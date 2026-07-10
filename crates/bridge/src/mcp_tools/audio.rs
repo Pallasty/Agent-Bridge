@@ -1665,7 +1665,10 @@ impl McpTool for LswrOutcomeAdmissionsIngestTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(25)
             .clamp(1, 200) as usize;
-        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
         let now = dispatch_now_secs();
         let cutoff = now.saturating_sub(window_secs).max(0) as u64;
@@ -1807,7 +1810,10 @@ impl McpTool for LswrOutcomeAdmissionsIngestTool {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let max_writes = request.get("max_writes").and_then(Value::as_u64).unwrap_or(1) as usize;
+        let max_writes = request
+            .get("max_writes")
+            .and_then(Value::as_u64)
+            .unwrap_or(1) as usize;
         let selected_keys: Vec<String> = request
             .get("candidate_keys")
             .and_then(Value::as_array)
@@ -1835,7 +1841,10 @@ impl McpTool for LswrOutcomeAdmissionsIngestTool {
                 refused.push(json!({"key": key, "reason": "candidate_not_found_at_write"}));
                 continue;
             };
-            let outcome_record = candidate.get("outcome_record").cloned().unwrap_or(Value::Null);
+            let outcome_record = candidate
+                .get("outcome_record")
+                .cloned()
+                .unwrap_or(Value::Null);
             let Some(mem) =
                 crate::present_ingest::build_outcome_memory(&outcome_record, now.max(0))
             else {
@@ -1843,7 +1852,9 @@ impl McpTool for LswrOutcomeAdmissionsIngestTool {
                 continue;
             };
             if mem.key != *key {
-                refused.push(json!({"key": key, "reason": "rebuilt_key_mismatch", "rebuilt_key": mem.key}));
+                refused.push(
+                    json!({"key": key, "reason": "rebuilt_key_mismatch", "rebuilt_key": mem.key}),
+                );
                 continue;
             }
             // Re-probe right before write; first slice refuses an active-row refresh.
@@ -1870,13 +1881,17 @@ impl McpTool for LswrOutcomeAdmissionsIngestTool {
                     }));
                 }
                 Err(e) => {
-                    refused.push(json!({"key": key, "reason": "store_error", "error": e.to_string()}));
+                    refused
+                        .push(json!({"key": key, "reason": "store_error", "error": e.to_string()}));
                 }
             }
         }
 
         let plan_hash = plan.get("plan_hash").cloned().unwrap_or(Value::Null);
-        let approval_post_id = request.get("approval_post_id").cloned().unwrap_or(Value::Null);
+        let approval_post_id = request
+            .get("approval_post_id")
+            .cloned()
+            .unwrap_or(Value::Null);
         let writes_state = !written_keys.is_empty();
         let rollback = if writes_state {
             json!({
@@ -2101,9 +2116,8 @@ pub(super) fn carry_forward_ingest_lifecycle(
 ) -> MemoryRecord {
     if let Some(ex) = existing {
         mem.importance = ex.importance;
-        mem.tags.retain(|t| {
-            !t.starts_with(crate::outcome_valence::VALENCE_APPLIED_TAG_PREFIX)
-        });
+        mem.tags
+            .retain(|t| !t.starts_with(crate::outcome_valence::VALENCE_APPLIED_TAG_PREFIX));
         if let Some(stamp) = ex
             .tags
             .iter()
@@ -4164,4 +4178,3 @@ impl McpTool for AgentInboxTool {
         })))
     }
 }
-

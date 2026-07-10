@@ -10,11 +10,9 @@ use crate::trigger_recall_opt_in::{
     trigger_recall_value_contains_raw, TriggerRecallEnforceHoldApprovalPacketValidatorOptions,
     TriggerRecallOptInGatedBaselineTrialHit, TriggerRecallOptInGatedBaselineTrialOptions,
     TriggerRecallOptInGatedBatchDiagnosticsOptions, TriggerRecallOptInGatedBatchDiagnosticsPacket,
-    TriggerRecallOptInRuntimeTransitionGateOptions,
-    TriggerRecallOptInStatusOptions, TriggerRecallPrePolicyHoldSimulationOptions,
-    TRIGGER_RECALL_DISABLE_ENV,
-    TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA,
-    TRIGGER_RECALL_OPT_IN_ENABLE_ENV,
+    TriggerRecallOptInRuntimeTransitionGateOptions, TriggerRecallOptInStatusOptions,
+    TriggerRecallPrePolicyHoldSimulationOptions, TRIGGER_RECALL_DISABLE_ENV,
+    TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA, TRIGGER_RECALL_OPT_IN_ENABLE_ENV,
     TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE_ENV, TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN_ENV,
 };
 use crate::warp_scheme::{
@@ -33,7 +31,6 @@ use ab_store::{
     prioritize_session_handoff,
     semantic_blend_score,
     semantic_rank_weights,
-    AMBIENT_SURFACING_MODE,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
     AgentPresenceRecord,
     CompactPolicy,
@@ -53,6 +50,7 @@ use ab_store::{
     SessionFilter,
     StateStore,
     StoredSession,
+    AMBIENT_SURFACING_MODE,
 };
 use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
@@ -10284,9 +10282,7 @@ impl McpTool for AgentSendInputTool {
         let session = match store.load_session(&id).await? {
             Some(s) => s,
             None => {
-                return Ok(ToolResult::error(format!(
-                    "unknown agent session {id}"
-                )));
+                return Ok(ToolResult::error(format!("unknown agent session {id}")));
             }
         };
         if session.ended_at.is_some() {
@@ -10648,9 +10644,8 @@ impl McpTool for AgentSessionReconcileTool {
             if liveness == "untracked" && !finalise_untracked {
                 skipped_untracked += 1;
                 let mut deferred = candidate;
-                deferred["deferred_reason"] = json!(
-                    "untracked_liveness_requires_finalise_untracked_confirmation"
-                );
+                deferred["deferred_reason"] =
+                    json!("untracked_liveness_requires_finalise_untracked_confirmation");
                 deferred_untracked.push(deferred);
                 continue;
             }
@@ -10937,11 +10932,7 @@ impl McpTool for AgentSessionOutputTool {
             None | Some(Value::Null) => None,
             Some(v) => match v.as_u64() {
                 Some(n) if n >= 1 => Some(n),
-                _ => {
-                    return Ok(ToolResult::error(
-                        "'tail_bytes' must be an integer >= 1",
-                    ))
-                }
+                _ => return Ok(ToolResult::error("'tail_bytes' must be an integer >= 1")),
             },
         };
         let session = match store.load_session(&id).await? {
@@ -11558,12 +11549,8 @@ const CONTINUITY_FRESHNESS_POLICY_VALUES: [&str; 4] = [
     "version_bound",
     "project_phase_bound",
 ];
-const CONTINUITY_ACTIONABILITY_VALUES: [&str; 4] = [
-    "background",
-    "plan_influence",
-    "must_block",
-    "needs_review",
-];
+const CONTINUITY_ACTIONABILITY_VALUES: [&str; 4] =
+    ["background", "plan_influence", "must_block", "needs_review"];
 const CONTINUITY_BLAST_RADIUS_VALUES: [&str; 4] =
     ["current_task", "project", "cross_project", "global"];
 
@@ -11597,7 +11584,10 @@ impl MemoryContinuityMetadata {
             obj.insert("continuity_role".to_string(), Value::String(value.clone()));
         }
         if let Some(value) = &self.retrieval_trigger {
-            obj.insert("retrieval_trigger".to_string(), Value::String(value.clone()));
+            obj.insert(
+                "retrieval_trigger".to_string(),
+                Value::String(value.clone()),
+            );
         }
         if let Some(value) = &self.confidence {
             obj.insert("confidence".to_string(), Value::String(value.clone()));
@@ -11645,7 +11635,11 @@ fn memory_continuity_string_field(obj: &Map<String, Value>, field: &str) -> Opti
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| s.chars().take(CONTINUITY_RETRIEVAL_TRIGGER_MAX_CHARS).collect())
+        .map(|s| {
+            s.chars()
+                .take(CONTINUITY_RETRIEVAL_TRIGGER_MAX_CHARS)
+                .collect()
+        })
 }
 
 fn memory_continuity_enum_field(
@@ -11753,7 +11747,10 @@ fn memory_apply_continuity_metadata_tags(
         );
     }
     if let Some(value) = &metadata.actionability {
-        memory_push_unique_tag(tags, format!("{CONTINUITY_ACTIONABILITY_TAG_PREFIX}{value}"));
+        memory_push_unique_tag(
+            tags,
+            format!("{CONTINUITY_ACTIONABILITY_TAG_PREFIX}{value}"),
+        );
     }
     if let Some(value) = &metadata.blast_radius {
         memory_push_unique_tag(tags, format!("{CONTINUITY_BLAST_RADIUS_TAG_PREFIX}{value}"));
@@ -12231,10 +12228,14 @@ fn memory_save_scope_identity_trace_with_policy(
         });
     };
 
-    let scope_project_id =
-        strip_scope_prefix_case_insensitive(scope, crate::project_identity::PROJECT_ID_SCOPE_PREFIX);
-    let legacy_project_path =
-        strip_scope_prefix_case_insensitive(scope, crate::project_identity::LEGACY_PROJECT_SCOPE_PREFIX);
+    let scope_project_id = strip_scope_prefix_case_insensitive(
+        scope,
+        crate::project_identity::PROJECT_ID_SCOPE_PREFIX,
+    );
+    let legacy_project_path = strip_scope_prefix_case_insensitive(
+        scope,
+        crate::project_identity::LEGACY_PROJECT_SCOPE_PREFIX,
+    );
     if scope_project_id.is_none() && legacy_project_path.is_none() {
         return json!({
             "status": "not_applicable",
@@ -12247,7 +12248,9 @@ fn memory_save_scope_identity_trace_with_policy(
     let policy_project_id = project_scope_aliases
         .map(str::trim)
         .filter(|aliases| !aliases.is_empty())
-        .and_then(|aliases| crate::project_identity::approved_scope_alias_canonical(scope, aliases));
+        .and_then(|aliases| {
+            crate::project_identity::approved_scope_alias_canonical(scope, aliases)
+        });
     let configured_project_id = configured_project_id
         .map(str::trim)
         .filter(|project_id| !project_id.is_empty());
@@ -12271,7 +12274,11 @@ fn memory_save_scope_identity_trace_with_policy(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()));
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string())
+        });
 
     let Some(cwd) = cwd else {
         return json!({
@@ -13728,9 +13735,8 @@ fn work_memory_expires_at(record: &MemoryRecord) -> Option<i64> {
             .filter(|days| *days > 0)
     })?;
     let anchor = record.updated_at.max(record.created_at);
-    (anchor > 0).then(|| {
-        anchor.saturating_add(ttl_days.saturating_mul(WORK_MEMORY_SECONDS_PER_DAY))
-    })
+    (anchor > 0)
+        .then(|| anchor.saturating_add(ttl_days.saturating_mul(WORK_MEMORY_SECONDS_PER_DAY)))
 }
 
 fn work_memory_is_live(record: &MemoryRecord, now: i64) -> bool {
@@ -13847,8 +13853,7 @@ fn merge_alias_compatible_work_memory(
     aliases: &str,
     limit: usize,
 ) -> Vec<MemoryRecord> {
-    let seen: std::collections::HashSet<String> =
-        same_node.iter().map(|r| r.key.clone()).collect();
+    let seen: std::collections::HashSet<String> = same_node.iter().map(|r| r.key.clone()).collect();
     let mut extra: Vec<MemoryRecord> = broad
         .into_iter()
         .filter(|r| !seen.contains(&r.key))
@@ -14414,9 +14419,12 @@ impl McpTool for WorkMemoryTool {
                     // superseded slot that list no longer shows.
                     Some(row)
                         if row.kind == WORK_MEMORY_KIND
-                            && work_memory_is_live(&row, unix_now_secs()) => Ok(
-                        ToolResult::json_text(&serde_json::to_value(row).unwrap_or(Value::Null)),
-                    ),
+                            && work_memory_is_live(&row, unix_now_secs()) =>
+                    {
+                        Ok(ToolResult::json_text(
+                            &serde_json::to_value(row).unwrap_or(Value::Null),
+                        ))
+                    }
                     Some(row) if row.kind == WORK_MEMORY_KIND => {
                         Ok(ToolResult::error("work memory key not found"))
                     }
@@ -16445,7 +16453,10 @@ fn format_continuity_kernel_index_line(r: &MemoryRecord) -> String {
     let trigger = memory_continuity_metadata_from_tags(&r.tags, r.superseded_by.as_deref())
         .and_then(|m| m.retrieval_trigger)
         .map(|t| {
-            let prefix: String = t.chars().take(CONTINUITY_KERNEL_INDEX_TRIGGER_CHARS).collect();
+            let prefix: String = t
+                .chars()
+                .take(CONTINUITY_KERNEL_INDEX_TRIGGER_CHARS)
+                .collect();
             format!(" {{{prefix}}}")
         })
         .unwrap_or_default();
@@ -16525,7 +16536,11 @@ fn format_continuity_kernel_block(
                 .map(|t| estimate_tokens_from_text(t) as usize)
                 .unwrap_or(0);
             let line_tokens = estimate_tokens_from_text(&line) as usize;
-            if used.saturating_add(title_tokens).saturating_add(line_tokens) > full_budget {
+            if used
+                .saturating_add(title_tokens)
+                .saturating_add(line_tokens)
+                > full_budget
+            {
                 full_exhausted = true;
                 demoted.push(row);
                 continue;
@@ -16618,14 +16633,7 @@ fn format_bootstrap_memory_rows(rows: &[MemoryRecord], snippet_len: usize) -> Ve
             };
             format!(
                 "[{}] {}{}{}{}{}: {}{}",
-                r.kind,
-                r.key,
-                imp_marker,
-                ref_marker,
-                tags,
-                continuity_reason,
-                snippet,
-                ellipsis
+                r.kind, r.key, imp_marker, ref_marker, tags, continuity_reason, snippet, ellipsis
             )
         })
         .collect()
@@ -16708,12 +16716,15 @@ pub(crate) fn pick_distillation_candidates(
         .into_iter()
         .filter(memory_record_active)
         .filter(|r| !r.key.starts_with("pub_"))
-        .filter(|r| !r.tags.iter().any(|t| t == "zone:public" || t == "distill:no"))
-        .filter(|r| match r.kind.as_str() {
-            "lesson" | "error_pattern" => r
-                .tags
+        .filter(|r| {
+            !r.tags
                 .iter()
-                .any(|t| t == "continuity_confidence:verified"),
+                .any(|t| t == "zone:public" || t == "distill:no")
+        })
+        .filter(|r| match r.kind.as_str() {
+            "lesson" | "error_pattern" => {
+                r.tags.iter().any(|t| t == "continuity_confidence:verified")
+            }
             "present_outcome" | "outcome" => r.tags.iter().any(|t| t == "verify:verified"),
             _ => false,
         })
@@ -17465,8 +17476,7 @@ impl McpTool for SessionBootstrapTool {
                     )
                     .await
                     .unwrap_or_default();
-                let peers =
-                    cross_node_peer_lanes(&work_memory_scope(&cwd), broad, &aliases, 0, 3);
+                let peers = cross_node_peer_lanes(&work_memory_scope(&cwd), broad, &aliases, 0, 3);
                 if let Some(block) = format_cross_node_peer_block(&peers, is_compact) {
                     lines.extend(cap_block_lines(block, BUDGET_CROSS_NODE_PEERS));
                 }
@@ -23490,7 +23500,10 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
             .and_then(Value::as_u64)
             .unwrap_or(50)
             .clamp(1, 500) as usize;
-        let restamp = args.get("restamp").and_then(Value::as_bool).unwrap_or(false);
+        let restamp = args
+            .get("restamp")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         let meta_rows = store
             .active_outcome_meta_rows()
@@ -23905,7 +23918,10 @@ impl McpTool for EmbeddingQuantShadowTool {
             .get("max_queries")
             .and_then(|v| v.as_u64())
             .unwrap_or(200) as usize;
-        let threshold = args.get("threshold").and_then(|v| v.as_f64()).unwrap_or(0.98);
+        let threshold = args
+            .get("threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.98);
 
         let rows = store
             .active_embedding_quant_rows()
@@ -25641,9 +25657,9 @@ impl McpTool for IntrospectRecallTool {
         // but is a no-op (it never gated a real LLM call after this change).
         let option_e_result: Option<OptionEResult> = None;
         let _ = skip_llm_probe; // accepted for back-compat; never runs an LLM probe
-        // `no_hits` (empty store / no embeddings) is the only honest degradation
-        // signal left: novelty is forced to the 1.0 ceiling, so flag it so
-        // callers don't read max-novelty as a confident "unsupported" verdict.
+                                // `no_hits` (empty store / no embeddings) is the only honest degradation
+                                // signal left: novelty is forced to the 1.0 ceiling, so flag it so
+                                // callers don't read max-novelty as a confident "unsupported" verdict.
         let degraded = hits.is_empty();
         let degraded_reason: Option<String> = if hits.is_empty() {
             Some("no_hits".to_string())
@@ -27396,8 +27412,7 @@ impl MemoryRelatedKeysMaterializePlan {
         max_inbound_per_target: u32,
     ) -> Value {
         let projected_orphans = self.projected_orphans_after_selected();
-        let selected_edge_hash_v1 =
-            memory_related_keys_selected_edge_hash_v1(&self.selected_edges);
+        let selected_edge_hash_v1 = memory_related_keys_selected_edge_hash_v1(&self.selected_edges);
         json!({
             "visible_total": self.visible_total,
             "current_edge_pairs": self.current_edge_pairs,
@@ -28417,9 +28432,7 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                 "scope_filter must be one of: compatible, exact",
             ));
         };
-        if scope_filter == MemoryRelatedKeysReviewScopeFilter::Exact
-            && requested_scope.is_none()
-        {
+        if scope_filter == MemoryRelatedKeysReviewScopeFilter::Exact && requested_scope.is_none() {
             return Ok(ToolResult::error(
                 "scope_filter=exact requires a non-empty scope",
             ));
@@ -29171,12 +29184,7 @@ fn memory_consolidation_push(
     {
         return;
     }
-    rows.push(memory_consolidation_item(
-        rec,
-        reason,
-        score,
-        preview_chars,
-    ));
+    rows.push(memory_consolidation_item(rec, reason, score, preview_chars));
 }
 
 fn memory_consolidation_sort_and_truncate(
@@ -29343,7 +29351,10 @@ fn memory_consolidation_queue_from_records(
     edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
     options: MemoryConsolidationQueueOptions,
 ) -> Value {
-    let active: Vec<&MemoryRecord> = records.iter().filter(|rec| memory_record_active(rec)).collect();
+    let active: Vec<&MemoryRecord> = records
+        .iter()
+        .filter(|rec| memory_record_active(rec))
+        .collect();
     let visible_keys: HashSet<String> = active.iter().map(|rec| rec.key.clone()).collect();
     let by_key: HashMap<String, &MemoryRecord> =
         active.iter().map(|rec| (rec.key.clone(), *rec)).collect();
@@ -29412,7 +29423,11 @@ fn memory_consolidation_queue_from_records(
         let Some(target) = memory_consolidation_feedback_target(rec, &by_key) else {
             continue;
         };
-        if rec.tags.iter().any(|tag| tag == "retrieval_feedback:duplicate") {
+        if rec
+            .tags
+            .iter()
+            .any(|tag| tag == "retrieval_feedback:duplicate")
+        {
             memory_consolidation_push(
                 &mut buckets,
                 "duplicate_lessons",
@@ -29432,7 +29447,11 @@ fn memory_consolidation_queue_from_records(
                 options.preview_chars,
             );
         }
-        if rec.tags.iter().any(|tag| tag == "retrieval_feedback:harmful") {
+        if rec
+            .tags
+            .iter()
+            .any(|tag| tag == "retrieval_feedback:harmful")
+        {
             memory_consolidation_push(
                 &mut buckets,
                 "harmful_memories",
@@ -29442,7 +29461,11 @@ fn memory_consolidation_queue_from_records(
                 options.preview_chars,
             );
         }
-        if rec.tags.iter().any(|tag| tag == "retrieval_feedback:too_large") {
+        if rec
+            .tags
+            .iter()
+            .any(|tag| tag == "retrieval_feedback:too_large")
+        {
             memory_consolidation_push(
                 &mut buckets,
                 "too_large_memories",
@@ -29459,8 +29482,12 @@ fn memory_consolidation_queue_from_records(
         .iter()
         .map(|(bucket, rows)| (bucket.clone(), rows.len()))
         .collect();
-    let gated_actions =
-        memory_consolidation_gated_actions(&active, &by_key, edges_by_key, options.max_gated_actions);
+    let gated_actions = memory_consolidation_gated_actions(
+        &active,
+        &by_key,
+        edges_by_key,
+        options.max_gated_actions,
+    );
 
     json!({
         "schema": "agent_bridge.memory_consolidation_queue.v1",
@@ -29534,8 +29561,7 @@ fn outcome_gated_consolidation_status_eval(
     let mut eligible_verb_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut candidate_blocker_counts: BTreeMap<String, usize> = BTreeMap::new();
     for action in gated_actions {
-        let shadow_eligible =
-            action.get("shadow_eligible").and_then(Value::as_bool) == Some(true);
+        let shadow_eligible = action.get("shadow_eligible").and_then(Value::as_bool) == Some(true);
         if shadow_eligible {
             if let Some(verb) = action.get("verb").and_then(Value::as_str) {
                 *eligible_verb_counts.entry(verb.to_string()).or_default() += 1;
@@ -29544,7 +29570,9 @@ fn outcome_gated_consolidation_status_eval(
         if let Some(blockers) = action.get("candidate_blockers").and_then(Value::as_array) {
             for blocker in blockers {
                 if let Some(name) = blocker.as_str() {
-                    *candidate_blocker_counts.entry(name.to_string()).or_default() += 1;
+                    *candidate_blocker_counts
+                        .entry(name.to_string())
+                        .or_default() += 1;
                 }
             }
         }
@@ -30316,13 +30344,22 @@ impl McpTool for OutcomeGatedConsolidationTransitionGateTool {
                 .unwrap_or(false),
             anchor_ok: anchor == OUTCOME_GATED_CONSOLIDATION_ANCHOR,
             outer_raw_payload_present,
-            reviewer: args.get("reviewer").and_then(Value::as_str).map(str::to_string),
-            commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
+            reviewer: args
+                .get("reviewer")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            commit: args
+                .get("commit")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             forum_post_id: args
                 .get("forum_post_id")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-            memory_key: args.get("memory_key").and_then(Value::as_str).map(str::to_string),
+            memory_key: args
+                .get("memory_key")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         };
         Ok(ToolResult::json_text(
             &outcome_gated_consolidation_transition_gate_eval(&status_packet, flags),
@@ -30356,7 +30393,10 @@ fn outcome_gated_apply_trial_plan_candidate(
     by_key: &HashMap<String, &MemoryRecord>,
     min_sim: f64,
 ) -> Value {
-    let target_key = action.get("target_key").and_then(Value::as_str).unwrap_or("");
+    let target_key = action
+        .get("target_key")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let verb = action.get("verb").and_then(Value::as_str).unwrap_or("");
     let outcomes = action.get("outcomes").cloned().unwrap_or(json!([]));
 
@@ -30953,7 +30993,10 @@ fn outcome_gated_consolidation_approval_packet_eval(
     trial_packet: &Value,
     flags: OutcomeGatedConsolidationApprovalFlags,
 ) -> Value {
-    let trial_schema = trial_packet.get("schema").and_then(Value::as_str).unwrap_or("");
+    let trial_schema = trial_packet
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let trial_read_only = trial_packet
         .get("read_only")
         .and_then(Value::as_bool)
@@ -30962,7 +31005,10 @@ fn outcome_gated_consolidation_approval_packet_eval(
         .get("dry_run_forced")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let trial_status = trial_packet.get("status").and_then(Value::as_str).unwrap_or("missing");
+    let trial_status = trial_packet
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("missing");
     // Narrow content check: the trial plan legitimately carries target keys.
     let trial_contains_raw = outcome_gated_contains_memory_content(trial_packet);
     let trial_side_effects_safe = trial_packet
@@ -31089,7 +31135,11 @@ fn outcome_gated_consolidation_approval_packet_eval(
                     .collect()
             })
             .unwrap_or_default();
-        (Value::String(diff_hash), Value::String(token), Value::Array(targets))
+        (
+            Value::String(diff_hash),
+            Value::String(token),
+            Value::Array(targets),
+        )
     } else {
         (Value::Null, Value::Null, Value::Array(Vec::new()))
     };
@@ -31273,13 +31323,22 @@ impl McpTool for OutcomeGatedConsolidationApprovalPacketTool {
                 .unwrap_or(false),
             anchor_ok: anchor == OUTCOME_GATED_CONSOLIDATION_ANCHOR,
             outer_raw_payload_present,
-            reviewer: args.get("reviewer").and_then(Value::as_str).map(str::to_string),
-            commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
+            reviewer: args
+                .get("reviewer")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            commit: args
+                .get("commit")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             forum_post_id: args
                 .get("forum_post_id")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-            memory_key: args.get("memory_key").and_then(Value::as_str).map(str::to_string),
+            memory_key: args
+                .get("memory_key")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         };
         Ok(ToolResult::json_text(
             &outcome_gated_consolidation_approval_packet_eval(&trial_packet, flags),
@@ -31393,20 +31452,41 @@ impl McpTool for OutcomeGatedConsolidationApplyTool {
             None => return Ok(ToolResult::error("no store configured")),
         };
         let packet = args.get("approval_packet").cloned().unwrap_or(Value::Null);
-        let reviewer = args.get("reviewer").and_then(Value::as_str).map(str::to_string);
-        let commit = args.get("commit").and_then(Value::as_str).map(str::to_string);
-        let forum_post_id = args.get("forum_post_id").and_then(Value::as_str).map(str::to_string);
-        let memory_key = args.get("memory_key").and_then(Value::as_str).map(str::to_string);
-        let anchor = args.get("regression_anchor").and_then(Value::as_str).unwrap_or("");
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let anchor = args
+            .get("regression_anchor")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         let anchor_ok = anchor == OUTCOME_GATED_CONSOLIDATION_ANCHOR;
-        let per_call_opt_in = args.get("per_call_opt_in").and_then(Value::as_bool).unwrap_or(false);
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let operator_disabled = args
             .get("operator_disabled")
             .and_then(Value::as_bool)
             .unwrap_or(false)
             || mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
         let runtime_enabled = mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV);
-        let confirm_apply = args.get("confirm_apply").and_then(Value::as_bool).unwrap_or(false);
+        let confirm_apply = args
+            .get("confirm_apply")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let max_apply_per_pass = args
             .get("max_apply_per_pass")
             .and_then(Value::as_u64)
@@ -31436,8 +31516,14 @@ impl McpTool for OutcomeGatedConsolidationApplyTool {
 
         // ---- Gate 2: approval packet validity + token reproduction ----------
         let pkt_schema = packet.get("schema").and_then(Value::as_str).unwrap_or("");
-        let pkt_status = packet.get("status").and_then(Value::as_str).unwrap_or("missing");
-        let pkt_read_only = packet.get("read_only").and_then(Value::as_bool).unwrap_or(false);
+        let pkt_status = packet
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("missing");
+        let pkt_read_only = packet
+            .get("read_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let frozen_diff_hash = packet
             .pointer("/approval/diff_hash")
             .and_then(Value::as_str)
@@ -31556,9 +31642,8 @@ impl McpTool for OutcomeGatedConsolidationApplyTool {
                 .filter(|p| p.get("decision").and_then(Value::as_str) == Some("accepted"))
                 .collect();
         }
-        let diff_hash_matches = gate12_ok
-            && !live_diff_hash.is_empty()
-            && live_diff_hash == frozen_diff_hash;
+        let diff_hash_matches =
+            gate12_ok && !live_diff_hash.is_empty() && live_diff_hash == frozen_diff_hash;
 
         // ---- Decision -------------------------------------------------------
         let verified = gate12_ok && diff_hash_matches;
@@ -35421,7 +35506,9 @@ impl McpTool for ContextGovernorSnapshotTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        Ok(ToolResult::json_text(&build_context_governor_snapshot(&args)))
+        Ok(ToolResult::json_text(&build_context_governor_snapshot(
+            &args,
+        )))
     }
 }
 
@@ -38866,9 +38953,12 @@ pub fn lswr_readonly_bridge_display_mcp_surface_report() -> Value {
     let profile_rows = lswr_readonly_bridge_display_surface_profile_rows();
     // Ceremony-gated (2026-07 prune): the schema is only reachable through
     // all-dev / AGENT_BRIDGE_EXPOSE_CEREMONY, so fetch facts from that view.
-    let all_dev_schema = lswr_readonly_bridge_display_schema_for_policy(
-        ToolPolicy::from_values(Some("all-dev"), None, None, None),
-    );
+    let all_dev_schema = lswr_readonly_bridge_display_schema_for_policy(ToolPolicy::from_values(
+        Some("all-dev"),
+        None,
+        None,
+        None,
+    ));
     let schema_facts = lswr_readonly_bridge_display_schema_facts(all_dev_schema.as_ref());
     let checks = lswr_readonly_bridge_display_surface_checks(&profile_rows, &schema_facts);
     let verdict = if checks.iter().all(|row| row["verdict"] == "passed") {
@@ -42044,9 +42134,7 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         ceremony,
         Tier::Niche,
-        Arc::new(
-            MemoryBioCortexT6CandidateExpansionShadowExecutorInvocationReportTool::new(),
-        ),
+        Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutorInvocationReportTool::new()),
     );
     reg_if_available(
         &mut reg,
@@ -42951,7 +43039,11 @@ pub(crate) fn hidden_tool_report(policy: ToolPolicy) -> Value {
 
 /// Explicit-input core of `hidden_tool_report` — unit-testable without
 /// depending on the build host's env/binaries.
-pub(crate) fn hidden_tool_report_with(policy: ToolPolicy, surface: HostSurface, ceremony: bool) -> Value {
+pub(crate) fn hidden_tool_report_with(
+    policy: ToolPolicy,
+    surface: HostSurface,
+    ceremony: bool,
+) -> Value {
     let names = |surface: HostSurface, ceremony: bool| -> std::collections::BTreeSet<String> {
         build_registry_with_policy_surface(Hub::builder().build(), policy, surface, ceremony)
             .list()

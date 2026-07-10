@@ -4299,7 +4299,9 @@ fn main() -> Result<()> {
 async fn dim_guard_strict_preflight(store: &Arc<dyn StateStore>) {
     if let Some(warning) = ab_bridge::embedding_dim_guard::preflight_class1(store).await {
         if ab_bridge::embedding_dim_guard::strict_class1_enabled(
-            std::env::var("AGENT_BRIDGE_DIM_GUARD_STRICT").ok().as_deref(),
+            std::env::var("AGENT_BRIDGE_DIM_GUARD_STRICT")
+                .ok()
+                .as_deref(),
         ) {
             tracing::error!(target: "embedding_dim_guard", "STRICT ABORT: {warning}");
             eprintln!(
@@ -7560,9 +7562,7 @@ async fn real_main() -> Result<()> {
             // First pass runs IMMEDIATELY: recovering right after a daemon
             // crash/restart is the scenario this exists for.
             if !ab_bridge::orphan_reaper::reaper_enabled() {
-                tracing::info!(
-                    "orphan-reaper: disabled (AGENT_BRIDGE_ORPHAN_REAPER unset)"
-                );
+                tracing::info!("orphan-reaper: disabled (AGENT_BRIDGE_ORPHAN_REAPER unset)");
             } else if let Some(store) = hub.store.clone() {
                 let tick_secs = ab_bridge::orphan_reaper::reaper_tick_secs();
                 tracing::info!(tick_secs, "orphan-reaper: spawning reaper tick");
@@ -7585,7 +7585,11 @@ async fn real_main() -> Result<()> {
                         .await
                         {
                             Ok(r) => {
-                                if r.reaped > 0 || r.finalised_gone > 0 || r.still_alive > 0 || r.errors > 0 {
+                                if r.reaped > 0
+                                    || r.finalised_gone > 0
+                                    || r.still_alive > 0
+                                    || r.errors > 0
+                                {
                                     tracing::info!(
                                         scanned = r.scanned,
                                         reaped = r.reaped,
@@ -7976,8 +7980,8 @@ fn run_walkthrough(doc_arg: &str, title: Option<&str>, as_json: bool) -> Result<
         std::fs::read_to_string(doc_arg)
             .with_context(|| format!("read walkthrough doc {doc_arg}"))?
     };
-    let doc: Value =
-        serde_json::from_str(&raw).context("parse walkthrough doc JSON ({summary, steps:[...]})")?;
+    let doc: Value = serde_json::from_str(&raw)
+        .context("parse walkthrough doc JSON ({summary, steps:[...]})")?;
 
     let dir = presentations_dir();
     let (id, path) = write_walkthrough_artifact(&dir, &doc, title, None)
@@ -20343,12 +20347,11 @@ async fn build_hub() -> Result<Hub> {
         }
         _ => {
             let bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
-            let interactive_args =
-                if cli_env_falsey("AGENT_BRIDGE_CLAUDE_INTERACTIVE_NO_CHROME") {
-                    Vec::new()
-                } else {
-                    vec!["--no-chrome".to_string()]
-                };
+            let interactive_args = if cli_env_falsey("AGENT_BRIDGE_CLAUDE_INTERACTIVE_NO_CHROME") {
+                Vec::new()
+            } else {
+                vec!["--no-chrome".to_string()]
+            };
             tracing::info!(runtime = "claude-code", binary = %bin, "agent runtime selected");
             Arc::new(
                 ClaudeCodeRuntime::with_binary(bin)
@@ -20400,7 +20403,10 @@ mod tests {
         use ab_bridge::present::build_walkthrough_html;
         // An empty doc OR a doc of empty steps renders no content -> must FAIL the
         // self-check (we never silently write a blank "walkthrough").
-        for doc in [json!({"summary": "", "steps": []}), json!({"summary": "  ", "steps": [{}]})] {
+        for doc in [
+            json!({"summary": "", "steps": []}),
+            json!({"summary": "  ", "steps": [{}]}),
+        ] {
             let html = build_walkthrough_html(&doc, None, None);
             assert!(
                 !walkthrough_region_has_content(&html),

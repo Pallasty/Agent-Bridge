@@ -536,7 +536,9 @@ pub(super) fn mobile_device_json(device: &MobileDevice, android_version: Option<
     Value::Object(obj)
 }
 
-pub(super) async fn mobile_online_devices(timeout_ms: u64) -> std::result::Result<Vec<MobileDevice>, String> {
+pub(super) async fn mobile_online_devices(
+    timeout_ms: u64,
+) -> std::result::Result<Vec<MobileDevice>, String> {
     let out = run_adb_command(None, &adb_args(&["devices", "-l"]), timeout_ms).await?;
     if !out.ok() {
         return Err(format!("adb devices failed: {}", out.stderr.trim()));
@@ -2226,7 +2228,10 @@ pub(super) async fn ios_visible_udids(timeout_ms: u64) -> std::result::Result<Ve
         .collect())
 }
 
-pub(super) async fn ios_selected_udid(args: &Value, timeout_ms: u64) -> std::result::Result<String, String> {
+pub(super) async fn ios_selected_udid(
+    args: &Value,
+    timeout_ms: u64,
+) -> std::result::Result<String, String> {
     if let Some(udid) = args
         .get("udid")
         .and_then(|v| v.as_str())
@@ -2788,4 +2793,3 @@ impl McpTool for BrowserLiteProbeTool {
         Ok(ToolResult::json_text(&payload))
     }
 }
-
