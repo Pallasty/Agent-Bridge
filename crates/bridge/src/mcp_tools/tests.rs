@@ -31705,3 +31705,82 @@ fn b1_digest_block_skips_empty_subsections_in_body() {
         "empty project bucket must NOT emit subsection label"
     );
 }
+
+// ---- S4 compact search projection (s4_compact_search_projection_gate_20260709) ----
+
+fn s4_hit(content: &str, cosine: Option<f32>) -> ab_store::MemorySearchHit {
+    let mut rec = b1_mem_with("s4_key", "decision", content);
+    rec.tags = vec!["ab-improvement".to_string(), "gated".to_string()];
+    ab_store::MemorySearchHit {
+        record: rec,
+        score: 1.23,
+        cosine,
+    }
+}
+
+#[test]
+fn s4_compact_projection_has_exactly_the_cue_tag_fields_and_no_body() {
+    let long: String = "记".repeat(500);
+    let v = super::memory_search_hit_value_compact(&s4_hit(&long, Some(0.87)));
+    let obj = v.as_object().expect("compact hit is an object");
+    let mut keys: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec![
+            "content_chars",
+            "content_preview",
+            "content_truncated",
+            "cosine",
+            "importance",
+            "key",
+            "kind",
+            "score",
+            "tags",
+        ],
+        "compact projection must expose the cue/tag layer and NOTHING else \
+         (no `record`, no full `content`, no continuity blob)"
+    );
+    assert_eq!(obj["key"], "s4_key");
+    assert_eq!(obj["kind"], "decision");
+    assert_eq!(obj["score"], 1.23);
+    assert_eq!(obj["content_chars"], 500);
+    assert_eq!(obj["content_truncated"], true);
+}
+
+#[test]
+fn s4_compact_preview_truncates_by_chars_not_bytes() {
+    // 500 CJK chars = 1500 UTF-8 bytes; a byte-based slice at 200 would land
+    // mid-code-point and panic. Char-based take(200) must yield exactly 200
+    // chars and valid UTF-8.
+    let long: String = "忆".repeat(500);
+    let v = super::memory_search_hit_value_compact(&s4_hit(&long, None));
+    let preview = v["content_preview"].as_str().expect("preview is a string");
+    assert_eq!(preview.chars().count(), 200);
+    assert!(preview.chars().all(|c| c == '忆'));
+}
+
+#[test]
+fn s4_compact_short_content_is_whole_and_unflagged() {
+    let v = super::memory_search_hit_value_compact(&s4_hit("short body", None));
+    assert_eq!(v["content_preview"], "short body");
+    assert_eq!(v["content_chars"], 10);
+    assert_eq!(v["content_truncated"], false);
+    assert!(
+        v.get("cosine").is_none(),
+        "fts-path hits (cosine=None) must omit the cosine field, matching \
+         the full projection's skip_serializing_if contract"
+    );
+}
+
+#[test]
+fn s4_default_full_projection_still_carries_record_and_content() {
+    // The byte-identical-default contract: the pre-existing full path keeps
+    // its shape (hit envelope + full `record` with `content`) — compact is
+    // strictly opt-in and must not have touched it.
+    let v = super::memory_search_hit_value_with_continuity(&s4_hit("full body here", Some(0.5)));
+    let rec = v.get("record").expect("full hit keeps `record`");
+    assert_eq!(rec["content"], "full body here");
+    assert_eq!(rec["key"], "s4_key");
+    assert!(v.get("content_preview").is_none());
+}

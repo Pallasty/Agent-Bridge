@@ -11824,6 +11824,40 @@ fn memory_search_hit_value_with_continuity(hit: &MemorySearchHit) -> Value {
     value
 }
 
+/// S4 compact projection (gate: `s4_compact_search_projection_gate_20260709`).
+/// The Cue→Tag layer of the read-cost model: enough per hit to decide WHICH
+/// rows deserve a full `memory_get`, without paying the full-body page.
+/// `content_chars` is the price tag for that follow-up read. Truncation is
+/// char-based, never byte-based — a byte slice could split a multi-byte code
+/// point (most store content is Chinese) and panic.
+const MEMORY_SEARCH_COMPACT_PREVIEW_CHARS: usize = 200;
+
+fn memory_search_hit_value_compact(hit: &MemorySearchHit) -> Value {
+    let rec = &hit.record;
+    let content_chars = rec.content.chars().count();
+    let preview: String = rec
+        .content
+        .chars()
+        .take(MEMORY_SEARCH_COMPACT_PREVIEW_CHARS)
+        .collect();
+    let mut obj = serde_json::Map::new();
+    obj.insert("key".to_string(), json!(rec.key));
+    obj.insert("kind".to_string(), json!(rec.kind));
+    obj.insert("tags".to_string(), json!(rec.tags));
+    obj.insert("importance".to_string(), json!(rec.importance));
+    obj.insert("score".to_string(), json!(hit.score));
+    if let Some(c) = hit.cosine {
+        obj.insert("cosine".to_string(), json!(c));
+    }
+    obj.insert("content_preview".to_string(), json!(preview));
+    obj.insert("content_chars".to_string(), json!(content_chars));
+    obj.insert(
+        "content_truncated".to_string(),
+        json!(content_chars > MEMORY_SEARCH_COMPACT_PREVIEW_CHARS),
+    );
+    Value::Object(obj)
+}
+
 pub struct MemorySaveTool {
     hub: Hub,
 }
@@ -12703,7 +12737,9 @@ impl McpTool for MemorySearchTool {
             description: "Search memories by keyword or semantic similarity. mode='fts': \
                  FTS5 by bm25+recency+importance. mode='hybrid': FTS5 + graph neighbors \
                  via RRF fusion. mode='semantic': cosine over local embeddings — catches \
-                 synonyms FTS misses. Excludes archived/superseded."
+                 synonyms FTS misses. Excludes archived/superseded. Set compact:true for \
+                 a key/kind/tags/importance/score/preview projection, then memory_get the \
+                 few rows worth reading in full."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -12748,6 +12784,14 @@ impl McpTool for MemorySearchTool {
                             Useful for keeping bulky `skill` records (~88% of store) out of generic queries. \
                             Inner search auto-overfetches 5× to compensate. α coactivation still learns \
                             from the full pre-filter hit set, so cross-kind edges keep forming."
+                    },
+                    "compact": {
+                        "type": "boolean", "default": false,
+                        "description": "Return a compact projection per hit — key/kind/tags/importance/\
+                            score(+cosine)/content_preview (first 200 chars) + content_chars — instead \
+                            of full records (~5-8KB vs ~25KB a page). Ranking, limits and telemetry are \
+                            unchanged; follow up with memory_get for the rows worth reading in full. \
+                            Default false = full records, byte-identical to prior behavior."
                     }
                 },
                 "required": ["query"]
@@ -13232,10 +13276,19 @@ impl McpTool for MemorySearchTool {
             "mcp:memory_search",
         );
 
+        // S4 projection dispatch. Param absent/false takes the pre-existing
+        // full-record path untouched — the byte-identical default contract.
+        let compact = args
+            .get("compact")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let project: fn(&MemorySearchHit) -> Value = if compact {
+            memory_search_hit_value_compact
+        } else {
+            memory_search_hit_value_with_continuity
+        };
         Ok(ToolResult::json_text(&Value::Array(
-            hits.iter()
-                .map(memory_search_hit_value_with_continuity)
-                .collect(),
+            hits.iter().map(project).collect(),
         )))
     }
 }
