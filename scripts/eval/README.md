@@ -188,8 +188,11 @@ rejects a spec/capture mismatch before it can claim or invoke a model.
 Single-use attempt claims are scoped to the frozen public contract, so changing
 spec formatting or recapturing cannot create another attempt 1; they retain
 spec/capture hashes for provenance and also prevent attempt-2 receipt replay.
-Any model-started, tool, schema, marker, or other semantic failure has zero
-retries. Answers are stored and blinded exactly as returned; v2 applies no
+The v2 contract also commits the canonical execution-worktree path hash, so an
+alternate worktree or clone fails before capture can create a separate local
+claim directory. This is a managed-host guard, not a tamper-proof cross-host
+ledger. Any model-started, tool, schema, marker, or other semantic failure has
+zero retries. Answers are stored and blinded exactly as returned; v2 applies no
 output postprocessing.
 
 ```bash

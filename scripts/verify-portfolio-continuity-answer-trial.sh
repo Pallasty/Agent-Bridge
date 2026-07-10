@@ -56,6 +56,9 @@ assert all("retrieval_query" not in case for case in contract["cases"])
 assert all("retrieval_query_sha256" in case for case in contract["cases"])
 contract_sha = hashlib.sha256(contract_path.read_bytes()).hexdigest()
 assert reported_hash("contract_sha256", 64) == contract_sha
+assert reported_hash("execution_repo_path_sha256", 64) == contract[
+    "execution_repo_path_sha256"
+]
 frozen_commit = reported_hash("contract_commit", 40)
 for field, relative in {
     "harness_source_sha256": "scripts/eval/portfolio_continuity_answer_trial.py",
@@ -946,9 +949,6 @@ contract = {
     "harness_source_sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(),
     "surface_source_sha256": hashlib.sha256(surface.read_bytes()).hexdigest(),
     "digest_key_sha256": hashlib.sha256(b"syn_00").hexdigest(),
-    "execution_repo_path_sha256": hashlib.sha256(
-        str(repo.resolve()).encode("utf-8")
-    ).hexdigest(),
     "conditions": [
         {"condition_id": "hybrid_retrieval", "capture": "hybrid_full"},
         {"condition_id": "portfolio_digest", "capture": "memory_get_digest"},
@@ -1922,6 +1922,9 @@ contract = {
     "harness_source_sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(),
     "surface_source_sha256": hashlib.sha256(surface.read_bytes()).hexdigest(),
     "digest_key_sha256": hashlib.sha256(b"syn_00").hexdigest(),
+    "execution_repo_path_sha256": hashlib.sha256(
+        str(repo.resolve()).encode("utf-8")
+    ).hexdigest(),
     "conditions": [
         {"condition_id": "hybrid_retrieval", "capture": "hybrid_full"},
         {"condition_id": "portfolio_digest", "capture": "memory_get_digest"},
