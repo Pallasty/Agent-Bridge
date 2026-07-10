@@ -36,6 +36,8 @@ status: READY_FOR_EXPANDED_TRIAL
 recommendation_scope: expanded_trial_only
 contract_commit: bf0ec41abaf7749feb60ead77951657b9529925e
 contract_sha256: f1dbaa335f082d329c2fe01d3681df14046df720351d22d300663bcb4a6acd1f
+scorer_commit: ea7d09b1af9f97fa8ea0a9e977c3531368860eb2
+scorer_source_sha256: 106740c0426c5fb2c5c8882dd59e5f03d800e5334fe1d53c97f714a58c097def
 capture_sha256: ec2def7c7601626198f985071d166699fb57b540373d7df1a95f8e64ebf4990f
 generation_sha256: 13e7423414de8d3bd7fb7d1f8b532c2bfa72726ba3d3bb5bac89fc64055b0ff9
 blind_packet_sha256: fc5d783bcbdd0773fb589a5a727e247fbd34f140ba51c87b718ffc656bb82201
@@ -74,6 +76,10 @@ comparator and was never eligible to advance.
 The owner completed all rubric fields for eight opaque answers and both case
 preferences before unblinding. The completed review was frozen at SHA-256
 `0747f57b8cbb80597a98aca5f2c33aef5eb5e63b7b530eaca80b7b7105d14ea0`.
+
+The executed scorer source was byte-identical to its last code change at
+`ea7d09b1af9f97fa8ea0a9e977c3531368860eb2`, with source SHA-256
+`106740c0426c5fb2c5c8882dd59e5f03d800e5334fe1d53c97f714a58c097def`.
 
 The scorer validated the contract, capture, blind packet, and complete review
 before opening the condition-labelled generation packet or blind map. Its
