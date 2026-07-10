@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "agent_bridge.release_truth_gate.v0"
+SCHEMA = "agent_bridge.release_truth_gate.v1"
 VERSION_TAG_RE = re.compile(r"^v(?P<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$")
 CHANGELOG_RELEASE_RE = re.compile(r"^## \[(?P<version>\d+\.\d+\.\d+)\]", re.MULTILINE)
 
@@ -112,6 +112,8 @@ def inspect_binary(repo: Path, binary: str | None) -> dict[str, Any]:
             "path": None,
             "version_output": None,
             "parsed_version": None,
+            "git_describe": None,
+            "git_sha": None,
         }
 
     path = Path(binary).expanduser()
@@ -121,14 +123,23 @@ def inspect_binary(repo: Path, binary: str | None) -> dict[str, Any]:
         fail(f"binary not found: {path}")
     completed = run([str(path), "--version"], cwd=repo)
     output = completed.stdout.strip()
-    match = re.search(r"(?P<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$", output)
+    match = re.search(
+        r"(?:^|\s)(?P<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?=\s|\(|$)",
+        output,
+    )
     if match is None:
         fail(f"unable to parse binary version output: {output!r}")
+    build_match = re.search(
+        r"\((?P<describe>[^;]+);\s*(?P<sha>[0-9a-f]{7,40}|unknown)\)$",
+        output,
+    )
     return {
         "checked": True,
         "path": str(path),
         "version_output": output,
         "parsed_version": match.group("version"),
+        "git_describe": build_match.group("describe") if build_match else None,
+        "git_sha": build_match.group("sha") if build_match else None,
     }
 
 
@@ -165,6 +176,9 @@ def build_gate(repo: Path, *, binary: str | None, check_fmt: bool) -> dict[str, 
     vector_source = read_text(repo / "crates" / "store" / "src" / "vector.rs")
     bridge_source = read_text(repo / "crates" / "bridge" / "src" / "main.rs")
     mcp_source = read_text(repo / "crates" / "bridge" / "src" / "mcp_tools.rs")
+    build_identity_source = read_text(
+        repo / "crates" / "bridge" / "src" / "build_identity.rs"
+    )
     bridge_manifest = read_text(repo / "crates" / "bridge" / "Cargo.toml")
     sync_doc = read_text(repo / "docs" / "CROSS-MACHINE-SYNC.md")
 
@@ -192,22 +206,28 @@ def build_gate(repo: Path, *, binary: str | None, check_fmt: bool) -> dict[str, 
             "Compiled default is now gte-multilingual-base (768-dim multilingual)"
             in vector_source
         ),
-        "hash_fallback_is_384": "FNV-1a feature-hash embedding: 384-dim" in vector_source,
+        "hash_fallback_tracks_active_dimension": (
+            "FNV-1a feature-hash embedding sized to [`vector_dim`]" in vector_source
+            and "let dim = vector_dim();" in vector_source
+        ),
     }
     embedding_doc_checks = {
         "readme_model_aware": (
-            "model-aware local embedding" in readme
+            "model-aware embedding" in readme
             and re.search(
                 r"compiled default is\s+`gte-multilingual-base` at 768 dimensions",
                 readme,
             )
             is not None
-            and re.search(r"deterministic 384-dim\s+`fnv1a-hash-384`", readme)
-            is not None
+            and "output width follows the active `vector_dim()`" in readme
         ),
         "sync_doc_model_aware": (
-            "dimension matches the active" in sync_doc
-            and "`gte-multilingual-base` at 768 dimensions" in sync_doc
+            "model-aware embedding" in sync_doc
+            and re.search(
+                r"`gte-multilingual-base` at 768\s+dimensions", sync_doc
+            )
+            is not None
+            and "width follows the active model dimension" in sync_doc
         ),
         "vector_api_model_aware": (
             "Compute a model-aware f32 embedding" in vector_source
@@ -228,9 +248,17 @@ def build_gate(repo: Path, *, binary: str | None, check_fmt: bool) -> dict[str, 
         item.get("name") == "agent-bridge" and item.get("path") == "src/main.rs"
         for item in bridge_toml.get("bin", [])
     )
-    cli_uses_cargo_version = "#[command(version," in bridge_source
+    cli_uses_cargo_version = (
+        "version = ab_bridge::build_identity::PACKAGE_VERSION" in bridge_source
+    )
     mcp_uses_cargo_version = 'env!("CARGO_PKG_VERSION")' in bridge_source
-    capability_uses_cargo_version = 'let version = env!("CARGO_PKG_VERSION");' in mcp_source
+    capability_uses_cargo_version = (
+        "let version = crate::build_identity::PACKAGE_VERSION;" in mcp_source
+    )
+    build_identity_traceable = all(
+        needle in build_identity_source
+        for needle in ["PACKAGE_VERSION", "GIT_DESCRIBE", "GIT_SHA", "LONG_VERSION"]
+    )
 
     binary_observation = inspect_binary(repo, binary)
     observed_binary_matches_cargo = (
@@ -246,16 +274,12 @@ def build_gate(repo: Path, *, binary: str | None, check_fmt: bool) -> dict[str, 
         "cli_uses_cargo_package_version": cli_uses_cargo_version,
         "mcp_uses_cargo_package_version": mcp_uses_cargo_version,
         "capability_uses_cargo_package_version": capability_uses_cargo_version,
+        "build_identity_traceable": build_identity_traceable,
         "observed_binary_matches_cargo": observed_binary_matches_cargo,
         "cargo_version_matches_latest_tag": workspace_version == tag_version,
         "binary_expected_version_matches_latest_tag": workspace_version == tag_version,
     }
-    version_identity_aligned = (
-        version_gates["latest_tag_matches_changelog"]
-        and version_gates["cargo_version_matches_latest_tag"]
-        and version_gates["binary_expected_version_matches_latest_tag"]
-        and observed_binary_matches_cargo
-    )
+    version_identity_aligned = all(version_gates.values())
 
     source_only_consistent = all(source_only_checks.values())
     embedding_runtime_consistent = all(runtime_embedding_checks.values())
@@ -330,7 +354,8 @@ def build_gate(repo: Path, *, binary: str | None, check_fmt: bool) -> dict[str, 
         "embedding_truth": {
             "compiled_default_model": "gte-multilingual-base",
             "compiled_default_dimension": 768,
-            "hash_fallback_dimension": 384,
+            "hash_fallback_dimension": "active_vector_dim",
+            "hash_only_build_dimension": 384,
             "optional_onnx_dimension": 384,
             "runtime_consistent": embedding_runtime_consistent,
             "docs_match_runtime": embedding_docs_match_runtime,
@@ -340,12 +365,12 @@ def build_gate(repo: Path, *, binary: str | None, check_fmt: bool) -> dict[str, 
         "format_check": format_check,
         "blockers": blockers,
         "required_owner_decisions": [
-            "Choose one version identity contract for v* source markers and Cargo/binary/MCP surfaces.",
             "Choose the next semantic version only after reviewing the Unreleased change set.",
+            "Decide whether the remaining workspace format drift must block the next source marker.",
             "Authorize tag creation/publication only after clean-checkout format, build, and test gates pass.",
         ],
         "next_safe_actions": [
-            "Keep exact build provenance anchored to a Git commit until version identity is aligned.",
+            "Use the emitted git describe and SHA when exact unreleased-build provenance matters.",
             "Reduce workspace format drift in scoped, reviewable commits rather than one bulk rewrite.",
             "Re-run this gate with --check-fmt and an explicit --binary before a release decision.",
         ],

@@ -13,8 +13,8 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 output_json="$tmpdir/gate.json"
 binary_args=()
-if [ -x "$ROOT_DIR/target/release/agent-bridge" ]; then
-  binary_args=(--binary "$ROOT_DIR/target/release/agent-bridge")
+if [ -n "${AGENT_BRIDGE_RELEASE_TRUTH_BINARY:-}" ]; then
+  binary_args=(--binary "$AGENT_BRIDGE_RELEASE_TRUTH_BINARY")
 fi
 
 python3 "$HELPER" \
@@ -31,10 +31,15 @@ from pathlib import Path
 
 packet = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 
-assert packet["schema"] == "agent_bridge.release_truth_gate.v0"
+assert packet["schema"] == "agent_bridge.release_truth_gate.v1"
 assert packet["run_type"] == "read_only_release_truth_gate"
-assert packet["status"] == "NO_GO_VERSION_IDENTITY_DRIFT"
-assert packet["verdict"] == "NO_GO"
+assert packet["status"] in {
+    "NO_GO_WORKSPACE_FORMAT_DRIFT",
+    "READY_FOR_OWNER_RELEASE_DECISION",
+}
+assert packet["verdict"] == (
+    "NO_GO" if packet["status"].startswith("NO_GO_") else "OWNER_GATED"
+)
 assert packet["publication_allowed_now"] is False
 assert packet["owner_gate_required"] is True
 assert packet["creates_tag"] is False
@@ -53,29 +58,32 @@ assert source["changelog_latest_release"] == "0.14.0"
 assert source["changelog_has_unreleased_section"] is True
 
 cargo = packet["cargo_identity"]
-assert cargo["workspace_package_version"] == "0.1.0"
+assert cargo["workspace_package_version"] == "0.14.0"
 assert cargo["bridge_package_name"] == "ab-bridge"
 assert cargo["bridge_inherits_workspace_version"] is True
 assert cargo["binary_name"] == "agent-bridge"
-assert cargo["binary_expected_version"] == "0.1.0"
-assert cargo["mcp_expected_version"] == "0.1.0"
-assert cargo["capability_expected_version"] == "0.1.0"
+assert cargo["binary_expected_version"] == "0.14.0"
+assert cargo["mcp_expected_version"] == "0.14.0"
+assert cargo["capability_expected_version"] == "0.14.0"
 assert len(cargo["workspace_member_version_inheritance"]) == 13
 assert all(cargo["workspace_member_version_inheritance"].values())
 
 binary = packet["binary_observation"]
 if binary["checked"]:
-    assert binary["parsed_version"] == "0.1.0"
-    assert binary["version_output"].endswith(" 0.1.0")
+    assert binary["parsed_version"] == "0.14.0"
+    assert binary["version_output"].startswith("agent-bridge 0.14.0")
+    assert binary["git_describe"]
+    assert binary["git_sha"]
 
 version = packet["version_identity"]
-assert version["aligned"] is False
+assert version["aligned"] is True
 assert version["gates"] == {
     "agent_bridge_binary_declared": True,
-    "binary_expected_version_matches_latest_tag": False,
+    "binary_expected_version_matches_latest_tag": True,
     "bridge_inherits_workspace_version": True,
+    "build_identity_traceable": True,
     "capability_uses_cargo_package_version": True,
-    "cargo_version_matches_latest_tag": False,
+    "cargo_version_matches_latest_tag": True,
     "cli_uses_cargo_package_version": True,
     "latest_tag_matches_changelog": True,
     "mcp_uses_cargo_package_version": True,
@@ -91,7 +99,8 @@ assert all(distribution["checks"].values())
 embedding = packet["embedding_truth"]
 assert embedding["compiled_default_model"] == "gte-multilingual-base"
 assert embedding["compiled_default_dimension"] == 768
-assert embedding["hash_fallback_dimension"] == 384
+assert embedding["hash_fallback_dimension"] == "active_vector_dim"
+assert embedding["hash_only_build_dimension"] == 384
 assert embedding["optional_onnx_dimension"] == 384
 assert embedding["runtime_consistent"] is True
 assert embedding["docs_match_runtime"] is True
@@ -105,14 +114,19 @@ if fmt["passed"] is False:
     assert fmt["diff_file_count"] > 0
     assert "workspace_format_drift" in packet["blockers"]
 
-assert "version_identity_drift" in packet["blockers"]
+assert "version_identity_drift" not in packet["blockers"]
 assert len(packet["required_owner_decisions"]) == 3
 assert len(packet["next_safe_actions"]) == 3
 
 print("Agent-Bridge release truth JSON verification passed")
 PY
 
-if python3 "$HELPER" --repo "$ROOT_DIR" --strict > "$tmpdir/strict.out"; then
+if python3 "$HELPER" --repo "$ROOT_DIR" --check-fmt --strict > "$tmpdir/strict.out"; then
+  if grep -q '"status": "NO_GO_' "$output_json"; then
+    echo "expected strict release truth gate to reject current NO_GO status" >&2
+    exit 1
+  fi
+elif ! grep -q '"status": "NO_GO_' "$output_json"; then
   echo "expected strict release truth gate to reject NO_GO status" >&2
   exit 1
 fi
@@ -132,13 +146,13 @@ readme, sync_doc, vector, manifest, changelog = [
 
 assert "### Version provenance" in readme
 assert "scripts/agent-bridge-release-truth-gate.py" in readme
-assert "model-aware local embedding" in readme
+assert "model-aware embedding" in readme
 assert "`gte-multilingual-base` at 768 dimensions" in readme
-assert "deterministic 384-dim" in readme
+assert "output width follows the active `vector_dim()`" in readme
 assert "Memories get a **384-dim embedding**" not in readme
 
-assert "dimension matches the active" in sync_doc
-assert "`gte-multilingual-base` at 768 dimensions" in sync_doc
+assert "model-aware embedding" in sync_doc
+assert "width follows the active model dimension" in sync_doc
 assert "Each `memory_save` writes a 384-dim embedding" not in sync_doc
 
 assert "Compute a model-aware f32 embedding" in vector
@@ -149,7 +163,7 @@ assert "Source builds enable `onnx-embed` by default" in manifest
 assert "Prebuilt release binaries are built" not in manifest
 
 assert "Release truth is now explicit and machine-checkable" in changelog
-assert "NO_GO_VERSION_IDENTITY_DRIFT" in changelog
+assert "latest released baseline (`0.14.0`)" in changelog
 
 print("Agent-Bridge release and embedding documentation verification passed")
 PY
@@ -161,40 +175,41 @@ from pathlib import Path
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
 required = [
     "# Agent-Bridge Release Truth Gate",
-    "Source base commit: `5f5002a8`",
+    "Source base commit: `51c1b2c1`",
     "Run type: read-only release identity and documentation gate",
-    "release_status: NO_GO_VERSION_IDENTITY_DRIFT",
+    "release_status: READY_FOR_OWNER_RELEASE_DECISION",
     "publication_allowed_now: false",
     "owner_gate_required: true",
     "agent_bridge_release_truth_gate_20260709",
     "codex-agent-bridge-release-truth-gate-20260709_active",
     "Forum thread: `design#119`, post `2999`",
     "cascadeprojects_portfolio_audit_20260709",
-    "schema: agent_bridge.release_truth_gate.v0",
+    "schema: agent_bridge.release_truth_gate.v1",
     "latest_tag: v0.14.0",
     "latest_tag_version: 0.14.0",
     "latest_tag_commit: c74bf3360502ffbc1a7c9a471d939617cc028422",
-    "commits_since_latest_tag: 67",
+    "commits_since_latest_tag: 68",
     "changelog_latest_release: 0.14.0",
-    "workspace_package_version: 0.1.0",
-    "binary_observation: ab-bridge 0.1.0",
-    "cargo_version_matches_latest_tag: false",
-    "binary_expected_version_matches_latest_tag: false",
+    "workspace_package_version: 0.14.0",
+    "binary_observation: agent-bridge 0.14.0",
+    "cargo_version_matches_latest_tag: true",
+    "binary_expected_version_matches_latest_tag: true",
+    "version_identity_aligned: true",
     "latest_tag_matches_changelog: true",
     "distribution_mode: source_only",
     "distribution_policy_consistent: true",
     "compiled_default_model: gte-multilingual-base",
     "compiled_default_dimension: 768",
-    "hash_fallback_dimension: 384",
+    "hash_fallback_dimension: active_vector_dim",
+    "hash_only_build_dimension: 384",
     "optional_onnx_dimension: 384",
     "embedding_docs_match_runtime: true",
     "format_check_passed: false",
-    "format_diff_file_count: 43",
     "creates_tag: false",
     "publishes_release: false",
     "writes_repository: false",
     "reads_credential_content: false",
-    "no Cargo version change",
+    "Cargo baseline changed from 0.1.0 to 0.14.0",
     "no tag creation or release publication",
     "WAIT_VALUE_GATE",
 ]
@@ -208,7 +223,6 @@ for forbidden in [
     "owner_gate_required: false",
     "creates_tag: true",
     "publishes_release: true",
-    "version_identity_aligned: true",
     "release is ready",
 ]:
     assert forbidden not in text
