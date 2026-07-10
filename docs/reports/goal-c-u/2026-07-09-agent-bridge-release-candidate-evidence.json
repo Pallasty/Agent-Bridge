@@ -1,12 +1,12 @@
 {
   "schema": "agent_bridge.release_candidate_execution_evidence.v0",
   "date": "2026-07-09",
-  "source_commit": "0c32bddc95bfef00ca9411e2030aa15b9e51c163",
+  "source_commit": "d717a53437d6fb50a474b433e6ec7d5a25289c57",
   "source_worktree": {
-    "mode": "temporary_detached_clean_source",
+    "mode": "isolated_branch_worktree",
     "clean_before": true,
     "clean_after": true,
-    "removed_after_run": true
+    "removed_after_run": false
   },
   "artifact_cache": {
     "mode": "warm_shared_target",
@@ -20,79 +20,75 @@
     "jobs": 1
   },
   "accepted_harness": {
-    "cargo": "$(rustup which cargo)",
-    "rustc": "$(rustup which rustc)",
-    "rustdoc": "$(rustup which rustdoc)",
+    "cargo": "$(rustup which --toolchain stable cargo)",
+    "rustc": "$(rustup which --toolchain stable rustc)",
+    "rustdoc": "$(rustup which --toolchain stable rustdoc)",
     "explicit_toolchain_paths": true
   },
-  "excluded_attempts": [
-    {
-      "reason": "Direct toolchain Cargo without explicit RUSTC/RUSTDOC allowed a dependency-local rust-toolchain 1.57 override; its --check-cfg failure was a harness error and is not product evidence."
-    }
-  ],
-  "binary_observation": "agent-bridge 0.14.0 (v0.14.0-71-g0c32bddc; 0c32bddc95bf)",
+  "excluded_attempts": [],
+  "binary_observation": "agent-bridge 0.14.0 (v0.14.0-80-gd717a534; d717a53437d6)",
   "results": {
     "fmt": {
       "command": "cargo fmt --all -- --check",
-      "status": 1,
-      "duration_secs": 20,
-      "diff_file_count": 43,
-      "log_bytes": 2612450,
-      "log_sha256": "ea1ff3f551c2dcae225c2c95ce3949bae2af74e2a3c418a18dda81365571b019"
+      "status": 0,
+      "duration_secs": 3,
+      "diff_file_count": 0,
+      "log_bytes": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "build": {
       "command": "cargo build --workspace --all-targets -j 1",
       "status": 0,
-      "duration_secs": 273,
+      "duration_secs": 300,
       "warning_header_count": 13,
-      "log_bytes": 5601,
-      "log_sha256": "accd90bb634c412a3bc5909b1d6598b64150c0ef9a158514412ee8b7bd93c1be"
+      "log_bytes": 5205,
+      "log_sha256": "8b1a812abd45242022f24c993395ac4865e61e290a43ad0a41f454fdf893260a"
     },
     "test": {
       "command": "cargo test --workspace --no-fail-fast -j 1",
       "status": 0,
-      "duration_secs": 65,
+      "duration_secs": 66,
       "suite_count": 63,
       "passed": 2507,
       "failed": 0,
       "ignored": 14,
       "log_bytes": 222197,
-      "log_sha256": "bd2f06c736a747eb535705bc038b9f998c6f5a64b1dad73e0dee18a19a847588"
+      "log_sha256": "00410882c0852c3403c7e0dae56d6f64ef7505bca140a8387b5cab7cc66928bf"
     },
     "clippy": {
       "command": "cargo clippy --workspace --all-targets -j 1 -- -W clippy::all",
       "status": 0,
-      "duration_secs": 126,
+      "duration_secs": 139,
       "advisory": true,
       "warning_header_count": 415,
-      "log_bytes": 238964,
-      "log_sha256": "8d5caa3fd4212bb3d7c7d761f93215c0a13a8fcbbec58e2e3dacfeba00e65a79"
+      "log_bytes": 236579,
+      "log_sha256": "63a8d773bc1841e6ac55446e7525f22d3f01f9b354db3f61a49c6f2e0a701ed9"
     },
     "no_default_build": {
       "command": "cargo build -p ab-bridge --no-default-features --all-targets -j 1",
       "status": 0,
-      "duration_secs": 236,
+      "duration_secs": 250,
       "warning_header_count": 13,
-      "log_bytes": 4673,
-      "log_sha256": "a28021f5d23291948408234140be3c70cf9c5c2cf801f062d948b9cae7efe525"
+      "log_bytes": 5063,
+      "log_sha256": "7b11b550c22ce3b9e9fb651f28c5cbbe6b33a3510cb32d1e963e8b568be4996e"
     },
     "no_default_test": {
       "command": "cargo test -p ab-bridge --no-default-features --lib -j 1",
       "status": 0,
-      "duration_secs": 5,
+      "duration_secs": 6,
       "passed": 1477,
       "failed": 0,
       "ignored": 4,
       "log_bytes": 127037,
-      "log_sha256": "45c45d95e2bc5d96e851cb11951ec4085096d36c88633dd8e15261c150cc3216"
+      "log_sha256": "d6cdb61f252083cd27489d11fb6d8d4cd7e1b53f283c4dd2abbf9dd599ac2639"
     }
   },
   "remote_ci": {
     "github_linux_verified": false,
     "github_macos_verified": false,
     "gitlab_linux_verified": false,
-    "status": "unobservable_private_repository",
-    "evidence": "GitHub Actions returned 404 without authentication; gh/glab and GH/GitHub/GitLab tokens were unavailable."
+    "status": "not_observed_owner_auth_gate",
+    "evidence": "Authenticated CI was intentionally not queried; this local audit did not inspect or use credentials."
   },
   "writes_version": false,
   "creates_tag": false,

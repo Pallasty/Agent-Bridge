@@ -2,12 +2,12 @@
 
 Date: 2026-07-09
 
-Source base commit: `0c32bddc`
+Source base commit: `d717a534`
 
 Run type: owner-authorized candidate audit, no version or tag write
 
 ```yaml
-candidate_status: NO_GO_FORMAT_DRIFT
+candidate_status: OWNER_GATE_REMOTE_CI
 version_identity_policy: unified
 version_change_allowed_now: false
 tag_creation_allowed_now: false
@@ -31,7 +31,7 @@ unreleased builds expose `git describe` plus source SHA. The post-tag change
 set warrants a `0.15.0` candidate recommendation, but this audit does not write
 that version.
 
-Local Linux release behavior is healthy on a clean detached source worktree:
+Local Linux release behavior is healthy on a clean isolated branch worktree:
 
 ```yaml
 workspace_build_status: PASS
@@ -44,10 +44,10 @@ hash_only_tests_failed: 0
 clippy_status: PASS_ADVISORY
 ```
 
-The candidate remains `NO_GO` because `cargo fmt --all -- --check` reports 43
-files and authenticated remote Linux/macOS CI was not observable from this
-host. Format repair and remote CI evidence must precede a version write or tag
-decision.
+The local candidate is no longer blocked by format, build, test, or hash-only
+checks. It remains owner-gated because authenticated Linux/macOS CI was not
+observed for the exact candidate source. Remote CI evidence must precede a
+version write or tag decision.
 
 Landed audit artifacts:
 
@@ -63,7 +63,7 @@ docs/reports/goal-c-u/2026-07-09-agent-bridge-release-candidate-audit.md
 ```yaml
 schema: agent_bridge.release_candidate_audit.v0
 execution_evidence_schema: agent_bridge.release_candidate_execution_evidence.v0
-candidate_status: NO_GO_FORMAT_DRIFT
+candidate_status: OWNER_GATE_REMOTE_CI
 version_identity_policy: unified
 version_change_allowed_now: false
 tag_creation_allowed_now: false
@@ -82,7 +82,7 @@ invalidates it and requires a new clean-worktree run.
 
 ## Semver Assessment
 
-Source base profile from `v0.14.0..0c32bddc`:
+Source base profile from `v0.14.0..d717a534`:
 
 ```yaml
 released_baseline: 0.14.0
@@ -90,12 +90,13 @@ recommended_candidate: 0.15.0
 recommendation_only: true
 reason: feature_additions_require_minor
 version_file_modified: false
-commit_count: 71
+commit_count: 80
 type_counts:
   feat: 35
   docs: 14
-  test: 9
-  fix: 6
+  test: 10
+  fix: 7
+  style: 7
   other: 4
   refactor: 2
   chore: 1
@@ -105,9 +106,9 @@ explicit_breaking_change_count: 0
 Change volume:
 
 ```yaml
-changed_file_count: 145
-additions: 112240
-deletions: 80826
+changed_file_count: 176
+additions: 114637
+deletions: 81092
 binary_file_count: 0
 ```
 
@@ -140,15 +141,12 @@ cargo fmt --all -- --check
 ```
 
 ```yaml
-format_check_passed: false
-format_diff_file_count: 43
-examples_and_tests: 17
-store_runtime: 2
-bridge_runtime_other: 17
-bridge_mcp_main: 7
+format_check_passed: true
+format_diff_file_count: 0
+original_format_diff_file_count: 43
 ```
 
-Recommended repair order, from lower to higher review risk:
+The repair was completed in the recorded lower-to-higher review order:
 
 1. `examples_and_tests` (17): twelve bridge examples, two bridge integration
    tests, and three store examples.
@@ -156,9 +154,11 @@ Recommended repair order, from lower to higher review risk:
 3. `bridge_runtime_other` (17): feature modules outside the MCP/main surface.
 4. `bridge_mcp_main` (7): `main.rs`, `mcp_tools.rs`, and five MCP modules/tests.
 
-The high-churn MCP/main partition stays last so a large import/wrapping diff
-does not hide review of the smaller ownership slices. Each partition should be
-a format-only commit with focused tests plus the candidate helper rerun.
+The high-churn MCP/main partition stayed last so a large import/wrapping diff
+did not hide review of the smaller ownership slices. The 17 examples/tests
+landed at `6f3ec818`; the remaining 26 files landed in six format-only commits
+from `86ac36ca` through `5175c83b`. A separate clean checkout at `6f3ec818`
+reproduced all 26 remaining files byte-for-byte with `cargo fmt --all`.
 
 The machine-readable helper emits every path. Aggregate partitions are:
 
@@ -190,11 +190,11 @@ bridge_mcp_main:
 Execution source:
 
 ```yaml
-source_commit: 0c32bddc95bfef00ca9411e2030aa15b9e51c163
-source_mode: temporary_detached_clean_source
+source_commit: d717a53437d6fb50a474b433e6ec7d5a25289c57
+source_mode: isolated_branch_worktree
 source_clean_before: true
 source_clean_after: true
-temporary_worktree_removed: true
+worktree_removed_at_evidence_write: false
 artifact_cache_mode: warm_shared_target
 cold_cache_claim: false
 platform: linux_x86_64
@@ -203,20 +203,21 @@ cargo: 1.96.0
 jobs: 1
 ```
 
-The source checkout was clean and detached. Cargo reused the main repository's
+The source checkout was clean and isolated. Cargo reused the main repository's
 target directory to stay within the 15 GiB RAM / 11 GiB swap host envelope, so
-this is explicitly a warm-cache result. Remote CI or a separate cold-cache run
-is still required before tagging.
+this is explicitly a warm-cache result. Authenticated remote CI is still
+required before tagging; a separate cold-cache run would add local evidence but
+would not replace that gate.
 
 Accepted commands pin Cargo, rustc, and rustdoc to the same stable toolchain:
 
 ```bash
-RUSTC="$(rustup which rustc)" \
-RUSTDOC="$(rustup which rustdoc)" \
+RUSTC="$(rustup which --toolchain stable rustc)" \
+RUSTDOC="$(rustup which --toolchain stable rustdoc)" \
 CARGO_BUILD_JOBS=1 \
 CARGO_INCREMENTAL=0 \
 CARGO_TARGET_DIR=/Data/CascadeProjects/agent-bridge/target \
-"$(rustup which cargo)" build --workspace --all-targets -j 1
+"$(rustup which --toolchain stable cargo)" build --workspace --all-targets -j 1
 
 # Same environment:
 cargo test --workspace --no-fail-fast -j 1
@@ -229,35 +230,34 @@ Results:
 
 | Gate | Status | Duration | Evidence |
 | --- | --- | ---: | --- |
-| workspace all-targets build | PASS | 273 s | 13 warning headers; log SHA-256 `accd90bb634c412a3bc5909b1d6598b64150c0ef9a158514412ee8b7bd93c1be` |
-| workspace tests | PASS | 65 s | 2,507 passed, 0 failed, 14 ignored across 63 suites; log SHA-256 `bd2f06c736a747eb535705bc038b9f998c6f5a64b1dad73e0dee18a19a847588` |
-| clippy all-targets | PASS_ADVISORY | 126 s | exit 0; 415 warning-header lines; log SHA-256 `8d5caa3fd4212bb3d7c7d761f93215c0a13a8fcbbec58e2e3dacfeba00e65a79` |
-| hash-only all-targets build | PASS | 236 s | 13 warning headers; log SHA-256 `a28021f5d23291948408234140be3c70cf9c5c2cf801f062d948b9cae7efe525` |
-| hash-only bridge lib tests | PASS | 5 s | 1,477 passed, 0 failed, 4 ignored; log SHA-256 `45c45d95e2bc5d96e851cb11951ec4085096d36c88633dd8e15261c150cc3216` |
+| format check | PASS | 3 s | 0 files / 0 output bytes; log SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| workspace all-targets build | PASS | 300 s | 13 warning headers; log SHA-256 `8b1a812abd45242022f24c993395ac4865e61e290a43ad0a41f454fdf893260a` |
+| workspace tests | PASS | 66 s | 2,507 passed, 0 failed, 14 ignored across 63 suites; log SHA-256 `00410882c0852c3403c7e0dae56d6f64ef7505bca140a8387b5cab7cc66928bf` |
+| clippy all-targets | PASS_ADVISORY | 139 s | exit 0; 415 warning-header lines; log SHA-256 `63a8d773bc1841e6ac55446e7525f22d3f01f9b354db3f61a49c6f2e0a701ed9` |
+| hash-only all-targets build | PASS | 250 s | 13 warning headers; log SHA-256 `7b11b550c22ce3b9e9fb651f28c5cbbe6b33a3510cb32d1e963e8b568be4996e` |
+| hash-only bridge lib tests | PASS | 6 s | 1,477 passed, 0 failed, 4 ignored; log SHA-256 `d6cdb61f252083cd27489d11fb6d8d4cd7e1b53f283c4dd2abbf9dd599ac2639` |
 
 Built identity:
 
 ```text
-agent-bridge 0.14.0 (v0.14.0-71-g0c32bddc; 0c32bddc95bf)
+agent-bridge 0.14.0 (v0.14.0-80-gd717a534; d717a53437d6)
 ```
 
-One preliminary harness attempt was excluded: directly invoking toolchain
-Cargo without explicit `RUSTC/RUSTDOC` let a dependency-local Rust 1.57
-override intercept compilation and reject stable Cargo's `--check-cfg` flag.
-The accepted matrix explicitly pins one stable toolchain and passes.
+No matrix attempt was excluded. The accepted matrix explicitly pins one stable
+toolchain and passes.
 
 ## Remote CI Boundary
 
 ```yaml
-remote_ci_status: UNVERIFIED_PRIVATE
+remote_ci_status: UNVERIFIED_OWNER_AUTH_GATE
 github_linux_verified: false
 github_macos_verified: false
 gitlab_linux_verified: false
 ```
 
-The repository is private from the unauthenticated browser path. This host has
-no `gh`/`glab` binary and no GitHub/GitLab API token. GitHub Actions returned
-404 without authentication. No remote result is inferred from local success.
+Authenticated CI was intentionally not queried because this audit was not
+authorized to inspect or use credentials. No remote result is inferred from
+local success.
 
 The checked-in CI contract runs workspace all-targets build and workspace tests
 on Ubuntu 22.04 and macOS 14; GitLab mirrors the Linux commands. A candidate
@@ -272,8 +272,8 @@ commit still needs authenticated results for the exact SHA, especially macOS.
 | Linux default build/test | PASS | local candidate behavior accepted |
 | Linux hash-only build/test | PASS | documented lower-footprint path accepted |
 | clippy | PASS_ADVISORY | warning debt recorded, not current CI blocker |
-| format | FAIL, 43 files | primary `NO_GO_FORMAT_DRIFT` blocker |
-| authenticated Linux/macOS CI | UNVERIFIED | separate pre-tag blocker |
+| format | PASS, 0 files | local format blocker closed |
+| authenticated Linux/macOS CI | UNVERIFIED | remaining owner/pre-tag gate |
 
 ## Boundary
 
@@ -288,7 +288,7 @@ This audit performed no product or release mutation:
 - no `cargo fmt` write;
 - no remote CI or release claim without evidence.
 
-The only repository changes are this read-only audit helper, verifier, evidence
+The only repository changes are read-only release helpers/verifiers, evidence
 summary, report, and documentation links.
 
 ## Verification
@@ -302,12 +302,11 @@ git diff --check
 
 The verifier reruns static Git/format analysis, validates execution evidence,
 checks evidence applicability across audit-only descendant commits, asserts the
-`0.15.0` recommendation and `NO_GO_FORMAT_DRIFT`, and confirms strict mode
-rejects the candidate. It does not rerun the multi-minute Rust matrix.
+`0.15.0` recommendation and `OWNER_GATE_REMOTE_CI`, and confirms strict mode
+accepts the non-NO-GO packet without authorizing a version write. It does not
+rerun the multi-minute Rust matrix.
 
 ## Next Step
 
-Do not write `0.15.0` yet. Request a separate remediation lane for format
-partition 1 (`examples_and_tests`), then proceed in the recorded order. After
-all format partitions pass, obtain authenticated Linux/macOS CI for the exact
-candidate commit and rerun this audit before an owner version-write decision.
+Do not write `0.15.0` yet. Obtain authenticated Linux/macOS CI for the exact
+candidate source and rerun this audit before an owner version-write decision.

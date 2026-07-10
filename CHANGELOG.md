@@ -70,10 +70,11 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   public-surface changes since the latest source marker, partitions workspace
   formatting drift, validates clean-worktree execution evidence, and emits a
   recommendation without editing Cargo or creating a tag. The first packet
-  recommends `0.15.0` from the 35 post-0.14 feature commits and schema v40/v41,
-  while holding the candidate at `NO_GO_FORMAT_DRIFT`: Linux default and
-  hash-only build/test matrices pass, but 43 Rust files need scoped formatting
-  and authenticated Linux/macOS CI remains unobserved from this host.
+  recommends `0.15.0` from the 35 post-0.14 feature commits and schema v40/v41.
+  The original `NO_GO_FORMAT_DRIFT` is closed: all 43 Rust files were repaired
+  in scoped format-only commits and the refreshed Linux default/hash-only
+  matrices pass. The candidate is now `OWNER_GATE_REMOTE_CI`; authenticated
+  Linux/macOS results remain unobserved and no version or tag was written.
 - **Release truth is now explicit and machine-checkable.**
   `scripts/agent-bridge-release-truth-gate.py` compares the latest `v*` source
   marker and CHANGELOG release with Cargo/CLI/MCP version surfaces, confirms
