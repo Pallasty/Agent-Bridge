@@ -29,6 +29,8 @@ python3 - "$SUCCESSOR_CONTRACT" "$SUCCESSOR_REPORT" \
   "$ROOT_DIR/scripts/eval/README.md" "$ROOT_DIR/CHANGELOG.md" "$ROOT_DIR" <<'PY'
 import hashlib
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -38,12 +40,46 @@ public_paths = [contract_path, report_path, Path(sys.argv[3]), Path(sys.argv[4])
 root = Path(sys.argv[5])
 contract = json.loads(contract_path.read_text(encoding="utf-8"))
 report = report_path.read_text(encoding="utf-8")
+
+
+def reported_hash(field: str, length: int) -> str:
+    match = re.search(rf"^{re.escape(field)}: ([0-9a-f]{{{length}}})$", report, re.M)
+    if match is None:
+        raise SystemExit(f"successor preregistration is missing {field}")
+    return match.group(1)
+
+
 assert contract["schema"].endswith(".v2")
 assert len(contract["cases"]) == 12
 assert all("prompt" not in case for case in contract["cases"])
 assert all("retrieval_query" not in case for case in contract["cases"])
 assert all("retrieval_query_sha256" in case for case in contract["cases"])
-assert hashlib.sha256(contract_path.read_bytes()).hexdigest() in report
+contract_sha = hashlib.sha256(contract_path.read_bytes()).hexdigest()
+assert reported_hash("contract_sha256", 64) == contract_sha
+frozen_commit = reported_hash("contract_commit", 40)
+for field, relative in {
+    "harness_source_sha256": "scripts/eval/portfolio_continuity_answer_trial.py",
+    "surface_source_sha256": "scripts/eval/portfolio_continuity_ab_trial.py",
+}.items():
+    current = root / relative
+    expected = hashlib.sha256(current.read_bytes()).hexdigest()
+    assert contract[field] == expected
+    assert reported_hash(field, 64) == expected
+    frozen = subprocess.check_output(
+        ["git", "show", f"{frozen_commit}:{relative}"], cwd=root
+    )
+    if frozen != current.read_bytes():
+        raise SystemExit(f"successor {field} drifted from its frozen commit")
+frozen_contract = subprocess.check_output(
+    [
+        "git",
+        "show",
+        f"{frozen_commit}:scripts/eval/fixtures/portfolio_continuity_successor_answer_contract.json",
+    ],
+    cwd=root,
+)
+if frozen_contract != contract_path.read_bytes():
+    raise SystemExit("successor contract drifted from its frozen commit")
 for anchor in (
     "PRE-REGISTERED / IMPLEMENTATION VERIFIED / INDEPENDENT REVIEW",
     "NOT EXECUTED",
@@ -1978,15 +2014,26 @@ contract = {
         "ad_hoc_retry_allowed": False,
     },
 }
-(repo / "answer-contract.json").write_text(
-    json.dumps(contract, indent=2) + "\n", encoding="utf-8"
-)
+for filename, contract_variant in {
+    "answer-contract.json": contract,
+    "answer-contract.coverage.json": {
+        **contract,
+        "contract_id": "synthetic_successor_answer_coverage",
+    },
+    "answer-contract.semantic.json": {
+        **contract,
+        "contract_id": "synthetic_successor_answer_semantic",
+    },
+}.items():
+    (repo / filename).write_text(
+        json.dumps(contract_variant, indent=2) + "\n", encoding="utf-8"
+    )
 PY
 
 git -C "$v2repo" init -q
 git -C "$v2repo" config user.email synthetic@example.invalid
 git -C "$v2repo" config user.name Synthetic
-git -C "$v2repo" add .gitignore answer-contract.json scripts/eval
+git -C "$v2repo" add .gitignore answer-contract*.json scripts/eval
 git -C "$v2repo" commit -qm 'synthetic v2 contract and harness'
 
 python3 - "$v2repo" <<'PY'
@@ -1998,44 +2045,53 @@ from pathlib import Path
 
 repo = Path(sys.argv[1])
 contract_path = repo / "answer-contract.json"
-contract = json.loads(contract_path.read_text(encoding="utf-8"))
 prompts = [f"Synthetic successor question {index}?" for index in range(12)]
 queries = [f"Synthetic retrieval query {index}" for index in range(12)]
 head = subprocess.check_output(
     ["git", "rev-parse", "HEAD"], cwd=repo, text=True
 ).strip()
-spec = {
-    "schema": "agent_bridge.portfolio_continuity_answer_spec.v2",
-    "trial_id": "synthetic_successor_run",
-    "contract_sha256": hashlib.sha256(contract_path.read_bytes()).hexdigest(),
-    "contract_commit": head,
-    "repo": str(repo),
-    "digest_key": "syn_00",
-    "blind_seed": "12" * 32,
-    "cases": [
-        {
-            "case_id": case["case_id"],
-            "prompt": prompt,
-            "retrieval_query": query,
-        }
-        for case, prompt, query in zip(
-            contract["cases"], prompts, queries, strict=True
-        )
-    ],
-}
+
+
+def make_spec(contract_file: str, trial_id: str) -> dict[str, object]:
+    contract = json.loads((repo / contract_file).read_text(encoding="utf-8"))
+    return {
+        "schema": "agent_bridge.portfolio_continuity_answer_spec.v2",
+        "trial_id": trial_id,
+        "contract_sha256": hashlib.sha256((repo / contract_file).read_bytes()).hexdigest(),
+        "contract_commit": head,
+        "repo": str(repo),
+        "digest_key": "syn_00",
+        "blind_seed": "12" * 32,
+        "cases": [
+            {
+                "case_id": case["case_id"],
+                "prompt": prompt,
+                "retrieval_query": query,
+            }
+            for case, prompt, query in zip(
+                contract["cases"], prompts, queries, strict=True
+            )
+        ],
+    }
+
+
+spec = make_spec("answer-contract.json", "synthetic_successor_run")
 (repo / "data/spec.json").write_text(
     json.dumps(spec, indent=2) + "\n", encoding="utf-8"
 )
-invalid_coverage_spec = json.loads(json.dumps(spec))
-invalid_coverage_spec["trial_id"] = "synthetic_successor_invalid_coverage"
+invalid_coverage_spec = make_spec(
+    "answer-contract.coverage.json", "synthetic_successor_invalid_coverage"
+)
 (repo / "data/spec.invalid-coverage.json").write_text(
     json.dumps(invalid_coverage_spec, indent=2) + "\n", encoding="utf-8"
 )
-semantic_spec = json.loads(json.dumps(spec))
-semantic_spec["trial_id"] = "synthetic_successor_semantic_failure"
-(repo / "data/spec.semantic.json").write_text(
-    json.dumps(semantic_spec, indent=2) + "\n", encoding="utf-8"
+semantic_spec = make_spec(
+    "answer-contract.semantic.json", "synthetic_successor_semantic_failure"
 )
+semantic_bytes = (json.dumps(semantic_spec, indent=2) + "\n").encode("utf-8")
+(repo / "data/spec.semantic.json").write_bytes(semantic_bytes)
+# This is semantically identical JSON with only trailing JSON whitespace changed.
+(repo / "data/spec.semantic-whitespace.json").write_bytes(semantic_bytes + b" \n")
 PY
 
 v2adapter="$v2repo/scripts/eval/portfolio_continuity_answer_trial.py"
@@ -2043,6 +2099,12 @@ v2data="$v2repo/data"
 python3 "$v2adapter" validate-contract \
   --contract "$v2repo/answer-contract.json" \
   >"$tmpdir/v2-contract.stdout.json"
+python3 "$v2adapter" validate-contract \
+  --contract "$v2repo/answer-contract.coverage.json" \
+  >"$tmpdir/v2-coverage-contract.stdout.json"
+python3 "$v2adapter" validate-contract \
+  --contract "$v2repo/answer-contract.semantic.json" \
+  >"$tmpdir/v2-semantic-contract.stdout.json"
 FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
   python3 "$v2adapter" capture \
   --contract "$v2repo/answer-contract.json" \
@@ -2055,7 +2117,7 @@ FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
 
 FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
   FAKE_EMPTY_FULL_SEARCH=1 python3 "$v2adapter" capture \
-  --contract "$v2repo/answer-contract.json" \
+  --contract "$v2repo/answer-contract.coverage.json" \
   --spec "$v2data/spec.invalid-coverage.json" \
   --source-db "$tmpdir/source.db" \
   --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
@@ -2065,7 +2127,7 @@ FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
 
 FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
   python3 "$v2adapter" capture \
-  --contract "$v2repo/answer-contract.json" \
+  --contract "$v2repo/answer-contract.semantic.json" \
   --spec "$v2data/spec.semantic.json" \
   --source-db "$tmpdir/source.db" \
   --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
@@ -2074,7 +2136,7 @@ FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
   >"$tmpdir/v2-semantic-capture.stdout.json"
 
 if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-coverage-count" python3 "$v2adapter" generate \
-  --contract "$v2repo/answer-contract.json" \
+  --contract "$v2repo/answer-contract.coverage.json" \
   --spec "$v2data/spec.invalid-coverage.json" \
   --capture "$v2data/capture.invalid-coverage.raw.json" \
   --codex-bin "$tmpdir/fake-codex" \
@@ -2144,7 +2206,7 @@ fi
 if FAKE_CODEX_MARKER_LEAK=1 \
   FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
   python3 "$v2adapter" generate \
-  --contract "$v2repo/answer-contract.json" \
+  --contract "$v2repo/answer-contract.semantic.json" \
   --spec "$v2data/spec.semantic.json" \
   --capture "$v2data/capture.semantic.raw.json" \
   --codex-bin "$tmpdir/fake-codex" \
@@ -2159,9 +2221,57 @@ if FAKE_CODEX_MARKER_LEAK=1 \
   exit 1
 fi
 
+# A byte-only private-spec edit cannot reuse a capture from the original spec.
 if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
   python3 "$v2adapter" generate \
-  --contract "$v2repo/answer-contract.json" \
+  --contract "$v2repo/answer-contract.semantic.json" \
+  --spec "$v2data/spec.semantic-whitespace.json" \
+  --capture "$v2data/capture.semantic.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/semantic-byte-mismatch.generation.json" \
+  --blind-output "$v2data/semantic-byte-mismatch.blind.json" \
+  --map-output "$v2data/semantic-byte-mismatch.map.json" \
+  --review-template-output "$v2data/semantic-byte-mismatch.review.json" \
+  --redacted-output "$v2data/semantic-byte-mismatch.redacted.json" \
+  --failure-output "$v2data/semantic-byte-mismatch.failure.json" \
+  >"$tmpdir/v2-semantic-byte-mismatch.stdout" \
+  2>"$tmpdir/v2-semantic-byte-mismatch.stderr"; then
+  echo "v2 accepted a whitespace-mutated spec with the original capture" >&2
+  exit 1
+fi
+
+# Recapturing that byte-only variant cannot create another attempt-one allowance.
+FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
+  python3 "$v2adapter" capture \
+  --contract "$v2repo/answer-contract.semantic.json" \
+  --spec "$v2data/spec.semantic-whitespace.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v2data/capture.semantic-whitespace.raw.json" \
+  --redacted-output "$v2data/capture.semantic-whitespace.redacted.json" \
+  >"$tmpdir/v2-semantic-whitespace-capture.stdout.json"
+
+if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
+  python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.semantic.json" \
+  --spec "$v2data/spec.semantic-whitespace.json" \
+  --capture "$v2data/capture.semantic-whitespace.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/semantic-recapture.generation.json" \
+  --blind-output "$v2data/semantic-recapture.blind.json" \
+  --map-output "$v2data/semantic-recapture.map.json" \
+  --review-template-output "$v2data/semantic-recapture.review.json" \
+  --redacted-output "$v2data/semantic-recapture.redacted.json" \
+  --failure-output "$v2data/semantic-recapture.failure.json" \
+  >"$tmpdir/v2-semantic-recapture.stdout" \
+  2>"$tmpdir/v2-semantic-recapture.stderr"; then
+  echo "v2 semantic failure allowed recapture plus a fresh attempt one" >&2
+  exit 1
+fi
+
+if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
+  python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.semantic.json" \
   --spec "$v2data/spec.semantic.json" \
   --capture "$v2data/capture.semantic.raw.json" \
   --codex-bin "$tmpdir/fake-codex" \
@@ -2179,7 +2289,7 @@ fi
 
 if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
   python3 "$v2adapter" generate \
-  --contract "$v2repo/answer-contract.json" \
+  --contract "$v2repo/answer-contract.semantic.json" \
   --spec "$v2data/spec.semantic.json" \
   --capture "$v2data/capture.semantic.raw.json" \
   --codex-bin "$tmpdir/fake-codex" \
@@ -2247,6 +2357,7 @@ data = Path(sys.argv[1])
 tmp = Path(sys.argv[2])
 capture = json.loads((data / "capture.raw.json").read_text(encoding="utf-8"))
 redacted = (data / "capture.redacted.json").read_text(encoding="utf-8")
+redacted_capture = json.loads(redacted)
 invalid_capture = json.loads(
     (data / "capture.invalid-coverage.raw.json").read_text(encoding="utf-8")
 )
@@ -2263,9 +2374,17 @@ blind = json.loads((data / "retry.blind.json").read_text(encoding="utf-8"))
 semantic_failure = json.loads(
     (data / "semantic.failure.json").read_text(encoding="utf-8")
 )
+semantic_capture = json.loads(
+    (data / "capture.semantic.raw.json").read_text(encoding="utf-8")
+)
+semantic_whitespace_capture = json.loads(
+    (data / "capture.semantic-whitespace.raw.json").read_text(encoding="utf-8")
+)
 score = json.loads((data / "retry.score.json").read_text(encoding="utf-8"))
 
 assert capture["schema"].endswith(".v2")
+assert capture["spec_sha256"] == hashlib.sha256((data / "spec.json").read_bytes()).hexdigest()
+assert redacted_capture["spec_sha256"] == capture["spec_sha256"]
 assert capture["coverage"]["status"] == "VALID"
 assert all(row["pass"] for row in capture["coverage"]["cases"])
 assert all(case["retrieval_query"] != case["prompt"] for case in capture["cases"])
@@ -2340,7 +2459,22 @@ assert semantic_failure["answer_sha256"] == hashlib.sha256(
 assert semantic_failure["matched_marker_sha256"] == hashlib.sha256(
     b"hybrid_retrieval"
 ).hexdigest()
+assert semantic_capture["spec_sha256"] == hashlib.sha256(
+    (data / "spec.semantic.json").read_bytes()
+).hexdigest()
+assert semantic_whitespace_capture["spec_sha256"] == hashlib.sha256(
+    (data / "spec.semantic-whitespace.json").read_bytes()
+).hexdigest()
+assert semantic_capture["spec_sha256"] != semantic_whitespace_capture["spec_sha256"]
 assert int((tmp / "v2-semantic-count").read_text(encoding="utf-8")) == 1
+assert not (data / "semantic-byte-mismatch.failure.json").exists()
+assert "private byte identity mismatch" in (
+    tmp / "v2-semantic-byte-mismatch.stderr"
+).read_text(encoding="utf-8")
+assert not (data / "semantic-recapture.failure.json").exists()
+assert "already claimed" in (
+    tmp / "v2-semantic-recapture.stderr"
+).read_text(encoding="utf-8")
 assert not (data / "semantic-fresh.failure.json").exists()
 assert "already claimed" in (
     tmp / "v2-semantic-fresh.stderr"
@@ -2365,19 +2499,30 @@ claim_dir = data / "portfolio-continuity-generation-claims"
 assert claim_dir.stat().st_mode & 0o777 == 0o700
 claims = sorted(claim_dir.glob("*.json"))
 assert len(claims) == 4
+claim_identities = set()
 for path in claims:
     assert path.stat().st_mode & 0o777 == 0o600
     claim = json.loads(path.read_text(encoding="utf-8"))
     assert claim["schema"].endswith("attempt_claim.v2")
+    assert claim["execution_identity_sha256"] == hashlib.sha256(
+        (
+            "agent_bridge.portfolio_continuity_answer_attempt_claim.v2\0"
+            + claim["contract_sha256"]
+        ).encode("utf-8")
+    ).hexdigest()
+    claim_identities.add(claim["execution_identity_sha256"])
     assert claim["boundary"] == {
         "private": True,
         "raw_material_present": False,
         "single_use": True,
     }
+assert len(claim_identities) == 3
 for prefix in (
     "coverage",
     "identity",
     "semantic",
+    "semantic-byte-mismatch",
+    "semantic-recapture",
     "semantic-fresh",
     "semantic-retry",
     "replay",

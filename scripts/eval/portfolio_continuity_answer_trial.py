@@ -1485,7 +1485,8 @@ def capture_trial(
     )
     contract, contract_sha = load_contract(contract_path)
     conditions = contract_conditions(contract)
-    spec_raw, _ = read_json(spec_path)
+    spec_raw, spec_bytes = read_json(spec_path)
+    spec_sha = sha256_bytes(spec_bytes)
     spec = validate_spec(spec_raw, contract, contract_sha)
     repo: Path = spec["repo"]
     if git_head(repo) != spec["contract_commit"]:
@@ -1772,6 +1773,7 @@ def capture_trial(
         "trial_id": spec["trial_id"],
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
+        **({"spec_sha256": spec_sha} if is_successor(contract) else {}),
         "captured_at": captured_at,
         "runtime_source_commit": contract["runtime_source_commit"],
         "binary_observation": binary_observation,
@@ -1856,6 +1858,7 @@ def capture_trial(
         "trial_id": spec["trial_id"],
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
+        **({"spec_sha256": spec_sha} if is_successor(contract) else {}),
         "capture_sha256": sha256_bytes(raw_bytes),
         "captured_at": captured_at,
         "runtime_source_commit": contract["runtime_source_commit"],
@@ -1896,6 +1899,7 @@ def validate_capture(
             "trial_id",
             "contract_sha256",
             "contract_commit",
+            *({"spec_sha256"} if is_successor(contract) else set()),
             "captured_at",
             "runtime_source_commit",
             "binary_observation",
@@ -1911,6 +1915,11 @@ def validate_capture(
         raise TrialError("capture contract hash mismatch")
     trial_id = require_label(value.get("trial_id"), "capture.trial_id")
     contract_commit = require_commit(value.get("contract_commit"), "capture.contract_commit")
+    spec_sha = (
+        require_sha256(value.get("spec_sha256"), "capture.spec_sha256")
+        if is_successor(contract)
+        else None
+    )
     captured_at = require_nonnegative_int(value.get("captured_at"), "capture.captured_at")
     if require_commit(
         value.get("runtime_source_commit"), "capture.runtime_source_commit"
@@ -2273,6 +2282,7 @@ def validate_capture(
     return {
         "trial_id": trial_id,
         "contract_commit": contract_commit,
+        **({"spec_sha256": spec_sha} if is_successor(contract) else {}),
         "captured_at": captured_at,
         "capture_sha256": sha256_bytes(capture_bytes),
         "cases": cases,
@@ -2627,7 +2637,15 @@ def claim_generation_attempt(
             raise TrialError("private attempt claim directory permissions are too broad")
     except OSError as exc:
         raise TrialError("failed to prepare the private attempt claim directory") from exc
-    identity_sha = sha256_text(f"{contract_sha}\0{spec_sha}")
+    # A v2 contract represents one preregistered execution, not a family of
+    # executions selected by mutable private-spec bytes or capture contents.
+    # Keep those hashes in the claim packet for provenance, but key the
+    # exclusive claim only by the frozen public contract. This closes retries
+    # through cosmetic/private-spec changes, changed trial IDs, or recapture.
+    identity_sha = sha256_text(
+        "agent_bridge.portfolio_continuity_answer_attempt_claim.v2\0"
+        f"{contract_sha}"
+    )
     first_claim_path = claim_dir / f"{identity_sha}.attempt-1.json"
     resolved_claim_dir = claim_dir.resolve(strict=False)
     if any(
@@ -2641,6 +2659,7 @@ def claim_generation_attempt(
     require_ignored_data_path(repo, claim_path, "generation attempt claim")
     packet = {
         "schema": "agent_bridge.portfolio_continuity_answer_attempt_claim.v2",
+        "execution_identity_sha256": identity_sha,
         "contract_sha256": contract_sha,
         "spec_sha256": spec_sha,
         "capture_sha256": capture_sha,
@@ -2942,6 +2961,8 @@ def generate_trial(
     capture = validate_capture(capture_raw, capture_bytes, contract, contract_sha)
     if capture["trial_id"] != spec["trial_id"] or capture["contract_commit"] != spec["contract_commit"]:
         raise TrialError("capture/spec trial identity mismatch")
+    if is_successor(contract) and capture["spec_sha256"] != spec_sha:
+        raise TrialError("capture/spec private byte identity mismatch")
     attempt = 1
     prior_receipt_sha: str | None = None
     if prior_failure_receipt is not None:

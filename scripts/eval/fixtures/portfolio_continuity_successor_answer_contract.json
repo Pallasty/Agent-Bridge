@@ -3,7 +3,7 @@
   "contract_id": "portfolio_continuity_successor_answer_blind_20260710",
   "prereg_base_commit": "768f24aca039d82cf7b6bf748216d5a45900b432",
   "runtime_source_commit": "a8c6302325e27c9b5cb20f8c958ab719666de372",
-  "harness_source_sha256": "36891b0a325645c31a42369febe237a5b246d2b740170d6afc885be189f0c313",
+  "harness_source_sha256": "13e71e82801c099c2b59945112770c974ab4632c057d8d56d1989ae10c4551da",
   "surface_source_sha256": "0ff5ab27b79d36169fee22b5de5f2c4563cb1ba0f6edebf354a17cfcb60e6311",
   "digest_key_sha256": "a9d9842db1fe7437ce4a276ddae9a1c91d776cd75606ec2269bb50fc7df21cf1",
   "conditions": [
