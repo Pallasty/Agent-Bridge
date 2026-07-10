@@ -1339,9 +1339,11 @@ def capture_trial(
             "ranking_projection_invariant_required": COMPACT_CONDITION in conditions,
         },
     }
-    raw_bytes = write_json(
-        raw_output, capture, protected_paths=protected_inputs
-    )
+    rendered_capture = surface.render_json(capture)
+    validate_capture(capture, rendered_capture, contract, contract_sha)
+    raw_bytes = write_json(raw_output, capture, protected_paths=protected_inputs)
+    if raw_bytes != rendered_capture:
+        raise TrialError("capture serialization drifted after validation")
     redacted_cases = []
     for case in cases:
         condition_rows = {}
@@ -1636,7 +1638,9 @@ def validate_capture(
             require_string(hit["record"].get("key"), "capture full-search key", max_chars=256)
             for hit in full_hits
         ]
-        if len(full_keys) < 2 or len(full_keys) != len(set(full_keys)):
+        if len(full_keys) != len(set(full_keys)) or (
+            COMPACT_CONDITION in condition_ids and len(full_keys) < 2
+        ):
             raise TrialError("capture full-search ranking is too short or contains duplicates")
 
         if COMPACT_CONDITION in condition_ids:

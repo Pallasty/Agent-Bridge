@@ -3,7 +3,7 @@
   "contract_id": "portfolio_continuity_expanded_answer_blind_20260710",
   "prereg_base_commit": "1a90f4e59fedb7960cbb77e512bde66153bc93c7",
   "runtime_source_commit": "a8c6302325e27c9b5cb20f8c958ab719666de372",
-  "harness_source_sha256": "3f06f1067750629bf4b227b381c8102a6a6fb12e009a2d02e2b1e3558526f7ed",
+  "harness_source_sha256": "60dd2130f6e4af976e594dec284ae38c46c63b437a7f3080d5eb5f41369973a5",
   "surface_source_sha256": "0ff5ab27b79d36169fee22b5de5f2c4563cb1ba0f6edebf354a17cfcb60e6311",
   "digest_key_sha256": "a9d9842db1fe7437ce4a276ddae9a1c91d776cd75606ec2269bb50fc7df21cf1",
   "conditions": [

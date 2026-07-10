@@ -162,9 +162,13 @@ python3 scripts/eval/portfolio_continuity_answer_trial.py score ... \
 ```
 
 V1 refuses capture/generation unless its contract, harness, and surface-helper
-bytes are tracked at the spec's exact commit. It validates both complete reviews
-before opening the condition-labelled generation packet or blind map. Even a
-full pass can only recommend preregistering a separate write-side digest trial.
+bytes are tracked at the spec's exact commit. Capture validates its canonical
+raw payload before writing either output. V1 preserves zero- or one-hit full
+hybrid results as observed retrieval outcomes; only v0's compact top-2
+projection requires at least two unique full-search hits. It validates both
+complete reviews before opening the condition-labelled generation packet or
+blind map. Even a full pass can only recommend preregistering a separate
+write-side digest trial.
 
 Prompts, contexts, answers, seed, condition map, and private reviews must remain
 under ignored `data/`. The v0 score can recommend only an expanded answer trial;

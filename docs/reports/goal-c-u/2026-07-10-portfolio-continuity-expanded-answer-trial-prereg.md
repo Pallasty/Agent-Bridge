@@ -19,8 +19,8 @@ AB anchors:
 ```yaml
 schema: agent_bridge.portfolio_continuity_answer_contract.v1
 contract_id: portfolio_continuity_expanded_answer_blind_20260710
-contract_sha256: f9b67382eee2f27ecf01e9cc546286efe4ff544e0125f084e8b95ff36ca0fb62
-harness_source_sha256: 3f06f1067750629bf4b227b381c8102a6a6fb12e009a2d02e2b1e3558526f7ed
+contract_sha256: a02affde622ede83c52121e47dd5cb085127b1e4525427518909eb7ba43de57d
+harness_source_sha256: 60dd2130f6e4af976e594dec284ae38c46c63b437a7f3080d5eb5f41369973a5
 surface_source_sha256: 0ff5ab27b79d36169fee22b5de5f2c4563cb1ba0f6edebf354a17cfcb60e6311
 blind_seed_sha256: c63bab65c362a4370e66d45616a7d05e0add1bdaeb029274306a977517e2b083
 digest_key_sha256: a9d9842db1fe7437ce4a276ddae9a1c91d776cd75606ec2269bb50fc7df21cf1
@@ -129,6 +129,33 @@ bound to the exact contract commit. The private spec, including its digest key,
 must validate against that contract; capture, generation, blind packet, blind
 map, and both reviews remain hash-bound through scoring. Raw prompts, contexts,
 answers, mappings, reviewer records, and seed remain in ignored `data/`.
+
+### Pre-generation amendment
+
+The first real capture at contract commit
+`1a93668fb527eca453d075e784ac3636121e0e05` produced private capture hash
+`6a62665a6361368c1a48fdab27148d9d821b88a02a645182a89fb8d77ab28fab`.
+The capture command returned success, but the downstream validator rejected the
+payload because six full-hybrid searches returned zero records. No answer was
+generated, no blind packet was created, and no reviewer saw this capture.
+
+The rejection exposed a v0 compact-top-2 cardinality invariant applied to v1,
+even though v1 has no compact condition. This pre-generation amendment leaves
+the prompt corpus, private seed, conditions, generator, metrics, thresholds,
+review protocol, and boundaries unchanged. It makes two implementation-only
+corrections:
+
+1. v1 accepts zero- or one-hit full-hybrid results as the observed retrieval
+   outcome while continuing to reject duplicate keys; v0 still requires two
+   unique full-search hits for its compact top-2 projection.
+2. capture validates its canonical raw payload before writing either raw or
+   redacted output, so an invalid payload cannot return success or leave a
+   partial trial artifact.
+
+The rejected capture is retained only as a private invalidated audit artifact
+under ignored `data/` and is forbidden as generation input. Real capture must
+restart from a private spec bound to the amended contract commit. No captured
+context or answer content was used to alter the frozen corpus or gate.
 
 ## Blinding And Review
 

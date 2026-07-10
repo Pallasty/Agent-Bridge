@@ -230,6 +230,10 @@ for line in sys.stdin:
         ordered = list(records)
         if args.get("compact") and os.environ.get("FAKE_RANK_MISMATCH"):
             ordered[0], ordered[1] = ordered[1], ordered[0]
+        if not args.get("compact") and os.environ.get("FAKE_EMPTY_FULL_SEARCH"):
+            ordered = []
+        if not args.get("compact") and os.environ.get("FAKE_DUPLICATE_FULL_SEARCH"):
+            ordered[1] = ordered[0]
         if args.get("compact"):
             rows = []
             for rank, record in enumerate(ordered, start=1):
@@ -911,6 +915,42 @@ python3 "$v1adapter" capture \
   --redacted-output "$v1data/capture.redacted.json" \
   >"$tmpdir/v1-capture.stdout.json"
 
+FAKE_EMPTY_FULL_SEARCH=1 python3 "$v1adapter" capture \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v1data/capture.empty-reference.raw.json" \
+  --redacted-output "$v1data/capture.empty-reference.redacted.json" \
+  >"$tmpdir/v1-capture-empty-reference.stdout.json"
+
+python3 "$v1adapter" generate \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --capture "$v1data/capture.empty-reference.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v1data/generation.empty-reference.raw.json" \
+  --blind-output "$v1data/blind.empty-reference.packet.json" \
+  --map-output "$v1data/blind.empty-reference.map.json" \
+  --review-template-output "$v1data/review.empty-reference.template.json" \
+  --redacted-output "$v1data/generation.empty-reference.redacted.json" \
+  >"$tmpdir/v1-generate-empty-reference.stdout.json"
+
+if FAKE_DUPLICATE_FULL_SEARCH=1 python3 "$v1adapter" capture \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v1data/capture.duplicate-ranking.raw.json" \
+  --redacted-output "$v1data/capture.duplicate-ranking.redacted.json" \
+  >"$tmpdir/v1-capture-duplicate-ranking.stdout" \
+  2>"$tmpdir/v1-capture-duplicate-ranking.stderr"; then
+  echo "v1 capture with duplicate full-search ranking unexpectedly passed" >&2
+  exit 1
+fi
+test ! -e "$v1data/capture.duplicate-ranking.raw.json"
+test ! -e "$v1data/capture.duplicate-ranking.redacted.json"
+
 python3 "$v1adapter" generate \
   --contract "$v1repo/answer-contract.json" \
   --spec "$v1data/spec.json" \
@@ -1245,6 +1285,12 @@ review_template = json.loads(
     (data / "review.template.json").read_text(encoding="utf-8")
 )
 score = json.loads((data / "score.json").read_text(encoding="utf-8"))
+empty_capture = json.loads(
+    (data / "capture.empty-reference.redacted.json").read_text(encoding="utf-8")
+)
+empty_generation = json.loads(
+    (data / "generation.empty-reference.redacted.json").read_text(encoding="utf-8")
+)
 abstention_fail = json.loads(
     (data / "score.abstention-fail.json").read_text(encoding="utf-8")
 )
@@ -1259,6 +1305,13 @@ assert generation["case_count"] == 12
 assert generation["condition_count"] == 2
 assert generation["answer_count"] == 24
 assert generation["status"] == "WAIT_TWO_BLIND_REVIEWS"
+assert all(
+    case["conditions"]["hybrid_retrieval"]["observed_items"] == 0
+    for case in empty_capture["cases"]
+)
+assert empty_capture["condition_run_count"] == 24
+assert empty_generation["answer_count"] == 24
+assert empty_generation["status"] == "WAIT_TWO_BLIND_REVIEWS"
 assert blind["boundary"]["required_reviewer_count"] == 2
 assert review_template["independent_review"] is False
 assert review_template["condition_blinded"] is False
@@ -1637,6 +1690,9 @@ assert "harness source hash" in (
 ).read_text(encoding="utf-8")
 assert "surface helper source hash" in (
     tmp / "v1-dirty-surface.stderr"
+).read_text(encoding="utf-8")
+assert "too short or contains duplicates" in (
+    tmp / "v1-capture-duplicate-ranking.stderr"
 ).read_text(encoding="utf-8")
 assert "committed seed" in (
     tmp / "v1-synced-reorder.stderr"

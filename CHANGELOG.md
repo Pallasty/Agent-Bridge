@@ -11,12 +11,15 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 - **Expanded blinded portfolio-continuity answer gate.** A backward-compatible
   v1 contract narrows the comparison to full hybrid retrieval and direct
   digest across twelve frozen prompts, six strata, explicit insufficiency
-  cases, and two independent reviewers. Contract-committed harness/digest
-  identities, complete-review-before-unblind ordering, and per-reviewer plus
-  per-stratum all-gates prevent pooled scores or an uncommitted fixture from
-  authorizing a result. Even a full pass can recommend only preregistration of
-  a separate write-side digest trial; it cannot authorize CI, release, runtime,
-  retrieval-default, or digest-generation changes.
+  cases, and two independent reviewers. Contract-committed harness,
+  retrieval-surface, and digest identities, pre-write capture validation,
+  complete-review-before-unblind ordering, and per-reviewer plus per-stratum
+  all-gates prevent pooled scores, malformed capture output, or an uncommitted
+  fixture from authorizing a result. V1 retains zero- and one-hit hybrid results
+  as observed outcomes while v0 keeps its compact top-2 cardinality invariant.
+  Even a full pass can recommend only preregistration of a separate write-side
+  digest trial; it cannot authorize CI, release, runtime, retrieval-default, or
+  digest-generation changes.
 - **Blinded portfolio-continuity answer trial.** A preregistered, no-live-write
   harness compares full hybrid retrieval, S4 compact-then-top-2-get, session
   bootstrap, and direct digest contexts through independent fixed-model answer
