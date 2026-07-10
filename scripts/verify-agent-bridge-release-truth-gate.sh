@@ -23,13 +23,18 @@ python3 "$HELPER" \
   --check-fmt \
   --output "$output_json"
 
-python3 - "$output_json" <<'PY'
+python3 - "$output_json" "$HELPER" <<'PY'
+import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
 
 packet = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+spec = importlib.util.spec_from_file_location("release_truth_gate", sys.argv[2])
+assert spec is not None and spec.loader is not None
+helper = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(helper)
 
 assert packet["schema"] == "agent_bridge.release_truth_gate.v1"
 assert packet["run_type"] == "read_only_release_truth_gate"
@@ -117,6 +122,29 @@ if fmt["passed"] is False:
 assert "version_identity_drift" not in packet["blockers"]
 assert len(packet["required_owner_decisions"]) == 3
 assert len(packet["next_safe_actions"]) == 3
+action_text = " ".join(
+    packet["required_owner_decisions"] + packet["next_safe_actions"]
+)
+if fmt["passed"] is True:
+    assert "remaining workspace format drift" not in action_text
+    assert "Reduce workspace format drift" not in action_text
+    assert "authenticated Linux/macOS CI" in action_text
+elif fmt["passed"] is False:
+    assert "remaining workspace format drift" in action_text
+    assert "Reduce workspace format drift" in action_text
+else:
+    assert "Run this gate with --check-fmt" in action_text
+
+clean_guidance = " ".join(helper.format_guidance({"checked": True, "passed": True}))
+drift_guidance = " ".join(helper.format_guidance({"checked": True, "passed": False}))
+unchecked_guidance = " ".join(
+    helper.format_guidance({"checked": False, "passed": None})
+)
+assert "remaining workspace format drift" not in clean_guidance
+assert "authenticated Linux/macOS CI" in clean_guidance
+assert "remaining workspace format drift" in drift_guidance
+assert "Reduce workspace format drift" in drift_guidance
+assert "Run this gate with --check-fmt" in unchecked_guidance
 
 print("Agent-Bridge release truth JSON verification passed")
 PY

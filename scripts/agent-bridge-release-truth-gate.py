@@ -105,6 +105,26 @@ def inspect_format(repo: Path, enabled: bool) -> dict[str, Any]:
     }
 
 
+def format_guidance(format_check: dict[str, Any]) -> tuple[str, str]:
+    if format_check["checked"] and format_check["passed"]:
+        return (
+            "Confirm authenticated Linux/macOS CI for the exact candidate source before "
+            "creating the next source marker.",
+            "Obtain authenticated Linux/macOS CI results for the exact candidate source.",
+        )
+    if format_check["checked"]:
+        return (
+            "Decide whether the remaining workspace format drift must block the next "
+            "source marker.",
+            "Reduce workspace format drift in scoped, reviewable commits rather than "
+            "one bulk rewrite.",
+        )
+    return (
+        "Require a clean-checkout format check before creating the next source marker.",
+        "Run this gate with --check-fmt to establish the workspace format status.",
+    )
+
+
 def inspect_binary(repo: Path, binary: str | None) -> dict[str, Any]:
     if binary is None:
         return {
@@ -309,6 +329,8 @@ def build_gate(repo: Path, *, binary: str | None, check_fmt: bool) -> dict[str, 
     else:
         status = "READY_FOR_OWNER_RELEASE_DECISION"
 
+    format_owner_decision, format_next_action = format_guidance(format_check)
+
     return {
         "schema": SCHEMA,
         "run_type": "read_only_release_truth_gate",
@@ -366,12 +388,12 @@ def build_gate(repo: Path, *, binary: str | None, check_fmt: bool) -> dict[str, 
         "blockers": blockers,
         "required_owner_decisions": [
             "Choose the next semantic version only after reviewing the Unreleased change set.",
-            "Decide whether the remaining workspace format drift must block the next source marker.",
+            format_owner_decision,
             "Authorize tag creation/publication only after clean-checkout format, build, and test gates pass.",
         ],
         "next_safe_actions": [
             "Use the emitted git describe and SHA when exact unreleased-build provenance matters.",
-            "Reduce workspace format drift in scoped, reviewable commits rather than one bulk rewrite.",
+            format_next_action,
             "Re-run this gate with --check-fmt and an explicit --binary before a release decision.",
         ],
     }
