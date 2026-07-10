@@ -19,7 +19,12 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   adapter now captures hybrid retrieval, session bootstrap, and direct digest
   evidence against an online SQLite backup, requires complete human evidence
   review, and assembles redacted scorer packets without writing the live AB
-  store or checking private prompts/content into git.
+  store or checking raw trial captures, memory prose, or review mappings into
+  git. Capture outputs use fixed resolved-directory descriptors and reject
+  existing aliases to the spec, source DB, or binary; v1 review decisions bind
+  the capture, capture-derived review template, and selector/content manifest,
+  assembly re-derives the final review from those inputs, and private review
+  stages emit only hash receipts on stdout.
 - **Portfolio continuity evaluation contract.** A standalone no-write scorer
   now measures structured project-status/retrospective evidence packets by
   supported required-claim coverage, current evidence precision, stale or

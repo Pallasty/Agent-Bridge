@@ -13,15 +13,16 @@ AB anchors:
 
 ## Verdict
 
-Direct portfolio digest and hybrid retrieval both satisfy the strict reviewed
-evidence contract for the two observed strategic prompt classes. Direct digest
-uses substantially less context. Session bootstrap is sufficient for the
-status/concerns case but incomplete for the broader retrospective/planning
-case.
+**PROVISIONAL / REVIEW_BINDING_GAP.** The recorded calculations show direct
+portfolio digest and hybrid retrieval satisfying the evidence thresholds for
+the two observed strategic prompt classes, with direct digest using
+substantially less context. However, the original v0 selector decisions were
+not bound to the final capture and review template, so these calculations are
+not yet an admitted reviewed result.
 
-This is not a natural-language answer-quality result. It admits direct digest
-to a separate blinded answer-stage comparison; it does not admit automatic
-digest regeneration or any runtime behavior.
+This is not a natural-language answer-quality result. It does not currently
+admit a blinded answer-stage comparison, automatic digest regeneration, or any
+runtime behavior. Admission requires a new capture-bound v1 review first.
 
 ```yaml
 trial_schema: agent_bridge.portfolio_continuity_ab_assembly.v0
@@ -31,6 +32,8 @@ adapter_base_commit: a8c6302325e27c9b5cb20f8c958ab719666de372
 capture_sha256: ab08bee97a29caa2ef51d73266208fc7fdaa041f230a4572cffbab4da1a2545f
 snapshot_sha256_before: 46ddbdba1cf08fcae0d696aa5bcd2d09e14af2a8e26e7d8f89746a97f2ec3a4d
 raw_capture_in_git: false
+review_provenance: legacy_unbound_v0
+admission_status: blocked_pending_capture_bound_review
 calls_llm: false
 writes_live_ab_store: false
 answer_quality_claim: false
@@ -39,8 +42,9 @@ runtime_promotion_allowed: false
 
 ## Preregistered Contract
 
-Two exact 14-day high-frequency prompt classes were fixed before capture. The
-repository records only their SHA-256 values:
+Two exact 14-day high-frequency prompt classes were fixed before capture. They
+reuse queries that already existed in the versioned evaluation corpus; this
+trial report identifies them by SHA-256 and does not add another raw copy:
 
 | Case | Prompt SHA-256 | Required claim surface |
 | --- | --- | --- |
@@ -53,26 +57,26 @@ claims, and all cases passing. The thresholds were stored in the ignored
 private capture spec before collection and were not changed after results.
 Hybrid retrieval was explicitly locked to `compact: false`.
 
-## Results
+## Results (Provisional)
 
-| Condition | Verdict | Cases | Supported coverage | Selected precision | Context tokens | p95 latency | Relevant / observed evidence | Stale/unknown observed |
+| Condition | Provisional threshold result | Cases | Supported coverage | Selected precision | Context tokens | p95 latency | Relevant / observed evidence | Stale/unknown observed |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hybrid_retrieval` | PASS | 2/2 | 1.000000 | 1.000000 | 17,870 | 14.980 ms | 10/18 (0.555556) | 4 |
-| `session_bootstrap` | FAIL | 1/2 | 0.833333 | 1.000000 | 7,802 | 184.310 ms | 10/32 (0.312500) | 8 |
-| `portfolio_digest` | PASS | 2/2 | 1.000000 | 1.000000 | 3,676 | 42.282 ms | 2/2 (1.000000) | 0 |
+| `hybrid_retrieval` | MET (unadmitted) | 2/2 | 1.000000 | 1.000000 | 17,870 | 14.980 ms | 10/18 (0.555556) | 4 |
+| `session_bootstrap` | NOT MET (unadmitted) | 1/2 | 0.833333 | 1.000000 | 7,802 | 184.310 ms | 10/32 (0.312500) | 8 |
+| `portfolio_digest` | MET (unadmitted) | 2/2 | 1.000000 | 1.000000 | 3,676 | 42.282 ms | 2/2 (1.000000) | 0 |
 
-Selected precision applies only to evidence that the complete human review map
-assigned to a claim. Relevant/observed ratio accounts for every context item,
-including irrelevant and stale/unknown material. Therefore precision `1.0`
-does not mean retrieval or bootstrap is noise-free.
+Selected precision applies only to evidence that the original unbound review
+map assigned to a claim. Relevant/observed ratio accounts for every context
+item, including irrelevant and stale/unknown material. Therefore precision
+`1.0` does not mean retrieval or bootstrap is noise-free.
 
 Per case:
 
 | Condition | Status/concerns | Retrospective/plan |
 | --- | ---: | ---: |
-| `hybrid_retrieval` | 1.000000 PASS | 1.000000 PASS |
-| `session_bootstrap` | 1.000000 PASS | 0.666667 FAIL |
-| `portfolio_digest` | 1.000000 PASS | 1.000000 PASS |
+| `hybrid_retrieval` | 1.000000 (unadmitted) | 1.000000 (unadmitted) |
+| `session_bootstrap` | 1.000000 (unadmitted) | 0.666667 (below threshold; unadmitted) |
+| `portfolio_digest` | 1.000000 (unadmitted) | 1.000000 (unadmitted) |
 
 The bootstrap retrospective context supplied vision, encountered-problem,
 unexpected-result, and disproven-direction evidence, but lacked portfolio-level
@@ -98,7 +102,10 @@ The collector:
 2. created a consistent online backup in a temporary directory;
 3. passed only the snapshot path to the child MCP process;
 4. required child stderr to confirm that exact path;
-5. rejected output paths that alias the source DB;
+5. fixed each resolved output directory with an open directory descriptor,
+   applied containment/ignore/tracking policy to that fixed path, rejected
+   aliases to the spec, source DB, or binary, and created/replaced JSON leaves
+   through the same descriptor;
 6. allowed in-repo raw output only under a `git check-ignore`-confirmed
    `data/` path;
 7. removed the snapshot after capture.
@@ -115,10 +122,17 @@ capture.
 
 ## Review Discipline
 
-The review adapter requires every observed evidence item to resolve through one
-private source-key or source-title decision. Missing, extra, or unknown
-selectors fail closed. The final review packet contains evidence hashes, status,
-and claim labels, not memory keys or content.
+The current adapter requires every observed evidence item to resolve through
+one private source-key or source-title decision. Decisions must bind the exact
+capture, capture-derived review template, and selector/content manifest;
+missing, extra, unknown, legacy, or mismatched inputs fail closed. Assembly
+receives those same private inputs, re-derives the template and final review,
+and rejects semantic drift in either packet. Private review stages write full
+packets only to files and emit hash-only receipts on stdout.
+
+The stored trial packet predates that v1 binding contract. Its selector labels
+must therefore be reviewed again against the final capture before the recorded
+condition verdicts can be admitted.
 
 Time-bound June work-memory snapshots were marked `superseded` even though their
 database status remained active. Mixed index/prediction bootstrap blocks were
@@ -126,6 +140,10 @@ marked `unknown` and were not selected as claim evidence. These rows remain in
 the observed-context denominator.
 
 ## Private Artifacts
+
+The prompt strings themselves are pre-existing versioned evaluation inputs,
+not newly private trial material. The private boundary covers raw captures,
+memory prose, selector-to-evidence review mappings, and assembled source data.
 
 The reproducible private packet is under ignored local path:
 
@@ -140,18 +158,19 @@ packets. None is checked into git.
 ## Limitations
 
 - Current hybrid retrieval already surfaces the digest in its top two for both
-  cases. It is not a pre-digest baseline; its PASS shows that the current
-  retrieval surface can carry digest evidence, while the comparison primarily
-  measures context expansion and noise.
+  cases. It is not a pre-digest baseline; the provisional threshold result
+  suggests that the current retrieval surface can carry digest evidence, while
+  the comparison primarily measures context expansion and noise.
 - Runtime source `a8c63023` includes the newly deployed opt-in S4 compact search
   projection. This trial explicitly uses `compact: false`; it does not measure
   compact-only or compact-then-get behavior.
 - The digest was hand-synthesized for these observed prompt classes. Full
   reviewed coverage is an admission signal for answer testing, not evidence of
   generalization to unseen strategic questions.
-- Evidence review was performed by the implementing agent with condition labels
-  visible. It is complete and hash-bound but not blinded or independently
-  adjudicated.
+- The original evidence review was performed by the implementing agent with
+  condition labels visible, but its v0 decisions were not bound to the final
+  capture/template. The calculated rows remain provisional until a v1 review
+  is completed and independently checked.
 - There are two prompts and one SQLite snapshot. Latency is diagnostic, and the
   token counts use Agent-Bridge's mixed CJK/Latin heuristic rather than a model's
   exact tokenizer.
@@ -178,17 +197,25 @@ git diff --check
 ```
 
 The synthetic verifier makes its fake MCP mutate the snapshot and asserts the
-source database remains unchanged. It also rejects a mismatched binary identity,
-an unconfirmed child DB path, in-repo raw output outside ignored `data/`,
-incomplete selector decisions, incomplete evidence review, malformed capture,
-capture-hash drift, and unknown claim labels.
+source database remains unchanged. It also checks hardlink aliases, a leaf swap,
+capture-input aliases, and parent-symlink retarget races before and after policy
+validation; rejects a mismatched binary identity, an unconfirmed child DB path,
+raw output outside ignored `data/` or at a tracked path, unbound or mismatched
+selector decisions, legacy or semantically modified final reviews, incomplete
+evidence review, malformed capture, capture-hash drift, and unknown claim
+labels.
 
 ## Next Gate
 
-Generate answers from the exact captured contexts with one fixed model and
-decoding configuration. Randomize condition labels and have the owner score
-claim completeness, currency, unsupported assertions, and usefulness without
-seeing which condition produced each answer.
+First, regenerate the final review template and have the owner review every
+selector against the exact final capture. Record v1 decisions bound to the
+capture, template, and selector/content manifest, then reassemble and rescore.
+
+Only after that gate passes should the project generate answers from the exact
+captured contexts with one fixed model and decoding configuration. Randomize
+condition labels and have the owner score claim completeness, currency,
+unsupported assertions, and usefulness without seeing which condition produced
+each answer.
 
 Only a blinded answer-stage win can justify discussing automatic digest
 refresh. Current evidence supports carrying direct digest forward as a trial

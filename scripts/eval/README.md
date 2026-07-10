@@ -83,11 +83,12 @@ python3 scripts/eval/portfolio_continuity_eval.py \
   --strict
 ```
 
-`portfolio_continuity_ab_trial.py` builds the private AB-native input for that
-scorer. Its `capture` command opens the source SQLite database read-only, makes
-an online backup, and launches Agent-Bridge with `AGENT_BRIDGE_DB` pointing at
-the temporary snapshot. It fails unless child stderr confirms that exact
-snapshot path. The source DB path is never passed to the child.
+`portfolio_continuity_ab_trial.py` builds the private AB-native capture and
+review input for that scorer. Its `capture` command opens the source SQLite
+database read-only, makes an online backup, and launches Agent-Bridge with
+`AGENT_BRIDGE_DB` pointing at the temporary snapshot. It fails unless child
+stderr confirms that exact snapshot path. The source DB path is never passed
+to the child.
 
 The workflow has four explicit stages:
 
@@ -98,14 +99,27 @@ python3 scripts/eval/portfolio_continuity_ab_trial.py apply-review ...
 python3 scripts/eval/portfolio_continuity_ab_trial.py assemble ...
 ```
 
+Review decisions use the v1 schema. `apply-review` verifies their binding to the
+exact capture bytes, review-template bytes, and selector/content manifest;
+the template must also exactly match the capture-derived review structure.
+Legacy or mismatched inputs fail closed. `review-template` and `apply-review`
+write their private packets to the requested files and print only a schema/hash
+receipt to stdout. `assemble` requires the same template and decisions,
+re-derives the final review, and rejects any semantic drift before it writes
+scorer packets.
+
 Real in-repo raw captures are accepted only below `data/` after `git
-check-ignore` confirms the path; output paths may not alias the source DB.
-Repository fixtures are synthetic. The redacted capture and assembly
-summary contain hashes, labels, counts, timing, and token estimates only. The
-adapter does not call an LLM and does not claim answer quality or runtime
-promotion. It uses `subprocess` environment maps directly; do not wrap it with
-bare `env`, because this host may have a user-level `env` shim ahead of
-`/usr/bin/env`.
+check-ignore` confirms the path and `git ls-files` confirms it is untracked;
+output paths may not alias the capture spec, source DB, or Agent-Bridge binary.
+Capture outputs keep their resolved destination directories open across
+collection; containment, ignore, and tracking checks use those fixed paths, and
+JSON leaves are created/replaced through the same descriptors. Existing
+same-inode aliases fail closed. Repository fixtures are synthetic. The redacted
+capture and assembly summary contain hashes, labels, counts, timing, and token
+estimates only. The adapter does not call an LLM and does not claim answer
+quality or runtime promotion. It uses `subprocess` environment maps directly;
+do not wrap it with bare `env`, because this host may have a user-level `env`
+shim ahead of `/usr/bin/env`.
 
 `portfolio_continuity_answer_trial.py` is the separate owner-blinded answer
 gate. Its checked-in contract fixes four conditions before collection: full
