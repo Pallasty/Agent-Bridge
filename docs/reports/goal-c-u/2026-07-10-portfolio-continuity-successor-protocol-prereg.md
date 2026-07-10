@@ -2,8 +2,8 @@
 
 Date: 2026-07-10
 
-Status: **PRE-REGISTERED / IMPLEMENTATION VERIFIED / INDEPENDENT REVIEW
-PENDING / NOT EXECUTED**. This change defines and tests contract v2. It does not
+Status: **PRE-REGISTERED / IMPLEMENTATION VERIFIED / INDEPENDENT READ-ONLY
+REVIEW PASSED / NOT EXECUTED**. This change defines and tests contract v2. It does not
 perform a real capture, answer generation, blind review, unblinding, score,
 benchmark, runtime change, version change, tag, release, or CI action.
 
@@ -54,10 +54,30 @@ claim namespace. Attempt 2 remains bound to its authorized receipt; claims
 retain explicit private permissions and fsync and remain protected from
 output-path writes.
 
-Independent code review remains mandatory before any real successor capture or
-generation. A reviewer must inspect the frozen contract commit without reading
-private `data/`, and any implementation change requires a new harness hash,
-contract hash, local verification, and review.
+An external Claude Code review completed on 2026-07-10 against implementation
+commit `e5c985d4`, documentation binding `dbf98d50`, and decision packet
+`0ec8c33c`. It returned `PASS` with no execution-safety blocker and did not
+read private `data/`, execute a capture/generation, or invoke CI. The reviewer
+statically verified contract/source/path hashes, retry derivation, exact
+private-spec binding, alternate-worktree rejection, replay/coverage/semantic
+failure behavior, and v0/v1 guards. This session separately ran the complete
+public v0/v1/v2 verifier from current HEAD to a passing result.
+
+The review records three disclosed limits. First, the execution commit's
+public verifier fixture wiring is repaired by the later `dbf98d50`
+documentation/verification binding; run the verifier from that binding or
+later, where it mechanically checks the frozen `e5c985d4` contract and harness
+bytes. This does not change the frozen capture/generation harness. Second,
+the local claim latch is a managed-host guard rather than a tamper-proof
+cross-host ledger, as stated below. Third, an invalid coverage capture sent to
+`generate` intentionally consumes the single attempt-1 claim with no retry;
+the operator must inspect the private coverage status before invoking
+generation.
+
+The independent review gate is therefore satisfied for this frozen
+implementation. A later real execution still requires the separately recorded
+owner decisions for capture and generation. Any implementation change requires
+a new harness hash, contract hash, local verification, and independent review.
 
 ## Prior Result
 
@@ -125,6 +145,11 @@ V2 constructs model input deterministically before generation:
 4. Render canonical sorted JSON and bind its SHA-256, byte count, and token
    estimate.
 5. Reject capture if any source identifier remains after projection.
+
+This fixed projection does not generically scrub arbitrary key-like literals
+that happen to occur in a record's substantive `content`; it removes the
+record `key` field and aliases the five declared identifiers. That low-severity
+residual scope is disclosed rather than expanded ad hoc after freeze.
 
 The raw result is never reconstructed from projected context. Validation
 instead recomputes the projection from the private raw result and requires

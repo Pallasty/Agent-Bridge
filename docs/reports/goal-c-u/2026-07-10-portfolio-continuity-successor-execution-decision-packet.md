@@ -30,8 +30,12 @@ tracked by Git.
 - The complete local synthetic verifier passes v0, v1, and v2.
 - V2 adversarial coverage includes both whitespace-only private-spec changes
   and a same-commit alternate worktree; each is stopped before a model call.
-- Separately scoped read-only audits found and closed the spec-byte and
-  alternate-worktree retry blockers; the final audit reported no blocker.
+- An external independent read-only review of `e5c985d4` returned `PASS` with
+  no blocker and did not inspect `data/`, perform a real trial, or invoke CI.
+- The execution commit's verifier fixture wiring is repaired in `dbf98d50`.
+  The current public verifier passes from that binding and mechanically checks
+  the frozen `e5c985d4` contract/harness bytes; the capture/generation harness
+  itself is unchanged.
 - The real capture validates against the frozen contract and has exact status
   `VALID` for all twelve reference-coverage cases.
 - The capture performed 24 isolated condition runs, wrote no live memory, and
@@ -39,11 +43,9 @@ tracked by Git.
 
 ## Remaining Hard Gates
 
-1. No external third-party code review has completed. That remains a generation
-   gate even though separately scoped internal read-only audits passed.
-2. Generation requires a separate decision because it would invoke the fixed
+1. Generation requires a separate decision because it would invoke the fixed
    Codex matrix 24 times and is not treated as reversible.
-3. Immediately before generation, the operator must recheck the frozen commit,
+2. Immediately before generation, the operator must recheck the frozen commit,
    hashes, canonical-worktree path, Codex identity, disk/process state, fresh
    private output paths, and the absence of prior attempt claims.
 
