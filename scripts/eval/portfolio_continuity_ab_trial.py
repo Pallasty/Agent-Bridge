@@ -3,18 +3,21 @@
 
 The capture path opens the source SQLite database read-only, makes an online
 backup, and points a child Agent-Bridge MCP process at that temporary snapshot.
-Raw prompts and memory content stay in caller-selected private files. The
-assembler emits scorer-compatible fixtures/candidates plus a redacted summary.
+Raw trial captures, captured production memory prose, and evidence-review
+mappings stay in caller-selected private files. The assembler emits
+scorer-compatible fixtures/candidates plus a redacted summary.
 """
 
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import math
 import os
 import re
+import secrets
 import select
 import sqlite3
 import subprocess
@@ -28,8 +31,10 @@ from typing import Any
 SPEC_SCHEMA = "agent_bridge.portfolio_continuity_capture_spec.v0"
 CAPTURE_SCHEMA = "agent_bridge.portfolio_continuity_ab_capture.v0"
 REDACTED_CAPTURE_SCHEMA = "agent_bridge.portfolio_continuity_ab_capture_redacted.v0"
-REVIEW_SCHEMA = "agent_bridge.portfolio_continuity_evidence_review.v0"
-REVIEW_DECISIONS_SCHEMA = "agent_bridge.portfolio_continuity_review_decisions.v0"
+REVIEW_TEMPLATE_SCHEMA = "agent_bridge.portfolio_continuity_evidence_review.v0"
+REVIEW_SCHEMA = "agent_bridge.portfolio_continuity_evidence_review.v1"
+REVIEW_DECISIONS_SCHEMA = "agent_bridge.portfolio_continuity_review_decisions.v1"
+PRIVATE_OUTPUT_RECEIPT_SCHEMA = "agent_bridge.private_output_receipt.v0"
 ASSEMBLY_SCHEMA = "agent_bridge.portfolio_continuity_ab_assembly.v0"
 SCORER_FIXTURE_SCHEMA = "agent_bridge.portfolio_continuity_eval_fixture.v0"
 SCORER_CANDIDATE_SCHEMA = "agent_bridge.portfolio_continuity_candidate.v0"
@@ -72,9 +77,9 @@ def read_json(path: Path) -> tuple[dict[str, Any], bytes]:
     return require_object(value, str(path)), raw
 
 
-def write_json(path: Path, value: dict[str, Any]) -> bytes:
+def render_json(value: dict[str, Any]) -> bytes:
     try:
-        rendered = (
+        return (
             json.dumps(
                 value,
                 ensure_ascii=False,
@@ -84,11 +89,156 @@ def write_json(path: Path, value: dict[str, Any]) -> bytes:
             )
             + "\n"
         ).encode("utf-8")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(rendered)
-    except (OSError, ValueError) as exc:
-        raise TrialError(f"failed to write JSON output: {exc}") from exc
-    return rendered
+    except (TypeError, ValueError) as exc:
+        raise TrialError(f"failed to render JSON output: {exc}") from exc
+
+
+def file_identity(stat_result: os.stat_result) -> tuple[int, int]:
+    return stat_result.st_dev, stat_result.st_ino
+
+
+class AtomicJsonDestination:
+    """Keep one output directory fixed while atomically replacing its leaf."""
+
+    def __init__(self, path: Path):
+        if not path.name or path.name in {".", ".."}:
+            raise TrialError("JSON output must name a file")
+        directory_fd = -1
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            resolved_parent = path.parent.resolve(strict=True)
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            directory_fd = os.open(resolved_parent, flags)
+            opened_identity = file_identity(os.fstat(directory_fd))
+            resolved_identity = file_identity(
+                os.stat(resolved_parent, follow_symlinks=False)
+            )
+            if opened_identity != resolved_identity:
+                raise TrialError("JSON output directory changed while it was opened")
+        except OSError as exc:
+            if directory_fd >= 0:
+                os.close(directory_fd)
+            raise TrialError(f"failed to open JSON output directory: {exc}") from exc
+        except TrialError:
+            if directory_fd >= 0:
+                os.close(directory_fd)
+            raise
+        self.directory_fd = directory_fd
+        self.path = path
+        self.name = path.name
+        self.resolved_path = resolved_parent / self.name
+
+    def close(self) -> None:
+        if self.directory_fd >= 0:
+            os.close(self.directory_fd)
+            self.directory_fd = -1
+
+    def __enter__(self) -> AtomicJsonDestination:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def directory_identity(self) -> tuple[int, int]:
+        try:
+            return file_identity(os.fstat(self.directory_fd))
+        except OSError as exc:
+            raise TrialError(f"failed to inspect JSON output directory: {exc}") from exc
+
+    def destination_identity(self) -> tuple[int, int] | None:
+        try:
+            return file_identity(
+                os.stat(self.name, dir_fd=self.directory_fd, follow_symlinks=True)
+            )
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise TrialError(f"failed to inspect JSON output path: {exc}") from exc
+
+    def reject_protected_identities(self, protected: set[tuple[int, int]]) -> None:
+        identity = self.destination_identity()
+        if identity is not None and identity in protected:
+            raise TrialError("JSON output must not overwrite an input file")
+
+    def write(self, value: dict[str, Any]) -> bytes:
+        rendered = render_json(value)
+        temporary_name: str | None = None
+        try:
+            for _ in range(128):
+                candidate = f".{self.name}.{secrets.token_hex(12)}"
+                try:
+                    temporary_fd = os.open(
+                        candidate,
+                        os.O_WRONLY
+                        | os.O_CREAT
+                        | os.O_EXCL
+                        | getattr(os, "O_CLOEXEC", 0),
+                        0o600,
+                        dir_fd=self.directory_fd,
+                    )
+                except FileExistsError:
+                    continue
+                temporary_name = candidate
+                break
+            else:
+                raise TrialError("failed to allocate a unique JSON temporary file")
+
+            try:
+                handle = os.fdopen(temporary_fd, "wb")
+            except (OSError, ValueError):
+                os.close(temporary_fd)
+                raise
+            with handle:
+                handle.write(rendered)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(
+                temporary_name,
+                self.name,
+                src_dir_fd=self.directory_fd,
+                dst_dir_fd=self.directory_fd,
+            )
+            temporary_name = None
+            try:
+                os.fsync(self.directory_fd)
+            except OSError as exc:
+                if exc.errno not in {errno.EINVAL, getattr(errno, "ENOTSUP", errno.EINVAL)}:
+                    raise
+        except (OSError, ValueError, NotImplementedError) as exc:
+            raise TrialError(f"failed to write JSON output: {exc}") from exc
+        finally:
+            if temporary_name is not None:
+                try:
+                    os.unlink(temporary_name, dir_fd=self.directory_fd)
+                except FileNotFoundError:
+                    pass
+        return rendered
+
+
+def protected_file_identities(paths: tuple[Path, ...]) -> set[tuple[int, int]]:
+    identities: set[tuple[int, int]] = set()
+    try:
+        for path in paths:
+            identities.add(file_identity(path.stat()))
+    except OSError as exc:
+        raise TrialError(f"failed to inspect protected input file: {exc}") from exc
+    return identities
+
+
+def write_json(
+    path: Path,
+    value: dict[str, Any],
+    *,
+    protected_paths: tuple[Path, ...] = (),
+) -> bytes:
+    with AtomicJsonDestination(path) as destination:
+        destination.reject_protected_identities(protected_file_identities(protected_paths))
+        return destination.write(value)
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -133,6 +283,13 @@ def require_label(value: Any, path: str) -> str:
     if not LABEL_RE.fullmatch(label):
         raise TrialError(f"{path} must be a bounded machine label")
     return label
+
+
+def require_sha256(value: Any, path: str) -> str:
+    digest = require_string(value, path)
+    if not SHA256_RE.fullmatch(digest):
+        raise TrialError(f"{path} must be a lowercase SHA-256 digest")
+    return digest
 
 
 def require_bool(value: Any, path: str) -> bool:
@@ -669,15 +826,41 @@ def validate_capture_output_paths(
     repo: Path,
     raw_output: Path,
     redacted_output: Path,
+    raw_destination: AtomicJsonDestination,
+    redacted_destination: AtomicJsonDestination,
+    protected_inputs: tuple[Path, ...] = (),
 ) -> None:
+    if raw_destination.path != raw_output or redacted_destination.path != redacted_output:
+        raise TrialError("capture output handles do not match the requested paths")
     source_path = source_db.resolve()
     repo_path = repo.resolve()
-    raw_path = raw_output.resolve(strict=False)
-    redacted_path = redacted_output.resolve(strict=False)
-    if raw_path == redacted_path:
+    raw_path = raw_destination.resolved_path
+    redacted_path = redacted_destination.resolved_path
+    try:
+        source_identity = file_identity(source_db.stat())
+        raw_identity = raw_destination.destination_identity()
+        redacted_identity = redacted_destination.destination_identity()
+    except OSError as exc:
+        raise TrialError(f"failed to validate capture output aliases: {exc}") from exc
+    same_destination_name = (
+        raw_destination.directory_identity() == redacted_destination.directory_identity()
+        and raw_destination.name == redacted_destination.name
+    )
+    if (
+        raw_path == redacted_path
+        or same_destination_name
+        or (raw_identity is not None and raw_identity == redacted_identity)
+    ):
         raise TrialError("raw and redacted capture outputs must be different files")
-    if source_path in {raw_path, redacted_path}:
+    if (
+        source_path in {raw_path, redacted_path}
+        or raw_identity == source_identity
+        or redacted_identity == source_identity
+    ):
         raise TrialError("capture output must not overwrite the source SQLite database")
+    protected_identities = protected_file_identities(protected_inputs)
+    raw_destination.reject_protected_identities(protected_identities)
+    redacted_destination.reject_protected_identities(protected_identities)
     if raw_path.is_relative_to(repo_path):
         private_root = (repo_path / "data").resolve(strict=False)
         if not raw_path.is_relative_to(private_root):
@@ -695,6 +878,20 @@ def validate_capture_output_paths(
             raise TrialError(f"failed to verify raw capture ignore policy: {exc}") from exc
         if ignored.returncode != 0:
             raise TrialError("raw capture data/ path is not ignored by git")
+        try:
+            tracked = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", "--", str(relative)],
+                cwd=repo_path,
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise TrialError(f"failed to verify raw capture tracking policy: {exc}") from exc
+        if tracked.returncode == 0:
+            raise TrialError("raw capture data/ path must not be tracked by git")
+        if tracked.returncode != 1:
+            raise TrialError("failed to verify raw capture tracking policy")
 
 
 def capture_trial(
@@ -705,6 +902,30 @@ def capture_trial(
     redacted_output: Path,
     timeout: float,
 ) -> dict[str, Any]:
+    with AtomicJsonDestination(raw_output) as raw_destination:
+        with AtomicJsonDestination(redacted_output) as redacted_destination:
+            return _capture_trial(
+                spec_path,
+                source_db,
+                binary,
+                raw_output,
+                redacted_output,
+                raw_destination,
+                redacted_destination,
+                timeout,
+            )
+
+
+def _capture_trial(
+    spec_path: Path,
+    source_db: Path,
+    binary: Path,
+    raw_output: Path,
+    redacted_output: Path,
+    raw_destination: AtomicJsonDestination,
+    redacted_destination: AtomicJsonDestination,
+    timeout: float,
+) -> dict[str, Any]:
     spec_raw, _ = read_json(spec_path)
     spec = validate_spec(spec_raw)
     if not binary.is_file() or not os.access(binary, os.X_OK):
@@ -712,7 +933,15 @@ def capture_trial(
     repo = Path(spec["repo"])
     if not repo.is_dir():
         raise TrialError("spec.repo does not exist")
-    validate_capture_output_paths(source_db, repo, raw_output, redacted_output)
+    validate_capture_output_paths(
+        source_db,
+        repo,
+        raw_output,
+        redacted_output,
+        raw_destination,
+        redacted_destination,
+        (spec_path, binary),
+    )
     binary_observation = observe_binary_identity(
         binary, repo, spec["source_commit"], timeout
     )
@@ -854,7 +1083,7 @@ def capture_trial(
                 "runtime_promotion_allowed": False,
             },
         }
-        raw_bytes = write_json(raw_output, capture)
+        raw_bytes = raw_destination.write(capture)
 
         redacted_cases: list[dict[str, Any]] = []
         for case in cases:
@@ -899,7 +1128,7 @@ def capture_trial(
             "cases": redacted_cases,
             "boundary": capture["boundary"],
         }
-        write_json(redacted_output, redacted)
+        redacted_destination.write(redacted)
         return redacted
 
 
@@ -914,16 +1143,76 @@ def capture_evidence_index(capture: dict[str, Any], case_id: str) -> dict[str, d
             item = require_object(raw, "capture evidence")
             evidence_id_value = require_label(item.get("evidence_id"), "capture evidence id")
             prior = evidence.get(evidence_id_value)
-            if prior is not None and prior.get("content_sha256") != item.get("content_sha256"):
-                raise TrialError("capture reuses an evidence id for different content")
+            if prior is not None:
+                review_identity_fields = (
+                    "content_sha256",
+                    "source_type",
+                    "source_key",
+                    "source_title",
+                )
+                if any(prior.get(field) != item.get(field) for field in review_identity_fields):
+                    raise TrialError(
+                        "capture reuses an evidence id with different review metadata"
+                    )
             evidence[evidence_id_value] = item
     return evidence
 
 
-def make_review_template(capture_path: Path, output: Path) -> dict[str, Any]:
-    capture, capture_bytes = read_json(capture_path)
-    if capture.get("schema") != CAPTURE_SCHEMA:
-        raise TrialError(f"capture schema must be {CAPTURE_SCHEMA}")
+def review_selector_manifest_sha256(capture: dict[str, Any]) -> str:
+    manifest: list[dict[str, Any]] = []
+    cases = sorted(
+        require_list(capture.get("cases"), "capture.cases"),
+        key=lambda row: require_label(
+            require_object(row, "capture case").get("case_id"), "capture case_id"
+        ),
+    )
+    for raw_case in cases:
+        case = require_object(raw_case, "capture case")
+        case_id = require_label(case.get("case_id"), "capture case_id")
+        selectors: dict[tuple[str, str], set[tuple[str, str, str]]] = {}
+        for item in capture_evidence_index(capture, case_id).values():
+            source_key = item.get("source_key")
+            source_title = item.get("source_title")
+            if isinstance(source_key, str):
+                selector = ("source_key", source_key)
+            elif isinstance(source_title, str):
+                selector = ("source_title", source_title)
+            else:
+                raise TrialError(f"capture evidence in {case_id} has no review selector")
+            selectors.setdefault(selector, set()).add(
+                (
+                    require_label(item.get("evidence_id"), "capture evidence id"),
+                    require_sha256(item.get("content_sha256"), "capture content_sha256"),
+                    require_label(item.get("source_type"), "capture source_type"),
+                )
+            )
+        for (selector_kind, selector_value), evidence in sorted(selectors.items()):
+            manifest.append(
+                {
+                    "case_id": case_id,
+                    "selector_kind": selector_kind,
+                    "selector_value": selector_value,
+                    "evidence": [
+                        {
+                            "evidence_id": evidence_id,
+                            "content_sha256": content_sha256,
+                            "source_type": source_type,
+                        }
+                        for evidence_id, content_sha256, source_type in sorted(evidence)
+                    ],
+                }
+            )
+    rendered = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return sha256_bytes(rendered)
+
+
+def build_review_template(capture: dict[str, Any], capture_bytes: bytes) -> dict[str, Any]:
     cases: list[dict[str, Any]] = []
     for raw_case in require_list(capture.get("cases"), "capture.cases"):
         case = require_object(raw_case, "capture case")
@@ -950,14 +1239,21 @@ def make_review_template(capture_path: Path, output: Path) -> dict[str, Any]:
                 "evidence_reviews": reviews,
             }
         )
-    review = {
-        "schema": REVIEW_SCHEMA,
+    return {
+        "schema": REVIEW_TEMPLATE_SCHEMA,
         "review_id": f"{capture['trial_id']}.review",
         "capture_sha256": sha256_bytes(capture_bytes),
         "reviewer": "pending_reviewer",
         "cases": cases,
     }
-    write_json(output, review)
+
+
+def make_review_template(capture_path: Path, output: Path) -> dict[str, Any]:
+    capture, capture_bytes = read_json(capture_path)
+    if capture.get("schema") != CAPTURE_SCHEMA:
+        raise TrialError(f"capture schema must be {CAPTURE_SCHEMA}")
+    review = build_review_template(capture, capture_bytes)
+    write_json(output, review, protected_paths=(capture_path,))
     return review
 
 
@@ -985,18 +1281,49 @@ def apply_review_decisions(
     capture_path: Path,
     template_path: Path,
     decisions_path: Path,
-    output: Path,
+    output: Path | None,
 ) -> dict[str, Any]:
     capture, capture_bytes = read_json(capture_path)
     if capture.get("schema") != CAPTURE_SCHEMA:
         raise TrialError(f"capture schema must be {CAPTURE_SCHEMA}")
     capture_sha = sha256_bytes(capture_bytes)
-    template, _ = read_json(template_path)
-    validate_review(template, capture, capture_sha)
-    decisions, _ = read_json(decisions_path)
+    template, template_bytes = read_json(template_path)
+    validate_review(template, capture, capture_sha, template=True)
+    if template != build_review_template(capture, capture_bytes):
+        raise TrialError("review template does not match the capture-derived template")
+    template_sha = sha256_bytes(template_bytes)
+    selector_manifest_sha = review_selector_manifest_sha256(capture)
+    decisions, decisions_bytes = read_json(decisions_path)
     if decisions.get("schema") != REVIEW_DECISIONS_SCHEMA:
         raise TrialError(f"review decisions schema must be {REVIEW_DECISIONS_SCHEMA}")
-    reject_unknown_fields(decisions, {"schema", "reviewer", "cases"}, "decisions")
+    reject_unknown_fields(
+        decisions,
+        {
+            "schema",
+            "capture_sha256",
+            "review_template_sha256",
+            "selector_manifest_sha256",
+            "reviewer",
+            "cases",
+        },
+        "decisions",
+    )
+    decisions_capture_sha = require_sha256(
+        decisions.get("capture_sha256"), "decisions.capture_sha256"
+    )
+    if decisions_capture_sha != capture_sha:
+        raise TrialError("review decisions do not match the raw capture")
+    decisions_template_sha = require_sha256(
+        decisions.get("review_template_sha256"), "decisions.review_template_sha256"
+    )
+    if decisions_template_sha != template_sha:
+        raise TrialError("review decisions do not match the review template")
+    decisions_selector_manifest_sha = require_sha256(
+        decisions.get("selector_manifest_sha256"),
+        "decisions.selector_manifest_sha256",
+    )
+    if decisions_selector_manifest_sha != selector_manifest_sha:
+        raise TrialError("review decisions do not match the capture selector manifest")
     reviewer = require_label(decisions.get("reviewer"), "decisions.reviewer")
     decision_cases = require_object(decisions.get("cases"), "decisions.cases")
     capture_cases = {
@@ -1008,7 +1335,14 @@ def apply_review_decisions(
         raise TrialError("review decisions must cover exactly the capture cases")
 
     review = json.loads(json.dumps(template))
+    review["schema"] = REVIEW_SCHEMA
     review["reviewer"] = reviewer
+    review["decision_binding"] = {
+        "decisions_schema": REVIEW_DECISIONS_SCHEMA,
+        "decisions_sha256": sha256_bytes(decisions_bytes),
+        "review_template_sha256": template_sha,
+        "selector_manifest_sha256": selector_manifest_sha,
+    }
     for review_case in review["cases"]:
         case_id = require_label(review_case.get("case_id"), "review case_id")
         capture_case = capture_cases[case_id]
@@ -1080,24 +1414,65 @@ def apply_review_decisions(
         if used_keys != set(key_decisions) or used_titles != set(title_decisions):
             raise TrialError(f"review decisions contain unused selectors in {case_id}")
     validate_review(review, capture, capture_sha)
-    write_json(output, review)
+    if output is not None:
+        write_json(
+            output,
+            review,
+            protected_paths=(capture_path, template_path, decisions_path),
+        )
     return review
 
 
 def validate_review(
-    review: dict[str, Any], capture: dict[str, Any], capture_sha: str
+    review: dict[str, Any],
+    capture: dict[str, Any],
+    capture_sha: str,
+    *,
+    template: bool = False,
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    if review.get("schema") != REVIEW_SCHEMA:
-        raise TrialError(f"review schema must be {REVIEW_SCHEMA}")
+    expected_schema = REVIEW_TEMPLATE_SCHEMA if template else REVIEW_SCHEMA
+    if review.get("schema") != expected_schema:
+        raise TrialError(f"review schema must be {expected_schema}")
+    allowed_fields = {"schema", "review_id", "capture_sha256", "reviewer", "cases"}
+    if not template:
+        allowed_fields.add("decision_binding")
     reject_unknown_fields(
         review,
-        {"schema", "review_id", "capture_sha256", "reviewer", "cases"},
+        allowed_fields,
         "review",
     )
     require_label(review.get("review_id"), "review.review_id")
     require_label(review.get("reviewer"), "review.reviewer")
     if review.get("capture_sha256") != capture_sha:
         raise TrialError("review.capture_sha256 does not match the raw capture")
+    if not template:
+        binding = require_object(review.get("decision_binding"), "review.decision_binding")
+        reject_unknown_fields(
+            binding,
+            {
+                "decisions_schema",
+                "decisions_sha256",
+                "review_template_sha256",
+                "selector_manifest_sha256",
+            },
+            "review.decision_binding",
+        )
+        if binding.get("decisions_schema") != REVIEW_DECISIONS_SCHEMA:
+            raise TrialError("review decision binding uses an unsupported decisions schema")
+        require_sha256(
+            binding.get("decisions_sha256"),
+            "review.decision_binding.decisions_sha256",
+        )
+        require_sha256(
+            binding.get("review_template_sha256"),
+            "review.decision_binding.review_template_sha256",
+        )
+        selector_manifest_sha = require_sha256(
+            binding.get("selector_manifest_sha256"),
+            "review.decision_binding.selector_manifest_sha256",
+        )
+        if selector_manifest_sha != review_selector_manifest_sha256(capture):
+            raise TrialError("review decision binding does not match the capture selectors")
     capture_cases = {
         require_label(case.get("case_id"), "capture case_id"): case
         for case in require_list(capture.get("cases"), "capture.cases")
@@ -1186,13 +1561,27 @@ def percentile_95(values: list[float]) -> float:
     return ordered[index]
 
 
-def assemble_trial(capture_path: Path, review_path: Path, output_dir: Path) -> dict[str, Any]:
+def assemble_trial(
+    capture_path: Path,
+    review_path: Path,
+    template_path: Path,
+    decisions_path: Path,
+    output_dir: Path,
+) -> dict[str, Any]:
     capture, capture_bytes = read_json(capture_path)
     if capture.get("schema") != CAPTURE_SCHEMA:
         raise TrialError(f"capture schema must be {CAPTURE_SCHEMA}")
     capture_sha = sha256_bytes(capture_bytes)
-    review, _ = read_json(review_path)
+    review, review_bytes = read_json(review_path)
     reviews = validate_review(review, capture, capture_sha)
+    expected_review = apply_review_decisions(
+        capture_path,
+        template_path,
+        decisions_path,
+        None,
+    )
+    if review != expected_review:
+        raise TrialError("final review does not match the bound template and decisions")
     trial_id = require_label(capture.get("trial_id"), "capture.trial_id")
     captured_at = require_nonnegative_int(capture.get("captured_at"), "capture.captured_at")
     thresholds = validate_thresholds(capture.get("thresholds"), "capture.thresholds")
@@ -1376,11 +1765,20 @@ def assemble_trial(capture_path: Path, review_path: Path, output_dir: Path) -> d
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     fixture_path = output_dir / "fixture.reviewed.json"
-    fixture_bytes = write_json(fixture_path, fixture)
+    protected_inputs = (capture_path, review_path, template_path, decisions_path)
+    fixture_bytes = write_json(
+        fixture_path,
+        fixture,
+        protected_paths=protected_inputs,
+    )
     candidate_files: dict[str, Any] = {}
     for condition, candidate in candidates.items():
         path = output_dir / f"candidate.{condition}.json"
-        candidate_bytes = write_json(path, candidate)
+        candidate_bytes = write_json(
+            path,
+            candidate,
+            protected_paths=protected_inputs,
+        )
         candidate_files[condition] = {
             "file": path.name,
             "sha256": sha256_bytes(candidate_bytes),
@@ -1411,6 +1809,7 @@ def assemble_trial(capture_path: Path, review_path: Path, output_dir: Path) -> d
         "schema": ASSEMBLY_SCHEMA,
         "trial_id": trial_id,
         "capture_sha256": capture_sha,
+        "review_sha256": sha256_bytes(review_bytes),
         "source_commit": capture.get("source_commit"),
         "snapshot_sha256_before": capture.get("snapshot_sha256_before"),
         "fixture": {"file": fixture_path.name, "sha256": sha256_bytes(fixture_bytes)},
@@ -1426,7 +1825,11 @@ def assemble_trial(capture_path: Path, review_path: Path, output_dir: Path) -> d
             "runtime_promotion_allowed": False,
         },
     }
-    write_json(output_dir / "assembly.summary.json", summary)
+    write_json(
+        output_dir / "assembly.summary.json",
+        summary,
+        protected_paths=protected_inputs,
+    )
     return summary
 
 
@@ -1457,10 +1860,12 @@ def build_parser() -> argparse.ArgumentParser:
     apply_review.add_argument("--output", required=True)
 
     assemble = subparsers.add_parser(
-        "assemble", help="Assemble scorer fixtures/candidates from a reviewed capture."
+        "assemble", help="Reverify and assemble scorer packets from a reviewed capture."
     )
     assemble.add_argument("--capture", required=True)
     assemble.add_argument("--review", required=True)
+    assemble.add_argument("--template", required=True)
+    assemble.add_argument("--decisions", required=True)
     assemble.add_argument("--output-dir", required=True)
     return parser
 
@@ -1490,8 +1895,20 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             packet = assemble_trial(
-                Path(args.capture), Path(args.review), Path(args.output_dir)
+                Path(args.capture),
+                Path(args.review),
+                Path(args.template),
+                Path(args.decisions),
+                Path(args.output_dir),
             )
+        if args.command in {"review-template", "apply-review"}:
+            output_sha256 = sha256_bytes(render_json(packet))
+            packet = {
+                "schema": PRIVATE_OUTPUT_RECEIPT_SCHEMA,
+                "packet_schema": packet["schema"],
+                "output_sha256": output_sha256,
+                "private_packet_written": True,
+            }
     except TrialError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

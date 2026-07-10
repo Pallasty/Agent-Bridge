@@ -43,6 +43,15 @@ private_boundary["repo"] = str(private_repo)
     json.dumps(private_boundary, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",
 )
+tracked_repo = tmp / "tracked-private-repo"
+tracked_repo.mkdir()
+(tracked_repo / ".gitignore").write_text("/data/\n", encoding="utf-8")
+tracked_boundary = json.loads(json.dumps(fixture))
+tracked_boundary["repo"] = str(tracked_repo)
+(tmp / "capture_spec.tracked-private.json").write_text(
+    json.dumps(tracked_boundary, ensure_ascii=False, indent=2) + "\n",
+    encoding="utf-8",
+)
 
 with sqlite3.connect(tmp / "source.db") as conn:
     conn.execute("CREATE TABLE marker (value TEXT NOT NULL)")
@@ -140,6 +149,105 @@ fake_path.write_text(fake, encoding="utf-8")
 fake_path.chmod(0o755)
 PY
 
+git -C "$tmpdir/tracked-private-repo" init -q
+mkdir -p "$tmpdir/tracked-private-repo/data"
+printf '{}\n' >"$tmpdir/tracked-private-repo/data/tracked.json"
+git -C "$tmpdir/tracked-private-repo" add -f .gitignore data/tracked.json
+
+PYTHONPYCACHEPREFIX="$tmpdir/pycache" python3 - "$tmpdir" "$ROOT_DIR" <<'PY'
+import json
+import os
+import sqlite3
+import sys
+from pathlib import Path
+
+tmp = Path(sys.argv[1])
+root = Path(sys.argv[2])
+sys.path.insert(0, str(root / "scripts/eval"))
+import portfolio_continuity_ab_trial as trial
+
+source = tmp / "race-source.db"
+raw_output = tmp / "race-output.json"
+redacted_output = tmp / "race-redacted.json"
+with sqlite3.connect(source) as conn:
+    conn.execute("CREATE TABLE marker (value TEXT NOT NULL)")
+    conn.execute("INSERT INTO marker(value) VALUES ('live-source')")
+
+with trial.AtomicJsonDestination(raw_output) as raw_destination:
+    with trial.AtomicJsonDestination(redacted_output) as redacted_destination:
+        trial.validate_capture_output_paths(
+            source,
+            root,
+            raw_output,
+            redacted_output,
+            raw_destination,
+            redacted_destination,
+        )
+        os.link(source, raw_output)
+        raw_destination.write({"safe": True})
+assert not os.path.samefile(source, raw_output)
+with sqlite3.connect(source) as conn:
+    assert conn.execute("SELECT value FROM marker").fetchone()[0] == "live-source"
+
+source_parent = tmp / "parent-race-source"
+safe_parent = tmp / "parent-race-safe"
+source_parent.mkdir()
+safe_parent.mkdir()
+parent_source = source_parent / "protected.db"
+with sqlite3.connect(parent_source) as conn:
+    conn.execute("CREATE TABLE marker (value TEXT NOT NULL)")
+    conn.execute("INSERT INTO marker(value) VALUES ('parent-live-source')")
+route = tmp / "parent-race-route"
+route.symlink_to(safe_parent, target_is_directory=True)
+parent_raw = route / parent_source.name
+parent_redacted = safe_parent / "redacted.json"
+with trial.AtomicJsonDestination(parent_raw) as raw_destination:
+    with trial.AtomicJsonDestination(parent_redacted) as redacted_destination:
+        trial.validate_capture_output_paths(
+            parent_source,
+            root,
+            parent_raw,
+            parent_redacted,
+            raw_destination,
+            redacted_destination,
+        )
+        route.unlink()
+        route.symlink_to(source_parent, target_is_directory=True)
+        raw_destination.write({"safe": True})
+with sqlite3.connect(parent_source) as conn:
+    assert conn.execute("SELECT value FROM marker").fetchone()[0] == "parent-live-source"
+assert json.loads((safe_parent / parent_source.name).read_text(encoding="utf-8")) == {
+    "safe": True
+}
+
+policy_repo = tmp / "fixed-policy-repo"
+policy_outside = tmp / "fixed-policy-outside"
+policy_repo.mkdir()
+policy_outside.mkdir()
+policy_route = tmp / "fixed-policy-route"
+policy_route.symlink_to(policy_repo, target_is_directory=True)
+policy_raw = policy_route / "unignored.json"
+policy_redacted = policy_outside / "redacted.json"
+with trial.AtomicJsonDestination(policy_raw) as raw_destination:
+    with trial.AtomicJsonDestination(policy_redacted) as redacted_destination:
+        policy_route.unlink()
+        policy_route.symlink_to(policy_outside, target_is_directory=True)
+        try:
+            trial.validate_capture_output_paths(
+                source,
+                policy_repo,
+                policy_raw,
+                policy_redacted,
+                raw_destination,
+                redacted_destination,
+            )
+        except trial.TrialError as exc:
+            assert "must be stored under data/" in str(exc)
+        else:
+            raise AssertionError("fixed in-repo output path bypassed the private-data policy")
+assert not (policy_repo / "unignored.json").exists()
+PY
+
 python3 "$ADAPTER" capture \
   --spec "$tmpdir/capture_spec.json" \
   --source-db "$tmpdir/source.db" \
@@ -148,12 +256,113 @@ python3 "$ADAPTER" capture \
   --redacted-output "$tmpdir/capture.redacted.json" \
   >"$tmpdir/capture.stdout.json"
 
+python3 "$ADAPTER" capture \
+  --spec "$tmpdir/capture_spec.tracked-private.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$tmpdir/tracked-private-repo/data/untracked.raw.json" \
+  --redacted-output "$tmpdir/untracked-private.redacted.json" \
+  >"$tmpdir/untracked-private.stdout.json"
+git -C "$tmpdir/tracked-private-repo" check-ignore -q -- data/untracked.raw.json
+test -z "$(git -C "$tmpdir/tracked-private-repo" ls-files -- data/untracked.raw.json)"
+
+cp "$tmpdir/capture_spec.json" "$tmpdir/capture-spec-output-alias.json"
+if python3 "$ADAPTER" capture \
+  --spec "$tmpdir/capture-spec-output-alias.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$tmpdir/capture-spec-output-alias.json" \
+  --redacted-output "$tmpdir/spec-alias-redacted.json" \
+  >"$tmpdir/capture-spec-output-alias.stdout" \
+  2>"$tmpdir/capture-spec-output-alias.stderr"; then
+  echo "expected capture raw/spec alias to fail closed" >&2
+  exit 1
+fi
+cmp -s "$tmpdir/capture_spec.json" "$tmpdir/capture-spec-output-alias.json"
+
+ln "$tmpdir/fake-agent-bridge" "$tmpdir/capture-binary-output-alias.json"
+if python3 "$ADAPTER" capture \
+  --spec "$tmpdir/capture_spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$tmpdir/capture-binary-output-alias.json" \
+  --redacted-output "$tmpdir/binary-alias-redacted.json" \
+  >"$tmpdir/capture-binary-output-alias.stdout" \
+  2>"$tmpdir/capture-binary-output-alias.stderr"; then
+  echo "expected capture raw/binary hardlink alias to fail closed" >&2
+  exit 1
+fi
+rm "$tmpdir/capture-binary-output-alias.json"
+
+ln "$tmpdir/source.db" "$tmpdir/source-raw-hardlink.json"
+if python3 "$ADAPTER" capture \
+  --spec "$tmpdir/capture_spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$tmpdir/source-raw-hardlink.json" \
+  --redacted-output "$tmpdir/hardlink-redacted.json" \
+  >"$tmpdir/source-raw-hardlink.stdout" 2>"$tmpdir/source-raw-hardlink.stderr"; then
+  echo "expected source/raw hardlink alias to fail closed" >&2
+  exit 1
+fi
+rm "$tmpdir/source-raw-hardlink.json"
+
+ln "$tmpdir/source.db" "$tmpdir/source-redacted-hardlink.json"
+if python3 "$ADAPTER" capture \
+  --spec "$tmpdir/capture_spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$tmpdir/hardlink-raw.json" \
+  --redacted-output "$tmpdir/source-redacted-hardlink.json" \
+  >"$tmpdir/source-redacted-hardlink.stdout" 2>"$tmpdir/source-redacted-hardlink.stderr"; then
+  echo "expected source/redacted hardlink alias to fail closed" >&2
+  exit 1
+fi
+rm "$tmpdir/source-redacted-hardlink.json"
+
+ln -s "$tmpdir/source.db" "$tmpdir/source-raw-symlink.json"
+if python3 "$ADAPTER" capture \
+  --spec "$tmpdir/capture_spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$tmpdir/source-raw-symlink.json" \
+  --redacted-output "$tmpdir/symlink-redacted.json" \
+  >"$tmpdir/source-raw-symlink.stdout" 2>"$tmpdir/source-raw-symlink.stderr"; then
+  echo "expected source/raw symlink alias to fail closed" >&2
+  exit 1
+fi
+rm "$tmpdir/source-raw-symlink.json"
+
+touch "$tmpdir/output-alias-raw.json"
+ln "$tmpdir/output-alias-raw.json" "$tmpdir/output-alias-redacted.json"
+if python3 "$ADAPTER" capture \
+  --spec "$tmpdir/capture_spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$tmpdir/output-alias-raw.json" \
+  --redacted-output "$tmpdir/output-alias-redacted.json" \
+  >"$tmpdir/output-hardlink.stdout" 2>"$tmpdir/output-hardlink.stderr"; then
+  echo "expected raw/redacted hardlink alias to fail closed" >&2
+  exit 1
+fi
+
 python3 "$ADAPTER" review-template \
   --capture "$tmpdir/capture.raw.json" \
   --output "$tmpdir/review.template.json" \
   >"$tmpdir/review-template.stdout.json"
 
-python3 - "$tmpdir" <<'PY'
+cp "$tmpdir/capture.raw.json" "$tmpdir/review-input-output-alias.json"
+if python3 "$ADAPTER" review-template \
+  --capture "$tmpdir/review-input-output-alias.json" \
+  --output "$tmpdir/review-input-output-alias.json" \
+  >"$tmpdir/review-input-output-alias.stdout" \
+  2>"$tmpdir/review-input-output-alias.stderr"; then
+  echo "expected private review input/output alias to fail closed" >&2
+  exit 1
+fi
+cmp -s "$tmpdir/capture.raw.json" "$tmpdir/review-input-output-alias.json"
+
+PYTHONPYCACHEPREFIX="$tmpdir/pycache" python3 - "$tmpdir" "$ROOT_DIR" <<'PY'
 import hashlib
 import json
 import sqlite3
@@ -161,10 +370,19 @@ import sys
 from pathlib import Path
 
 tmp = Path(sys.argv[1])
+root = Path(sys.argv[2])
+sys.path.insert(0, str(root / "scripts/eval"))
+import portfolio_continuity_ab_trial as trial
+
 capture_path = tmp / "capture.raw.json"
 capture = json.loads(capture_path.read_text(encoding="utf-8"))
 decisions = {
-    "schema": "agent_bridge.portfolio_continuity_review_decisions.v0",
+    "schema": "agent_bridge.portfolio_continuity_review_decisions.v1",
+    "capture_sha256": hashlib.sha256(capture_path.read_bytes()).hexdigest(),
+    "review_template_sha256": hashlib.sha256(
+        (tmp / "review.template.json").read_bytes()
+    ).hexdigest(),
+    "selector_manifest_sha256": trial.review_selector_manifest_sha256(capture),
     "reviewer": "synthetic_reviewer",
     "cases": {},
 }
@@ -203,6 +421,22 @@ for case in capture["cases"]:
     encoding="utf-8",
 )
 
+tampered_template = json.loads((tmp / "review.template.json").read_text(encoding="utf-8"))
+validity = tampered_template["cases"][0]["evidence_reviews"][0]
+validity["valid_from"] = 0 if validity["valid_from"] != 0 else 1
+tampered_template_bytes = (
+    json.dumps(tampered_template, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+).encode("utf-8")
+(tmp / "review.template-validity-tamper.json").write_bytes(tampered_template_bytes)
+tampered_template_decisions = json.loads(json.dumps(decisions))
+tampered_template_decisions["review_template_sha256"] = hashlib.sha256(
+    tampered_template_bytes
+).hexdigest()
+(tmp / "review.decisions-validity-tamper.json").write_text(
+    json.dumps(tampered_template_decisions, ensure_ascii=False, indent=2) + "\n",
+    encoding="utf-8",
+)
+
 with sqlite3.connect(tmp / "source.db") as conn:
     assert conn.execute("SELECT value FROM marker").fetchone()[0] == "live-source"
 
@@ -217,6 +451,15 @@ assert redacted["boundary"]["child_db_is_temporary_snapshot"] is True
 assert redacted["boundary"]["child_snapshot_path_confirmed"] is True
 assert redacted["boundary"]["live_store_writes"] is False
 assert redacted["boundary"]["calls_llm"] is False
+template_receipt = json.loads(
+    (tmp / "review-template.stdout.json").read_text(encoding="utf-8")
+)
+assert template_receipt == {
+    "output_sha256": hashlib.sha256((tmp / "review.template.json").read_bytes()).hexdigest(),
+    "packet_schema": "agent_bridge.portfolio_continuity_evidence_review.v0",
+    "private_packet_written": True,
+    "schema": "agent_bridge.private_output_receipt.v0",
+}
 
 for path in [
     tmp / "capture.redacted.json",
@@ -243,6 +486,7 @@ python3 "$ADAPTER" apply-review \
 
 python3 - "$tmpdir" <<'PY'
 import copy
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -250,6 +494,24 @@ from pathlib import Path
 tmp = Path(sys.argv[1])
 review = json.loads((tmp / "review.json").read_text(encoding="utf-8"))
 decisions = json.loads((tmp / "review.decisions.json").read_text(encoding="utf-8"))
+assert review["schema"] == "agent_bridge.portfolio_continuity_evidence_review.v1"
+assert review["decision_binding"] == {
+    "decisions_schema": "agent_bridge.portfolio_continuity_review_decisions.v1",
+    "decisions_sha256": hashlib.sha256(
+        (tmp / "review.decisions.json").read_bytes()
+    ).hexdigest(),
+    "review_template_sha256": decisions["review_template_sha256"],
+    "selector_manifest_sha256": decisions["selector_manifest_sha256"],
+}
+apply_receipt = json.loads(
+    (tmp / "apply-review.stdout.json").read_text(encoding="utf-8")
+)
+assert apply_receipt == {
+    "output_sha256": hashlib.sha256((tmp / "review.json").read_bytes()).hexdigest(),
+    "packet_schema": "agent_bridge.portfolio_continuity_evidence_review.v1",
+    "private_packet_written": True,
+    "schema": "agent_bridge.private_output_receipt.v0",
+}
 
 missing = copy.deepcopy(review)
 missing["cases"][0]["evidence_reviews"].pop()
@@ -267,16 +529,74 @@ unknown_claim["cases"][0]["evidence_reviews"][0]["supports_claim_ids"] = [
     json.dumps(unknown_claim), encoding="utf-8"
 )
 
+semantic_tamper = copy.deepcopy(review)
+semantic_row = semantic_tamper["cases"][0]["evidence_reviews"][0]
+semantic_row["status"] = (
+    "archived" if semantic_row["status"] != "archived" else "active"
+)
+(tmp / "review.semantic-tamper.json").write_text(
+    json.dumps(semantic_tamper), encoding="utf-8"
+)
+
 missing_decision = copy.deepcopy(decisions)
 missing_decision["cases"]["synthetic_status"]["source_keys"].pop("syn_noise")
 (tmp / "review.decisions-missing.json").write_text(
     json.dumps(missing_decision), encoding="utf-8"
 )
 
+wrong_capture_decision = copy.deepcopy(decisions)
+wrong_capture_decision["capture_sha256"] = "0" * 64
+(tmp / "review.decisions-wrong-capture.json").write_text(
+    json.dumps(wrong_capture_decision), encoding="utf-8"
+)
+
+wrong_template_decision = copy.deepcopy(decisions)
+wrong_template_decision["review_template_sha256"] = "0" * 64
+(tmp / "review.decisions-wrong-template.json").write_text(
+    json.dumps(wrong_template_decision), encoding="utf-8"
+)
+
+wrong_selector_decision = copy.deepcopy(decisions)
+wrong_selector_decision["selector_manifest_sha256"] = "0" * 64
+(tmp / "review.decisions-wrong-selector.json").write_text(
+    json.dumps(wrong_selector_decision), encoding="utf-8"
+)
+
+legacy_decision = copy.deepcopy(decisions)
+legacy_decision["schema"] = "agent_bridge.portfolio_continuity_review_decisions.v0"
+legacy_decision.pop("capture_sha256")
+legacy_decision.pop("review_template_sha256")
+legacy_decision.pop("selector_manifest_sha256")
+(tmp / "review.decisions-legacy-v0.json").write_text(
+    json.dumps(legacy_decision), encoding="utf-8"
+)
+
 malformed_capture = json.loads((tmp / "capture.raw.json").read_text(encoding="utf-8"))
 malformed_capture["cases"][0].pop("conditions")
 (tmp / "capture.malformed.json").write_text(
     json.dumps(malformed_capture), encoding="utf-8"
+)
+
+selector_drift = json.loads((tmp / "capture.raw.json").read_text(encoding="utf-8"))
+drift_case = selector_drift["cases"][0]
+first_condition = next(iter(drift_case["conditions"].values()))
+target = first_condition["evidence"][0]
+drifted = False
+for condition in drift_case["conditions"].values():
+    for item in condition["evidence"]:
+        if item is target or item["evidence_id"] != target["evidence_id"]:
+            continue
+        if isinstance(item.get("source_key"), str):
+            item["source_key"] += "_drift"
+        else:
+            item["source_title"] += " drift"
+        drifted = True
+        break
+    if drifted:
+        break
+assert drifted
+(tmp / "capture.selector-drift.json").write_text(
+    json.dumps(selector_drift), encoding="utf-8"
 )
 PY
 
@@ -290,6 +610,58 @@ if python3 "$ADAPTER" apply-review \
   exit 1
 fi
 
+if python3 "$ADAPTER" apply-review \
+  --capture "$tmpdir/capture.raw.json" \
+  --template "$tmpdir/review.template.json" \
+  --decisions "$tmpdir/review.decisions-wrong-capture.json" \
+  --output "$tmpdir/review.should-not-exist.json" \
+  >"$tmpdir/bad-decision-capture.stdout" 2>"$tmpdir/bad-decision-capture.stderr"; then
+  echo "expected capture-mismatched review decisions to fail closed" >&2
+  exit 1
+fi
+
+if python3 "$ADAPTER" apply-review \
+  --capture "$tmpdir/capture.raw.json" \
+  --template "$tmpdir/review.template.json" \
+  --decisions "$tmpdir/review.decisions-wrong-template.json" \
+  --output "$tmpdir/review.should-not-exist.json" \
+  >"$tmpdir/bad-decision-template.stdout" 2>"$tmpdir/bad-decision-template.stderr"; then
+  echo "expected template-mismatched review decisions to fail closed" >&2
+  exit 1
+fi
+
+if python3 "$ADAPTER" apply-review \
+  --capture "$tmpdir/capture.raw.json" \
+  --template "$tmpdir/review.template-validity-tamper.json" \
+  --decisions "$tmpdir/review.decisions-validity-tamper.json" \
+  --output "$tmpdir/review.should-not-exist.json" \
+  >"$tmpdir/bad-template-validity.stdout" \
+  2>"$tmpdir/bad-template-validity.stderr"; then
+  echo "expected capture-derived template validity drift to fail closed" >&2
+  exit 1
+fi
+
+if python3 "$ADAPTER" apply-review \
+  --capture "$tmpdir/capture.raw.json" \
+  --template "$tmpdir/review.template.json" \
+  --decisions "$tmpdir/review.decisions-wrong-selector.json" \
+  --output "$tmpdir/review.should-not-exist.json" \
+  >"$tmpdir/bad-decision-selector.stdout" 2>"$tmpdir/bad-decision-selector.stderr"; then
+  echo "expected selector-mismatched review decisions to fail closed" >&2
+  exit 1
+fi
+
+if python3 "$ADAPTER" apply-review \
+  --capture "$tmpdir/capture.raw.json" \
+  --template "$tmpdir/review.template.json" \
+  --decisions "$tmpdir/review.decisions-legacy-v0.json" \
+  --output "$tmpdir/review.should-not-exist.json" \
+  >"$tmpdir/bad-decision-legacy.stdout" 2>"$tmpdir/bad-decision-legacy.stderr"; then
+  echo "expected legacy unbound review decisions to fail closed" >&2
+  exit 1
+fi
+test ! -e "$tmpdir/review.should-not-exist.json"
+
 if python3 "$ADAPTER" review-template \
   --capture "$tmpdir/capture.malformed.json" \
   --output "$tmpdir/review.malformed.json" \
@@ -298,11 +670,32 @@ if python3 "$ADAPTER" review-template \
   exit 1
 fi
 
+if python3 "$ADAPTER" review-template \
+  --capture "$tmpdir/capture.selector-drift.json" \
+  --output "$tmpdir/review.selector-drift.json" \
+  >"$tmpdir/selector-drift.stdout" 2>"$tmpdir/selector-drift.stderr"; then
+  echo "expected duplicate evidence selector drift to fail closed" >&2
+  exit 1
+fi
+
 python3 "$ADAPTER" assemble \
   --capture "$tmpdir/capture.raw.json" \
   --review "$tmpdir/review.json" \
+  --template "$tmpdir/review.template.json" \
+  --decisions "$tmpdir/review.decisions.json" \
   --output-dir "$tmpdir/assembled" \
   >"$tmpdir/assemble.stdout.json"
+
+if python3 "$ADAPTER" assemble \
+  --capture "$tmpdir/capture.raw.json" \
+  --review "$tmpdir/review.template.json" \
+  --template "$tmpdir/review.template.json" \
+  --decisions "$tmpdir/review.decisions.json" \
+  --output-dir "$tmpdir/legacy-assembled" \
+  >"$tmpdir/legacy-assemble.stdout" 2>"$tmpdir/legacy-assemble.stderr"; then
+  echo "expected unbound legacy review packet to fail closed" >&2
+  exit 1
+fi
 
 python3 "$SCORER" \
   --fixture "$tmpdir/assembled/fixture.reviewed.json" \
@@ -325,10 +718,12 @@ if python3 "$SCORER" \
   exit 1
 fi
 
-for name in missing wrong-hash unknown-claim; do
+for name in missing wrong-hash unknown-claim semantic-tamper; do
   if python3 "$ADAPTER" assemble \
     --capture "$tmpdir/capture.raw.json" \
     --review "$tmpdir/review.$name.json" \
+    --template "$tmpdir/review.template.json" \
+    --decisions "$tmpdir/review.decisions.json" \
     --output-dir "$tmpdir/bad-$name" \
     >"$tmpdir/bad-$name.stdout" 2>"$tmpdir/bad-$name.stderr"; then
     echo "expected $name review to fail assembly" >&2
@@ -369,8 +764,21 @@ if python3 "$ADAPTER" capture \
   exit 1
 fi
 
+if python3 "$ADAPTER" capture \
+  --spec "$tmpdir/capture_spec.tracked-private.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$tmpdir/tracked-private-repo/data/tracked.json" \
+  --redacted-output "$tmpdir/tracked-private.redacted.json" \
+  >"$tmpdir/tracked-private.stdout" 2>"$tmpdir/tracked-private.stderr"; then
+  echo "expected tracked in-repo raw capture to fail" >&2
+  exit 1
+fi
+
 python3 - "$tmpdir" "$ROOT_DIR/scripts/eval/README.md" "$ROOT_DIR/CHANGELOG.md" "$REPORT" <<'PY'
+import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -378,12 +786,16 @@ tmp = Path(sys.argv[1])
 readme = Path(sys.argv[2]).read_text(encoding="utf-8")
 changelog = Path(sys.argv[3]).read_text(encoding="utf-8")
 report = Path(sys.argv[4]).read_text(encoding="utf-8")
+normalized_readme = " ".join(readme.split())
 summary = json.loads((tmp / "assembled/assembly.summary.json").read_text(encoding="utf-8"))
 retrieval = json.loads((tmp / "score.retrieval.json").read_text(encoding="utf-8"))
 bootstrap = json.loads((tmp / "score.bootstrap.json").read_text(encoding="utf-8"))
 digest = json.loads((tmp / "score.digest.json").read_text(encoding="utf-8"))
 
 assert summary["schema"] == "agent_bridge.portfolio_continuity_ab_assembly.v0"
+assert summary["review_sha256"] == hashlib.sha256(
+    (tmp / "review.json").read_bytes()
+).hexdigest()
 assert summary["conditions"]["hybrid_retrieval"]["observed_evidence_count"] == 4
 assert summary["conditions"]["hybrid_retrieval"]["relevant_evidence_count"] == 2
 assert summary["conditions"]["hybrid_retrieval"]["relevant_evidence_ratio"] == 0.5
@@ -418,12 +830,36 @@ assert "does not match" in (tmp / "bad-wrong-hash.stderr").read_text(encoding="u
 assert "unknown supported claim" in (
     tmp / "bad-unknown-claim.stderr"
 ).read_text(encoding="utf-8")
+assert "does not match the bound template and decisions" in (
+    tmp / "bad-semantic-tamper.stderr"
+).read_text(encoding="utf-8")
 assert "leave evidence unreviewed" in (
     tmp / "bad-decisions.stderr"
+).read_text(encoding="utf-8")
+assert "do not match the raw capture" in (
+    tmp / "bad-decision-capture.stderr"
+).read_text(encoding="utf-8")
+assert "do not match the review template" in (
+    tmp / "bad-decision-template.stderr"
+).read_text(encoding="utf-8")
+assert "does not match the capture-derived template" in (
+    tmp / "bad-template-validity.stderr"
+).read_text(encoding="utf-8")
+assert "do not match the capture selector manifest" in (
+    tmp / "bad-decision-selector.stderr"
+).read_text(encoding="utf-8")
+assert "review decisions schema must be" in (
+    tmp / "bad-decision-legacy.stderr"
+).read_text(encoding="utf-8")
+assert "review schema must be" in (
+    tmp / "legacy-assemble.stderr"
 ).read_text(encoding="utf-8")
 assert (tmp / "malformed.stderr").read_text(encoding="utf-8").strip() == (
     "ERROR: malformed trial packet"
 )
+assert "different review metadata" in (
+    tmp / "selector-drift.stderr"
+).read_text(encoding="utf-8")
 assert "did not confirm" in (tmp / "unconfirmed.stderr").read_text(encoding="utf-8")
 assert "binary identity does not match" in (
     tmp / "wrong-identity.stderr"
@@ -431,36 +867,59 @@ assert "binary identity does not match" in (
 assert "must be stored under data/" in (
     tmp / "private-boundary.stderr"
 ).read_text(encoding="utf-8")
+assert "must not be tracked by git" in (
+    tmp / "tracked-private.stderr"
+).read_text(encoding="utf-8")
+assert "must not overwrite the source SQLite database" in (
+    tmp / "source-raw-hardlink.stderr"
+).read_text(encoding="utf-8")
+assert "must not overwrite an input file" in (
+    tmp / "capture-spec-output-alias.stderr"
+).read_text(encoding="utf-8")
+assert "must not overwrite an input file" in (
+    tmp / "capture-binary-output-alias.stderr"
+).read_text(encoding="utf-8")
+assert "must not overwrite the source SQLite database" in (
+    tmp / "source-redacted-hardlink.stderr"
+).read_text(encoding="utf-8")
+assert "must not overwrite the source SQLite database" in (
+    tmp / "source-raw-symlink.stderr"
+).read_text(encoding="utf-8")
+assert "must be different files" in (
+    tmp / "output-hardlink.stderr"
+).read_text(encoding="utf-8")
+assert "must not overwrite an input file" in (
+    tmp / "review-input-output-alias.stderr"
+).read_text(encoding="utf-8")
 
 assert "portfolio_continuity_ab_trial.py" in readme
-assert "source DB path is never passed to the child" in readme
+assert "source DB path is never passed to the child" in normalized_readme
 assert "Snapshot-safe AB-native portfolio continuity trial" in changelog
 required_report = [
     "# AB-Native Portfolio Continuity Surface Trial",
+    "PROVISIONAL / REVIEW_BINDING_GAP",
+    "## Results (Provisional)",
     "agent_bridge.portfolio_continuity_ab_assembly.v0",
     "runtime_source_commit: a8c6302325e27c9b5cb20f8c958ab719666de372",
     "capture_sha256: ab08bee97a29caa2ef51d73266208fc7fdaa041f230a4572cffbab4da1a2545f",
     "raw_capture_in_git: false",
+    "review_provenance: legacy_unbound_v0",
+    "admission_status: blocked_pending_capture_bound_review",
     "writes_live_ab_store: false",
     "answer_quality_claim: false",
-    "| `hybrid_retrieval` | PASS | 2/2",
-    "| `session_bootstrap` | FAIL | 1/2",
-    "| `portfolio_digest` | PASS | 2/2",
+    "| `hybrid_retrieval` | MET (unadmitted) | 2/2",
+    "| `session_bootstrap` | NOT MET (unadmitted) | 1/2",
+    "| `portfolio_digest` | MET (unadmitted) | 2/2",
     "79.429% fewer estimated context tokens",
     "data/eval/portfolio-continuity-ab-native-20260710/",
-    "does not admit automatic",
+    "does not currently",
     "It is not a pre-digest baseline",
     "Forum thread: `design#119`, start post `3033`",
 ]
 missing_report = [needle for needle in required_report if needle not in report]
 if missing_report:
     raise SystemExit("missing report anchors: " + ", ".join(missing_report))
-for private in [
-    "我们来检查Agent-Bridge记忆中项目的当前状态",
-    "非常棒！看来项目的又一个阶段达成",
-    "portfolio_state_digest",
-]:
-    assert private not in report
+assert re.search(r"\b(?:PASS|FAIL)\b", report) is None
 
 print("AB-native portfolio continuity trial verification passed")
 PY
