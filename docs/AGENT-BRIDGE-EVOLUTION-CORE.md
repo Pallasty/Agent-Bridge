@@ -223,10 +223,10 @@ pub async fn build_handoff_brief(
 ### 8.1 AI 偏好批量注入 + 语义检索
 
 - **注入包**：`memory_snapshots/inject/ab_ai_kernel_v1.jsonl` — 每条为原子卡片，`content` 顶部用 `SIGNAL:` / `FACTS:` / `MUST:` / `KEYWORDS:` 便于模型解析。
-- **嵌入后端**（2026-05-03 起）：默认 `all-MiniLM-L6-v2` ONNX 模型经 `fastembed` + `ort` 静态链接，**384 维**句向量，无 Python / 无外部 API；模型首次调用时自动下载到 `~/.cache/fastembed/`（~22 MB）。`onnx-embed` feature 关闭时回落到 FNV-1a 哈希向量（同 384 维）。代码在 `crates/store/src/vector.rs`。
+- **嵌入后端**：启用默认 `onnx-embed` feature 时，编译默认是 `gte-multilingual-base`，输出 **768 维**；`e5-small` / `all-minilm` / `para-ml` 仍是可选的 384 维路径。关闭 feature 时使用 384 维 hash-only 后端；启用 feature 后的 hash 回退宽度跟随活动模型的 `vector_dim()`。运行时事实以 `capabilities.memory.embedding` 的 backend + dim 为准。代码在 `crates/store/src/vector.rs` 与 `embedding.rs`。
 - **导入**：`memory_import(..., conflict_policy="skip"|"newer_wins")`；导入路径与 `memory_save` **同样写入 `embedding` 列**，可直接 `memory_search(..., mode="semantic")`。
 - **召回**：优先 `tags_any=["ab-inject"]` + `mode="hybrid"`（图扩展）；纯释义对齐用 `mode="semantic"` 调 `threshold`（ONNX 真语义下，相关结果分数典型 0.5–0.75，宽 0.3、紧 0.6 量级）。
-- **维度迁移**：从 512→384 时 `migration v16` 清空旧 embedding，新 MCP `memory_reindex(batch_size=100)` 用现行 backend 重建索引；调用至 `updated=0` 即完成。
+- **维度迁移**：历史上的 512→384 由 `migration v16` 清空旧 embedding；当前 384/768 切换必须先看启动 dim-guard / preflight，再用现行 backend 运行 `memory_reindex(batch_size=100)` 至 `updated=0`。不得在未确认 store/backend 维度一致时混写。
 
 ### 8.2 智能体体验改进建议（已写入注入包 + 路线图）
 
@@ -248,9 +248,9 @@ pub async fn build_handoff_brief(
 
 **反面教训（仍然成立）**：v2.0 hook（2026-05-03 当日）尝试在 hook 里做 Python FNV-1a 嵌入 + cosine。维度从 512 迁到 384 后，hook 仍写 512，`zip()` 静默截断到 384，分数全是噪声。**两小时内回归 v3.0 静态排序**。教训的一般形：**客户端不得自建与服务端平行的打分/嵌入实现**——v5.0 之所以安全，正因为它把嵌入送回了单一事实源。
 
-### 8.4 嵌入后端可插拔（路线图 §B）
+### 8.4 嵌入后端可插拔（已落地）
 
-当前 `embed_text()` 是裸函数 + cargo feature 切换（`onnx-embed`）。中期目标是抽 `EmbeddingBackend` trait（`dim() / embed(&[&str]) / name()`），让 ONNX / Hash / 未来的 Rust Seed (AIoT) 等 backend 可在启动时通过环境变量或 `capabilities` 选择。这是把 agent-bridge 从"链接特定推理引擎"改成"可承载多种推理引擎"的关键。
+`EmbeddingBackend` trait 已提供 `name()` / `dim()` / `embed()` / `embed_batch()`，ONNX、Hash 与远端委托后端共用 `default_backend()` / `set_default_backend()` 入口；`embed_text()` 只是兼容 shim。后续后端接入应复用这条单一事实源，并同时满足 backend 标签、维度守卫与重建索引契约，不再另建平行嵌入实现。
 
 ---
 

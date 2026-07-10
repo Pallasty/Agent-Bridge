@@ -13666,13 +13666,14 @@ const WORK_MEMORY_KIND: &str = "work_memory";
 const WORK_MEMORY_DEFAULT_SLOT: &str = "active";
 const WORK_MEMORY_MAX_CONTENT_CHARS: usize = 12_000;
 const WORK_MEMORY_PRECOMPACT_CHARS: usize = 6_000;
+const WORK_MEMORY_SECONDS_PER_DAY: i64 = 86_400;
 /// Upper bound on work_memory rows scanned (most-recent first, across ALL
 /// projects' scopes) for cross-node fan-in in the alias-aware `list`. The scan
 /// is then filtered to alias-compatible scopes. NOTE: an alias-compatible
 /// sibling lane older than the Nth most-recent work_memory row store-wide is
 /// silently NOT surfaced — acceptable because work_memory is a recent-sorted,
 /// TTL-bounded scratchpad, but raise this (or scope the broad fetch) if the
-/// active work_memory population ever approaches this bound. (Live: ~61 active.)
+/// live work_memory population ever approaches this bound.
 const WORK_MEMORY_ALIAS_FANIN_SCAN: u32 = 500;
 
 fn unix_now_secs() -> i64 {
@@ -13680,6 +13681,63 @@ fn unix_now_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn work_memory_declared_status(args: &Value, content: &str) -> String {
+    if let Some(status) = args
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+    {
+        return status.to_string();
+    }
+    content
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("status")
+                .then(|| value.trim().to_string())
+        })
+        .filter(|status| !status.is_empty())
+        .unwrap_or_else(|| "active".to_string())
+}
+
+fn work_memory_status_is_terminal(status: &str) -> bool {
+    let head = status
+        .trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches(|ch: char| matches!(ch, '.' | ',' | ':' | ';'))
+        .to_string();
+    matches!(
+        head.as_str(),
+        "complete" | "completed" | "resolved" | "done" | "closed" | "finished" | "superseded"
+    ) || head.starts_with("completed_")
+        || head.starts_with("completed-")
+}
+
+fn work_memory_expires_at(record: &MemoryRecord) -> Option<i64> {
+    let ttl_days = record.tags.iter().find_map(|tag| {
+        tag.strip_prefix("ttl:")
+            .and_then(|value| value.strip_suffix('d'))
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|days| *days > 0)
+    })?;
+    let anchor = record.updated_at.max(record.created_at);
+    (anchor > 0).then(|| {
+        anchor.saturating_add(ttl_days.saturating_mul(WORK_MEMORY_SECONDS_PER_DAY))
+    })
+}
+
+fn work_memory_is_live(record: &MemoryRecord, now: i64) -> bool {
+    record.status == "active"
+        && work_memory_expires_at(record)
+            .map(|expires_at| expires_at > now)
+            .unwrap_or(true)
 }
 
 fn stable_fnv1a_hex(input: &str) -> String {
@@ -13832,8 +13890,10 @@ fn cross_node_peer_lanes(
     since_ts: i64,
     limit: usize,
 ) -> Vec<MemoryRecord> {
+    let now = unix_now_secs();
     let mut peers: Vec<MemoryRecord> = broad
         .into_iter()
+        .filter(|r| work_memory_is_live(r, now))
         .filter(|r| r.updated_at > since_ts)
         // Exclude this session's own scope AND same-node ancestor/descendant
         // scopes (e.g. the parent `project:/Users/.../Projects` of this
@@ -14021,9 +14081,10 @@ fn format_work_memory_block(
     is_compact: bool,
     snippet_len: usize,
 ) -> Option<Vec<String>> {
+    let now = unix_now_secs();
     let rows: Vec<MemoryRecord> = rows
         .iter()
-        .filter(|r| r.status == "active")
+        .filter(|r| work_memory_is_live(r, now))
         .take(4)
         .cloned()
         .collect();
@@ -14161,7 +14222,7 @@ impl McpTool for WorkMemoryTool {
                     "evidence": { "type": "string" },
                     "files": { "type": "array", "items": { "type": "string" }, "default": [] },
                     "content": { "type": "string", "description": "Optional full Markdown content. Capped at 12000 chars." },
-                    "status": { "type": "string", "default": "active" },
+                    "status": { "type": "string", "default": "active", "description": "Lifecycle marker. Terminal values (complete/completed/resolved/done/closed/finished/superseded, including completed_* variants) clear the addressed short-lived slot instead of saving another active row. WAIT/blocked values remain visible." },
                     "tags": { "type": "array", "items": { "type": "string" }, "default": [] },
                     "ttl_days": { "type": "integer", "minimum": 1, "maximum": 90, "default": 14 },
                     "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 },
@@ -14203,6 +14264,21 @@ impl McpTool for WorkMemoryTool {
                     };
                 let key = work_memory_resolved_key(&args, &cwd, session_id, slot);
                 let scope = work_memory_scope(&cwd);
+                let declared_status = work_memory_declared_status(&args, &content);
+                if work_memory_status_is_terminal(&declared_status) {
+                    let deleted = store.memory_delete(&key).await?;
+                    return Ok(ToolResult::json_text(&json!({
+                        "saved": false,
+                        "cleared": true,
+                        "deleted": deleted,
+                        "key": key,
+                        "scope": scope,
+                        "slot": slot,
+                        "declared_status": declared_status,
+                        "source_chars": total_chars,
+                        "truncated": truncated,
+                    })));
+                }
                 let ttl_days = args
                     .get("ttl_days")
                     .and_then(|v| v.as_u64())
@@ -14244,6 +14320,7 @@ impl McpTool for WorkMemoryTool {
                     "key": key,
                     "scope": scope,
                     "slot": slot,
+                    "declared_status": declared_status,
                     "content_chars": mem.content.chars().count(),
                     "source_chars": total_chars,
                     "truncated": truncated,
@@ -14267,6 +14344,8 @@ impl McpTool for WorkMemoryTool {
                         limit,
                     )
                     .await?;
+                let now = unix_now_secs();
+                rows.retain(|row| work_memory_is_live(row, now));
                 // Cross-node fan-in: work_memory list is otherwise exact-scope,
                 // so lanes written under an alias-compatible scope on ANOTHER
                 // node (e.g. aio2's project:/Data/... path for this same
@@ -14280,13 +14359,14 @@ impl McpTool for WorkMemoryTool {
                     .ok()
                     .filter(|s| !s.trim().is_empty())
                 {
-                    let broad = store
+                    let mut broad = store
                         .list_memories(
                             Some(WORK_MEMORY_KIND),
                             MemoryListSort::Recent,
                             WORK_MEMORY_ALIAS_FANIN_SCAN,
                         )
                         .await?;
+                    broad.retain(|row| work_memory_is_live(row, now));
                     rows = merge_alias_compatible_work_memory(
                         rows,
                         broad,
@@ -14304,6 +14384,7 @@ impl McpTool for WorkMemoryTool {
                                 "key": r.key,
                                 "scope": r.scope,
                                 "updated_at": r.updated_at,
+                                "expires_at": work_memory_expires_at(&r),
                                 "tags": r.tags,
                                 "snippet": snippet,
                                 "truncated": truncated,
@@ -14331,7 +14412,9 @@ impl McpTool for WorkMemoryTool {
                     // status=='active'): retired scratchpad rows are not
                     // readable, so get cannot resurrect an archived or
                     // superseded slot that list no longer shows.
-                    Some(row) if row.kind == WORK_MEMORY_KIND && row.status == "active" => Ok(
+                    Some(row)
+                        if row.kind == WORK_MEMORY_KIND
+                            && work_memory_is_live(&row, unix_now_secs()) => Ok(
                         ToolResult::json_text(&serde_json::to_value(row).unwrap_or(Value::Null)),
                     ),
                     Some(row) if row.kind == WORK_MEMORY_KIND => {
@@ -21596,8 +21679,9 @@ impl McpTool for CapabilitiesTool {
         // Detect frontend
         let frontend = detect_frontend();
 
-        // Version from binary
-        let version = env!("CARGO_PKG_VERSION");
+        // Package version remains semver-compatible; build identity distinguishes
+        // unreleased source builds from the release tag they follow.
+        let version = crate::build_identity::PACKAGE_VERSION;
         let policy = ToolPolicy::from_env();
 
         let sec = &self.hub.security;
@@ -21668,7 +21752,12 @@ impl McpTool for CapabilitiesTool {
                 "env_vars": "AB_ALLOW_SHELL_EXEC, AB_ALLOW_AGENT_SPAWN, AB_ALLOW_TERMINAL_WRITE, AB_ALLOW_BROWSER, AB_SHELL_EXEC_TIMEOUT_MAX"
             },
             "oz_run_tools": runtime_id == "warp-oz",
-            "version": version
+            "version": version,
+            "build": {
+                "package_version": version,
+                "git_sha": crate::build_identity::GIT_SHA,
+                "git_describe": crate::build_identity::GIT_DESCRIBE
+            }
         })))
     }
 }

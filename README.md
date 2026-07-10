@@ -18,12 +18,12 @@ works as your install source:
 
 ### Version provenance
 
-`v*` tags are source release markers. The CLI, MCP server, and capability
-surfaces report the Cargo workspace package version through
-`CARGO_PKG_VERSION`; those two version surfaces are not assumed to be aligned.
-Until they are reconciled by an explicit release decision, pin installations
-to a Git commit when exact build provenance matters. Run
-`scripts/agent-bridge-release-truth-gate.py` to inspect the current state.
+`v*` tags are source release markers. The Cargo workspace package version tracks
+the latest released baseline; unreleased source builds add `git describe` and a
+short source SHA to CLI/capability output. Pin installations to a Git commit
+when exact provenance matters. Run `scripts/agent-bridge-release-truth-gate.py`
+to inspect the current state; choosing a new version or tag remains an explicit
+owner release decision.
 
 You need a Rust toolchain ([rustup](https://rustup.rs)) and a working C
 linker; no system libraries otherwise (`zbus` and `rusqlite` with the
@@ -53,7 +53,7 @@ Incremental rebuilds < 15 s. The binary lands at
 `target/release/agent-bridge`. Then jump to **[Configure](#configure)**.
 
 > **Lower-footprint build:** add `--no-default-features` to drop the ONNX
-> embedding backend and fall back to the built-in 384-dim hash embedding —
+> embedding backend and use the built-in 384-dim hash-only backend —
 > a ~3× smaller binary with no model download. Memory and embedding APIs
 > work identically; semantic search quality is lower.
 
@@ -738,14 +738,15 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 
 ### Memory search / embeddings (operators & agents)
 
-Memories get a **model-aware local embedding** from `embed_text` in `ab-store`
-on every `memory_save` and every `memory_import` row — **no external embedding
-API**. With the default `onnx-embed` feature, the compiled default is
-`gte-multilingual-base` at 768 dimensions. Set `AGENT_BRIDGE_ONNX_MODEL` to
-`all-minilm`, `e5-small`, or `para-ml` for a supported 384-dim ONNX path. Set
-`AGENT_BRIDGE_EMBED_BACKEND=hash` to force the deterministic 384-dim
-`fnv1a-hash-384` fallback. Stored and query dimensions are checked against the
-active model rather than treated as a fixed constant.
+Memories get a model-aware embedding from the active local backend (`embed_text`
+in `ab-store`) on every `memory_save` and `memory_import` row — **no external
+embedding API**. With the default `onnx-embed` feature, the compiled default is
+`gte-multilingual-base` at 768 dimensions. `AGENT_BRIDGE_ONNX_MODEL=e5-small`,
+`all-minilm`, or `para-ml` selects a legacy 384-dimensional model. Set
+`AGENT_BRIDGE_EMBED_BACKEND=hash` to force the deterministic FNV-1a fallback;
+its output width follows the active `vector_dim()` (384 in a hash-only build,
+otherwise the selected model width). Treat `capabilities.memory.embedding`
+(`backend` + `dim`) as the runtime truth before migrating or reindexing a store.
 
 When you pass a `scope`, choose the recall boundary deliberately:
 

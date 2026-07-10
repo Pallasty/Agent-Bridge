@@ -21,6 +21,7 @@ pub mod bootstrap_bfs;
 pub mod bootstrap_transitions;
 pub mod brave_api;
 pub mod browser_lite;
+pub mod build_identity;
 pub mod c3_self_check;
 pub mod cloudflare_api;
 pub mod context_budget;

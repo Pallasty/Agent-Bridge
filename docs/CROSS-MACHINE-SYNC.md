@@ -1,9 +1,10 @@
-# Cross-machine memory sync
+# Cross-machine one-shot memory handoff
 
-One-shot push of memories (and the edges between them) from this machine to
-another over plain ssh + scp. No Tailscale required, no daemon, no schema
-migrations on the remote — a fresh host gets a `state.db` populated in one
-command.
+This page documents the specialized `scripts/sync-handoff.sh` push path over
+plain ssh + scp. It is useful for seeding a fresh host or moving a filtered
+slice without a shared forge. It is **not** the canonical multi-machine sync:
+`agent-bridge sync` is the current git-backed, bidirectional workflow and
+round-trips memories, edges, and forum state with version-vector merge.
 
 ## TL;DR
 
@@ -139,16 +140,13 @@ no TOCTOU window), and the count is reported back per import call.
 
 ### `embedding_backend`
 
-Each `memory_save` writes an embedding whose dimension matches the active
-backend. The same model-aware rule applies when import creates or re-embeds a
-row. Two local backends ship:
+Each `memory_save` writes a model-aware embedding alongside the row. Two
+built-in backends ship:
 
-- **ONNX**: the compiled default is `gte-multilingual-base` at 768 dimensions.
-  `all-minilm`, `e5-small`, and `para-ml` remain supported 384-dim selections
-  through `AGENT_BRIDGE_ONNX_MODEL`.
-- **hash** (FNV-1a hash projected to 384 dims): cheap, deterministic, no
-  semantic signal. Used as a fallback while ONNX init is in-flight, or as
-  a fast/offline mode.
+- **ONNX** (`fastembed`): compiled default `gte-multilingual-base` at 768
+  dimensions; e5/MiniLM/para-ml remain selectable 384-dimensional models.
+- **hash** (FNV-1a): cheap, deterministic, no semantic signal. Its vector
+  width follows the active model dimension, or 384 in a hash-only build.
 
 The script forces `hash` on the remote because:
 
@@ -255,4 +253,4 @@ Cross-platform expectations:
   call `memory_import` directly with `conflict_policy=newer_wins`. (Not
   exposed as a script flag yet.)
 
-[2n]: ../../../home/pallasting/.claude/projects/-Data-CascadeProjects-agent-bridge/memory/context_two_node_workflow_pattern.md
+[2n]: design/MS_TWO_NODE_WET_TEST_RUNBOOK_2026_05_24.md

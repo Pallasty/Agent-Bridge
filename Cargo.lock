@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ab-agent"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-core",
  "ab-store",
@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "ab-bridge"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-agent",
  "ab-browser",
@@ -57,7 +57,7 @@ dependencies = [
 
 [[package]]
 name = "ab-browser"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-core",
  "async-trait",
@@ -73,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "ab-core"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "ab-mcp"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-core",
  "ab-store",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "ab-memory-columnar"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-store",
  "arrow",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "ab-notifier"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-core",
  "async-trait",
@@ -125,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "ab-oob-alert"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "ab-store"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-core",
  "async-trait",
@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "ab-terminal"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-core",
  "async-stream",
@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "ab-tts"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "hound",
  "misaki-rs",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "ab-world-core"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -197,7 +197,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-cli"
-version = "0.1.0"
+version = "0.14.0"
 dependencies = [
  "ab-bridge",
  "ab-core",

@@ -8,6 +8,10 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Traceable build identity.** The CLI long version and MCP `capabilities`
+  now expose the package version plus `git describe` and a short source SHA.
+  Build environments without git report `unknown` honestly and can inject
+  `AGENT_BRIDGE_BUILD_DESCRIBE` / `AGENT_BRIDGE_BUILD_SHA` explicitly.
 - **`agent_session_output` slimming knobs** (`tail_bytes`, `strip_ansi`):
   optional, lossless trims for the heaviest recurring MCP payload
   (mcp_call_stats 30d: ~74 KB avg per read, full merged PTY transcript on
@@ -65,12 +69,19 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   `scripts/agent-bridge-release-truth-gate.py` compares the latest `v*` source
   marker and CHANGELOG release with Cargo/CLI/MCP version surfaces, confirms
   the source-only distribution policy, checks model-aware embedding docs, and
-  optionally summarizes workspace `cargo fmt --check` drift. It is read-only
-  and deliberately reports `NO_GO_VERSION_IDENTITY_DRIFT` while the release
-  marker and Cargo package version differ; choosing the next version, tagging,
-  and publication remain owner decisions. Embedding documentation now states
-  the compiled 768-dim GTE default and the supported 384-dim ONNX/hash paths
-  instead of describing every active embedding as fixed at 384 dimensions.
+  optionally summarizes workspace `cargo fmt --check` drift. Workspace crates
+  now report the latest released baseline (`0.14.0`) instead of the stale
+  `0.1.0`; unreleased builds remain distinguishable by `git describe` and source
+  SHA. Choosing the next version, creating a tag, and publication remain owner
+  decisions. README, sync, and evolution-core guidance now match the compiled
+  768-dimensional GTE default, model-aware hash fallback, existing
+  `EmbeddingBackend` trait, and native version-vector sync.
+
+### Fixed
+- **`work_memory` lifecycle semantics.** Saving a terminal status now clears
+  the addressed short-lived slot instead of persisting another database row as
+  `active`. Rows past their `ttl:Nd` tag are hidden consistently from list,
+  get, bootstrap, and cross-node peer views; WAIT/blocked lanes remain active.
 - **MCP tool-surface prune** (30-day all-source telemetry driven; 294 exposed
   / 94 with traffic → standard profile 145→96, profile-all 294→~215 on a
   typical host). Three mechanisms, each with an escape hatch:

@@ -1184,6 +1184,50 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn work_memory_lifecycle_and_ttl_classification_is_explicit() {
+        for status in [
+            "complete",
+            "completed",
+            "completed_pushed",
+            "resolved (#119)",
+            "done.",
+            "closed",
+            "finished",
+            "superseded",
+        ] {
+            assert!(work_memory_status_is_terminal(status), "{status}");
+        }
+        for status in ["active", "WAIT_VALUE_GATE", "blocked_owner", "paused"] {
+            assert!(!work_memory_status_is_terminal(status), "{status}");
+        }
+
+        let content = "# Finished lane\nstatus: completed_pushed\n";
+        assert_eq!(
+            work_memory_declared_status(&json!({"content": content}), content),
+            "completed_pushed"
+        );
+
+        let now = unix_now_secs();
+        let expired = MemoryRecord {
+            key: "expired-work-memory".to_string(),
+            kind: WORK_MEMORY_KIND.to_string(),
+            content: "status: active".to_string(),
+            tags: vec!["ttl:14d".to_string()],
+            related_keys: vec![],
+            scope: Some("project:/tmp/work-memory-expired".to_string()),
+            created_at: now - 15 * WORK_MEMORY_SECONDS_PER_DAY,
+            updated_at: now - 15 * WORK_MEMORY_SECONDS_PER_DAY,
+            last_accessed_at: now,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        assert!(!work_memory_is_live(&expired, now));
+    }
+
+    #[test]
     fn work_memory_list_fan_in_surfaces_alias_compatible_cross_node_lanes() {
         let mk = |key: &str, scope: &str, accessed: i64| MemoryRecord {
             key: key.to_string(),
@@ -1492,6 +1536,59 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .await
             .expect("clear ok");
         assert_eq!(result_json(&cleared)["deleted"], true);
+    }
+
+    #[tokio::test]
+    async fn work_memory_terminal_save_clears_the_addressed_slot() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let tool = WorkMemoryTool::new(hub);
+        let ctx = ToolContext::default();
+        let cwd = "/tmp/agent-bridge-work-memory-terminal";
+        let session_id = "terminal-session";
+
+        let saved = tool
+            .execute(
+                json!({
+                    "op": "save",
+                    "cwd": cwd,
+                    "session_id": session_id,
+                    "summary": "This lane is still active.",
+                }),
+                &ctx,
+            )
+            .await
+            .expect("save active slot");
+        assert_eq!(result_json(&saved)["saved"], true);
+
+        let terminal = tool
+            .execute(
+                json!({
+                    "op": "save",
+                    "cwd": cwd,
+                    "session_id": session_id,
+                    "status": "completed_pushed",
+                    "summary": "The lane has a durable checkpoint.",
+                }),
+                &ctx,
+            )
+            .await
+            .expect("terminal save clears slot");
+        let terminal = result_json(&terminal);
+        assert_eq!(terminal["saved"], false);
+        assert_eq!(terminal["cleared"], true);
+        assert_eq!(terminal["deleted"], true);
+
+        let key = work_memory_key(cwd, Some(session_id), WORK_MEMORY_DEFAULT_SLOT);
+        assert!(store.memory_get(&key).await.expect("store get").is_none());
+        let listed = tool
+            .execute(json!({"op": "list", "cwd": cwd, "compact": true}), &ctx)
+            .await
+            .expect("list after terminal save");
+        assert!(result_json(&listed)["rows"]
+            .as_array()
+            .expect("rows")
+            .is_empty());
     }
 
     #[tokio::test]

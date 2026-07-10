@@ -2,10 +2,10 @@
 //!
 //! This module provides the two **built-in** embedding implementations:
 //!
-//! 1. **ONNX** (`onnx-embed` feature, default): `gte-multilingual-base` is the
-//!    compiled 768-dim default; selected MiniLM/e5/para models remain 384-dim.
-//! 2. **Hash fallback**: FNV-1a feature hashing (unigrams + bigrams). 384-dim,
-//!    no external deps, deterministic.
+//! 1. **ONNX** (`onnx-embed` feature, default): `gte-multilingual-base` at 768
+//!    dimensions. The 384-dimensional e5/MiniLM/para-ml models remain selectable.
+//! 2. **Hash fallback**: FNV-1a feature hashing (unigrams + bigrams), sized to
+//!    the active [`vector_dim`]; no external dependencies and deterministic.
 //!
 //! Both paths produce unit vectors so cosine similarity is consistent
 //! regardless of which path ran. The canonical dimension is **model-aware**:
@@ -428,8 +428,8 @@ pub fn decode_embedding(bytes: &[u8]) -> Vec<f32> {
 
 // ── Hash fallback ─────────────────────────────────────────────────────────
 
-/// FNV-1a feature-hash embedding: 384-dim, no external dependencies.
-/// Used when the ONNX backend is unavailable.
+/// FNV-1a feature-hash embedding sized to [`vector_dim`], with no external
+/// dependencies. Used when the ONNX backend is unavailable.
 pub fn embed_text_hash(text: &str) -> Vec<f32> {
     let tokens = tokenize(text);
     let dim = vector_dim();

@@ -69,7 +69,12 @@ mod shadow_cortex;
 use ab_bridge::sync;
 
 #[derive(Parser, Debug)]
-#[command(version, about = "agent-bridge — Unix-native AI agent control plane")]
+#[command(
+    name = "agent-bridge",
+    version = ab_bridge::build_identity::PACKAGE_VERSION,
+    long_version = ab_bridge::build_identity::LONG_VERSION,
+    about = "agent-bridge — Unix-native AI agent control plane"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,

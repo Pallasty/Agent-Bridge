@@ -3,8 +3,8 @@
 //! Lets agent-bridge swap the inference kernel without touching call sites.
 //! The current built-ins are:
 //!
-//! - [`OnnxBackend`] — `all-MiniLM-L6-v2` via `fastembed` + `ort` (default
-//!   when the `onnx-embed` feature is enabled).
+//! - [`OnnxBackend`] — model-aware `fastembed` + `ort`; the compiled default
+//!   is 768-dimensional `gte-multilingual-base` when `onnx-embed` is enabled.
 //! - [`HashBackend`] — FNV-1a feature hashing (no external deps; default
 //!   fallback).
 //!
@@ -88,7 +88,8 @@ pub trait EmbeddingBackend: Send + Sync {
 // ── Built-in: hash ────────────────────────────────────────────────────────
 
 /// FNV-1a feature-hash backend. No external dependencies, deterministic,
-/// fast (~10 μs / call). Used as fallback when ONNX is unavailable.
+/// fast (~10 μs / call). Its stable name is retained for store compatibility;
+/// [`Self::dim`] and the emitted vector follow the active model-aware dimension.
 pub struct HashBackend;
 
 impl EmbeddingBackend for HashBackend {
@@ -105,10 +106,10 @@ impl EmbeddingBackend for HashBackend {
 
 // ── Built-in: ONNX ────────────────────────────────────────────────────────
 
-/// `all-MiniLM-L6-v2` via `fastembed`. 384-dim sentence embeddings; model
-/// downloads on first use to `~/.cache/fastembed/`. Falls back to
-/// [`HashBackend`] silently if the model fails to load (e.g. network down
-/// on first call).
+/// Model-aware local ONNX sentence embeddings via `fastembed`. The compiled
+/// default is `gte-multilingual-base` at 768 dimensions; 384-dimensional
+/// e5/MiniLM/para-ml variants are selectable by environment. Falls back to
+/// [`HashBackend`] if the model fails to load.
 pub struct OnnxBackend;
 
 impl EmbeddingBackend for OnnxBackend {
