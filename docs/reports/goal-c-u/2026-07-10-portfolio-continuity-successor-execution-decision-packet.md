@@ -2,9 +2,11 @@
 
 Date: 2026-07-10
 
-Status: **GATE CLOSED / NOT EXECUTED**. This is a read-only decision packet.
-It does not authorize or perform a real capture, model invocation, review,
-unblinding, scoring, runtime change, CI action, release, tag, or version change.
+Status: **CAPTURE VALID / GENERATION GATE CLOSED**. The read-only real capture
+has completed and is recorded in
+`2026-07-10-portfolio-continuity-successor-capture-result.md`. No model
+invocation, review, unblinding, scoring, runtime change, CI action, release,
+tag, or version change has occurred.
 
 ## Frozen Implementation
 
@@ -17,8 +19,10 @@ unblinding, scoring, runtime change, CI action, release, tag, or version change.
 | surface SHA-256 | `0ff5ab27b79d36169fee22b5de5f2c4563cb1ba0f6edebf354a17cfcb60e6311` |
 | canonical execution-worktree path SHA-256 | `70680947cae27b8b6d4650c3f905fa8379686bf7e465fa1baf3803a33bbc4935` |
 
-The designated worktree is clean, detached at the implementation commit, and
-contains no copied private trial input as part of this checkpoint.
+The designated worktree remains detached at the implementation commit. Its
+ignored private directory now contains the mode-restricted frozen input, spec,
+runtime binary copy, raw capture, redacted capture, and command receipt. None is
+tracked by Git.
 
 ## Completed Non-Execution Checks
 
@@ -26,22 +30,22 @@ contains no copied private trial input as part of this checkpoint.
 - The complete local synthetic verifier passes v0, v1, and v2.
 - V2 adversarial coverage includes both whitespace-only private-spec changes
   and a same-commit alternate worktree; each is stopped before a model call.
-- A separate read-only audit found no remaining blocker in the worktree-binding
-  fix. That audit did not inspect `data/` and does not satisfy the required
-  external independent code review.
+- Separately scoped read-only audits found and closed the spec-byte and
+  alternate-worktree retry blockers; the final audit reported no blocker.
+- The real capture validates against the frozen contract and has exact status
+  `VALID` for all twelve reference-coverage cases.
+- The capture performed 24 isolated condition runs, wrote no live memory, and
+  called no LLM.
 
 ## Remaining Hard Gates
 
-1. An external independent reviewer must inspect implementation commit
-   `e5c985d4` without reading private `data/`.
-2. The owner must explicitly authorize a real private capture after that review.
-   Capture reads the scoped private store but does not call an LLM.
-3. After a valid capture and its coverage gate, the owner must separately
-   authorize generation. Generation would invoke the fixed Codex matrix once;
-   it is not implied by capture authorization.
-4. The operator must recheck the frozen commit, all hashes, canonical-worktree
-   path hash, binary identities, MCP availability, disk space, process state,
-   and ignored/private output paths immediately before either authorized step.
+1. No external third-party code review has completed. That remains a generation
+   gate even though separately scoped internal read-only audits passed.
+2. Generation requires a separate decision because it would invoke the fixed
+   Codex matrix 24 times and is not treated as reversible.
+3. Immediately before generation, the operator must recheck the frozen commit,
+   hashes, canonical-worktree path, Codex identity, disk/process state, fresh
+   private output paths, and the absence of prior attempt claims.
 
 ## Trust Boundary
 

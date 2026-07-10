@@ -24,8 +24,10 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   regression plus v2 adversarial verification
   covers coverage failure, projection, identity restart, claim replay, marker
   leakage, byte-preserving answers, blinding, review, and scoring. The successor
-  trial is preregistered but not executed and does not authorize CI, release,
-  versioning, tagging, runtime promotion, or digest writes.
+  protocol's first real read-only capture passed all twelve reference-coverage
+  cases with ten unique hits each and no live-store write or model call.
+  Generation remains unexecuted and separately gated. Neither result authorizes
+  CI, release, versioning, tagging, runtime promotion, or digest writes.
 - **Expanded blinded portfolio-continuity answer gate.** A backward-compatible
   v1 contract narrows the comparison to full hybrid retrieval and direct
   digest across twelve frozen prompts, six strata, explicit insufficiency
