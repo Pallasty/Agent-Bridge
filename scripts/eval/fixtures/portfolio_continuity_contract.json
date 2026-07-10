@@ -1,0 +1,75 @@
+{
+  "schema": "agent_bridge.portfolio_continuity_eval_fixture.v0",
+  "fixture_id": "synthetic_portfolio_continuity_contract_20260710",
+  "description": "Synthetic contract fixture only. It is not an Agent-Bridge product-quality corpus or benchmark score.",
+  "thresholds": {
+    "min_supported_claim_coverage": 1.0,
+    "min_evidence_precision": 1.0,
+    "max_stale_evidence_refs": 0,
+    "max_unknown_evidence_refs": 0,
+    "max_unsupported_claims": 0,
+    "max_forbidden_claims": 0,
+    "max_unsupported_evidence_claims": 0,
+    "require_all_cases_pass": true,
+    "require_all_abstention_cases_pass": true
+  },
+  "cases": [
+    {
+      "case_id": "project_status",
+      "prompt_class": "portfolio_status",
+      "as_of": 300,
+      "requires_abstention": false,
+      "evidence_catalog": [
+        { "key": "syn_goal_v1", "status": "superseded", "valid_from": 10, "valid_until": 199 },
+        { "key": "syn_goal_v2", "status": "active", "valid_from": 200, "valid_until": null },
+        { "key": "syn_completed_checkpoint", "status": "active", "valid_from": 210, "valid_until": null },
+        { "key": "syn_current_blocker", "status": "active", "valid_from": 220, "valid_until": null },
+        { "key": "syn_next_action", "status": "active", "valid_from": 230, "valid_until": null },
+        { "key": "syn_optional_risk", "status": "active", "valid_from": 240, "valid_until": null }
+      ],
+      "required_claims": [
+        { "claim_id": "current_goal", "weight": 2.0, "accepted_evidence_keys": ["syn_goal_v2"] },
+        { "claim_id": "completed_checkpoint", "weight": 1.0, "accepted_evidence_keys": ["syn_completed_checkpoint"] },
+        { "claim_id": "current_blocker", "weight": 2.0, "accepted_evidence_keys": ["syn_current_blocker"] },
+        { "claim_id": "next_action", "weight": 1.0, "accepted_evidence_keys": ["syn_next_action"] }
+      ],
+      "optional_claims": [
+        { "claim_id": "current_risk", "weight": 1.0, "accepted_evidence_keys": ["syn_optional_risk"] }
+      ],
+      "forbidden_claim_ids": ["release_complete", "revive_superseded_goal"]
+    },
+    {
+      "case_id": "project_retrospective",
+      "prompt_class": "retrospective",
+      "as_of": 500,
+      "requires_abstention": false,
+      "evidence_catalog": [
+        { "key": "syn_problem", "status": "active", "valid_from": 400, "valid_until": null },
+        { "key": "syn_disproven_direction", "status": "active", "valid_from": 410, "valid_until": null },
+        { "key": "syn_unexpected_result", "status": "active", "valid_from": 420, "valid_until": null },
+        { "key": "syn_retrospective_next", "status": "active", "valid_from": 430, "valid_until": null },
+        { "key": "syn_obsolete_plan", "status": "archived", "valid_from": 300, "valid_until": 399 }
+      ],
+      "required_claims": [
+        { "claim_id": "problem_encountered", "weight": 1.0, "accepted_evidence_keys": ["syn_problem"] },
+        { "claim_id": "disproven_direction", "weight": 1.0, "accepted_evidence_keys": ["syn_disproven_direction"] },
+        { "claim_id": "unexpected_result", "weight": 1.0, "accepted_evidence_keys": ["syn_unexpected_result"] },
+        { "claim_id": "retrospective_next", "weight": 1.0, "accepted_evidence_keys": ["syn_retrospective_next"] }
+      ],
+      "optional_claims": [],
+      "forbidden_claim_ids": ["revive_rejected_path", "present_obsolete_plan_as_current"]
+    },
+    {
+      "case_id": "insufficient_evidence",
+      "prompt_class": "abstention",
+      "as_of": 700,
+      "requires_abstention": true,
+      "evidence_catalog": [
+        { "key": "syn_partial_signal", "status": "active", "valid_from": 600, "valid_until": null }
+      ],
+      "required_claims": [],
+      "optional_claims": [],
+      "forbidden_claim_ids": ["invented_status", "invented_next_action"]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schema": "agent_bridge.portfolio_continuity_candidate.v0",
+  "candidate_id": "synthetic_contract_pass",
+  "condition": "reviewed_evidence_digest",
+  "cases": [
+    {
+      "case_id": "project_status",
+      "abstained": false,
+      "context_tokens": 420,
+      "latency_ms": 18.5,
+      "claims": [
+        { "claim_id": "current_goal", "confidence": "supported", "evidence_keys": ["syn_goal_v2"] },
+        { "claim_id": "completed_checkpoint", "confidence": "supported", "evidence_keys": ["syn_completed_checkpoint"] },
+        { "claim_id": "current_blocker", "confidence": "supported", "evidence_keys": ["syn_current_blocker"] },
+        { "claim_id": "next_action", "confidence": "supported", "evidence_keys": ["syn_next_action"] },
+        { "claim_id": "current_risk", "confidence": "supported", "evidence_keys": ["syn_optional_risk"] }
+      ]
+    },
+    {
+      "case_id": "project_retrospective",
+      "abstained": false,
+      "context_tokens": 510,
+      "latency_ms": 22.0,
+      "claims": [
+        { "claim_id": "problem_encountered", "confidence": "supported", "evidence_keys": ["syn_problem"] },
+        { "claim_id": "disproven_direction", "confidence": "supported", "evidence_keys": ["syn_disproven_direction"] },
+        { "claim_id": "unexpected_result", "confidence": "supported", "evidence_keys": ["syn_unexpected_result"] },
+        { "claim_id": "retrospective_next", "confidence": "supported", "evidence_keys": ["syn_retrospective_next"] }
+      ]
+    },
+    {
+      "case_id": "insufficient_evidence",
+      "abstained": true,
+      "context_tokens": 80,
+      "latency_ms": 4.0,
+      "claims": [
+        { "claim_id": "insufficient_evidence", "confidence": "abstained", "evidence_keys": [] }
+      ]
+    }
+  ]
+}

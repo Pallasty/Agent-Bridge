@@ -8,6 +8,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Portfolio continuity evaluation contract.** A standalone no-write scorer
+  now measures structured project-status/retrospective evidence packets by
+  supported required-claim coverage, current evidence precision, stale or
+  unknown references, forbidden/unsupported claims, abstention, token cost,
+  and latency. Synthetic fixtures and adversarial verifier cases establish the
+  contract without calling retrieval/LLMs, reading or writing the AB store,
+  emitting raw evidence keys, or claiming live digest quality.
 - **Traceable build identity.** The CLI long version and MCP `capabilities`
   now expose the package version plus `git describe` and a short source SHA.
   Build environments without git report `unknown` honestly and can inject

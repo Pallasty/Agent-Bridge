@@ -65,6 +65,24 @@ mode=bootstrap telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Maturation gate for a parked lane, not a regression component;
 it never touches baselines. Run: `python3 scripts/eval/ambient_gate.py`.
 
+`portfolio_continuity_eval.py` — deterministic, no-write scorer for redacted
+portfolio/session digest evidence packets. It measures required supported-claim
+coverage, current evidence precision, stale/unknown evidence, forbidden or
+unsupported claims, correct abstention, token cost, and latency. Claim ids are
+review labels supplied by an upstream adapter or reviewer. This scorer is not a
+natural-language judge.
+Candidate objects use strict field whitelists, bounded claim/evidence labels,
+unique JSON fields, and finite numeric diagnostics. It does not call retrieval,
+an LLM, or the AB store.
+It is contract-only and does not enter the daily baseline yet. Run:
+
+```bash
+python3 scripts/eval/portfolio_continuity_eval.py \
+  --fixture scripts/eval/fixtures/portfolio_continuity_contract.json \
+  --candidate scripts/eval/fixtures/portfolio_continuity_candidate_pass.json \
+  --strict
+```
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
