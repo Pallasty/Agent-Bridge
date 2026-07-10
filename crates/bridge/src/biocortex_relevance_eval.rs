@@ -211,7 +211,11 @@ pub fn aggregate_lift(samples: &[SampleLift]) -> AggregateLift {
         .iter()
         .filter(|s| s.baseline.rank_of_source.is_some())
         .count();
-    let mrr_baseline = samples.iter().map(|s| s.baseline.reciprocal_rank).sum::<f64>() / nf;
+    let mrr_baseline = samples
+        .iter()
+        .map(|s| s.baseline.reciprocal_rank)
+        .sum::<f64>()
+        / nf;
     let mrr_reordered = samples
         .iter()
         .map(|s| s.reordered.reciprocal_rank)

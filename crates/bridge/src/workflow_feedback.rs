@@ -7,9 +7,9 @@
 //! influence.
 
 use ab_store::{McpToolCallStats, StateStore};
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -3418,11 +3418,9 @@ mod tests {
             report.experience_object_fixture["promotion"]["runtime_influence_allowed"],
             false
         );
-        assert!(
-            report
-                .render_markdown()
-                .contains("## Experience Object v0 Fixture")
-        );
+        assert!(report
+            .render_markdown()
+            .contains("## Experience Object v0 Fixture"));
     }
 
     #[test]
@@ -3674,10 +3672,9 @@ mod tests {
             None,
         )
         .expect_err("wrong schema must fail");
-        assert!(
-            err.to_string()
-                .contains("expected agent_bridge.experience.v0")
-        );
+        assert!(err
+            .to_string()
+            .contains("expected agent_bridge.experience.v0"));
     }
 
     fn two_scenario_shadow_score_value() -> Value {
@@ -3782,7 +3779,7 @@ mod tests {
             vec![baseline],
             WorkflowFeedbackBaselineEvidenceOptions {
                 rollback_refs: vec![
-                    "rollback:disable promoted workflow feedback artifact".to_string(),
+                    "rollback:disable promoted workflow feedback artifact".to_string()
                 ],
             },
         )
@@ -3870,7 +3867,7 @@ mod tests {
             vec![baseline],
             WorkflowFeedbackBaselineEvidenceOptions {
                 rollback_refs: vec![
-                    "rollback:disable promoted workflow feedback artifact".to_string(),
+                    "rollback:disable promoted workflow feedback artifact".to_string()
                 ],
             },
         )
@@ -3897,10 +3894,9 @@ mod tests {
             None,
         )
         .expect_err("wrong schema must fail");
-        assert!(
-            err.to_string()
-                .contains("expected agent_bridge.workflow_feedback_baseline_observations.v0")
-        );
+        assert!(err
+            .to_string()
+            .contains("expected agent_bridge.workflow_feedback_baseline_observations.v0"));
     }
 
     #[test]
@@ -3923,7 +3919,7 @@ mod tests {
             vec![baseline_fixture],
             WorkflowFeedbackBaselineEvidenceOptions {
                 rollback_refs: vec![
-                    "rollback:disable promoted workflow feedback artifact".to_string(),
+                    "rollback:disable promoted workflow feedback artifact".to_string()
                 ],
             },
         )
@@ -4082,7 +4078,7 @@ mod tests {
             vec![baseline_fixture],
             WorkflowFeedbackBaselineEvidenceOptions {
                 rollback_refs: vec![
-                    "rollback:disable promoted workflow feedback artifact".to_string(),
+                    "rollback:disable promoted workflow feedback artifact".to_string()
                 ],
             },
         )
@@ -4131,7 +4127,7 @@ mod tests {
             Some("owner-review.json".to_string()),
             WorkflowFeedbackPromotionRecordOptions {
                 owner_approval_refs: vec![
-                    "user:owner approved docs-memory-runbook promotion".to_string(),
+                    "user:owner approved docs-memory-runbook promotion".to_string()
                 ],
                 rollback_refs: vec!["rollback:remove docs and archive memory key".to_string()],
                 promotion_scopes: vec![
@@ -4278,10 +4274,9 @@ mod tests {
             None,
         )
         .expect_err("wrong schema must fail");
-        assert!(
-            err.to_string()
-                .contains("expected agent_bridge.workflow_feedback_shadow_score_scenarios.v0")
-        );
+        assert!(err
+            .to_string()
+            .contains("expected agent_bridge.workflow_feedback_shadow_score_scenarios.v0"));
     }
 
     #[test]
@@ -4332,7 +4327,7 @@ mod tests {
                 owner_approval_refs: vec!["forum:#108-owner-review".to_string()],
                 rollback_refs: vec!["git revert 7d3d01d".to_string()],
                 behavior_lift_refs: vec![
-                    "metric: held-out recovery path 2/2 top-ranked".to_string(),
+                    "metric: held-out recovery path 2/2 top-ranked".to_string()
                 ],
                 min_shadow_reports: 2,
                 min_scenarios: 2,
@@ -4358,10 +4353,9 @@ mod tests {
             None,
         )
         .expect_err("wrong schema must fail");
-        assert!(
-            err.to_string()
-                .contains("expected agent_bridge.workflow_feedback_shadow_score.v0")
-        );
+        assert!(err
+            .to_string()
+            .contains("expected agent_bridge.workflow_feedback_shadow_score.v0"));
     }
 
     fn two_case_scenario_fixture() -> ShadowScoreScenarioFixture {

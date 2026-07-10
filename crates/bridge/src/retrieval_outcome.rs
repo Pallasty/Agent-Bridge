@@ -351,7 +351,8 @@ pub async fn run_apply_pass(
             content: format!(
                 "retrieval_outcome_apply rollback map ({} rows)\n```json\n{}\n```",
                 changes.len(),
-                serde_json::to_string_pretty(&audit_body).unwrap_or_else(|_| audit_body.to_string())
+                serde_json::to_string_pretty(&audit_body)
+                    .unwrap_or_else(|_| audit_body.to_string())
             ),
             tags: vec![
                 "retrieval_outcome".to_string(),

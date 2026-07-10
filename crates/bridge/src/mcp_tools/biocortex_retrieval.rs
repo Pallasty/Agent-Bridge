@@ -499,12 +499,19 @@ impl McpTool for TriggerRecallOptInStatusTool {
             .unwrap_or(false)
             || mcp_env_truthy(TRIGGER_RECALL_DISABLE_ENV);
         let payload = trigger_recall_opt_in_status(TriggerRecallOptInStatusOptions {
-            mode: args.get("mode").and_then(Value::as_str).unwrap_or("fts").to_string(),
+            mode: args
+                .get("mode")
+                .and_then(Value::as_str)
+                .unwrap_or("fts")
+                .to_string(),
             per_call_opt_in: args
                 .get("per_call_opt_in")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-            scope: args.get("scope").and_then(Value::as_str).map(str::to_string),
+            scope: args
+                .get("scope")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             scope_mode: args
                 .get("scope_mode")
                 .and_then(Value::as_str)
@@ -613,12 +620,19 @@ impl McpTool for TriggerRecallOptInRuntimeTransitionGateTool {
         let payload = trigger_recall_opt_in_runtime_transition_gate(
             TriggerRecallOptInRuntimeTransitionGateOptions {
                 status_packet: args.get("status_packet").cloned().unwrap_or(Value::Null),
-                mode: args.get("mode").and_then(Value::as_str).unwrap_or("fts").to_string(),
+                mode: args
+                    .get("mode")
+                    .and_then(Value::as_str)
+                    .unwrap_or("fts")
+                    .to_string(),
                 per_call_opt_in: args
                     .get("per_call_opt_in")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
-                scope: args.get("scope").and_then(Value::as_str).map(str::to_string),
+                scope: args
+                    .get("scope")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 scope_mode: args
                     .get("scope_mode")
                     .and_then(Value::as_str)
@@ -630,8 +644,14 @@ impl McpTool for TriggerRecallOptInRuntimeTransitionGateTool {
                     .map(str::to_string),
                 runtime_enabled: mcp_env_truthy(TRIGGER_RECALL_OPT_IN_ENABLE_ENV),
                 operator_disabled,
-                reviewer: args.get("reviewer").and_then(Value::as_str).map(str::to_string),
-                commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
+                reviewer: args
+                    .get("reviewer")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                commit: args
+                    .get("commit")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 forum_post_id: args
                     .get("forum_post_id")
                     .and_then(Value::as_str)
@@ -772,7 +792,10 @@ impl McpTool for TriggerRecallOptInGatedBaselineTrialTool {
             .and_then(Value::as_str)
             .unwrap_or("fts")
             .to_string();
-        let scope = args.get("scope").and_then(Value::as_str).map(str::to_string);
+        let scope = args
+            .get("scope")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let scope_mode = args
             .get("scope_mode")
             .and_then(Value::as_str)
@@ -788,8 +811,14 @@ impl McpTool for TriggerRecallOptInGatedBaselineTrialTool {
             .unwrap_or(false)
             || mcp_env_truthy(TRIGGER_RECALL_DISABLE_ENV);
         let raw_payload_fields_present = trigger_recall_trial_unexpected_raw_fields(&args);
-        let attempt_id = args.get("attempt_id").and_then(Value::as_str).map(str::to_string);
-        let commit = args.get("commit").and_then(Value::as_str).map(str::to_string);
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
 
         let base_options = TriggerRecallOptInGatedBaselineTrialOptions {
             runtime_transition_gate,
@@ -834,19 +863,22 @@ impl McpTool for TriggerRecallOptInGatedBaselineTrialTool {
         } else {
             limit
         } as u32;
-        match store.memory_search(&options.query, &tags_any, search_limit).await {
+        match store
+            .memory_search(&options.query, &tags_any, search_limit)
+            .await
+        {
             Ok(mut hits) => {
                 if let Some(scope) = options.scope.as_deref() {
-                    hits =
-                        memory_search_apply_scope_mode(hits, scope, MemorySearchScopeMode::LocalOnly);
+                    hits = memory_search_apply_scope_mode(
+                        hits,
+                        scope,
+                        MemorySearchScopeMode::LocalOnly,
+                    );
                 }
                 hits.truncate(limit as usize);
                 options.baseline_search_called = true;
-                options.baseline_hits = Some(
-                    hits.iter()
-                        .map(trigger_recall_baseline_trial_hit)
-                        .collect(),
-                );
+                options.baseline_hits =
+                    Some(hits.iter().map(trigger_recall_baseline_trial_hit).collect());
             }
             Err(_) => {
                 options.baseline_search_called = true;
@@ -997,7 +1029,10 @@ impl McpTool for TriggerRecallOptInPrePolicyHoldSimulationTool {
             .and_then(Value::as_str)
             .unwrap_or("fts")
             .to_string();
-        let scope = args.get("scope").and_then(Value::as_str).map(str::to_string);
+        let scope = args
+            .get("scope")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let scope_mode = args
             .get("scope_mode")
             .and_then(Value::as_str)
@@ -1016,14 +1051,17 @@ impl McpTool for TriggerRecallOptInPrePolicyHoldSimulationTool {
             .and_then(Value::as_bool)
             .unwrap_or(false)
             || mcp_env_truthy(TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE_ENV);
-        let attempt_id = args.get("attempt_id").and_then(Value::as_str).map(str::to_string);
-        let commit = args.get("commit").and_then(Value::as_str).map(str::to_string);
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
 
         let base_options = TriggerRecallPrePolicyHoldSimulationOptions {
-            approval_packet: args
-                .get("approval_packet")
-                .cloned()
-                .unwrap_or(Value::Null),
+            approval_packet: args.get("approval_packet").cloned().unwrap_or(Value::Null),
             query,
             tags_count: tags_any.len(),
             limit,
@@ -1070,7 +1108,10 @@ impl McpTool for TriggerRecallOptInPrePolicyHoldSimulationTool {
         } else {
             limit
         } as u32;
-        match store.memory_search(&options.query, &tags_any, search_limit).await {
+        match store
+            .memory_search(&options.query, &tags_any, search_limit)
+            .await
+        {
             Ok(mut hits) => {
                 if exact_local_scope {
                     if let Some(scope) = options.scope.as_deref() {
@@ -1083,11 +1124,8 @@ impl McpTool for TriggerRecallOptInPrePolicyHoldSimulationTool {
                 }
                 hits.truncate(limit as usize);
                 options.baseline_search_called = true;
-                options.baseline_hits = Some(
-                    hits.iter()
-                        .map(trigger_recall_baseline_trial_hit)
-                        .collect(),
-                );
+                options.baseline_hits =
+                    Some(hits.iter().map(trigger_recall_baseline_trial_hit).collect());
             }
             Err(_) => {
                 options.baseline_search_called = true;
@@ -1249,12 +1287,17 @@ impl McpTool for TriggerRecallOptInGatedBatchDiagnosticsTool {
                     .get("reviewer")
                     .and_then(Value::as_str)
                     .map(str::to_string),
-                commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
+                commit: args
+                    .get("commit")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 forum_post_id: args
                     .get("forum_post_id")
                     .and_then(Value::as_str)
                     .map(str::to_string),
-                raw_payload_fields_present: trigger_recall_gated_batch_outer_args_contain_raw(&args),
+                raw_payload_fields_present: trigger_recall_gated_batch_outer_args_contain_raw(
+                    &args,
+                ),
             },
         );
         Ok(ToolResult::json_text(&payload))
@@ -2424,8 +2467,7 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
             .unwrap_or(Value::Null);
         let redacted_evidence_aggregate = args.get("redacted_evidence_aggregate").cloned();
         let evidence_summary = args.get("evidence_summary").cloned();
-        let capability_ledger_report_packet =
-            args.get("capability_ledger_report_packet").cloned();
+        let capability_ledger_report_packet = args.get("capability_ledger_report_packet").cloned();
         let reviewer = args
             .get("reviewer")
             .and_then(Value::as_str)

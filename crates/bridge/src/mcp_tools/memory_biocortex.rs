@@ -312,7 +312,8 @@ impl McpTool for MemoryBioCortexShadowTrialTool {
 
 pub(super) const MEMORY_BIOCORTEX_T6_INFLUENCE_GATE_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_influence_gate.v0";
-pub(super) const MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA: &str = "agent_bridge.memory_biocortex_shadow_trial.v0";
+pub(super) const MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_shadow_trial.v0";
 pub(super) const MEMORY_BIOCORTEX_RECALL_EXPANSION_SUMMARY_SCHEMA: &str =
     "agent_bridge.memory_biocortex.recall_expansion_summary.v0";
 pub(super) const BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA_LOCAL: &str =
@@ -564,8 +565,7 @@ impl McpTool for MemoryBioCortexRedactedEvidenceAggregateTool {
 }
 
 pub(super) fn memory_biocortex_relevance_lift_summary_payload(payload: Value) -> Value {
-    let class_aggregates =
-        memory_biocortex_relevance_lift_summary_class_aggregates(&payload);
+    let class_aggregates = memory_biocortex_relevance_lift_summary_class_aggregates(&payload);
     let mut summary = json!({
         "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
         "generated_at": payload.get("generated_at").cloned().unwrap_or(Value::Null),
@@ -707,7 +707,10 @@ pub(super) fn memory_biocortex_recall_expansion_strip_frontmatter(content: &str)
     trimmed
 }
 
-pub(super) fn memory_biocortex_recall_expansion_derive_query(content: &str, max_chars: usize) -> String {
+pub(super) fn memory_biocortex_recall_expansion_derive_query(
+    content: &str,
+    max_chars: usize,
+) -> String {
     let body = memory_biocortex_recall_expansion_strip_frontmatter(content);
     let cleaned = body
         .chars()
@@ -723,7 +726,10 @@ pub(super) fn memory_biocortex_recall_expansion_derive_query(content: &str, max_
         .collect()
 }
 
-pub(super) fn memory_biocortex_recall_expansion_neighbor_key(edge: &MemoryEdge, source_key: &str) -> Option<String> {
+pub(super) fn memory_biocortex_recall_expansion_neighbor_key(
+    edge: &MemoryEdge,
+    source_key: &str,
+) -> Option<String> {
     if edge.from_key == source_key {
         Some(edge.to_key.clone())
     } else if edge.to_key == source_key {
@@ -752,8 +758,7 @@ pub(super) async fn memory_biocortex_recall_expansion_graph_holdout_cases(
         }
         let edges = store.memory_neighbors(&rec.key).await.unwrap_or_default();
         for edge in edges {
-            let Some(target_key) =
-                memory_biocortex_recall_expansion_neighbor_key(&edge, &rec.key)
+            let Some(target_key) = memory_biocortex_recall_expansion_neighbor_key(&edge, &rec.key)
             else {
                 continue;
             };
@@ -817,7 +822,10 @@ pub(super) fn memory_biocortex_recall_expansion_first_relevant_position(
         .map(|idx| idx + 1)
 }
 
-pub(super) fn memory_biocortex_recall_expansion_class_row(class_label: String, rows: &[Value]) -> Value {
+pub(super) fn memory_biocortex_recall_expansion_class_row(
+    class_label: String,
+    rows: &[Value],
+) -> Value {
     let evaluated_count = rows.len() as u64;
     let search_error_count = rows
         .iter()
@@ -1060,11 +1068,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             let class_label =
                 memory_biocortex_recall_expansion_class_label(case.class_label.as_deref());
             let query_hash = memory_biocortex_sha256_json(&json!({"query": case.query}));
-            let relevant = case
-                .relevant_keys
-                .iter()
-                .cloned()
-                .collect::<BTreeSet<_>>();
+            let relevant = case.relevant_keys.iter().cloned().collect::<BTreeSet<_>>();
 
             let baseline_hits = match store.memory_search(&case.query, &[], limit).await {
                 Ok(hits) => hits,
@@ -1113,15 +1117,17 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 .map(|hit| hit.record.key.clone())
                 .collect::<Vec<_>>();
             let baseline_key_set = baseline_keys.iter().cloned().collect::<BTreeSet<_>>();
-            let baseline_relevant_count =
-                relevant.intersection(&baseline_key_set).count() as u64;
+            let baseline_relevant_count = relevant.intersection(&baseline_key_set).count() as u64;
 
             let mut graph_neighbor_row_count = 0u64;
             let mut graph_neighbor_keys = BTreeSet::<String>::new();
             let mut graph_neighbor_ordered = Vec::<String>::new();
             let mut graph_neighbor_seen = BTreeSet::<String>::new();
             for hit in &baseline_hits {
-                let edges = store.memory_neighbors(&hit.record.key).await.unwrap_or_default();
+                let edges = store
+                    .memory_neighbors(&hit.record.key)
+                    .await
+                    .unwrap_or_default();
                 for edge in edges.into_iter().take(neighbor_limit) {
                     graph_neighbor_row_count += 1;
                     if let Some(neighbor_key) =
@@ -1135,8 +1141,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 }
             }
 
-            let graph_relevant_count =
-                relevant.intersection(&graph_neighbor_keys).count() as u64;
+            let graph_relevant_count = relevant.intersection(&graph_neighbor_keys).count() as u64;
             let mut expanded_keys = baseline_keys.clone();
             let mut expanded_seen = baseline_key_set.clone();
             for neighbor_key in &graph_neighbor_ordered {
@@ -1145,8 +1150,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 }
             }
             let expanded_key_set = expanded_keys.iter().cloned().collect::<BTreeSet<_>>();
-            let expanded_relevant_count =
-                relevant.intersection(&expanded_key_set).count() as u64;
+            let expanded_relevant_count = relevant.intersection(&expanded_key_set).count() as u64;
             let expanded_first_relevant_position =
                 memory_biocortex_recall_expansion_first_relevant_position(
                     &expanded_keys,
@@ -1492,7 +1496,10 @@ pub(super) fn memory_biocortex_t6_string_array_at(value: &Value, path: &str) -> 
         .unwrap_or_default()
 }
 
-pub(super) fn memory_biocortex_t6_rate(numerator: Option<u64>, denominator: Option<u64>) -> Option<f64> {
+pub(super) fn memory_biocortex_t6_rate(
+    numerator: Option<u64>,
+    denominator: Option<u64>,
+) -> Option<f64> {
     match (numerator, denominator) {
         (Some(numerator), Some(denominator)) if denominator > 0 => {
             Some(numerator as f64 / denominator as f64)
@@ -1506,9 +1513,15 @@ pub(super) fn memory_biocortex_t6_push_reason(reasons: &mut BTreeSet<String>, re
 }
 
 pub(super) fn memory_biocortex_t6_has_raw_payload_fields(value: &Value) -> bool {
-    ["raw_query", "raw_key", "raw_keys", "baseline_keys", "content"]
-        .iter()
-        .any(|field| value.get(*field).is_some())
+    [
+        "raw_query",
+        "raw_key",
+        "raw_keys",
+        "baseline_keys",
+        "content",
+    ]
+    .iter()
+    .any(|field| value.get(*field).is_some())
 }
 
 pub(super) fn memory_biocortex_t6_any_true(value: &Value, paths: &[&str]) -> bool {
@@ -1517,7 +1530,10 @@ pub(super) fn memory_biocortex_t6_any_true(value: &Value, paths: &[&str]) -> boo
         .any(|path| memory_biocortex_t6_bool_at(value, path) == Some(true))
 }
 
-pub(super) fn memory_biocortex_t6_check_shadow_trial(value: &Value, reasons: &mut BTreeSet<String>) {
+pub(super) fn memory_biocortex_t6_check_shadow_trial(
+    value: &Value,
+    reasons: &mut BTreeSet<String>,
+) {
     if memory_biocortex_t6_string_at(value, "/schema") != Some(MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA)
     {
         memory_biocortex_t6_push_reason(reasons, "shadow_schema_invalid");
@@ -1531,8 +1547,10 @@ pub(super) fn memory_biocortex_t6_check_shadow_trial(value: &Value, reasons: &mu
     if memory_biocortex_t6_bool_at(value, "/changes_memory_search_order") != Some(false) {
         memory_biocortex_t6_push_reason(reasons, "shadow_changes_memory_search_order");
     }
-    if memory_biocortex_t6_bool_at(value, "/current_biocortex_frontier/discovered_selection_claimed")
-        != Some(false)
+    if memory_biocortex_t6_bool_at(
+        value,
+        "/current_biocortex_frontier/discovered_selection_claimed",
+    ) != Some(false)
     {
         memory_biocortex_t6_push_reason(reasons, "shadow_frontier_claimed_discovered_selection");
     }
@@ -1564,7 +1582,13 @@ pub(super) fn memory_biocortex_t6_check_relevance_lift(
     min_mrr_lift: f64,
     max_worsened: u64,
     reasons: &mut BTreeSet<String>,
-) -> (Option<u64>, Option<f64>, Option<u64>, Option<u64>, Option<u64>) {
+) -> (
+    Option<u64>,
+    Option<f64>,
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+) {
     let Some(value) = value else {
         memory_biocortex_t6_push_reason(reasons, "missing_relevance_lift_eval");
         return (None, None, None, None, None);
@@ -1644,8 +1668,7 @@ pub(super) fn memory_biocortex_t6_check_redacted_aggregate(
             "/input_contract/content_included",
             "/input_contract/side_signal_raw_included",
         ],
-    )
-    {
+    ) {
         memory_biocortex_t6_push_reason(
             reasons,
             "redacted_evidence_aggregate_raw_query_key_or_content_included",
@@ -1658,7 +1681,10 @@ pub(super) fn memory_biocortex_t6_check_redacted_aggregate(
         memory_biocortex_t6_push_reason(reasons, "redacted_evidence_aggregate_not_ready");
     }
     if memory_biocortex_t6_bool_at(value, "/interpretation/default_influence_ready") == Some(true) {
-        memory_biocortex_t6_push_reason(reasons, "redacted_evidence_claims_default_influence_ready");
+        memory_biocortex_t6_push_reason(
+            reasons,
+            "redacted_evidence_claims_default_influence_ready",
+        );
     }
     aggregate_ready
 }
@@ -1698,8 +1724,7 @@ pub(super) fn memory_biocortex_t6_check_recall_expansion_summary(
         || memory_biocortex_t6_bool_at(value, "/safety/runs_biocortex") != Some(false)
         || memory_biocortex_t6_bool_at(value, "/safety/writes_memory") != Some(false)
         || memory_biocortex_t6_bool_at(value, "/safety/changes_search_order") != Some(false)
-        || memory_biocortex_t6_bool_at(value, "/safety/changes_prod_retrieval_order")
-            != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/changes_prod_retrieval_order") != Some(false)
         || memory_biocortex_t6_bool_at(value, "/safety/writes_state") != Some(false)
         || memory_biocortex_t6_bool_at(value, "/safety/default_search_order_change_allowed")
             != Some(false)
@@ -1741,28 +1766,17 @@ pub(super) fn memory_biocortex_t6_check_recall_expansion_summary(
     }
     let candidate_expansion_added_hit_count =
         memory_biocortex_t6_u64_at(value, "/metrics/candidate_expansion_added_hit_count");
-    if candidate_expansion_added_hit_count.unwrap_or(0)
-        < min_candidate_expansion_added_hit_count
-    {
-        memory_biocortex_t6_push_reason(
-            reasons,
-            "insufficient_candidate_expansion_added_hits",
-        );
+    if candidate_expansion_added_hit_count.unwrap_or(0) < min_candidate_expansion_added_hit_count {
+        memory_biocortex_t6_push_reason(reasons, "insufficient_candidate_expansion_added_hits");
     }
-    let candidate_expansion_added_hit_rate = memory_biocortex_t6_f64_at(
-        value,
-        "/metrics/candidate_expansion_added_hit_rate",
-    )
-    .or_else(|| {
-        memory_biocortex_t6_rate(candidate_expansion_added_hit_count, baseline_miss_count)
-    });
+    let candidate_expansion_added_hit_rate =
+        memory_biocortex_t6_f64_at(value, "/metrics/candidate_expansion_added_hit_rate").or_else(
+            || memory_biocortex_t6_rate(candidate_expansion_added_hit_count, baseline_miss_count),
+        );
     if candidate_expansion_added_hit_rate.unwrap_or(f64::NEG_INFINITY)
         < min_candidate_expansion_added_hit_rate
     {
-        memory_biocortex_t6_push_reason(
-            reasons,
-            "insufficient_candidate_expansion_added_hit_rate",
-        );
+        memory_biocortex_t6_push_reason(reasons, "insufficient_candidate_expansion_added_hit_rate");
     }
 
     MemoryBioCortexT6RecallExpansionMetrics {
@@ -1866,9 +1880,7 @@ pub(super) fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
     if improved.unwrap_or(0) < min_improved_count {
         memory_biocortex_t6_push_reason(&mut block_reasons, "insufficient_improved_count");
     }
-    if min_improved_rate > 0.0
-        && improved_rate.unwrap_or(f64::NEG_INFINITY) < min_improved_rate
-    {
+    if min_improved_rate > 0.0 && improved_rate.unwrap_or(f64::NEG_INFINITY) < min_improved_rate {
         memory_biocortex_t6_push_reason(&mut block_reasons, "insufficient_improved_rate");
     }
     let redacted_evidence_aggregate_ready = memory_biocortex_t6_check_redacted_aggregate(
@@ -1892,8 +1904,8 @@ pub(super) fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
     let relevance_lift_eval = args.get("relevance_lift_eval");
     let relevance_kind_filter = relevance_lift_eval
         .and_then(|value| memory_biocortex_t6_string_at(value, "/sampling/kind_filter"));
-    let relevance_sort =
-        relevance_lift_eval.and_then(|value| memory_biocortex_t6_string_at(value, "/sampling/sort"));
+    let relevance_sort = relevance_lift_eval
+        .and_then(|value| memory_biocortex_t6_string_at(value, "/sampling/sort"));
     let mut review_caveats = Vec::new();
     if let Some(evaluated_count) = evaluated_count {
         if evaluated_count < 30 {
@@ -1936,7 +1948,8 @@ pub(super) fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
     let mut candidate_expansion_review_caveats = Vec::new();
     if candidate_expansion_review_requested {
         if recall_expansion_metrics.evaluated_count.unwrap_or(0) < 30 {
-            candidate_expansion_review_caveats.push("low_recall_evaluated_count_for_strength_label");
+            candidate_expansion_review_caveats
+                .push("low_recall_evaluated_count_for_strength_label");
         }
         if recall_expansion_metrics.baseline_miss_count.unwrap_or(0) < 5 {
             candidate_expansion_review_caveats.push("low_baseline_miss_count");
@@ -2245,7 +2258,8 @@ pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_PREFLIGHT_
     "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_preflight.v0";
 pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_DESIGN_ARTIFACT_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact.v0";
-pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_OWNER_REVIEW_RECORD_SCHEMA: &str =
+pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_OWNER_REVIEW_RECORD_SCHEMA:
+    &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record.v0";
 pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_IMPLEMENTATION_PLAN_ARTIFACT_SCHEMA:
     &str =
@@ -2353,17 +2367,15 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_review_packet_payload(args
         gate,
         "/candidate_expansion_gate/evidence_strength/review_caveats",
     );
-    let source_next_gate = memory_biocortex_t6_string_at(
-        gate,
-        "/candidate_expansion_gate/decision/next_gate",
-    )
-    .unwrap_or(if ready {
-        "human_review_before_candidate_expansion_experiment"
-    } else if requested {
-        "collect_more_redacted_recall_expansion_evidence"
-    } else {
-        "provide_recall_expansion_summary_when_evaluating_candidate_expansion"
-    });
+    let source_next_gate =
+        memory_biocortex_t6_string_at(gate, "/candidate_expansion_gate/decision/next_gate")
+            .unwrap_or(if ready {
+                "human_review_before_candidate_expansion_experiment"
+            } else if requested {
+                "collect_more_redacted_recall_expansion_evidence"
+            } else {
+                "provide_recall_expansion_summary_when_evaluating_candidate_expansion"
+            });
     let verdict = if ready {
         "ready_for_human_review"
     } else if requested {
@@ -2806,9 +2818,7 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_dry_run_report_payload(arg
     let plan = args
         .get("candidate_expansion_dry_run_plan")
         .unwrap_or(&Value::Null);
-    let summary = args
-        .get("recall_expansion_summary")
-        .unwrap_or(&Value::Null);
+    let summary = args.get("recall_expansion_summary").unwrap_or(&Value::Null);
     let reviewer = args
         .get("reviewer")
         .and_then(Value::as_str)
@@ -2842,10 +2852,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_dry_run_report_payload(arg
             plan,
             "/experiment_contract/may_run_candidate_expansion_dry_run_now",
         ) == Some(false)
-        && memory_biocortex_t6_bool_at(
-            plan,
-            "/experiment_contract/may_expand_candidate_set_now",
-        ) == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/experiment_contract/may_expand_candidate_set_now")
+            == Some(false)
         && memory_biocortex_t6_bool_at(plan, "/experiment_contract/changes_candidate_set_now")
             == Some(false)
         && memory_biocortex_t6_bool_at(plan, "/experiment_contract/runtime_influence_approved")
@@ -2887,8 +2895,7 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_dry_run_report_payload(arg
         && memory_biocortex_t6_bool_at(summary, "/safety/changes_search_order") == Some(false)
         && memory_biocortex_t6_bool_at(summary, "/safety/changes_prod_retrieval_order")
             == Some(false)
-        && memory_biocortex_t6_bool_at(summary, "/safety/changes_candidate_set_now")
-            == Some(false);
+        && memory_biocortex_t6_bool_at(summary, "/safety/changes_candidate_set_now") == Some(false);
     let summary_claims_authority = memory_biocortex_t6_any_true(
         summary,
         &[
@@ -3135,7 +3142,9 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionDryRunReportTool {
     }
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_human_review_packet_payload(args: Value) -> Value {
+pub(super) fn memory_biocortex_t6_candidate_expansion_human_review_packet_payload(
+    args: Value,
+) -> Value {
     let report = args
         .get("candidate_expansion_dry_run_report")
         .unwrap_or(&Value::Null);
@@ -3172,10 +3181,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_human_review_packet_payloa
             report,
             "/experiment_contract/may_run_candidate_expansion_dry_run_now",
         ) == Some(false)
-        && memory_biocortex_t6_bool_at(
-            report,
-            "/experiment_contract/may_expand_candidate_set_now",
-        ) == Some(false)
+        && memory_biocortex_t6_bool_at(report, "/experiment_contract/may_expand_candidate_set_now")
+            == Some(false)
         && memory_biocortex_t6_bool_at(report, "/experiment_contract/changes_candidate_set_now")
             == Some(false)
         && memory_biocortex_t6_bool_at(report, "/experiment_contract/runtime_influence_approved")
@@ -3405,10 +3412,10 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool {
     }
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_owner_decision_record_payload(args: Value) -> Value {
-    let packet = args
-        .get("human_review_packet")
-        .unwrap_or(&Value::Null);
+pub(super) fn memory_biocortex_t6_candidate_expansion_owner_decision_record_payload(
+    args: Value,
+) -> Value {
+    let packet = args.get("human_review_packet").unwrap_or(&Value::Null);
     let owner = args
         .get("owner")
         .and_then(Value::as_str)
@@ -3470,10 +3477,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_owner_decision_record_payl
             packet,
             "/review_contract/may_run_candidate_expansion_dry_run_now",
         ) == Some(false)
-        && memory_biocortex_t6_bool_at(
-            packet,
-            "/review_contract/may_expand_candidate_set_now",
-        ) == Some(false)
+        && memory_biocortex_t6_bool_at(packet, "/review_contract/may_expand_candidate_set_now")
+            == Some(false)
         && memory_biocortex_t6_bool_at(packet, "/review_contract/changes_candidate_set_now")
             == Some(false)
         && memory_biocortex_t6_bool_at(packet, "/review_contract/runtime_influence_approved")
@@ -3761,10 +3766,10 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionOwnerDecisionRecordTool {
     }
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_preflight_payload(args: Value) -> Value {
-    let record = args
-        .get("owner_decision_record")
-        .unwrap_or(&Value::Null);
+pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_preflight_payload(
+    args: Value,
+) -> Value {
+    let record = args.get("owner_decision_record").unwrap_or(&Value::Null);
     let reviewer = args
         .get("reviewer")
         .and_then(Value::as_str)
@@ -3790,8 +3795,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_preflight_pay
         == Some(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_OWNER_DECISION_RECORD_SCHEMA);
     let record_ready =
         memory_biocortex_t6_bool_at(record, "/owner_decision_record/ready") == Some(true);
-    let owner_decision = memory_biocortex_t6_string_at(record, "/owner_decision_record/owner_decision")
-        .unwrap_or("missing_owner_decision");
+    let owner_decision =
+        memory_biocortex_t6_string_at(record, "/owner_decision_record/owner_decision")
+            .unwrap_or("missing_owner_decision");
     let next_design_gate_requested =
         memory_biocortex_t6_bool_at(record, "/decision_contract/next_design_gate_requested")
             == Some(true)
@@ -3808,10 +3814,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_preflight_pay
             record,
             "/decision_contract/may_run_candidate_expansion_dry_run_now",
         ) == Some(false)
-        && memory_biocortex_t6_bool_at(
-            record,
-            "/decision_contract/may_expand_candidate_set_now",
-        ) == Some(false)
+        && memory_biocortex_t6_bool_at(record, "/decision_contract/may_expand_candidate_set_now")
+            == Some(false)
         && memory_biocortex_t6_bool_at(record, "/decision_contract/changes_candidate_set_now")
             == Some(false)
         && memory_biocortex_t6_bool_at(record, "/decision_contract/runtime_influence_approved")
@@ -3888,7 +3892,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_preflight_pay
             "source_owner_decision_not_approved_for_design_gate",
         );
     }
-    for reason in memory_biocortex_t6_string_array_at(record, "/owner_decision_record/block_reasons")
+    for reason in
+        memory_biocortex_t6_string_array_at(record, "/owner_decision_record/block_reasons")
     {
         memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
     }
@@ -4073,9 +4078,7 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeGatePreflightTool {
 pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact_payload(
     args: Value,
 ) -> Value {
-    let preflight = args
-        .get("runtime_gate_preflight")
-        .unwrap_or(&Value::Null);
+    let preflight = args.get("runtime_gate_preflight").unwrap_or(&Value::Null);
     let reviewer = args
         .get("reviewer")
         .and_then(Value::as_str)
@@ -4125,10 +4128,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifa
         ) == Some(false)
         && memory_biocortex_t6_bool_at(preflight, "/preflight_contract/changes_candidate_set_now")
             == Some(false)
-        && memory_biocortex_t6_bool_at(
-            preflight,
-            "/preflight_contract/runtime_influence_approved",
-        ) == Some(false)
+        && memory_biocortex_t6_bool_at(preflight, "/preflight_contract/runtime_influence_approved")
+            == Some(false)
         && memory_biocortex_t6_bool_at(
             preflight,
             "/preflight_contract/may_change_search_order_now",
@@ -4170,7 +4171,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifa
     let preflight_flags_raw = memory_biocortex_t6_has_raw_payload_fields(preflight)
         || preflight.get("owner_decision_record").is_some()
         || preflight.get("human_review_packet").is_some()
-        || preflight.get("candidate_expansion_dry_run_report").is_some()
+        || preflight
+            .get("candidate_expansion_dry_run_report")
+            .is_some()
         || preflight.get("dry_run_report").is_some()
         || preflight.get("candidate_expansion_dry_run_plan").is_some()
         || preflight.get("recall_expansion_summary").is_some()
@@ -4472,8 +4475,7 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_
         == Some(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_DESIGN_ARTIFACT_SCHEMA);
     let artifact_ready =
         memory_biocortex_t6_bool_at(artifact, "/runtime_gate_design_artifact/ready") == Some(true);
-    let artifact_safe_contract = memory_biocortex_t6_bool_at(artifact, "/read_only")
-        == Some(true)
+    let artifact_safe_contract = memory_biocortex_t6_bool_at(artifact, "/read_only") == Some(true)
         && memory_biocortex_t6_bool_at(
             artifact,
             "/design_contract/may_prepare_runtime_gate_design_artifact",
@@ -4490,10 +4492,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_
             artifact,
             "/design_contract/may_run_candidate_expansion_dry_run_now",
         ) == Some(false)
-        && memory_biocortex_t6_bool_at(
-            artifact,
-            "/design_contract/may_expand_candidate_set_now",
-        ) == Some(false)
+        && memory_biocortex_t6_bool_at(artifact, "/design_contract/may_expand_candidate_set_now")
+            == Some(false)
         && memory_biocortex_t6_bool_at(artifact, "/design_contract/changes_candidate_set_now")
             == Some(false)
         && memory_biocortex_t6_bool_at(artifact, "/design_contract/runtime_influence_approved")
@@ -4574,8 +4574,7 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_
             | "request_runtime_gate_design_changes"
             | "reject_runtime_gate"
     );
-    let owner_approves_plan =
-        owner_decision == "approve_runtime_gate_implementation_plan_only";
+    let owner_approves_plan = owner_decision == "approve_runtime_gate_implementation_plan_only";
 
     let mut block_reasons = BTreeSet::<String>::new();
     if !artifact_schema_valid {
@@ -4623,10 +4622,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_
             "owner_did_not_approve_runtime_gate_implementation_plan",
         );
     }
-    for reason in memory_biocortex_t6_string_array_at(
-        artifact,
-        "/runtime_gate_design_artifact/block_reasons",
-    ) {
+    for reason in
+        memory_biocortex_t6_string_array_at(artifact, "/runtime_gate_design_artifact/block_reasons")
+    {
         memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
     }
 
@@ -4872,13 +4870,10 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_implementatio
     let record_ready =
         memory_biocortex_t6_bool_at(record, "/runtime_gate_owner_review_record/ready")
             == Some(true);
-    let owner_decision = memory_biocortex_t6_string_at(
-        record,
-        "/runtime_gate_owner_review_record/owner_decision",
-    )
-    .unwrap_or("missing_owner_decision");
-    let owner_approves_plan =
-        owner_decision == "approve_runtime_gate_implementation_plan_only";
+    let owner_decision =
+        memory_biocortex_t6_string_at(record, "/runtime_gate_owner_review_record/owner_decision")
+            .unwrap_or("missing_owner_decision");
+    let owner_approves_plan = owner_decision == "approve_runtime_gate_implementation_plan_only";
     let record_safe_contract = memory_biocortex_t6_bool_at(record, "/read_only") == Some(true)
         && memory_biocortex_t6_bool_at(
             record,
@@ -4896,10 +4891,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_implementatio
             record,
             "/review_contract/may_run_candidate_expansion_dry_run_now",
         ) == Some(false)
-        && memory_biocortex_t6_bool_at(
-            record,
-            "/review_contract/may_expand_candidate_set_now",
-        ) == Some(false)
+        && memory_biocortex_t6_bool_at(record, "/review_contract/may_expand_candidate_set_now")
+            == Some(false)
         && memory_biocortex_t6_bool_at(record, "/review_contract/changes_candidate_set_now")
             == Some(false)
         && memory_biocortex_t6_bool_at(record, "/review_contract/runtime_influence_approved")
@@ -5199,12 +5192,13 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeGateImplementationPla
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Read-only T6 candidate-expansion runtime-gate implementation-plan artifact. \
+            description:
+                "Read-only T6 candidate-expansion runtime-gate implementation-plan artifact. \
                 Consumes a safe runtime-gate owner-review record and emits a \
                 code-gate planning contract without writing state, implementing \
                 runtime code, approving runtime influence, or expanding \
                 candidate sets."
-                .into(),
+                    .into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["runtime_gate_owner_review_record"],
@@ -5291,10 +5285,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_code_implemen
             plan,
             "/plan_contract/may_prepare_runtime_gate_code_implementation_gate",
         ) == Some(true)
-        && memory_biocortex_t6_bool_at(
-            plan,
-            "/plan_contract/may_implement_runtime_gate_code_now",
-        ) == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/plan_contract/may_implement_runtime_gate_code_now")
+            == Some(false)
         && memory_biocortex_t6_bool_at(
             plan,
             "/plan_contract/candidate_expansion_experiment_approved",
@@ -5485,10 +5477,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_gate_code_implemen
     } else {
         "repair_or_reapprove_runtime_gate_implementation_plan_artifact"
     };
-    let telemetry_fields = memory_biocortex_t6_string_array_at(
-        plan,
-        "/implementation_plan/telemetry_fields",
-    );
+    let telemetry_fields =
+        memory_biocortex_t6_string_array_at(plan, "/implementation_plan/telemetry_fields");
 
     json!({
         "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_CODE_IMPLEMENTATION_GATE_SCHEMA,
@@ -5674,7 +5664,9 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeGateCodeImplementatio
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         Ok(ToolResult::json_text(
-            &memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate_payload(args),
+            &memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate_payload(
+                args,
+            ),
         ))
     }
 }
@@ -5705,7 +5697,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_bool(
     args.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_has_raw(args: &Value) -> bool {
+pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_has_raw(
+    args: &Value,
+) -> bool {
     [
         "raw_query",
         "raw_queries",
@@ -5725,39 +5719,35 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_has_ra
     .any(|field| args.get(*field).is_some())
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_payload(args: Value) -> Value {
-    let runtime_enabled =
-        mcp_env_truthy(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_ENABLE_ENV);
-    let operator_disabled =
-        mcp_env_truthy(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DISABLE_ENV);
-    let baseline_candidate_count =
-        memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
-            &args,
-            "baseline_candidate_count",
-            0,
-            10_000,
-        );
-    let expanded_candidate_count =
-        memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
-            &args,
-            "expanded_candidate_count",
-            baseline_candidate_count,
-            10_000,
-        );
-    let added_candidate_count =
-        memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
-            &args,
-            "added_candidate_count",
-            expanded_candidate_count.saturating_sub(baseline_candidate_count),
-            10_000,
-        );
-    let max_added_candidates =
-        memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
-            &args,
-            "max_added_candidates",
-            3,
-            100,
-        );
+pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_payload(
+    args: Value,
+) -> Value {
+    let runtime_enabled = mcp_env_truthy(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_ENABLE_ENV);
+    let operator_disabled = mcp_env_truthy(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DISABLE_ENV);
+    let baseline_candidate_count = memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
+        &args,
+        "baseline_candidate_count",
+        0,
+        10_000,
+    );
+    let expanded_candidate_count = memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
+        &args,
+        "expanded_candidate_count",
+        baseline_candidate_count,
+        10_000,
+    );
+    let added_candidate_count = memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
+        &args,
+        "added_candidate_count",
+        expanded_candidate_count.saturating_sub(baseline_candidate_count),
+        10_000,
+    );
+    let max_added_candidates = memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
+        &args,
+        "max_added_candidates",
+        3,
+        100,
+    );
     let negative_control_regression_count =
         memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_u64(
             &args,
@@ -5770,16 +5760,14 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_payloa
             &args,
             "deterministic_replay_fixture_present",
         );
-    let bounded_candidate_delta =
-        memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_bool(
-            &args,
-            "bounded_candidate_delta",
-        );
-    let rollback_plan_present =
-        memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_bool(
-            &args,
-            "rollback_plan_present",
-        );
+    let bounded_candidate_delta = memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_bool(
+        &args,
+        "bounded_candidate_delta",
+    );
+    let rollback_plan_present = memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_bool(
+        &args,
+        "rollback_plan_present",
+    );
     let raw_fields_present =
         memory_biocortex_t6_candidate_expansion_shadow_runtime_gate_has_raw(&args);
 
@@ -6036,7 +6024,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_
     value.pointer(pointer).and_then(Value::as_u64).unwrap_or(0)
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_raw_key(key: &str) -> bool {
+pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_raw_key(
+    key: &str,
+) -> bool {
     matches!(
         key,
         "raw_query"
@@ -6061,9 +6051,7 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_cont
     match value {
         Value::Object(map) => map.iter().any(|(key, value)| {
             memory_biocortex_t6_candidate_expansion_shadow_execution_gate_raw_key(key)
-                || memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(
-                    value,
-                )
+                || memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(value)
         }),
         Value::Array(values) => values.iter().any(|value| {
             memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(value)
@@ -6171,7 +6159,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_sour
         )
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_payload(args: Value) -> Value {
+pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_payload(
+    args: Value,
+) -> Value {
     let report = args
         .get("shadow_runtime_gate_report")
         .cloned()
@@ -6190,8 +6180,10 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_payl
         &args,
         "replay_fixture_id",
     );
-    let telemetry_sink =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "telemetry_sink");
+    let telemetry_sink = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "telemetry_sink",
+    );
 
     let source_schema = report
         .get("schema")
@@ -6229,7 +6221,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_execution_gate_payl
     if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args) {
         block_reasons.insert("input_contains_raw_or_source_fields".to_string());
     }
-    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_source_claims_runtime_authority(&report) {
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_source_claims_runtime_authority(
+        &report,
+    ) {
         block_reasons.insert("source_shadow_runtime_gate_claims_runtime_authority".to_string());
     }
     if !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_source_requirements_complete(
@@ -6495,7 +6489,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_
         )
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_payload(args: Value) -> Value {
+pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_payload(
+    args: Value,
+) -> Value {
     let report = args
         .get("shadow_execution_gate_report")
         .cloned()
@@ -6506,14 +6502,15 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_
         &args,
         "replay_fixture_id",
     );
-    let telemetry_sink =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "telemetry_sink");
-    let max_shadow_cases =
-        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
-            &args,
-            "max_shadow_cases",
-            0,
-        );
+    let telemetry_sink = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "telemetry_sink",
+    );
+    let max_shadow_cases = memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+        &args,
+        "max_shadow_cases",
+        0,
+    );
     let max_shadow_case_bound = 100_u64;
 
     let mut block_reasons = BTreeSet::<String>::new();
@@ -6785,26 +6782,26 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_executor_invocation
         &args,
         "replay_fixture_id",
     );
-    let telemetry_sink =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "telemetry_sink");
-    let shadow_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
-            &args,
-            "shadow_case_count",
-            0,
-        );
+    let telemetry_sink = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "telemetry_sink",
+    );
+    let shadow_case_count = memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+        &args,
+        "shadow_case_count",
+        0,
+    );
     let completed_case_count =
         memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
             &args,
             "completed_case_count",
             0,
         );
-    let failed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
-            &args,
-            "failed_case_count",
-            0,
-        );
+    let failed_case_count = memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+        &args,
+        "failed_case_count",
+        0,
+    );
     let candidate_delta_count =
         memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
             &args,
@@ -7105,8 +7102,8 @@ pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_CODE
     "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0";
 pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_CODE_GATE_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_shadow_code_gate.v0";
-pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_FEATURE_FLAG: &str =
-    "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW";
+pub(super) const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_FEATURE_FLAG:
+    &str = "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW";
 
 pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(
     report: &Value,
@@ -7182,7 +7179,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_so
         )
 }
 
-pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_payload(args: Value) -> Value {
+pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_payload(
+    args: Value,
+) -> Value {
     let report = args
         .get("shadow_executor_invocation_report")
         .cloned()
@@ -7193,34 +7192,30 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_pa
         &args,
         "review_source",
     );
-    let telemetry_window_id =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
-            &args,
-            "telemetry_window_id",
-        );
+    let telemetry_window_id = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "telemetry_window_id",
+    );
     let telemetry_review_decision =
         memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
             &args,
             "telemetry_review_decision",
         );
-    let observed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
-            &args,
-            "observed_case_count",
-            0,
-        );
-    let reviewed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
-            &args,
-            "reviewed_case_count",
-            0,
-        );
-    let failed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
-            &args,
-            "failed_case_count",
-            0,
-        );
+    let observed_case_count = memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+        &args,
+        "observed_case_count",
+        0,
+    );
+    let reviewed_case_count = memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+        &args,
+        "reviewed_case_count",
+        0,
+    );
+    let failed_case_count = memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+        &args,
+        "failed_case_count",
+        0,
+    );
     let candidate_delta_count =
         memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
             &args,
@@ -7644,21 +7639,18 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_review_
             &args,
             "runtime_enablement_review_decision",
         );
-    let observed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &review,
-            "/shadow_telemetry_review/observed_case_count",
-        );
-    let reviewed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &review,
-            "/shadow_telemetry_review/reviewed_case_count",
-        );
-    let failed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &review,
-            "/shadow_telemetry_review/failed_case_count",
-        );
+    let observed_case_count = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &review,
+        "/shadow_telemetry_review/observed_case_count",
+    );
+    let reviewed_case_count = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &review,
+        "/shadow_telemetry_review/reviewed_case_count",
+    );
+    let failed_case_count = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &review,
+        "/shadow_telemetry_review/failed_case_count",
+    );
     let candidate_delta_count =
         memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
             &review,
@@ -7674,11 +7666,10 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_review_
             &review,
             "/shadow_telemetry_review/redaction_violation_count",
         );
-    let source_case_bound =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &review,
-            "/shadow_telemetry_review/source_case_bound",
-        );
+    let source_case_bound = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &review,
+        "/shadow_telemetry_review/source_case_bound",
+    );
     let append_only_telemetry_confirmed =
         memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
             &review,
@@ -7732,10 +7723,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_review_
     if !redacted_aggregate_only {
         block_reasons.insert("redacted_aggregate_only_missing".to_string());
     }
-    for reason in memory_biocortex_t6_string_array_at(
-        &review,
-        "/shadow_telemetry_review/block_reasons",
-    ) {
+    for reason in
+        memory_biocortex_t6_string_array_at(&review, "/shadow_telemetry_review/block_reasons")
+    {
         memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
     }
 
@@ -8040,21 +8030,18 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_d
         &args,
         "owner_decision",
     );
-    let observed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &review,
-            "/runtime_enablement_review/observed_case_count",
-        );
-    let reviewed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &review,
-            "/runtime_enablement_review/reviewed_case_count",
-        );
-    let failed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &review,
-            "/runtime_enablement_review/failed_case_count",
-        );
+    let observed_case_count = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &review,
+        "/runtime_enablement_review/observed_case_count",
+    );
+    let reviewed_case_count = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &review,
+        "/runtime_enablement_review/reviewed_case_count",
+    );
+    let failed_case_count = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &review,
+        "/runtime_enablement_review/failed_case_count",
+    );
     let candidate_delta_count =
         memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
             &review,
@@ -8070,11 +8057,10 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_d
             &review,
             "/runtime_enablement_review/redaction_violation_count",
         );
-    let source_case_bound =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &review,
-            "/runtime_enablement_review/source_case_bound",
-        );
+    let source_case_bound = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &review,
+        "/runtime_enablement_review/source_case_bound",
+    );
     let append_only_telemetry_confirmed =
         memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
             &review,
@@ -8119,8 +8105,7 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_d
         block_reasons.insert("owner_decision_invalid".to_string());
     }
     if owner_decision != "approve_runtime_enablement_preflight_or_plan_review_only" {
-        block_reasons
-            .insert("owner_decision_not_preflight_or_plan_review_only".to_string());
+        block_reasons.insert("owner_decision_not_preflight_or_plan_review_only".to_string());
     }
     if failed_case_count > 0 {
         block_reasons.insert("failed_case_count_present".to_string());
@@ -8137,10 +8122,9 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_d
     if !redacted_aggregate_only {
         block_reasons.insert("redacted_aggregate_only_missing".to_string());
     }
-    for reason in memory_biocortex_t6_string_array_at(
-        &review,
-        "/runtime_enablement_review/block_reasons",
-    ) {
+    for reason in
+        memory_biocortex_t6_string_array_at(&review, "/runtime_enablement_review/block_reasons")
+    {
         memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
     }
 
@@ -8437,11 +8421,10 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_impleme
             &record,
             "/runtime_enablement_owner_decision_record/redacted_aggregate_only",
         );
-    let failed_case_count =
-        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
-            &record,
-            "/runtime_enablement_owner_decision_record/failed_case_count",
-        );
+    let failed_case_count = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+        &record,
+        "/runtime_enablement_owner_decision_record/failed_case_count",
+    );
     let negative_control_regression_count =
         memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
             &record,
@@ -8486,8 +8469,7 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_impleme
     }
     if source_claims_runtime_authority {
         block_reasons.insert(
-            "source_runtime_enablement_owner_decision_record_claims_runtime_authority"
-                .to_string(),
+            "source_runtime_enablement_owner_decision_record_claims_runtime_authority".to_string(),
         );
     }
     if !source_requirements_ok {
@@ -8700,14 +8682,18 @@ impl MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtif
     }
 }
 
-impl Default for MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool {
+impl Default
+    for MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool {
+impl McpTool
+    for MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool
+{
     fn name(&self) -> &'static str {
         "memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact"
     }
@@ -8905,44 +8891,44 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_code_im
         .is_empty()
         && !memory_biocortex_t6_string_array_at(plan, "/implementation_plan/telemetry_fields")
             .is_empty();
-    let plan_flags_raw = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(
-        plan,
-    ) || plan
-        .get("runtime_enablement_owner_decision_record")
-        .is_some()
-        || plan.get("runtime_enablement_review").is_some()
-        || plan.get("shadow_telemetry_review").is_some()
-        || plan.get("shadow_executor_invocation_report").is_some()
-        || plan.get("runtime_gate_owner_review_record").is_some()
-        || plan.get("owner_decision_record").is_some()
-        || plan.get("human_review_packet").is_some()
-        || plan.get("candidate_expansion_dry_run_report").is_some()
-        || plan.get("dry_run_report").is_some()
-        || plan.get("candidate_expansion_dry_run_plan").is_some()
-        || plan.get("recall_expansion_summary").is_some()
-        || plan.get("case_rows").is_some()
-        || memory_biocortex_t6_any_true(
-            plan,
-            &[
-                "/input_contract/runtime_enablement_implementation_plan_artifact_included",
-                "/input_contract/runtime_enablement_owner_decision_record_included",
-                "/input_contract/runtime_enablement_review_included",
-                "/input_contract/shadow_telemetry_review_included",
-                "/input_contract/shadow_executor_invocation_report_included",
-                "/input_contract/runtime_gate_owner_review_record_included",
-                "/input_contract/owner_decision_record_included",
-                "/input_contract/human_review_packet_included",
-                "/input_contract/dry_run_report_included",
-                "/input_contract/dry_run_plan_included",
-                "/input_contract/recall_expansion_summary_included",
-                "/input_contract/case_rows_included",
-                "/input_contract/raw_query_included",
-                "/input_contract/raw_queries_included",
-                "/input_contract/raw_keys_included",
-                "/input_contract/content_included",
-                "/input_contract/raw_error_included",
-            ],
-        );
+    let plan_flags_raw =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(plan)
+            || plan
+                .get("runtime_enablement_owner_decision_record")
+                .is_some()
+            || plan.get("runtime_enablement_review").is_some()
+            || plan.get("shadow_telemetry_review").is_some()
+            || plan.get("shadow_executor_invocation_report").is_some()
+            || plan.get("runtime_gate_owner_review_record").is_some()
+            || plan.get("owner_decision_record").is_some()
+            || plan.get("human_review_packet").is_some()
+            || plan.get("candidate_expansion_dry_run_report").is_some()
+            || plan.get("dry_run_report").is_some()
+            || plan.get("candidate_expansion_dry_run_plan").is_some()
+            || plan.get("recall_expansion_summary").is_some()
+            || plan.get("case_rows").is_some()
+            || memory_biocortex_t6_any_true(
+                plan,
+                &[
+                    "/input_contract/runtime_enablement_implementation_plan_artifact_included",
+                    "/input_contract/runtime_enablement_owner_decision_record_included",
+                    "/input_contract/runtime_enablement_review_included",
+                    "/input_contract/shadow_telemetry_review_included",
+                    "/input_contract/shadow_executor_invocation_report_included",
+                    "/input_contract/runtime_gate_owner_review_record_included",
+                    "/input_contract/owner_decision_record_included",
+                    "/input_contract/human_review_packet_included",
+                    "/input_contract/dry_run_report_included",
+                    "/input_contract/dry_run_plan_included",
+                    "/input_contract/recall_expansion_summary_included",
+                    "/input_contract/case_rows_included",
+                    "/input_contract/raw_query_included",
+                    "/input_contract/raw_queries_included",
+                    "/input_contract/raw_keys_included",
+                    "/input_contract/content_included",
+                    "/input_contract/raw_error_included",
+                ],
+            );
     let input_contains_raw =
         memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args);
     let code_gate_decision_valid = matches!(
@@ -8961,9 +8947,8 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_code_im
         );
     }
     if !plan_ready {
-        block_reasons.insert(
-            "source_runtime_enablement_implementation_plan_artifact_not_ready".to_string(),
-        );
+        block_reasons
+            .insert("source_runtime_enablement_implementation_plan_artifact_not_ready".to_string());
     }
     if !plan_safe_contract || plan_claims_runtime_authority {
         block_reasons.insert(
@@ -9545,8 +9530,7 @@ pub(super) fn memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_
     if feature_flag_name
         != MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_FEATURE_FLAG
     {
-        block_reasons
-            .insert("runtime_enablement_shadow_feature_flag_name_invalid".to_string());
+        block_reasons.insert("runtime_enablement_shadow_feature_flag_name_invalid".to_string());
     }
 
     let block_reasons: Vec<String> = block_reasons.into_iter().collect();
@@ -10102,4 +10086,3 @@ impl McpTool for MemoryNeuralCriticShadowEvalTool {
         ))
     }
 }
-

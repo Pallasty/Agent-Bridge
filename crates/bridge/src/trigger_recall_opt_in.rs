@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -937,7 +937,9 @@ fn pre_policy_hold_approval_blockers(
     );
     push_if(
         &mut blockers,
-        !packet_commit.is_empty() && !requested_commit.is_empty() && packet_commit != requested_commit,
+        !packet_commit.is_empty()
+            && !requested_commit.is_empty()
+            && packet_commit != requested_commit,
         "implementation_commit_mismatch",
     );
     push_if(
@@ -1687,8 +1689,7 @@ pub fn trigger_recall_enforce_hold_approval_packet_validator(
     let regression_anchor = string_at(&packet, "/evidence/regression_anchor");
     let baseline_false_hits_after_shadow_gate =
         u64_at(&packet, "/evidence/baseline_false_hits_after_shadow_gate");
-    let true_hits_lost_by_shadow_gate =
-        u64_at(&packet, "/evidence/true_hits_lost_by_shadow_gate");
+    let true_hits_lost_by_shadow_gate = u64_at(&packet, "/evidence/true_hits_lost_by_shadow_gate");
     let positive_cases_held = u64_at(&packet, "/evidence/positive_cases_held");
     let raw_payload_leaks = u64_at(&packet, "/evidence/raw_payload_leaks");
     let held_bare_empty_arrays = u64_at(&packet, "/evidence/held_bare_empty_arrays");
@@ -2009,8 +2010,14 @@ mod tests {
         );
         assert_eq!(result["status"], json!("approval_packet_ready"));
         assert_eq!(result["approved_mode"], json!("pre_policy_hold"));
-        assert_eq!(result["canonical_mode"], json!("pre_policy_hold_simulation"));
-        assert_eq!(result["boundary_check"]["approval_packet_ready"], json!(true));
+        assert_eq!(
+            result["canonical_mode"],
+            json!("pre_policy_hold_simulation")
+        );
+        assert_eq!(
+            result["boundary_check"]["approval_packet_ready"],
+            json!(true)
+        );
         assert_eq!(result["boundary_check"]["blockers"], json!([]));
         assert_eq!(
             result["decision"]["may_implement_pre_policy_hold"],
@@ -2321,9 +2328,7 @@ mod tests {
         })
     }
 
-    fn ready_pre_policy_hold_options(
-        query: &str,
-    ) -> TriggerRecallPrePolicyHoldSimulationOptions {
+    fn ready_pre_policy_hold_options(query: &str) -> TriggerRecallPrePolicyHoldSimulationOptions {
         TriggerRecallPrePolicyHoldSimulationOptions {
             approval_packet: ready_pre_policy_hold_approval_packet("candidate-commit"),
             query: query.to_string(),
@@ -2466,9 +2471,8 @@ mod tests {
     #[test]
     fn pre_policy_hold_blocks_before_store_search_by_default() {
         let query = "Goal C dashboard state card spacing responsive layout visual design only";
-        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(
-            ready_pre_policy_hold_options(query),
-        );
+        let packet =
+            trigger_recall_opt_in_pre_policy_hold_simulation(ready_pre_policy_hold_options(query));
         let serialized = serde_json::to_string(&packet).expect("serialize");
         assert!(!serialized.contains(query));
         assert_eq!(
@@ -2520,12 +2524,10 @@ mod tests {
             json!("count_audit_requested")
         );
         assert_eq!(packet["baseline"]["baseline_candidate_count"], json!(1));
-        assert!(
-            packet["baseline"]["baseline_order_hash"]
-                .as_str()
-                .unwrap_or("")
-                .starts_with("sha256:")
-        );
+        assert!(packet["baseline"]["baseline_order_hash"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("sha256:"));
         assert_eq!(packet["side_effects"]["calls_store_fts"], json!(true));
         assert_eq!(packet["side_effects"]["calls_memory_search"], json!(false));
     }
@@ -2681,10 +2683,7 @@ mod tests {
         assert_eq!(packet["status"], json!("blocked_to_baseline"));
         let blockers = packet["approval"]["blockers"].as_array().expect("blockers");
         assert!(blockers.contains(&json!("exact_local_project_scope_missing")));
-        assert_eq!(
-            packet["request"]["exact_local_project_scope"],
-            json!(false)
-        );
+        assert_eq!(packet["request"]["exact_local_project_scope"], json!(false));
     }
 
     #[test]
