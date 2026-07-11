@@ -17996,7 +17996,7 @@ impl McpTool for SessionCurateTool {
         let curate_opts =
             crate::curate::CurateOptions::from_env_or_defaults().with_overrides(score_ov, dedup_ov);
 
-        let candidates = crate::curate::curate_conversation_with_options(
+        let mut candidates = crate::curate::curate_conversation_with_options(
             &text,
             session_id.as_deref(),
             max_items,
@@ -18028,6 +18028,41 @@ impl McpTool for SessionCurateTool {
         let store = store_opt.unwrap();
         let mut saved: Vec<Value> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
+
+        // Staleness-gate slice ③ (forum #119 post 3072): a curate run retires
+        // its OWN session's previous in-flight handoff snapshots by declaring
+        // `continuity_supersedes` on the batch's new session_handoff row —
+        // enforced store-side since f067ab6e. In-flight snapshots asserting
+        // arc state were the dominant stale class (M2 69.2%); the CJK-weak
+        // token-overlap heuristic never retired them. Scoped to runs WITH a
+        // session_id (an empty sid suffix would prefix-match every session);
+        // lessons/decisions are durable knowledge and are never touched.
+        // Limitation: if the new handoff's key already exists verbatim, its
+        // save is skipped below and no retirement happens this run.
+        let mut retired_prior_handoffs: Vec<String> = Vec::new();
+        if session_id.is_some() && candidates.iter().any(|m| m.kind == "session_handoff") {
+            let sid_suffix = crate::curate::mk_sid_suffix(session_id.as_deref());
+            let prefix = format!("curated_session_handoff{sid_suffix}_");
+            let batch_keys: std::collections::HashSet<&str> =
+                candidates.iter().map(|m| m.key.as_str()).collect();
+            match store.memory_active_keys_with_prefix(&prefix, 32).await {
+                Ok(prior) => {
+                    retired_prior_handoffs = prior
+                        .into_iter()
+                        .filter(|k| !batch_keys.contains(k.as_str()))
+                        .collect();
+                    if !retired_prior_handoffs.is_empty() {
+                        if let Some(h) = candidates.iter_mut().find(|m| m.kind == "session_handoff")
+                        {
+                            for old_key in &retired_prior_handoffs {
+                                h.tags.push(format!("continuity_supersedes:{old_key}"));
+                            }
+                        }
+                    }
+                }
+                Err(e) => errors.push(format!("prior-handoff scan: {e}")),
+            }
+        }
 
         for mem in &candidates {
             // Skip if key already exists (dedup)
@@ -18062,13 +18097,25 @@ impl McpTool for SessionCurateTool {
         )
         .await;
 
+        // Retirement is carried by the tagged handoff row's save; if that
+        // save was skipped (key already existed) or errored, nothing was
+        // actually retired — don't report otherwise.
+        if !retired_prior_handoffs.is_empty()
+            && !saved
+                .iter()
+                .any(|v| v.get("kind").and_then(|k| k.as_str()) == Some("session_handoff"))
+        {
+            retired_prior_handoffs.clear();
+        }
+
         Ok(ToolResult::json_text(&json!({
             "dry_run": false,
             "saved_count": saved.len(),
             "new_memories": saved,
             "skipped_duplicates": skipped,
             "errors": errors,
-            "session_handoff_key": session_handoff_key
+            "session_handoff_key": session_handoff_key,
+            "retired_prior_handoffs": retired_prior_handoffs
         })))
     }
 }

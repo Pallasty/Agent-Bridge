@@ -4416,6 +4416,35 @@ impl StateStore for SqliteStore {
         Ok(edges)
     }
 
+    async fn memory_active_keys_with_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let prefix = prefix.to_string();
+        let keys = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<String>> {
+                // substr() equality keeps `_` / `%` in the prefix literal
+                // (LIKE would treat them as wildcards — curated keys are
+                // underscore-heavy). Table is small; no index need.
+                let mut stmt = c.prepare(
+                    "SELECT key FROM memories
+                     WHERE status = 'active'
+                       AND substr(key, 1, length(?1)) = ?1
+                     ORDER BY created_at ASC
+                     LIMIT ?2",
+                )?;
+                let rows = stmt
+                    .query_map(params![prefix, limit as i64], |row| row.get::<_, String>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_active_keys_with_prefix: {e}")))?;
+        Ok(keys)
+    }
+
     async fn memory_neighbors_bfs(
         &self,
         start_key: &str,
@@ -18744,6 +18773,64 @@ mod tests {
         assert!(live.superseded_by.is_none());
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_active_keys_with_prefix_literal_and_active_only() {
+        // Prefix listing for session_curate's prior-handoff retirement:
+        // literal `_` matching (no LIKE wildcards), active-only, oldest-first,
+        // limit respected.
+        let (dir, store) = fresh_store("keys-prefix").await;
+
+        // Disjoint per-row vocabulary so the token-overlap auto-supersede
+        // pass cannot fire between fixtures (only the listing is under test).
+        for (i, (k, body)) in [
+            (
+                "curated_session_handoff_abc12345_3alpha",
+                "alpha antelope acorn",
+            ),
+            (
+                "curated_session_handoff_abc12345_7bravo",
+                "bravo biscuit burrow",
+            ),
+            // `_` must NOT match `X`:
+            (
+                "curated_session_handoffXabc12345_9decoy",
+                "decoy dromedary dusk",
+            ),
+            ("curated_lesson_abc12345_2charlie", "charlie chestnut cloud"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let mut m = make_memrec(k, body);
+            m.created_at = 1_700_000_000 + i as i64;
+            store.memory_save(&m).await.expect("save");
+        }
+        // Retire one matching row; it must drop out of the listing.
+        let mut winner = make_memrec("curated_session_handoff_abc12345_9new", "newest row");
+        winner.tags = vec!["continuity_supersedes:curated_session_handoff_abc12345_3alpha".into()];
+        store.memory_save(&winner).await.expect("save winner");
+
+        let keys = store
+            .memory_active_keys_with_prefix("curated_session_handoff_abc12345_", 32)
+            .await
+            .expect("prefix list");
+        assert_eq!(
+            keys,
+            vec![
+                "curated_session_handoff_abc12345_7bravo".to_string(),
+                "curated_session_handoff_abc12345_9new".to_string(),
+            ],
+            "literal prefix, active-only, oldest-first"
+        );
+
+        let capped = store
+            .memory_active_keys_with_prefix("curated_", 1)
+            .await
+            .expect("capped list");
+        assert_eq!(capped.len(), 1, "limit respected");
+        drop(dir);
     }
 
     #[tokio::test]
