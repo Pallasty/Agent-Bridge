@@ -174,6 +174,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   `EmbeddingBackend` trait, and native version-vector sync.
 
 ### Fixed
+- **Declared continuity supersession now executes its row-level contract.**
+  Saving a memory with `continuity.supersedes` retires each existing target in
+  the same transaction (`status=superseded`, `superseded_by`, and canonical
+  `supersedes` lineage edge), so replaced rows leave search/list surfaces while
+  remaining directly readable for history. Self-references and unknown targets
+  are no-ops; a focused store test covers the transition. This is future-write
+  behavior only and performs no retroactive live-store cleanup or deployment.
 - **`work_memory` lifecycle semantics.** Saving a terminal status now clears
   the addressed short-lived slot instead of persisting another database row as
   `active`. Rows past their `ttl:Nd` tag are hidden consistently from list,

@@ -6,13 +6,16 @@ Status: `REVIEW_REQUIRED / CAUSALITY_BLOCKED / AMBIENT_WAIT / NO_WRITE`
 
 ## Decision
 
-Do not merge the parallel automatic supersede-retirement patch, run outcome
+Do not deploy or retroactively backfill declared supersession, run outcome
 reinforcement/decay, or open ambient stage 2 from this result.
 
-The frozen structural audit found explicit stale-active lifecycle conflicts,
-but it does not know whether a whole memory row and a claim inside that row have
-the same lifecycle. The repair must therefore resolve claim-versus-row
-semantics before it retires anything.
+The frozen structural audit found explicit stale-active lifecycle conflicts.
+During result integration, a parallel commit (`f067ab6e`) advanced master with
+future-write semantics for the existing row-level `continuity.supersedes`
+contract: saving a replacement now retires each existing target atomically and
+records its lineage edge. That source change passed its focused local test, but
+it does not retroactively clean the 30 candidates in this snapshot and was not
+deployed by this lane.
 
 The retrieval telemetry cannot distinguish eval traffic from organic traffic.
 All current reinforce/decay candidate interpretation remains causally blocked.
@@ -102,18 +105,17 @@ It neither reads the frozen truth anchors nor adjudicates memory prose.
 
 ### Temporal Decision
 
-The evidence supports a lifecycle repair lane, but not the current whole-row
-auto-retirement implementation as-is. Before a write patch can advance, a
-synthetic contract must distinguish:
+The row-level future-write repair is now source state at `f067ab6e`. Its API
+description explicitly defines the field as keys the new memory replaces, and
+its focused store test verifies atomic status, `superseded_by`, lineage,
+self-reference, and missing-target behavior.
 
-1. a row that contains exactly one superseded claim;
-2. a row containing both superseded and still-current claims;
-3. missing and self-referential targets;
-4. an explicit row-level retirement declaration;
-5. idempotent edge creation plus reversible status transition.
-
-Until that contract exists, `continuity_supersedes:*` remains an audit signal,
-not automatic authority to archive the target row.
+This audit still authorizes no deployment or historical cleanup. Existing
+declarations require a separate copied-DB backfill protocol with an exact
+candidate manifest, backup/rollback map, idempotency proof, post-run retrieval
+check, and explicit exclusion for any record whose replacement semantics are
+ambiguous. Re-run this same structural audit after that separate operation;
+the three direct status conflicts must reach zero before the lane can close.
 
 ## Retrieval Causality Result
 
@@ -200,8 +202,14 @@ decay and no apply authority.
 
 - ArrowQuant m24 still has no closeout post after its exclusive claim in
   forum #115 post #3067; no new ArrowQuant job was started.
-- The separate untracked Temporal Truth Projection design and uncommitted
-  `supersede-enforcement` worktrees were not changed.
+- The separate untracked Temporal Truth Projection design was not changed.
+- Parallel commit `f067ab6e` landed the declared-supersede future-write repair
+  on master while this result branch was being integrated. Focused local
+  verification passed:
+  `cargo test -p ab-store memory_save_declared_supersede_retires_target` and
+  the subsequent full `cargo test -p ab-store` (`426 passed`), plus
+  `cargo fmt --all -- --check`. No binary build, deployment, or live-store
+  backfill was performed by this lane.
 - The already-landed multiplicative `memory_reinforce_active` implementation
   at `fd3650cfd` means the later durable note describing that fix as pending is
   itself stale planning context. No duplicate reinforce implementation should
@@ -217,11 +225,25 @@ Passed locally without remote CI:
 bash scripts/verify-memory-evidence-audits.sh
 python3 -m py_compile (both helpers; external pycache)
 bash -n scripts/verify-memory-evidence-audits.sh
+cargo test -p ab-store  # 426 passed
+cargo fmt --all -- --check
 git diff --check
 ```
 
 The synthetic verifier covers labelled, unlabeled, partially labelled,
 malformed-schema, lifecycle-conflict, no-write, and identifier-leak cases.
+
+## Integration Incident
+
+Master advanced locally to parallel commit `f067ab6e` between the final fetch
+and the planned fast-forward. The fast-forward correctly failed, but the shell
+sequence was not fail-fast and its following `git push origin master` published
+that already-existing local commit. The commit lacks `[skip ci]`, and both
+repository workflows are configured for code pushes to master. This host has
+neither `gh` nor a GitHub API credential, so the run could not be inspected or
+cancelled from here. Treat remote CI as potentially triggered contrary to the
+owner's no-CI boundary. All commits created by this audit lane contain
+`[skip ci]`; no further non-skip push is permitted.
 
 ## Boundary
 
