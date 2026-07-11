@@ -2456,6 +2456,9 @@ fn parse_str_array(s: &str) -> Vec<String> {
 }
 
 const CONTINUITY_RETRIEVAL_TRIGGER_TAG_PREFIX: &str = "continuity_retrieval_trigger:";
+// Written by the bridge layer from `continuity.supersedes` (memory_save arg).
+// Must stay in sync with CONTINUITY_SUPERSEDES_TAG_PREFIX in bridge/mcp_tools.rs.
+const CONTINUITY_SUPERSEDES_TAG_PREFIX: &str = "continuity_supersedes:";
 const FTS_RETRIEVAL_TRIGGER_CAP: usize = 512;
 
 fn memory_fts_content(content: &str, tags: &[String]) -> String {
@@ -3608,6 +3611,19 @@ impl StateStore for SqliteStore {
         // promoted to its own indexed column. The full `tags` array stays
         // as the wire-level source of truth; the column is a derived index.
         let dedupe_key_storage: Option<String> = dedupe_tags.first().cloned();
+        // Explicit `continuity.supersedes` declarations arrive as
+        // `continuity_supersedes:<key>` tags (bridge layer). Until 2026-07-10
+        // they were declaration-only: the target row stayed status='active'
+        // and kept surfacing in retrieval (staleness-gate M2 finding, forum
+        // #119 post 3072). Retire declared targets like the dedupe pass does.
+        let declared_supersedes: Vec<String> = mem
+            .tags
+            .iter()
+            .filter_map(|t| t.strip_prefix(CONTINUITY_SUPERSEDES_TAG_PREFIX))
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != key)
+            .map(str::to_string)
+            .collect();
 
         // A1 (correction co-surface, write-path). When a `correction:<target>:*`
         // feedback memory is persisted, auto-link the `corrects` edge to the
@@ -3755,6 +3771,38 @@ impl StateStore for SqliteStore {
                             params![cand_key, key],
                         )?;
                     }
+                }
+
+                // ── declared-supersede pass ──────────────────────────────────
+                // Explicit `continuity.supersedes` targets: lineage edge plus
+                // retirement, mirroring the dedupe pass above. The edge is
+                // recorded even when the target is already archived/superseded
+                // (lineage stays useful); the status flip only touches rows
+                // that are still active. Missing targets are skipped silently —
+                // declarations may legitimately point at keys written later.
+                for target in &declared_supersedes {
+                    let target_exists = {
+                        let mut st = c.prepare("SELECT 1 FROM memories WHERE key = ?1")?;
+                        let mut rows = st.query(params![target.as_str()])?;
+                        rows.next()?.is_some()
+                    };
+                    if !target_exists {
+                        continue;
+                    }
+                    c.execute(
+                        "INSERT INTO memory_edges
+                           (from_key, to_key, edge_type, weight, created_at)
+                         VALUES (?1, ?2, 'supersedes', ?3, ?4)
+                         ON CONFLICT(from_key, to_key, edge_type)
+                         DO UPDATE SET weight = excluded.weight",
+                        params![key, target.as_str(), EDGE_WEIGHT_SUPERSEDES, now],
+                    )?;
+                    c.execute(
+                        "UPDATE memories
+                            SET status = 'superseded', superseded_by = ?2
+                          WHERE key = ?1 AND status = 'active'",
+                        params![target.as_str(), key],
+                    )?;
                 }
 
                 // ── Contradiction detection ──────────────────────────────────
@@ -18640,6 +18688,70 @@ mod tests {
         assert!(live.superseded_by.is_none());
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_save_declared_supersede_retires_target() {
+        // 2026-07-10 staleness-gate M2 finding (forum #119 post 3072):
+        // `continuity_supersedes:<key>` tags were declaration-only — the
+        // target row stayed active and kept surfacing in retrieval. The
+        // declared-supersede pass must retire the target (status +
+        // superseded_by) and record the lineage edge, like the dedupe pass.
+        let (dir, store) = fresh_store("declared-supersede").await;
+
+        // Disjoint vocabulary so the token-overlap auto-supersede path
+        // cannot fire — only the explicit declaration is under test.
+        let old = make_memrec("closeout_v1", "alpha bravo charlie delta echo");
+        store.memory_save(&old).await.expect("save old");
+
+        let mut new = make_memrec("closeout_v2", "foxtrot golf hotel india juliet");
+        new.tags = vec!["continuity_supersedes:closeout_v1".into()];
+        store.memory_save(&new).await.expect("save new");
+
+        let retired = store
+            .memory_get("closeout_v1")
+            .await
+            .expect("get old")
+            .expect("old still readable");
+        assert_eq!(retired.status, "superseded");
+        assert_eq!(retired.superseded_by.as_deref(), Some("closeout_v2"));
+
+        let live = store
+            .memory_get("closeout_v2")
+            .await
+            .expect("get new")
+            .expect("new exists");
+        assert_eq!(live.status, "active");
+        assert!(live.superseded_by.is_none());
+
+        // Lineage edge new → old with the canonical explicit-supersede weight.
+        let edges = store
+            .memory_neighbors("closeout_v2")
+            .await
+            .expect("neighbors");
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.to_key == "closeout_v1" && e.edge_type == "supersedes"),
+            "supersedes edge must link winner → retired row"
+        );
+
+        // Self-reference and missing targets are no-ops: the save succeeds
+        // and nothing else changes state.
+        let mut selfy = make_memrec("closeout_v3", "kilo lima mike november oscar");
+        selfy.tags = vec![
+            "continuity_supersedes:closeout_v3".into(),
+            "continuity_supersedes:never_written_key".into(),
+        ];
+        store.memory_save(&selfy).await.expect("save selfy");
+        let selfy_row = store
+            .memory_get("closeout_v3")
+            .await
+            .expect("get selfy")
+            .expect("selfy exists");
+        assert_eq!(selfy_row.status, "active");
+
+        drop(dir);
     }
 
     #[tokio::test]
