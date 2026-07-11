@@ -29,11 +29,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   each and no live-store write or model call. The separately authorized
   attempt-1 generation completed all 24 fixed cells with an empty stderr, no
   tool events, no postprocessing, no retry, and a validated blinded-artifact
-  hash chain. Two independent human blind reviews and the single authorized
-  custodian score then completed. The scorer returned `NO_ADVANCE`: direct
-  digest reduced estimated context tokens by 79.9529% but failed absolute,
-  non-inferiority, and all six per-stratum gates for both reviewers; the
-  reference also missed its absolute gate. The result recommends no write-side
+  hash chain. Two returned review packets passed the scorer's mechanical
+  validation, but private provenance showed that both explicitly identify
+  Claude and reuse one stable base identifier. They do not satisfy the frozen
+  requirement for two independent human reviewers. A single custodian score
+  had already opened the private map and returned an exploratory `NO_ADVANCE`;
+  that score is non-admissible, and the formal terminal result is
+  `NO_ADVANCE_REVIEW_PROTOCOL_FAILURE`. It recommends no write-side
   preregistration and authorizes no CI, release, versioning, tagging, runtime
   promotion, retrieval-default change, regeneration, or digest write.
 - **Expanded blinded portfolio-continuity answer gate.** A backward-compatible

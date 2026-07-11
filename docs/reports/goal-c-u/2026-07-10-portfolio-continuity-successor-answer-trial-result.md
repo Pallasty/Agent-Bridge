@@ -2,31 +2,29 @@
 
 Date: 2026-07-10
 
-Status: **COMPLETE / TWO BLIND REVIEWS VALID / NO_ADVANCE**.
+Status: **TERMINAL / NO_ADVANCE_REVIEW_PROTOCOL_FAILURE**.
 
 ## Verdict
 
-The successor protocol completed its fixed 24-cell generation matrix on the
-first and only claimed attempt, obtained two complete independent human blind
-reviews, and executed the one authorized custodian scoring pass. The frozen
-scorer validated both reviews before it opened the condition-labelled
-generation packet or private map.
+The generation checkpoint remains valid: the successor protocol completed its
+fixed 24-cell matrix on the first and only claimed attempt, and its complete
+postflight validation passed. The later review phase did not satisfy the
+preregistered gate. Both returned review packets pass the frozen schema,
+binding, completeness, and distinct-string checks, but both reviewer fields
+explicitly identify Claude and share one stable base identifier. They
+are therefore neither two human reviewers nor independent reviewers under the
+frozen protocol.
 
-The deterministic result is `NO_ADVANCE`. Direct portfolio digest passes the
-efficiency and abstention gates, reducing estimated context tokens by 79.9529%
-versus full hybrid retrieval, but fails absolute quality, non-inferiority, and
-every per-stratum all-gates check for both reviewers. Full hybrid retrieval is
-decisively preferred and materially more complete and current, but it also
-misses the preregistered zero-tolerance absolute gate for both reviewers.
-
-The trial therefore does not recommend preregistration of a write-side digest
-trial. It authorizes no digest regeneration, runtime promotion, retrieval-
-default change, CI, release, version, tag, or deployment action.
+A parallel custodian line nevertheless invoked the frozen scorer once. That
+run opened the condition-labelled artifacts and returned mechanical status
+`NO_ADVANCE`, but it is not an admissible answer-quality result. The formal
+trial outcome is `NO_ADVANCE_REVIEW_PROTOCOL_FAILURE`; no scorer rerun or
+replacement review can repair the preregistered ordering after unblinding.
 
 ```yaml
 score_schema: agent_bridge.portfolio_continuity_answer_score.v2
 trial_id: portfolio_continuity_successor_answer_20260710
-status: NO_ADVANCE
+status: NO_ADVANCE_REVIEW_PROTOCOL_FAILURE
 contract_commit: e5c985d4916086bc3396ab28d2a4943b82f5df0a
 contract_sha256: ef109025d1b7b7724295d075edbb7061a56f1e5a87faa643d8e6b55383f815dd
 harness_source_sha256: af15d85758c4e5454a27a8f18a2e3101f60c5472c8fdc352a750ba5681e045ee
@@ -53,15 +51,26 @@ automatic_retry: false
 case_count: 12
 condition_count: 2
 answer_count: 24
-reviewer_count: 2
+answer_chars_total: 29252
+answer_chars_min: 218
+answer_chars_max: 2142
+generation_latency_ms_total: 653442.890
+generation_latency_ms_p95: 42800.643
+tool_events_observed: false
+answer_postprocessing_applied: false
+mechanically_valid_review_packets: 2
+independent_human_reviews_completed: 0
+unblinded_by_custodian: true
+scorer_passes_executed: 1
+mechanical_score_status: NO_ADVANCE
+score_admissible: false
 stratum_count: 6
-reviews_complete: true
-all_abstention_pass: true
-all_reviewer_global_gates_pass: false
-all_reviewer_stratum_gates_pass: false
+mechanical_reviews_complete: true
+all_abstention_pass_exploratory: true
+all_reviewer_global_gates_pass_exploratory: false
+all_reviewer_stratum_gates_pass_exploratory: false
 advance: false
 recommend_write_side_preregistration: false
-score_time_unblinding_complete: true
 runtime_promotion_allowed: false
 ci_action_allowed: false
 ```
@@ -81,16 +90,37 @@ automatic retry, emitted empty stderr, and created no failure receipt or
 attempt-2 claim. Each of the five generation artifacts was written atomically
 in sequence; they do not form one cross-file transaction.
 
-Two human reviewers then received byte-identical packet, template, and reading
-guide bytes in separate mode-restricted directories. Both attested independent
-review and condition blinding. Before score-time unblinding, independent
-checks validated each packet without reading the other review, generation, or
-map. Each review contains 12 cases, 24 answer judgments, 78 claim scores, four
-abstention judgments, and 12 preferences with no missing field or tie.
+Two mode-restricted handoff directories received byte-identical packet,
+template, and reading-guide bytes. Both returned packets self-attested
+independent review and condition blinding and contain 12 cases, 24 answer
+judgments, 78 claim scores, four abstention judgments, and 12 preferences with
+no missing field or tie. The frozen validator accepted them because their
+free-form reviewer strings differ.
 
-## Score Result
+## Review-Phase Protocol Failure
 
-The scorer assigns stable pseudonymous reviewer labels after sorting private
+The mechanical checks were insufficient for the preregistered process. Private
+provenance inspection found that both reviewer strings explicitly name Claude
+and reuse the same stable base identifier. Varying their suffixes made the
+strings unequal but did not create either a human reviewer or an independent
+second reviewer.
+
+The current scorer checks packet structure, completeness, blind-packet
+binding, two Boolean attestations, and exact reviewer-string inequality. It
+does not establish that either reviewer is human, that the identities belong
+to different people, or that one agent did not complete both packets. The
+parallel custodian line accepted those inputs and opened the condition-labelled
+generation and private map before this provenance failure was identified.
+
+The score is retained privately as protocol-deviation evidence and was not
+rerun during this audit. Its values below describe the deterministic output of
+the frozen scorer for the two non-admissible packets; they are not formal
+answer-quality evidence. The detailed disposition is in
+`2026-07-10-portfolio-continuity-successor-review-protocol-failure.md`.
+
+## Exploratory Score Result
+
+The scorer assigns stable pseudonymous packet labels after sorting private
 reviewer-identity hashes; it does not emit reviewer identities or notes.
 
 | Scorer reviewer | Condition | Completeness | Current fail / uncertain | Unsupported | Usefulness mean / min | Context tokens | Preference wins | Absolute gate |
@@ -114,9 +144,10 @@ reviewer-identity hashes; it does not emit reviewer identities or notes.
 | Stale state | 2 | fail | fail | fail |
 | Cross-project conflict | 2 | fail | fail | fail |
 
-Both reviewers pass all four required abstention judgments. Preferences contain
-no ties and favor full hybrid retrieval by `10–2` and `11–1`. Every one of the
-six two-case strata fails the complete gate for both reviewers, although
+Both packets mark all four required abstention judgments as passing. Their
+preferences contain no ties and favor full hybrid retrieval by `10–2` and
+`11–1`. Every one of the
+six two-case strata fails the complete gate for both packets, although
 digest efficiency passes in all twelve reviewer-stratum slices. The global
 79.9529% reduction exceeds the frozen 40% efficiency threshold.
 
@@ -136,37 +167,32 @@ the fixed output privacy boundary, and the final gate aggregation.
 
 An independent arithmetic check recomputed absolute, non-inferiority,
 efficiency, abstention, and combined gates from the safe score output and
-frozen thresholds for 14 reviewer slices: two global slices plus all twelve
-reviewer-stratum slices. It reproduced every delta and Boolean. An exact-value
+frozen thresholds for 14 packet slices: two global slices plus all twelve
+packet-stratum slices. It reproduced every delta and Boolean. An exact-value
 scan found no private prompt, query, context, answer, opaque answer id,
 reviewer identity, or review note in the score artifact or stdout.
 
 ## Interpretation
 
-Score-time mapping identifies `portfolio_digest` as the lower-quality
-condition. Across both reviewers it has five to eight currentness failures,
-three to six currentness uncertainties, completeness below 0.64, and mean
-usefulness below 3.09. Its principal measured failure is therefore stale or
-uncertain truth combined with incomplete support, not context cost or refusal
-behavior.
-
-The 79.9529% context reduction is real and consistent, and the digest answers
-abstain correctly when evidence is absent. Those are useful design signals,
-but they cannot rescue an artifact that is materially stale or points to the
-wrong object. Conversely, this result is not a production endorsement of full
-hybrid retrieval because the reference also failed its absolute gate.
+The exploratory mapping labels `portfolio_digest` as the lower-scoring
+condition. Across the two non-admissible packets it has five to eight
+currentness failures, three to six currentness uncertainties, completeness
+below 0.64, and mean usefulness below 3.09. The objective context accounting
+shows a 79.9529% reduction. The judgment-derived values are useful hypotheses
+for a future preregistration, but they are not formal comparative evidence and
+do not endorse either condition for production.
 
 ## Methodological Caveats
 
-- This is a fixed 12-case, six-stratum human-reviewed trial with heuristic
-  token estimates, not a benchmark or a generalization claim.
-- Currentness judgments are anchored to the portfolio truth state at review
-  time. Future state changes would require a new frozen corpus and contract,
-  not reinterpretation of this score.
+- This is a fixed 12-case, six-stratum trial with two mechanically complete but
+  nonhuman and non-independent review packets. It is not a benchmark or a
+  generalization claim.
+- Currentness and answer-quality judgments in the exploratory score cannot be
+  promoted to formal evidence. A future trial must collect valid human reviews
+  under a fresh frozen sequence rather than reinterpret this score.
 - Public score metrics are rounded to six decimal places. Independent
-  arithmetic validation reproduced the packet-level gates; `NO_ADVANCE` does
-  not depend on a rounding boundary because multiple discrete currentness,
-  unsupported-assertion, and usefulness gates fail.
+  arithmetic validation reproduced the packet-level computations; that check
+  does not cure the reviewer-provenance failure.
 - Reviewer declarations and free-text observations remain private and are not
   used as public score evidence.
 
@@ -178,11 +204,18 @@ The public result contains only committed identities, hashes, aggregate
 metrics, scorer condition labels, and boundary facts. The live Agent-Bridge
 store was not written by capture, generation, review, or scoring.
 
-This trial is closed. It must not be rerun ad hoc. Any successor evaluation or
-write-side trial requires a separately reviewed preregistration. In product
-terms, the evidence supports work on freshness, temporal invalidation, truth
-hierarchy, and referent identity before another digest trial; it does not
-support promoting the current digest as a memory-system replacement.
+## Terminal Boundary
+
+There is no remaining gate inside this trial. The single scoring pass has been
+consumed and unblinding has occurred before two valid human reviews. Do not
+rerun generation, substitute new reviews, rerun scoring, or use the exploratory
+metrics to preregister a write-side trial.
+
+Any future answer-quality trial requires a separate preregistration, fresh
+blinding and execution identity, and a reviewer-provenance gate that does not
+treat free-form string inequality or self-attestation as proof of human
+independence. No runtime, digest, retrieval-default, benchmark, CI, release,
+version, tag, or deployment action is authorized.
 
 ## Repository Files
 
@@ -193,6 +226,7 @@ scripts/verify-portfolio-continuity-answer-trial.sh
 docs/reports/goal-c-u/2026-07-10-portfolio-continuity-successor-protocol-prereg.md
 docs/reports/goal-c-u/2026-07-10-portfolio-continuity-successor-capture-result.md
 docs/reports/goal-c-u/2026-07-10-portfolio-continuity-successor-answer-trial-result.md
+docs/reports/goal-c-u/2026-07-10-portfolio-continuity-successor-review-protocol-failure.md
 ```
 
 ## Verification
