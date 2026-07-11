@@ -54,6 +54,9 @@ pub mod lswr_snapshot_wrapper_descriptor;
 pub mod lswr_snapshot_wrapper_exposure_dry_run;
 pub mod lswr_snapshot_wrapper_preflight_report;
 pub mod mcp_tools;
+/// Internal raw-envelope resolver; no MCP, transport, or cross-repository API.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod memory_truth;
 pub mod notion_api;
 pub mod openai_api;
 pub mod orphan_reaper;
