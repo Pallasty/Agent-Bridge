@@ -2,13 +2,13 @@
 
 Date: 2026-07-10
 
-Status: **GENERATION COMPLETE / ATTEMPT 1 VALID /
-WAIT_TWO_BLIND_REVIEWS**. The read-only capture and fixed 24-cell generation
-matrix have completed. Their public records are
+Status: **COMPLETE / TWO BLIND REVIEWS VALID / NO_ADVANCE**. The read-only
+capture, fixed 24-cell generation matrix, two independent human blind reviews,
+and single authorized custodian score have completed. Their public records are
 `2026-07-10-portfolio-continuity-successor-capture-result.md` and
-`2026-07-10-portfolio-continuity-successor-answer-trial-result.md`. No review,
-reviewer/owner unblinding, scoring, runtime change, CI action, release, tag, or
-version change has occurred.
+`2026-07-10-portfolio-continuity-successor-answer-trial-result.md`. The scorer
+returned `NO_ADVANCE`; no runtime change, CI action, release, tag, version
+change, digest regeneration, or write-side action has occurred.
 
 ## Frozen Implementation
 
@@ -24,8 +24,8 @@ version change has occurred.
 The designated worktree remains detached at the implementation commit. Its
 ignored private directories now contain the mode-restricted frozen input,
 spec, runtime binary copy, capture artifacts, single-use attempt claim,
-generation artifacts, blind packet, private map, review template, and command
-receipts. None is tracked by Git.
+generation artifacts, blind packet, private map, review template, two reviews,
+score artifacts, and command receipts. None is tracked by Git.
 
 ## Completed Checks
 
@@ -55,8 +55,15 @@ receipts. None is tracked by Git.
   attempt-2 claim.
 - Content-blind postflight validation passed the complete capture-generation-
   blind-map hash chain, deterministic blinding, review template, redacted
-  completion marker, permissions, and public-summary leak guard. The current
-  protocol status is `WAIT_TWO_BLIND_REVIEWS`.
+  completion marker, permissions, and public-summary leak guard.
+- Both independent condition-blind human reviews passed the frozen review
+  validator before any score-time map access. Each completed all 12 cases, 24
+  answer judgments, 78 claim scores, four abstention judgments, and 12
+  preferences.
+- The one authorized custodian score completed with empty stderr. Post-score
+  validation passed the full hash chain, privacy boundary, semantic stdout
+  equality, and all 14 reviewer-slice packet-level gate calculations without
+  rerunning the scorer.
 
 ## Generation Identity
 
@@ -70,18 +77,28 @@ receipts. None is tracked by Git.
 | review template SHA-256 | `016dfdbd34a61f0a38c748f8256796caaab6f191961c089df4518401c89f45fd` |
 | attempt-1 claim SHA-256 | `fc0967830ca7082a646a2679f91075a327ba43c75c2a3f31d06f0035a17469ec` |
 
-## Remaining Hard Gates
+## Score Identity
 
-1. Two independent human reviewers must complete the full review template from
-   byte-identical blind packets without seeing the private condition map or
-   condition-labelled generation artifact.
-2. The custodian must verify both completed review bindings and reviewer
-   independence before any unblinding.
-3. Only then does the protocol authorize one custodian scoring pass. The
-   harness has no score-time latch, so any repeat would require a separately
-   recorded decision. The output determines whether the successor returns
-   `NO_ADVANCE` or recommends only preregistration of a separate write-side
-   trial.
+| Item | Binding |
+| --- | --- |
+| review 1 SHA-256 | `8d6874cb3084e7b0f7b98b6f6264bd310eaa2dfa032d14ff769304a7761b4a0b` |
+| review 2 SHA-256 | `86188b8ee4f5435d886a46a35c0fa954861990f4306d04e582b1ccd4738d2e3a` |
+| score SHA-256 | `32bd54632fa342e481f57d17526a11358fd35ccc38209611efc0718e6e4cf065` |
+| score stdout SHA-256 | `1edaa4f51179fc69c902c437996bc129253e4ad606e05d3242213070dbcc8328` |
+| private reviewer declarations SHA-256 | `bed06056b4206fcc6ffc25bad6124468412ff6db6f513cb66bf453cf5b8a516f` |
+| private custodian receipt SHA-256 | `e09992c837ed355c6b4dd26157d72ebd945e0f600e8386c4be8e5a08ff13254d` |
+
+## Final Decision
+
+The candidate reduces estimated context tokens by `0.799529` versus the
+reference and all abstention judgments pass. Both reviewers nevertheless fail
+the candidate's absolute and non-inferiority gates globally and in all six
+strata. The reference also fails its own zero-tolerance global absolute gate.
+
+The terminal status is `NO_ADVANCE`, with
+`recommend_write_side_preregistration=false`. No execution gate remains in
+this contract. It must not be rescored or rerun ad hoc; any successor requires
+a new, separately reviewed preregistration.
 
 ## Trust Boundary
 
@@ -101,9 +118,14 @@ be repaired by deleting the claim. None occurred in this execution: the
 redacted completion marker exists, the hash chain validates, and no failure
 receipt or second attempt exists.
 
+The score command has no technical replay latch. Governance authorized and
+executed one scoring pass; post-score validation used only the completed score
+packet and did not call the scorer again.
+
 ## Explicit Non-Authorities
 
-Even a future passing score cannot authorize automatic digest regeneration,
-runtime promotion, retrieval-default changes, benchmark claims, remote CI,
-release, version, tag, or deployment changes. It could at most support a
-separate preregistration decision for a write-side trial.
+This `NO_ADVANCE` result authorizes no automatic digest regeneration, runtime
+promotion, retrieval-default change, benchmark claim, remote CI, release,
+version, tag, deployment, or write-side trial. The evidence supports redesign
+work on freshness, temporal invalidation, truth hierarchy, and referent
+identity before any separately preregistered successor evaluation.

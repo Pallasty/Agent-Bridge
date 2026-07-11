@@ -2,28 +2,31 @@
 
 Date: 2026-07-10
 
-Status: **GENERATION COMPLETE / ATTEMPT 1 VALID /
-WAIT_TWO_BLIND_REVIEWS**.
+Status: **COMPLETE / TWO BLIND REVIEWS VALID / NO_ADVANCE**.
 
 ## Verdict
 
-The successor protocol completed its fixed 24-cell answer-generation matrix on
-the first and only claimed attempt. Postflight validation passed for the raw
-generation packet, blinded review packet, private condition map, review
-template, redacted completion packet, claim state, permissions, and complete
-hash chain. Generation stderr is empty, no tool event was observed, no answer
-postprocessing or automatic retry occurred, and no failure receipt or second
-attempt exists.
+The successor protocol completed its fixed 24-cell generation matrix on the
+first and only claimed attempt, obtained two complete independent human blind
+reviews, and executed the one authorized custodian scoring pass. The frozen
+scorer validated both reviews before it opened the condition-labelled
+generation packet or private map.
 
-This is a generation-phase result, not an answer-quality result. No reviewer
-has completed a review, neither a reviewer nor the owner has received the
-condition mapping, no score-time or decision unblinding has occurred, and no
-score or advancement decision has been computed.
+The deterministic result is `NO_ADVANCE`. Direct portfolio digest passes the
+efficiency and abstention gates, reducing estimated context tokens by 79.9529%
+versus full hybrid retrieval, but fails absolute quality, non-inferiority, and
+every per-stratum all-gates check for both reviewers. Full hybrid retrieval is
+decisively preferred and materially more complete and current, but it also
+misses the preregistered zero-tolerance absolute gate for both reviewers.
+
+The trial therefore does not recommend preregistration of a write-side digest
+trial. It authorizes no digest regeneration, runtime promotion, retrieval-
+default change, CI, release, version, tag, or deployment action.
 
 ```yaml
-generation_schema: agent_bridge.portfolio_continuity_answer_generation_redacted.v2
+score_schema: agent_bridge.portfolio_continuity_answer_score.v2
 trial_id: portfolio_continuity_successor_answer_20260710
-status: WAIT_TWO_BLIND_REVIEWS
+status: NO_ADVANCE
 contract_commit: e5c985d4916086bc3396ab28d2a4943b82f5df0a
 contract_sha256: ef109025d1b7b7724295d075edbb7061a56f1e5a87faa643d8e6b55383f815dd
 harness_source_sha256: af15d85758c4e5454a27a8f18a2e3101f60c5472c8fdc352a750ba5681e045ee
@@ -34,121 +37,152 @@ generation_sha256: c83f62ce88f2509667f949c1dd2ebca1410537f73a4ed49d595b62b1c635d
 redacted_generation_sha256: eb7b94e1e14f6226507b101b4bda4b5aceedf2a1647bbf163a8fb4f254941c3c
 blind_packet_sha256: 12a1364f59ee970956e289823608641dd83747e605fb7308ebfa4e221c416c0b
 blind_map_sha256: e80693737e4afb0204cf3dd7b108c6011504f92d18364594945d5b70539b8b80
-review_template_sha256: 016dfdbd34a61f0a38c748f8256796caaab6f191961c089df4518401c89f45fd
-attempt_claim_sha256: fc0967830ca7082a646a2679f91075a327ba43c75c2a3f31d06f0035a17469ec
+review_1_sha256: 8d6874cb3084e7b0f7b98b6f6264bd310eaa2dfa032d14ff769304a7761b4a0b
+review_2_sha256: 86188b8ee4f5435d886a46a35c0fa954861990f4306d04e582b1ccd4738d2e3a
+score_sha256: 32bd54632fa342e481f57d17526a11358fd35ccc38209611efc0718e6e4cf065
+score_stdout_sha256: 1edaa4f51179fc69c902c437996bc129253e4ad606e05d3242213070dbcc8328
+private_reviewer_declarations_sha256: bed06056b4206fcc6ffc25bad6124468412ff6db6f513cb66bf453cf5b8a516f
+custodian_receipt_sha256: e09992c837ed355c6b4dd26157d72ebd945e0f600e8386c4be8e5a08ff13254d
 generated_at_utc: 2026-07-10T20:25:31Z
+custodian_score_completed_at_utc: 2026-07-11T00:02:45Z
 generator_identity: codex-cli 0.144.1
 model: gpt-5.4
 reasoning_effort: medium
 generation_attempt: 1
-prior_failure_receipt_sha256: null
-failure_receipt_created: false
-second_attempt_created: false
+automatic_retry: false
 case_count: 12
 condition_count: 2
 answer_count: 24
-answer_chars_total: 29252
-answer_chars_min: 218
-answer_chars_max: 2142
-generation_latency_ms_total: 653442.890
-generation_latency_ms_p95: 42800.643
-tool_events_observed: false
-answer_postprocessing_applied: false
-automatic_retry: false
-blind_reviews_completed: 0
-unblinded: false
-scored: false
+reviewer_count: 2
+stratum_count: 6
+reviews_complete: true
+all_abstention_pass: true
+all_reviewer_global_gates_pass: false
+all_reviewer_stratum_gates_pass: false
+advance: false
+recommend_write_side_preregistration: false
+score_time_unblinding_complete: true
 runtime_promotion_allowed: false
 ci_action_allowed: false
 ```
 
 ## Execution Record
 
-Generation ran only in the canonical detached execution worktree at the frozen
-implementation commit. Immediately before the attempt, the operator rechecked
-the contract, capture coverage, worktree binding, fresh output paths, absence
-of an existing claim, and exact generator identity.
+Capture used one read-only online backup and 24 condition-isolated snapshots;
+all twelve reference-coverage cases passed. Generation ran only in the
+canonical detached execution worktree. A private `CODEX_HOME` containing only
+authentication isolated the exact frozen CLI identity from unrelated shared-
+home startup warnings before any attempt was claimed or model invoked.
 
-The shared Codex home emitted an unrelated startup warning during a zero-call
-identity probe. Before any attempt was claimed or model called, generation was
-therefore bound to a private mode-restricted `CODEX_HOME` containing only the
-authentication file. Its version probe produced the exact frozen stdout and
-empty stderr. No user configuration, project rules, hooks, or prior session
-state entered the generation environment.
+The harness created the single contract-scoped attempt-1 claim and ran one
+independent Codex process per fixed cell in an empty ephemeral read-only
+workspace. It observed no tool events, performed no answer postprocessing or
+automatic retry, emitted empty stderr, and created no failure receipt or
+attempt-2 claim. Each of the five generation artifacts was written atomically
+in sequence; they do not form one cross-file transaction.
 
-The harness then created the single contract-scoped attempt-1 claim and ran one
-independent Codex process per case-condition cell in the committed order. Each
-process used an empty ephemeral workspace, read-only sandbox, ignored user
-configuration and project rules, fixed model and reasoning effort, and no
-tools or external facts. All 24 cells completed and the harness atomically
-wrote each of the five preregistered output artifacts in sequence, with the
-redacted completion packet written last. The writes do not form one cross-file
-transaction.
+Two human reviewers then received byte-identical packet, template, and reading
+guide bytes in separate mode-restricted directories. Both attested independent
+review and condition blinding. Before score-time unblinding, independent
+checks validated each packet without reading the other review, generation, or
+map. Each review contains 12 cases, 24 answer judgments, 78 claim scores, four
+abstention judgments, and 12 preferences with no missing field or tie.
 
-## Postflight Validation
+## Score Result
 
-The content-blind postflight re-ran the frozen validators over the capture,
-generation, blind packet, and map and independently reconstructed the expected
-review template and redacted summary. It confirmed:
+The scorer assigns stable pseudonymous reviewer labels after sorting private
+reviewer-identity hashes; it does not emit reviewer identities or notes.
 
-- complete invocation indexes `1..24`, one answer per fixed cell, and exact
-  capture/context/prompt/output hash bindings;
-- byte-consistent answer hashes and character counts, with the generated
-  answer strings preserved rather than sanitized;
-- blinded answer-set equality, seed-reproducible opaque ids and ordering, and
-  a complete private one-to-one condition map;
-- semantic JSON equality between generation stdout and the redacted completion
-  packet despite their different serializations;
-- mode `0600` for all generation and handoff artifacts, mode `0700` for the
-  claim directory, and mode `0600` for the sole attempt-1 claim;
-- empty generation stderr, no failure receipt, and no attempt-2 claim;
-- no exact frozen prompt, retrieval query, context, answer, or blind seed in
-  the redacted completion packet or stdout.
+| Scorer reviewer | Condition | Completeness | Current fail / uncertain | Unsupported | Usefulness mean / min | Context tokens | Preference wins | Absolute gate |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `reviewer_1` | `hybrid_retrieval` | 0.972973 | 1 / 2 | 2 | 4.416667 / 3 | 111,996 | 10 | fail |
+| `reviewer_1` | `portfolio_digest` | 0.635135 | 8 / 3 | 3 | 3.083333 / 2 | 22,452 | 2 | fail |
+| `reviewer_2` | `hybrid_retrieval` | 1.000000 | 0 / 4 | 2 | 4.583333 / 4 | 111,996 | 11 | fail |
+| `reviewer_2` | `portfolio_digest` | 0.594595 | 5 / 6 | 1 | 2.916667 / 2 | 22,452 | 1 | fail |
 
-The check consumed private packets only through validation code and emitted
-hashes, counts, booleans, and aggregate lengths/latencies. It did not display
-raw inputs, answers, or the condition map.
+| Scorer reviewer | Completeness drop | Usefulness drop | Token reduction | Non-inferiority | Efficiency |
+| --- | ---: | ---: | ---: | --- | --- |
+| `reviewer_1` | 0.337838 | 1.333334 | 0.799529 | fail | pass |
+| `reviewer_2` | 0.405405 | 1.666666 | 0.799529 | fail | pass |
 
-## Privacy And Blinding
+| Stratum | Cases | Reviewer 1 gate | Reviewer 2 gate | All reviewers |
+| --- | ---: | --- | --- | --- |
+| Portfolio status | 2 | fail | fail | fail |
+| Portfolio retrospective | 2 | fail | fail | fail |
+| Portfolio planning | 2 | fail | fail | fail |
+| Dependency and risk | 2 | fail | fail | fail |
+| Stale state | 2 | fail | fail | fail |
+| Cross-project conflict | 2 | fail | fail | fail |
 
-- Raw capture, raw generation, blind seed, private Codex home, attempt claim,
-  blind packet, condition map, and review template remain beneath ignored,
-  mode-restricted directories and are not tracked by Git.
-- The blinded packet contains the questions, rubric, and opaque answer ids
-  needed for review, but no condition labels or contexts.
-- The condition map is not part of either reviewer handoff and must remain
-  unopened by reviewers until both reviews are complete.
-- Public artifacts contain only identities, hashes, counts, aggregate
-  character/latency statistics, status, and boundary booleans.
-- The live Agent-Bridge store was not written during capture or generation.
+Both reviewers pass all four required abstention judgments. Preferences contain
+no ties and favor full hybrid retrieval by `10–2` and `11–1`. Every one of the
+six two-case strata fails the complete gate for both reviewers, although
+digest efficiency passes in all twelve reviewer-stratum slices. The global
+79.9529% reduction exceeds the frozen 40% efficiency threshold.
+
+The absolute gate requires at least 0.90 weighted completeness, zero current
+failures, zero current uncertainties, zero unsupported assertions, zero
+abstention failures, mean usefulness at least 4.0, and no case below 3. Full
+hybrid clears completeness and usefulness globally but fails the zero-
+tolerance currentness/unsupported requirements. Direct digest fails multiple
+absolute thresholds and is not non-inferior to the reference.
+
+## Validation
+
+Post-score validation did not invoke the scorer again. It confirmed mode
+`0600`, empty stderr, semantic JSON equality between score stdout and the score
+artifact, the complete contract/capture/generation/blind/map/review hash chain,
+the fixed output privacy boundary, and the final gate aggregation.
+
+An independent arithmetic check recomputed absolute, non-inferiority,
+efficiency, abstention, and combined gates from the safe score output and
+frozen thresholds for 14 reviewer slices: two global slices plus all twelve
+reviewer-stratum slices. It reproduced every delta and Boolean. An exact-value
+scan found no private prompt, query, context, answer, opaque answer id,
+reviewer identity, or review note in the score artifact or stdout.
 
 ## Interpretation
 
-Generation success establishes only that the preregistered comparison reached
-its human-review gate without a protocol failure. It says nothing yet about
-claim completeness, currentness, unsupported assertions, usefulness,
-abstention, preference, non-inferiority, efficiency, or which condition should
-advance.
+Score-time mapping identifies `portfolio_digest` as the lower-quality
+condition. Across both reviewers it has five to eight currentness failures,
+three to six currentness uncertainties, completeness below 0.64, and mean
+usefulness below 3.09. Its principal measured failure is therefore stale or
+uncertain truth combined with incomplete support, not context cost or refusal
+behavior.
 
-The expanded v1 run remains terminal and is not rerun or overwritten by this
-successor execution. The successor result is a separate contract with a new
-capture, coverage gate, projection, retry policy, and blind seed.
+The 79.9529% context reduction is real and consistent, and the digest answers
+abstain correctly when evidence is absent. Those are useful design signals,
+but they cannot rescue an artifact that is materially stale or points to the
+wrong object. Conversely, this result is not a production endorsement of full
+hybrid retrieval because the reference also failed its absolute gate.
 
-## Next Gate
+## Methodological Caveats
 
-Two independent human reviewers must each receive byte-identical copies of the
-blind packet and review template, remain condition-blind, and complete every
-required score, abstention judgment, usefulness value, preference, identity,
-and timestamp. Neither may inspect the private map or condition-labelled raw
-generation packet.
+- This is a fixed 12-case, six-stratum human-reviewed trial with heuristic
+  token estimates, not a benchmark or a generalization claim.
+- Currentness judgments are anchored to the portfolio truth state at review
+  time. Future state changes would require a new frozen corpus and contract,
+  not reinterpretation of this score.
+- Public score metrics are rounded to six decimal places. Independent
+  arithmetic validation reproduced the packet-level gates; `NO_ADVANCE` does
+  not depend on a rounding boundary because multiple discrete currentness,
+  unsupported-assertion, and usefulness gates fail.
+- Reviewer declarations and free-text observations remain private and are not
+  used as public score evidence.
 
-Only after both reviews are complete may the custodian verify their bindings
-and invoke the frozen scorer. The protocol authorizes one custodian scoring
-pass; the harness does not enforce a score-time latch, so any repeat would
-require a separately recorded decision. The scorer validates both reviews
-before it opens generation and mapping artifacts. Its result can recommend at
-most preregistration of a separate write-side trial; it cannot authorize any
-runtime or product change.
+## Privacy And Boundaries
+
+Raw capture, generation, seed, private map, reviews, reviewer identities,
+notes, private Codex home, and claim remain in ignored mode-restricted paths.
+The public result contains only committed identities, hashes, aggregate
+metrics, scorer condition labels, and boundary facts. The live Agent-Bridge
+store was not written by capture, generation, review, or scoring.
+
+This trial is closed. It must not be rerun ad hoc. Any successor evaluation or
+write-side trial requires a separately reviewed preregistration. In product
+terms, the evidence supports work on freshness, temporal invalidation, truth
+hierarchy, and referent identity before another digest trial; it does not
+support promoting the current digest as a memory-system replacement.
 
 ## Repository Files
 
