@@ -83,6 +83,12 @@ final cross-cluster adversarial review with all required corrections applied.
    corrected findings and the July 2026 experimental maturity update are in
    `BATCH3_ENCODING_HARDWARE_REVIEW.md`.
 4. Final synthesis and adversarial review: **complete**.
+5. First roadmap execution task, evidence-bounded Fermi--Hubbard resource model:
+   **planning scaffold complete; matched benchmark still open** — logical
+   subtotals, topology, first-step unknowns, route-specific error/shots
+   bookkeeping, and a parameterized native/bare-qubit/lattice-surgery physical
+   translation are implemented. Cross-compiler term-order validation and current
+   primary-source gaps remain explicit as `UNRESOLVED`.
 
 The focused 70-claim ledger is fully adjudicated: 56 unanimous verified, 8
 split/partial accepted, and 6 refuted as written, with every mandatory rewrite
@@ -94,5 +100,10 @@ retained in `claim-status.jsonl`.
 - [Full technical synthesis](FINAL_SYNTHESIS.md)
 - [Final adversarial review](FINAL_ADVERSARIAL_REVIEW.md)
 - [Post-ledger June 2026 matchgate/QC-AFQMC update](POST_LEDGER_MATCHGATE_UPDATE.md)
+- [Evidence-bounded 2D Fermi--Hubbard resource model (Chinese)](RESOURCE_MODEL_FERMI_HUBBARD_ZH.md)
+- Reproducible model: `fermi_hubbard_resource_model.py`, scenario
+  `fermi_hubbard_resource_scenario.json`, Fig. 5 candidate points
+  `fermi_hubbard_fig5_candidate_points.json`, and unit tests
+  `test_fermi_hubbard_resource_model.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

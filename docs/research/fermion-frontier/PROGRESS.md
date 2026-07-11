@@ -83,11 +83,27 @@ unreviewed focused claims.
   `FINAL_ADVERSARIAL_REVIEW.md`, with a Chinese brief in
   `EXECUTIVE_BRIEF_ZH.md`.
 
-## Next update
+## Roadmap execution update
 
-Begin the first execution task from the final roadmap: construct a matched
-logical-to-physical resource model for one Hubbard or lattice-gauge workload
-across native fermions, fermionic swap networks, dynamic Jordan–Wigner, and
-surface-code lattice surgery. The comparison must fix a target error and report
-preprocessing, gate count, topology/depth, physical space-time, movement,
-readout, classical post-processing, and amortization in one table.
+The first execution task now has a reproducible planning deliverable in
+`RESOURCE_MODEL_FERMI_HUBBARD_ZH.md` and
+`fermi_hubbard_resource_model.py`. It fixes an open-boundary spinful square
+Fermi--Hubbard physics target, a shared Strang-step planning input, an additive
+target-error ledger, and route-specific accepted-shot/acceptance/mitigation
+accounting. The common term-group order is reconstructed from dynamic-JW Fig. 14
+but remains a validation target rather than a completed cross-compiler fact. The
+model separates:
+
+- source-reported leading dynamic-JW resources;
+- finite-size FSN/dynamic candidate fits restricted to the Fig. 5 domain;
+- a new graph-coloring native schedule under the common group-order target;
+- bare-qubit layer time from non-CNOT time;
+- lattice-surgery ladder rounds from complete encoding switches, code cycles,
+  auxiliary/routing/factory patches, and magic-state supply.
+
+The model intentionally returns `UNRESOLVED` for complete totals and wall-clock
+quantities that the primary sources do not determine. The next update must
+supply individual-term cross-compiler validation, a same-observable convergence/
+variance study, full first-step circuit exports, native consecutive-matching
+movement benchmarks, and a distance-`d` surface-code place-and-route before
+claiming an end-to-end winner.

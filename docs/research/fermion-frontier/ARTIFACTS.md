@@ -33,3 +33,20 @@ All copied JSON files are research-only outputs. They contain no credentials.
 
 The copied workflow projections are independently hashed in
 `SHA256SUMS` after creation.
+
+## Post-takeover reproducible model
+
+The following are authored research artifacts rather than copied Claude data,
+so they are versioned normally and are not added to the preservation-only
+`SHA256SUMS` list:
+
+- `RESOURCE_MODEL_FERMI_HUBBARD_ZH.md`: assumptions, derivations, evidence
+  boundaries, planning scenario, and decisive next measurements;
+- `fermi_hubbard_resource_model.py`: standard-library-only executable model;
+- `fermi_hubbard_resource_scenario.json`: deliberately incomplete physical
+  planning configuration; `null` denotes an evidence gap;
+- `fermi_hubbard_fig5_candidate_points.json`: finite-domain reconstructed points
+  and candidate formulas, explicitly not author-supplied machine-readable data;
+- `test_fermi_hubbard_resource_model.py`: all plotted candidate points, domain
+  guards, common-order scheduling, first-step blocking, lattice-surgery
+  translation, route-specific shots, and validation tests.

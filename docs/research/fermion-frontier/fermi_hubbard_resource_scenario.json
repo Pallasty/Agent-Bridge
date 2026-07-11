@@ -1,0 +1,137 @@
+{
+  "physics": {
+    "hopping_t_energy_units": 1.0,
+    "onsite_u_over_t": 8.0,
+    "dimensionless_evolution_time_tT": 1.0,
+    "filling_particles_per_site": 1.0,
+    "initial_state": "checkerboard Neel product state (minimal spin imbalance if required)",
+    "observables": [
+      "staggered magnetization",
+      "double occupancy"
+    ],
+    "measurement_settings": 1,
+    "error_metric": "additive absolute error in each reported observable"
+  },
+  "workload": {
+    "linear_size": 8,
+    "trotter_steps": 100,
+    "target_total_error": 0.02,
+    "algorithmic_error_budget": 0.005,
+    "statistical_error_budget": 0.01,
+    "hardware_error_budget": 0.005,
+    "accepted_shots_per_measurement_setting": 10000
+  },
+  "route_sampling": {
+    "native_fermions": {
+      "acceptance_probability": null,
+      "mitigation_repetition_multiplier": null
+    },
+    "dynamic_jw_local_grid": {
+      "acceptance_probability": null,
+      "mitigation_repetition_multiplier": null
+    },
+    "fsn_standard": {
+      "acceptance_probability": null,
+      "mitigation_repetition_multiplier": null
+    },
+    "fsn_ladder": {
+      "acceptance_probability": null,
+      "mitigation_repetition_multiplier": null
+    },
+    "dynamic_jw_surface_code": {
+      "acceptance_probability": null,
+      "mitigation_repetition_multiplier": null
+    }
+  },
+  "first_step_extra_cnot": {
+    "dynamic_jw": null,
+    "fsn_standard": null,
+    "fsn_ladder": null
+  },
+  "first_step_extra_cnot_depth": {
+    "dynamic_jw": null,
+    "fsn_standard": null,
+    "fsn_ladder": null
+  },
+  "timing_us": {
+    "route_overheads": {
+      "native_fermions": {
+        "classical_preprocessing_us": null,
+        "prep_us": null,
+        "readout_reset_us": null,
+        "classical_postprocess_per_execution_us": null
+      },
+      "dynamic_jw_local_grid": {
+        "classical_preprocessing_us": null,
+        "prep_us": null,
+        "readout_reset_us": null,
+        "classical_postprocess_per_execution_us": null
+      },
+      "fsn_standard": {
+        "classical_preprocessing_us": null,
+        "prep_us": null,
+        "readout_reset_us": null,
+        "classical_postprocess_per_execution_us": null
+      },
+      "fsn_ladder": {
+        "classical_preprocessing_us": null,
+        "prep_us": null,
+        "readout_reset_us": null,
+        "classical_postprocess_per_execution_us": null
+      },
+      "dynamic_jw_surface_code": {
+        "classical_preprocessing_us": null,
+        "prep_us": null,
+        "readout_reset_us": null,
+        "classical_postprocess_per_execution_us": null
+      }
+    },
+    "native_h1_half_layer_us": null,
+    "native_h2_half_layer_us": null,
+    "native_h3_half_layer_us": null,
+    "native_h1_full_boundary_layer_us": null,
+    "native_h4_full_central_layer_us": null,
+    "native_onsite_half_layer_us": null,
+    "bare_qubit_routes": {
+      "dynamic_jw": {
+        "cnot_layer_us": null,
+        "non_cnot_us_per_steady_step": null,
+        "first_step_extra_non_cnot_us": null
+      },
+      "fsn_standard": {
+        "cnot_layer_us": null,
+        "non_cnot_us_per_steady_step": null,
+        "first_step_extra_non_cnot_us": null
+      },
+      "fsn_ladder": {
+        "cnot_layer_us": null,
+        "non_cnot_us_per_steady_step": null,
+        "first_step_extra_non_cnot_us": null
+      }
+    }
+  },
+  "native_hardware": {
+    "storage_traps": null,
+    "transport_tweezers": null,
+    "workspace_sites": null
+  },
+  "surface_code": {
+    "distance": 21,
+    "cycle_us": 1.0,
+    "joint_measurement_cycles": 21,
+    "aux_readout_cycles": 1,
+    "single_qubit_clifford_cycles": 0,
+    "reaction_us": 10.0,
+    "feedforward_barriers_per_ladder": 1,
+    "c2d_blocks_per_switch": 1,
+    "cz_layer_cycles": 21,
+    "spinful_swap_cycles_per_switch": null,
+    "local_rotation_cycles_per_step": null,
+    "auxiliary_patches": null,
+    "routing_patches": null,
+    "factory_patches": null,
+    "magic_states_per_step": null,
+    "magic_state_output_interval_cycles": null,
+    "factory_count": null
+  }
+}
