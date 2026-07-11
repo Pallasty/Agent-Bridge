@@ -100,8 +100,8 @@ and [JMLR 2022 random-design regression](https://www.jmlr.org/papers/v23/19-571.
 
 The Monte Carlo result uses a particular OPE DPP on a hypercube and a restricted
 function class. The SGD result concerns an unbiased gradient estimator. The
-inherited ledger incorrectly relabeled it as a loss/coreset estimator. Two
-One reviewer also found that the original NeurIPS paper treats part of the
+inherited ledger incorrectly relabeled it as a loss/coreset estimator. One
+reviewer also found that the original NeurIPS paper treats part of the
 transfer from a smoothed theoretical estimator to the practical discrete DPP
 through a spectral approximation whose rigor is qualified in the appendix; the
 other two accepted the later review's theorem statement after correcting the

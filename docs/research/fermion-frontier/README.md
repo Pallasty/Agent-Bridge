@@ -29,10 +29,9 @@ verification round:
 | Targeted gap survey | 119 | 25 | 21 | 4 | `claude-round2-result.json` |
 | Gap 3/4/5 verification | 70 | 10 | 10 | 0 | `claude-round3-partial-result.json` |
 
-The third round is incomplete: only five claims received a full 3-0 vote;
-five more received 2-0 and remain provisional under this takeover's stricter
-three-vote gate. Sixty claims have no valid adjudication. The original third
-round synthesis failed after the Claude session hit its usage limit.
+At takeover, the third round was incomplete: only five claims had a full 3-0
+vote, five more had 2-0 votes, and sixty had no valid adjudication. The original
+third-round synthesis failed after the Claude session hit its usage limit.
 
 The compact 70-claim input is preserved as `gap345-claims.json`. Original
 Claude paths and content hashes are recorded in `ARTIFACTS.md`.
@@ -69,8 +68,8 @@ intrinsically antisymmetric. Non-Gaussian resources, interactions, encoding
 overheads, high polynomial degree, and mismatched inductive bias delimit the
 advantage.
 
-This thesis remains a synthesis target rather than a final verdict until the
-open verification batches are closed.
+The three focused verification batches are now closed. This thesis remains a
+synthesis target until it passes the final cross-cluster adversarial review.
 
 ## Planned verification batches
 
@@ -79,6 +78,12 @@ open verification batches are closed.
 2. DPP and negative-dependence ML: **complete** — the full 30-claim cluster has
    28 verified and 2 refuted as written; corrected findings are in
    `BATCH2_DPP_REVIEW.md`.
-3. Fermion-to-qubit mappings and native hardware: HATT, programmable neutral
-   atom fermionic processing, and the 2026 dynamic Jordan-Wigner construction.
-4. Final synthesis and adversarial review.
+3. Fermion-to-qubit mappings and native hardware: **complete** — 12 fully
+   verified, 2 verified only after partial rewrite, and 1 refuted as written;
+   corrected findings and the July 2026 experimental maturity update are in
+   `BATCH3_ENCODING_HARDWARE_REVIEW.md`.
+4. Final synthesis and adversarial review: **next**.
+
+The focused 70-claim ledger is fully adjudicated: 64 verified and 6 refuted as
+written, with every split decision and mandatory rewrite retained in
+`claim-status.jsonl`.

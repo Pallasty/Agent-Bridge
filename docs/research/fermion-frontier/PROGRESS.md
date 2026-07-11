@@ -11,6 +11,10 @@ Status date: 2026-07-11
 - `INFERRED`: synthesis or cross-domain mapping not directly asserted by a
   source.
 
+Split suffixes retain the vote tally: `verified_2_1` means two passes and one
+refutation; `verified_2_0_1` means two passes and one unverified verdict. Their
+replacement wording and disagreement are mandatory, not optional caveats.
+
 ## Completed evidence clusters
 
 The inherited completed rounds support these clusters, subject to the original
@@ -36,8 +40,12 @@ source-level caveats preserved in the round result files:
 |---|---:|---|
 | DPP / negative-dependence ML | 30 | 28 verified, 2 refuted/rewrite-required |
 | Non-Gaussian fermionic simulation | 10 | 9 verified, 1 refuted/rewrite-required |
-| Fermion-to-qubit encoding / native hardware | 15 | Unverified |
+| Fermion-to-qubit encoding / native hardware | 15 | 12 fully verified, 2 verified after partial rewrite, 1 refuted |
 | Gaussian-state manifold geometry | 15 | 13 verified, 2 refuted/rewrite-required |
+
+All 70 claims in the focused gap-3/4/5 ledger are now adjudicated: 64 verified
+(including retained split decisions) and 6 refuted as written. There are no
+unverified focused claims.
 
 ## QA findings
 
@@ -54,12 +62,23 @@ source-level caveats preserved in the round result files:
 - The DPP source graph has substantial author overlap and survey-to-primary
   dependencies. Three independent reviews do not constitute three independent
   source replications.
+- The encoding batch separates classical mapping preprocessing, compiled CNOT
+  count, logical depth, physical execution time, and fault-tolerant space-time.
+  Equal asymptotic depth across two papers does not make these resources
+  interchangeable.
+- Encoding claim 46 was unanimously refuted because it changed a five-layer
+  native-gate depth statement into five total gates. Claim 43 passed 2–1 only
+  as a four-mode H2 hardware observation without a general causal noise claim.
+- The 2023 native-hardware maturity statement is now historically incomplete.
+  Separate 2026 experiments demonstrate high-fidelity fermionic collisional
+  gates and programmable fermionic array preparation/readout, but not yet the
+  complete integrated processor proposed in PNAS.
 - No unified final report was produced by Claude.
 
 ## Next update
 
-Proceed to a single comparative encoding/hardware batch rather than three
-isolated source summaries. Verify the peer-reviewed HATT compiler and PNAS
-native-fermion proposal first, then use the May 2026 dynamic Jordan-Wigner
-preprint as an adversarial update to determine which native-hardware advantages
-remain after architecture-dependent encoding improvements.
+Proceed to the unified final synthesis and adversarial review. The synthesis
+must keep the different meanings of fermion continuity separate, distinguish
+direct physical evidence from mathematical transfer and analogy, and compare
+advantages only after normalizing preprocessing, logical gates/depth, physical
+space-time, publication maturity, and source independence.
