@@ -96,11 +96,15 @@ def _age_band(age_days: int) -> str:
 
 
 def audit(db_path: str, as_of: int | None = None) -> dict:
-    as_of = int(time.time()) if as_of is None else int(as_of)
-    if as_of < 0:
+    if as_of is not None and int(as_of) < 0:
         raise ValueError("as_of must be non-negative")
 
     db = _open_read_only(db_path)
+    db.execute("BEGIN")
+    # Establish one read snapshot before fixing the default wall-clock bound.
+    # Every later SELECT in this audit therefore observes the same DB state.
+    db.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    as_of = int(time.time()) if as_of is None else int(as_of)
     start_changes = db.total_changes
     try:
         _require_schema(db)
@@ -108,12 +112,16 @@ def audit(db_path: str, as_of: int | None = None) -> dict:
             """SELECT key, kind, tags, created_at, updated_at,
                       last_accessed_at, access_count, status,
                       superseded_by, dedupe_key
-                 FROM memories"""
+                 FROM memories
+                WHERE created_at <= ?""",
+            (as_of,),
         ).fetchall()
         edge_rows = db.execute(
             """SELECT from_key, to_key, edge_type, created_at
                  FROM memory_edges
-                WHERE edge_type IN ('supersedes','invalidates','corrects')"""
+                WHERE edge_type IN ('supersedes','invalidates','corrects')
+                  AND created_at <= ?""",
+            (as_of,),
         ).fetchall()
 
         records: dict[str, dict] = {}
@@ -291,6 +299,7 @@ def audit(db_path: str, as_of: int | None = None) -> dict:
             "no_write_invariant": {
                 "sqlite_uri_mode": "ro",
                 "query_only": True,
+                "consistent_read_snapshot": True,
                 "connection_total_changes_before": start_changes,
                 "connection_total_changes_after": end_changes,
                 "passed": start_changes == 0 and end_changes == 0,

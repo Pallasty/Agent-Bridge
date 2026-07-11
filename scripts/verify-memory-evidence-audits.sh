@@ -258,6 +258,7 @@ assert temporal["signal_details"]["active_duplicate_dedupe_groups"] == 1
 assert temporal["signal_details"]["post_supersede_or_invalidate_access_rows"] == 2
 assert temporal["signal_details"]["freshness_bound_age_bands"] == {"d14-29": 1}
 assert temporal["signal_details"]["unique_actionable_candidate_rows"] == 10
+assert temporal["no_write_invariant"]["consistent_read_snapshot"] is True
 assert temporal["no_write_invariant"]["passed"] is True
 
 unlabelled = packet("telemetry-unlabelled.json")
@@ -278,6 +279,7 @@ assert unlabelled["eval_contamination_bounds"] == {
 }
 assert unlabelled["ambient_stage2_gate"]["verdict"] == "WAIT"
 assert unlabelled["outcome_apply_authorized"] is False
+assert unlabelled["no_write_invariant"]["consistent_read_snapshot"] is True
 assert unlabelled["no_write_invariant"]["passed"] is True
 
 labelled = packet("telemetry-labelled.json")

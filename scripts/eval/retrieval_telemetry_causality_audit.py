@@ -133,13 +133,16 @@ def audit(
     as_of: int | None = None,
     window_days: int = DEFAULT_WINDOW_DAYS,
 ) -> dict:
-    as_of = int(time.time()) if as_of is None else int(as_of)
-    if as_of < 0:
+    if as_of is not None and int(as_of) < 0:
         raise ValueError("as_of must be non-negative")
     if window_days <= 0:
         raise ValueError("window_days must be positive")
 
     db = _open_read_only(db_path)
+    db.execute("BEGIN")
+    # Bind active-key membership and surfacing rows to one SQLite snapshot.
+    db.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    as_of = int(time.time()) if as_of is None else int(as_of)
     start_changes = db.total_changes
     try:
         _, traffic_class_present = _require_schema(db)
@@ -151,7 +154,10 @@ def audit(
             "memory_key, mode, rank, surfaced_at, used_at, consumed_at"
             + (", traffic_class" if traffic_class_present else "")
         )
-        raw_rows = db.execute(f"SELECT {fields} FROM retrieval_surfacing").fetchall()
+        raw_rows = db.execute(
+            f"SELECT {fields} FROM retrieval_surfacing WHERE surfaced_at <= ?",
+            (as_of,),
+        ).fetchall()
         rows = []
         for raw in raw_rows:
             traffic_class = raw[6] if traffic_class_present else None
@@ -163,8 +169,12 @@ def audit(
                     "mode": raw[1],
                     "rank": int(raw[2]),
                     "surfaced_at": int(raw[3]),
-                    "used_at": None if raw[4] is None else int(raw[4]),
-                    "consumed_at": None if raw[5] is None else int(raw[5]),
+                    "used_at": (
+                        None if raw[4] is None or int(raw[4]) > as_of else int(raw[4])
+                    ),
+                    "consumed_at": (
+                        None if raw[5] is None or int(raw[5]) > as_of else int(raw[5])
+                    ),
                     "traffic_class": traffic_class,
                 }
             )
@@ -338,6 +348,7 @@ def audit(
             "no_write_invariant": {
                 "sqlite_uri_mode": "ro",
                 "query_only": True,
+                "consistent_read_snapshot": True,
                 "connection_total_changes_before": start_changes,
                 "connection_total_changes_after": end_changes,
                 "passed": start_changes == 0 and end_changes == 0,
