@@ -107,3 +107,10 @@ supply individual-term cross-compiler validation, a same-observable convergence/
 variance study, full first-step circuit exports, native consecutive-matching
 movement benchmarks, and a distance-`d` surface-code place-and-route before
 claiming an end-to-end winner.
+
+The first of those interfaces is now executable: `term_order_contract.json` pins
+the reconstructed group-level Strang order and fusion rules,
+`term_order_validator.py` validates route exports, and the native fixture passes
+group-level checks. Individual-term exports for dynamic-JW and FSN are still
+absent, so the research status remains “target defined, cross-compiler equality
+unverified.”

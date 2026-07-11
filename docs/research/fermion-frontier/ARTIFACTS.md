@@ -47,6 +47,12 @@ so they are versioned normally and are not added to the preservation-only
   planning configuration; `null` denotes an evidence gap;
 - `fermi_hubbard_fig5_candidate_points.json`: finite-domain reconstructed points
   and candidate formulas, explicitly not author-supplied machine-readable data;
+- `term_order_contract.json`: reconstructed group-order and fusion contract;
+- `term_order_validator.py`: fail-closed group/term-set export validator;
+- `term_order_native_fixture.json`: abstract native group-level fixture, not a
+  hardware circuit export;
 - `test_fermi_hubbard_resource_model.py`: all plotted candidate points, domain
   guards, common-order scheduling, first-step blocking, lattice-surgery
   translation, route-specific shots, and validation tests.
+- `test_term_order_validator.py`: contract, fusion, term-set, and invalid-export
+  regression tests.

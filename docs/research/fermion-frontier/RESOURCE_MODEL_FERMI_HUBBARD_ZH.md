@@ -346,7 +346,26 @@ Nature 的 `99.75(6)%` 是最多 20 pulses 的 repeated-pulse fit、双粒子 po
 fidelity。Nature 的 `U_int` 也不是 PNAS 的纯 density-phase primitive。因此这些值
 均未进入默认完整误差模型。
 
-## 7. 复算与测试
+## 7. 项序契约与验证器
+
+本阶段新增 [term_order_contract.json](term_order_contract.json) 和
+[term_order_validator.py](term_order_validator.py)。路线导出采用最小 schema：
+`route`、`L`、`R`、每步的 raw `events[].group`；如果提供 `events[].terms`，验证器
+还会检查每个 matching / onsite term set。
+
+验证器固定检查：
+
+- raw Strang group order：`H1,H2,HU,H3,H4,H4,H3,HU,H2,H1`；
+- 每步一个 `H4-H4` fusion；
+- 相邻步之间一个 `H1-H1` fusion；
+- raw/fused group-event 数和 raw/fused term-call 数；
+- `L>=3`、步数、group order 和 individual term set 的 fail-closed 行为。
+
+当前 native fixture 已通过 group-level 验证，但没有 individual term lists；dynamic-JW
+和两种 FSN 仍没有机器可读导出，因此不会被验证器假定为已匹配。验证结果
+`VALIDATED` 只表示“给定导出符合契约”，不表示硬件实现或跨编译器等价已经成立。
+
+## 8. 复算与测试
 
 ```bash
 python3 docs/research/fermion-frontier/fermi_hubbard_resource_model.py \
@@ -354,14 +373,22 @@ python3 docs/research/fermion-frontier/fermi_hubbard_resource_model.py \
   --format markdown
 
 python3 docs/research/fermion-frontier/test_fermi_hubbard_resource_model.py
+
+python3 docs/research/fermion-frontier/term_order_validator.py \
+  --contract docs/research/fermion-frontier/term_order_contract.json \
+  --export docs/research/fermion-frontier/term_order_native_fixture.json \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_term_order_validator.py
 ```
 
-十个回归测试覆盖 Fig. 5 的全部 `L=4...10` candidate points、域外阻断、退化网格、
-共同分组 native schedule、两个 `C2D` 的第二 CZ layer、辅助 footprint、零/无限 cycle、
-factory 配置、route-specific expected executions、首步对 complete time 的阻断和误差
-预算校验。
+资源模型的十个回归测试覆盖 Fig. 5 的全部 `L=4...10` candidate points、域外阻断、
+退化网格、共同分组 native schedule、两个 `C2D` 的第二 CZ layer、辅助 footprint、
+零/无限 cycle、factory 配置、route-specific expected executions、首步对 complete time
+的阻断和误差预算校验；项序验证器另有四个测试覆盖 group order、融合、term set 和
+fail-closed 行为。
 
-## 8. 下一阶段的决定性工作
+## 9. 下一阶段的决定性工作
 
 1. **跨编译器同序验证：**导出 native、dynamic-JW、standard/ladder FSN 的
    individual-term circuits；若共同顺序改变 `21N/4L` 或 candidate fits，重新计数。

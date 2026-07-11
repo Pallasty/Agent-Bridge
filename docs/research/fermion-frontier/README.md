@@ -103,7 +103,8 @@ retained in `claim-status.jsonl`.
 - [Evidence-bounded 2D Fermi--Hubbard resource model (Chinese)](RESOURCE_MODEL_FERMI_HUBBARD_ZH.md)
 - Reproducible model: `fermi_hubbard_resource_model.py`, scenario
   `fermi_hubbard_resource_scenario.json`, Fig. 5 candidate points
-  `fermi_hubbard_fig5_candidate_points.json`, and unit tests
-  `test_fermi_hubbard_resource_model.py`
+  `fermi_hubbard_fig5_candidate_points.json`, term-order contract and validator,
+  and unit tests `test_fermi_hubbard_resource_model.py` /
+  `test_term_order_validator.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

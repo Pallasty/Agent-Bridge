@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "route": "native_fermions",
+  "linear_size": 4,
+  "trotter_steps": 2,
+  "steps": [
+    {
+      "step": 0,
+      "events": [
+        {"group": "H1"}, {"group": "H2"}, {"group": "HU"}, {"group": "H3"},
+        {"group": "H4"}, {"group": "H4"}, {"group": "H3"}, {"group": "HU"},
+        {"group": "H2"}, {"group": "H1"}
+      ]
+    },
+    {
+      "step": 1,
+      "events": [
+        {"group": "H1"}, {"group": "H2"}, {"group": "HU"}, {"group": "H3"},
+        {"group": "H4"}, {"group": "H4"}, {"group": "H3"}, {"group": "HU"},
+        {"group": "H2"}, {"group": "H1"}
+      ]
+    }
+  ]
+}
