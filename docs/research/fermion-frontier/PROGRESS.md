@@ -43,9 +43,9 @@ source-level caveats preserved in the round result files:
 | Fermion-to-qubit encoding / native hardware | 15 | 12 fully verified, 2 verified after partial rewrite, 1 refuted |
 | Gaussian-state manifold geometry | 15 | 13 verified, 2 refuted/rewrite-required |
 
-All 70 claims in the focused gap-3/4/5 ledger are now adjudicated: 64 verified
-(including retained split decisions) and 6 refuted as written. There are no
-unverified focused claims.
+All 70 claims in the focused gap-3/4/5 ledger are now adjudicated: 56 unanimous
+verified, 8 split/partial accepted, and 6 refuted as written. There are no
+unreviewed focused claims.
 
 ## QA findings
 
@@ -73,12 +73,21 @@ unverified focused claims.
   Separate 2026 experiments demonstrate high-fidelity fermionic collisional
   gates and programmable fermionic array preparation/readout, but not yet the
   complete integrated processor proposed in PNAS.
-- No unified final report was produced by Claude.
+- A June 2026 Physical Review Research accepted paper was found after the
+  ledger closed and separately reviewed 3–0. Its 24-qubit hybrid QC-AFQMC
+  workflow is an engineering milestone; `9x` is a tuned circuit-throughput
+  result and `656x` is a normalized/extrapolated post-processing estimate, not
+  an end-to-end quantum speedup.
+- Claude produced no unified final report. The takeover's synthesis and final
+  adversarial review are now complete in `FINAL_SYNTHESIS.md` and
+  `FINAL_ADVERSARIAL_REVIEW.md`, with a Chinese brief in
+  `EXECUTIVE_BRIEF_ZH.md`.
 
 ## Next update
 
-Proceed to the unified final synthesis and adversarial review. The synthesis
-must keep the different meanings of fermion continuity separate, distinguish
-direct physical evidence from mathematical transfer and analogy, and compare
-advantages only after normalizing preprocessing, logical gates/depth, physical
-space-time, publication maturity, and source independence.
+Begin the first execution task from the final roadmap: construct a matched
+logical-to-physical resource model for one Hubbard or lattice-gauge workload
+across native fermions, fermionic swap networks, dynamic Jordan–Wigner, and
+surface-code lattice surgery. The comparison must fix a target error and report
+preprocessing, gate count, topology/depth, physical space-time, movement,
+readout, classical post-processing, and amortization in one table.

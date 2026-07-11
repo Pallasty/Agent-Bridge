@@ -68,8 +68,8 @@ intrinsically antisymmetric. Non-Gaussian resources, interactions, encoding
 overheads, high polynomial degree, and mismatched inductive bias delimit the
 advantage.
 
-The three focused verification batches are now closed. This thesis remains a
-synthesis target until it passes the final cross-cluster adversarial review.
+The three focused verification batches are closed, and this thesis passed the
+final cross-cluster adversarial review with all required corrections applied.
 
 ## Planned verification batches
 
@@ -82,8 +82,17 @@ synthesis target until it passes the final cross-cluster adversarial review.
    verified, 2 verified only after partial rewrite, and 1 refuted as written;
    corrected findings and the July 2026 experimental maturity update are in
    `BATCH3_ENCODING_HARDWARE_REVIEW.md`.
-4. Final synthesis and adversarial review: **next**.
+4. Final synthesis and adversarial review: **complete**.
 
-The focused 70-claim ledger is fully adjudicated: 64 verified and 6 refuted as
-written, with every split decision and mandatory rewrite retained in
-`claim-status.jsonl`.
+The focused 70-claim ledger is fully adjudicated: 56 unanimous verified, 8
+split/partial accepted, and 6 refuted as written, with every mandatory rewrite
+retained in `claim-status.jsonl`.
+
+## Final deliverables
+
+- [Chinese executive brief](EXECUTIVE_BRIEF_ZH.md)
+- [Full technical synthesis](FINAL_SYNTHESIS.md)
+- [Final adversarial review](FINAL_ADVERSARIAL_REVIEW.md)
+- [Post-ledger June 2026 matchgate/QC-AFQMC update](POST_LEDGER_MATCHGATE_UPDATE.md)
+- Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
+  `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`
