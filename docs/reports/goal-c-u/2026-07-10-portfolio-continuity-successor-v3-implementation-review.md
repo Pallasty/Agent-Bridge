@@ -2,8 +2,8 @@
 
 Date: 2026-07-10
 
-Status: **INDEPENDENT REVIEW COMPLETED / FINDINGS REMEDIATED / FOLLOW-UP
-PENDING / NOT EXECUTED**.
+Status: **INDEPENDENT REVIEW COMPLETED / FINDINGS REMEDIATED / FOLLOW-UP PASS /
+CLOSED / NOT EXECUTED**.
 
 ## Review Identity
 
@@ -88,5 +88,27 @@ Disposition: **FIXED BEFORE EXECUTION**.
   guard those impossible states.
 
 None authorizes execution. The remediated source, contract, documentation, and
-adversarial tests require a new frozen commit plus an independent follow-up
-review before an execution decision.
+adversarial tests were frozen at `1d2da68181a276a71da36688f53c8f26f3770b50`.
+
+## Follow-Up Review
+
+```yaml
+reviewer: claude-opus-4-8
+cli: Claude Code 2.1.207
+effort: high
+candidate_commit: 1d2da68181a276a71da36688f53c8f26f3770b50
+model_turns: 13
+raw_review_receipt_sha256: 384d471018a5e49eaa79b38221eb2541c128be172c9612bd25ccfe77dbaa4266
+stderr_bytes: 0
+verdict: PASS
+capture_or_answer_generation: false
+remote_ci: false
+```
+
+The follow-up independently confirmed that the score claim has no operator
+path, is keyed only by the frozen contract, and rejects replay under a new
+score output. It also confirmed strict command-record schema and exact
+Claude/Codex model, effort, safety, request, cwd, and workspace binding. No new
+execution blocker was found. The next action, if separately authorized, is an
+execution decision; this review does not itself run or authorize capture,
+generation, model review, unblinding, or scoring.

@@ -2,8 +2,9 @@
 
 Date: 2026-07-10
 
-Status: **PRE-REGISTERED / REVIEW FINDINGS REMEDIATED / REFREEZE PENDING /
-NOT EXECUTED**. This change defines contract v3 and its fail-closed validator.
+Status: **PRE-REGISTERED / IMPLEMENTATION VERIFIED / INDEPENDENT READ-ONLY
+REVIEW PASSED / FROZEN / NOT EXECUTED**. This change defines contract v3 and
+its fail-closed validator.
 It does not perform capture, answer generation, model review, scoring,
 unblinding, an Agent-Bridge write, remote CI, versioning, tagging, release, or
 deployment.
@@ -14,7 +15,7 @@ deployment.
 schema: agent_bridge.portfolio_continuity_answer_contract.v3
 contract_id: portfolio_continuity_successor_v3_answer_blind_20260710
 preregistration_base: a9bb0c93fcfecc63761946f50c7275f78de8db23
-contract_commit: PENDING_REFREEZE
+contract_commit: 1d2da68181a276a71da36688f53c8f26f3770b50
 contract_sha256: da9e190492d74824159bbff18eaeff02a4848921989f4077072f126e1d4e4bcc
 harness_source_sha256: 0b92b1153a77257a49fc847eb37be3e20d687c41067559c22b2ebed72649e003
 surface_source_sha256: b6f599e748088e36424bd03e70a5bc3112aeaf728f6679b19297889a98e5b7f3
@@ -34,6 +35,25 @@ byte-identical to its frozen `af15d857...` source; v3 does not weaken v2 hash
 checking or reopen its consumed generation and scoring allowances. The first
 v3 candidate at `9b0dcbcc` was never executed and is superseded by this
 post-review refreeze.
+
+## Independent Review Gate
+
+Claude Opus 4.8 performed an independent public-source-only review in a clean
+detached worktree with no private `data/`, writes, commands, MCP, web, capture,
+or answer generation. The first review receipt SHA-256 is
+`d14a534840810d0656757eb48b5523dbad5a654b40783272959a745073be1fd1`.
+It confirmed the overall fail-closed order but found an operator-selected
+score-claim replay path and unparsed command provenance. Both were remediated
+before refreeze.
+
+A fresh no-persistence follow-up reviewed candidate `1d2da681` and returned
+`PASS`; receipt SHA-256 is
+`384d471018a5e49eaa79b38221eb2541c128be172c9612bd25ccfe77dbaa4266`.
+It mechanically confirmed deterministic contract-scoped score identity,
+different-output replay rejection, complete Claude/Codex argv validation,
+request/workspace binding, pre-unblind ordering, alias guards, source hashes,
+v2 isolation, and adversarial coverage. Remaining risks are disclosed in the
+implementation-review report and do not authorize execution by themselves.
 
 ## Prior Result
 
