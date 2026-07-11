@@ -243,8 +243,8 @@ provider overlap with the `gpt-5.4` generator and the scheduler's corpus COI
 are explicit contract fields.
 
 Each v3 score requires two private review packets, custodian receipts, full
-command records, and structured model responses byte-identical to the review
-packets. Their CLI/model, command, deterministic request, response/review,
+strict parsed command records, and structured model responses byte-identical
+to the review packets. Their CLI/model/effort argv, command, deterministic request, response/review,
 workspace, no-tool/no-MCP, and COI hashes are validated before
 condition-labelled generation or map bytes are opened. A
 single-use score claim is created immediately before unblinding. V3 also makes
@@ -263,9 +263,12 @@ python3 scripts/eval/portfolio_continuity_successor_v3_trial.py score ... \
   --review-command data/eval/<trial>/command.anthropic.json \
   --review-command data/eval/<trial>/command.openai.json \
   --review-response data/eval/<trial>/response.anthropic.json \
-  --review-response data/eval/<trial>/response.openai.json \
-  --score-claim data/eval/<trial>/score.claim.json
+  --review-response data/eval/<trial>/response.openai.json
 ```
+
+The score claim is not an operator argument. V3 derives one fixed private
+claim path from the frozen contract hash before unblinding, so changing the
+score output path cannot create another allowance.
 
 ## Baselines
 

@@ -58,6 +58,9 @@ FAILURE_RECEIPT_SCHEMA_V2 = (
 REVIEW_RECEIPT_SCHEMA_V3 = (
     "agent_bridge.portfolio_continuity_answer_review_receipt.v3"
 )
+REVIEW_COMMAND_SCHEMA_V3 = (
+    "agent_bridge.portfolio_continuity_answer_review_command.v3"
+)
 SCORE_CLAIM_SCHEMA_V3 = "agent_bridge.portfolio_continuity_answer_score_claim.v3"
 
 CONDITIONS = (
@@ -583,7 +586,9 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             }
         )
     if version >= 3:
-        contract_fields.update({"review_execution", "conflicts_of_interest"})
+        contract_fields.update(
+            {"review_execution", "conflicts_of_interest", "score_policy"}
+        )
     reject_unknown_fields(value, contract_fields, "contract")
     contract_id = require_label(value.get("contract_id"), "contract.contract_id")
     prereg_base_commit = require_commit(
@@ -619,6 +624,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     execution_repo_path_sha256: str | None = None
     review_execution: dict[str, Any] | None = None
     conflicts_of_interest: dict[str, Any] | None = None
+    score_policy: dict[str, Any] | None = None
     if version >= 2:
         execution_repo_path_sha256 = require_sha256(
             value.get("execution_repo_path_sha256"),
@@ -793,6 +799,19 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         if coi != V3_CONFLICTS_OF_INTEREST:
             raise TrialError("v3 conflicts-of-interest disclosure is not fixed")
         conflicts_of_interest = V3_CONFLICTS_OF_INTEREST
+        score_raw = require_object(value.get("score_policy"), "contract.score_policy")
+        expected_score_policy = {
+            "single_use": True,
+            "claim_scope": "frozen_contract_sha256",
+            "operator_claim_path_allowed": False,
+            "claim_before_unblinding": True,
+        }
+        reject_unknown_fields(
+            score_raw, set(expected_score_policy), "contract.score_policy"
+        )
+        if score_raw != expected_score_policy:
+            raise TrialError("v3 score claim policy is not fixed")
+        score_policy = expected_score_policy
 
     raw_conditions = require_list(value.get("conditions"), "contract.conditions")
     condition_ids: list[str] = []
@@ -1366,6 +1385,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             {
                 "review_execution": review_execution,
                 "conflicts_of_interest": conflicts_of_interest,
+                "score_policy": score_policy,
             }
             if version >= 3
             else {}
@@ -4663,6 +4683,128 @@ def build_v3_review_request(
     return request.encode("utf-8")
 
 
+def validate_v3_review_command(
+    command_bytes: bytes,
+    reviewer_slot: str,
+    reviewer: dict[str, Any],
+    request_sha256: str,
+) -> str:
+    try:
+        command_text = command_bytes.decode("utf-8")
+        command = json.loads(
+            command_text,
+            parse_constant=surface.reject_json_constant,
+            object_pairs_hook=surface.reject_duplicate_json_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TrialError("review command record is malformed") from exc
+    command = require_object(command, "review command")
+    reject_unknown_fields(
+        command,
+        {
+            "schema",
+            "reviewer_slot",
+            "argv",
+            "cwd",
+            "stdin_request_sha256",
+            "context_environment_keys",
+        },
+        "review command",
+    )
+    if command.get("schema") != REVIEW_COMMAND_SCHEMA_V3:
+        raise TrialError(f"review command schema must be {REVIEW_COMMAND_SCHEMA_V3}")
+    if require_label(
+        command.get("reviewer_slot"), "review command.reviewer_slot"
+    ) != reviewer_slot:
+        raise TrialError("review command slot mismatch")
+    if require_sha256(
+        command.get("stdin_request_sha256"),
+        "review command.stdin_request_sha256",
+    ) != request_sha256:
+        raise TrialError("review command stdin request hash mismatch")
+    environment_keys = require_list(
+        command.get("context_environment_keys"),
+        "review command.context_environment_keys",
+    )
+    if environment_keys:
+        raise TrialError("review command contains context environment keys")
+    cwd = require_string(command.get("cwd"), "review command.cwd", max_chars=4096)
+    cwd_path = Path(cwd)
+    if not cwd_path.is_absolute():
+        raise TrialError("review command cwd must be absolute")
+    argv: list[str] = []
+    for index, value in enumerate(
+        require_list(command.get("argv"), "review command.argv")
+    ):
+        if not isinstance(value, str) or len(value) > 8192:
+            raise TrialError(f"review command.argv[{index}] must be a bounded string")
+        argv.append(value)
+    if not 2 <= len(argv) <= 32:
+        raise TrialError("review command argv length is outside the fixed bounds")
+    normalized = list(argv)
+    normalized[0] = Path(normalized[0]).name
+    if reviewer["command_profile"] == "claude_print_json_v1":
+        expected = [
+            "claude",
+            "-p",
+            "--model",
+            reviewer["model"],
+            "--output-format",
+            "json",
+            "--no-session-persistence",
+            "--safe-mode",
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--tools",
+            "",
+            "--permission-mode",
+            "dontAsk",
+        ]
+    elif reviewer["command_profile"] == "codex_exec_json_v1":
+        if normalized.count("--output-last-message") != 1 or normalized.count("-C") != 1:
+            raise TrialError("Codex review command dynamic paths are malformed")
+        output_index = normalized.index("--output-last-message") + 1
+        cwd_index = normalized.index("-C") + 1
+        if output_index >= len(normalized) or cwd_index >= len(normalized):
+            raise TrialError("Codex review command dynamic path is missing")
+        if not Path(normalized[output_index]).is_absolute():
+            raise TrialError("Codex review response path must be absolute")
+        if Path(normalized[cwd_index]).resolve(strict=False) != cwd_path.resolve(
+            strict=False
+        ):
+            raise TrialError("Codex review command cwd argument mismatch")
+        normalized[output_index] = "${REVIEW_RESPONSE}"
+        normalized[cwd_index] = "${EMPTY_WORKSPACE}"
+        expected = [
+            "codex",
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--color",
+            "never",
+            "--model",
+            reviewer["model"],
+            "-c",
+            f'model_reasoning_effort="{reviewer["reasoning_effort"]}"',
+            "--output-last-message",
+            "${REVIEW_RESPONSE}",
+            "-C",
+            "${EMPTY_WORKSPACE}",
+            "-",
+        ]
+    else:
+        raise TrialError("review command profile is unsupported")
+    if normalized != expected:
+        raise TrialError("review command argv does not match the frozen profile")
+    return sha256_text(str(cwd_path.resolve(strict=False)))
+
+
 def validate_v3_review_receipt(
     value: dict[str, Any],
     raw_bytes: bytes,
@@ -4704,6 +4846,7 @@ def validate_v3_review_receipt(
             "started_at",
             "completed_at",
             "exit_code",
+            "workspace_path_sha256",
             "workspace_file_count",
             "workspace_tree_sha256",
             "model_pinned_in_command",
@@ -4762,6 +4905,17 @@ def validate_v3_review_receipt(
         value.get("request_sha256"), "review receipt.request_sha256"
     ) != expected_request_sha:
         raise TrialError("review receipt request hash mismatch")
+    command_workspace_sha = validate_v3_review_command(
+        command_bytes,
+        reviewer_slot,
+        expected_reviewer,
+        expected_request_sha,
+    )
+    if require_sha256(
+        value.get("workspace_path_sha256"),
+        "review receipt.workspace_path_sha256",
+    ) != command_workspace_sha:
+        raise TrialError("review receipt workspace path hash mismatch")
     if require_sha256(
         value.get("raw_response_sha256"), "review receipt.raw_response_sha256"
     ) != sha256_bytes(raw_response_bytes):
@@ -5208,19 +5362,24 @@ def score_trial_v1(
 
 
 def claim_v3_score_attempt(
-    claim_path: Path,
     repo: Path,
     contract: dict[str, Any],
     contract_sha: str,
     blind: dict[str, Any],
     review_records: list[dict[str, Any]],
-) -> str:
+    reserved_paths: tuple[Path, ...],
+) -> tuple[str, Path]:
     if not has_review_provenance(contract):
         raise TrialError("score claims require a v3 contract")
     if sha256_text(str(repo)) != contract["execution_repo_path_sha256"]:
         raise TrialError("score execution worktree does not match the commitment")
+    identity_sha = sha256_text(f"{SCORE_CLAIM_SCHEMA_V3}\0{contract_sha}")
+    claim_dir = repo / "data" / "portfolio-continuity-score-claims"
+    claim_path = claim_dir / f"{identity_sha}.json"
+    resolved_claim_path = claim_path.resolve(strict=False)
+    if any(path.resolve(strict=False) == resolved_claim_path for path in reserved_paths):
+        raise TrialError("score inputs and outputs must not alias the score claim")
     require_ignored_data_path(repo, claim_path, "score attempt claim")
-    claim_dir = claim_path.parent
     try:
         claim_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         if claim_dir.stat().st_mode & 0o077:
@@ -5229,6 +5388,7 @@ def claim_v3_score_attempt(
         raise TrialError("failed to prepare the private score claim directory") from exc
     packet = {
         "schema": SCORE_CLAIM_SCHEMA_V3,
+        "execution_identity_sha256": identity_sha,
         "contract_sha256": contract_sha,
         "blind_packet_sha256": blind["blind_packet_sha256"],
         "reviews": [
@@ -5274,7 +5434,7 @@ def claim_v3_score_attempt(
         raise TrialError("score attempt was already claimed") from exc
     except OSError as exc:
         raise TrialError("failed to atomically claim the score attempt") from exc
-    return sha256_bytes(rendered)
+    return sha256_bytes(rendered), claim_path
 
 
 def _score_trial_core(
@@ -5288,7 +5448,6 @@ def _score_trial_core(
     review_receipt_paths: list[Path] | None = None,
     review_command_paths: list[Path] | None = None,
     review_response_paths: list[Path] | None = None,
-    score_claim_path: Path | None = None,
 ) -> dict[str, Any]:
     review_receipt_paths = review_receipt_paths or []
     review_command_paths = review_command_paths or []
@@ -5329,7 +5488,6 @@ def _score_trial_core(
                 f"review_response_{index}": path
                 for index, path in enumerate(review_response_paths, start=1)
             },
-            **({"score_claim": score_claim_path} if score_claim_path else {}),
             "harness_source": Path(__file__),
             "surface_source": Path(surface.__file__),
             "output": output_path,
@@ -5341,10 +5499,9 @@ def _score_trial_core(
             len(review_receipt_paths) != 2
             or len(review_command_paths) != 2
             or len(review_response_paths) != 2
-            or score_claim_path is None
         ):
             raise TrialError(
-                "v3 score requires two receipts, commands, raw responses, and a score claim"
+                "v3 score requires two receipts, commands, and raw responses"
             )
         if output_path.exists() or output_path.is_symlink():
             raise TrialError("v3 score requires a fresh output path")
@@ -5352,7 +5509,6 @@ def _score_trial_core(
         review_receipt_paths
         or review_command_paths
         or review_response_paths
-        or score_claim_path is not None
     ):
         raise TrialError("review provenance inputs are supported only by v3 score")
     capture_raw, capture_bytes = read_json(capture_path)
@@ -5428,13 +5584,13 @@ def _score_trial_core(
             )
             record.update(provenance)
         repo = git_root(contract_path.parent)
-        score_claim_sha = claim_v3_score_attempt(
-            score_claim_path,
+        score_claim_sha, score_claim_path = claim_v3_score_attempt(
             repo,
             contract,
             contract_sha,
             blind,
             review_records,
+            (*protected_inputs, output_path),
         )
         protected_inputs += (score_claim_path,)
     else:
@@ -5632,7 +5788,6 @@ def score_trial(
     review_receipt_paths: list[Path] | None = None,
     review_command_paths: list[Path] | None = None,
     review_response_paths: list[Path] | None = None,
-    score_claim_path: Path | None = None,
 ) -> dict[str, Any]:
     return _score_trial_core(
         contract_path,
@@ -5645,7 +5800,6 @@ def score_trial(
         review_receipt_paths,
         review_command_paths,
         review_response_paths,
-        score_claim_path,
     )
 
 
@@ -5703,7 +5857,6 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--review-receipt", action="append")
     score.add_argument("--review-command", action="append")
     score.add_argument("--review-response", action="append")
-    score.add_argument("--score-claim")
     score.add_argument("--output", required=True)
     return parser
 
@@ -5770,7 +5923,6 @@ def main(argv: list[str] | None = None) -> int:
                     if args.review_response
                     else None
                 ),
-                Path(args.score_claim) if args.score_claim else None,
             )
     except TrialError as exc:
         print(f"ERROR: {exc}", file=os.sys.stderr)

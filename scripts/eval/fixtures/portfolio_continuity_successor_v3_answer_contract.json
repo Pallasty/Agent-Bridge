@@ -1,9 +1,9 @@
 {
   "schema": "agent_bridge.portfolio_continuity_answer_contract.v3",
   "contract_id": "portfolio_continuity_successor_v3_answer_blind_20260710",
-  "prereg_base_commit": "29b518ed4d1bfde4ae260295e4116dbeb4ea4079",
+  "prereg_base_commit": "a9bb0c93fcfecc63761946f50c7275f78de8db23",
   "runtime_source_commit": "1f75ede032b36db321c3e767d620eac5a6a44c6e",
-  "harness_source_sha256": "dcb74fde6f5f68e386ad6ee9215d716be43509dd0b30afe27435b2833a081788",
+  "harness_source_sha256": "0b92b1153a77257a49fc847eb37be3e20d687c41067559c22b2ebed72649e003",
   "surface_source_sha256": "b6f599e748088e36424bd03e70a5bc3112aeaf728f6679b19297889a98e5b7f3",
   "digest_key_sha256": "a9d9842db1fe7437ce4a276ddae9a1c91d776cd75606ec2269bb50fc7df21cf1",
   "execution_repo_path_sha256": "116257ea10192e1be1c92ef77e005f06d597c006801ea9eefcb5a29d4fdcee74",
@@ -115,6 +115,12 @@
       "reviewer_openai_sol"
     ],
     "pooled_reviewer_mean_allowed": false
+  },
+  "score_policy": {
+    "single_use": true,
+    "claim_scope": "frozen_contract_sha256",
+    "operator_claim_path_allowed": false,
+    "claim_before_unblinding": true
   },
   "thresholds": {
     "min_weighted_claim_completeness": 0.9,

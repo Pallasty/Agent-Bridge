@@ -2,8 +2,8 @@
 
 Date: 2026-07-10
 
-Status: **PRE-REGISTERED / IMPLEMENTATION VERIFIED / FROZEN / NOT EXECUTED**.
-This change defines contract v3 and its fail-closed validator.
+Status: **PRE-REGISTERED / REVIEW FINDINGS REMEDIATED / REFREEZE PENDING /
+NOT EXECUTED**. This change defines contract v3 and its fail-closed validator.
 It does not perform capture, answer generation, model review, scoring,
 unblinding, an Agent-Bridge write, remote CI, versioning, tagging, release, or
 deployment.
@@ -13,10 +13,10 @@ deployment.
 ```yaml
 schema: agent_bridge.portfolio_continuity_answer_contract.v3
 contract_id: portfolio_continuity_successor_v3_answer_blind_20260710
-preregistration_base: 29b518ed4d1bfde4ae260295e4116dbeb4ea4079
-contract_commit: 9b0dcbccb61f00179c5e8131608904022256185b
-contract_sha256: 6bd44c22759f6376d2d45a2c8e2efe08ccd228303c6a1a325b888eb6fda8e816
-harness_source_sha256: dcb74fde6f5f68e386ad6ee9215d716be43509dd0b30afe27435b2833a081788
+preregistration_base: a9bb0c93fcfecc63761946f50c7275f78de8db23
+contract_commit: PENDING_REFREEZE
+contract_sha256: da9e190492d74824159bbff18eaeff02a4848921989f4077072f126e1d4e4bcc
+harness_source_sha256: 0b92b1153a77257a49fc847eb37be3e20d687c41067559c22b2ebed72649e003
 surface_source_sha256: b6f599e748088e36424bd03e70a5bc3112aeaf728f6679b19297889a98e5b7f3
 runtime_source_commit: 1f75ede032b36db321c3e767d620eac5a6a44c6e
 blind_seed_sha256: 0df722697912c7da5f6749b434102e362f7ae872e5bc440e5b667de2c5e0ad3b
@@ -31,7 +31,9 @@ execution_status: NOT_EXECUTED
 
 V3 uses a separate harness and contract. The historical v2 harness remains
 byte-identical to its frozen `af15d857...` source; v3 does not weaken v2 hash
-checking or reopen its consumed generation and scoring allowances.
+checking or reopen its consumed generation and scoring allowances. The first
+v3 candidate at `9b0dcbcc` was never executed and is superseded by this
+post-review refreeze.
 
 ## Prior Result
 
@@ -115,15 +117,19 @@ each slot:
 - exact structured model response, byte-identical to the review packet.
 
 The receipt binds contract, blind packet, slot, provider, model, reasoning
-policy, CLI/version, command profile, command bytes, deterministic request,
+policy, CLI/version, parsed command profile, command bytes, deterministic request,
 structured response/review bytes, session identity, usage record, timestamps,
 single invocation, zero retries, empty workspace, no tools/MCP/project context,
 and the slot-specific COI disclosure. The review packet contains a fixed
 `reviewer_slot`; free-form reviewer strings and self-attested independence are
 not accepted as provenance.
 
-Any missing, substituted, duplicated, permission-broad, or hash-mismatched
-provenance input stops before generation or blind-map bytes are read.
+The command record is strict JSON. It binds slot, absolute empty-workspace cwd,
+stdin request hash, zero context-environment keys, and the complete normalized
+Claude or Codex argv. Model and effort are therefore checked against command
+content rather than trusted receipt Booleans. Any missing, substituted,
+duplicated, permission-broad, or hash-mismatched provenance input stops before
+generation or blind-map bytes are read.
 
 ## Blinding Changes
 
@@ -135,9 +141,11 @@ fixed scoring rubric; only forbidden labels that previously leaked temporal
 truth hints are hidden.
 
 The scorer validates both complete reviews and their provenance before it
-creates a private single-use score claim. Only then may it open the
-condition-labelled generation and map. Creating the claim consumes the sole
-unblinding allowance even if a later map or score check fails.
+creates a private single-use score claim. The claim path is not supplied by an
+operator: it is deterministically keyed by the frozen contract SHA-256 in a
+fixed ignored directory. Only then may the scorer open the condition-labelled
+generation and map. Creating the claim consumes the sole unblinding allowance
+even if a later map or score check fails.
 
 ## Scoring And Decision
 
@@ -166,7 +174,7 @@ changes, benchmark claims, deployment, CI, release, version, or tag actions.
 | Review command/model/CLI/request/response/review mismatch | Terminal before unblinding |
 | Review uses project context, MCP, tools, or a retry | Terminal before unblinding |
 | Review slot missing, duplicated, substituted, or out of order | Terminal before unblinding |
-| Score claim already exists | Reject replay before unblinding |
+| Deterministic contract-scoped score claim already exists | Reject replay before unblinding, including a new output path |
 | Failure after score claim creation | Terminal; no replacement review or rescore |
 
 ## Verification
@@ -175,7 +183,8 @@ The v3 verifier exercises the full synthetic 12-case/24-answer blind and map
 chain, both review slots, per-reviewer scoring input, agreement diagnostics,
 receipt success, and adversarial mutations. It confirms command, request,
 response, review, model, retry, workspace, tool, MCP, project-context, COI, and
-score-replay failures.
+score-replay failures, including a rehashed wrong-model command and replay
+with a different score output path.
 
 ```bash
 python3 -m py_compile \
@@ -201,4 +210,5 @@ scripts/eval/portfolio_continuity_successor_v3_trial.py
 scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json
 scripts/verify-portfolio-continuity-successor-v3-prereg.py
 docs/reports/goal-c-u/2026-07-10-portfolio-continuity-successor-v3-protocol-prereg.md
+docs/reports/goal-c-u/2026-07-10-portfolio-continuity-successor-v3-implementation-review.md
 ```

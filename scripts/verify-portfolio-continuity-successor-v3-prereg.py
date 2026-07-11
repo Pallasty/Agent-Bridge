@@ -43,6 +43,70 @@ def expect_rejected(callable_, label: str) -> None:
     raise AssertionError(f"adversarial mutation was accepted: {label}")
 
 
+def make_command_record(
+    contract: dict[str, object], blind_bytes: bytes, reviewer_slot: str
+) -> bytes:
+    reviewer = next(
+        row
+        for row in contract["review_execution"]["reviewers"]
+        if row["reviewer_slot"] == reviewer_slot
+    )
+    cwd = f"/tmp/empty-review-workspace-{reviewer_slot}"
+    if reviewer["command_profile"] == "claude_print_json_v1":
+        argv = [
+            "/usr/local/bin/claude",
+            "-p",
+            "--model",
+            reviewer["model"],
+            "--output-format",
+            "json",
+            "--no-session-persistence",
+            "--safe-mode",
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--tools",
+            "",
+            "--permission-mode",
+            "dontAsk",
+        ]
+    else:
+        argv = [
+            "/usr/local/bin/codex",
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--color",
+            "never",
+            "--model",
+            reviewer["model"],
+            "-c",
+            f'model_reasoning_effort="{reviewer["reasoning_effort"]}"',
+            "--output-last-message",
+            f"/tmp/review-response-{reviewer_slot}.json",
+            "-C",
+            cwd,
+            "-",
+        ]
+    return trial.surface.render_json(
+        {
+            "schema": trial.REVIEW_COMMAND_SCHEMA_V3,
+            "reviewer_slot": reviewer_slot,
+            "argv": argv,
+            "cwd": cwd,
+            "stdin_request_sha256": sha256(
+                trial.build_v3_review_request(contract, blind_bytes, reviewer_slot)
+            ),
+            "context_environment_keys": [],
+        }
+    )
+
+
 def make_receipt(
     contract: dict[str, object],
     contract_sha: str,
@@ -60,6 +124,7 @@ def make_receipt(
         for row in contract["review_execution"]["reviewers"]  # type: ignore[index]
     }
     reviewer = roster[reviewer_slot]
+    command = json.loads(command_bytes)
     return {
         "schema": trial.REVIEW_RECEIPT_SCHEMA_V3,
         "trial_id": blind["trial_id"],
@@ -85,6 +150,9 @@ def make_receipt(
         "started_at": completed_at - 1,
         "completed_at": completed_at,
         "exit_code": 0,
+        "workspace_path_sha256": sha256(
+            str(Path(command["cwd"]).resolve()).encode()
+        ),
         "workspace_file_count": 0,
         "workspace_tree_sha256": trial.EMPTY_WORKSPACE_SHA256,
         "model_pinned_in_command": True,
@@ -457,22 +525,24 @@ def main() -> None:
     commit_match = re.search(
         r"^contract_commit: ([0-9a-f]{40})$", report, re.MULTILINE
     )
-    assert commit_match is not None
-    contract_commit = commit_match.group(1)
-    frozen_paths = {
-        CONTRACT_PATH: "scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json",
-        Path(trial.__file__): "scripts/eval/portfolio_continuity_successor_v3_trial.py",
-        Path(trial.surface.__file__): "scripts/eval/portfolio_continuity_ab_trial.py",
-    }
-    for current_path, relative_path in frozen_paths.items():
-        frozen = subprocess.check_output(
-            ["git", "show", f"{contract_commit}:{relative_path}"], cwd=ROOT
-        )
-        assert frozen == current_path.read_bytes()
-    frozen_parent = subprocess.check_output(
-        ["git", "rev-parse", f"{contract_commit}^"], cwd=ROOT, text=True
-    ).strip()
-    assert frozen_parent == raw_contract["prereg_base_commit"]
+    if commit_match is None:
+        assert "contract_commit: PENDING_REFREEZE" in report
+    else:
+        contract_commit = commit_match.group(1)
+        frozen_paths = {
+            CONTRACT_PATH: "scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json",
+            Path(trial.__file__): "scripts/eval/portfolio_continuity_successor_v3_trial.py",
+            Path(trial.surface.__file__): "scripts/eval/portfolio_continuity_ab_trial.py",
+        }
+        for current_path, relative_path in frozen_paths.items():
+            frozen = subprocess.check_output(
+                ["git", "show", f"{contract_commit}:{relative_path}"], cwd=ROOT
+            )
+            assert frozen == current_path.read_bytes()
+        frozen_parent = subprocess.check_output(
+            ["git", "rev-parse", f"{contract_commit}^"], cwd=ROOT, text=True
+        ).strip()
+        assert frozen_parent == raw_contract["prereg_base_commit"]
     assert contract["version"] == 3
     assert trial.surface.sha256_file(Path(trial.__file__)) == raw_contract[
         "harness_source_sha256"
@@ -532,10 +602,9 @@ def main() -> None:
         }
         review_bytes = trial.surface.render_json(review)
         response_bytes = review_bytes
-        command_bytes = (
-            json.dumps({"slot": roster_row["reviewer_slot"], "argv": ["synthetic"]})
-            + "\n"
-        ).encode()
+        command_bytes = make_command_record(
+            contract, blind_bytes, roster_row["reviewer_slot"]
+        )
         receipt = make_receipt(
             contract,
             contract_sha,
@@ -566,6 +635,7 @@ def main() -> None:
             "response substitution": ("raw_response_sha256", "0" * 64),
             "review substitution": ("review_sha256", "0" * 64),
             "retry": ("retry_count", 1),
+            "workspace path": ("workspace_path_sha256", "0" * 64),
             "nonempty workspace": ("workspace_file_count", 1),
             "tool event": ("tool_events_observed", True),
             "MCP context": ("mcp_server_count", 1),
@@ -601,6 +671,68 @@ def main() -> None:
                 contract_sha,
             ),
             "command substitution",
+        )
+        mutated_command = json.loads(command_bytes)
+        model_index = mutated_command["argv"].index("--model") + 1
+        mutated_command["argv"][model_index] = "wrong-model"
+        mutated_command_bytes = trial.surface.render_json(mutated_command)
+        rebound_command = copy.deepcopy(receipt)
+        rebound_command["command_sha256"] = sha256(mutated_command_bytes)
+        expect_rejected(
+            lambda: validate_receipt(
+                rebound_command,
+                mutated_command_bytes,
+                response_bytes,
+                review_bytes,
+                review,
+                blind,
+                blind_bytes,
+                contract,
+                contract_sha,
+            ),
+            "command model rebinding",
+        )
+        mutated_effort = json.loads(command_bytes)
+        if roster_row["command_profile"] == "claude_print_json_v1":
+            mutated_effort["argv"].extend(["--effort", "high"])
+        else:
+            effort_index = mutated_effort["argv"].index("-c") + 1
+            mutated_effort["argv"][effort_index] = 'model_reasoning_effort="high"'
+        mutated_effort_bytes = trial.surface.render_json(mutated_effort)
+        rebound_effort = copy.deepcopy(receipt)
+        rebound_effort["command_sha256"] = sha256(mutated_effort_bytes)
+        expect_rejected(
+            lambda: validate_receipt(
+                rebound_effort,
+                mutated_effort_bytes,
+                response_bytes,
+                review_bytes,
+                review,
+                blind,
+                blind_bytes,
+                contract,
+                contract_sha,
+            ),
+            "command effort rebinding",
+        )
+        mutated_stdin = json.loads(command_bytes)
+        mutated_stdin["stdin_request_sha256"] = "0" * 64
+        mutated_stdin_bytes = trial.surface.render_json(mutated_stdin)
+        rebound_stdin = copy.deepcopy(receipt)
+        rebound_stdin["command_sha256"] = sha256(mutated_stdin_bytes)
+        expect_rejected(
+            lambda: validate_receipt(
+                rebound_stdin,
+                mutated_stdin_bytes,
+                response_bytes,
+                review_bytes,
+                review,
+                blind,
+                blind_bytes,
+                contract,
+                contract_sha,
+            ),
+            "command stdin rebinding",
         )
         reformatted_response = json.dumps(
             json.loads(response_bytes), separators=(",", ":")
@@ -646,6 +778,7 @@ def main() -> None:
         ("generator effort", ("generation", "reasoning_effort"), "high"),
         ("self attestation", ("review", "self_attestation_sufficient"), True),
         ("pooled mean", ("conflicts_of_interest", "pooled_reviewer_mean_allowed"), True),
+        ("operator score path", ("score_policy", "operator_claim_path_allowed"), True),
         ("LLM judge denial", ("boundaries", "llm_judge"), False),
     ]
     for label, path, value in contract_mutations:
@@ -661,6 +794,8 @@ def main() -> None:
     score_claim = source.index("claim_v3_score_attempt(")
     unblind = source.index("generation_raw, generation_bytes = read_json(generation_path)")
     assert receipt_gate < score_claim < unblind
+    assert "score_claim_path" not in inspect.signature(trial._score_trial_core).parameters
+    assert '"--score-claim"' not in inspect.getsource(trial.build_parser)
 
     with tempfile.TemporaryDirectory(prefix="ab-successor-v3-score-claim-") as temporary:
         repo = Path(temporary) / "repo"
@@ -698,27 +833,30 @@ def main() -> None:
             }
             for index, row in enumerate(contract["review_execution"]["reviewers"])
         ]
-        claim_path = repo / "data" / "score-claims" / "v3.json"
-        claim_sha = trial.claim_v3_score_attempt(
-            claim_path,
+        claim_sha, claim_path = trial.claim_v3_score_attempt(
             repo,
             claim_contract,
             contract_sha,
             blind,
             records,
+            (repo / "data" / "score-one.json",),
         )
         assert re.fullmatch(r"[0-9a-f]{64}", claim_sha)
+        expected_identity = sha256(
+            (trial.SCORE_CLAIM_SCHEMA_V3 + "\0" + contract_sha).encode()
+        )
+        assert claim_path.name == f"{expected_identity}.json"
         assert claim_path.stat().st_mode & 0o777 == 0o600
         expect_rejected(
             lambda: trial.claim_v3_score_attempt(
-                claim_path,
                 repo,
                 claim_contract,
                 contract_sha,
                 blind,
                 records,
+                (repo / "data" / "score-two.json",),
             ),
-            "score replay",
+            "score replay with a different output path",
         )
 
     print("Portfolio continuity successor v3 preregistration verification passed")

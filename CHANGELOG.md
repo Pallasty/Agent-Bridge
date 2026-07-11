@@ -14,9 +14,11 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   with fixed Claude Opus 4.8 and GPT-5.6-Sol slots. Custodian receipts bind
   private command, deterministic request, byte-identical response/review,
   CLI/model, empty-workspace, no-tool/no-MCP, and COI evidence before
-  unblinding. Forbidden-claim labels are opaque, reviewer gates remain
-  unpooled, and a single-use score claim blocks review replacement or rescore
-  after unblinding. This preregistration executes no capture or model call and
+  unblinding. Command records are parsed against exact model/effort argv
+  profiles. Forbidden-claim labels are opaque, reviewer gates remain unpooled,
+  and a deterministic contract-scoped score claim blocks review replacement
+  or rescore after unblinding, even under a new output path. This
+  preregistration executes no capture or answer-generation call and
   authorizes no CI, runtime, write-side, release, version, or tag action.
 - **Explicit retrieval traffic provenance (schema v42).**
   `retrieval_surfacing.traffic_class` records producer-boundary `organic`,
