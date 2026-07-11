@@ -57,6 +57,9 @@ pub mod mcp_tools;
 /// Internal raw-envelope resolver; no MCP, transport, or cross-repository API.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod memory_truth;
+/// Fail-closed admission gate between raw store diagnostics and truth projection.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod memory_truth_adapter;
 pub mod notion_api;
 pub mod openai_api;
 pub mod orphan_reaper;

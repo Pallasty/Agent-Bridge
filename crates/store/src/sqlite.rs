@@ -65,13 +65,15 @@ use crate::{
     ForumPostRecord, ForumThreadExport, ForumThreadRecord, GraphTopology, HebbianCluster,
     IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow,
     McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge,
-    MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryLiveMeta,
-    MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow,
-    ModeStats, NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats,
-    ReplayAuditRow, ReplayAuditStats, RetrievalOutcomeMemory, RetrievalOutcomeShadowRow,
-    RetrievalOutcomeSummary, S234Counts, SessionFilter, SignalFidelityStats, StateStore,
-    StoredSession, WaypointRow, WaypointStats, AMBIENT_SURFACING_MODE, MCP_TOOL_ERROR_RING_CAP,
-    MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
+    MemoryEdgeExport, MemoryEvidenceProfile, MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot,
+    MemoryEvidenceSnapshotLimits, MemoryExportFilter, MemoryExportResult, MemoryListSort,
+    MemoryLiveMeta, MemoryPeekResult, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
+    MemorySearchHit, MemoryStats, MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord,
+    OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats,
+    RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts,
+    SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
+    AMBIENT_SURFACING_MODE, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP,
+    RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -2501,6 +2503,97 @@ fn parse_str_array(s: &str) -> Vec<String> {
     serde_json::from_str(s).unwrap_or_default()
 }
 
+fn invalid_evidence_column(
+    index: usize,
+    value_type: rusqlite::types::Type,
+    message: impl Into<String>,
+) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        index,
+        value_type,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            message.into(),
+        )),
+    )
+}
+
+fn decode_exact_str_array(row: &rusqlite::Row<'_>, index: usize) -> RusqliteResult<Vec<String>> {
+    let encoded: String = row.get(index)?;
+    serde_json::from_str(&encoded).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+/// Decode the canonical 14-column memory envelope used by exact diagnostic
+/// reads. Callers must select columns in this order:
+/// key, kind, content, tags, related_keys, scope, created_at, updated_at,
+/// last_accessed_at, access_count, importance, status, trigger_pattern,
+/// superseded_by.
+fn decode_memory_record(row: &rusqlite::Row<'_>) -> RusqliteResult<MemoryRecord> {
+    let access_count_raw: i64 = row.get(9)?;
+    let access_count = u64::try_from(access_count_raw).map_err(|_| {
+        invalid_evidence_column(
+            9,
+            rusqlite::types::Type::Integer,
+            format!("negative access_count {access_count_raw}"),
+        )
+    })?;
+    let importance: f64 = row.get(10)?;
+    if !importance.is_finite() || !(0.0..=1.0).contains(&importance) {
+        return Err(invalid_evidence_column(
+            10,
+            rusqlite::types::Type::Real,
+            format!("importance outside finite 0..=1 range: {importance}"),
+        ));
+    }
+    let status: String = row.get(11)?;
+    if !matches!(
+        status.as_str(),
+        "active" | "archived" | "superseded" | "conflict" | "tombstoned"
+    ) {
+        return Err(invalid_evidence_column(
+            11,
+            rusqlite::types::Type::Text,
+            format!("unknown memory lifecycle status {status:?}"),
+        ));
+    }
+    Ok(MemoryRecord {
+        key: row.get(0)?,
+        kind: row.get(1)?,
+        content: row.get(2)?,
+        tags: decode_exact_str_array(row, 3)?,
+        related_keys: decode_exact_str_array(row, 4)?,
+        scope: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+        last_accessed_at: row.get(8)?,
+        access_count,
+        importance,
+        status,
+        trigger_pattern: row.get::<_, Option<String>>(12)?,
+        superseded_by: row.get::<_, Option<String>>(13)?,
+    })
+}
+
+fn reserve_evidence_payload(used: &mut usize, next: i64, limit: usize) -> bool {
+    let Ok(next) = usize::try_from(next) else {
+        return false;
+    };
+    let Some(total) = used.checked_add(next) else {
+        return false;
+    };
+    if total > limit {
+        return false;
+    }
+    *used = total;
+    true
+}
+
 const CONTINUITY_RETRIEVAL_TRIGGER_TAG_PREFIX: &str = "continuity_retrieval_trigger:";
 // Written by the bridge layer from `continuity.supersedes` (memory_save arg).
 // Must stay in sync with CONTINUITY_SUPERSEDES_TAG_PREFIX in bridge/mcp_tools.rs.
@@ -3902,6 +3995,241 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_save: {e}")))?;
         Ok(())
+    }
+
+    async fn memory_peek(&self, key: &str) -> Result<MemoryPeekResult> {
+        let key = key.to_string();
+        self.conn
+            .call(move |c| -> RusqliteResult<MemoryPeekResult> {
+                let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+                let metadata: Option<(String, i64)> = tx
+                    .query_row(
+                        "SELECT status, updated_at FROM memories WHERE key = ?1",
+                        params![key],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                let result = match metadata {
+                    None => MemoryPeekResult::Missing,
+                    Some((status, updated_at)) if status == "tombstoned" => {
+                        MemoryPeekResult::Tombstoned {
+                            marker: MemoryTombstoneMarker {
+                                key: key.clone(),
+                                updated_at,
+                            },
+                        }
+                    }
+                    Some(_) => {
+                        let record = tx.query_row(
+                            "SELECT key, kind, content, tags, related_keys, scope,
+                                    created_at, updated_at, last_accessed_at, access_count,
+                                    importance, status, trigger_pattern, superseded_by
+                               FROM memories WHERE key = ?1",
+                            params![key],
+                            decode_memory_record,
+                        )?;
+                        MemoryPeekResult::Present {
+                            record: Box::new(record),
+                        }
+                    }
+                };
+                tx.commit()?;
+                Ok(result)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_peek: {e}")))
+    }
+
+    async fn memory_evidence_snapshot(
+        &self,
+        limits: MemoryEvidenceSnapshotLimits,
+    ) -> Result<MemoryEvidenceSnapshot> {
+        let limits = limits.validate()?;
+        self.conn
+            .call(move |c| -> RusqliteResult<MemoryEvidenceSnapshot> {
+                let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+
+                let record_limit = i64::try_from(limits.max_records + 1).unwrap_or(i64::MAX);
+                let tombstone_limit = i64::try_from(limits.max_tombstones + 1).unwrap_or(i64::MAX);
+                let edge_limit = i64::try_from(limits.max_edges + 1).unwrap_or(i64::MAX);
+                let mut payload_bytes = 0usize;
+                let mut truncated = false;
+
+                let records = {
+                    let mut stmt = tx.prepare(
+                        "SELECT key, status, created_at, updated_at,
+                                length(CAST(key AS BLOB))
+                                  + length(CAST(status AS BLOB)) + 16
+                           FROM memories
+                          WHERE status != 'tombstoned'
+                          ORDER BY key ASC
+                          LIMIT ?1",
+                    )?;
+                    let mut rows = stmt.query(params![record_limit])?;
+                    let mut records = Vec::new();
+                    while let Some(row) = rows.next()? {
+                        if records.len() >= limits.max_records {
+                            truncated = true;
+                            break;
+                        }
+                        let row_bytes: i64 = row.get(4)?;
+                        if !reserve_evidence_payload(
+                            &mut payload_bytes,
+                            row_bytes,
+                            limits.max_payload_bytes,
+                        ) {
+                            truncated = true;
+                            break;
+                        }
+                        let status: String = row.get(1)?;
+                        if !matches!(
+                            status.as_str(),
+                            "active" | "archived" | "superseded" | "conflict"
+                        ) {
+                            return Err(invalid_evidence_column(
+                                1,
+                                rusqlite::types::Type::Text,
+                                format!("unknown retained memory lifecycle status {status:?}"),
+                            ));
+                        }
+                        records.push(MemoryEvidenceRecordMarker {
+                            key: row.get(0)?,
+                            status,
+                            created_at: row.get(2)?,
+                            updated_at: row.get(3)?,
+                        });
+                    }
+                    records
+                };
+                let tombstones = {
+                    let mut stmt = tx.prepare(
+                        "SELECT key, updated_at,
+                                length(CAST(key AS BLOB)) + 8
+                           FROM memories
+                          WHERE status = 'tombstoned'
+                          ORDER BY key ASC
+                          LIMIT ?1",
+                    )?;
+                    let mut rows = stmt.query(params![tombstone_limit])?;
+                    let mut tombstones = Vec::new();
+                    while let Some(row) = rows.next()? {
+                        if tombstones.len() >= limits.max_tombstones {
+                            truncated = true;
+                            break;
+                        }
+                        let row_bytes: i64 = row.get(2)?;
+                        if !reserve_evidence_payload(
+                            &mut payload_bytes,
+                            row_bytes,
+                            limits.max_payload_bytes,
+                        ) {
+                            truncated = true;
+                            break;
+                        }
+                        tombstones.push(MemoryTombstoneMarker {
+                            key: row.get(0)?,
+                            updated_at: row.get(1)?,
+                        });
+                    }
+                    tombstones
+                };
+                let tombstone_relationships_redacted: bool = tx.query_row(
+                    "SELECT EXISTS(
+                         SELECT 1
+                           FROM memory_edges e
+                          WHERE EXISTS(
+                                    SELECT 1 FROM memories m
+                                     WHERE m.key = e.from_key
+                                       AND m.status = 'tombstoned'
+                                )
+                             OR EXISTS(
+                                    SELECT 1 FROM memories m
+                                     WHERE m.key = e.to_key
+                                       AND m.status = 'tombstoned'
+                                )
+                     )",
+                    [],
+                    |row| row.get(0),
+                )?;
+                let edges = {
+                    let mut stmt = tx.prepare(
+                        "SELECT e.from_key, e.to_key, e.edge_type, e.weight, e.created_at,
+                                length(CAST(e.from_key AS BLOB))
+                                  + length(CAST(e.to_key AS BLOB))
+                                  + length(CAST(e.edge_type AS BLOB)) + 16
+                           FROM memory_edges e
+                          WHERE NOT EXISTS(
+                                    SELECT 1 FROM memories m
+                                     WHERE m.key = e.from_key
+                                       AND m.status = 'tombstoned'
+                                )
+                            AND NOT EXISTS(
+                                    SELECT 1 FROM memories m
+                                     WHERE m.key = e.to_key
+                                       AND m.status = 'tombstoned'
+                                )
+                          ORDER BY e.from_key ASC, e.to_key ASC, e.edge_type ASC
+                          LIMIT ?1",
+                    )?;
+                    let mut rows = stmt.query(params![edge_limit])?;
+                    let mut edges = Vec::new();
+                    while let Some(row) = rows.next()? {
+                        if edges.len() >= limits.max_edges {
+                            truncated = true;
+                            break;
+                        }
+                        let row_bytes: i64 = row.get(5)?;
+                        if !reserve_evidence_payload(
+                            &mut payload_bytes,
+                            row_bytes,
+                            limits.max_payload_bytes,
+                        ) {
+                            truncated = true;
+                            break;
+                        }
+                        let weight: f64 = row.get(3)?;
+                        if !weight.is_finite() {
+                            return Err(invalid_evidence_column(
+                                3,
+                                rusqlite::types::Type::Real,
+                                format!("non-finite memory edge weight {weight}"),
+                            ));
+                        }
+                        edges.push(MemoryEdgeExport {
+                            from_key: row.get(0)?,
+                            to_key: row.get(1)?,
+                            edge_type: row.get(2)?,
+                            weight,
+                            created_at: row.get(4)?,
+                        });
+                    }
+                    edges
+                };
+
+                let retained_keys: std::collections::HashSet<&str> =
+                    records.iter().map(|record| record.key.as_str()).collect();
+                let retained_edge_endpoints_closed = !truncated
+                    && edges.iter().all(|edge| {
+                        retained_keys.contains(edge.from_key.as_str())
+                            && retained_keys.contains(edge.to_key.as_str())
+                    });
+
+                tx.commit()?;
+                Ok(MemoryEvidenceSnapshot {
+                    records,
+                    tombstones,
+                    edges,
+                    payload_bytes,
+                    truncated,
+                    retained_edge_endpoints_closed,
+                    tombstone_relationships_redacted,
+                    // Producer-bound: callers cannot replace this with a bag
+                    // of asserted booleans or deserialize a forged snapshot.
+                    profile: MemoryEvidenceProfile::MutableSqliteV41,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_evidence_snapshot: {e}")))
     }
 
     async fn memory_get(&self, key: &str) -> Result<Option<MemoryRecord>> {
@@ -18244,6 +18572,438 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct MemoryReadMutationProbe {
+        access_count: i64,
+        last_accessed_at: i64,
+        query_rows: i64,
+        surfacing_rows: i64,
+        coactivation_rows: i64,
+        total_changes: i64,
+    }
+
+    async fn memory_read_mutation_probe(store: &SqliteStore, key: &str) -> MemoryReadMutationProbe {
+        let key = key.to_string();
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<MemoryReadMutationProbe> {
+                let (access_count, last_accessed_at) = c.query_row(
+                    "SELECT access_count, last_accessed_at FROM memories WHERE key = ?1",
+                    params![key],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                Ok(MemoryReadMutationProbe {
+                    access_count,
+                    last_accessed_at,
+                    query_rows: c.query_row(
+                        "SELECT COUNT(*) FROM memory_query_log",
+                        [],
+                        |row| row.get(0),
+                    )?,
+                    surfacing_rows: c.query_row(
+                        "SELECT COUNT(*) FROM retrieval_surfacing",
+                        [],
+                        |row| row.get(0),
+                    )?,
+                    coactivation_rows: c.query_row(
+                        "SELECT COUNT(*) FROM memory_coactivation",
+                        [],
+                        |row| row.get(0),
+                    )?,
+                    total_changes: c.query_row("SELECT total_changes()", [], |row| row.get(0))?,
+                })
+            })
+            .await
+            .expect("probe memory read mutations")
+    }
+
+    #[tokio::test]
+    async fn memory_peek_is_exact_and_mutates_no_access_or_retrieval_telemetry() {
+        let (dir, store) = fresh_store("memory-peek-zero-write").await;
+        let record = make_memrec("peek-key", "exact diagnostic content");
+        store.memory_save(&record).await.expect("save peek record");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories
+                        SET kind='decision', content='exact diagnostic content',
+                            tags='[\"tag-a\",\"tag-b\"]', related_keys='[\"rel-a\"]',
+                            scope='project:/exact', created_at=101, updated_at=202,
+                            last_accessed_at=303, access_count=7, importance=0.73,
+                            status='archived', trigger_pattern='needle',
+                            superseded_by='next-key'
+                      WHERE key='peek-key'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed distinguishable envelope");
+        let before = memory_read_mutation_probe(&store, "peek-key").await;
+
+        for _ in 0..2 {
+            let result = store.memory_peek("peek-key").await.expect("peek");
+            let MemoryPeekResult::Present { record } = result else {
+                panic!("expected present record");
+            };
+            assert_eq!(record.key, "peek-key");
+            assert_eq!(record.kind, "decision");
+            assert_eq!(record.content, "exact diagnostic content");
+            assert_eq!(record.tags, ["tag-a", "tag-b"]);
+            assert_eq!(record.related_keys, ["rel-a"]);
+            assert_eq!(record.scope.as_deref(), Some("project:/exact"));
+            assert_eq!(record.created_at, 101);
+            assert_eq!(record.updated_at, 202);
+            assert_eq!(record.last_accessed_at, 303);
+            assert_eq!(record.access_count, 7);
+            assert!((record.importance - 0.73).abs() < f64::EPSILON);
+            assert_eq!(record.status, "archived");
+            assert_eq!(record.trigger_pattern.as_deref(), Some("needle"));
+            assert_eq!(record.superseded_by.as_deref(), Some("next-key"));
+        }
+
+        let after = memory_read_mutation_probe(&store, "peek-key").await;
+        assert_eq!(after, before, "peek must be a zero-write read");
+
+        // Positive control: the legacy retrieval read must trip the probe, so
+        // an accidentally inert assertion cannot make this test pass.
+        store.memory_get("peek-key").await.expect("get");
+        let after_get = memory_read_mutation_probe(&store, "peek-key").await;
+        assert_eq!(after_get.access_count, before.access_count + 1);
+        assert!(after_get.total_changes > before.total_changes);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_peek_works_on_read_only_store_and_redacts_tombstone_content() {
+        let (dir, store) = fresh_store("memory-peek-read-only").await;
+        let db_path = dir.join("state.db");
+        store
+            .memory_save(&make_memrec("live", "visible exact content"))
+            .await
+            .expect("save live");
+        store
+            .memory_save(&make_memrec("secret", "must never leave tombstone"))
+            .await
+            .expect("save secret");
+        store
+            .memory_delete("secret")
+            .await
+            .expect("tombstone secret");
+
+        let read_only = SqliteStore::open_read_only(&db_path)
+            .await
+            .expect("open read only");
+        assert!(matches!(
+            read_only.memory_peek("live").await.unwrap(),
+            MemoryPeekResult::Present { .. }
+        ));
+        let tombstone = read_only.memory_peek("secret").await.unwrap();
+        let MemoryPeekResult::Tombstoned { marker } = &tombstone else {
+            panic!("expected tombstone marker");
+        };
+        assert_eq!(marker.key, "secret");
+        let encoded = serde_json::to_string(&tombstone).unwrap();
+        assert!(!encoded.contains("must never leave tombstone"));
+        assert!(matches!(
+            read_only.memory_peek("missing").await.unwrap(),
+            MemoryPeekResult::Missing
+        ));
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_peek_fails_closed_on_corrupt_exact_envelope() {
+        let (dir, store) = fresh_store("memory-peek-corrupt").await;
+        store
+            .memory_save(&make_memrec("corrupt", "diagnostic body"))
+            .await
+            .expect("save");
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET status='conflict' WHERE key='corrupt'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("mark legitimate conflict copy");
+        let MemoryPeekResult::Present { record } =
+            store.memory_peek("corrupt").await.expect("peek conflict")
+        else {
+            panic!("conflict copy must remain an exact retained row");
+        };
+        assert_eq!(record.status, "conflict");
+        assert_eq!(
+            store
+                .memory_evidence_snapshot(MemoryEvidenceSnapshotLimits::default())
+                .await
+                .expect("snapshot conflict")
+                .records[0]
+                .status,
+            "conflict"
+        );
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute("UPDATE memories SET tags='{bad' WHERE key='corrupt'", [])?;
+                Ok(())
+            })
+            .await
+            .expect("corrupt tags");
+        assert!(store.memory_peek("corrupt").await.is_err());
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET tags='[]', importance=2.0 WHERE key='corrupt'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("corrupt importance");
+        assert!(store.memory_peek("corrupt").await.is_err());
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET importance=0.5, access_count=-1 WHERE key='corrupt'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("corrupt count");
+        assert!(store.memory_peek("corrupt").await.is_err());
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET access_count=0, status='alien' WHERE key='corrupt'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("corrupt status");
+        assert!(store.memory_peek("corrupt").await.is_err());
+        assert!(store
+            .memory_evidence_snapshot(MemoryEvidenceSnapshotLimits::default())
+            .await
+            .is_err());
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_evidence_snapshot_is_canonical_capped_and_zero_write() {
+        let (dir, store) = fresh_store("memory-evidence-snapshot").await;
+        store
+            .memory_save(&make_memrec("z-archived", "zulu archive material"))
+            .await
+            .expect("save z");
+        store
+            .memory_save(&make_memrec("a-active", "alpha active material"))
+            .await
+            .expect("save a");
+        store
+            .memory_save(&make_memrec("t-secret", "private tombstone body"))
+            .await
+            .expect("save tombstone source");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET status='archived' WHERE key='z-archived'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("archive z");
+        store.memory_delete("t-secret").await.expect("tombstone t");
+        store
+            .memory_link("a-active", "z-archived", "supersedes", 1.0)
+            .await
+            .expect("link retained rows");
+
+        let before = memory_read_mutation_probe(&store, "a-active").await;
+        let snapshot = store
+            .memory_evidence_snapshot(MemoryEvidenceSnapshotLimits::default())
+            .await
+            .expect("snapshot");
+        let after = memory_read_mutation_probe(&store, "a-active").await;
+        assert_eq!(after, before, "snapshot must not mutate the store");
+
+        assert_eq!(
+            snapshot
+                .records
+                .iter()
+                .map(|record| record.key.as_str())
+                .collect::<Vec<_>>(),
+            ["a-active", "z-archived"]
+        );
+        assert_eq!(snapshot.tombstones.len(), 1);
+        assert_eq!(snapshot.tombstones[0].key, "t-secret");
+        assert_eq!(snapshot.edges.len(), 1);
+        assert!(snapshot.edges[0].created_at > 0);
+        assert!(snapshot.retained_edge_endpoints_closed);
+        assert!(!snapshot.truncated);
+        assert!(!snapshot.tombstone_relationships_redacted);
+        assert_eq!(snapshot.profile, MemoryEvidenceProfile::MutableSqliteV41);
+        assert!(snapshot.payload_bytes > 0);
+        assert!(!snapshot
+            .records
+            .iter()
+            .any(|record| record.key == "t-secret"));
+
+        let capped = store
+            .memory_evidence_snapshot(MemoryEvidenceSnapshotLimits {
+                max_records: 1,
+                max_tombstones: 1,
+                max_edges: 1,
+                max_payload_bytes: 1024,
+            })
+            .await
+            .expect("capped snapshot");
+        assert!(capped.truncated);
+        assert!(!capped.retained_edge_endpoints_closed);
+        assert_eq!(capped.records.len(), 1);
+        assert!(store
+            .memory_evidence_snapshot(MemoryEvidenceSnapshotLimits {
+                max_records: 0,
+                max_tombstones: 1,
+                max_edges: 1,
+                max_payload_bytes: 1024,
+            })
+            .await
+            .is_err());
+        let byte_capped = store
+            .memory_evidence_snapshot(MemoryEvidenceSnapshotLimits {
+                max_records: 10,
+                max_tombstones: 10,
+                max_edges: 10,
+                max_payload_bytes: 1,
+            })
+            .await
+            .expect("byte-capped snapshot");
+        assert!(byte_capped.truncated);
+        assert_eq!(byte_capped.payload_bytes, 0);
+        assert!(byte_capped.records.is_empty());
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_evidence_snapshot_detects_dangling_retained_edge() {
+        let (dir, store) = fresh_store("memory-evidence-dangling").await;
+        store
+            .memory_save(&make_memrec("present", "present endpoint material"))
+            .await
+            .expect("save present");
+        // The current schema deliberately has no endpoint FK/check. The
+        // diagnostic must expose that fact instead of silently dropping it.
+        store
+            .memory_link("missing", "present", "supersedes", 1.0)
+            .await
+            .expect("insert dangling edge");
+        let snapshot = store
+            .memory_evidence_snapshot(MemoryEvidenceSnapshotLimits::default())
+            .await
+            .expect("snapshot");
+        assert!(!snapshot.retained_edge_endpoints_closed);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_evidence_snapshot_read_only_redacts_tombstone_relationships() {
+        let (dir, store) = fresh_store("memory-evidence-tombstone-edge").await;
+        let db_path = dir.join("state.db");
+        store
+            .memory_save(&make_memrec("live", "visible row"))
+            .await
+            .expect("save live");
+        store
+            .memory_save(&make_memrec("secret", "private tombstone body"))
+            .await
+            .expect("save secret");
+        store
+            .memory_link("live", "secret", "relates", 1.0)
+            .await
+            .expect("link tombstone candidate");
+        store.memory_delete("secret").await.expect("tombstone");
+
+        let read_only = SqliteStore::open_read_only(&db_path)
+            .await
+            .expect("open read only");
+        let snapshot = read_only
+            .memory_evidence_snapshot(MemoryEvidenceSnapshotLimits::default())
+            .await
+            .expect("read-only snapshot");
+        assert_eq!(snapshot.records.len(), 1);
+        assert_eq!(snapshot.records[0].key, "live");
+        assert_eq!(snapshot.tombstones.len(), 1);
+        assert_eq!(snapshot.tombstones[0].key, "secret");
+        assert!(snapshot.edges.is_empty());
+        assert!(snapshot.tombstone_relationships_redacted);
+        assert!(snapshot.retained_edge_endpoints_closed);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[test]
+    fn deferred_read_transaction_keeps_one_snapshot_across_concurrent_commit() {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-snapshot-semantics-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create tempdir");
+        let path = dir.join("snapshot-semantics.db");
+        let mut reader = rusqlite::Connection::open(&path).expect("open reader");
+        reader
+            .execute_batch(
+                "PRAGMA journal_mode=WAL;
+                 CREATE TABLE evidence_probe (id INTEGER PRIMARY KEY);
+                 INSERT INTO evidence_probe(id) VALUES (1);",
+            )
+            .expect("seed probe");
+        let writer = rusqlite::Connection::open(&path).expect("open writer");
+
+        let tx = reader
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
+            .expect("begin deferred read");
+        let before: i64 = tx
+            .query_row("SELECT COUNT(*) FROM evidence_probe", [], |row| row.get(0))
+            .expect("establish read snapshot");
+        assert_eq!(before, 1);
+
+        writer
+            .execute("INSERT INTO evidence_probe(id) VALUES (2)", [])
+            .expect("writer commits while WAL reader remains open");
+        let during: i64 = tx
+            .query_row("SELECT COUNT(*) FROM evidence_probe", [], |row| row.get(0))
+            .expect("repeat read in same transaction");
+        assert_eq!(during, 1, "transaction must not mix pre/post-write rows");
+        tx.commit().expect("commit reader");
+
+        let after: i64 = reader
+            .query_row("SELECT COUNT(*) FROM evidence_probe", [], |row| row.get(0))
+            .expect("read next snapshot");
+        assert_eq!(after, 2);
+        drop(writer);
+        drop(reader);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
