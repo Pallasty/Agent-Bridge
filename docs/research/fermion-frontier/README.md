@@ -76,8 +76,9 @@ open verification batches are closed.
 
 1. Gaussian/non-Gaussian boundary: **complete** — 22 verified and 3 refuted as
    written; corrected findings are in `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`.
-2. DPP and negative-dependence ML: finish four unverified sources and add the
-   missing third vote to the current 2-0 coreset claims.
+2. DPP and negative-dependence ML: **complete** — the full 30-claim cluster has
+   28 verified and 2 refuted as written; corrected findings are in
+   `BATCH2_DPP_REVIEW.md`.
 3. Fermion-to-qubit mappings and native hardware: HATT, programmable neutral
    atom fermionic processing, and the 2026 dynamic Jordan-Wigner construction.
 4. Final synthesis and adversarial review.

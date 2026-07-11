@@ -27,13 +27,14 @@ source-level caveats preserved in the round result files:
    overhead rather than an automatic speedup.
 6. Determinant/Pfaffian neural quantum states, their expressivity, cubic
    algebraic costs, and orthogonal acceleration routes.
-7. Fast exact DPP sampling and DPP coreset advantages, partially verified.
+7. Fast exact DPP sampling, conditional DPP coreset advantages, volume-sampling
+   identities, and the sampling-versus-MAP tractability boundary.
 
-## Open clusters
+## Focused verification clusters
 
 | Cluster | Candidate claims | Current state |
 |---|---:|---|
-| DPP / negative-dependence ML | 30 | 5 verified, 5 provisional, 20 unverified |
+| DPP / negative-dependence ML | 30 | 28 verified, 2 refuted/rewrite-required |
 | Non-Gaussian fermionic simulation | 10 | 9 verified, 1 refuted/rewrite-required |
 | Fermion-to-qubit encoding / native hardware | 15 | Unverified |
 | Gaussian-state manifold geometry | 15 | 13 verified, 2 refuted/rewrite-required |
@@ -45,11 +46,20 @@ source-level caveats preserved in the round result files:
 - `unverified: 0` in rounds 1 and 2 describes the selected 25-claim voting
   batch, not all 120/119 extracted candidates.
 - Five round 3 DPP coreset claims were accepted with only 2-0 votes. They are
-  provisional here until a third independent vote is recorded.
+  now closed by three new independent reviews; all five passed with explicit
+  construction and dimensionality limits.
+- The DPP batch task initially pointed to indices 50–54. The persistent ledger
+  shows that those are encoding claims; the correct fifth DPP source is at
+  indices 55–59. All three reviewers used the corrected index set.
+- The DPP source graph has substantial author overlap and survey-to-primary
+  dependencies. Three independent reviews do not constitute three independent
+  source replications.
 - No unified final report was produced by Claude.
 
 ## Next update
 
-Proceed to the DPP/negative-dependence batch. Reuse existing votes, add the
-missing third coreset vote, and verify the four untouched sources before any
-cross-project application proposal.
+Proceed to a single comparative encoding/hardware batch rather than three
+isolated source summaries. Verify the peer-reviewed HATT compiler and PNAS
+native-fermion proposal first, then use the May 2026 dynamic Jordan-Wigner
+preprint as an adversarial update to determine which native-hardware advantages
+remain after architecture-dependent encoding improvements.
