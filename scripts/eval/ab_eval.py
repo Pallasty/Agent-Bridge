@@ -39,12 +39,15 @@ class McpClient:
     """Serial JSON-RPC driver over stdio (same pattern as live_verify_*)."""
 
     def __init__(self, binary):
+        env = os.environ.copy()
+        env["AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS"] = "eval"
         self.proc = subprocess.Popen(
             [binary, "mcp"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            env=env,
         )
         self._id = 0
         self._rpc("initialize", {

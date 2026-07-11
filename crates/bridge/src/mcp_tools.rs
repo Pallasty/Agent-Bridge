@@ -12592,6 +12592,18 @@ fn outcome_collector_enabled() -> bool {
     )
 }
 
+const RETRIEVAL_TRAFFIC_CLASS_ENV: &str = "AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS";
+
+/// Process-boundary provenance for retrieval telemetry. Missing, empty, and
+/// invalid values fail closed to `unknown`; no request content is inspected.
+fn retrieval_traffic_class_from(env_val: Option<&str>) -> &'static str {
+    ab_store::normalize_retrieval_traffic_class(env_val)
+}
+
+fn retrieval_traffic_class() -> &'static str {
+    retrieval_traffic_class_from(std::env::var(RETRIEVAL_TRAFFIC_CLASS_ENV).ok().as_deref())
+}
+
 /// Stage-1 ambient-surfacing kill switch: `AB_BOOTSTRAP_SURFACING_DISABLE=1`
 /// stops session_bootstrap from logging its semantic page to
 /// `retrieval_surfacing` (mode = [`AMBIENT_SURFACING_MODE`]) without touching
@@ -12649,7 +12661,7 @@ mod recall_semantic_fallback_tests {
     use super::{
         ambient_surfacing_disabled_from, correction_cosurface_enabled_from,
         distill_surfacing_disabled_from, outcome_collector_enabled_from,
-        recall_semantic_fallback_enabled_from,
+        recall_semantic_fallback_enabled_from, retrieval_traffic_class_from,
     };
 
     #[test]
@@ -12700,6 +12712,17 @@ mod recall_semantic_fallback_tests {
         assert!(outcome_collector_enabled_from(Some("1")));
         assert!(outcome_collector_enabled_from(Some("true")));
         assert!(outcome_collector_enabled_from(Some("TRUE")));
+    }
+
+    #[test]
+    fn retrieval_traffic_class_is_canonical_and_fails_closed() {
+        assert_eq!(retrieval_traffic_class_from(None), "unknown");
+        assert_eq!(retrieval_traffic_class_from(Some("")), "unknown");
+        assert_eq!(retrieval_traffic_class_from(Some("   ")), "unknown");
+        assert_eq!(retrieval_traffic_class_from(Some("production")), "unknown");
+        assert_eq!(retrieval_traffic_class_from(Some("organic")), "organic");
+        assert_eq!(retrieval_traffic_class_from(Some(" Organic ")), "organic");
+        assert_eq!(retrieval_traffic_class_from(Some("EVAL")), "eval");
     }
 
     #[test]
@@ -13220,9 +13243,15 @@ impl McpTool for MemorySearchTool {
                 .collect();
             let q_owned = q.to_string();
             let mode_owned = mode.to_string();
+            let traffic_class = retrieval_traffic_class().to_string();
             tokio::spawn(async move {
                 let _ = store_clone
-                    .record_retrieval_surfacing(&surfaced, &q_owned, &mode_owned)
+                    .record_retrieval_surfacing_classified(
+                        &surfaced,
+                        &q_owned,
+                        &mode_owned,
+                        &traffic_class,
+                    )
                     .await;
             });
         }
@@ -17290,9 +17319,15 @@ impl McpTool for SessionBootstrapTool {
             if !surfaced.is_empty() {
                 let store_clone = store.clone();
                 let q_owned = query.clone().unwrap_or_default();
+                let traffic_class = retrieval_traffic_class().to_string();
                 tokio::spawn(async move {
                     let _ = store_clone
-                        .record_retrieval_surfacing(&surfaced, &q_owned, AMBIENT_SURFACING_MODE)
+                        .record_retrieval_surfacing_classified(
+                            &surfaced,
+                            &q_owned,
+                            AMBIENT_SURFACING_MODE,
+                            &traffic_class,
+                        )
                         .await;
                 });
             }

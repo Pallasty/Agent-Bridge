@@ -5,6 +5,8 @@ set -euo pipefail
 # Verifies tools/list schema + tools/call behavior without writing memory or
 # granting candidate-set/runtime authority.
 
+export AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS=eval
+
 AB_BIN="${AB_BIN:-/Users/pallasting/.local/bin/agent-bridge.real}"
 
 if [[ ! -x "$AB_BIN" ]]; then

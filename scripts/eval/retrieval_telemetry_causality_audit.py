@@ -37,6 +37,7 @@ SURFACING_COLUMNS = {
 }
 MEMORY_COLUMNS = {"key", "status"}
 SEARCH_TRAFFIC_CLASSES = {"organic", "eval"}
+ALL_TRAFFIC_CLASSES = {"unknown", "organic", "eval"}
 
 
 def _open_read_only(db_path: str) -> sqlite3.Connection:
@@ -259,7 +260,33 @@ def audit(
         ).hexdigest()
 
         bootstrap_rows = [row for row in rows if row["mode"] == AMBIENT_MODE]
-        bootstrap_used = [row for row in bootstrap_rows if row["used_at"] is not None]
+        bootstrap_class_counts: dict[str, int] = {}
+        for row in bootstrap_rows:
+            label = row["traffic_class"]
+            if not traffic_class_present:
+                label = "unobservable"
+            elif label not in ALL_TRAFFIC_CLASSES:
+                label = "invalid_or_unlabeled"
+            bootstrap_class_counts[label] = bootstrap_class_counts.get(label, 0) + 1
+        organic_bootstrap = [
+            row for row in bootstrap_rows if row["traffic_class"] == "organic"
+        ]
+        first_organic_bootstrap = min(
+            (row["surfaced_at"] for row in organic_bootstrap), default=None
+        )
+        post_label_unknown_bootstrap = (
+            0
+            if first_organic_bootstrap is None
+            else sum(
+                1
+                for row in bootstrap_rows
+                if row["surfaced_at"] >= first_organic_bootstrap
+                and row["traffic_class"] not in SEARCH_TRAFFIC_CLASSES
+            )
+        )
+        bootstrap_used = [
+            row for row in organic_bootstrap if row["used_at"] is not None
+        ]
         clean_bootstrap_used = [
             row
             for row in bootstrap_used
@@ -276,6 +303,14 @@ def audit(
             f"clean_stamps>={AMBIENT_CLEAN_STAMPS_GATE}": len(clean_bootstrap_used)
             >= AMBIENT_CLEAN_STAMPS_GATE,
         }
+        if not traffic_class_present:
+            ambient_verdict = "BLOCKED_NEEDS_TRAFFIC_CLASS"
+        elif first_organic_bootstrap is None:
+            ambient_verdict = "WAIT_LABELLED_DATA"
+        elif post_label_unknown_bootstrap:
+            ambient_verdict = "BLOCKED_PARTIAL_TRAFFIC_CLASS"
+        else:
+            ambient_verdict = "OPEN" if all(ambient_conditions.values()) else "WAIT"
 
         if not traffic_class_present:
             verdict = "BLOCKED_NEEDS_TRAFFIC_CLASS"
@@ -333,13 +368,18 @@ def audit(
                 "identified_exactly": not invalid_pending_labels,
             },
             "ambient_stage2_gate": {
+                "traffic_class_counts": dict(sorted(bootstrap_class_counts.items())),
+                "organic_exposures": len(organic_bootstrap),
+                "first_organic_surfaced_at": first_organic_bootstrap,
+                "post_label_unknown_rows": post_label_unknown_bootstrap,
+                "eval_rows_excluded": bootstrap_class_counts.get("eval", 0),
                 "total_stamps": len(bootstrap_used),
                 "distinct_stamp_days": len(
                     {row["used_at"] // 86_400 for row in bootstrap_used}
                 ),
                 "clean_stamps": len(clean_bootstrap_used),
                 "conditions": ambient_conditions,
-                "verdict": "OPEN" if all(ambient_conditions.values()) else "WAIT",
+                "verdict": ambient_verdict,
                 "stage2_action_authorized": False,
             },
             "verdict": verdict,

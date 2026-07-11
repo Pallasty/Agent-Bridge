@@ -549,6 +549,7 @@ class McpClient:
                 "AGENT_BRIDGE_TOOL_PROFILE": "all",
                 "AB_BOOTSTRAP_SURFACING_DISABLE": "1",
                 "AGENT_BRIDGE_OUTCOME_COLLECTOR": "0",
+                "AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS": "eval",
                 "RUST_LOG": "info",
             }
         )

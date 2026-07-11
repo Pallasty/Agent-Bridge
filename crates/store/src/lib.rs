@@ -243,6 +243,26 @@ pub const RETRIEVAL_SURFACING_RING_CAP: i64 = 50_000;
 /// follow-up, gated on the data this stage accumulates.
 pub const AMBIENT_SURFACING_MODE: &str = "bootstrap";
 
+/// v42 retrieval provenance. Traffic origin is orthogonal to retrieval mode:
+/// an eval process may call either `memory_search` or `session_bootstrap`.
+/// Missing/invalid values fail closed to `unknown`; they are never inferred
+/// from query text, keys, mode, timestamps, or process names.
+pub const RETRIEVAL_TRAFFIC_CLASS_UNKNOWN: &str = "unknown";
+pub const RETRIEVAL_TRAFFIC_CLASS_ORGANIC: &str = "organic";
+pub const RETRIEVAL_TRAFFIC_CLASS_EVAL: &str = "eval";
+
+pub fn normalize_retrieval_traffic_class(value: Option<&str>) -> &'static str {
+    match value.map(str::trim) {
+        Some(value) if value.eq_ignore_ascii_case(RETRIEVAL_TRAFFIC_CLASS_ORGANIC) => {
+            RETRIEVAL_TRAFFIC_CLASS_ORGANIC
+        }
+        Some(value) if value.eq_ignore_ascii_case(RETRIEVAL_TRAFFIC_CLASS_EVAL) => {
+            RETRIEVAL_TRAFFIC_CLASS_EVAL
+        }
+        _ => RETRIEVAL_TRAFFIC_CLASS_UNKNOWN,
+    }
+}
+
 /// Hard cap on stdout/stderr we persist per agent session, to keep the DB
 /// file from growing unbounded if a sub-agent goes haywire.
 pub const STDIO_CAP: usize = 64 * 1024;
@@ -3213,9 +3233,28 @@ pub trait StateStore: Send + Sync {
     /// `AGENT_BRIDGE_OUTCOME_COLLECTOR` flag are both present.
     async fn record_retrieval_surfacing(
         &self,
+        surfaced: &[(String, i64)],
+        query: &str,
+        mode: &str,
+    ) -> Result<()> {
+        self.record_retrieval_surfacing_classified(
+            surfaced,
+            query,
+            mode,
+            RETRIEVAL_TRAFFIC_CLASS_UNKNOWN,
+        )
+        .await
+    }
+
+    /// v42 classified writer. The bridge supplies a process-boundary class;
+    /// direct/legacy callers that use `record_retrieval_surfacing` above are
+    /// deliberately persisted as `unknown`.
+    async fn record_retrieval_surfacing_classified(
+        &self,
         _surfaced: &[(String, i64)],
         _query: &str,
         _mode: &str,
+        _traffic_class: &str,
     ) -> Result<()> {
         Ok(())
     }

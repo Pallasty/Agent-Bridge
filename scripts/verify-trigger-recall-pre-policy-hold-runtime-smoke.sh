@@ -7,6 +7,8 @@ set -euo pipefail
 # the current Codex tool profile, deploy binaries, write memory, write graph
 # edges, reindex, or authorize production enforce_hold.
 
+export AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS=eval
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AB_BIN="${AB_BIN:-$HOME/.local/bin/agent-bridge.real}"

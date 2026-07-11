@@ -7,6 +7,8 @@ set -euo pipefail
 # outcome sidecars into temporary presentation dirs, and invokes a short-lived
 # MCP subprocess against each copy.
 
+export AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS=eval
+
 AB_BIN="${AB_BIN:-$HOME/.local/bin/agent-bridge.real}"
 AB_SOURCE_DB="${AB_SOURCE_DB:-${HOME}/.local/share/agent-bridge/state.db}"
 AB_KEEP_TMP="${AB_KEEP_TMP:-0}"

@@ -574,13 +574,15 @@ CREATE INDEX IF NOT EXISTS idx_memory_coactivation_count   ON memory_coactivatio
 // (NULL = "ignored" so far).
 const SCHEMA_V39_RETRIEVAL_SURFACING: &str = r#"
 CREATE TABLE IF NOT EXISTS retrieval_surfacing (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_key  TEXT    NOT NULL,
-    query       TEXT    NOT NULL DEFAULT '',
-    mode        TEXT    NOT NULL DEFAULT '',
-    rank        INTEGER NOT NULL,
-    surfaced_at INTEGER NOT NULL,
-    used_at     INTEGER
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_key    TEXT    NOT NULL,
+    query         TEXT    NOT NULL DEFAULT '',
+    mode          TEXT    NOT NULL DEFAULT '',
+    rank          INTEGER NOT NULL,
+    surfaced_at   INTEGER NOT NULL,
+    used_at       INTEGER,
+    traffic_class TEXT    NOT NULL DEFAULT 'unknown'
+        CHECK (traffic_class IN ('unknown', 'organic', 'eval'))
 );
 CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_key ON retrieval_surfacing(memory_key, surfaced_at DESC);
 CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_at  ON retrieval_surfacing(surfaced_at DESC);
@@ -597,6 +599,15 @@ CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_at  ON retrieval_surfacing(su
 const SCHEMA_V40_RETRIEVAL_SURFACING_CONSUMED: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_pending
     ON retrieval_surfacing(memory_key, surfaced_at) WHERE consumed_at IS NULL;
+"#;
+
+// v42 — explicit producer-boundary traffic provenance. Historical rows and
+// callers using the compatibility writer stay `unknown`; only a classified
+// writer may persist organic/eval. The index supports class-sliced audits and
+// future shadows without changing any current consumer SQL in this slice.
+const SCHEMA_V42_RETRIEVAL_TRAFFIC_CLASS: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_traffic_at
+    ON retrieval_surfacing(traffic_class, surfaced_at DESC);
 "#;
 
 // v32 — timestamp integrity guard for sync/export tables.
@@ -1725,6 +1736,41 @@ impl SqliteStore {
                     }
                 }
                 let _ = c.execute("UPDATE schema_meta SET value='41' WHERE key='version'", []);
+            }
+
+            // ── v42: retrieval traffic provenance. The default is deliberately
+            // unknown so historical rows, old binaries, and unclassified
+            // external callers can never masquerade as organic evidence.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "41".to_string());
+            if cur.as_str() == "41" {
+                let exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('retrieval_surfacing') \
+                         WHERE name='traffic_class'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if exists == 0 {
+                    if let Err(e) = c.execute(
+                        "ALTER TABLE retrieval_surfacing \
+                         ADD COLUMN traffic_class TEXT NOT NULL DEFAULT 'unknown' \
+                         CHECK (traffic_class IN ('unknown', 'organic', 'eval'))",
+                        [],
+                    ) {
+                        if !e.to_string().contains("duplicate column name") {
+                            return Err(e);
+                        }
+                    }
+                }
+                c.execute_batch(SCHEMA_V42_RETRIEVAL_TRAFFIC_CLASS)?;
+                let _ = c.execute("UPDATE schema_meta SET value='42' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -7038,11 +7084,12 @@ impl StateStore for SqliteStore {
     /// by the MCP layer. FIFO ring-capped at [`RETRIEVAL_SURFACING_RING_CAP`] in
     /// the same transaction as the insert (so concurrent writers can't slip past
     /// the cap); fail-soft like record_coactivation.
-    async fn record_retrieval_surfacing(
+    async fn record_retrieval_surfacing_classified(
         &self,
         surfaced: &[(String, i64)],
         query: &str,
         mode: &str,
+        traffic_class: &str,
     ) -> Result<()> {
         if surfaced.is_empty() {
             return Ok(());
@@ -7051,6 +7098,8 @@ impl StateStore for SqliteStore {
         let rows: Vec<(String, i64)> = surfaced.to_vec();
         let query = query.to_string();
         let mode = mode.to_string();
+        let traffic_class =
+            crate::normalize_retrieval_traffic_class(Some(traffic_class)).to_string();
         let res = self
             .conn
             .call(move |c| -> RusqliteResult<()> {
@@ -7058,11 +7107,18 @@ impl StateStore for SqliteStore {
                 {
                     let mut stmt = tx.prepare(
                         "INSERT INTO retrieval_surfacing
-                            (memory_key, query, mode, rank, surfaced_at, used_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+                            (memory_key, query, mode, rank, surfaced_at, used_at, traffic_class)
+                         VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)",
                     )?;
                     for (key, rank) in &rows {
-                        stmt.execute(rusqlite::params![key, query, mode, rank, now])?;
+                        stmt.execute(rusqlite::params![
+                            key,
+                            query,
+                            mode,
+                            rank,
+                            now,
+                            traffic_class
+                        ])?;
                     }
                 }
                 // Ring-buffer prune: keep at most RETRIEVAL_SURFACING_RING_CAP rows.
@@ -18120,7 +18176,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "41"); // v41 = sessions process identity (orphan reaper); latest after all migrations
+        assert_eq!(version, "42"); // v42 = retrieval traffic provenance; latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -19937,7 +19993,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(v, "41", "schema after all migrations");
+        assert_eq!(v, "42", "schema after all migrations");
         assert_eq!(n, 1, "last_cofire_at present exactly once");
 
         seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
@@ -19987,7 +20043,7 @@ mod tests {
             })
             .await
             .expect("probe after upgrade");
-        assert_eq!(v, "41", "re-open ran through all migrations");
+        assert_eq!(v, "42", "re-open ran through all migrations");
         assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -20027,7 +20083,7 @@ mod tests {
             })
             .await
             .expect("probe v39 schema");
-        assert_eq!(v, "41", "schema after all migrations");
+        assert_eq!(v, "42", "schema after all migrations");
         assert_eq!(table_n, 1, "retrieval_surfacing table exists");
         assert_eq!(key_idx_n, 1, "key/surfaced_at index exists");
         assert_eq!(at_idx_n, 1, "surfaced_at index exists");
@@ -20065,7 +20121,7 @@ mod tests {
             })
             .await
             .expect("probe v40 schema");
-        assert_eq!(v, "41", "schema after v40+v41");
+        assert_eq!(v, "42", "schema after v40+v41+v42");
         assert_eq!(col_n, 1, "consumed_at column exists exactly once");
         assert_eq!(idx_n, 1, "pending partial index exists");
 
@@ -20164,6 +20220,141 @@ mod tests {
         );
         let row = store.load_session(&sid).await.expect("load").expect("row");
         assert_eq!(row.proc_pid, Some(4242), "finalised row untouched");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v42_retrieval_traffic_class_migrates_historical_rows_unknown() {
+        let (dir, store) = fresh_store("v42-traffic-migration").await;
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute_batch(
+                    "DROP INDEX IF EXISTS idx_retrieval_surfacing_traffic_at;
+                     ALTER TABLE retrieval_surfacing DROP COLUMN traffic_class;
+                     INSERT INTO retrieval_surfacing
+                         (memory_key, query, mode, rank, surfaced_at, used_at, consumed_at)
+                     VALUES ('historical', 'q', 'bootstrap', 0, 1700000000, NULL, NULL);
+                     UPDATE schema_meta SET value='41' WHERE key='version';",
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("rewind to a v41-shaped retrieval table");
+        drop(store);
+
+        let reopened = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("migrate v41-shaped store");
+        let (version, column_n, index_n, traffic_class): (String, i64, i64, String) = reopened
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64, i64, String)> {
+                let version = c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let column_n = c.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('retrieval_surfacing')
+                     WHERE name='traffic_class'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let index_n = c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master
+                     WHERE type='index'
+                       AND name='idx_retrieval_surfacing_traffic_at'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let traffic_class = c.query_row(
+                    "SELECT traffic_class FROM retrieval_surfacing
+                     WHERE memory_key='historical'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((version, column_n, index_n, traffic_class))
+            })
+            .await
+            .expect("inspect v42 migration");
+        assert_eq!(version, "42");
+        assert_eq!(column_n, 1, "traffic_class exists exactly once");
+        assert_eq!(index_n, 1, "traffic class index exists exactly once");
+        assert_eq!(traffic_class, "unknown", "historical rows fail closed");
+
+        let invalid = reopened
+            .conn
+            .call(|c| -> RusqliteResult<usize> {
+                c.execute(
+                    "INSERT INTO retrieval_surfacing
+                         (memory_key, query, mode, rank, surfaced_at, traffic_class)
+                     VALUES ('invalid', 'q', 'fts', 0, 1700000001, 'production')",
+                    [],
+                )
+            })
+            .await;
+        assert!(invalid.is_err(), "CHECK rejects non-canonical classes");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn retrieval_traffic_class_normalizes_and_legacy_is_unknown() {
+        let (dir, store) = fresh_store("v42-traffic-writers").await;
+        store
+            .record_retrieval_surfacing(&[("legacy".to_string(), 0)], "legacy", "fts")
+            .await
+            .expect("legacy writer");
+        store
+            .record_retrieval_surfacing_classified(
+                &[("organic".to_string(), 0)],
+                "organic",
+                "fts",
+                " Organic ",
+            )
+            .await
+            .expect("organic writer");
+        store
+            .record_retrieval_surfacing_classified(
+                &[("eval".to_string(), 0)],
+                "eval",
+                AMBIENT_SURFACING_MODE,
+                "EVAL",
+            )
+            .await
+            .expect("eval bootstrap writer");
+        store
+            .record_retrieval_surfacing_classified(
+                &[("invalid".to_string(), 0)],
+                "invalid",
+                "semantic",
+                "production",
+            )
+            .await
+            .expect("invalid writer fails closed");
+
+        let rows: Vec<(String, String, String)> = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, String, String)>> {
+                let mut stmt = c.prepare(
+                    "SELECT query, mode, traffic_class FROM retrieval_surfacing
+                     ORDER BY query",
+                )?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .expect("read traffic classes");
+        assert_eq!(
+            rows,
+            vec![
+                ("eval".into(), AMBIENT_SURFACING_MODE.into(), "eval".into()),
+                ("invalid".into(), "semantic".into(), "unknown".into()),
+                ("legacy".into(), "fts".into(), "unknown".into()),
+                ("organic".into(), "fts".into(), "organic".into()),
+            ]
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
@@ -23467,7 +23658,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("41"),
+            Some("42"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -24092,7 +24283,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, "41", "schema must be at the latest version");
+        assert_eq!(probe.0, "42", "schema must be at the latest version");
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),
@@ -24125,7 +24316,7 @@ mod tests {
             .expect("probe after reopen");
         assert_eq!(
             again,
-            ("41".to_string(), 2),
+            ("42".to_string(), 2),
             "re-open stays at the latest version with both columns, no duplicate ALTER"
         );
 

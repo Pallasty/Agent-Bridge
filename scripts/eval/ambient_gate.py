@@ -4,10 +4,10 @@
 Stage 1 (PR #72) writes session_bootstrap's semantic page to
 retrieval_surfacing as mode=bootstrap, quarantined from every reinforce/decay
 aggregate. Stage 2 (calibrate an ambient-specific rule + mode-sliced shadow)
-was gated on data accumulation. This probe reads the ambient slice and prints
-an OPEN/WAIT verdict for that gate, so any session can re-check it with one
-command. Read-only; never part of ab_eval baselines (maturation gate, not a
-regression component).
+was gated on data accumulation. This probe reads only explicitly organic
+ambient traffic and prints an OPEN/WAIT/BLOCKED verdict. Evaluation and
+historical unknown traffic never contribute to the gate. Read-only; never part
+of ab_eval baselines (maturation gate, not a regression component).
 
 Label semantics: used_at on an ambient row comes from attribute_retrieval_get
 (store), which stamps ALL recent unconsumed surfacings of a key on any
@@ -23,8 +23,10 @@ both filtered at read time (stamps carry rank, so no code change needed):
     key+window coincidence, not surfacing-driven consultation.
 """
 import argparse
+import datetime
 import json
 import os
+from pathlib import Path
 import sqlite3
 import sys
 
@@ -40,51 +42,167 @@ GATE_TOTAL_STAMPS = 100
 GATE_DISTINCT_DAYS = 7
 GATE_CLEAN_STAMPS = 50
 CLEAN_RANK_MAX = 30
+VALID_TRAFFIC_CLASSES = {"unknown", "organic", "eval"}
+
+
+def _open_read_only(db_path):
+    uri = Path(db_path).expanduser().resolve().as_uri() + "?mode=ro"
+    db = sqlite3.connect(uri, uri=True)
+    db.execute("PRAGMA query_only=ON")
+    if db.execute("PRAGMA query_only").fetchone()[0] != 1:
+        db.close()
+        raise RuntimeError("SQLite query_only could not be enabled")
+    return db
+
+
+def _day(timestamp):
+    return datetime.datetime.fromtimestamp(
+        timestamp, tz=datetime.timezone.utc
+    ).date().isoformat()
+
+
+def _traffic_class(value):
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value in VALID_TRAFFIC_CLASSES:
+            return value
+    return "invalid_or_unlabeled"
 
 
 def probe(db_path):
-    db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    c = db.cursor()
+    db = _open_read_only(db_path)
+    db.execute("BEGIN")
+    db.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    start_changes = db.total_changes
+    try:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if "retrieval_surfacing" not in tables:
+            raise RuntimeError("missing required table: retrieval_surfacing")
+        columns = {
+            row[1] for row in db.execute("PRAGMA table_info(retrieval_surfacing)")
+        }
+        required = {"memory_key", "mode", "rank", "surfaced_at", "used_at"}
+        missing = required - columns
+        if missing:
+            raise RuntimeError("missing required columns: " + ", ".join(sorted(missing)))
+        traffic_class_present = "traffic_class" in columns
+        fields = "memory_key, rank, surfaced_at, used_at"
+        if traffic_class_present:
+            fields += ", traffic_class"
+        raw_rows = db.execute(
+            f"SELECT {fields} FROM retrieval_surfacing WHERE mode='bootstrap'"
+        ).fetchall()
+        rows = []
+        for raw in raw_rows:
+            rows.append(
+                {
+                    "memory_key": raw[0],
+                    "rank": int(raw[1]),
+                    "surfaced_at": int(raw[2]),
+                    "used_at": None if raw[3] is None else int(raw[3]),
+                    "traffic_class": (
+                        _traffic_class(raw[4])
+                        if traffic_class_present
+                        else "unobservable"
+                    ),
+                }
+            )
 
-    per_day = c.execute(
-        "SELECT date(surfaced_at,'unixepoch') d, count(*),"
-        "       count(DISTINCT memory_key)"
-        " FROM retrieval_surfacing WHERE mode='bootstrap'"
-        " GROUP BY d ORDER BY d"
-    ).fetchall()
+        class_counts = {}
+        for row in rows:
+            label = row["traffic_class"]
+            class_counts[label] = class_counts.get(label, 0) + 1
+        organic_rows = [
+            row for row in rows if row["traffic_class"] == "organic"
+        ]
+        first_organic = min(
+            (row["surfaced_at"] for row in organic_rows), default=None
+        )
+        post_label_unknown_rows = (
+            0
+            if first_organic is None
+            else sum(
+                1
+                for row in rows
+                if row["surfaced_at"] >= first_organic
+                and row["traffic_class"] not in {"organic", "eval"}
+            )
+        )
 
-    stamps_per_day = c.execute(
-        "SELECT date(used_at,'unixepoch') d, count(*)"
-        " FROM retrieval_surfacing"
-        " WHERE mode='bootstrap' AND used_at IS NOT NULL"
-        " GROUP BY d ORDER BY d"
-    ).fetchall()
+        exposure_days = {}
+        stamp_days = {}
+        bands = {
+            "r00-05": [0, 0],
+            "r06-15": [0, 0],
+            "r16-30": [0, 0],
+            "r31+": [0, 0],
+        }
+        for row in organic_rows:
+            surfaced_day = _day(row["surfaced_at"])
+            day_entry = exposure_days.setdefault(surfaced_day, [0, set()])
+            day_entry[0] += 1
+            day_entry[1].add(row["memory_key"])
+            if row["rank"] <= 5:
+                band = "r00-05"
+            elif row["rank"] <= 15:
+                band = "r06-15"
+            elif row["rank"] <= 30:
+                band = "r16-30"
+            else:
+                band = "r31+"
+            bands[band][0] += 1
+            if row["used_at"] is not None:
+                bands[band][1] += 1
+                used_day = _day(row["used_at"])
+                stamp_days[used_day] = stamp_days.get(used_day, 0) + 1
 
-    rank_curve = c.execute(
-        "SELECT CASE WHEN rank<=5 THEN 'r00-05' WHEN rank<=15 THEN 'r06-15'"
-        "            WHEN rank<=30 THEN 'r16-30' ELSE 'r31+' END band,"
-        "       count(*) exposures,"
-        "       sum(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END) used"
-        " FROM retrieval_surfacing WHERE mode='bootstrap'"
-        " GROUP BY band ORDER BY min(rank)"
-    ).fetchall()
+        organic_used = [row for row in organic_rows if row["used_at"] is not None]
+        total_stamps = len(organic_used)
+        distinct_days = len(stamp_days)
+        clean_stamps = sum(
+            1
+            for row in organic_used
+            if row["rank"] <= CLEAN_RANK_MAX
+            and not row["memory_key"].startswith("distill_draft_")
+        )
 
-    total_stamps = sum(n for _, n in stamps_per_day)
-    distinct_days = len(stamps_per_day)
-    clean_stamps = c.execute(
-        "SELECT count(*) FROM retrieval_surfacing"
-        " WHERE mode='bootstrap' AND used_at IS NOT NULL"
-        "   AND rank <= ? AND memory_key NOT LIKE 'distill_draft_%'",
-        (CLEAN_RANK_MAX,),
-    ).fetchone()[0]
-    db.close()
+        per_day = [
+            (day, values[0], len(values[1]))
+            for day, values in sorted(exposure_days.items())
+        ]
+        stamps_per_day = sorted(stamp_days.items())
+        rank_curve = [
+            (band, values[0], values[1]) for band, values in bands.items()
+        ]
+        end_changes = db.total_changes
+    finally:
+        db.close()
 
     conditions = {
         f"total_stamps>={GATE_TOTAL_STAMPS}": total_stamps >= GATE_TOTAL_STAMPS,
         f"distinct_days>={GATE_DISTINCT_DAYS}": distinct_days >= GATE_DISTINCT_DAYS,
         f"clean_stamps>={GATE_CLEAN_STAMPS}": clean_stamps >= GATE_CLEAN_STAMPS,
     }
+    if not traffic_class_present:
+        verdict = "BLOCKED_NEEDS_TRAFFIC_CLASS"
+    elif first_organic is None:
+        verdict = "WAIT_LABELLED_DATA"
+    elif post_label_unknown_rows:
+        verdict = "BLOCKED_PARTIAL_TRAFFIC_CLASS"
+    else:
+        verdict = "OPEN" if all(conditions.values()) else "WAIT"
+
     return {
+        "traffic_class_column_present": traffic_class_present,
+        "bootstrap_traffic_class_counts": dict(sorted(class_counts.items())),
+        "first_organic_surfaced_at": first_organic,
+        "post_label_unknown_rows": post_label_unknown_rows,
+        "eval_rows_excluded": class_counts.get("eval", 0),
         "ambient_per_day": [
             {"day": d, "exposures": n, "distinct_keys": k} for d, n, k in per_day
         ],
@@ -102,7 +220,15 @@ def probe(db_path):
         "distinct_stamp_days": distinct_days,
         "clean_stamps": clean_stamps,
         "conditions": conditions,
-        "verdict": "OPEN" if all(conditions.values()) else "WAIT",
+        "verdict": verdict,
+        "no_write_invariant": {
+            "sqlite_uri_mode": "ro",
+            "query_only": True,
+            "consistent_read_snapshot": True,
+            "connection_total_changes_before": start_changes,
+            "connection_total_changes_after": end_changes,
+            "passed": start_changes == 0 and end_changes == 0,
+        },
     }
 
 
@@ -118,6 +244,11 @@ def main():
     else:
         print("# ambient stage-2 data gate")
         print(f"DB: {args.db}")
+        print(
+            "traffic_class: "
+            + ("present" if r["traffic_class_column_present"] else "absent")
+        )
+        print(f"bootstrap classes: {r['bootstrap_traffic_class_counts']}")
         for row in r["ambient_per_day"]:
             print(f"  {row['day']}  exposures={row['exposures']:>5}  keys={row['distinct_keys']}")
         print("stamps/day: " + (", ".join(

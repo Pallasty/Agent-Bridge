@@ -16,7 +16,9 @@ python3 scripts/eval/ab_eval.py --component retrieval  # one component only
 ```
 
 Default binary: `~/.local/bin/agent-bridge` (the wrapper, so machine.env is
-sourced and the embedder works). Override with `--binary`.
+sourced and the embedder works). Override with `--binary`. The harness always
+overrides `AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS=eval`, so benchmark searches
+and bootstrap calls cannot be counted as organic telemetry.
 
 ## Components
 
@@ -60,10 +62,14 @@ sourced and the embedder works). Override with `--binary`.
 
 ## Sibling probes (not benchmark components)
 
-`ambient_gate.py` — ambient stage-2 data-gate probe (OPEN/WAIT): is the
-mode=bootstrap telemetry slice ripe enough to calibrate an ambient-specific
-reinforce rule? Maturation gate for a parked lane, not a regression component;
-it never touches baselines. Run: `python3 scripts/eval/ambient_gate.py`.
+`ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
+`mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
+reinforce rule? Eval and historical unknown rows are excluded. A missing class
+column, no labelled organic data, or unknown/invalid rows after organic
+collection begins produce distinct fail-closed verdicts; only clean organic
+traffic can reach OPEN. This is a maturation gate for a parked lane, not a
+regression component, and it never touches baselines. Run:
+`python3 scripts/eval/ambient_gate.py`.
 
 `temporal_truth_drift_audit.py` — aggregate-only structural audit for explicit
 stale-active evidence: lifecycle status/edges, declared supersession,
@@ -76,6 +82,8 @@ separating organic and eval retrieval telemetry before surfaced-to-used
 reinforce/decay evidence is interpreted. It never reads query text or infers
 traffic from keys/timing. Missing or partial `traffic_class` labels block; even
 complete labels admit only a separately frozen clean shadow, never apply.
+Its sibling ambient section uses the same organic-only and post-label-unknown
+rules as `ambient_gate.py`.
 
 `portfolio_continuity_eval.py` — deterministic, no-write scorer for redacted
 portfolio/session digest evidence packets. It measures required supported-claim

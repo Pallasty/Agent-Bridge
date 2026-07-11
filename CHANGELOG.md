@@ -8,6 +8,16 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Explicit retrieval traffic provenance (schema v42).**
+  `retrieval_surfacing.traffic_class` records producer-boundary `organic`,
+  `eval`, or fail-closed `unknown` provenance with a constrained column and
+  class/time index. Search and semantic-bootstrap writers capture a process
+  environment label; no MCP argument lets a model self-classify. Existing
+  rows and old callers remain `unknown`, while repository benchmarks and MCP
+  verifiers explicitly identify as `eval`. Ambient stage-2 thresholds now use
+  only organic bootstrap rows, exclude eval/history, and block incomplete
+  post-deployment labelling. This enables provenance collection only;
+  retrieval outcome apply remains disabled and unchanged.
 - **Read-only memory-evidence audit pair.** A structural temporal-truth probe
   reports explicit stale-active lifecycle, correction, freshness, and dedupe
   signals without reading memory prose or emitting keys. A sibling retrieval

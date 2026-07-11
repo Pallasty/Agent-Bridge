@@ -5,6 +5,8 @@
 
 set -euo pipefail
 
+export AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS=eval
+
 AB="$(command -v agent-bridge 2>/dev/null || true)"
 [[ -z "$AB" && -x "${HOME}/.local/bin/agent-bridge" ]] && AB="${HOME}/.local/bin/agent-bridge"
 if [[ ! -x "$AB" ]]; then

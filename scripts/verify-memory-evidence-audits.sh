@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPORAL="$ROOT_DIR/scripts/eval/temporal_truth_drift_audit.py"
 TELEMETRY="$ROOT_DIR/scripts/eval/retrieval_telemetry_causality_audit.py"
+AMBIENT="$ROOT_DIR/scripts/eval/ambient_gate.py"
 AS_OF=2000000000
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ab-memory-evidence-audits-XXXXXX")"
@@ -178,7 +179,8 @@ def make_telemetry(path, labelled):
         surfacing("l_mixed_used", "semantic", 0, 30_000, True, "eval")
         surfacing("l_mixed_used", "semantic", 1, 29_000, False, "organic")
         surfacing("l_org_used", "fts", 2, 28_000, True, "organic")
-        surfacing("l_boot", "bootstrap", 0, 30_000, True, "bootstrap")
+        surfacing("l_boot", "bootstrap", 0, 30_000, True, "organic")
+        surfacing("l_boot", "bootstrap", 10, 29_000, True, "eval")
 
     con.commit()
     con.close()
@@ -193,6 +195,25 @@ con.execute(
     "UPDATE retrieval_surfacing SET traffic_class=NULL "
     "WHERE memory_key='l_org_decay' AND rank=0"
 )
+con.execute("INSERT OR IGNORE INTO memories VALUES ('l_boot_unknown', 'active')")
+con.execute(
+    "INSERT INTO retrieval_surfacing VALUES (?,?,?,?,?,?,?)",
+    ("l_boot_unknown", "bootstrap", 1, as_of - 20_000, None, None, "unknown"),
+)
+con.commit()
+con.close()
+
+shutil.copy2(root / "telemetry-labelled.db", root / "telemetry-open.db")
+con = sqlite3.connect(root / "telemetry-open.db")
+for day_offset in range(1, 8):
+    for rank in range(15):
+        key = f"open_boot_{day_offset}_{rank}"
+        surfaced_at = as_of - day_offset * day - 1_000
+        con.execute("INSERT OR IGNORE INTO memories VALUES (?, 'active')", (key,))
+        con.execute(
+            "INSERT INTO retrieval_surfacing VALUES (?,?,?,?,?,?,?)",
+            (key, "bootstrap", rank, surfaced_at, surfaced_at + 60, None, "organic"),
+        )
 con.commit()
 con.close()
 
@@ -221,6 +242,22 @@ python3 "$TELEMETRY" \
   --db "$tmpdir/telemetry-partial.db" \
   --as-of "$AS_OF" \
   --json > "$tmpdir/telemetry-partial.json"
+
+python3 "$AMBIENT" \
+  --db "$tmpdir/telemetry-unlabelled.db" \
+  --json > "$tmpdir/ambient-unlabelled.json"
+
+python3 "$AMBIENT" \
+  --db "$tmpdir/telemetry-labelled.db" \
+  --json > "$tmpdir/ambient-labelled.json"
+
+python3 "$AMBIENT" \
+  --db "$tmpdir/telemetry-partial.db" \
+  --json > "$tmpdir/ambient-partial.json"
+
+python3 "$AMBIENT" \
+  --db "$tmpdir/telemetry-open.db" \
+  --json > "$tmpdir/ambient-open.json"
 
 python3 - "$tmpdir" <<'PY'
 import json
@@ -277,7 +314,8 @@ assert unlabelled["eval_contamination_bounds"] == {
     "reinforce_candidate_memories_max": 1,
     "reinforce_candidate_memories_min": 0,
 }
-assert unlabelled["ambient_stage2_gate"]["verdict"] == "WAIT"
+assert unlabelled["ambient_stage2_gate"]["verdict"] == "BLOCKED_NEEDS_TRAFFIC_CLASS"
+assert unlabelled["ambient_stage2_gate"]["total_stamps"] == 0
 assert unlabelled["outcome_apply_authorized"] is False
 assert unlabelled["no_write_invariant"]["consistent_read_snapshot"] is True
 assert unlabelled["no_write_invariant"]["passed"] is True
@@ -293,18 +331,61 @@ assert labelled["mature_pending"]["organic_reinforce_candidate_memories"] == 1
 assert labelled["mature_pending"]["known_eval_decay_candidate_memories"] == 1
 assert labelled["mature_pending"]["known_eval_reinforce_candidate_memories"] == 1
 assert labelled["eval_contamination_bounds"]["identified_exactly"] is True
+assert labelled["ambient_stage2_gate"]["verdict"] == "WAIT"
+assert labelled["ambient_stage2_gate"]["total_stamps"] == 1
+assert labelled["ambient_stage2_gate"]["eval_rows_excluded"] == 1
 assert labelled["outcome_apply_authorized"] is False
 
 partial = packet("telemetry-partial.json")
 assert partial["verdict"] == "BLOCKED_PARTIAL_TRAFFIC_CLASS"
 assert partial["observability"]["mature_pending_rows_without_valid_class"] == 1
 assert partial["eval_contamination_bounds"]["identified_exactly"] is False
+assert partial["ambient_stage2_gate"]["verdict"] == "BLOCKED_PARTIAL_TRAFFIC_CLASS"
+assert partial["ambient_stage2_gate"]["post_label_unknown_rows"] == 1
+
+ambient_unlabelled = packet("ambient-unlabelled.json")
+assert ambient_unlabelled["verdict"] == "BLOCKED_NEEDS_TRAFFIC_CLASS"
+assert ambient_unlabelled["traffic_class_column_present"] is False
+assert ambient_unlabelled["total_stamps"] == 0
+
+ambient_labelled = packet("ambient-labelled.json")
+assert ambient_labelled["verdict"] == "WAIT"
+assert ambient_labelled["bootstrap_traffic_class_counts"] == {
+    "eval": 1,
+    "organic": 1,
+}
+assert ambient_labelled["eval_rows_excluded"] == 1
+assert ambient_labelled["total_stamps"] == 1
+
+ambient_partial = packet("ambient-partial.json")
+assert ambient_partial["verdict"] == "BLOCKED_PARTIAL_TRAFFIC_CLASS"
+assert ambient_partial["post_label_unknown_rows"] == 1
+
+ambient_open = packet("ambient-open.json")
+assert ambient_open["verdict"] == "OPEN"
+assert ambient_open["total_stamps"] == 106
+assert ambient_open["distinct_stamp_days"] >= 7
+assert ambient_open["clean_stamps"] == 106
+assert ambient_open["eval_rows_excluded"] == 1
+
+for ambient in (
+    ambient_unlabelled,
+    ambient_labelled,
+    ambient_partial,
+    ambient_open,
+):
+    assert ambient["no_write_invariant"]["consistent_read_snapshot"] is True
+    assert ambient["no_write_invariant"]["passed"] is True
 
 for name in (
     "temporal.json",
     "telemetry-unlabelled.json",
     "telemetry-labelled.json",
     "telemetry-partial.json",
+    "ambient-unlabelled.json",
+    "ambient-labelled.json",
+    "ambient-partial.json",
+    "ambient-open.json",
 ):
     text = (root / name).read_text(encoding="utf-8")
     for raw_identifier in (
@@ -317,13 +398,15 @@ for name in (
         "l_eval_decay",
         "l_org_decay",
         "l_mixed_used",
+        "l_boot_unknown",
+        "open_boot_1_0",
     ):
         assert json.dumps(raw_identifier) not in text, (name, raw_identifier)
 
 for db_name, expected in (
     ("temporal.db", (18, 4)),
     ("telemetry-unlabelled.db", (4, 7)),
-    ("telemetry-labelled.db", (5, 8)),
+    ("telemetry-labelled.db", (5, 9)),
 ):
     con = sqlite3.connect(root / db_name)
     if db_name == "temporal.db":

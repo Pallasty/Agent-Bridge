@@ -7,6 +7,8 @@ set -euo pipefail
 # AGENT_BRIDGE_CORRECTION_COSURFACE unset and one with it enabled, and compares
 # key/rank level results only.
 
+export AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS=eval
+
 AB_BIN="${AB_BIN:-$HOME/.local/bin/agent-bridge.real}"
 AB_SOURCE_DB="${AB_SOURCE_DB:-${HOME}/.local/share/agent-bridge/state.db}"
 AB_MAX_CORRECTIONS="${AB_MAX_CORRECTIONS:-20}"
