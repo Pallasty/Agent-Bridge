@@ -16,6 +16,12 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   rows; it also reproduces the ambient stage-2 maturation gate. Both helpers
   use SQLite `mode=ro` plus `query_only`, emit aggregate-only packets, and have
   no archive, supersede, importance, ranking, runtime, or apply authority.
+  The first frozen live run found 30 unique structural review candidates and
+  retained `REVIEW_REQUIRED`; the telemetry schema had no traffic-origin
+  label, so 300 decay candidates and 42 reinforce candidates remain bounded by
+  wholly unknown eval contamination and outcome apply stays blocked. Ambient
+  stage 2 remains `WAIT` at 89 total stamps, five distinct days, and 56 clean
+  stamps.
 - **Portfolio-continuity successor answer protocol.** Contract v2 freezes a
   separate retrieval query for each of the twelve existing blind-review cases,
   requires valid reference coverage before generation, and projects private

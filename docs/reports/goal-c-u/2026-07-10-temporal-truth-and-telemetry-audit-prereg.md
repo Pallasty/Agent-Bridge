@@ -2,7 +2,7 @@
 
 Date: 2026-07-10
 
-Status: `PROTOCOL_FROZEN / READ_ONLY / KNOWN_PRIOR / NO_RUNTIME_AUTHORITY`
+Status: `PROTOCOL_FROZEN_WITH_SNAPSHOT_AMENDMENT / READ_ONLY / KNOWN_PRIOR / NO_RUNTIME_AUTHORITY`
 
 ## Decision
 
@@ -220,3 +220,17 @@ python3 scripts/eval/retrieval_telemetry_causality_audit.py --json \
 ```
 
 No remote CI may be triggered. Any push must use a `[skip ci]` commit.
+
+## Protocol Amendment Record
+
+Before any result was admitted, commit
+`9302c5043b2226a7bd767e29f95228f8f80ce98b` bound every helper query to one
+explicit SQLite read transaction and added `surfaced_at/created_at <= as_of`
+upper bounds. It changed no signal class, threshold, verdict rule, privacy
+boundary, or authority rule. The synthetic gate was rerun before production.
+
+A diagnostic run made before that hardening is inadmissible: external live
+writers changed table/edge counts across its separate SELECT snapshots. Its
+packet was overwritten and none of its values or hashes are used by the result
+report. The admitted run uses the tracked helper bytes at `9302c504` and reports
+`consistent_read_snapshot=true` for both packets.
