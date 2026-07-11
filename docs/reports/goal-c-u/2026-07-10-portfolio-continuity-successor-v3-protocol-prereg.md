@@ -2,8 +2,8 @@
 
 Date: 2026-07-10
 
-Status: **PRE-REGISTERED / IMPLEMENTATION VERIFIED / COMMIT BINDING PENDING /
-NOT EXECUTED**. This change defines contract v3 and its fail-closed validator.
+Status: **PRE-REGISTERED / IMPLEMENTATION VERIFIED / FROZEN / NOT EXECUTED**.
+This change defines contract v3 and its fail-closed validator.
 It does not perform capture, answer generation, model review, scoring,
 unblinding, an Agent-Bridge write, remote CI, versioning, tagging, release, or
 deployment.
@@ -14,7 +14,7 @@ deployment.
 schema: agent_bridge.portfolio_continuity_answer_contract.v3
 contract_id: portfolio_continuity_successor_v3_answer_blind_20260710
 preregistration_base: 29b518ed4d1bfde4ae260295e4116dbeb4ea4079
-contract_commit: PENDING_BINDING
+contract_commit: 9b0dcbccb61f00179c5e8131608904022256185b
 contract_sha256: 6bd44c22759f6376d2d45a2c8e2efe08ccd228303c6a1a325b888eb6fda8e816
 harness_source_sha256: dcb74fde6f5f68e386ad6ee9215d716be43509dd0b30afe27435b2833a081788
 surface_source_sha256: b6f599e748088e36424bd03e70a5bc3112aeaf728f6679b19297889a98e5b7f3

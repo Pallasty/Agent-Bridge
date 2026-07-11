@@ -454,6 +454,25 @@ def main() -> None:
     } == expected_reported
     assert "NOT EXECUTED" in report
     assert "Gemini is not" in report
+    commit_match = re.search(
+        r"^contract_commit: ([0-9a-f]{40})$", report, re.MULTILINE
+    )
+    assert commit_match is not None
+    contract_commit = commit_match.group(1)
+    frozen_paths = {
+        CONTRACT_PATH: "scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json",
+        Path(trial.__file__): "scripts/eval/portfolio_continuity_successor_v3_trial.py",
+        Path(trial.surface.__file__): "scripts/eval/portfolio_continuity_ab_trial.py",
+    }
+    for current_path, relative_path in frozen_paths.items():
+        frozen = subprocess.check_output(
+            ["git", "show", f"{contract_commit}:{relative_path}"], cwd=ROOT
+        )
+        assert frozen == current_path.read_bytes()
+    frozen_parent = subprocess.check_output(
+        ["git", "rev-parse", f"{contract_commit}^"], cwd=ROOT, text=True
+    ).strip()
+    assert frozen_parent == raw_contract["prereg_base_commit"]
     assert contract["version"] == 3
     assert trial.surface.sha256_file(Path(trial.__file__)) == raw_contract[
         "harness_source_sha256"
