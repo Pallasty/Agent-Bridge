@@ -256,7 +256,7 @@ pub(crate) fn now_secs() -> i64 {
         .as_secs() as i64
 }
 
-fn mk_sid_suffix(session_id: Option<&str>) -> String {
+pub(crate) fn mk_sid_suffix(session_id: Option<&str>) -> String {
     session_id
         .map(|s| format!("_{}", &s[..s.len().min(8)]))
         .unwrap_or_default()

@@ -2660,6 +2660,18 @@ pub trait StateStore: Send + Sync {
     /// Results are ordered by `weight DESC` (highest-weight / most causal first).
     async fn memory_neighbors(&self, key: &str) -> Result<Vec<MemoryEdge>>;
 
+    /// Active memory keys that start with `prefix` (literal byte-prefix match
+    /// on the primary key — `substr()` comparison, so `_`/`%` in the prefix
+    /// stay literal), `status='active'` only, oldest-first, capped at `limit`.
+    /// Added for session_curate's prior-handoff retirement (staleness-gate
+    /// slice ③, 2026-07-10): a curate run looks up its own session's earlier
+    /// in-flight snapshots to supersede them.
+    async fn memory_active_keys_with_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<String>>;
+
     /// BFS traversal up to `depth` hops from `start_key`.
     /// Returns `(MemoryEdge, energy)` pairs sorted by descending energy.
     /// Energy starts at 1.0 and decays with each hop:
