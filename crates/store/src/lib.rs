@@ -270,6 +270,14 @@ pub const STDIO_CAP: usize = 64 * 1024;
 /// Hard cap on a single memory's `content` field (256 KiB).
 pub const MEMORY_CONTENT_CAP: usize = 256 * 1024;
 
+/// Hard ceilings for one internal truth-adapter diagnostic snapshot. These
+/// bounds are deliberately below the general export surface: a preflight is a
+/// bounded proof attempt, not another bulk raw-memory API.
+pub const MEMORY_EVIDENCE_SNAPSHOT_MAX_RECORDS: usize = 10_000;
+pub const MEMORY_EVIDENCE_SNAPSHOT_MAX_TOMBSTONES: usize = 10_000;
+pub const MEMORY_EVIDENCE_SNAPSHOT_MAX_EDGES: usize = 50_000;
+pub const MEMORY_EVIDENCE_SNAPSHOT_MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
+
 /// One row in the `memories` table — Claude's cross-session note.
 ///
 /// Hyperlink-style relationships only: `related_keys` is a list of other
@@ -298,9 +306,11 @@ pub struct MemoryRecord {
     /// observation:0.3). Decays over time via session_finalize.
     #[serde(default = "default_importance")]
     pub importance: f64,
-    /// Lifecycle status: "active" | "archived" | "superseded".
-    /// Archived = decayed below threshold. Superseded = a newer memory
-    /// auto-detected as replacing this one.
+    /// Lifecycle status: "active" | "archived" | "superseded" | "conflict" |
+    /// "tombstoned". Archived = decayed below threshold. Superseded = a newer
+    /// memory auto-detected as replacing this one. Conflict rows preserve a
+    /// concurrent imported version. Tombstoned rows are retained deletion
+    /// markers and are hidden from ordinary retrieval.
     #[serde(default = "default_status")]
     pub status: String,
     /// When `kind == error_pattern`, optional substring to match against
@@ -313,6 +323,155 @@ pub struct MemoryRecord {
     /// were superseded manually without going through the auto-detect path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<String>,
+}
+
+/// Content-free privacy marker returned by [`StateStore::memory_peek`] and
+/// [`StateStore::memory_evidence_snapshot`]. Tombstoned content, tags, scope,
+/// and relationship fields must never be rehydrated through these surfaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryTombstoneMarker {
+    pub key: String,
+    pub updated_at: i64,
+}
+
+/// Exact, side-effect-free result for one memory key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MemoryPeekResult {
+    Missing,
+    Present { record: Box<MemoryRecord> },
+    Tombstoned { marker: MemoryTombstoneMarker },
+}
+
+/// Caller bounds for one internal evidence snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryEvidenceSnapshotLimits {
+    pub max_records: usize,
+    pub max_tombstones: usize,
+    pub max_edges: usize,
+    /// Maximum aggregate UTF-8 payload bytes retained across row markers,
+    /// tombstone markers, and visible edges. Rust container overhead is
+    /// separately bounded by the three row caps.
+    pub max_payload_bytes: usize,
+}
+
+impl Default for MemoryEvidenceSnapshotLimits {
+    fn default() -> Self {
+        Self {
+            max_records: 1_000,
+            max_tombstones: 1_000,
+            max_edges: 5_000,
+            max_payload_bytes: 4 * 1024 * 1024,
+        }
+    }
+}
+
+impl MemoryEvidenceSnapshotLimits {
+    pub fn validate(self) -> Result<Self> {
+        let checks = [
+            (
+                "max_records",
+                self.max_records,
+                MEMORY_EVIDENCE_SNAPSHOT_MAX_RECORDS,
+            ),
+            (
+                "max_tombstones",
+                self.max_tombstones,
+                MEMORY_EVIDENCE_SNAPSHOT_MAX_TOMBSTONES,
+            ),
+            (
+                "max_edges",
+                self.max_edges,
+                MEMORY_EVIDENCE_SNAPSHOT_MAX_EDGES,
+            ),
+            (
+                "max_payload_bytes",
+                self.max_payload_bytes,
+                MEMORY_EVIDENCE_SNAPSHOT_MAX_PAYLOAD_BYTES,
+            ),
+        ];
+        if let Some((field, value, hard_max)) = checks
+            .into_iter()
+            .find(|(_, value, hard_max)| *value == 0 || *value > *hard_max)
+        {
+            return Err(ab_core::Error::Backend(format!(
+                "memory evidence snapshot {field} must be in 1..={hard_max}, got {value}"
+            )));
+        }
+        Ok(self)
+    }
+}
+
+/// Producer/schema profile bound into an opaque evidence snapshot by the
+/// store implementation. Callers cannot supply an arbitrary capability bag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MemoryEvidenceProfile {
+    /// Current SQLite: one mutable row per key, purgeable tombstones, and no
+    /// append-only truth/governance ledger.
+    MutableSqliteV41,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MemoryEvidenceRecordMarker {
+    pub key: String,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// One bounded, deterministic, read-only inventory used only for adapter
+/// completeness preflight. Retained content/tags/related_keys remain behind
+/// single-key [`StateStore::memory_peek`]; tombstoned relationship endpoints
+/// never enter this value. The type is intentionally not serializable and its
+/// payload fields are private outside `ab-store`.
+#[derive(Clone)]
+pub struct MemoryEvidenceSnapshot {
+    records: Vec<MemoryEvidenceRecordMarker>,
+    tombstones: Vec<MemoryTombstoneMarker>,
+    edges: Vec<MemoryEdgeExport>,
+    payload_bytes: usize,
+    truncated: bool,
+    /// Direct endpoint check over the retained rows in this exact snapshot.
+    /// Adapter admission still requires stronger profile guarantees.
+    retained_edge_endpoints_closed: bool,
+    tombstone_relationships_redacted: bool,
+    profile: MemoryEvidenceProfile,
+}
+
+impl MemoryEvidenceSnapshot {
+    pub fn profile(&self) -> MemoryEvidenceProfile {
+        self.profile
+    }
+
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    pub fn record_count(&self) -> usize {
+        self.records.len()
+    }
+
+    pub fn tombstone_count(&self) -> usize {
+        self.tombstones.len()
+    }
+
+    pub fn visible_edge_count(&self) -> usize {
+        self.edges.len()
+    }
+
+    pub fn payload_bytes(&self) -> usize {
+        self.payload_bytes
+    }
+
+    pub fn retained_edge_endpoints_closed(&self) -> bool {
+        self.retained_edge_endpoints_closed
+    }
+
+    pub fn tombstone_relationships_redacted(&self) -> bool {
+        self.tombstone_relationships_redacted
+    }
 }
 
 fn default_importance() -> f64 {
@@ -2582,6 +2741,34 @@ pub trait StateStore: Send + Sync {
     /// [`MEMORY_CONTENT_CAP`]. Updates `updated_at` to `now`; on first insert
     /// `created_at` is also set, `access_count` starts at 0.
     async fn memory_save(&self, mem: &MemoryRecord) -> Result<()>;
+
+    /// Fetch one exact key without changing access counters or any query,
+    /// surfacing, retrieval-use, or coactivation telemetry. Active, archived,
+    /// superseded, and conflict rows return their exact current envelope;
+    /// tombstones return only a content-free marker. This is an internal
+    /// diagnostic read, not a retrieval or truth-adapter admission surface.
+    async fn memory_peek(&self, key: &str) -> Result<MemoryPeekResult> {
+        let _ = key;
+        Err(ab_core::Error::Backend(
+            "memory_peek unsupported by this store backend".into(),
+        ))
+    }
+
+    /// Read retained-row markers, content-free tombstones, and timestamped
+    /// visible edges in one bounded store snapshot. Implementations must not
+    /// mutate access or retrieval telemetry, bulk-load retained content, or
+    /// expose tombstone-incident relationships. Unsupported backends fail
+    /// closed rather than returning an empty snapshot that could be mistaken
+    /// for completeness.
+    async fn memory_evidence_snapshot(
+        &self,
+        limits: MemoryEvidenceSnapshotLimits,
+    ) -> Result<MemoryEvidenceSnapshot> {
+        let _ = limits;
+        Err(ab_core::Error::Backend(
+            "memory_evidence_snapshot unsupported by this store backend".into(),
+        ))
+    }
 
     /// Fetch one memory by exact key. Implementations MUST atomically bump
     /// `access_count` and `last_accessed_at` as a side effect of a successful

@@ -307,7 +307,9 @@ labels do all useful work) and do not ship the biological candidate.
 ## Later slices (not authorized by v0)
 
 1. A side-effect-free exact evidence reader (`memory_peek`) with mutation
-   counters proving zero access/query/coactivation telemetry.
+   counters proving zero access/query/coactivation telemetry. This diagnostic
+   slice was separately authorized and remains adapter-blocked; see
+   [Memory Peek and Truth-Adapter Preflight v0](MEMORY_PEEK_TRUTH_ADAPTER_PREFLIGHT_V0_2026_07_10.md).
 2. An opt-in, Niche-profile assembler tool over explicit truth bindings.
    Before accepting untrusted/MCP input, add hard caps for required claims,
    visible evidence, aliases, source keys, relationships, and serialized bytes;
