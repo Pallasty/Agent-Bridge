@@ -1,0 +1,81 @@
+{
+  "stats": {
+    "sources": 14,
+    "claims": 70,
+    "confirmed": 10,
+    "refuted": 0,
+    "unverified": 60,
+    "byGap": {
+      "g3": "10/30",
+      "g4": "0/25",
+      "g5": "0/15"
+    }
+  },
+  "summary": "synthesis agent failed",
+  "findings": [],
+  "caveats": "",
+  "openQuestions": [],
+  "refuted": [],
+  "confirmedRaw": [
+    {
+      "gap": 3,
+      "claim": "存在一个精确 DPP（volume sampling）算法，其单次采样成本仅为 poly(d)，与数据行数 n 完全无关——这是负相依/费米子排斥结构在随机数值线性代数中'可证计算优势'的核心资源计数：对 n≫d 的高瘦矩阵，重复采样代价不随数据规模增长。",
+      "source": "https://arxiv.org/abs/1811.03717",
+      "vote": "3-0"
+    },
+    {
+      "gap": 3,
+      "claim": "该算法的一次性预处理步骤在输入稀疏度时间 O(nnz(X)·log n)+poly(d) 内完成，即预处理近线性于矩阵非零元个数，这给出 DPP 采样端到端复杂度的可验证上界（可与后续文献如 Calandriello/Derezinski 2020+ 的改进对比核查）。",
+      "source": "https://arxiv.org/abs/1811.03717",
+      "vote": "3-0"
+    },
+    {
+      "gap": 3,
+      "claim": "中间分布（regularized DPP, R-DPP）将行数从 n 降到 poly(d) 且不引入任何分布失真——即这是精确采样而非近似采样，目标 DPP 概率被严格保持；这一'distortion-free'性质是区分'有定理支撑'与'量子启发营销'的关键判据之一。",
+      "source": "https://arxiv.org/abs/1811.03717",
+      "vote": "3-0"
+    },
+    {
+      "gap": 3,
+      "claim": "R-DPP 的构造依赖用 Poisson 随机变量控制子集大小的概率，并由此导出新的行列式恒等式（如该分布的归一化常数）——即行列式结构本身提供了可解析计算的配分函数，这是行列式/费米子结构相对一般点过程的具体数学杠杆。",
+      "source": "https://arxiv.org/abs/1811.03717",
+      "vote": "3-0"
+    },
+    {
+      "gap": 3,
+      "claim": "作者主张该快速 DPP 采样算法适用于机器学习、随机优化、数据摘要与低秩矩阵重构等领域——此为应用广度主张（摘要层面为声明性，具体每个领域的优势需在正文/后续文献中核实定理条件）。",
+      "source": "https://arxiv.org/abs/1811.03717",
+      "vote": "3-0"
+    },
+    {
+      "gap": 3,
+      "claim": "该论文肯定回答了此前悬而未决的核心问题：DPP 采样构造的 coreset 在基数(cardinality)上可以被证明地小于独立采样构造的 coreset，即费米子型负相依排斥结构在 coreset 选择上有定理级(而非仅实证)优势。",
+      "source": "https://arxiv.org/abs/2411.00611",
+      "vote": "2-0"
+    },
+    {
+      "gap": 3,
+      "claim": "论文将 coreset 损失重新表述为随机 coreset 的线性统计量(linear statistic)，并借此建立了超越已有最优结果的 DPP 线性统计量集中不等式，其适用范围覆盖一般非投影(non-projection)甚至非对称(non-symmetric)核——即定理条件不再局限于经典的投影 DPP。",
+      "source": "https://arxiv.org/abs/2411.00611",
+      "vote": "2-0"
+    },
+    {
+      "gap": 3,
+      "claim": "非对称核 DPP 近年已在 coreset 之外的机器学习场景中显示价值，但其理论工具箱有限；该论文的集中不等式是对这一工具箱的扩展——这界定了该结果的适用边界主张(非对称核此前缺乏此类保证)。",
+      "source": "https://arxiv.org/abs/2411.00611",
+      "vote": "2-0"
+    },
+    {
+      "gap": 3,
+      "claim": "论文声称首次在 coreset 文献中处理了向量值目标函数(vector-valued objective functions)的 coreset 问题。",
+      "source": "https://arxiv.org/abs/2411.00611",
+      "vote": "2-0"
+    },
+    {
+      "gap": 3,
+      "claim": "该工作是同行评审结果而非仅预印本：被 NeurIPS 2024 接收且为 Spotlight 论文（作者 Bardenet/Ghosh/Simon-Onfroy/Tran，按字母序排列），可作为'DPP 负相依优势有定理支撑'一类主张的同行评审级引用。",
+      "source": "https://arxiv.org/abs/2411.00611",
+      "vote": "2-0"
+    }
+  ]
+}
