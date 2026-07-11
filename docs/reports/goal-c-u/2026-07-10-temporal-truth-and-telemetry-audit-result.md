@@ -6,16 +6,18 @@ Status: `REVIEW_REQUIRED / CAUSALITY_BLOCKED / AMBIENT_WAIT / NO_WRITE`
 
 ## Decision
 
-Do not deploy or retroactively backfill declared supersession, run outcome
+Do not extend the completed four-target supersession backfill, run outcome
 reinforcement/decay, or open ambient stage 2 from this result.
 
 The frozen structural audit found explicit stale-active lifecycle conflicts.
 During result integration, a parallel commit (`f067ab6e`) advanced master with
 future-write semantics for the existing row-level `continuity.supersedes`
 contract: saving a replacement now retires each existing target atomically and
-records its lineage edge. That source change passed its focused local test, but
-it does not retroactively clean the 30 candidates in this snapshot and was not
-deployed by this lane.
+records its lineage edge. A parallel lane backed up the DB/binary, deployed
+that source, and re-saved four reviewed chain heads. The final admissible
+snapshot below was taken after that intervention and contains 30 residual
+structural candidates. This audit lane did not perform the deployment or
+backfill.
 
 The retrieval telemetry cannot distinguish eval traffic from organic traffic.
 All current reinforce/decay candidate interpretation remains causally blocked.
@@ -47,9 +49,11 @@ c83ac016dc5d2844ad47d64dbe9d59aa259add6d
 ```
 
 Both helpers ran from the tracked bytes at the execution hardening commit with
-the same `as_of=1783732107`. A pre-hardening diagnostic run is inadmissible and
+the same `as_of=1783732107`, after the parallel runtime restart and reviewed
+four-target backfill. A pre-hardening diagnostic run is inadmissible and
 excluded from every result below; its cross-query counts moved while external
-writers remained live, which is why the single-snapshot hardening was required.
+writers and the parallel intervention remained live, which is why the
+single-snapshot hardening was required.
 
 Private aggregate packets stayed under ignored `data/`, untracked, and mode
 `0600`:
@@ -105,17 +109,28 @@ It neither reads the frozen truth anchors nor adjudicates memory prose.
 
 ### Temporal Decision
 
-The row-level future-write repair is now source state at `f067ab6e`. Its API
+The row-level future-write repair is source and deployed state at `f067ab6e`.
+The installed version is `v0.14.0-110-gf067ab6e`; daemon-http and Palace health
+checks returned HTTP 200 after the restart. Its API
 description explicitly defines the field as keys the new memory replaces, and
 its focused store test verifies atomic status, `superseded_by`, lineage,
 self-reference, and missing-target behavior.
 
-This audit still authorizes no deployment or historical cleanup. Existing
-declarations require a separate copied-DB backfill protocol with an exact
-candidate manifest, backup/rollback map, idempotency proof, post-run retrieval
-check, and explicit exclusion for any record whose replacement semantics are
-ambiguous. Re-run this same structural audit after that separate operation;
-the three direct status conflicts must reach zero before the lane can close.
+Forum #119 post #3073 records the parallel backup, byte-identical re-save of
+four reviewed chain heads, pointer checks, and frozen-query acceptance. This
+report does not independently validate the backup bytes, but a later read-only
+rerun (`as_of=1783732767`) returned the same candidate-manifest hash and the
+same 30 residual candidates:
+
+```text
+cd2d67380228774c622e04ce539d1eadb645600155f08467b02d3a3b892bf2f9
+```
+
+Do not generalize that four-target action to the residual set. Any further
+cleanup needs a new reviewed candidate manifest, backup/rollback map,
+idempotency proof, post-run retrieval check, and explicit exclusion for records
+whose replacement semantics are ambiguous. The three direct status conflicts
+must reach zero before lifecycle hygiene can close.
 
 ## Retrieval Causality Result
 
@@ -203,19 +218,24 @@ decay and no apply authority.
 - ArrowQuant m24 still has no closeout post after its exclusive claim in
   forum #115 post #3067; no new ArrowQuant job was started.
 - The separate untracked Temporal Truth Projection design was not changed.
-- Parallel commit `f067ab6e` landed the declared-supersede future-write repair
-  on master while this result branch was being integrated. Focused local
-  verification passed:
+- Parallel commit `f067ab6e` landed and was deployed while this result branch
+  was being integrated. Focused local verification passed:
   `cargo test -p ab-store memory_save_declared_supersede_retires_target` and
   the subsequent full `cargo test -p ab-store` (`426 passed`), plus
-  `cargo fmt --all -- --check`. No binary build, deployment, or live-store
-  backfill was performed by this lane.
+  `cargo fmt --all -- --check`. Installed version and local health checks match
+  the parallel deployment claim. The deployment/backfill was not performed by
+  this audit lane.
 - The already-landed multiplicative `memory_reinforce_active` implementation
   at `fd3650cfd` means the later durable note describing that fix as pending is
   itself stale planning context. No duplicate reinforce implementation should
   be started.
-- BioCortex, SpecFormer, MemoryArena runner, successor rerun, release, version,
-  and tag lanes remain closed or gated exactly as before.
+- Successor v2 remains terminal. Forum #119 post #3074 records owner authority
+  to design a fresh v3 with model reviewers, but its proposed Gemini reviewer
+  conflicts with the standing direct instruction to use only Codex/Claude.
+  V3 protocol design is open; capture/generation/review remain blocked until a
+  no-Gemini independence/COI roster is frozen.
+- BioCortex, SpecFormer, MemoryArena runner, release, version, and tag lanes
+  remain closed or gated exactly as before.
 
 ## Verification
 
@@ -228,6 +248,8 @@ bash -n scripts/verify-memory-evidence-audits.sh
 cargo test -p ab-store  # 426 passed
 cargo fmt --all -- --check
 git diff --check
+installed binary version = v0.14.0-110-gf067ab6e
+daemon-http /healthz = 200; Palace /healthz = 200
 ```
 
 The synthetic verifier covers labelled, unlabeled, partially labelled,
