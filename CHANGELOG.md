@@ -8,6 +8,14 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Read-only memory-evidence audit pair.** A structural temporal-truth probe
+  reports explicit stale-active lifecycle, correction, freshness, and dedupe
+  signals without reading memory prose or emitting keys. A sibling retrieval
+  causality probe refuses to interpret eval-contaminated surfaced-to-used
+  telemetry unless an explicit `traffic_class` separates organic and eval
+  rows; it also reproduces the ambient stage-2 maturation gate. Both helpers
+  use SQLite `mode=ro` plus `query_only`, emit aggregate-only packets, and have
+  no archive, supersede, importance, ranking, runtime, or apply authority.
 - **Portfolio-continuity successor answer protocol.** Contract v2 freezes a
   separate retrieval query for each of the twelve existing blind-review cases,
   requires valid reference coverage before generation, and projects private

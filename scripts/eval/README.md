@@ -65,6 +65,18 @@ mode=bootstrap telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Maturation gate for a parked lane, not a regression component;
 it never touches baselines. Run: `python3 scripts/eval/ambient_gate.py`.
 
+`temporal_truth_drift_audit.py` — aggregate-only structural audit for explicit
+stale-active evidence: lifecycle status/edges, declared supersession,
+correction-edge coverage, bounded-freshness age, and active dedupe conflicts.
+It does not read memory prose or assert semantic truth, emits no keys, and has
+no retirement authority.
+
+`retrieval_telemetry_causality_audit.py` — fail-closed observability gate for
+separating organic and eval retrieval telemetry before surfaced-to-used
+reinforce/decay evidence is interpreted. It never reads query text or infers
+traffic from keys/timing. Missing or partial `traffic_class` labels block; even
+complete labels admit only a separately frozen clean shadow, never apply.
+
 `portfolio_continuity_eval.py` — deterministic, no-write scorer for redacted
 portfolio/session digest evidence packets. It measures required supported-claim
 coverage, current evidence precision, stale/unknown evidence, forbidden or
