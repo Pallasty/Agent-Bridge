@@ -11901,7 +11901,7 @@ impl McpTool for MemorySaveTool {
                             "freshness_policy": { "type": "string", "enum": ["never_expires", "ttl", "version_bound", "project_phase_bound"] },
                             "actionability": { "type": "string", "enum": ["background", "plan_influence", "must_block", "needs_review"] },
                             "blast_radius": { "type": "string", "enum": ["current_task", "project", "cross_project", "global"] },
-                            "supersedes": { "type": "array", "items": { "type": "string" }, "default": [] }
+                            "supersedes": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Keys this memory replaces. Each existing target is RETIRED in the same save (status='superseded' + superseded_by pointer + supersedes edge), dropping it from search/list surfaces; memory_get still returns it. Self-references and unknown keys are skipped." }
                         }
                     }
                 },
