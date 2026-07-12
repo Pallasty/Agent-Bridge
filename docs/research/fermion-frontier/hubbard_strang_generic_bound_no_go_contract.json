@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "contract_fingerprint": "hubbard_strang_generic_bound_no_go_contract_v1",
+  "certificate_type": "hubbard_strang_fixed_generic_bound_infeasibility_witness_v1",
+  "checker_fingerprint": "hubbard_strang_exact_basis_action_no_go_v1",
+  "checker_source_sha256": "f6039cf834f4865ccdbb91726e8aa21bc2317620227ac8a0febfa35878e46f42",
+  "source_pins": [
+    {
+      "relative_path": "hubbard_strang_commutator_checker.py",
+      "role": "audited_exact_nested_commutator_and_basis_action_backend",
+      "sha256": "e3144590c0e00bb2bd69bc50b1bdf3d7d6c3043c8697d5050202404590138fa7"
+    },
+    {
+      "relative_path": "hubbard_strang_commutator_contract.json",
+      "role": "positive_base_contract",
+      "sha256": "44bc15474b7964d94db6cd79fb7bce3255d1c8f9bb181ddada8dc294cdb428c1"
+    },
+    {
+      "relative_path": "hubbard_strang_commutator_template.json",
+      "role": "positive_base_certificate",
+      "sha256": "ba42851a7bad6fa117df8bfa4d8f6f7c261f11175a6df4bb673614b5cdbba572"
+    }
+  ],
+  "bound_source": {
+    "authors": "Ansgar Schubert and Christian B. Mendl",
+    "title": "Trotter error with commutator scaling for the Fermi-Hubbard model",
+    "arxiv_version": "2306.10603v2",
+    "doi": "10.1103/PhysRevB.108.195105",
+    "result": "Proposition 2 Equation 13",
+    "fixed_coefficient": "C=sum_gamma(norm([K_gamma,[K_gamma,H_gamma]])/12+norm([H_gamma,[K_gamma,H_gamma]])/24)",
+    "generic_observable_bound": "2*C*T^3/R^2 for norm(O)<=1"
+  },
+  "upstream_cluster_context": {
+    "official_repository": "https://github.com/qc-tum/fermi_hubbard_commutators",
+    "paper_time_commit": "859bef092675957ae126e9d3b09dc3c63b213859",
+    "hamiltonian_ops_relative_path": "fh_comm/hamiltonian_ops.py",
+    "hamiltonian_ops_sha256": "c8fd4425f573d57823ac6857c66a7b8464db9d84bbe562241c9730c86350c9ea",
+    "maximum_dense_Fock_modes_in_upstream_code": 14,
+    "upstream_spectral_numerics": "NumPy_dense_binary64_SVD_without_directed_rounding",
+    "executed_or_imported_by_this_checker": false,
+    "logical_role": "the no-go remains valid even if every cluster approximation is replaced by the globally exact spectral norm"
+  },
+  "witness_policy": {
+    "profile_id": "L8_OBC_U8_T1_R100_FIXED_FIVE_GROUP_GENERIC_BOUND_NO_GO",
+    "linear_size": 8,
+    "n_qubits": 128,
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "group_order": ["H1", "H2", "HU", "H3", "H4"],
+    "selected_gamma": 1,
+    "selected_group": "H1",
+    "selected_tail_groups": ["H2", "HU", "H3", "H4"],
+    "selected_family": "tail_nested_[K1_[K1_H1]]",
+    "selected_theorem_weight": "1/12",
+    "witness_vector": "checkerboard_Neel_computational_basis_A_up_B_down_q0_first",
+    "witness_sector": "N_up=32_N_down=32_half_filled_zero_spin",
+    "trotter_steps": 100,
+    "per_observable_allocation": "1/4000",
+    "required_coefficient_C_ceiling": "5/4",
+    "proof_rule": "norm(A)^2>=norm(A|psi>)^2 for normalized psi; all theorem norm summands nonnegative"
+  },
+  "resource_limits": {
+    "max_json_bytes": 262144,
+    "max_checker_source_bytes": 131072,
+    "max_pinned_source_bytes": 1048576,
+    "max_qubits": 128,
+    "max_selected_nested_terms": 4096,
+    "max_action_outputs": 2048,
+    "max_rational_digits": 64
+  },
+  "expected_witness_sha256": "20019d1e12e6a05d49335eaffec147bb7060ee0114d9163e12dc0b5aff02e392",
+  "maximum_positive_status": "VERIFIED_GENERIC_STRANG_BOUND_INFEASIBILITY_WITNESS",
+  "scope_claims": {
+    "checker_execution_from_contract_pinned_source_bytes_verified": true,
+    "base_commutator_subcertificate_source_pinned_and_verified": true,
+    "fixed_L8_selected_nested_operator_exactly_recomputed": true,
+    "normalized_computational_basis_witness_verified": true,
+    "half_filled_zero_spin_sector_witness_verified": true,
+    "exact_nested_operator_basis_action_recomputed": true,
+    "spectral_norm_lower_bound_from_basis_action_verified": true,
+    "generic_R100_coefficient_ceiling_infeasibility_verified": true,
+    "exact_cluster_spectral_norm_required_for_decision": false,
+    "upstream_binary64_spectral_norm_imported": false,
+    "actual_product_formula_error_lower_bounded": false,
+    "observable_specific_or_locality_tightening": "NOT_ASSESSED",
+    "alternative_grouping_or_higher_order_formula": "NOT_ASSESSED",
+    "truncation_certificate_composed": false,
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  }
+}

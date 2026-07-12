@@ -208,9 +208,22 @@ noncommuting edges inside each plaquette and do not match the declared benchmark
 circuit.  This screen therefore selects certified cluster spectral norms or
 observable/locality-specific bounds as the next mathematical layer.
 
-These campaign, reference, proof-kernel, mapping, checkpoint, commutator and
-grouping-screen artifacts remain standalone preflight, qualification and conformance
-tools. They have **not** yet
+The cluster route has now been audited against the paper-time official implementation
+and stopped at a stronger exact decision boundary.  The upstream 14-mode method uses
+binary64 NumPy spectral calculations without directed rounding, so its values
+are diagnostic rather than certificate inputs.  A full L8 diagnostic prototype lowers
+the coefficient to about `1343.96`, still more than one thousand times the required
+`5/4`.  More decisively, the new exact checker applies just
+`A=[K1,[K1,H1]]` to the normalized half-filled Néel basis vector and obtains
+`||A|q>||^2=295200`.  Hence the single positive theorem contribution already obeys
+`(||A||/12)^2>=2050>25/16=(5/4)^2`.  Even a globally exact, sector-restricted cluster
+spectral norm therefore cannot make the fixed generic R=100 bound qualify.  This is
+not a lower bound on actual Trotter error and does not exclude observable/locality-
+specific cancellation, alternative groupings, or higher-order formulas.
+
+These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
+grouping-screen and fixed-generic-bound no-go artifacts remain standalone preflight,
+qualification and conformance tools. They have **not** yet
 been added as components of `fermi_hubbard_evidence.py`, so they do not alter the
 current outer `READY_FOR_BENCHMARK` gate.
 
@@ -241,6 +254,7 @@ retained in `claim-status.jsonl`.
   source-pinned full L=2 checkpointed propagation contract/template/checker,
   source-pinned L=2/L=3/L=8 Strang commutator contract/template/checker,
   source-pinned L=8 Strang grouping-screen contract/template/checker,
+  source-pinned fixed-generic-bound infeasibility contract/template/checker,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -263,6 +277,7 @@ retained in `claim-status.jsonl`.
   `test_pauli_bitset_backend.py` /
   `test_operator_propagation_checkpointed_l2.py` /
   `test_hubbard_strang_commutator_checker.py` /
-  `test_hubbard_strang_grouping_screen.py`
+  `test_hubbard_strang_grouping_screen.py` /
+  `test_hubbard_strang_generic_bound_no_go_checker.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

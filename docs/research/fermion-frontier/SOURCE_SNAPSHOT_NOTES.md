@@ -82,9 +82,29 @@ not a new reference: the candidate plaquette cluster exponentials do not match t
 benchmark circuit, the paper's PBC decimal norm bounds are not imported, and no
 observable/locality-specific tightening is assessed.
 
+The paper-time official cluster code is separately pinned at commit
+`859bef092675957ae126e9d3b09dc3c63b213859`.  Its at-most-14-mode compact Fock
+matrices are evaluated with NumPy binary64 spectral routines and no directed
+rounding or residual enclosure, so neither those outputs nor the full-L8 diagnostic
+prototype are certificate inputs.  The diagnostic value `C≈1343.9636` is retained
+only as route-screening context.
+
+A further source-pinned exact checker removes the need to certify that cluster upper
+bound for the fixed-generic decision.  It recomputes
+`A=[K1,[K1,H1]]` and its action on one normalized checkerboard Néel basis vector in
+the `N_up=N_down=32` sector.  The exact result `||A|q>||^2=295200` implies that the
+single positive `||A||/12` theorem contribution has squared lower bound 2,050,
+already above the entire R=100 coefficient ceiling squared `25/16`.  Thus even a
+globally exact sector-restricted spectral norm cannot make this fixed five-group
+generic theorem expression qualify.  This is not an actual product-formula-error
+lower bound and does not assess observable/locality-specific cancellation,
+alternative groupings, or higher-order formulas.  It supplies no reference value and
+is not part of the source snapshot.
+
 None of the campaign preflight, reference-qualification ledger, proof kernel, L=2
 conformance witness, mapping checker, checkpointed L2 checker, bitset prototype,
-Strang commutator checker or grouping-screen checker is currently a component of
+Strang commutator checker, grouping-screen checker or fixed-generic-bound no-go
+checker is currently a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the
 outer snapshot status or promote it toward `READY_FOR_BENCHMARK`.

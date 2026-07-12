@@ -306,6 +306,63 @@ nonbinding diagnostic，会得到每 site `C≈25.4537`；即使形式上乘 64 
 均不匹配，这个数没有进入 certificate。机器结论只排除 coefficient-L1 regrouping，下一
 层必须是 certified cluster spectral norm 或直接面向两个 observables/locality cones 的界。
 
+### Cluster spectral 主源审计与 exact generic-bound no-go
+
+论文配套的[官方实现](https://github.com/qc-tum/fermi_hubbard_commutators)已固定到与最终
+square plaquette 版本对应的 commit
+[`859bef092675957ae126e9d3b09dc3c63b213859`](https://github.com/qc-tum/fermi_hubbard_commutators/commit/859bef092675957ae126e9d3b09dc3c63b213859)。
+其 `SumOp.norm_bound()` 对不超过 14 active fermionic modes 的 compact Fock matrix 按粒子
+数分块做 dense spectral norm；更大非二次 operator 先拆 support graph components，再用
+“新增 modes 最少”的 greedy clusters。14 是实现阈值，不是定理。源码把系数转为 float，
+调用 NumPy binary64 norm/eigensolver，没有 outward rounding、interval residual 或证书；满占据
+block 还需由新 checker 单独验证。因此论文的 “numerically exactly” 不能解释成我们的
+`exact_bounded`。
+
+作为诊断，固定 OBC 五组的完整 14-mode prototype 得到：
+
+| quantity | Pauli-L1 certificate | binary64 cluster diagnostic |
+|---|---:|---:|
+| tail-family sum | 22,752 | 11,810.1186 |
+| self-family sum | 11,104 | 8,634.8900 |
+| `C` | `7076/3≈2358.6667` | 1,343.9636 |
+| generic R=100 bound | `1769/3750≈0.47173` | 0.26879 |
+
+原型含 105 clusters，其中 94 个达到 14 modes；运行约 65.8 s、峰值约 69.5 MiB。它将
+`C` 降低约 43%，但仍是所需 `C<=5/4` 的约 1075 倍，且数值本身不是 certificate。
+
+更强且完全 exact 的路线判据已由
+`hubbard_strang_generic_bound_no_go_checker.py` 实现。令
+
+\[
+A=[K_1,[K_1,H_1]],\qquad
+|q\rangle=|\text{checkerboard Néel}\rangle,\quad N_\uparrow=N_\downarrow=32.
+\]
+
+checker 重算 A 的 3,072 个 merged Pauli terms，并得到 416 个非零输出与
+
+\[
+\|A|q\rangle\|_2^2=295200=3600\cdot82.
+\]
+
+由于 `|q>` 已归一化，`||A||²>=295200`；而 Proposition 2 中这一项的 weight 是 `1/12`，
+所以
+
+\[
+\left(\frac{\|A\|}{12}\right)^2\ge2050
+>\frac{25}{16}=\left(\frac54\right)^2.
+\]
+
+整个 `C` 是非负 norm terms 之和，因此仅此一项就超过 R=100 allocation 允许的总 ceiling。
+等价地，generic theorem expression 至少为 `sqrt(82)/1000`，是 `1/4000` 的
+`4*sqrt(82)≈36.22` 倍；由精确四次幂比较，R=601 仍被排除，R=602 只是“不再被这个单
+witness 排除”的必要门槛，并非充分条件。所有 416 个输出都机械验证仍在
+`N_up=N_down=32` sector，所以把 operator norm 限制到物理守恒 sector 也不能改变结论。
+
+这个 no-go 只针对固定五组、固定二阶公式的 **generic operator-norm bound expression**。
+它没有证明 actual Trotter error 很大，也没有排除两个 observable 的 cancellation/locality
+cone、不同 grouping 或高阶 formula。由此停止继续认证该固定 generic cluster 上界，下一
+主线正式转为 observable/locality-specific bound。
+
 `standard_error=0` 只表示 deterministic certificate，不等于 bound 为零。未经证书的
 Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGNOSTIC_ONLY`。
 
@@ -314,10 +371,10 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
 1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结，完整 L2
    checkpoint propagation 已闭合；下一步为 L8 固定 A/B Néel 相位、两个 observable 和
    与真实 campaign 相同的 occurrence-level term-sequence identity。
-2. 不把 `R=100` 的 generic commutator-L1 结果写成可接受误差。Group-order 与 OBC
-   plaquette coefficient-L1 穷举均已失败；停止继续枚举同类 split，转而实现最多 14 modes
-   的 certified cluster spectral norm 或 observable/locality-specific tightening。每个候选
-   仍须保留 source-pinned constants、common-phase ledger 与可机检 commutator records。
+2. 固定五组 generic bound 已被 half-filled-sector exact witness 严格排除；不再投入其
+   14-mode cluster spectral upper bound。转而实现两个 target observables 的 locality cone /
+   Heisenberg commutator bound，并平行筛选真正不同的 grouping 或高阶 formula。每个候选
+   仍须保留 source-pinned constants、common-phase ledger 与可机检 records。
 3. 固定 MajoranaPropagation implementation commit；补 deduplicate-before-truncation、
    per-slice dropped-L1 ledger、directed coefficient intervals 和小尺寸 ED 对照，并把
    L8 initial observable/state identity 与完整 mapped sequence 组合进 checker。

@@ -300,8 +300,29 @@ the R=100 allocation requires `C<=5/4`, the screen proves that coefficient-L1
 reordering/regrouping is not the next viable tightening; it does not prove a
 no-go for cluster spectral norms or observable/locality-specific analysis.
 
+The official cluster implementation is now pinned at paper commit
+`859bef092675957ae126e9d3b09dc3c63b213859`.  It constructs compact Fock matrices on
+at most 14 modes and calls NumPy binary64 spectral routines; no outward rounding
+or residual certificate is emitted.  A separate full-L8 diagnostic prototype uses
+105 clusters (94 at 14 modes) and obtains `C≈1343.9636`, a 43% reduction from Pauli
+L1 but still about 1075 times the R=100 ceiling.  These numbers are not imported into
+any positive scope.
+
+`hubbard_strang_generic_bound_no_go_checker.py` removes the need to certify those
+cluster upper bounds for the route decision.  For the fixed five-group theorem it
+recomputes the 3,072-term `A=[K1,[K1,H1]]` and its exact action on the checkerboard
+Néel vector in the physical `N_up=N_down=32` sector.  The 416 nonzero outputs give
+`||A|q>||^2=295200`, so the selected `1/12` contribution has squared lower bound
+2,050, while the entire coefficient would have to satisfy `C^2<=25/16`.  The implied
+generic R=100 bound expression is at least `sqrt(82)/1000`, over the allocation by
+`4*sqrt(82)`; R=602 is only the first step count not ruled out by this single witness.
+Thus globally exact and sector-restricted cluster spectral norms cannot rescue the
+fixed generic bound.  Actual product-formula error and observable-specific error are
+not lower-bounded; the next route is observable/locality-specific or a genuinely
+different grouping/formula.
+
 None of the campaign, reference-qualification, proof-kernel, mapping, checkpoint,
-commutator or grouping-screen interfaces is currently loaded by
+commutator, grouping-screen or generic-bound no-go interfaces is currently loaded by
 `fermi_hubbard_evidence.py`. They do not
 add components to `component_statuses`, and none can yet participate
 in or strengthen the outer `READY_FOR_BENCHMARK` decision. Outer integration remains

@@ -668,6 +668,56 @@ R=100 与 `1/4000` allocation 要求 `C<=5/4`；当前最优仍为 `7072/3`。�
 或 READY。结果把后续实现方向收敛到 certified cluster spectral norm 或 observable-specific
 locality cone，而不是继续枚举同类 coefficient-L1 grouping。
 
+#### 8.2.6 Cluster 主源审计与 fixed generic-bound exact no-go
+
+Cluster 路线已对照
+[Schubert--Mendl 的局域 cluster 方法](https://arxiv.org/html/2306.10603#S4.SS3)与
+[论文时期官方代码提交](https://github.com/qc-tum/fermi_hubbard_commutators/commit/859bef092675957ae126e9d3b09dc3c63b213859)
+完成审计。官方实现对不超过 14 个 fermionic modes 的 compact Fock matrix 做 NumPy
+binary64 SVD/eigensolve；它没有 directed rounding、residual enclosure 或 interval
+certificate，且 14 只是实现阈值。因此其输出可作算法诊断，不能直接进入严格证书。
+
+未版本化的完整 L8 诊断原型把 tail/self 两类和从 22,752/11,104 降到约
+11,810.1186/8,634.8900，得到 `C≈1343.9636` 和 R=100 generic observable bound
+`≈0.268793`。它使用 105 个 clusters，其中 94 个达到 14 modes，运行约 65.8 s、峰值约
+69.5 MiB。虽然相对 Pauli-L1 改善约 43%，`C` 仍是 `5/4` 门槛的约 1,075 倍；这些
+binary64 数字只记录为诊断，不写入 positive scope。
+
+[hubbard_strang_generic_bound_no_go_checker.py](hubbard_strang_generic_bound_no_go_checker.py)
+给出了无需认证 cluster 上界的更强路线判据。对固定五组顺序，取 Proposition 2 中的单个
+正项
+
+\[
+A=[K_1,[K_1,H_1]],\qquad C\ge \|A\|/12,
+\]
+
+并把精确 3,072 项 operator 作用于归一化 checkerboard Néel basis vector
+`q=0x66669999666699996666999966669999`。该向量及全部 416 个非零输出都位于
+`N_up=N_down=32` sector，checker 精确得到
+
+\[
+\|A|q\rangle\|^2=295200=3600\cdot82,
+\qquad C\ge5\sqrt{82}.
+\]
+
+因此仅这一项已有
+
+\[
+(\|A\|/12)^2\ge2050>25/16=(5/4)^2.
+\]
+
+即使把所有 cluster approximation 换成全局精确、并限制到物理 half-filled sector 的谱
+范数，也不可能使这个 **固定五组、固定二阶、generic operator-norm theorem expression**
+在 R=100 达标。对应 generic bound 的精确平方下界为 `41/500000`，相对 allocation
+平方 `1/16000000` 的比值为 1,312；单凭该 witness，`R=602` 只是第一个未被排除的步数，
+并非充分条件。
+
+最高状态为 `VERIFIED_GENERIC_STRANG_BOUND_INFEASIBILITY_WITNESS`，CLI 按设计仍非零。
+它没有给 actual product-formula error 下界，也没有排除 observable/locality-specific
+cancellation、不同 grouping 或高阶 formula；不组合 truncation、physical reference 或
+READY。由此停止继续建设这条 fixed-generic cluster upper-bound 证书，下一数学层转向两个
+target observables 的 locality cone / Heisenberg propagation，或真正不同的公式。
+
 ### 8.3 L=2 双观测量 screening pilot
 
 新增 [fermi_hubbard_l2_pilot.py](fermi_hubbard_l2_pilot.py) 后，已经可以在无
@@ -850,6 +900,13 @@ python3 docs/research/fermion-frontier/hubbard_strang_grouping_screen.py \
 
 python3 docs/research/fermion-frontier/test_hubbard_strang_grouping_screen.py
 
+# 成功的 fixed-generic-bound no-go witness 仍按设计 exit 1
+python3 docs/research/fermion-frontier/hubbard_strang_generic_bound_no_go_checker.py \
+  docs/research/fermion-frontier/hubbard_strang_generic_bound_no_go_contract.json \
+  docs/research/fermion-frontier/hubbard_strang_generic_bound_no_go_template.json
+
+python3 docs/research/fermion-frontier/test_hubbard_strang_generic_bound_no_go_checker.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
@@ -927,6 +984,9 @@ Grouping screen 另有三十九个测试覆盖基础 checker source pins、120/2
 declared/best exact values、OBC 112-bond cover、plaquette/boundary term counts 与 commuting
 structure、materiality/allocation decision、paper-scope boundary、strict JSON/types、
 well-shaped tamper、pre-exec pin、失败 scope 清零和 CLI 非零边界。
+Fixed generic-bound no-go checker 另有三十八个测试覆盖 exact selected operator、归一化
+Néel witness、half-filled sector、416 项 action 与 amplitude histogram、平方 margin、
+601/602 边界、source pins、strict schema/types、tamper、失败 scope 清零和 CLI 非零边界。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
@@ -941,7 +1001,7 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `396` 个测试。
+全套共 `434` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
@@ -956,12 +1016,14 @@ overlap、operation window/资源冲突、event binding、dependency、非法 ID
    circuit，且本次容量截断的 dropped-`L1` 为零；这消除了旧的纯字符串资源 defer。
    L8 五组 Strang generic commutator-L1 也已机检，但 R=100 的通用 observable bound
    `1769/3750` 远超 `0.00025`；全部 group orders 与精确 OBC plaquette+boundary
-   coefficient-L1 screen 也没有实质改进。下一步直接实现 certified cluster spectral norm
-   或 observable/locality-specific bound，并比较独立高阶 formula；同时把 L8 初态、两个
-   observables、occurrence-level sequence、truncation 和 product-formula bound 组合成
-   同一 source-pinned chain。只有全链通过且 `total_abs_bound<=0.00025` 才能新增 reference
-   资格状态；当前 subcertificates 与 `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付
-   边界。
+   coefficient-L1 screen 也没有实质改进。更强的 exact half-filled-sector witness 已证明，
+   即使使用全局精确 cluster spectral norms，固定五组 generic theorem 在 R=100 仍至少超
+   allocation 约 36.2 倍；因此不再建设该 fixed-generic cluster upper-bound 路线。下一步
+   直接实现两个 target observables 的 locality cone / Heisenberg propagation bound，或
+   检查真正不同的 grouping 与高阶 formula；同时把 L8 初态、两个 observables、
+   occurrence-level sequence、truncation 和 product-formula bound 组合成同一 source-pinned
+   chain。只有全链通过且 `total_abs_bound<=0.00025` 才能新增 reference 资格状态；当前
+   subcertificates 与 `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付边界。
 4. **真实双观测量网格：**按固定 `R=[25,50,100,200,400,800]` 对四条 unique
    convergence routes 生成联合 measurements、covariance、有效样本与可绑定 systematic
    evidence；严格区分 screening 与 `READY_FOR_TARGET_R`。

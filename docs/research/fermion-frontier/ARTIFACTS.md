@@ -197,8 +197,22 @@ so they are versioned normally and are not added to the preservation-only
 - `test_hubbard_strang_grouping_screen.py`: thirty-nine exact-value, permutation,
   Hamiltonian-cover, plaquette-structure, source-pin, strict-schema, tamper,
   failure-scope and CLI regressions.
+- `hubbard_strang_generic_bound_no_go_contract.json`: fixed L8 five-group theorem,
+  half-filled Néel witness, exact coefficient ceiling, paper/official-code provenance,
+  source pins, resource caps and expected-witness digest.
+- `hubbard_strang_generic_bound_no_go_template.json`: positive infeasibility witness
+  with exact nested/action digests, `||A|q>||^2=295200`, squared contribution lower
+  bound 2,050 versus ceiling `25/16`, and the necessary-step boundary 601/602.
+- `hubbard_strang_generic_bound_no_go_checker.py`: recomputes one exact nested family
+  and its sector-preserving basis action.  It proves that globally exact cluster
+  spectral norms cannot make the fixed generic R=100 theorem expression qualify,
+  while explicitly not lower-bounding actual error or importing upstream binary64.
+- `test_hubbard_strang_generic_bound_no_go_checker.py`: thirty-eight operator/witness,
+  amplitude, sector, exact-square, margin, R-boundary, source-pin, strict-schema,
+  tamper, failure-scope and CLI regressions.
 - The measurement-campaign, reference-qualification, proof-kernel, mapping,
-  checkpoint, commutator and grouping-screen artifacts are currently independent of
+  checkpoint, commutator, grouping-screen and generic-bound no-go artifacts are
+  currently independent of
   `fermi_hubbard_evidence.py`;
   none is yet an outer `READY_FOR_BENCHMARK` component.
 - `fermi_hubbard_l2_pilot.py`: dependency-free L=2 dual-observable deterministic
