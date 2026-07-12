@@ -1,6 +1,6 @@
 # MRAgent active-reconstruction shadow trial — harness spec
 
-**Status: SCAFFOLD (fixture + spec + scorer committed; snapshot/arms/run deferred).**
+**Status: SCAFFOLD (fixture + spec + scorer + snapshot builder committed; arms/run deferred).**
 Read-only retrieval-quality trial that asks one question: *does evidence-conditioned
 multi-round reconstruction (S2) beat one-shot retrieval (S0) and — the real test —
 beat a blind equal-budget multi-query control (S1)?*
@@ -86,6 +86,29 @@ Mirror `ab_eval.py`'s MCP-stdio driver:
 
 1. `snapshot.py` — `memory_export` → temp DB; plant the canary corpus into the
    temp copy only; emit `snapshot_sha`.
+   **✅ BUILT + validated: `mragent_reconstruction_snapshot.py`** (self-contained
+   MCP-stdio driver, same pattern as `ab_eval.py`). Read-only live `memory_export`
+   → JSONL; a **stable content sha** that strips read-volatile telemetry
+   (`access_count`/`last_accessed_at`; edge `weight` drifts under coactivation) so
+   two exports of one store state hash equal; canary planted into the temp copy
+   only; `materialize()` imports into a temp DB under an `AGENT_BRIDGE_DB` override
+   so the live store is never written. `--selftest` (offline, no binary) proves
+   sha determinism/content-sensitivity/order-independence + canary schema+plant;
+   `--export`/`--build` run the live pipeline. Validated end-to-end on a 60-row
+   subset: import inserted=61 malformed=0, and **serve-verify** confirmed the
+   canary is both `memory_get`-able and search-index-reachable in the temp DB
+   (`canary_get=True, real_get=True, search_finds_canary=True`), while the canary
+   key returns `null` from the live store.
+   - **Bug caught by serve-verify (now guarded):** a canary lacking
+     `{created_at, updated_at, version_vector}` was counted `malformed` and
+     silently dropped by `memory_import` — which would have made the injection
+     test vacuously pass with **no canary ever present**. Fix = full export-schema
+     parity (`REQUIRED_IMPORT_FIELDS`) with fixed deterministic timestamps, plus
+     an offline selftest assertion so it can't regress.
+   - **Cost finding for arms.py:** materialize is ~35 ms/record (60 rows → 2.1 s;
+     full ~1618-row store ≈ 1 min import + edge/embed load — the first full run
+     hit the 180 s harness cap). **Build the snapshot ONCE per run and reuse it
+     across all probes×arms; never re-materialize per probe.**
 2. `arms.py` — S0/S1/S2 executors calling `memory_search` / `memory_neighbors`
    over MCP stdio against the snapshot, `TRAFFIC_CLASS=eval`, with call/token metering.
 3. `score.py` — deterministic any-of scorer + abstention + injection detectors.
