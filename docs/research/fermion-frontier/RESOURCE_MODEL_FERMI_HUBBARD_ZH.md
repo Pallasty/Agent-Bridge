@@ -799,8 +799,60 @@ source。L8 exact Néel `D3` action 对 magnetization 给出
 `chi=5,Upsilon=2,R=100` 时覆盖 `(chi-1)R Upsilon+3=803` 层，远超过 L8 OBC
 格点直径 14，已经饱和。并且 theorem 以 qubit Pauli support 陈述；当前 JW 竖向 hopping
 含长字符串，若把物理 fermion-site locality 代入，必须另证 even-CAR adaptation。下一步
-改为构造逐 `k` evolved-observable/Majorana propagation ledger，直接包住每步 defect 或
-global cancellation-aware 表达式，再决定是否还有 observable-specific 认证空间。
+改为直接 evolved-observable/Majorana interval propagation ledger，记录每个 gate/stage
+的 rounding widening 与 dropped-L1，并与独立 Trotter budget 组合；不再逐 step 重算
+完整 Taylor remainder。global cancellation-aware 表达式仍是平行路线。
+
+#### 8.2.8 Double-occupancy cluster no-go 与 Majorana 执行基线
+
+double occupancy 的单个 Néel `D3` action witness 没有超过 `5/2`，但固定 cluster
+triangle 路线现在已有更强的 exact early stop。
+[hubbard_d3_double_occupancy_cluster_no_go_checker.py](hubbard_d3_double_occupancy_cluster_no_go_checker.py)
+把 `D3=-i[B3,D]` 的 2,748 个 simplified physical-fermion terms 展开成 18,544 个
+field terms，再独立 exact-JW 映射为 8,928 项 Pauli expansion。其 digest 与 Taylor
+oracle 逐项相同：
+
+`069f0d7d28804d2981081b84393e88696a55628814da625ff82df0beaa262aba`。
+
+按 fixture order 重放 externally audited
+reversed-order/minimum-support-addition、14-mode greedy rule 后得到 43 个 clusters。fixture
+decomposition/order 到 upstream simplify 的 provenance 是外部审计，checker 不从 upstream
+源码重生成；它机检 fixture 总和的 exact D3 身份、单连通 128-mode support graph 与下游
+partition/actions。令 `C_j` 为第 j 个 cluster。checker 直接在全局 128-mode checkerboard Néel
+态上求最大绝对矩阵元，得到 sector 内严格下界
+
+\[
+\|C_j\|\ge\max_x|\langle x|C_j|q\rangle|.
+\]
+
+前 30 个下界之和已经是
+
+\[
+\frac{1945}{768}=2.532552\ldots>\frac52,
+\]
+
+margin `25/768`。任何合法 cluster upper bound 都不小于对应 exact cluster norm，所以
+即使 43 个 cluster 全部使用 exact spectral norm，这个 k=0 partition 的 triangle bound 也
+不可能小于 R=100 uniform-supremum leading ceiling。它只排除把该 bound 作为 100 步共同
+supremum；逐 `k` evolved cluster ledger 仍开放，因为 k=0 partial floor 在其中仅贡献
+`(1945/768)/100^3=389/153600000`。这个结论也不允许把 cluster 下界之和当成 globally
+merged `D3` norm 的下界；不同 partition、跨-cluster cancellation 与直接 global-sector
+norm 仍开放。最高状态仅
+`VERIFIED_D3_DOUBLE_OCCUPANCY_CLUSTER_UNIFORM_SUP_NO_GO`，不提供 reference/READY。
+
+逐 `k` 重跑完整 495-path remainder 同样被资源测量停止。L8 的
+`ad_H^0..4(O)` 项数分别为 magnetization
+`128,448,1800,9008,50144`，double occupancy
+`192,896,6688,30912,157892`；`D3(ad_H O)` 已达到 42,488/88,352 项。下一 proof kernel
+改为直接 evolved-observable propagation，在每个 gate/stage 做 outward interval、
+deterministic top-L1 和 cumulative dropped-L1 ledger。
+
+Majorana 主源审计选择从 registered `MajoranaPropagation v0.3.0` 的
+`main@b7849cb4bac5b604f0d2fe6ff807ed889305e668` 建 certificate fork，而不是 inferred
+paper snapshot `1a39fbf`；后者早于 documented splitting-sign fix `46b696b`。fork 必须
+固定 Julia Manifest 与 PauliPropagation v0.7.3，移植 composite bitmask deterministic
+sort，并补 directed coefficient intervals。当前 `truncate!` 虽然在 merge/dedup 后运行，
+但不返回 dropped terms/reasons/`L1`，所以论文参数 convergence 仍只能作 diagnostic。
 
 ### 8.3 L=2 双观测量 screening pilot
 
@@ -996,6 +1048,13 @@ python3 docs/research/fermion-frontier/hubbard_strang_observable_taylor_step_che
 
 python3 docs/research/fermion-frontier/test_hubbard_strang_observable_taylor_step_checker.py
 
+# 成功的 double-occupancy fixed-cluster no-go witness 仍按设计 exit 1
+python3 docs/research/fermion-frontier/hubbard_d3_double_occupancy_cluster_no_go_checker.py \
+  docs/research/fermion-frontier/hubbard_d3_double_occupancy_cluster_no_go_contract.json \
+  docs/research/fermion-frontier/hubbard_d3_double_occupancy_cluster_no_go_template.json
+
+python3 docs/research/fermion-frontier/test_hubbard_d3_double_occupancy_cluster_no_go_checker.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
@@ -1081,6 +1140,10 @@ hard pair preflight、9-stage composition、
 双 observable identity、formal degree 0--2 cancellation、495 个 remainder paths、L2/L3/L8
 exact Fractions、严格单步 operator/expectation bounds、uniform-sup floor、Néel action/
 sector、资源上限、缓存、失败 scope 清零和 CLI 非零边界。
+Double-occupancy D3 cluster no-go checker 另有四十个测试覆盖 compressed/raw fixture
+pins、18,544-term field expansion、exact JW/Pauli oracle equality、43-cluster greedy14
+partition、全局半填充 Néel actions、`1945/768` rational margin、same-byte source、strict
+schema/types、tamper、失败 scope 清零和 CLI 非零边界。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
@@ -1095,7 +1158,7 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `466` 个测试。
+全套共 `506` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
@@ -1114,9 +1177,11 @@ overlap、operation window/资源冲突、event binding、dependency、非法 ID
    即使使用全局精确 cluster spectral norms，固定五组 generic theorem 在 R=100 仍至少超
    allocation 约 36.2 倍；因此不再建设该 fixed-generic cluster upper-bound 路线。
    Observable Taylor 单步核现已严格闭合，但正确 R-step telescoping 需要 evolved `O_k`；
-   uniform-supremum Pauli-L1 shortcut 也已被 `k=0` floor 排除。下一步构造逐 `k`
-   Majorana/Pauli evolved-observable ledger 或 cancellation-aware global defect，并检查真正
-   不同的 grouping 与高阶 formula；同时把 L8 初态、两个 observables、
+   uniform-supremum Pauli-L1 shortcut 已被 `k=0` floor 排除，double occupancy 的 fixed
+   用 greedy14 exact-cluster-norm triangle 作为 uniform supremum 也被
+   `1945/768>5/2` 排除，但逐 `k` cluster ledger 仍开放。逐 `k` 重跑 495 paths
+   的 term-growth 不合适，下一步改为 Majorana/Pauli 直接 evolved-observable interval
+   propagation + dropped-L1 ledger，或 cancellation-aware global defect；同时把 L8 初态、两个 observables、
    occurrence-level sequence、truncation 和 product-formula bound 组合成同一 source-pinned
    chain。只有全链通过且 `total_abs_bound<=0.00025` 才能新增 reference 资格状态；当前
    subcertificates 与 `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付边界。

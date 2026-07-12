@@ -41,6 +41,63 @@ systematically controlled truncation 和参数收敛还不是本项目要求的�
 参见 [D'Anna--Nys--Carrasquilla](https://arxiv.org/abs/2511.02809) 和
 [MajoranaPropagation.jl](https://github.com/SparqleSim/MajoranaPropagation.jl)。
 
+### MajoranaPropagation 主源与执行基线审计
+
+论文当前只有 [arXiv:2511.02809v1](https://arxiv.org/abs/2511.02809v1)；审计 PDF
+SHA-256 为 `be16b251adfef08eff14a7876addae0084ec78143173db5a296cae128bdf06cb`，
+source tar SHA-256 为
+`7d12e0b80ad7b61a910c9cebd5aa192f4832b638bcb3fb64db7be048ebee37a5`。
+论文和 Code Availability 都没有给 tag/commit。提交日最近 merged-to-main 的 PR squash commit
+`1a39fbf9af9be486ceca86c0e952fbd0a227ff42` 只能标为 **inferred paper snapshot**，
+不能称为作者确认的 paper commit；而且它早于
+[`46b696b`](https://github.com/SparqleSim/MajoranaPropagation.jl/commit/46b696bc62bc60e2580ab8d6e1037722d5caf61d)
+所记录的 Majorana splitting “extra minus sign” 修复，因此不能作为证书执行基线。
+
+当前最稳妥的 fork 基线是已注册 `v0.3.0` 的
+[`main@b7849cb`](https://github.com/SparqleSim/MajoranaPropagation.jl/commit/b7849cb4bac5b604f0d2fe6ff807ed889305e668)，
+tree `d62823f20677593ff5e256e5f8bc316dd7aecd7a`。其 `Project.toml` 中
+`PauliPropagation = "0.7.2"` 是 compat 下界而非 lock；仓库没有 Manifest。在
+2026-07-12 General registry 与兼容 Julia 环境下，fresh resolve 会选择
+`PauliPropagation v0.7.3`、commit
+`2a96e9a94dafc2df3466d2611fafa141319469f8`、tree
+`757b43af3c247d9fad953dd056d3df76fe6e6a08`。证书 fork 必须提交完整 Manifest，不能只写
+compat 字符串。
+
+关键执行面 source pins 如下；完整 fork 还需把所有加载源码与 Manifest 一并 pin：
+
+| source | SHA-256 |
+|---|---|
+| MP `Project.toml` | `692cceeecda9e613e31bb8a827d956ee922623b1b493be5f2b8a80a56e193fec` |
+| MP `src/gates.jl` | `b268a49da3b13ba9d6f98ec3e43861b18ffd7faf83497909efff009b365c6689` |
+| MP `src/truncations.jl` | `efd0dd8d64726de8b92782c7d93cf5ed7b1da08049a057d7877a5a47e92dc4c3` |
+| MP `src/propagation.jl` | `3064b54daa1d0e3f2b1e2dfcb8c2f920898561e6b5db55fe2943d35505f7e115` |
+| MP `src/MajoranaDataTypes.jl` | `73c3c1b889857b2c44e1e45c5ddaba1758c320f1350efe0bb21c961506b33803` |
+| PP v0.7.3 `src/Base/merge.jl` | `3cb7a51fd80d4ca34f666b1c4950244557eca3f2a7fa09dfc4018e159098f4c6` |
+| PP v0.7.3 `src/Base/truncate.jl` | `ce959eadff90c8b59a34a4a6acb8d056c4b044404be44469832c233f930c776e` |
+| PP v0.7.3 `src/Base/propagate.jl` | `9cd0fb092dd1e76137b5c21735fc306d0fb2ccdaab322a4ebd6e45b7dcd21129` |
+
+源码审计确认当前顺序是 branch 后先 merge/deduplicate、再 truncate；阈值比较是严格
+`abs(c)<epsilon`。`:hop/:hopup/:hopdn` 在每个 constituent Majorana rotation 后 merge，
+但延迟到完整 `FermionicRotation` 后 truncate；其他 composite 默认每个 constituent 后
+truncate。现有 `truncate!` 只删除项，不返回 dropped terms/reason/`L1`，Float64
+`sin/cos` 与 merge 也没有 directed enclosure。未合并的
+[`327ef11`](https://github.com/SparqleSim/MajoranaPropagation.jl/commit/327ef11f4bb9e175532dd9d9600667a972bfae27)
+才把 composite Majorana terms 按 bitmask 排序；certificate fork 应移植这项确定性修复，
+但不直接跟随整个实验分支。
+
+因此 P0 基线已冻结为：从 `b7849cb` 建最小 fork，固定 Julia/Manifest 与
+PauliPropagation v0.7.3，序列化 Schrödinger/Heisenberg occurrence digests，并在每次
+dedup 后记录 canonical dropped-term digest、reason 与
+`sum sup(abs(coefficient_interval))`。区间跨过 cutoff 时必须保留；最终把
+`B_trunc+B_round+B_Trotter` 分项报告。当前论文的 `S,epsilon` convergence 和
+PauliPropagation `estimatemse` 都不是这种 deterministic absolute bound。
+
+论文的二维展示也不与本项目 workload 同一：它使用 3x3、7x7、19x19 的 checkerboard
+背景单-hole/多区域 hole observables（3x3 取 `U/t=8`，7x7 取 `U/t=8.72`），而不是
+8x8 无 hole 初态的两个全局 observables；论文未报告这些二维图的 Trotter `dt`，审计的
+`main@b7849cb` tree 中也没有对应 figure scripts、Manifest 或 raw data。因此即使参数扫描
+收敛，也不能转写成当前 campaign 的 bounded reference。
+
 ## 首选证书：Majorana/Pauli operator propagation
 
 目标 observable 写成范数为一的 Majorana strings 之和，在 Heisenberg picture 中逐
@@ -453,12 +510,78 @@ triangle + uniform supremum + 当前 Pauli-L1 substitution”；逐 `k` 求和�
 step defects 的 cancellation、state/sector-specific action 或其他更紧 norm 仍然开放，
 也没有给出 actual Trotter error 下界。
 
+### Double-occupancy D3 固定 cluster-triangle uniform-sup 路线 no-go
+
+double occupancy 的单个 Néel action 小于 `5/2` 并不等于 cluster tightening 可行。新的
+`hubbard_d3_double_occupancy_cluster_no_go_checker.py` 把该问题闭合到一个更窄但严格的
+决策边界。它先把 `D3=-i[B3,D]` 的 2,748 个 fixture-defined simplified
+physical-fermion terms 独立展开
+为 18,544 个 field terms，再做 exact Jordan--Wigner mapping；所得 8,928 项 Pauli
+expansion 与上述 Taylor checker 逐项一致，二者 digest 均为
+`069f0d7d28804d2981081b84393e88696a55628814da625ff82df0beaa262aba`，`L1=423/16`。
+因此 cluster fixture 的物理算符身份不依赖外部 binary64 spectral calculation。
+
+随后按 fixture order 重放 externally audited
+reversed-order/minimum-support-addition、14-mode greedy rule，得到 43 个 clusters。checker
+明确标记：fixture decomposition/order 来自 upstream simplify 的 provenance 是外部审计，
+没有在运行时从 upstream 源码重生成；已机检的是 fixture 总和的 exact D3 身份、单连通
+128-mode support graph 和后续 partition/action。对每个 cluster `C_j`，checker 直接在全局 128-mode
+checkerboard Néel basis state 上计算一个最大绝对矩阵元，因此在全局
+`N_up=N_down=32` sector 中严格有
+
+\[
+\|C_j\|\ge \max_x |\langle x|C_j|q\rangle|.
+\]
+
+前 30 个非负下界已经满足
+
+\[
+\sum_{j=0}^{29}\|C_j\|\ge\frac{1945}{768}
+=2.532552\ldots>\frac52,
+\]
+
+严格 margin 为 `25/768`。所以即使把这 43 个 cluster 的 Gershgorin/row bounds 全部换成
+exact spectral norms，这个 **k=0 fixed-partition triangle bound** 仍不可能小于 uniform-sup
+证书所需 `5/2`，因而不能作为 100 步共同 supremum coefficient。它不排除逐 `k` triangle
+ledger：k=0 的上述 partial floor 在该求和中只贡献
+`(1945/768)/100^3=389/153600000≈2.53e-6`。这里也绝不能把 cluster norm 下界相加成
+globally merged `D3` norm 的下界；跨-cluster cancellation、不同 partition 和直接 global
+half-sector norm 都仍开放。
+checker 的最高状态仅
+`VERIFIED_D3_DOUBLE_OCCUPANCY_CLUSTER_UNIFORM_SUP_NO_GO`，有 same-byte source contract、
+40 个回归测试，CLI 固定退出 1；不认证 actual R=100 error、reference 或 READY。
+
+### Evolved-observable 资源测量与下一内核
+
+对每个 `O_k` 重跑完整 495-path `D3/E4/P4` 不是最小可行实现。L8 exact Pauli growth 为：
+
+| observable | `O` | `ad_H O` | `ad_H^2 O` | `ad_H^3 O` | `ad_H^4 O` |
+|---|---:|---:|---:|---:|---:|
+| staggered magnetization | 128 | 448 | 1,800 | 9,008 | 50,144 |
+| double occupancy | 192 | 896 | 6,688 | 30,912 | 157,892 |
+
+`D3` map 本身含 6,996 项；作用在初始 observable 后输出 6,784/8,928 项，作用在
+一阶 evolved component `ad_H(O)` 后已增至 42,488/88,352 项。double occupancy 若继续
+构造 `ad_H^5(O)`，仅最后一层 pair-product floor 就是
+`640*157892=101050880`。这已经足以停止“每个 k 重算完整 fourth remainder”的实现方向。
+
+独立 binary64 PF resource probe（明确 `DIAGNOSTIC_ONLY`）在首个反向 step 内看到
+magnetization 项数 `128→256→608→2048→16064→229776`，double occupancy
+`192→640→5136→20112→255204`；第一次压回 65,536 项时 top-`L1` drop 约为
+`2.74e-10` 与 `4.38e-10`。这些小数不是证书，但说明直接 observable propagation 值得
+继续。下一内核因此固定为 **逐 gate/stage outward interval propagation + deterministic
+top-L1 + cumulative dropped-L1 ledger**，先认证相对于未截断 product formula 的传播误差；
+不再逐 `k` 枚举 495 条 Taylor paths。top-K 合同还必须明确按 interval absolute upper
+bound 降序、bitmask 升序 tie-break、精确保留 K 项；这与官方 `abs(c)<epsilon` cutoff 是
+两个不同策略，不能混写。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
-在物理 site support 上使用还必须补 even-CAR 适配证明。下一可检验单元因此是逐 `k`
-evolved-observable ledger：优先复用 Majorana/Pauli propagation，记录每步 `D3/E4/P4`
-或直接 global defect 的 directed enclosure，再判断是否存在 cancellation-aware 的生路。
+在物理 site support 上使用还必须补 even-CAR 适配证明。下一可检验单元因此是直接
+evolved-observable ledger：优先复用 Majorana/Pauli propagation，记录每个 gate/stage
+的 retained interval、rounding widening 与 dropped-`L1`，再把 product-formula/Trotter
+项作为独立预算组合；不再把初始 `D3/E4/P4` 核机械提升为逐 `k` 实现。
 
 `standard_error=0` 只表示 deterministic certificate，不等于 bound 为零。未经证书的
 Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGNOSTIC_ONLY`。
@@ -468,14 +591,15 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
 1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结，完整 L2
    checkpoint propagation 已闭合；下一步为 L8 固定 A/B Néel 相位、两个 observable 和
    与真实 campaign 相同的 occurrence-level term-sequence identity。
-2. 固定五组 generic bound 已被 half-filled-sector exact witness 严格排除；observable
-   Taylor 单步核也已闭合，并排除 uniform-supremum Pauli-L1 shortcut。下一单元改为逐 `k`
-   evolved-observable / Majorana ledger 或 cancellation-aware global defect；同时平行筛选真正
-   不同的 grouping 或高阶 formula。每个候选仍须保留 source-pinned constants、
-   common-phase ledger 与可机检 records。
-3. 固定 MajoranaPropagation implementation commit；补 deduplicate-before-truncation、
-   per-slice dropped-L1 ledger、directed coefficient intervals 和小尺寸 ED 对照，并把
-   L8 initial observable/state identity 与完整 mapped sequence 组合进 checker。
+2. 固定五组 generic bound、uniform-supremum Pauli-L1 shortcut，以及 double occupancy
+   用 fixed greedy14 cluster-exact-norm triangle 作为 uniform supremum 的架构都已被 exact
+   witness 严格排除；逐 `k` cluster triangle ledger 仍开放。下一单元不再逐 `k` 重算
+   495 paths，而是直接传播 evolved observable；cross-cluster/global cancellation-aware
+   方法仍作为平行数学路线。
+3. Majorana 执行基线已固定为从 `main@b7849cb` 建 certificate fork，pin Julia Manifest 与
+   PauliPropagation v0.7.3，并移植 deterministic composite bitmask sort。补
+   deduplicate-before-truncation、per-gate/stage dropped-L1 ledger、directed coefficient
+   intervals 和 L2/L3 ED 对照，再组合 L8 initial observable/state 与完整 mapped sequence。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
    两个 observables 可以采用不同 certified methods，不能只因增大 R 就跳过资源与独立性
    复核。

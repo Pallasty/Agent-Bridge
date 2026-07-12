@@ -220,9 +220,30 @@ so they are versioned normally and are not added to the preservation-only
   composition, observable-identity, exact-Fraction, formal-residual, remainder-path,
   one-step, uniform-floor, action/sector, resource, cache, failure-scope and CLI
   regressions.
+- `hubbard_d3_double_occupancy_symbolic_terms.b85`: bounded compressed fixture of
+  2,748 simplified physical-fermion terms for `D3=-i[B3,D]`; it has no independent
+  authority and is accepted only after the checker expands all 18,544 field terms
+  and proves exact JW equality to the source-pinned 8,928-term Pauli oracle.
+- `hubbard_d3_double_occupancy_cluster_no_go_contract.json`: same-byte checker pin,
+  compressed/raw fixture pins, upstream audit metadata, fixed greedy14 partition,
+  global half-filled Néel witness policy, uniform-supremum scope, resource caps and
+  witness digest.
+- `hubbard_d3_double_occupancy_cluster_no_go_template.json`: positive narrow
+  no-go witness with all 43 cluster count/support summaries and the first 30 detailed
+  exact global-sector matrix-element/JW-action records, whose sum is
+  `1945/768>5/2`.
+- `hubbard_d3_double_occupancy_cluster_no_go_checker.py`: independently expands the
+  physical fixture, verifies exact fermion-to-Pauli D3 identity, replays the fixed
+  fixture-defined greedy partition and proves that even exact cluster norms followed
+  by the same k=0 triangle sum cannot seed the R=100 uniform-supremum certificate. It
+  does not rule out a per-step cluster ledger or lower-bound the globally merged D3
+  norm; upstream decomposition/order provenance remains external audit metadata.
+- `test_hubbard_d3_double_occupancy_cluster_no_go_checker.py`: forty source/fixture,
+  exact-JW identity, partition, global-sector action, rational-margin, strict-schema,
+  tamper, failure-scope and CLI regressions.
 - The measurement-campaign, reference-qualification, proof-kernel, mapping,
-  checkpoint, commutator, grouping-screen, generic-bound no-go and observable-Taylor
-  artifacts are
+  checkpoint, commutator, grouping-screen, generic-bound no-go, observable-Taylor
+  and double-occupancy-cluster no-go artifacts are
   currently independent of
   `fermi_hubbard_evidence.py`;
   none is yet an outer `READY_FOR_BENCHMARK` component.

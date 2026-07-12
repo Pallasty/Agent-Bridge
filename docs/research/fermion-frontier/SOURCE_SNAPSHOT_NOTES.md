@@ -112,10 +112,30 @@ cannot meet the allocation.  It supplies no R=100 reference value, and its exact
 Néel-sector `D3` action is a leading-coefficient route witness rather than an actual
 error lower bound.
 
+The standalone double-occupancy cluster checker now proves a different, narrower
+uniform-sup no-go.  Its compressed physical-fermion fixture is accepted only after exact JW
+expansion reproduces the source-pinned 8,928-term Pauli `D3`.  The fixed upstream
+greedy14 rule yields 43 clusters, and direct global half-filled Néel matrix elements
+lower-bound the first 30 cluster norms by `1945/768>5/2`.  Therefore exact cluster
+norms plus triangle for this k=0 partition cannot seed the R=100 uniform-supremum
+certificate.  A per-step evolved cluster ledger is not ruled out; the k=0 partial
+floor contributes only `389/153600000` in that sum.  These cluster lower bounds are
+not a lower bound on the globally summed operator; cross-cluster cancellation and
+other partitions remain unassessed.  The fixture's upstream decomposition/order
+provenance is externally audited but not runtime-regenerated.  No numeric reference
+value is added to this snapshot.
+
+The Majorana implementation audit likewise changes no snapshot value.  It selects a
+future fork from registered `main@b7849cb` because the inferred paper-date commit
+precedes a documented splitting-sign fix; a complete Julia Manifest, deterministic
+composite ordering, outward intervals, and a per-gate/stage dropped-L1 ledger are
+still missing.  Current Majorana convergence data therefore remain diagnostic only.
+
 None of the campaign preflight, reference-qualification ledger, proof kernel, L=2
 conformance witness, mapping checker, checkpointed L2 checker, bitset prototype,
-Strang commutator checker, grouping-screen checker, fixed-generic-bound no-go checker
-or observable-Taylor-step checker is currently a component of
+Strang commutator checker, grouping-screen checker, fixed-generic-bound no-go checker,
+observable-Taylor-step checker or double-occupancy-cluster no-go checker is currently
+a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the
 outer snapshot status or promote it toward `READY_FOR_BENCHMARK`.

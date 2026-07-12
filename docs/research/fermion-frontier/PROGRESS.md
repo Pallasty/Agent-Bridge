@@ -337,8 +337,33 @@ double-occupancy witness remains below it.  The narrow positive status certifies
 the one-step kernel and route decision; full R=100 error, reference and READY remain
 unassessed.
 
+The double-occupancy sector follow-on now closes one additional uniform-supremum
+architecture without
+overclaiming a global norm.  The new source-pinned checker expands a compact
+2,748-term physical-fermion fixture, independently obtains 18,544 field terms, and
+proves its exact JW image equals the existing 8,928-term Pauli `D3` oracle
+(`L1=423/16`).  It then replays the fixture-defined 43-cluster greedy14 partition.  Direct
+matrix elements on the global `N_up=N_down=32` Néel basis state lower-bound the first
+30 exact cluster norms by `1945/768>5/2`, margin `25/768`; hence even exact norms for
+this k=0 partition followed by triangle cannot seed the R=100 uniform leading bound.
+A per-step evolved cluster ledger remains open because this k=0 floor contributes
+only `389/153600000` there.  The fixture decomposition/order's link to upstream
+simplify is external audit provenance rather than a runtime-recomputed claim.  The
+checker explicitly does not add those lower bounds into a lower bound for the
+globally merged `D3`, so cancellation-aware/global-sector routes remain open.
+
+The Majorana source audit also fixes the implementation direction.  The inferred
+paper-date snapshot predates a documented splitting-sign repair; the selected base
+is registered MajoranaPropagation `v0.3.0`, `main@b7849cb`, with a certificate fork
+that must pin Julia/Manifest and PauliPropagation, sort composite terms, and add
+outward intervals plus a post-dedup dropped-L1 ledger.  Exact term-growth probes show
+that applying `D3` to `ad_H(O)` already yields 42,488/88,352 terms, so the next kernel
+will directly propagate evolved observables instead of recomputing 495 fourth-order
+paths at every step.
+
 None of the campaign, reference-qualification, proof-kernel, mapping, checkpoint,
-commutator, grouping-screen, generic-bound no-go or observable-Taylor-step interfaces
+commutator, grouping-screen, generic-bound no-go, observable-Taylor-step or
+double-occupancy-cluster no-go interfaces
 is currently loaded by
 `fermi_hubbard_evidence.py`. They do not
 add components to `component_statuses`, and none can yet participate
