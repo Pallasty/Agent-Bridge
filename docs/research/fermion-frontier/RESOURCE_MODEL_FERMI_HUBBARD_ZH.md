@@ -400,6 +400,24 @@ evolution 得到 deterministic reference `0.655760337805`，再对共同 raw gro
 检查，不是 `L=8` 证据、不是 dynamic-JW/FSN/native 的硬件结果，也不能证明不同
 编译器已经产生相同 individual-term order；真实路线数据仍需替换 `group_order_pilot`。
 
+### 8.2 首步与计时账本
+
+为避免把稳态 subtotal 误写成完整电路，新增
+[first_step_contract.json](first_step_contract.json)、
+[first_step_ledger_template.json](first_step_ledger_template.json) 和
+[first_step_ledger_validator.py](first_step_ledger_validator.py)。契约要求每条路线
+分别提供 `R`、稳态每步 count/depth、首步额外 count/depth、`compiled_exact` 标记、
+逻辑资源 provenance，以及 CNOT layer、稳态 non-CNOT、首步额外 non-CNOT 和 timing
+provenance。验证器的状态含义是：
+
+- `UNRESOLVED`：首步或计时字段缺失/非法；
+- `BOOKKEEPING_CLOSED_ESTIMATE`：首步 count/depth/time 已闭账，但稳态值仍是
+  source-leading 或 figure-fit 估计（因此不能生成 complete total）；
+- `COMPLETE`：稳态与首步均来自精确 compiled export，且所有 route timing 字段齐全。
+
+当前账本仍为空模板，五条 L=8 路线均为 `UNRESOLVED`；加入首步数据不会自动把
+leading 或 candidate-fit 证据升级为精确 compiled 资源。
+
 ## 9. 复算与测试
 
 ```bash
@@ -426,6 +444,13 @@ python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
 python3 docs/research/fermion-frontier/test_fermi_hubbard_l2_pilot.py
+
+python3 docs/research/fermion-frontier/first_step_ledger_validator.py \
+  --contract docs/research/fermion-frontier/first_step_contract.json \
+  --ledger docs/research/fermion-frontier/first_step_ledger_template.json \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_first_step_ledger_validator.py
 ```
 
 资源模型的十个回归测试覆盖 Fig. 5 的全部 `L=4...10` candidate points、域外阻断、
@@ -435,6 +460,8 @@ python3 docs/research/fermion-frontier/test_fermi_hubbard_l2_pilot.py
 fail-closed 行为；收敛接口另有五个测试覆盖双区间稳定、reference、缺路线、metadata
 不一致和统计误差 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和规模限制。
+首步账本另有六个测试覆盖空模板、bookkeeping-closed 状态、精确闭账、全路线闭账
+门槛和非法 timing 的 fail-closed 行为。
 
 ## 10. 下一阶段的决定性工作
 
@@ -442,8 +469,9 @@ L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和
    individual-term circuits；若共同顺序改变 `21N/4L` 或 candidate fits，重新计数。
 2. **共同误差标定：**对固定 `U/t=8,tT=1`、Néel 初态和两个 observables 做
    `R` convergence、variance 和 measurement-allocation 测试。
-3. **首步闭账：**分别报告三条 qubit 路线 first-step 的 CNOT count、depth、
-   non-CNOT time，而不是继续用稳态平均代替完整总量。
+3. **首步闭账：**使用 `first_step_contract.json` 分别报告三条 qubit 路线
+   first-step 的 CNOT count、depth、non-CNOT time；在 `compiled_exact=true` 前，
+   只输出 `BOOKKEEPING_CLOSED_ESTIMATE`，不把稳态平均代替完整总量。
 4. **Native 微基准与空间：**连续执行四 matchings，测 inclusive transition time、
    move legs/distance、loss/leakage、cooling/echo、traps/tweezers/workspace 和回位。
 5. **Surface place-and-route：**给出完整 spinful switch 的 C2D blocks、CZ/SWAP、

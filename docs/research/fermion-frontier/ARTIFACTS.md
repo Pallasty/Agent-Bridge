@@ -68,3 +68,9 @@ so they are versioned normally and are not added to the preservation-only
   an assessor recommendation `R=32` for the group-order pilot only;
 - `test_fermi_hubbard_l2_pilot.py`: reference, R-grid, recommendation, and size-bound
   regression tests.
+- `first_step_contract.json`: required per-route first-step, steady-state, and timing
+  fields with fail-closed status rules;
+- `first_step_ledger_template.json`: empty five-route ledger, intentionally unresolved;
+- `first_step_ledger_validator.py`: validator that separates unresolved, bookkeeping-closed
+  estimates, and exact compiled totals;
+- `test_first_step_ledger_validator.py`: six regression tests for the first-step contract.

@@ -126,3 +126,11 @@ group-order pilot converges against an exact-reference calculation and the
 assessor selects `R=32` under its two-interval rule. It is explicitly marked as
 an algorithmic pilot, not a hardware or `L=8` result; the next evidence step is
 to replace it with route-specific exports and measurement uncertainties.
+
+The first-step interface is now executable as well. `first_step_contract.json`
+requires per-route steady and first-step logical resources, an explicit
+`compiled_exact` provenance flag, and route-specific timing fields.
+`first_step_ledger_validator.py` distinguishes `UNRESOLVED`,
+`BOOKKEEPING_CLOSED_ESTIMATE`, and `COMPLETE`; the empty five-route ledger remains
+unresolved, and candidate/source-leading steady values cannot be promoted to exact
+totals merely by supplying a first-step subtotal.

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "required_routes": [
+    "native_fermions",
+    "dynamic_jw_local_grid_source_leading",
+    "dynamic_jw_local_grid_figure_candidate_fit",
+    "fsn_standard_figure_candidate_fit",
+    "fsn_ladder_figure_candidate_fit"
+  ],
+  "required_fields": {
+    "R": "positive integer",
+    "steady_count_per_step": "non-negative integer",
+    "steady_depth_per_step": "non-negative integer",
+    "first_step_extra_count": "non-negative integer or null",
+    "first_step_extra_depth": "non-negative integer or null",
+    "compiled_exact": "boolean",
+    "provenance": "non-empty string"
+  },
+  "timing_fields": {
+    "cnot_layer_us": "finite non-negative number or null",
+    "non_cnot_us_per_steady_step": "finite non-negative number or null",
+    "first_step_extra_non_cnot_us": "finite non-negative number or null",
+    "timing_provenance": "non-empty string"
+  },
+  "status_rules": {
+    "complete": "compiled_exact=true and all logical/timing fields are present",
+    "bookkeeping_closed_estimate": "first-step count/depth/time fields are present but compiled_exact=false",
+    "unresolved": "required first-step or timing fields are missing"
+  }
+}
