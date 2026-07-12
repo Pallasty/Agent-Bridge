@@ -172,11 +172,9 @@ campaign `0.00025` allocation 全部仍为 `NOT_ASSESSED`；CLI 始终非零，r
 L=2 conformance witness 对 `R=2,T=1` 的 112 个 raw rotations 独立复算得到
 `M_s=0.781713978559467`、`D=0.0309252063024724`，与 direct-fermion statevector 一致；
 但它与 ideal diagnostic 的差仍约为 `0.12595` 和 `0.00586`，直接说明“circuit arithmetic
-正确”不等于“ideal-time reference 已认证”。完整 112-gate Fraction expansion 在当前纯
-Python sparse representation 中出现快速 term/rational growth，因此标为
-`DEFERRED_RESOURCE_LIMIT`。完整证书的下一实现层仍必须使用 bitset Pauli keys、批量
-directed arithmetic 和受审计的 checkpoint/digest；下述独立原型先验证了这些接口，
-但不能降低为 binary64 后继续声称 rigorous。
+正确”不等于“ideal-time reference 已认证”。早期字符串稀疏实现的完整 112-gate
+Fraction expansion 因 term/rational growth 标为 `DEFERRED_RESOURCE_LIMIT`；下述 bitset
+checkpoint 层现已消除这个特定实现障碍，但没有消除 R=2 product-formula error。
 
 ### 已实现的 canonical JW mapping 子证书
 
@@ -202,25 +200,94 @@ canonical JSON/SHA-256 checkpoint。固定样例 digest 为
 `c69ecf852f053106f0feb89cd0c2e220903ef862974fd5821786605cec9929dd`。本机固定种子、
 16-qubit/100,000 对诊断微基准中，预编码 bitset 的 multiply/commute 分别约为字符串实现
 的 `3.5x/9.6x`；这些数值仅是 CPython 本机诊断，不是规模保证。该模块的 certificate
-authority 固定为 `NONE`，尚未替换 source-pinned checker，也未完成 112-gate Fraction
-certificate。其 `max_bytes` 只限制 canonical serialization 输出；payload 构造峰值另由
+authority 固定为 `NONE`；它本身没有被升级为证书。新的 checker 将其 source-pin 后作为
+算术依赖使用。其 `max_bytes` 只限制 canonical serialization 输出；payload 构造峰值另由
 term-count/rational-digit caps 有界，不能把该字段解释为严格峰值内存证书。
+
+### 已实现的完整 L2 checkpoint 子证书
+
+`operator_propagation_checkpointed_l2.py` 从已哈希的精确源码字节加载 mapping、bitset、
+Fraction kernel 与 L2 witness 依赖，并要求 mapping 正状态和 112 门 canonical sequence
+逐项一致。对两个 observable 都反向执行 20 个 raw group-event checkpoints；每一 slice
+使用五阶 Taylor--Lagrange 区间，然后向外量化到分母 `2^32`，再按 deterministic top-L1
+规则执行容量上限 65,536 的保留。正 fixture 实际没有触发 drop：`M_s` 的 final/peak term
+count 是 16,380，`D` 是 16,381，二者累计 dropped-`L1` 均为 `0/1`，最大有理数位数为
+151。
+
+最终 declared mapped-circuit intervals 为
+
+\[
+M_s\in[104895467/134217728,\;209888553/268435456]
+      \simeq[0.7815321311,0.7818957902],
+\]
+
+\[
+D\in[8238201/268435456,\;33458587/1073741824]
+    \simeq[0.0306896903,0.0311607374].
+\]
+
+对应 float statevector 值被区间包含，但明确标为 diagnostic、`used_as_proof=false`。
+最高状态是 `VERIFIED_L2_MAPPED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`。这里“zero drop”只
+说明该次容量截断没有误差，不说明 Taylor/量化区间宽度为零，更不说明 `W_{R=2}` 已靠近
+`exp(-iHT)`；product-formula、L8 workload、campaign allocation、reference qualification
+与 READY 仍为 `NOT_ASSESSED/false`。
+
+### 已实现的 Strang 嵌套对易子 L1 子证书
+
+`hubbard_strang_commutator_checker.py` 采用
+[Schubert--Mendl Proposition 2, Eq. (13)](https://arxiv.org/html/2306.10603#S2.E13)
+（论文 DOI [10.1103/PhysRevB.108.195105](https://doi.org/10.1103/PhysRevB.108.195105)）
+固定的二阶对称公式。对顺序 `H1,H2,HU,H3,H4`，令
+
+\[
+K_\gamma=\sum_{j>\gamma}H_j,\qquad
+C=\sum_\gamma\left(
+\frac{\|[K_\gamma,[K_\gamma,H_\gamma]]\|}{12}+
+\frac{\|[H_\gamma,[K_\gamma,H_\gamma]]\|}{24}\right).
+\]
+
+checker 对每个外层 `gamma` 和每个 theorem family 分别精确合并相同 Pauli strings，再以
+coefficient `L1` 上界 operator norm；不同 family 之间不允许抵消。R 个 unitary steps 由
+telescoping 给出 `C T^3/R^2`，而任意 `||O||<=1` 的 expectation comparison 需要额外因子
+2。Raw palindrome 的十个 group events、每个 commuting term product 和被省略的 onsite
+identity common phase 都有独立账本。
+
+L8 五组非恒等 Pauli term counts 是 `(128,96,192,96,128)`；两个 nested-family L1 总和
+分别为 22,752 与 11,104，因此
+
+\[
+C=7076/3,\qquad
+\epsilon_U(R=100)\le1769/7500,\qquad
+\epsilon_O(R=100)\le1769/3750\simeq0.4717333.
+\]
+
+这远大于单 observable allocation `1/4000=0.00025`；在同一 generic observable bound
+下最小整数是 `R=4344`，`R=4343` 仍失败。这个结果只否定“当前五组划分 + coefficient-L1
++ generic factor-two + R=100”作为紧参考界的可行性，并不排除 observable/locality-specific
+cancellation、Schubert--Mendl 使用的 plaquette grouping、另一独立高阶 reference formula
+或更紧的 norm evaluation。该论文也明确指出四个 even/odd kinetic partitions 比其
+plaquette grouping 给出更弱的界，所以不能把论文的 PBC plaquette 数值直接移植到这里的
+OBC 五组 split。当前状态仍不组合 mapping/truncation，也没有认证 physical L8 initial
+state、两个 observables 或 READY。
 
 `standard_error=0` 只表示 deterministic certificate，不等于 bound 为零。未经证书的
 Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGNOSTIC_ONLY`。
 
 ## 执行顺序
 
-1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结；继续为 L=8
-   固定 A/B Néel 相位、两个 observable 与同一 term-sequence identity。
-2. 固定 MajoranaPropagation implementation commit；先补 deduplicate-before-truncation、
-   per-slice dropped-L1 ledger、directed coefficient intervals 和小尺寸 ED 对照；把已审计
-   bitset/checkpoint 原型纳入新的 source-pinned checker 版本。
-3. 为独立 reference formula 生成目标 L=8 OBC term split 与 product-formula commutator
-   certificate。
+1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结，完整 L2
+   checkpoint propagation 已闭合；下一步为 L8 固定 A/B Néel 相位、两个 observable 和
+   与真实 campaign 相同的 occurrence-level term-sequence identity。
+2. 不把 `R=100` 的 generic commutator-L1 结果写成可接受误差。先比较 observable/locality-
+   specific tightening、plaquette grouping 和独立四阶 reference formula，要求每个候选都
+   保留 source-pinned formula constants、common-phase ledger 与可机检 commutator records。
+3. 固定 MajoranaPropagation implementation commit；补 deduplicate-before-truncation、
+   per-slice dropped-L1 ledger、directed coefficient intervals 和小尺寸 ED 对照，并把
+   L8 initial observable/state identity 与完整 mapped sequence 组合进 checker。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
-   两个 observables 可以采用不同 certified methods。
-5. 若 Majorana L1 bound 爆炸，先计算 locality tail，再决定是否执行 cluster Krylov。
+   两个 observables 可以采用不同 certified methods，不能只因增大 R 就跳过资源与独立性
+   复核。
+5. 若 Majorana L1 或 locality tail 已超过 allocation，再决定是否执行 cluster Krylov。
 6. TDVP、PEPS、当前 Majorana 参数扫描、QMC 和 effective-model 结果保留为独立诊断，
    不参与任何 machine-verified reference 或 READY 判定。
 

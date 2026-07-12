@@ -153,8 +153,39 @@ so they are versioned normally and are not added to the preservation-only
   checkpoint digest prototype; certificate authority is explicitly `NONE`.
 - `test_pauli_bitset_backend.py`: thirty-five exhaustive/random algebra, interval,
   checkpoint, cap, malformed-input and L2-prefix conformance regressions.
-- The measurement-campaign, reference-qualification, proof-kernel, mapping and
-  bitset artifacts are currently independent of `fermi_hubbard_evidence.py`;
+- `operator_propagation_checkpointed_l2_contract.json`: fixed source pins, mapped
+  112-gate L2 circuit identity, two observable definitions, checkpoint schedule,
+  fifth-order Taylor policy, outward `2^32` quantization and hard resource caps.
+- `operator_propagation_checkpointed_l2_template.json`: positive full-circuit claims
+  for 20 checkpoints per observable.  Its final/peak term counts are 16,380/16,381,
+  cumulative dropped `L1` is zero, and the two declared-circuit expectation intervals
+  and canonical checkpoint digests are independently reproducible.
+- `operator_propagation_checkpointed_l2.py`: exact bitset/Fraction checker that loads
+  hash-verified dependencies from the same bytes it executes and returns at most
+  `VERIFIED_L2_MAPPED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`.  Product-formula error,
+  L8, reference qualification and READY remain unassessed; the CLI exits nonzero.
+- `test_operator_propagation_checkpointed_l2.py`: fifty-one regressions covering full
+  replay, mapping/source pins, checkpoints, intervals, quantization, no-drop,
+  strict-schema, resource, API/CLI and fail-closed behavior.
+- `hubbard_strang_commutator_contract.json`: source-pinned Schubert--Mendl
+  Proposition-2/Eq.-13 policy for the fixed L2/L3/L8 OBC
+  `H1,H2,HU,H3,H4` split, raw S2 binding, exact commutators, coefficient-L1 norm
+  substitution, R-step telescoping and generic observable factor two.
+- `hubbard_strang_commutator_template.json`: exact group, phase-ledger,
+  nested-family, digest and resource claims.  The L8 result is `C=7076/3`, unitary
+  bound `1769/7500`, generic observable bound `1769/3750` at R=100, and minimum
+  generic-allocation R of 4,344.
+- `hubbard_strang_commutator_checker.py`: independently regenerates and merges every
+  fixed nested Pauli commutator, performs full L2 and selected L3 sparse-action
+  oracles, cross-checks pinned mapping/bitset sources, and returns at most
+  `VERIFIED_STRANG_COMMUTATOR_L1_SUBCERTIFICATE`; it does not compose a physical
+  reference and always exits nonzero.
+- `test_hubbard_strang_commutator_checker.py`: fifty regressions covering the formula,
+  group order, commutation, raw palindrome, common phase, exact values, action oracles,
+  source execution, strict schema, resources, failure scopes and the CLI boundary.
+- The measurement-campaign, reference-qualification, proof-kernel, mapping,
+  checkpoint and commutator artifacts are currently independent of
+  `fermi_hubbard_evidence.py`;
   none is yet an outer `READY_FOR_BENCHMARK` component.
 - `fermi_hubbard_l2_pilot.py`: dependency-free L=2 dual-observable deterministic
   product-formula screening generator;

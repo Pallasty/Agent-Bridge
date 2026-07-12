@@ -565,8 +565,9 @@ statevector 与 direct-fermion path 分别给出
 `M_s=0.781713978559467`、`D=0.0309252063024724`，差小于 `1e-12`。但是它们与 ideal
 diagnostic 的差仍约 `0.12595/0.00586`，所以 mapping cross-check 不能冒充 ideal-time
 certificate。当前纯 Python `Fraction` 稀疏传播在完整 112 gates 上出现快速 term 和大整数
-增长，正式状态为 `DEFERRED_RESOURCE_LIMIT`；只有一门 local probe 已做完整有理区间
-enclosure。
+增长，因此该旧字符串实现的正式状态为 `DEFERRED_RESOURCE_LIMIT`；只有一门 local
+probe 已做完整有理区间 enclosure。后续 8.2.3 的 bitset/checkpoint checker 已关闭这个
+特定实现 defer，但没有改变这里的 ideal-evolution 边界。
 
 #### 8.2.2 Canonical JW mapping 与 bitset checkpoint 层
 
@@ -590,10 +591,59 @@ Pauli keys、精确相位/辛对易、checker-compatible Fraction interval propa
 canonical checkpoint SHA-256。固定 checkpoint 样例 digest 为
 `c69ecf852f053106f0feb89cd0c2e220903ef862974fd5821786605cec9929dd`。本机固定种子
 16-qubit/100,000 对诊断微基准中，预编码 bitset 的 multiply/commute 约有 `3.5x/9.6x`
-加速；这不是可移植性能保证。该模块的 certificate authority 是 `NONE`，尚未进入
-source-pinned checker，也没有完成全 112 门 Fraction certificate。
+加速；这不是可移植性能保证。该模块自身的 certificate authority 是 `NONE`；后续
+8.2.3 将其作为 source-pinned 算术依赖并完成 112 门证书，而不是提升 prototype 自身。
 其中 `max_bytes` 是 serialization 输出上限，不是峰值内存上限；payload 构造仍由独立
 term-count 与 rational-digit caps 有界。
+
+#### 8.2.3 完整 L2 checkpointed bitset/Fraction 子证书
+
+[operator_propagation_checkpointed_l2.py](operator_propagation_checkpointed_l2.py)
+把上节的 prototype 纳入新的 source-pinned checker，而不是提升 prototype 自身的
+authority。它从已经哈希的同一份源码字节执行 mapping、bitset、Fraction kernel 与 L2
+witness 依赖，要求 mapping positive status，并把全部 112 个 nonidentity rotations 与
+canonical L2 sequence 逐项绑定。两个 observables 都按 reverse-forward 顺序通过 20 个
+raw group-event checkpoints；每个 slice 用五阶 Taylor 区间传播，再向外量化到分母
+`2^32`，最后执行容量 65,536 的 deterministic top-L1 保留。
+
+本次完整运行没有发生 truncation drop。Staggered magnetization 的 final/peak term count
+均为 16,380，最终区间为
+`[104895467/134217728,209888553/268435456]`；double occupancy 的 final/peak term
+count 均为 16,381，最终区间为
+`[8238201/268435456,33458587/1073741824]`。两者 cumulative dropped-`L1` 都是
+`0/1`，20 个中间 checkpoint 与 final digest 均由 checker 重算，float statevector 只作
+被区间包含的非证明诊断。最高状态
+`VERIFIED_L2_MAPPED_CIRCUIT_TRUNCATION_SUBCERTIFICATE` 只闭合 declared R=2 mapped
+circuit；product-formula-to-exact error、L8、reference budget 与 READY 仍未评估，CLI
+固定非零。
+
+#### 8.2.4 L2/L3/L8 Strang commutator-L1 子证书
+
+[hubbard_strang_commutator_checker.py](hubbard_strang_commutator_checker.py) 按
+[Schubert--Mendl Proposition 2, Eq. (13)](https://arxiv.org/html/2306.10603#S2.E13)
+固定 `H1,H2,HU,H3,H4` 顺序和
+
+\[
+C=\sum_\gamma\left(
+\|[K_\gamma,[K_\gamma,H_\gamma]]\|/12+
+\|[H_\gamma,[K_\gamma,H_\gamma]]\|/24\right),\quad
+K_\gamma=\sum_{j>\gamma}H_j.
+\]
+
+checker 独立生成 L2/L3/L8 OBC nonidentity Pauli groups，逐 group 验证内部 commuting，
+绑定 raw S2 palindrome/term products 与 onsite common-phase ledger，并在每个 outer
+`gamma`、每个 nested family 内精确 merge 后才取 coefficient `L1`；不同 theorem norms
+之间不作抵消。L2 action oracle 覆盖全部 256 个 basis states，L3 使用固定 16 个 basis
+states；L8 action oracle 因显式资源边界未运行。
+
+L8 的两类 L1 总和为 22,752 和 11,104，故 `C=7076/3`。由 unitary telescoping，
+`T=1,R=100` 的 unitary bound 为 `1769/7500`；对 `||O||<=1` 的通用 expectation
+comparison 加 factor two 后为 `1769/3750≈0.4717333`，远大于 `1/4000` allocation。
+同一通用界至少需要 `R=4344`。因此当前五组 generic-L1 路线在 R=100 明确不可用作
+bounded reference，但这不是 observable-specific no-go；下一步应优先检查 locality/
+observable tightening、plaquette grouping 或独立高阶 formula。最高状态
+`VERIFIED_STRANG_COMMUTATOR_L1_SUBCERTIFICATE` 不组合 mapping/truncation，不认证
+physical L8 workload、reference 或 READY，CLI 固定非零。
 
 ### 8.3 L=2 双观测量 screening pilot
 
@@ -756,6 +806,20 @@ python3 docs/research/fermion-frontier/test_hubbard_jw_mapping_validator.py
 
 python3 docs/research/fermion-frontier/test_pauli_bitset_backend.py
 
+# 成功的完整 L2 mapped-circuit subcertificate 仍按设计 exit 1
+python3 docs/research/fermion-frontier/operator_propagation_checkpointed_l2.py \
+  docs/research/fermion-frontier/operator_propagation_checkpointed_l2_contract.json \
+  docs/research/fermion-frontier/operator_propagation_checkpointed_l2_template.json
+
+python3 docs/research/fermion-frontier/test_operator_propagation_checkpointed_l2.py
+
+# 成功的 Strang commutator-L1 subcertificate 仍按设计 exit 1
+python3 docs/research/fermion-frontier/hubbard_strang_commutator_checker.py \
+  docs/research/fermion-frontier/hubbard_strang_commutator_contract.json \
+  docs/research/fermion-frontier/hubbard_strang_commutator_template.json
+
+python3 docs/research/fermion-frontier/test_hubbard_strang_commutator_checker.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
@@ -822,6 +886,13 @@ source binding、term/event hashes、strict JSON/type/resource caps、API/CLI fa
 和 overclaim 阻断。Bitset/checkpoint 原型另有三十五个测试覆盖 2-qubit Pauli product
 穷举、3-qubit commutation 穷举、随机多比特/区间传播、canonical digest、重复/越界/
 非 Fraction/反向区间/资源上限拒绝，以及 L2 八门前缀与字符串 checker 一致性。
+完整 L2 checkpointed checker 另有五十一个测试覆盖 112 门/20 checkpoints 双 observable
+重放、精确 interval 与 digest、zero-drop、mapping/source same-byte execution、量化与资源
+上限、strict schema/types、pre-exec self pin、API/CLI 和失败 scope 清零。Strang
+commutator checker 另有五十个测试覆盖公式常数、L2/L3/L8 groups、内部 commuting、raw
+palindrome/term binding、common identity phase、exact nested-family L1、L2/L3 action
+oracles、R scaling/generic factor two、allocation boundary、source same-byte execution、
+strict schema/types、资源上限、pre-exec pin、失败清零和 CLI 非零边界。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
@@ -836,7 +907,7 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `256` 个测试。
+全套共 `357` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
@@ -847,13 +918,15 @@ overlap、operation window/资源冲突、event binding、dependency、非法 ID
    mitigation contribution ranges。当前 `p/eta` 为 `null`，所以 `103,218,432`
    effective target 还不能换算为 raw executions；若需要固定 attempt cap，另加入
    family-wise high-confidence binomial stopping rule，不能把 expected count 代替它。
-3. **独立有界 reference：**当前 Fraction proof kernel 已闭合固定 declared Pauli circuit
-   的 phase/interval/dropped-L1 子证明，但完整 L=2 `R=2` 已触及 term/rational growth。
-   Bitset/checkpoint 原型和 L2/L3 canonical mapping validator 已完成；下一步把它们纳入
-   新的 source-pinned checkpointed checker，延伸到 L=8 OBC identity，并生成
-   product-formula commutator certificate。只有 checker 全链通过且 bound 不超过
-   `0.00025` 才能新增 reference 资格状态；当前两个 subcertificate、prototype 与
-   `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付边界。
+3. **独立有界 reference：**完整 L2 `R=2` checkpointed checker 已闭合 112 门 mapped
+   circuit，且本次容量截断的 dropped-`L1` 为零；这消除了旧的纯字符串资源 defer。
+   L8 五组 Strang generic commutator-L1 也已机检，但 R=100 的通用 observable bound
+   `1769/3750` 远超 `0.00025`，不能进入 reference。下一步比较 observable/locality-
+   specific tightening、plaquette split 与独立高阶 formula，并把 L8 初态、两个
+   observables、occurrence-level sequence、truncation 和 product-formula bound 组合成
+   同一 source-pinned chain。只有全链通过且 `total_abs_bound<=0.00025` 才能新增 reference
+   资格状态；当前 subcertificates 与 `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付
+   边界。
 4. **真实双观测量网格：**按固定 `R=[25,50,100,200,400,800]` 对四条 unique
    convergence routes 生成联合 measurements、covariance、有效样本与可绑定 systematic
    evidence；严格区分 screening 与 `READY_FOR_TARGET_R`。

@@ -51,19 +51,32 @@ the snapshot.
 The source-pinned Pauli propagation proof kernel does not close that gap. Its
 positive state verifies only arithmetic and truncation for one fixed abstract
 two-qubit declared circuit. The L=2 `R=2` witness is a conformance cross-check and
-marks its full 112-gate Fraction certificate `DEFERRED_RESOURCE_LIMIT`.
+the original string-sparse implementation marked its full 112-gate Fraction
+certificate `DEFERRED_RESOURCE_LIMIT`.
 
 A separate mapping subcertificate now verifies the fixed L2/L3 OBC canonical JW
 bonds, terms, raw events and selected CAR/onsite actions; it also binds the pinned L2
 witness's 112 nonidentity gates. This does not retroactively make the abstract
 truncation certificate a Hubbard certificate, does not compose the two artifacts into
 an end-to-end proof, and does not assess product-formula error, L=8 reference values or
-campaign-budget adequacy. The bitset/checkpoint module is likewise a non-authoritative
-prototype, not a completed 112-gate certificate. None is part of the source snapshot
-or outer evidence orchestrator.
+campaign-budget adequacy. The standalone bitset/checkpoint module remains a
+non-authoritative prototype, but a new source-pinned checkpointed checker now uses
+it to complete the fixed L2 112-gate mapped-circuit propagation for both observables.
+That run has zero dropped `L1` and rigorous Taylor/quantization intervals, yet still
+does not bound the R=2 product formula against exact Hubbard evolution or transfer
+the result to L=8.
+
+A separate source-pinned Strang checker now recomputes the fixed L2/L3/L8 five-group
+nested commutators.  Its L8 coefficient-L1 result is `C=7076/3`, giving the generic
+norm-one observable bound `1769/3750` at R=100.  This fails the `1/4000` allocation
+and therefore records a rigorous nonqualifying bound, not a reference value.  The
+checker does not compose mapping/truncation certificates or bind the physical L8
+initial state and observables.  Neither new subcertificate is part of the source
+snapshot or outer evidence orchestrator.
 
 None of the campaign preflight, reference-qualification ledger, proof kernel, L=2
-conformance witness, mapping checker or bitset prototype is currently a component of
+conformance witness, mapping checker, checkpointed L2 checker, bitset prototype or
+Strang commutator checker is currently a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the
 outer snapshot status or promote it toward `READY_FOR_BENCHMARK`.

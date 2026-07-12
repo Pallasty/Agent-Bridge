@@ -176,13 +176,29 @@ forces H2 and H3 to be nonempty. The maximum state is only
 truncation kernel, assess product-formula error, transfer to L=8, or enter READY.
 
 An exact `(x_mask,z_mask)` Pauli backend and deterministic Fraction-interval
-checkpoint digest are also available as a non-authoritative prototype. Exhaustive
-and randomized conformance checks match the string proof-kernel algebra, but this
-backend has not replaced the source-pinned checker and does not turn the deferred
-112-gate Fraction expansion into a certificate.
+checkpoint digest first established the required arithmetic as a non-authoritative
+prototype.  The follow-on source-pinned L=2 checker now uses that backend to replay
+all 112 mapped nonidentity rotations, with one checkpoint at each of 20 raw group events,
+fifth-order Taylor enclosures and outward quantization to denominator `2^32` after
+each slice.  Both observables retain the complete Pauli space reached by the run:
+the final/peak term counts are 16,380 for staggered magnetization and 16,381 for
+double occupancy, and cumulative dropped `L1` is exactly zero.  The certified
+declared-circuit intervals are `[0.7815321311,0.7818957902]` and
+`[0.0306896903,0.0311607374]`.  This closes the earlier L=2 implementation defer,
+but not product-formula error to ideal evolution or any L=8 claim.
 
-These campaign, reference, proof-kernel, mapping and bitset artifacts remain
-standalone preflight, qualification and conformance tools. They have **not** yet
+A second source-pinned checker now evaluates the exact nested commutators in the
+fixed `H1,H2,HU,H3,H4` Strang split at L=2,3,8.  It fully merges each theorem family
+before taking a Pauli-coefficient `L1` norm and applies the constants in Schubert--
+Mendl Proposition 2, Eq. (13).  For L=8 it obtains `C=7076/3`, hence at `R=100` a
+unitary bound `1769/7500` and the generic norm-one observable bound `1769/3750`.
+The latter is far above the per-observable allocation `1/4000`; this generic route
+would require at least `R=4344`.  Mapping/truncation certificates are not composed,
+the physical L=8 workload identity and observable-specific tightening remain
+unassessed, and this result cannot qualify a reference or READY gate.
+
+These campaign, reference, proof-kernel, mapping, checkpoint and commutator artifacts
+remain standalone preflight, qualification and conformance tools. They have **not** yet
 been added as components of `fermi_hubbard_evidence.py`, so they do not alter the
 current outer `READY_FOR_BENCHMARK` gate.
 
@@ -210,6 +226,8 @@ retained in `claim-status.jsonl`.
   L=2 proof-kernel conformance witness,
   source-pinned L=2/L=3 Hubbard-to-JW mapping contract/template/validator,
   exact bitset Pauli/checkpoint prototype,
+  source-pinned full L=2 checkpointed propagation contract/template/checker,
+  source-pinned L=2/L=3/L=8 Strang commutator contract/template/checker,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -229,6 +247,8 @@ retained in `claim-status.jsonl`.
   `test_operator_propagation_certificate_checker.py` /
   `test_operator_propagation_l2_witness.py` /
   `test_hubbard_jw_mapping_validator.py` /
-  `test_pauli_bitset_backend.py`
+  `test_pauli_bitset_backend.py` /
+  `test_operator_propagation_checkpointed_l2.py` /
+  `test_hubbard_strang_commutator_checker.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

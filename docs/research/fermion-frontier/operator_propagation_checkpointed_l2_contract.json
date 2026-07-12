@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "contract_fingerprint": "operator_propagation_checkpointed_l2_contract_v1",
+  "certificate_type": "l2_checkpointed_bitset_fraction_propagation_subcertificate_v1",
+  "checker_fingerprint": "operator_propagation_checkpointed_l2_bitset_fraction_v1",
+  "checker_source_sha256": "960e1e4ba57d0caafe4d82b6477388d0604b6a1af9f8adf44096a9ce6980adf2",
+  "source_pins": [
+    {
+      "relative_path": "hubbard_jw_mapping_validator.py",
+      "role": "positive_mapping_subcertificate_checker_and_gate_builder",
+      "sha256": "21ada33e0a45ec2ede6cc75872e17c8292eac6b17b747fc902a5bb1a135c8be6"
+    },
+    {
+      "relative_path": "hubbard_jw_mapping_contract.json",
+      "role": "mapping_contract",
+      "sha256": "8d1af7c7b17dfd2b92d5c9fae9a1a6dd71e17d3e78b6e8d4fc5aba2123463e01"
+    },
+    {
+      "relative_path": "hubbard_jw_mapping_template.json",
+      "role": "positive_mapping_certificate",
+      "sha256": "ecd9b2f98483280f3072e2077c83a6d8c115328968226de3c5e7c6f00a75fdaf"
+    },
+    {
+      "relative_path": "pauli_bitset_backend.py",
+      "role": "exact_bitset_Pauli_arithmetic_and_checkpoint_serialization",
+      "sha256": "6f968e30b9809894dc6a5585c80a29feb4f3cc8dab6da8300473763a90c7a8a5"
+    },
+    {
+      "relative_path": "operator_propagation_certificate_checker.py",
+      "role": "exact_Taylor_interval_and_rotation_semantics",
+      "sha256": "ade384b1b2258bc5cb3a296d9f7f4c0c85ee374293c2b1a5e4332f4ecba938d4"
+    },
+    {
+      "relative_path": "operator_propagation_l2_witness.py",
+      "role": "L2_112_gate_and_float_statevector_diagnostic_source",
+      "sha256": "575124ffcb90619b804bd017118b4ed45551b2d56c99b6c056c4d928111e4332"
+    }
+  ],
+  "workload_identity": {
+    "profile_id": "L2_OBC_U8_tT1_R2_NEEL",
+    "linear_size": 2,
+    "n_qubits": 8,
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "rotation_convention": "G_P(theta)=exp(-i*theta*P/2)",
+    "heisenberg_order": "reverse_forward_raw_events_and_reverse_gates_within_each_event",
+    "u_over_t": "8/1",
+    "total_time": "1/1",
+    "trotter_steps": 2,
+    "neel_bits_q0_first": "10010110",
+    "forward_identity_rotations_omitted_as_global_phase_only": true
+  },
+  "propagation_policy": {
+    "taylor_order": 5,
+    "taylor_interval": "sin_through_2Nplus1_cos_through_2N_next_term_remainder_abs_theta_le_1",
+    "checkpoint_boundary": "after_each_of_20_reversed_raw_group_events",
+    "outward_quantization": "lower=floor(lower*D)/D;upper=ceil(upper*D)/D",
+    "quantization_denominator": 4294967296,
+    "quantization_widening_l1": "sum_over_terms_max(pre_lower-quant_lower,quant_upper-pre_upper)",
+    "retained_term_cap": 65536,
+    "truncation_order": "descending_interval_abs_upper_then_ascending_numeric_x_mask_z_mask",
+    "dropped_l1": "sum_over_dropped_max(abs(lower),abs(upper))_after_quantization",
+    "checkpoint_digest": "source_pinned_pauli_bitset_fraction_interval_checkpoint_v1"
+  },
+  "expected_forward_gate_count": 112,
+  "expected_forward_gate_sequence_sha256": "3b3a7979593463681cc24a90c8d042053a433aec22e705b5ac50f614cb2bc5ad",
+  "expected_backprop_gate_sequence_sha256": "9d00f50109bb9d05bc21bbe682d1f9d54b6eac78801e7fbe770cd7b187b98ee4",
+  "expected_observables": [
+    {
+      "observable_id": "staggered_magnetization",
+      "normalization": "(1/4)*sum_(r,c)(-1)^(r+c)*(n_up-n_down)",
+      "initial_term_count": 8,
+      "initial_terms_sha256": "89ee2d6f91b45bc1c0b4b8f8c13e028fdf6e731ff4d2a0815ccc067d8c1789e5"
+    },
+    {
+      "observable_id": "double_occupancy",
+      "normalization": "(1/4)*sum_(r,c)n_up*n_down",
+      "initial_term_count": 13,
+      "initial_terms_sha256": "6069b2daf839600d0001ae16ee366518eae82dc05e1575541d4d2aa350069662"
+    }
+  ],
+  "resource_limits": {
+    "max_json_bytes": 262144,
+    "max_source_bytes_per_file": 1048576,
+    "max_qubits": 8,
+    "max_observables": 2,
+    "max_initial_terms": 16,
+    "max_raw_slices": 20,
+    "max_gates_per_slice": 12,
+    "max_gate_count": 112,
+    "max_live_terms": 65536,
+    "retained_term_cap": 65536,
+    "max_taylor_order": 5,
+    "max_rational_digits": 256,
+    "quantization_denominator": 4294967296,
+    "max_checkpoint_bytes": 16777216
+  },
+  "maximum_positive_status": "VERIFIED_L2_MAPPED_CIRCUIT_TRUNCATION_SUBCERTIFICATE",
+  "scope_claims": {
+    "checker_execution_from_contract_pinned_source_bytes_verified": true,
+    "source_pinned_mapping_subcertificate_verified": true,
+    "source_pinned_112_gate_sequence_verified": true,
+    "fixed_L2_observable_initializations_verified": true,
+    "bitset_fraction_interval_propagation_verified": true,
+    "outward_quantization_and_widening_ledger_verified": true,
+    "deterministic_truncation_dropped_l1_verified": true,
+    "canonical_checkpoint_digests_verified": true,
+    "product_formula_to_exact_hamiltonian": "NOT_ASSESSED",
+    "physical_L8_instance_identity": "NOT_ASSESSED",
+    "reference_error_budget": "NOT_ASSESSED",
+    "ready_gate_eligible": false
+  }
+}

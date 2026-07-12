@@ -258,9 +258,38 @@ prototype with certificate authority `NONE`. It matches exhaustive/random string
 tests and an eight-gate L2 prefix, but neither changes the pinned checker nor claims a
 complete 112-gate rational expansion.
 
-None of the campaign, reference-qualification, proof-kernel, mapping or bitset
-interfaces is currently loaded by `fermi_hubbard_evidence.py`. They do not add components to
-`component_statuses`, and none can yet participate
+That full L2 expansion is now completed by the separate source-pinned
+`operator_propagation_checkpointed_l2.py`.  It composes the positive canonical mapping
+result with all 112 nonidentity gates of the fixed `L=2,R=2,T=1` circuit, reverses the
+20 raw group-event checkpoints, uses fifth-order exact Taylor intervals, and rounds
+outward to the `2^32` grid after every slice.  No term is dropped: staggered
+magnetization finishes and peaks at 16,380 terms with interval
+`[104895467/134217728,209888553/268435456]`; double occupancy finishes and peaks at
+16,381 terms with interval `[8238201/268435456,33458587/1073741824]`.  Both final
+checkpoint digests and every intermediate checkpoint are independently recomputed.
+The float statevector values are contained diagnostics only.  The maximum status,
+`VERIFIED_L2_MAPPED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`, still excludes error from the
+R=2 product formula to exact Hubbard evolution, any L=8 transfer, reference-budget
+qualification and READY.
+
+The new `hubbard_strang_commutator_checker.py` independently regenerates the
+nonidentity Pauli expansions for the fixed L=2/L=3/L=8 OBC five-group split and
+computes the two nested-commutator families in the source-pinned Schubert--Mendl
+second-order bound.  Equal Pauli strings are merged inside each family before its
+coefficient `L1` norm is taken; theorem families are never cancelled against one
+another.  For L=8, the exact family sums are 22,752 and 11,104, giving `C=7076/3`.
+At `T=1,R=100` this yields unitary error at most `1769/7500` and the generic
+norm-one-observable comparison bound `1769/3750`, so the `1/4000` allocation fails by
+a wide margin; the least R satisfying this generic bound is 4,344.  This is a
+rigorous negative feasibility result for this grouping and generic norm reduction,
+not an observable-specific no-go theorem.  It cross-checks but does not compose the
+mapping certificate; L8 sparse-action validation, physical workload identity,
+truncation composition, observable-specific tightening, reference qualification and
+READY remain outside the positive status.
+
+None of the campaign, reference-qualification, proof-kernel, mapping, checkpoint or
+commutator interfaces is currently loaded by `fermi_hubbard_evidence.py`. They do not
+add components to `component_statuses`, and none can yet participate
 in or strengthen the outer `READY_FOR_BENCHMARK` decision. Outer integration remains
 a subsequent implementation step.
 
