@@ -1,6 +1,6 @@
 # 二维 Fermi–Hubbard 同任务资源模型
 
-状态日期：2026-07-11
+状态日期：2026-07-12
 
 模型状态：**证据约束的可复算规划脚手架；尚不是完成项序校验的 A/B benchmark，
 也不是硬件性能预测。**
@@ -568,6 +568,33 @@ certificate。当前纯 Python `Fraction` 稀疏传播在完整 112 gates 上出
 增长，正式状态为 `DEFERRED_RESOURCE_LIMIT`；只有一门 local probe 已做完整有理区间
 enclosure。
 
+#### 8.2.2 Canonical JW mapping 与 bitset checkpoint 层
+
+新增 [hubbard_jw_mapping_validator.py](hubbard_jw_mapping_validator.py) 后，L2 witness
+的 112 个 declared nonidentity gates 不再只靠 statevector 一致性间接支持。固定合同
+source-pin checker、L2 pilot、term-order contract、L2 witness 及其 proof-kernel dependency；
+checker 独立生成 L=2/L=3 OBC、site-major/spin-minor 的四组 bonds、
+`-1/2(XX+YY)` parity strings、未平移 onsite `2(I-Zup-Zdown+ZZ)` 和完整 R=2 raw events。
+L3 中 H1/H2/H3/H4 各有六条 spin-resolved bonds，补上 L2 的 H2/H3 空分支。
+
+每条 hopping bond 的八类 exact occupation witness 包含 prefix/suffix spectator；L2/L3
+分别重算 64/192 个 CAR-versus-Pauli actions。每个 site 的四种局域占据另得到
+`(0,0,0,8)`，共 16/36 个 onsite witnesses。Raw events 保留 identity rotations；供
+circuit 使用的 nonidentity view 省略它们时，全局相位账本明确给出 L2 `exp(-i*8)`、
+L3 `exp(-i*18)`。正路径运行 pinned L2 builder 并逐项比较全部 112 门。最高状态仍只是
+`VERIFIED_CANONICAL_JW_MAPPING_SUBCERTIFICATE`；product-formula、exact evolution、L=8、
+campaign budget 与 READY 均未评估，CLI 固定非零。
+
+[pauli_bitset_backend.py](pauli_bitset_backend.py) 同时提供 q0-first `(x_mask,z_mask)`
+Pauli keys、精确相位/辛对易、checker-compatible Fraction interval propagation 和
+canonical checkpoint SHA-256。固定 checkpoint 样例 digest 为
+`c69ecf852f053106f0feb89cd0c2e220903ef862974fd5821786605cec9929dd`。本机固定种子
+16-qubit/100,000 对诊断微基准中，预编码 bitset 的 multiply/commute 约有 `3.5x/9.6x`
+加速；这不是可移植性能保证。该模块的 certificate authority 是 `NONE`，尚未进入
+source-pinned checker，也没有完成全 112 门 Fraction certificate。
+其中 `max_bytes` 是 serialization 输出上限，不是峰值内存上限；payload 构造仍由独立
+term-count 与 rational-digit caps 有界。
+
 ### 8.3 L=2 双观测量 screening pilot
 
 新增 [fermi_hubbard_l2_pilot.py](fermi_hubbard_l2_pilot.py) 后，已经可以在无
@@ -720,6 +747,15 @@ python3 docs/research/fermion-frontier/operator_propagation_l2_witness.py \
 
 python3 docs/research/fermion-frontier/test_operator_propagation_l2_witness.py
 
+# 成功的 mapping subcertificate 仍按设计 exit 1
+python3 docs/research/fermion-frontier/hubbard_jw_mapping_validator.py \
+  docs/research/fermion-frontier/hubbard_jw_mapping_contract.json \
+  docs/research/fermion-frontier/hubbard_jw_mapping_template.json
+
+python3 docs/research/fermion-frontier/test_hubbard_jw_mapping_validator.py
+
+python3 docs/research/fermion-frontier/test_pauli_bitset_backend.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
@@ -780,6 +816,12 @@ Taylor remainder、Pauli phase/commutation、非零多门顺序、四角 interva
 CLI 非零边界。L=2 conformance witness 另有八个测试覆盖 112-gate raw sequence、Néel
 identity、双 observable statevector 交叉检查、local Fraction enclosure、ideal-reference
 分离和 full-certificate resource defer。
+Canonical JW mapping validator 另有三十四个测试覆盖 L2/L3 OBC bonds、H2/H3 parity、
+CAR/JW signs 与 external spectators、onsite 四占据、identity/global phase、112-gate
+source binding、term/event hashes、strict JSON/type/resource caps、API/CLI failure scopes
+和 overclaim 阻断。Bitset/checkpoint 原型另有三十五个测试覆盖 2-qubit Pauli product
+穷举、3-qubit commutation 穷举、随机多比特/区间传播、canonical digest、重复/越界/
+非 Fraction/反向区间/资源上限拒绝，以及 L2 八门前缀与字符串 checker 一致性。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
@@ -794,7 +836,7 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `187` 个测试。
+全套共 `256` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
@@ -807,10 +849,10 @@ overlap、operation window/资源冲突、event binding、dependency、非法 ID
    family-wise high-confidence binomial stopping rule，不能把 expected count 代替它。
 3. **独立有界 reference：**当前 Fraction proof kernel 已闭合固定 declared Pauli circuit
    的 phase/interval/dropped-L1 子证明，但完整 L=2 `R=2` 已触及 term/rational growth。
-   下一步先实现 bitset Pauli keys、批量 directed interval/checkpoint digest 和独立
-   mapping/term-list validator，再运行完整 L=2/L=3 parity witnesses；随后生成 L=8 OBC
+   Bitset/checkpoint 原型和 L2/L3 canonical mapping validator 已完成；下一步把它们纳入
+   新的 source-pinned checkpointed checker，延伸到 L=8 OBC identity，并生成
    product-formula commutator certificate。只有 checker 全链通过且 bound 不超过
-   `0.00025` 才能新增 reference 资格状态；当前 subcertificate 与
+   `0.00025` 才能新增 reference 资格状态；当前两个 subcertificate、prototype 与
    `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付边界。
 4. **真实双观测量网格：**按固定 `R=[25,50,100,200,400,800]` 对四条 unique
    convergence routes 生成联合 measurements、covariance、有效样本与可绑定 systematic

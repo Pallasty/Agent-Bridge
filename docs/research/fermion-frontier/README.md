@@ -1,6 +1,6 @@
 # Fermion frontier research takeover
 
-Status date: 2026-07-11
+Status date: 2026-07-12
 
 Scope: physical fermions, not the historical Fermion Memory service.
 
@@ -164,10 +164,27 @@ conformance witness independently reproduces both product-formula observables fr
 `DEFERRED_RESOURCE_LIMIT` because the unoptimized sparse rational expansion grows
 too quickly.
 
-These campaign, reference and proof-kernel artifacts remain standalone preflight,
-qualification and conformance tools. They have **not** yet been added as components of
-`fermi_hubbard_evidence.py`, so they do not alter the current outer
-`READY_FOR_BENCHMARK` gate.
+A separate source-pinned mapping checker now closes the narrower gate-identity gap
+for fixed L=2/L=3 OBC profiles. It independently regenerates the site-major,
+spin-minor JW bonds, `XX/YY` parity strings, unshifted onsite `I/Z/Z/ZZ` terms and
+the raw R=2 Strang events. Exact CAR-versus-Pauli basis-action witnesses include
+external spectators; all four onsite occupations are re-evaluated; omitted identity
+rotations retain an explicit global-phase ledger. The L=2 nonidentity sequence is
+checked at runtime, gate by gate, against the source-pinned 112-gate witness. L=3
+forces H2 and H3 to be nonempty. The maximum state is only
+`VERIFIED_CANONICAL_JW_MAPPING_SUBCERTIFICATE`: it does not compose itself with the
+truncation kernel, assess product-formula error, transfer to L=8, or enter READY.
+
+An exact `(x_mask,z_mask)` Pauli backend and deterministic Fraction-interval
+checkpoint digest are also available as a non-authoritative prototype. Exhaustive
+and randomized conformance checks match the string proof-kernel algebra, but this
+backend has not replaced the source-pinned checker and does not turn the deferred
+112-gate Fraction expansion into a certificate.
+
+These campaign, reference, proof-kernel, mapping and bitset artifacts remain
+standalone preflight, qualification and conformance tools. They have **not** yet
+been added as components of `fermi_hubbard_evidence.py`, so they do not alter the
+current outer `READY_FOR_BENCHMARK` gate.
 
 The focused 70-claim ledger is fully adjudicated: 56 unanimous verified, 8
 split/partial accepted, and 6 refuted as written, with every mandatory rewrite
@@ -191,6 +208,8 @@ retained in `claim-status.jsonl`.
   standalone reference-qualification contract/template/validator,
   source-pinned Pauli propagation subcertificate contract/template/checker,
   L=2 proof-kernel conformance witness,
+  source-pinned L=2/L=3 Hubbard-to-JW mapping contract/template/validator,
+  exact bitset Pauli/checkpoint prototype,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -208,6 +227,8 @@ retained in `claim-status.jsonl`.
   `test_measurement_campaign_validator.py` /
   `test_reference_qualification_validator.py` /
   `test_operator_propagation_certificate_checker.py` /
-  `test_operator_propagation_l2_witness.py`
+  `test_operator_propagation_l2_witness.py` /
+  `test_hubbard_jw_mapping_validator.py` /
+  `test_pauli_bitset_backend.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

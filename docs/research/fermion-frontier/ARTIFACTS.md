@@ -136,9 +136,26 @@ so they are versioned normally and are not added to the preservation-only
 - `test_operator_propagation_l2_witness.py`: eight gate-count, identity, dual-observable,
   local Fraction enclosure, ideal-reference separation, resource-boundary and CLI
   regressions.
-- The measurement-campaign, reference-qualification and proof-kernel artifacts are
-  currently independent of `fermi_hubbard_evidence.py`; none is yet an outer
-  `READY_FOR_BENCHMARK` component.
+- `hubbard_jw_mapping_contract.json`: source-pinned fixed L=2/L=3 OBC policy for
+  site-major/spin-minor JW bonds, unshifted onsite terms, raw R=2 Strang events,
+  selected CAR/onsite witnesses, explicit identity/global-phase accounting and the
+  pinned L2 112-gate cross-source binding.
+- `hubbard_jw_mapping_template.json`: positive canonical profile claims and digests;
+  its maximum status remains `VERIFIED_CANONICAL_JW_MAPPING_SUBCERTIFICATE`.
+- `hubbard_jw_mapping_validator.py`: stdlib-only exact mapping checker. It regenerates
+  bonds/terms/events, compares exact CAR and Pauli actions, evaluates all four onsite
+  occupations, runs the pinned L2 sequence builder, clears failed scopes and always
+  exits nonzero because product-formula error, L=8 and READY are not assessed.
+- `test_hubbard_jw_mapping_validator.py`: thirty-four mapping, parity, sign,
+  global-phase, source/digest, strict-JSON, resource, API/CLI and overclaim regressions.
+- `pauli_bitset_backend.py`: non-authoritative exact `(x_mask,z_mask)` Pauli arithmetic,
+  checker-compatible Fraction interval propagation and deterministic canonical
+  checkpoint digest prototype; certificate authority is explicitly `NONE`.
+- `test_pauli_bitset_backend.py`: thirty-five exhaustive/random algebra, interval,
+  checkpoint, cap, malformed-input and L2-prefix conformance regressions.
+- The measurement-campaign, reference-qualification, proof-kernel, mapping and
+  bitset artifacts are currently independent of `fermi_hubbard_evidence.py`;
+  none is yet an outer `READY_FOR_BENCHMARK` component.
 - `fermi_hubbard_l2_pilot.py`: dependency-free L=2 dual-observable deterministic
   product-formula screening generator;
 - `fermi_hubbard_l2_pilot_manifest.json`: generated deterministic pilot data whose

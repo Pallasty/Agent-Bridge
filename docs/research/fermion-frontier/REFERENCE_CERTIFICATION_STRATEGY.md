@@ -1,6 +1,6 @@
 # L=8 Fermi--Hubbard 有界参考策略
 
-更新日期：2026-07-11。
+更新日期：2026-07-12。
 
 ## 结论
 
@@ -174,19 +174,50 @@ L=2 conformance witness 对 `R=2,T=1` 的 112 个 raw rotations 独立复算得�
 但它与 ideal diagnostic 的差仍约为 `0.12595` 和 `0.00586`，直接说明“circuit arithmetic
 正确”不等于“ideal-time reference 已认证”。完整 112-gate Fraction expansion 在当前纯
 Python sparse representation 中出现快速 term/rational growth，因此标为
-`DEFERRED_RESOURCE_LIMIT`。下一实现层必须引入 bitset Pauli keys、批量 directed
-arithmetic 和受审计的 checkpoint/digest，而不能降低为 binary64 后继续声称 rigorous。
+`DEFERRED_RESOURCE_LIMIT`。完整证书的下一实现层仍必须使用 bitset Pauli keys、批量
+directed arithmetic 和受审计的 checkpoint/digest；下述独立原型先验证了这些接口，
+但不能降低为 binary64 后继续声称 rigorous。
+
+### 已实现的 canonical JW mapping 子证书
+
+`hubbard_jw_mapping_validator.py` 现已把“L2 witness 的 declared gates 是否真来自固定
+Hubbard convention”从人工复核变成独立 machine check。合同固定 L=2/L=3 OBC、
+site-major/spin-minor、未平移的 `U n_up n_down`、`U/t=8,T=1,R=2` 和 raw Strang 顺序；
+checker 重新生成四个 hopping matchings、`-1/2(XX+YY)` 的中间 Z 串以及 onsite
+`2(I-Zup-Zdown+ZZ)`。L3 的 H2/H3 各有六条 spin-resolved bonds，因而覆盖 L2 无法触发
+的 odd-parity 分支。
+
+每条 hopping bond 用八类 occupation witnesses 比较 CAR 与 Pauli action，其中包括
+prefix/suffix spectator；每个 site 的 `00/10/01/11` 能量重新得到 `0/0/0/8`。Raw events
+保留 identity rotations，并把非恒等 gate view 省略的全局相位显式记为 L2 `exp(-i*8)`、
+L3 `exp(-i*18)`。正路径还运行 SHA-pinned L2 builder，逐项要求其 112 门与 canonical
+sequence 完全相等。最高状态仅 `VERIFIED_CANONICAL_JW_MAPPING_SUBCERTIFICATE`；它没有
+与 truncation kernel 组合，也没有验证 product-formula error、L=8 或 READY。
+
+### 已实现的 bitset/checkpoint 原型
+
+`pauli_bitset_backend.py` 采用 q0-first `(x_mask,z_mask)` Hermitian Pauli 编码，提供精确
+相位乘法、辛对易、与现有 checker 同语义的 Fraction 区间传播，以及对排序稀疏项的
+canonical JSON/SHA-256 checkpoint。固定样例 digest 为
+`c69ecf852f053106f0feb89cd0c2e220903ef862974fd5821786605cec9929dd`。本机固定种子、
+16-qubit/100,000 对诊断微基准中，预编码 bitset 的 multiply/commute 分别约为字符串实现
+的 `3.5x/9.6x`；这些数值仅是 CPython 本机诊断，不是规模保证。该模块的 certificate
+authority 固定为 `NONE`，尚未替换 source-pinned checker，也未完成 112-gate Fraction
+certificate。其 `max_bytes` 只限制 canonical serialization 输出；payload 构造峰值另由
+term-count/rational-digit caps 有界，不能把该字段解释为严格峰值内存证书。
 
 `standard_error=0` 只表示 deterministic certificate，不等于 bound 为零。未经证书的
 Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGNOSTIC_ONLY`。
 
 ## 执行顺序
 
-1. 冻结 OBC、未平移的 `U n_up n_down` convention、A/B Néel 相位和两个 observable 的
-   canonical formulas。
+1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结；继续为 L=8
+   固定 A/B Néel 相位、两个 observable 与同一 term-sequence identity。
 2. 固定 MajoranaPropagation implementation commit；先补 deduplicate-before-truncation、
-   per-slice dropped-L1 ledger、directed coefficient intervals 和小尺寸 ED 对照。
-3. 为独立 reference formula 生成目标 OBC term split 的 commutator certificate。
+   per-slice dropped-L1 ledger、directed coefficient intervals 和小尺寸 ED 对照；把已审计
+   bitset/checkpoint 原型纳入新的 source-pinned checker 版本。
+3. 为独立 reference formula 生成目标 L=8 OBC term split 与 product-formula commutator
+   certificate。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
    两个 observables 可以采用不同 certified methods。
 5. 若 Majorana L1 bound 爆炸，先计算 locality tail，再决定是否执行 cluster Krylov。

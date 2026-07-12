@@ -1,6 +1,6 @@
 # Research progress ledger
 
-Status date: 2026-07-11
+Status date: 2026-07-12
 
 ## State labels
 
@@ -223,12 +223,12 @@ absolute interval and the cumulative `L1` ledger. It also returns the retained
 expectation interval expanded by cumulative dropped `L1`.
 
 This positive state is narrowly named
-`VERIFIED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`. It does not check whether the declared
-Pauli sequence is the Hubbard mapping, whether its product formula approximates
-ideal time evolution, whether the truncation bound meets any budget, or whether the
-method scales to L=8. All such fields remain `NOT_ASSESSED`, READY remains false and
-the CLI exits nonzero. The reference-qualification validator does not invoke this
-kernel, so no existing reference or outer state is upgraded.
+`VERIFIED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`. The kernel itself does not check whether
+its declared Pauli sequence is a Hubbard mapping, whether its product formula
+approximates ideal time evolution, whether the truncation bound meets any budget, or
+whether the method scales to L=8. All such fields remain `NOT_ASSESSED`, READY remains
+false and the CLI exits nonzero. The reference-qualification validator does not
+invoke this kernel, so no existing reference or outer state is upgraded.
 
 The companion L=2 conformance witness independently builds the site-major JW
 `R=2,T=1` sequence with 112 raw rotations and obtains
@@ -239,8 +239,27 @@ fully enclosed, while the full 112-gate rational certificate is
 `DEFERRED_RESOURCE_LIMIT`: the unoptimized term and rational-size growth is itself a
 measured implementation boundary, not evidence of L=8 feasibility.
 
-None of the campaign, reference-qualification or proof-kernel interfaces is currently
-loaded by `fermi_hubbard_evidence.py`. They do not add components to
+The next independent layer now verifies the canonical Hubbard-to-JW construction for
+fixed L=2 and L=3 OBC profiles. `hubbard_jw_mapping_validator.py` source-pins its own
+checker plus the L2 pilot, term-order contract, L2 witness and the witness's proof-kernel
+dependency. It regenerates every spin-resolved matching bond and Pauli term, retains
+the onsite identity component in raw events, and records global phases `exp(-i*8)` and
+`exp(-i*18)` for L2/L3. Exact CAR/JW action witnesses number 64/192, onsite occupation
+witnesses number 16/36, and L3 has six bonds in each of H1/H2/H3/H4. Its positive path
+also executes the pinned L2 builder and requires exact equality with the canonical
+112-gate nonidentity sequence. The maximum status is
+`VERIFIED_CANONICAL_JW_MAPPING_SUBCERTIFICATE`; product-formula error, exact evolution,
+L=8, the campaign budget and READY remain outside its scope.
+
+`pauli_bitset_backend.py` provides exact Hermitian-Pauli multiplication, symplectic
+commutation, checker-compatible interval propagation and order-independent checkpoint
+SHA-256 over canonical Fraction intervals. It is explicitly a consistency/performance
+prototype with certificate authority `NONE`. It matches exhaustive/random string-backend
+tests and an eight-gate L2 prefix, but neither changes the pinned checker nor claims a
+complete 112-gate rational expansion.
+
+None of the campaign, reference-qualification, proof-kernel, mapping or bitset
+interfaces is currently loaded by `fermi_hubbard_evidence.py`. They do not add components to
 `component_statuses`, and none can yet participate
 in or strengthen the outer `READY_FOR_BENCHMARK` decision. Outer integration remains
 a subsequent implementation step.
