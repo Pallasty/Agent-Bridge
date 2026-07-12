@@ -718,6 +718,90 @@ cancellation、不同 grouping 或高阶 formula；不组合 truncation、physic
 READY。由此停止继续建设这条 fixed-generic cluster upper-bound 证书，下一数学层转向两个
 target observables 的 locality cone / Heisenberg propagation，或真正不同的公式。
 
+#### 8.2.7 Fang--Qu observable Taylor 单步核与 R-step 路线判决
+
+observable-specific Taylor 核采用 Fang--Qu，*Uniform Semiclassical Observable Error
+Bound of Trotter--Suzuki Splitting: A Simple Algebraic Proof*，
+[SIAM J. Numer. Anal. 64 (2026)，DOI 10.1137/25M1777098](https://doi.org/10.1137/25M1777098)，
+[arXiv:2507.02783v2](https://arxiv.org/abs/2507.02783)。审计所用 v2 PDF SHA-256 为
+`c1afaae4a944ba5c32bb5c86e421986bbcd89c14dae959d73560db979e668806`。这里专门使用
+其 Eq. (3.9) 的逐 stage 积分 Taylor remainder；对整条径向 product 直接求四阶导会出现
+interleaved exponentials，不能作为同一公式的证明。
+
+合并相邻两个 `H4` 半步后，一步固定为
+
+\[
+(H_1,H_2,H_U,H_3,H_4,H_3,H_U,H_2,H_1),\qquad
+(c_1,\ldots,c_9)=(1/2,1/2,1/2,1/2,1,1/2,1/2,1/2,1/2).
+\]
+
+formal degree 0--2 product-minus-ideal residual 均为零；degree-3 差记为 `D3(O)`。四阶
+remainder 使用
+
+\[
+E_4(O)=\|\operatorname{ad}_H^4(O)\|/24,
+\]
+
+\[
+P_4(O)=\sum_{q_1+\cdots+q_9=4}
+\left(\prod_j\frac{c_j^{q_j}}{q_j!}\right)
+\left\|\operatorname{ad}_{H_9}^{q_9}\cdots
+\operatorname{ad}_{H_1}^{q_1}(O)\right\|.
+\]
+
+总计 `binom(12,8)=495` 个 weak compositions。每个 remainder 首次在总 degree 4 的
+stage 产生，余下 stages 只作为 exact unitary isometries 包在外层；因此对 `delta>=0`
+没有小步长前提，也没有 exponential prefactor。当前数值是 fully merged Pauli coefficient
+`L1` 对 operator norm 的严格替代，不是 exact spectral norms。L8 结果为：
+
+| observable | `D3` | `E4` | `P4` | `E4+P4` | `delta=1/100` 严格单步界 |
+|---|---:|---:|---:|---:|---:|
+| staggered magnetization | `1703/24` | `15275/12` | `25287/16` | `136961/48` | `159187/1600000000≈9.9491875e-5` |
+| double occupancy | `423/16` | `16633/12` | `37211/24` | `70477/24` | `133927/2400000000≈5.5802917e-5` |
+
+这些界只认证单步 defect 作用于初始 observable。R 步 Heisenberg telescoping 的正确输入
+是 evolved observable：
+
+\[
+\|\mathcal P_\delta^R(O)-\mathcal E_\delta^R(O)\|
+\le\sum_{k=0}^{R-1}
+\|(\mathcal P_\delta-\mathcal E_\delta)(O_k)\|,
+\qquad O_k=\mathcal E_\delta^k(O),
+\]
+
+或反向 telescoping 中的 PF-evolved `O_k`。外层 conjugation 的等距性不足以把 `O_k`
+替换成初始 `O`，所以把表中单步界直接乘 100 不是 actual/global error bound。严格
+uniform-sup 版本必须写成
+
+\[
+\sup_k\|D_3(O_k)\|/R^2+
+\sup_k(E_4(O_k)+P_4(O_k))/R^3.
+\]
+
+由于两个 suprema 都包含 `k=0`，R=100 的 RHS floor 分别至少为
+`159187/16000000` 与 `133927/24000000`，相对 `1/4000` allocation 是
+`159187/4000=39.79675` 倍与 `133927/6000≈22.32117` 倍。因此当前
+“逐步 triangle + uniform supremum + Pauli-L1”架构不能达标；这不是 actual-error
+no-go，也不排除逐 `k` ledger、跨 step cancellation、sector/state-specific action 或更紧
+norm。
+
+[hubbard_strang_observable_taylor_step_checker.py](hubbard_strang_observable_taylor_step_checker.py)
+已把上述 ledger 对 L2/L3/L8 和两个 observables 机器重算。最高状态仅
+`VERIFIED_ONE_STEP_OBSERVABLE_TAYLOR_L1_SUBCERTIFICATE`，CLI 固定非零。它 source-pin
+既有 Strang backend/contract/template，并在 warm cache 上重验；当前最小 artifact 尚无
+自身 same-byte contract，论文 PDF SHA 也只是外部审计 metadata，不是运行时载入的本地
+source。L8 exact Néel `D3` action 对 magnetization 给出
+`135913/18432>(5/2)^2`，排除 uniform-leading norm shortcut；double occupancy 为
+`79145/73728<(5/2)^2`，仍保留更紧 sector norm 的可能性。两者 `<q|D3|q>=0` 只收紧
+初始单步 expectation，不能外推后续 steps。
+
+短时 global-observable light-cone theorem 也不能直接救回该实例：二阶公式取
+`chi=5,Upsilon=2,R=100` 时覆盖 `(chi-1)R Upsilon+3=803` 层，远超过 L8 OBC
+格点直径 14，已经饱和。并且 theorem 以 qubit Pauli support 陈述；当前 JW 竖向 hopping
+含长字符串，若把物理 fermion-site locality 代入，必须另证 even-CAR adaptation。下一步
+改为构造逐 `k` evolved-observable/Majorana propagation ledger，直接包住每步 defect 或
+global cancellation-aware 表达式，再决定是否还有 observable-specific 认证空间。
+
 ### 8.3 L=2 双观测量 screening pilot
 
 新增 [fermi_hubbard_l2_pilot.py](fermi_hubbard_l2_pilot.py) 后，已经可以在无
@@ -907,6 +991,11 @@ python3 docs/research/fermion-frontier/hubbard_strang_generic_bound_no_go_checke
 
 python3 docs/research/fermion-frontier/test_hubbard_strang_generic_bound_no_go_checker.py
 
+# 成功的 observable Taylor one-step subcertificate 仍按设计 exit 1
+python3 docs/research/fermion-frontier/hubbard_strang_observable_taylor_step_checker.py
+
+python3 docs/research/fermion-frontier/test_hubbard_strang_observable_taylor_step_checker.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
@@ -987,6 +1076,11 @@ well-shaped tamper、pre-exec pin、失败 scope 清零和 CLI 非零边界。
 Fixed generic-bound no-go checker 另有三十八个测试覆盖 exact selected operator、归一化
 Néel witness、half-filled sector、416 项 action 与 amplitude histogram、平方 margin、
 601/602 边界、source pins、strict schema/types、tamper、失败 scope 清零和 CLI 非零边界。
+Observable Taylor step checker 另有三十二个测试覆盖 source pins、warm-cache drift、
+hard pair preflight、9-stage composition、
+双 observable identity、formal degree 0--2 cancellation、495 个 remainder paths、L2/L3/L8
+exact Fractions、严格单步 operator/expectation bounds、uniform-sup floor、Néel action/
+sector、资源上限、缓存、失败 scope 清零和 CLI 非零边界。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
@@ -1001,7 +1095,7 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `434` 个测试。
+全套共 `466` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
@@ -1018,9 +1112,11 @@ overlap、operation window/资源冲突、event binding、dependency、非法 ID
    `1769/3750` 远超 `0.00025`；全部 group orders 与精确 OBC plaquette+boundary
    coefficient-L1 screen 也没有实质改进。更强的 exact half-filled-sector witness 已证明，
    即使使用全局精确 cluster spectral norms，固定五组 generic theorem 在 R=100 仍至少超
-   allocation 约 36.2 倍；因此不再建设该 fixed-generic cluster upper-bound 路线。下一步
-   直接实现两个 target observables 的 locality cone / Heisenberg propagation bound，或
-   检查真正不同的 grouping 与高阶 formula；同时把 L8 初态、两个 observables、
+   allocation 约 36.2 倍；因此不再建设该 fixed-generic cluster upper-bound 路线。
+   Observable Taylor 单步核现已严格闭合，但正确 R-step telescoping 需要 evolved `O_k`；
+   uniform-supremum Pauli-L1 shortcut 也已被 `k=0` floor 排除。下一步构造逐 `k`
+   Majorana/Pauli evolved-observable ledger 或 cancellation-aware global defect，并检查真正
+   不同的 grouping 与高阶 formula；同时把 L8 初态、两个 observables、
    occurrence-level sequence、truncation 和 product-formula bound 组合成同一 source-pinned
    chain。只有全链通过且 `total_abs_bound<=0.00025` 才能新增 reference 资格状态；当前
    subcertificates 与 `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付边界。

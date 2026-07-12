@@ -321,8 +321,25 @@ fixed generic bound.  Actual product-formula error and observable-specific error
 not lower-bounded; the next route is observable/locality-specific or a genuinely
 different grouping/formula.
 
+`hubbard_strang_observable_taylor_step_checker.py` now implements the first
+observable-specific proof kernel.  It source-pins the positive Strang backend,
+specializes Fang--Qu Eq. (3.9) to the fixed nine-stage composition, verifies exact
+formal cancellation through degree two, merges the degree-three defects and
+enumerates all 495 fourth-order remainder paths for L2/L3/L8 and both targets.  At
+L8 its strict `delta=1/100` initial-observable one-step operator bounds are
+`159187/1600000000` and `133927/2400000000`; the initial Néel expectation bounds are
+smaller because both exact `D3` expectations vanish.  Correct R-step telescoping
+requires evolved `O_k`, so neither number is multiplied into an actual full-time
+bound.  Conversely, a uniform-supremum Pauli-L1 architecture must include `k=0` and
+therefore has floors 39.80 and 22.32 times the allocation.  The exact L8 Néel action
+witness makes the magnetization leading-coefficient floor exceed `5/2`, while the
+double-occupancy witness remains below it.  The narrow positive status certifies only
+the one-step kernel and route decision; full R=100 error, reference and READY remain
+unassessed.
+
 None of the campaign, reference-qualification, proof-kernel, mapping, checkpoint,
-commutator, grouping-screen or generic-bound no-go interfaces is currently loaded by
+commutator, grouping-screen, generic-bound no-go or observable-Taylor-step interfaces
+is currently loaded by
 `fermi_hubbard_evidence.py`. They do not
 add components to `component_statuses`, and none can yet participate
 in or strengthen the outer `READY_FOR_BENCHMARK` decision. Outer integration remains

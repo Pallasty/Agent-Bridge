@@ -221,9 +221,22 @@ spectral norm therefore cannot make the fixed generic R=100 bound qualify.  This
 not a lower bound on actual Trotter error and does not exclude observable/locality-
 specific cancellation, alternative groupings, or higher-order formulas.
 
+The first observable-specific layer is now machine checked as well.  The new
+Fang--Qu specialization expands the fixed nine-stage Strang Heisenberg map through
+degree three and enumerates all 495 degree-four remainder paths.  For one
+`delta=1/100` step acting on the initial observables, the rigorous Pauli-L1 operator
+bounds are `159187/1600000000` for staggered magnetization and
+`133927/2400000000` for double occupancy.  These numbers cannot simply be multiplied
+by 100: correct telescoping acts on evolved observables `O_k`.  Any uniform-supremum
+Pauli-L1 shortcut nevertheless has a `k=0` floor already 39.80 and 22.32 times the
+full-time allocation, so that architecture is stopped.  An exact half-filled-sector
+`D3` action witness also stops the corresponding uniform-leading route for
+magnetization, while double occupancy remains open to tighter sector norms or a
+per-step/cancellation-aware ledger.  No full R=100 error or reference is claimed.
+
 These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
-grouping-screen and fixed-generic-bound no-go artifacts remain standalone preflight,
-qualification and conformance tools. They have **not** yet
+grouping-screen, fixed-generic-bound no-go and observable-Taylor-step artifacts remain
+standalone preflight, qualification and conformance tools. They have **not** yet
 been added as components of `fermi_hubbard_evidence.py`, so they do not alter the
 current outer `READY_FOR_BENCHMARK` gate.
 
@@ -255,6 +268,7 @@ retained in `claim-status.jsonl`.
   source-pinned L=2/L=3/L=8 Strang commutator contract/template/checker,
   source-pinned L=8 Strang grouping-screen contract/template/checker,
   source-pinned fixed-generic-bound infeasibility contract/template/checker,
+  base-source-pinned observable Taylor one-step checker,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -278,6 +292,7 @@ retained in `claim-status.jsonl`.
   `test_operator_propagation_checkpointed_l2.py` /
   `test_hubbard_strang_commutator_checker.py` /
   `test_hubbard_strang_grouping_screen.py` /
-  `test_hubbard_strang_generic_bound_no_go_checker.py`
+  `test_hubbard_strang_generic_bound_no_go_checker.py` /
+  `test_hubbard_strang_observable_taylor_step_checker.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

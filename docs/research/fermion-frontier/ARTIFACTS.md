@@ -210,8 +210,19 @@ so they are versioned normally and are not added to the preservation-only
 - `test_hubbard_strang_generic_bound_no_go_checker.py`: thirty-eight operator/witness,
   amplitude, sector, exact-square, margin, R-boundary, source-pin, strict-schema,
   tamper, failure-scope and CLI regressions.
+- `hubbard_strang_observable_taylor_step_checker.py`: source-pins the fixed Strang
+  backend and specializes the Fang--Qu iterated Taylor remainder to both target
+  observables.  It exactly verifies degree-zero through degree-two cancellation,
+  degree-three defects, all 495 fourth-order paths, strict initial-observable
+  `delta=1/100` operator/expectation bounds and L8 Néel-sector action witnesses.  It
+  explicitly does not multiply the initial bound into a full R=100 claim.
+- `test_hubbard_strang_observable_taylor_step_checker.py`: thirty-two source,
+  composition, observable-identity, exact-Fraction, formal-residual, remainder-path,
+  one-step, uniform-floor, action/sector, resource, cache, failure-scope and CLI
+  regressions.
 - The measurement-campaign, reference-qualification, proof-kernel, mapping,
-  checkpoint, commutator, grouping-screen and generic-bound no-go artifacts are
+  checkpoint, commutator, grouping-screen, generic-bound no-go and observable-Taylor
+  artifacts are
   currently independent of
   `fermi_hubbard_evidence.py`;
   none is yet an outer `READY_FOR_BENCHMARK` component.

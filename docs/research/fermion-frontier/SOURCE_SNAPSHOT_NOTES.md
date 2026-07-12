@@ -101,10 +101,21 @@ lower bound and does not assess observable/locality-specific cancellation,
 alternative groupings, or higher-order formulas.  It supplies no reference value and
 is not part of the source snapshot.
 
+The observable-specific follow-on is also standalone.  Its source-pinned checker
+uses Fang--Qu's iterated integral-Taylor remainder to certify a single
+`delta=1/100` Strang step acting on each initial target observable.  The exact L8
+Pauli-L1 bounds are `159187/1600000000` and `133927/2400000000`.  Correct full-time
+telescoping instead requires the evolved observables `O_k`; multiplying either
+initial bound by 100 is not an error certificate.  The checker only uses those
+multiplied values as a floor proving that the uniform-supremum Pauli-L1 architecture
+cannot meet the allocation.  It supplies no R=100 reference value, and its exact
+Néel-sector `D3` action is a leading-coefficient route witness rather than an actual
+error lower bound.
+
 None of the campaign preflight, reference-qualification ledger, proof kernel, L=2
 conformance witness, mapping checker, checkpointed L2 checker, bitset prototype,
-Strang commutator checker, grouping-screen checker or fixed-generic-bound no-go
-checker is currently a component of
+Strang commutator checker, grouping-screen checker, fixed-generic-bound no-go checker
+or observable-Taylor-step checker is currently a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the
 outer snapshot status or promote it toward `READY_FOR_BENCHMARK`.

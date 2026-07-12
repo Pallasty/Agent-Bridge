@@ -363,6 +363,103 @@ witness 排除”的必要门槛，并非充分条件。所有 416 个输出都�
 cone、不同 grouping 或高阶 formula。由此停止继续认证该固定 generic cluster 上界，下一
 主线正式转为 observable/locality-specific bound。
 
+### Fang--Qu observable Taylor 单步核与 R-step 路线判决
+
+observable-specific Taylor 路线的主源固定为 Fang--Qu，*Uniform Semiclassical
+Observable Error Bound of Trotter--Suzuki Splitting: A Simple Algebraic Proof*，
+[SIAM J. Numer. Anal. 64 (2026)，DOI 10.1137/25M1777098](https://doi.org/10.1137/25M1777098)，
+[arXiv:2507.02783v2](https://arxiv.org/abs/2507.02783)。本次审计下载的 v2 PDF SHA-256
+为 `c1afaae4a944ba5c32bb5c86e421986bbcd89c14dae959d73560db979e668806`。
+采用其 Eq. (3.9) 的逐 stage、由内向外积分 Taylor 展开，而不是对整条径向 product 的
+四阶导数作朴素估计；后者会产生 interleaved exponentials，不能直接化为 `t=0` nested
+commutators。
+
+将相邻两个半步 `H4` 合并后，固定一步是 9-stage palindrome
+
+\[
+(H_1,H_2,H_U,H_3,H_4,H_3,H_U,H_2,H_1),\qquad
+(c_1,\ldots,c_9)=(1/2,1/2,1/2,1/2,1,1/2,1/2,1/2,1/2).
+\]
+
+令 `ad_A(B)=[A,B]`。product 与 ideal Heisenberg maps 的 formal degrees 0--2 精确相同，
+degree-3 差记为 `D3(O)`；四阶 ideal remainder 与逐 stage product remainder 分别由
+
+\[
+E_4(O)=\frac{\|\operatorname{ad}_H^4(O)\|}{24},
+\]
+
+\[
+P_4(O)=
+\sum_{q_1+\cdots+q_9=4}
+\left(\prod_{j=1}^9\frac{c_j^{q_j}}{q_j!}\right)
+\left\|
+\operatorname{ad}_{H_9}^{q_9}\cdots
+\operatorname{ad}_{H_1}^{q_1}(O)
+\right\|
+\]
+
+控制。共有 `binom(12,8)=495` 个 weak compositions。由于所有 Hamiltonians Hermitian、
+所有 `c_j` 为正，外层 exact conjugations 是 operator-norm isometries，故不需要
+`delta<=1` 假设，也没有遗漏 exponential prefactor。以完全 merge 后的 Pauli coefficient
+`L1` 上界代替各 operator norms，可严格得到初始 observable 的单步界
+
+\[
+\|\mathcal P_\delta(O)-\mathcal E_\delta(O)\|
+\le \delta^3\|D_3(O)\|+\delta^4(E_4(O)+P_4(O)),\qquad \delta\ge0.
+\]
+
+L8 exact Fraction 重算结果为：
+
+| observable | `D3` | `E4` | `P4` | `E4+P4` | `delta=1/100` 单步上界 |
+|---|---:|---:|---:|---:|---:|
+| staggered magnetization | `1703/24` | `15275/12` | `25287/16` | `136961/48` | `159187/1600000000` |
+| double occupancy | `423/16` | `16633/12` | `37211/24` | `70477/24` | `133927/2400000000` |
+
+这些量已由 `hubbard_strang_observable_taylor_step_checker.py` 对 L2/L3/L8 与两个
+observables 机器重算。最高状态仅
+`VERIFIED_ONE_STEP_OBSERVABLE_TAYLOR_L1_SUBCERTIFICATE`，CLI 固定非零。L8 的 exact
+Néel-sector `D3` action 进一步得到 magnetization 的 norm-square 下界
+`135913/18432>(5/2)^2`，所以即使把该 leading coefficient 的 Pauli-L1 换成精确 sector
+norm，uniform-leading architecture 也不能达标；double occupancy 的同一 witness 为
+`79145/73728<(5/2)^2`，没有排除更紧 sector norm。两者 `<q|D3|q>=0`，只收紧初始单步
+expectation remainder，不能推断后续 steps 消失。
+Checker 运行时重新绑定既有 Strang backend/contract/template，包括 warm-cache path；但该
+最小 artifact 还没有自身 same-byte contract，论文 PDF SHA 也只作为外部审计 metadata。
+这不影响本轮 exact arithmetic，但在接入 outer custody chain 前仍需补齐。
+
+即两个严格单步界约为 `9.9491875e-5` 与 `5.5802916667e-5`。它们只绑定初始 `O`，
+不能乘 100 冒充完整演化。若 `E_delta`、`P_delta` 分别表示 exact/PF 单步 Heisenberg
+map，正确 telescoping 是
+
+\[
+\|\mathcal P_\delta^R(O)-\mathcal E_\delta^R(O)\|
+\le\sum_{k=0}^{R-1}
+\| (\mathcal P_\delta-\mathcal E_\delta)(O_k)\|,
+\qquad O_k=\mathcal E_\delta^k(O),
+\]
+
+或使用 PF-evolved observable 的反向版本。外层等距性不能把 `O_k` 换回初始 `O`。
+因此严格 uniform-sup 架构必须使用
+
+\[
+\frac{\sup_k\|D_3(O_k)\|}{R^2}+
+\frac{\sup_k(E_4(O_k)+P_4(O_k))}{R^3}.
+\]
+
+这个架构已经可以提前停止：supremum 包含 `k=0`，所以 R=100 的右端 floor 至少为
+`159187/16000000` 和 `133927/24000000`，分别是 `1/4000` allocation 的
+`159187/4000=39.79675` 倍与 `133927/6000≈22.32117` 倍。这个判决只排除“逐步
+triangle + uniform supremum + 当前 Pauli-L1 substitution”；逐 `k` 求和、直接保持不同
+step defects 的 cancellation、state/sector-specific action 或其他更紧 norm 仍然开放，
+也没有给出 actual Trotter error 下界。
+
+普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
+`R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
+饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
+在物理 site support 上使用还必须补 even-CAR 适配证明。下一可检验单元因此是逐 `k`
+evolved-observable ledger：优先复用 Majorana/Pauli propagation，记录每步 `D3/E4/P4`
+或直接 global defect 的 directed enclosure，再判断是否存在 cancellation-aware 的生路。
+
 `standard_error=0` 只表示 deterministic certificate，不等于 bound 为零。未经证书的
 Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGNOSTIC_ONLY`。
 
@@ -371,10 +468,11 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
 1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结，完整 L2
    checkpoint propagation 已闭合；下一步为 L8 固定 A/B Néel 相位、两个 observable 和
    与真实 campaign 相同的 occurrence-level term-sequence identity。
-2. 固定五组 generic bound 已被 half-filled-sector exact witness 严格排除；不再投入其
-   14-mode cluster spectral upper bound。转而实现两个 target observables 的 locality cone /
-   Heisenberg commutator bound，并平行筛选真正不同的 grouping 或高阶 formula。每个候选
-   仍须保留 source-pinned constants、common-phase ledger 与可机检 records。
+2. 固定五组 generic bound 已被 half-filled-sector exact witness 严格排除；observable
+   Taylor 单步核也已闭合，并排除 uniform-supremum Pauli-L1 shortcut。下一单元改为逐 `k`
+   evolved-observable / Majorana ledger 或 cancellation-aware global defect；同时平行筛选真正
+   不同的 grouping 或高阶 formula。每个候选仍须保留 source-pinned constants、
+   common-phase ledger 与可机检 records。
 3. 固定 MajoranaPropagation implementation commit；补 deduplicate-before-truncation、
    per-slice dropped-L1 ledger、directed coefficient intervals 和小尺寸 ED 对照，并把
    L8 initial observable/state identity 与完整 mapped sequence 组合进 checker。
