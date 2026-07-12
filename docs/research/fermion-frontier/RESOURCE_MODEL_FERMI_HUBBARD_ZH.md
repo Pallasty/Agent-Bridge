@@ -477,6 +477,14 @@ loss/leakage 和 provenance。只有所有 occurrence 都是 measured 且
 `compiled_exact=true` 才能给出 `complete_circuit_us`；否则最多是
 `BOOKKEEPING_CLOSED_ESTIMATE`，空模板为 `UNRESOLVED`。
 
+为了保留已知但未闭合的数字，新增
+[evidence_manifest_source_snapshot.json](evidence_manifest_source_snapshot.json) 和
+[SOURCE_SNAPSHOT_NOTES.md](SOURCE_SNAPSHOT_NOTES.md)。snapshot 写入 native 的
+`44,864/801` 逻辑 bookkeeping，以及 dynamic leading、dynamic fit、standard FSN、
+ladder FSN 的 steady count/depth；首步 timing、native occurrence table、individual
+terms 和共同-R 数据仍为缺失。因此运行统一 validator 仍为 `UNRESOLVED`，不会把
+source subtotal 误升级为完整 benchmark。
+
 ## 9. 复算与测试
 
 ```bash
@@ -547,8 +555,8 @@ fail-closed 行为；收敛接口另有五个测试覆盖双区间稳定、refer
 L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和规模限制。
 首步账本另有六个测试覆盖空模板、bookkeeping-closed 状态、精确闭账、全路线闭账
 门槛和非法 timing 的 fail-closed 行为。
-统一 evidence manifest 另有四个测试覆盖空 manifest、合成闭合、R 不一致和 route-map
-漂移的 fail-closed 行为。
+统一 evidence manifest 另有五个测试覆盖空 manifest、source snapshot、合成闭合、R
+不一致和 route-map 漂移的 fail-closed 行为。
 native transition validator 另有六个测试覆盖空模板、measured 完成、derived 估计、
 class count、timing decomposition 和 fingerprint fail-closed 行为。
 

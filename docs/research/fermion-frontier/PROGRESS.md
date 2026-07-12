@@ -162,3 +162,9 @@ with component-level movement/error estimates, Nature 2026 supplies a measured l
 ^6Li collisional-gate primitive, and arXiv:2604.13160 supplies a new global-control
 proposal. None provides the matched L=8 four-matching compiled route needed for
 `native_fermions` to leave `UNRESOLVED`.
+
+`evidence_manifest_source_snapshot.json` now preserves the known L=8/R=100 source-leading
+and derived bookkeeping values without inventing missing fields. Its native row exposes
+the `44,864` count / `801` depth schedule, while qubit-route first-step corrections,
+native occurrence timing, individual terms, and common-R data remain unresolved. The
+validator therefore continues to report `UNRESOLVED` for the snapshot.

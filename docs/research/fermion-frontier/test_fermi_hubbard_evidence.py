@@ -42,6 +42,25 @@ class EvidenceManifestTests(unittest.TestCase):
             self.first_step_contract,
             self.native_transition_contract,
         )
+
+    def test_source_snapshot_preserves_known_subtotals_without_closure(self):
+        snapshot = load_json("evidence_manifest_source_snapshot.json")
+        result = EVIDENCE.validate_manifest(
+            self.contract,
+            snapshot,
+            self.term_contract,
+            self.first_step_contract,
+            self.native_transition_contract,
+        )
+        self.assertEqual(result["status"], "UNRESOLVED")
+        native_route = result["components"]["first_step"]["routes"]["native_fermions"]
+        self.assertEqual(native_route["complete_count"], 44864)
+        self.assertEqual(native_route["complete_depth"], 801)
+        dynamic_route = result["components"]["first_step"]["routes"][
+            "dynamic_jw_local_grid_source_leading"
+        ]
+        self.assertEqual(dynamic_route["steady_count_per_step"], 2688)
+        self.assertEqual(result["component_statuses"]["native_transition"], "UNRESOLVED")
         self.assertEqual(result["status"], "UNRESOLVED")
         self.assertEqual(
             result["component_statuses"],

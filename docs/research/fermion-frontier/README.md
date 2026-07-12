@@ -107,6 +107,7 @@ retained in `claim-status.jsonl`.
   cross-route sequence comparator/template, convergence template/assessor,
   first-step ledger contract/template/validator, unified evidence manifest
   contract/template/orchestrator, native transition contract/template/validator,
+  source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
   and the native-fermion primary-source evidence ledger,
