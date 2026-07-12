@@ -86,3 +86,6 @@ so they are versioned normally and are not added to the preservation-only
 - `fermi_hubbard_evidence.py`: orchestration validator producing `UNRESOLVED`,
   `INCONSISTENT`, `MISMATCH`, or `READY_FOR_BENCHMARK`;
 - `test_fermi_hubbard_evidence.py`: four integration regression tests.
+- `DYNAMIC_JW_SOURCE_EVIDENCE.md`: primary-source ledger for Fig. 5/Fig. 14,
+  Appendix I leading counts, explicit first-step omission, and unresolved individual
+  term/compiled-event fields.

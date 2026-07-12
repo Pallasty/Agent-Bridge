@@ -144,3 +144,8 @@ checks route-map/workload consistency and cross-checks term-export `trotter_step
 against ledger `R`. Its empty manifest is still `UNRESOLVED`; only real individual-term
 exports, exact first-step resources, and route-specific common-R data can produce
 `READY_FOR_BENCHMARK`.
+
+The dynamic-JW source was rechecked directly against arXiv v1. `DYNAMIC_JW_SOURCE_EVIDENCE.md`
+records that Fig. 14 supports only a group-level sequence and that Appendix I explicitly
+omits the extra cost of the first Trotter step. No individual-term list or exact first-step
+compiled record is published there, so the unified manifest remains correctly unresolved.

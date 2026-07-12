@@ -380,6 +380,12 @@ fidelity。Nature 的 `U_int` 也不是 PNAS 的纯 density-phase primitive。�
 替代 dynamic-JW/FSN 的真实编译器导出；因此研究结论仍是“共同顺序目标已定义，跨
 编译器 individual-term equality 未验证”。
 
+本轮直接复核 [dynamic-JW arXiv v1](https://arxiv.org/abs/2605.12600) 并将页码/图表
+锚点记录在 [DYNAMIC_JW_SOURCE_EVIDENCE.md](DYNAMIC_JW_SOURCE_EVIDENCE.md)。Fig. 14
+只给分组级叙述，Appendix I 还明确忽略首个 Trotter step 无法融合的额外 circuit cost；
+主源没有 individual-term event list 或首步 exact count/depth/time。因此这些字段继续
+由 validator 保持 `UNRESOLVED`，而不是从图形反推。
+
 ## 8. 共同 R / 误差收敛接口
 
 本阶段还新增 [fermi_hubbard_convergence.py](fermi_hubbard_convergence.py) 和
