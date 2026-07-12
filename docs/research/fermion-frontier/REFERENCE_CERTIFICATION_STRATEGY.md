@@ -147,6 +147,36 @@ machine-verified qualification 状态。当前外部 route-input snapshot 也只
 orchestrator 必须直接从已验证 manifest 注入该 snapshot。结构完整状态的 CLI 因此仍返回
 非零退出码。
 
+### 已实现的最小 proof kernel
+
+本阶段新增 `operator_propagation_certificate_checker.py`，把上述方案中的一个真子命题
+变成可执行证明：对合同固定的
+
+\[
+G_P(\theta)=\exp(-i\theta P/2),\qquad |\theta|\le1,
+\]
+
+checker 用纯 `Fraction` Taylor--Lagrange 区间重算 `sin(theta)` / `cos(theta)`，按合同
+明确的 backprop order 做 Pauli phase algebra；每个 slice 完成全部 gates 后才合并相同
+strings、执行显式 drop，并以区间最大绝对值重算累计 dropped-`L1`。这对应 Fuller et al.
+的单次 `L1` triangle bound 和跨 slice 逐项相加规则，而不是典型态 `L2` 估计。checker
+source、generator sequence、initial terms 和 computational-basis state 都被独立 SHA/pin
+固定；失败输出不会保留任何正的 `*_verified` claim。
+
+最高状态仅为 `VERIFIED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`。输出同时给 retained
+expectation interval 与其 `± cumulative_dropped_L1` 扩张，但不判断该界是否足够小。
+fermion-to-Pauli mapping、`W_R` 到 ideal `exp(-iHT)` 的 product-formula bound、L=8 和
+campaign `0.00025` allocation 全部仍为 `NOT_ASSESSED`；CLI 始终非零，reference validator
+也尚未调用此 kernel。
+
+L=2 conformance witness 对 `R=2,T=1` 的 112 个 raw rotations 独立复算得到
+`M_s=0.781713978559467`、`D=0.0309252063024724`，与 direct-fermion statevector 一致；
+但它与 ideal diagnostic 的差仍约为 `0.12595` 和 `0.00586`，直接说明“circuit arithmetic
+正确”不等于“ideal-time reference 已认证”。完整 112-gate Fraction expansion 在当前纯
+Python sparse representation 中出现快速 term/rational growth，因此标为
+`DEFERRED_RESOURCE_LIMIT`。下一实现层必须引入 bitset Pauli keys、批量 directed
+arithmetic 和受审计的 checkpoint/digest，而不能降低为 binary64 后继续声称 rigorous。
+
 `standard_error=0` 只表示 deterministic certificate，不等于 bound 为零。未经证书的
 Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGNOSTIC_ONLY`。
 

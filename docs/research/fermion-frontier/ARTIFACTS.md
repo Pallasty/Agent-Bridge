@@ -116,8 +116,28 @@ so they are versioned normally and are not added to the preservation-only
 - `REFERENCE_CERTIFICATION_STRATEGY.md`: current primary-source assessment of full-ED,
   Majorana/Pauli operator propagation, locality/Krylov, tensor-network and real-time
   QMC reference routes, plus the proposed deterministic-certificate execution order.
-- The measurement-campaign and reference-qualification artifacts are currently
-  independent of `fermi_hubbard_evidence.py`; neither is yet an outer
+- `operator_propagation_certificate_contract.json`: fixed two-qubit conformance
+  profile that pins the exact checker source, two noncommuting Pauli rotations, raw
+  observable terms, computational-basis state, ordering semantics and hard resource
+  caps.
+- `operator_propagation_certificate_template.json`: nontrivial synthetic certificate
+  whose duplicate input strings, rigorous Taylor intervals, merge-before-drop state,
+  dropped-`L1` ledger and final expectation interval are all independently recomputed.
+- `operator_propagation_certificate_checker.py`: stdlib-only Fraction proof kernel for
+  `G_P(theta)=exp(-i theta P/2)`. It verifies only the declared circuit and returns at
+  most `VERIFIED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`; mapping, product-formula error,
+  budget adequacy, L=8 and READY remain unassessed, and the CLI always exits nonzero.
+- `test_operator_propagation_certificate_checker.py`: twenty-four arithmetic,
+  interval, Pauli-phase, ordering, hash, byte-cap, state-boundary and fail-closed tests.
+- `operator_propagation_l2_witness.py`: executable 8-qubit JW conformance cross-check
+  for the full L=2, `R=2`, `T=1` raw Strang sequence (112 rotations). It matches the
+  independent direct-fermion pilot but defers the full Fraction certificate at the
+  explicit resource boundary.
+- `test_operator_propagation_l2_witness.py`: eight gate-count, identity, dual-observable,
+  local Fraction enclosure, ideal-reference separation, resource-boundary and CLI
+  regressions.
+- The measurement-campaign, reference-qualification and proof-kernel artifacts are
+  currently independent of `fermi_hubbard_evidence.py`; none is yet an outer
   `READY_FOR_BENCHMARK` component.
 - `fermi_hubbard_l2_pilot.py`: dependency-free L=2 dual-observable deterministic
   product-formula screening generator;

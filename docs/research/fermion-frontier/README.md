@@ -151,8 +151,21 @@ exits nonzero. The primary-source method assessment and proposed
 certificate pipeline are recorded in
 [REFERENCE_CERTIFICATION_STRATEGY.md](REFERENCE_CERTIFICATION_STRATEGY.md).
 
-These campaign and reference artifacts are currently standalone preflight and
-qualification tools. They have **not** yet been added as components of
+The first executable proof-kernel layer now exists, but remains deliberately
+separate from that reference ledger. Its source-pinned checker uses only exact
+`Fraction` arithmetic to enclose nonzero Pauli rotations, applies a contract-pinned
+backpropagation sequence, merges duplicate strings before truncation, and recomputes
+the cumulative dropped-`L1` interval. The maximum result is
+`VERIFIED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`; it does not assess the
+fermion-to-Pauli mapping, product-formula error to exact evolution, a truncation
+acceptance budget, or L=8, and its CLI exits nonzero. An executable L=2 `R=2`
+conformance witness independently reproduces both product-formula observables from
+112 Pauli rotations, while the full 112-gate Fraction certificate is explicitly
+`DEFERRED_RESOURCE_LIMIT` because the unoptimized sparse rational expansion grows
+too quickly.
+
+These campaign, reference and proof-kernel artifacts remain standalone preflight,
+qualification and conformance tools. They have **not** yet been added as components of
 `fermi_hubbard_evidence.py`, so they do not alter the current outer
 `READY_FOR_BENCHMARK` gate.
 
@@ -176,6 +189,8 @@ retained in `claim-status.jsonl`.
   surface-code place-and-route contract/template/validator,
   standalone measurement-campaign preflight contract/template/validator and
   standalone reference-qualification contract/template/validator,
+  source-pinned Pauli propagation subcertificate contract/template/checker,
+  L=2 proof-kernel conformance witness,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -191,6 +206,8 @@ retained in `claim-status.jsonl`.
   `test_native_transition_validator.py` /
   `test_surface_place_route_validator.py` /
   `test_measurement_campaign_validator.py` /
-  `test_reference_qualification_validator.py`
+  `test_reference_qualification_validator.py` /
+  `test_operator_propagation_certificate_checker.py` /
+  `test_operator_propagation_l2_witness.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

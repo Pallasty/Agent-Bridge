@@ -537,10 +537,36 @@ validator 不执行固定 machine checker，也不加载 campaign contract 判�
 `QUALIFIED_BOUNDED` 状态。Uncertified tensor network/Krylov/stochastic records 即使填写
 binding-looking fields 也只能是 `DIAGNOSTIC_ONLY`；空模板为 `UNRESOLVED`。
 
-这两个新 artifact 当前保持独立生命周期：campaign preflight 规划数据获取，reference
-ledger 资格化外部证书；它们尚未接入 `fermi_hubbard_evidence.py` 的最终 outer READY gate。
+这些 artifact 当前保持独立生命周期：campaign preflight 规划数据获取，reference ledger
+检查外部证书结构，proof kernel 只重算固定 declared circuit 的 truncation 子证明；它们均
+未接入 `fermi_hubbard_evidence.py` 的最终 outer READY gate。
 在真实 certificate 与 route data 出现前先保持这一边界，避免用空计划或合成证书制造
 新的自我认证回路。
+
+#### 8.2.1 Source-pinned Pauli truncation proof kernel
+
+现在已有第一个真正重算数值子证明的 kernel：
+[operator_propagation_certificate_checker.py](operator_propagation_certificate_checker.py)。
+固定合同同时 pin checker source SHA-256、两个非零非交换 Pauli rotations、raw initial
+observable、computational-basis state、backprop 顺序和硬资源上限。对
+`G_P(theta)=exp(-i theta P/2)`，checker 用纯 `Fraction` Taylor--Lagrange 区间包住
+`sin(theta)`/`cos(theta)`，重算 Pauli phase、四角 interval multiplication、slice 内
+merge-before-drop 和累计 dropped-`L1`。最终输出 retained expectation interval 及其
+`± cumulative dropped-L1` 扩张。
+
+这一正状态刻意命名为 `VERIFIED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`，而不是 bounded
+reference。它没有验证 declared gates 来自 Hubbard mapping，没有给出 product formula 到
+ideal evolution 的 bound，也不判断 truncation error 是否小于 `0.00025`；L=8 与 READY
+仍为 `NOT_ASSESSED/false`，CLI 固定返回非零。现有 reference validator 也不调用它。
+
+[operator_propagation_l2_witness.py](operator_propagation_l2_witness.py) 进一步把完整
+`L=2,R=2,T=1` raw Strang sequence 展开为 112 个 8-qubit JW Pauli rotations。独立 Pauli
+statevector 与 direct-fermion path 分别给出
+`M_s=0.781713978559467`、`D=0.0309252063024724`，差小于 `1e-12`。但是它们与 ideal
+diagnostic 的差仍约 `0.12595/0.00586`，所以 mapping cross-check 不能冒充 ideal-time
+certificate。当前纯 Python `Fraction` 稀疏传播在完整 112 gates 上出现快速 term 和大整数
+增长，正式状态为 `DEFERRED_RESOURCE_LIMIT`；只有一门 local probe 已做完整有理区间
+enclosure。
 
 ### 8.3 L=2 双观测量 screening pilot
 
@@ -682,6 +708,18 @@ python3 docs/research/fermion-frontier/reference_qualification_validator.py \
 
 python3 docs/research/fermion-frontier/test_reference_qualification_validator.py
 
+# 成功的 subcertificate 仍按设计 exit 1
+python3 docs/research/fermion-frontier/operator_propagation_certificate_checker.py \
+  docs/research/fermion-frontier/operator_propagation_certificate_contract.json \
+  docs/research/fermion-frontier/operator_propagation_certificate_template.json
+
+python3 docs/research/fermion-frontier/test_operator_propagation_certificate_checker.py
+
+python3 docs/research/fermion-frontier/operator_propagation_l2_witness.py \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_operator_propagation_l2_witness.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
@@ -736,6 +774,12 @@ fail-closed 行为。Reference qualification 另有二十九个测试覆盖双 o
 decomposition、缺失/部分/复用的外部 route-input snapshot、directed rounding、
 implementation/environment/checker fingerprints、五类 method claims，以及不存在可达
 `QUALIFIED_BOUNDED` 状态。
+Pauli propagation proof kernel 另有二十四个测试覆盖 Fraction rational encoding、严格
+Taylor remainder、Pauli phase/commutation、非零多门顺序、四角 interval、merge/drop、
+累计 `L1`、source/sequence/observable/state pins、byte/resource caps、失败 claim 清零和
+CLI 非零边界。L=2 conformance witness 另有八个测试覆盖 112-gate raw sequence、Néel
+identity、双 observable statevector 交叉检查、local Fraction enclosure、ideal-reference
+分离和 full-certificate resource defer。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
@@ -750,7 +794,7 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `155` 个测试。
+全套共 `187` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
@@ -761,12 +805,13 @@ overlap、operation window/资源冲突、event binding、dependency、非法 ID
    mitigation contribution ranges。当前 `p/eta` 为 `null`，所以 `103,218,432`
    effective target 还不能换算为 raw executions；若需要固定 attempt cap，另加入
    family-wise high-confidence binomial stopping rule，不能把 expected count 代替它。
-3. **独立有界 reference：**固定 MajoranaPropagation implementation/checker/environment
-   commits，增加 deduplicate-before-truncation、per-slice dropped-L1 ledger、OBC
-   product-formula commutator certificate 和 directed intervals；若 L1 bound 爆炸，先算
-   locality tail，再决定 cluster Krylov。实现并 pin 一个真正重算证书的 machine checker，
-   再新增“checker 通过且 bound 不超过 `0.00025`”的资格状态；当前
-   `STRUCTURALLY_COMPLETE_UNVERIFIED` 不能作为交付边界。
+3. **独立有界 reference：**当前 Fraction proof kernel 已闭合固定 declared Pauli circuit
+   的 phase/interval/dropped-L1 子证明，但完整 L=2 `R=2` 已触及 term/rational growth。
+   下一步先实现 bitset Pauli keys、批量 directed interval/checkpoint digest 和独立
+   mapping/term-list validator，再运行完整 L=2/L=3 parity witnesses；随后生成 L=8 OBC
+   product-formula commutator certificate。只有 checker 全链通过且 bound 不超过
+   `0.00025` 才能新增 reference 资格状态；当前 subcertificate 与
+   `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付边界。
 4. **真实双观测量网格：**按固定 `R=[25,50,100,200,400,800]` 对四条 unique
    convergence routes 生成联合 measurements、covariance、有效样本与可绑定 systematic
    evidence；严格区分 screening 与 `READY_FOR_TARGET_R`。

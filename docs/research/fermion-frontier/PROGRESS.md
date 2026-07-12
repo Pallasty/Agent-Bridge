@@ -213,8 +213,35 @@ always reports `ready_gate_eligible=false`, and deliberately has no
 than proven against convergence data, and `STRUCTURALLY_COMPLETE_UNVERIFIED` still
 has a nonzero CLI exit code. The empty template is `UNRESOLVED`.
 
-Neither standalone interface is currently loaded by `fermi_hubbard_evidence.py`.
-They do not add components to `component_statuses`, and neither can yet participate
+A first machine-recomputed subcertificate layer is now executable. The fixed
+two-qubit contract pins the checker source SHA-256, raw observable, computational
+basis state, two nonzero noncommuting rotations and explicit backpropagation order.
+The checker uses Fraction-only Taylor--Lagrange sine/cosine enclosures, exact Pauli
+phase algebra and four-corner interval arithmetic; it propagates every gate in a
+slice, merges identical strings, then recomputes each dropped coefficient's maximum
+absolute interval and the cumulative `L1` ledger. It also returns the retained
+expectation interval expanded by cumulative dropped `L1`.
+
+This positive state is narrowly named
+`VERIFIED_CIRCUIT_TRUNCATION_SUBCERTIFICATE`. It does not check whether the declared
+Pauli sequence is the Hubbard mapping, whether its product formula approximates
+ideal time evolution, whether the truncation bound meets any budget, or whether the
+method scales to L=8. All such fields remain `NOT_ASSESSED`, READY remains false and
+the CLI exits nonzero. The reference-qualification validator does not invoke this
+kernel, so no existing reference or outer state is upgraded.
+
+The companion L=2 conformance witness independently builds the site-major JW
+`R=2,T=1` sequence with 112 raw rotations and obtains
+`M_s=0.781713978559467` and `D=0.0309252063024724`, agreeing with the direct-fermion
+statevector path to below `1e-12`. The ideal-evolution diagnostic remains separated:
+the R=2 differences are about `0.12595` and `0.00586`. A one-gate Fraction probe is
+fully enclosed, while the full 112-gate rational certificate is
+`DEFERRED_RESOURCE_LIMIT`: the unoptimized term and rational-size growth is itself a
+measured implementation boundary, not evidence of L=8 feasibility.
+
+None of the campaign, reference-qualification or proof-kernel interfaces is currently
+loaded by `fermi_hubbard_evidence.py`. They do not add components to
+`component_statuses`, and none can yet participate
 in or strengthen the outer `READY_FOR_BENCHMARK` decision. Outer integration remains
 a subsequent implementation step.
 

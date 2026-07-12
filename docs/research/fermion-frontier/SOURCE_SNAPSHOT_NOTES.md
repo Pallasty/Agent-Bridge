@@ -48,9 +48,18 @@ campaign-bound adequacy is `NOT_ASSESSED_NO_CAMPAIGN_CONTRACT`, and
 `ready_gate_eligible` is always false. No real L=8 certificate has been entered into
 the snapshot.
 
-Neither the campaign preflight nor the reference-qualification ledger is currently
-a component of `evidence_manifest_source_snapshot.json` or
-`fermi_hubbard_evidence.py`. Their standalone results therefore cannot change the
+The new source-pinned Pauli propagation proof kernel does not close that gap. Its
+positive state verifies only arithmetic and truncation for one fixed abstract
+two-qubit declared circuit. The L=2 `R=2` witness is a conformance cross-check and
+marks its full 112-gate Fraction certificate `DEFERRED_RESOURCE_LIMIT`; neither
+artifact certifies the Hubbard mapping, product-formula error, L=8 reference value or
+campaign-budget adequacy. Neither is part of the source snapshot or outer evidence
+orchestrator.
+
+None of the campaign preflight, reference-qualification ledger, proof kernel or L=2
+conformance witness is currently a component of
+`evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
+standalone results therefore cannot change the
 outer snapshot status or promote it toward `READY_FOR_BENCHMARK`.
 
 The convergence status boundary is intentional. Finite-sample route data that pass the
