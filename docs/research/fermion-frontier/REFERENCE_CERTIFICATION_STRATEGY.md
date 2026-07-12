@@ -551,7 +551,7 @@ checker 的最高状态仅
 `VERIFIED_D3_DOUBLE_OCCUPANCY_CLUSTER_UNIFORM_SUP_NO_GO`，有 same-byte source contract、
 40 个回归测试，CLI 固定退出 1；不认证 actual R=100 error、reference 或 READY。
 
-### Evolved-observable 资源测量与下一内核
+### Evolved-observable 资源测量与已实现的 L8 mapped 单步内核
 
 对每个 `O_k` 重跑完整 495-path `D3/E4/P4` 不是最小可行实现。L8 exact Pauli growth 为：
 
@@ -575,6 +575,34 @@ top-L1 + cumulative dropped-L1 ledger**，先认证相对于未截断 product fo
 bound 降序、bitmask 升序 tie-break、精确保留 K 项；这与官方 `abs(c)<epsilon` cutoff 是
 两个不同策略，不能混写。
 
+上述 direct-propagation 内核现已落地为严格子证书。checker 独立重建 L8 OBC 五组，
+固定中央 H4 在截断前融合后的九 stage、1,152 门序列，并对两个 observable 使用
+`2^64` tick、`N=5` Taylor outward intervals、每八门 merge-then-top-65,536。九个
+stage 的门数均被八整除，所以 144 个 checkpoint 不跨 stage；这是固定资源政策，
+不是 batch size 或 interval box 的最优性结论。
+
+| observable | peak/final terms | cumulative dropped `L1` | retained Néel interval, ticks/`2^64` | declared mapped-step interval, ticks/`2^64` |
+|---|---:|---:|---|---|
+| staggered magnetization | 115,492 / 65,536 | `4619985807746/2^64` | `[18433845192157367192,18433845192157371232]` | `[18433840572171559446,18433849812143178978]` |
+| double occupancy | 199,528 / 65,536 | `130757007004862/2^64` | `[6447487876967911,6447487876983172]` | `[6316730869963049,6578244883988034]` |
+
+retained coefficient box 已包含 Taylor enclosure、trigonometric grid quantization
+与逐乘法 outward rounding widening；这些不能作为独立 scalar error 重复相加。
+累计 dropped-`L1` 则利用后续精确 unitary conjugation 的等距性，扩张最终
+expectation interval。最高状态仅为
+`VERIFIED_L8_ONE_STEP_MAPPED_INTERVAL_TRUNCATION_SUBCERTIFICATE`：这里的
+“untruncated”只指同一个 fused mapped product-formula step 未执行 top-K，绝不指
+`exp(-iH/100)`。
+
+下一内核是 100 个 child transition 的 parent--child chain。每个 child 必须绑定 step
+index、输入 expansion digest、输出 expansion digest、新增 dropped-`L1` 与继承误差；
+parent 验证相邻 digest 完全衔接，并只对 dropped bounds 做单调累加。
+product-formula-to-exact-Hubbard 项仍须作为独立证书预算组合。double occupancy
+不能机械复用当前容量：其 peak 已占 262,144 single-expansion term cap 的 76.1%，单步 drop
+`7.08835e-6` 也超过把全部 `1/4000` allocation 平均分给 100 步所得的 `2.5e-6`。
+下一轮应先提高 retained/single-expansion caps，或在合同中固定 deterministic adaptive-K 规则；
+不得事后人工选择 K。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
@@ -589,18 +617,20 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
 ## 执行顺序
 
 1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结，完整 L2
-   checkpoint propagation 已闭合；下一步为 L8 固定 A/B Néel 相位、两个 observable 和
-   与真实 campaign 相同的 occurrence-level term-sequence identity。
+   checkpoint propagation 已闭合；L8 初态、双 observable、mapped fused sequence 与
+   首个 interval child 也已闭合。下一步为 source-bound parent--child R100 chain。
 2. 固定五组 generic bound、uniform-supremum Pauli-L1 shortcut，以及 double occupancy
    用 fixed greedy14 cluster-exact-norm triangle 作为 uniform supremum 的架构都已被 exact
-   witness 严格排除；逐 `k` cluster triangle ledger 仍开放。下一单元不再逐 `k` 重算
-   495 paths，而是直接传播 evolved observable；cross-cluster/global cancellation-aware
-   方法仍作为平行数学路线。
+   witness 严格排除；逐 `k` cluster triangle ledger 仍开放。直接 evolved-observable
+   propagation 已完成首步，不再逐 `k` 重算 495 paths；cross-cluster/global
+   cancellation-aware 方法仍作为平行数学路线。
 3. Majorana 执行基线已固定为从 `main@b7849cb` 建 certificate fork，pin Julia Manifest 与
    PauliPropagation v0.7.3，并移植 deterministic composite bitmask sort。补
    deduplicate-before-truncation、per-gate/stage dropped-L1 ledger、directed coefficient
-   intervals 和 L2/L3 ED 对照，再组合 L8 initial observable/state 与完整 mapped sequence。
+   intervals 和 L2/L3 ED 对照。该 fork 是平行 custody/实现路线，不能覆盖现有 Python
+   one-step checker 的 authority。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
+   double occupancy 必须先通过 cap 升级或合同固定的 adaptive-K child policy；
    两个 observables 可以采用不同 certified methods，不能只因增大 R 就跳过资源与独立性
    复核。
 5. 若 Majorana L1 或 locality tail 已超过 allocation，再决定是否执行 cluster Krylov。

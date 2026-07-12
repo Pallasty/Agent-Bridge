@@ -125,16 +125,32 @@ other partitions remain unassessed.  The fixture's upstream decomposition/order
 provenance is externally audited but not runtime-regenerated.  No numeric reference
 value is added to this snapshot.
 
+A further standalone checker closes only the first L8 evolved-observable propagation
+unit.  It independently rebuilds the OBC/JW groups and encloses one fused nine-stage,
+1,152-gate mapped Strang step with `2^64` fixed-point intervals, Taylor truncation
+index `N=5`, 144 fixed eight-gate checkpoints and deterministic top-65,536
+truncation.  Staggered magnetization reaches a peak of 115,492 terms and has
+cumulative dropped `L1` `4619985807746/2^64`; its declared mapped-step interval is
+approximately `[0.9993004997799919,0.9993010006798572]`.  Double occupancy peaks at
+199,528 terms, drops `130757007004862/2^64`, and gives
+`[0.0003424306666110094,0.0003566073697180741]`.  These enclose the untruncated
+fused mapped one-step expectations, not exact-Hubbard or R=100 reference values.
+The raw ten-event unitary is exactly equivalent only because the central internally
+commuting H4 halves are fused before truncation; the raw and fused truncation paths
+are not claimed identical.  No snapshot value or outer status changes.
+
 The Majorana implementation audit likewise changes no snapshot value.  It selects a
 future fork from registered `main@b7849cb` because the inferred paper-date commit
 precedes a documented splitting-sign fix; a complete Julia Manifest, deterministic
 composite ordering, outward intervals, and a per-gate/stage dropped-L1 ledger are
-still missing.  Current Majorana convergence data therefore remain diagnostic only.
+still missing from the future Majorana certificate fork.  Current Majorana
+convergence data therefore remain diagnostic only.
 
 None of the campaign preflight, reference-qualification ledger, proof kernel, L=2
 conformance witness, mapping checker, checkpointed L2 checker, bitset prototype,
 Strang commutator checker, grouping-screen checker, fixed-generic-bound no-go checker,
-observable-Taylor-step checker or double-occupancy-cluster no-go checker is currently
+observable-Taylor-step checker, double-occupancy-cluster no-go checker or L8
+one-step interval checker is currently
 a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the

@@ -241,9 +241,29 @@ so they are versioned normally and are not added to the preservation-only
 - `test_hubbard_d3_double_occupancy_cluster_no_go_checker.py`: forty source/fixture,
   exact-JW identity, partition, global-sector action, rational-margin, strict-schema,
   tamper, failure-scope and CLI regressions.
+- `hubbard_l8_observable_interval_step_contract.json`: same-byte checker pin,
+  positive Strang-backend source pins, fixed L8 OBC/JW workload, fused
+  nine-stage/1,152-gate sequence, `2^64` outward fixed-point policy, Taylor
+  truncation index `N=5`, eight-gate checkpoint cadence, deterministic top-65,536
+  ranking, hard resource caps and expected-witness digest.
+- `hubbard_l8_observable_interval_step_template.json`: positive one-step
+  mapped-circuit fixture for both observables.  It binds the independently rebuilt
+  per-checkpoint ledgers by count/digest/nonzero/max summaries, retains nine stage
+  summaries per observable, and records the exact final retained and dropped-`L1`-
+  expanded mapped-step expectation intervals.
+- `hubbard_l8_observable_interval_step_checker.py`: independently regenerates the
+  112 geometric/224 spin-resolved OBC bonds, five mapped groups, 3,584 representative
+  CAR and 256 onsite witnesses, raw-to-fused central-H4 equivalence, phase ledger and
+  both one-step interval propagations.  It returns at most
+  `VERIFIED_L8_ONE_STEP_MAPPED_INTERVAL_TRUNCATION_SUBCERTIFICATE`; exact-Hubbard
+  error, the full R=100 chain, reference qualification and READY remain unassessed.
+- `test_hubbard_l8_observable_interval_step_checker.py`: source-pin, L8 mapping,
+  raw/fused sequence, phase, fixed-tick interval, checkpoint, deterministic ranking,
+  nonzero-drop, exact tick-value, resource-cap, tamper, fail-closed and CLI-boundary
+  regressions.
 - The measurement-campaign, reference-qualification, proof-kernel, mapping,
   checkpoint, commutator, grouping-screen, generic-bound no-go, observable-Taylor
-  and double-occupancy-cluster no-go artifacts are
+  step, double-occupancy-cluster no-go and L8 one-step interval artifacts are
   currently independent of
   `fermi_hubbard_evidence.py`;
   none is yet an outer `READY_FOR_BENCHMARK` component.
