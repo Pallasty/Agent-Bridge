@@ -272,19 +272,38 @@ fixed-point containment and truncation only relative to the untruncated fused
 mapped one-step circuit.  They do not certify exact-Hubbard evolution, the full
 R=100 chain, a reference value, or READY.
 
+The parent--child route now has one real linked transition.  Four canonical
+compact-JSON/zlib/Base85 sidecars materialize the complete 65,536-term retained
+boxes at boundaries one and two.  A new checker first executes the same-byte
+one-step parent certificate, proves each boundary-one sidecar has the parent's
+exact expansion, cumulative drop and retained expectation, and then replays the
+second 1,152-gate/144-checkpoint child without fusing H1 halves across the step
+boundary.  Boundary two is compared with the recomputed expansion term for term.
+
+For staggered magnetization the second child drops `207375793741436/2^64`, giving
+two-step cumulative drop `211995779549182/2^64` and mapped-circuit interval
+`[18395060021948335379,18395484013507455340]/2^64`, approximately
+`[0.9971982019398818,0.9972211865683575]`.  Double occupancy drops
+`2152392847533726/2^64`, giving cumulative `2283149854538588/2^64` and interval
+`[23418151510906025,27984451220025405]/2^64`, approximately
+`[0.0012695005371859505,0.0015170401404283085]`.  The latter already consumes
+about 49.5% of the `1/4000` observable allocation after only two mapped steps.
+This is a two-step custody/transition certificate, not an R=100 or exact-Hubbard
+result.
+
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
 which predates a documented splitting-sign fix.  The fork must pin a complete Julia
 Manifest/PauliPropagation version, sort composite bitmasks deterministically, and add
 outward coefficient intervals plus a post-dedup per-gate/stage dropped-L1 ledger.
 That work is a parallel implementation-custody route rather than authority for the
-Python one-step certificate.  The next kernel is a source-bound parent--child
-checkpoint chain for all 100 mapped steps; double occupancy first needs a larger
-retained cap or a contract-pinned deterministic adaptive-cap rule.
+Python interval certificates.  The next fixed-K experiment is magnetization step 3;
+double occupancy must first freeze a larger cap or a deterministic adaptive-K rule,
+because its second-step drop increased by a factor of 16.46 over step 1.
 
 These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
 grouping-screen, fixed-generic-bound no-go, observable-Taylor-step and
-double-occupancy-cluster no-go and L8 one-step-interval artifacts remain
+double-occupancy-cluster no-go and L8 one/two-step interval artifacts remain
 standalone preflight, qualification and conformance tools. They have **not** yet
 been added as components of `fermi_hubbard_evidence.py`, so they do not alter the
 current outer `READY_FOR_BENCHMARK` gate.
@@ -321,6 +340,8 @@ retained in `claim-status.jsonl`.
   source-pinned double-occupancy D3 symbolic fixture and fixed-cluster no-go
   contract/template/checker,
   source-pinned L8 mapped one-step interval contract/template/checker,
+  source-pinned L8 two-step parent--child interval contract/template/checker and
+  four canonical boundary sidecars,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -347,6 +368,7 @@ retained in `claim-status.jsonl`.
   `test_hubbard_strang_generic_bound_no_go_checker.py` /
   `test_hubbard_strang_observable_taylor_step_checker.py` /
   `test_hubbard_d3_double_occupancy_cluster_no_go_checker.py` /
-  `test_hubbard_l8_observable_interval_step_checker.py`
+  `test_hubbard_l8_observable_interval_step_checker.py` /
+  `test_hubbard_l8_observable_interval_two_step_checker.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

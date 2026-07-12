@@ -261,9 +261,29 @@ so they are versioned normally and are not added to the preservation-only
   raw/fused sequence, phase, fixed-tick interval, checkpoint, deterministic ranking,
   nonzero-drop, exact tick-value, resource-cap, tamper, fail-closed and CLI-boundary
   regressions.
+- `hubbard_l8_interval_checkpoints/*.b85`: four canonical 100-column Base85-wrapped
+  single-zlib-stream sidecars containing the complete 65,536-term retained interval
+  expansions for both observables at boundaries one and two.  Each state binds the
+  root one-step checker/witness, fixed backprop sequence, cumulative drop and retained
+  Néel expectation; the child contract separately pins encoded, compressed and raw
+  SHA-256 identities.
+- `hubbard_l8_observable_interval_two_step_contract.json` and
+  `hubbard_l8_observable_interval_two_step_template.json`: same-byte parent pins,
+  four-layer sidecar custody, fixed child policy/resources, exact step-2 expansion,
+  state, transition and expected-witness identities, with no remaining-step or
+  exact-Hubbard claim.
+- `hubbard_l8_observable_interval_two_step_checker.py`: verifies the positive parent
+  transition, decodes and validates all four boundaries, executes a second fixed
+  1,152-gate/144-checkpoint step without cross-boundary fusion, proves
+  `E2=E1+d2`, compares boundary two term for term and reports the dropped-L1-expanded
+  two-step mapped-circuit intervals.
+- `test_hubbard_l8_observable_interval_two_step_checker.py`: parent/source pin,
+  transport/raw/state/semantic custody, exact transition, recurrence, resource,
+  compression/JSON/order/integer adversarial, tamper, cache, failure-scope and CLI
+  regressions.
 - The measurement-campaign, reference-qualification, proof-kernel, mapping,
   checkpoint, commutator, grouping-screen, generic-bound no-go, observable-Taylor
-  step, double-occupancy-cluster no-go and L8 one-step interval artifacts are
+  step, double-occupancy-cluster no-go and L8 one/two-step interval artifacts are
   currently independent of
   `fermi_hubbard_evidence.py`;
   none is yet an outer `READY_FOR_BENCHMARK` component.

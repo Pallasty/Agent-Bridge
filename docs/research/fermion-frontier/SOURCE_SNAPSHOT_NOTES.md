@@ -139,6 +139,19 @@ The raw ten-event unitary is exactly equivalent only because the central interna
 commuting H4 halves are fused before truncation; the raw and fused truncation paths
 are not claimed identical.  No snapshot value or outer status changes.
 
+The first parent--child continuation is now standalone as well.  Four source-pinned
+canonical JSON/zlib/Base85 sidecars materialize both observables' complete retained
+boxes at boundaries one and two.  The two-step checker executes the positive
+same-byte parent, binds boundary one to its exact expansion/drop/expectation, replays
+one further 1,152-gate/144-checkpoint fused child without cross-step H1 fusion, and
+compares boundary two term for term.  Staggered magnetization has two-step cumulative
+dropped `L1` `211995779549182/2^64` and mapped interval approximately
+`[0.9971982019398818,0.9972211865683575]`; double occupancy has
+`2283149854538588/2^64` and `[0.0012695005371859505,0.0015170401404283085]`.
+These remain mapped product-formula enclosures only.  The remaining 98 transitions,
+exact-Hubbard error, reference and READY are unassessed; no source-snapshot value or
+outer status changes.
+
 The Majorana implementation audit likewise changes no snapshot value.  It selects a
 future fork from registered `main@b7849cb` because the inferred paper-date commit
 precedes a documented splitting-sign fix; a complete Julia Manifest, deterministic
@@ -150,7 +163,7 @@ None of the campaign preflight, reference-qualification ledger, proof kernel, L=
 conformance witness, mapping checker, checkpointed L2 checker, bitset prototype,
 Strang commutator checker, grouping-screen checker, fixed-generic-bound no-go checker,
 observable-Taylor-step checker, double-occupancy-cluster no-go checker or L8
-one-step interval checker is currently
+one/two-step interval checker is currently
 a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the

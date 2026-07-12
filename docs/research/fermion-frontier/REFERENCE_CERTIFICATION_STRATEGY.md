@@ -594,14 +594,29 @@ expectation interval。最高状态仅为
 “untruncated”只指同一个 fused mapped product-formula step 未执行 top-K，绝不指
 `exp(-iH/100)`。
 
-下一内核是 100 个 child transition 的 parent--child chain。每个 child 必须绑定 step
-index、输入 expansion digest、输出 expansion digest、新增 dropped-`L1` 与继承误差；
-parent 验证相邻 digest 完全衔接，并只对 dropped bounds 做单调累加。
-product-formula-to-exact-Hubbard 项仍须作为独立证书预算组合。double occupancy
-不能机械复用当前容量：其 peak 已占 262,144 single-expansion term cap 的 76.1%，单步 drop
-`7.08835e-6` 也超过把全部 `1/4000` allocation 平均分给 100 步所得的 `2.5e-6`。
-下一轮应先提高 retained/single-expansion caps，或在合同中固定 deterministic adaptive-K 规则；
-不得事后人工选择 K。
+parent--child chain 的第一个真实 child 也已闭合。boundary 1/2 的完整 65,536-term
+coefficient boxes 分别存为 canonical compact JSON，经单流 zlib 与 100-column Base85
+封装；checker 同时验证 encoded/compressed/raw/state/semantic hashes、严格数值排序、
+整数与解压资源上限。boundary 1 必须逐字段等于 same-byte positive parent 的 retained
+expansion、累计 drop 与 Néel expectation，随后 step 2 独立执行固定九 stage、1,152 门、
+144 checkpoints。child 边界处不融合相邻 H1 half stages，boundary 2 与重算 expansion
+做完整 dictionary equality，而非只比较 digest。
+
+链不变量冻结为：存在 `A_k` 位于 retained interval box，且未截断 mapped-PF observable
+与 `A_k` 的 operator-norm 距离不超过 `E_k`。精确 unitary 共轭保持 `E_k`，所以
+`E_{k+1}=E_k+d_{k+1}`，其中只有实际删除项的 Pauli-`L1` 进入 `d`；Taylor、trig grid
+与乘法 rounding 只扩大 coefficient box，不再作为 scalar error 相加。
+
+| observable | step-2 peak/final | child drop, ticks/`2^64` | two-step cumulative drop, ticks/`2^64` | declared two-step interval, ticks/`2^64` |
+|---|---:|---:|---:|---|
+| staggered magnetization | 103,720 / 65,536 | `207375793741436/2^64` | `211995779549182/2^64` | `[18395060021948335379,18395484013507455340]/2^64` |
+| double occupancy | 105,350 / 65,536 | `2152392847533726/2^64` | `2283149854538588/2^64` | `[23418151510906025,27984451220025405]/2^64` |
+
+double occupancy 的累计 half-width 已约为 `1.23770e-4`，占 `1/4000` allocation 的
+49.5%；step-2 local drop 又是 step 1 的 16.46 倍。因此不得直接执行 fixed-K step 3，
+必须先冻结更大 retained/single-expansion caps 或 deterministic adaptive-K rule。
+磁化量累计约 `1.14923e-5`，可继续做 fixed-K step-3/4 稳态资源测量。任何走势都不能
+线性外推到 R100；product-formula-to-exact-Hubbard 项仍须独立组合。
 
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
@@ -618,11 +633,12 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
 
 1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结，完整 L2
    checkpoint propagation 已闭合；L8 初态、双 observable、mapped fused sequence 与
-   首个 interval child 也已闭合。下一步为 source-bound parent--child R100 chain。
+   首个和第二个 interval boundary 以及 step-2 child 已闭合。下一步为磁化量 fixed-K
+   step 3，并先为 double occupancy 冻结 cap/adaptive-K policy。
 2. 固定五组 generic bound、uniform-supremum Pauli-L1 shortcut，以及 double occupancy
    用 fixed greedy14 cluster-exact-norm triangle 作为 uniform supremum 的架构都已被 exact
    witness 严格排除；逐 `k` cluster triangle ledger 仍开放。直接 evolved-observable
-   propagation 已完成首步，不再逐 `k` 重算 495 paths；cross-cluster/global
+   propagation 已完成两步，不再逐 `k` 重算 495 paths；cross-cluster/global
    cancellation-aware 方法仍作为平行数学路线。
 3. Majorana 执行基线已固定为从 `main@b7849cb` 建 certificate fork，pin Julia Manifest 与
    PauliPropagation v0.7.3，并移植 deterministic composite bitmask sort。补
