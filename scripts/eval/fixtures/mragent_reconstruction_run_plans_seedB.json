@@ -1,0 +1,244 @@
+{
+  "schema": "agent_bridge.mragent_reconstruction_run_plans.v0",
+  "label": "mragent-reconstruction-N8-seedB",
+  "honest_scope": "These are FIXTURE-AUTHORED deterministic query plans that transcribe the documented routing of the read-only N=7 pilot (see `mragent_reconstruction_probes.json` notes) into reproducible S0/S1/S2 arms. What this run ADDS over the pilot: an automated any-of scorer (removes the P7-style single-judge scoring bug), exact token/p95 metering (replaces the pilot's '~2-3x' hand-wave), canary-retrieval measurement, N>=8, and reproducibility against a frozen snapshot. What it does NOT add: independent re-discovery. The plans encode already-known routing, so a residual 'author knew the gold' bias remains -- the only way to retire it is the LLM-in-loop arm (an agent that never sees gold). Report accordingly.",
+  "s1_fairness": "Every S1 sub-query is derived ONLY from the question text -- no gold-row vocabulary. This is the blind equal-budget control that separates evidence-conditioning from 'just more queries'.",
+  "s2_fairness": "Every S2 conditioned re-query uses ONLY vocabulary an agent could read off round-1 evidence. Per-probe licensing is documented in `fairness_certification` below; injecting a gold row's distinctive strings the agent has not yet seen would be oracle leakage.",
+  "fairness_certification": {
+    "P1": "round-1 surfaces the lesson row (why memory_consolidate is wrong); reading it exposes 'writeside / TTL / record_ttl_is_live' vocabulary, which licenses the conditioned re-queries for the shipped-mechanism + tier2 rows. S1 (blind) provably cannot reach 'TTL/writeside' from the question alone.",
+    "P4": "round-1 surfaces the v38 governance-downgrade example carrying 'kernel must-block bucket / governance-downgrade' vocabulary; reading it licenses 'restore drill caused the downgrade' -> the conditioned re-query reaches the restore-drill mechanism row S0 missed. Blind S1 cannot query 'restore drill' from the question.",
+    "P2": "concentrated: answer shares 'fermion frontier' vocabulary with the question, so S0 already solves; S2 does a graph-hop only and is expected to TIE (no headroom).",
+    "P5": "conflict pair is lexically cohesive ('fermion #63 natural gradient'); S0 surfaces both sides, S2 has no headroom.",
+    "P3": "abstention: no real Tier 4 exists. S2's existence gate fires when round-1 top score is below `abstain_floor` (calibrated from the snapshot score distribution, NOT from knowing P3 abstains). Correct behavior is to NOT assert a fabricated 'Tier 4'.",
+    "P6": "double_unreachable: the current-deploy fact lives in a TTL-feature-named row orthogonal to deploy vocabulary, with no forward graph edge. Both arms are EXPECTED to fail; included as an honest negative control.",
+    "P7": "broad any-of status class; the note already flags this as NOT a clean S2>S1 (blind S1 can stumble onto a valid status member), so it does not count toward the >=2 S2-advantage tally.",
+    "P8": "control probe authored after read-only snapshot exploration (see below); chosen as a NON-S2-win so reaching N>=8 cannot inflate the S2-advantage count."
+  },
+  "probes": [
+    {
+      "id": "P1",
+      "regime": "gap_reachable",
+      "gold": [
+        {
+          "class": "why_consolidate_is_wrong",
+          "any_of": [
+            "lesson_consolidate_uplift_ratchets_junk_family_20260711"
+          ]
+        },
+        {
+          "class": "correct_mechanism_shipped",
+          "any_of": [
+            "writeside_ttl_tier1_landed_deployed_20260711",
+            "writeside_ttl_tier1_live_verified_20260711"
+          ]
+        },
+        {
+          "class": "legacy_backfill_still_open",
+          "any_of": [
+            "writeside_audit_governance_tier2_design_20260711"
+          ]
+        }
+      ],
+      "query": "how to remove the recurring junk audit rows and why consolidation is the wrong mechanism",
+      "s1_subqueries": [
+        "remove recurring junk audit rows",
+        "consolidation is the wrong mechanism for junk audit rows",
+        "audit-row family cleanup approach"
+      ],
+      "s2_round1": "consolidation uplift ratchets junk audit-row family lesson",
+      "s2_conditioned": [
+        "record TTL tier1 audit-row suppression shipped",
+        "audit governance tier2 legacy backfill rows"
+      ],
+      "s2_depth": 1
+    },
+    {
+      "id": "P2",
+      "regime": "concentrated",
+      "gold": [
+        {
+          "class": "concluded_status",
+          "any_of": [
+            "fermion_research_owner_review_4dir_20260711",
+            "fermion_frontier_takeover_final_20260711"
+          ]
+        },
+        {
+          "class": "current_owner",
+          "any_of": [
+            "fermion_frontier_takeover_final_20260711"
+          ]
+        }
+      ],
+      "query": "has the fermion frontier research been concluded and who is the current owner",
+      "s1_subqueries": [
+        "fermion frontier research concluded",
+        "fermion frontier who owns it now",
+        "fermion research takeover owner"
+      ],
+      "s2_round1": "fermion frontier research concluded current owner",
+      "s2_conditioned": [],
+      "s2_depth": 1
+    },
+    {
+      "id": "P3",
+      "regime": "abstention",
+      "gold": [
+        {
+          "class": "abstain_correct",
+          "abstain_expected": true,
+          "enumeration_evidence": [
+            "writeside_ttl_tier1_landed_deployed_20260711",
+            "writeside_audit_governance_tier2_design_20260711",
+            "lesson_consolidate_uplift_ratchets_junk_family_20260711"
+          ],
+          "decoys": [
+            "nexus_c5_tier_citadel_asset_20260706"
+          ]
+        }
+      ],
+      "query": "describe the Tier 4 write-side audit governance layer and whether it exists",
+      "s1_subqueries": [
+        "Tier 4 write-side audit governance layer",
+        "does a write-side audit governance tier 4 exist",
+        "audit governance fourth tier"
+      ],
+      "s2_round1": "Tier 4 write-side audit governance layer specification",
+      "s2_conditioned": [],
+      "s2_depth": 1,
+      "abstain_expected": true,
+      "abstain_floor": 0.02,
+      "abstain_floor_calibration": "Snapshot 38b22d8c: P3's best round-1 hit is 0.0164 -- the LOWEST top-1 score across all 8 probes -- and sits in a gap below the next-lowest real-match top (P4=0.0267) and the real-match cluster (0.029-0.033). Floor=0.02 is chosen from that distribution, NOT from foreknowledge that P3 abstains; any probe whose best hit falls below 0.02 abstains."
+    },
+    {
+      "id": "P4",
+      "regime": "gap_reachable",
+      "gold": [
+        {
+          "class": "downgrade_mechanism",
+          "any_of": [
+            "continuity_restore_drill_1_20260706"
+          ]
+        },
+        {
+          "class": "downgraded_example",
+          "any_of": [
+            "decision_ab_project_review_local_v38_preflight_20260629",
+            "agent_bridge_gte_dimension_gate_anchor_289f962_20260624"
+          ]
+        }
+      ],
+      "query": "how does the system avoid re-triggering must-block gates that were already cleared",
+      "s1_subqueries": [
+        "avoid re-triggering already-cleared must-block gates",
+        "must-block gate previously satisfied kernel bucket",
+        "stale satisfied preflight gate downgrade"
+      ],
+      "s2_round1": "must-block gate previously satisfied governance downgrade session",
+      "s2_conditioned": [
+        "downgrade produced by a continuity restore drill"
+      ],
+      "s2_depth": 1,
+      "observed_note": "Snapshot 38b22d8c: this question-faithful round-1 surfaces the gte_289f962 example (gold downgraded_example) at rank 1, but neither the graph-hop nor the conditioned re-query reaches the mechanism row continuity_restore_drill_1_20260706 -- so S2 satisfies the example class but NOT the mechanism class => P4 does NOT fully solve under blind automated re-authoring. This is a faithful negative, frozen (no gold-tuning). It diverges from the pilot's hand-run P4 win and is reported as such."
+    },
+    {
+      "id": "P5",
+      "regime": "conflict",
+      "gold": [
+        {
+          "class": "refuted_view",
+          "any_of": [
+            "fermion_frontier_takeover_batch1_20260711"
+          ]
+        },
+        {
+          "class": "rebuttal_view",
+          "any_of": [
+            "fermion_63_natural_gradient_deepening_resolution_20260711"
+          ]
+        }
+      ],
+      "query": "was fermion natural-gradient ledger 63 refuted or is it still valid",
+      "s1_subqueries": [
+        "fermion ledger 63 natural gradient refuted",
+        "fermion 63 natural gradient still valid",
+        "fermion natural gradient 63 resolution"
+      ],
+      "s2_round1": "fermion ledger 63 natural gradient refuted valid resolution",
+      "s2_conditioned": [],
+      "s2_depth": 1
+    },
+    {
+      "id": "P6",
+      "regime": "double_unreachable",
+      "gold": [
+        {
+          "class": "current_deploy_provenance",
+          "any_of": [
+            "writeside_ttl_tier1_live_verified_20260711"
+          ]
+        }
+      ],
+      "query": "what is the provenance string of the currently deployed agent-bridge binary",
+      "s1_subqueries": [
+        "currently deployed agent-bridge binary provenance",
+        "agent-bridge deployed binary version string",
+        "which binary is deployed git describe"
+      ],
+      "s2_round1": "currently deployed agent-bridge binary provenance version string",
+      "s2_conditioned": [
+        "agent-bridge binary rollout deploy history"
+      ],
+      "s2_depth": 1
+    },
+    {
+      "id": "P7",
+      "regime": "cross_project",
+      "gold": [
+        {
+          "class": "biocortex_status_conclusion",
+          "any_of": [
+            "biocortex_rs_resting_point_reconciled_with_ab_downstream_20260705",
+            "biocortex_reframe_biomimicry_rd_math_product_20260706",
+            "biocortex_non_memory_direction_research_20260710"
+          ]
+        }
+      ],
+      "query": "current standing of the biocortex-rs substrate-science line of work",
+      "s1_subqueries": [
+        "biocortex-rs substrate science standing",
+        "biocortex substrate line concluded or active",
+        "biocortex-rs current focus"
+      ],
+      "s2_round1": "biocortex-rs substrate science line resting point standing",
+      "s2_conditioned": [
+        "biocortex non-memory research reframe direction"
+      ],
+      "s2_depth": 1
+    },
+    {
+      "id": "P8",
+      "regime": "concentrated",
+      "gold": [
+        {
+          "class": "opt_in_status",
+          "any_of": [
+            "biocortex_opt_in_status_surface_20260611",
+            "biocortex_opt_in_gate_skeleton_20260611",
+            "biocortex_opt_in_review_packet_20260611"
+          ]
+        }
+      ],
+      "query": "status of the biocortex opt-in retrieval gating surface",
+      "s1_subqueries": [
+        "biocortex opt-in retrieval gating surface status",
+        "biocortex opt-in read-only status",
+        "biocortex opt-in gate landed"
+      ],
+      "s2_round1": "status of the biocortex opt-in retrieval gating surface",
+      "s2_conditioned": [],
+      "s2_depth": 1,
+      "control_note": "N>=8 filler authored AFTER read-only snapshot exploration; deliberately a CONCENTRATED probe (answer shares 'biocortex opt-in' vocabulary with the question), so S0 already solves and S2 has no headroom. Chosen as a NON-S2-win so reaching N>=8 cannot inflate the s2_solves_over_s1 tally. Snapshot 38b22d8c: round-1 surfaces status_surface at rank 1."
+    }
+  ]
+}

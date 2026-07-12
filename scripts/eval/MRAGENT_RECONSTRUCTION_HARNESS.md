@@ -1,6 +1,6 @@
 # MRAgent active-reconstruction shadow trial — harness spec
 
-**Status: CODE-COMPLETE (all 4 executor modules — scorer + snapshot + arms + run — built and validated, each with an offline selftest + a live run). Remaining is NOT code: author N≥8 real per-probe query plans (s2-fairness certified), run against the full-store snapshot, second-seed replication, and adjudicate the go-gate — the review-backed decision step.**
+**Status: RUN-COMPLETE (2026-07-12). All 4 modules built + validated; N=8 fairness-certified plans (`fixtures/mragent_reconstruction_run_plans.json`, seed A) + a second seed (`…_seedB.json`) were run against the frozen full-store snapshot (`snapshot_sha=38b22d8c…`). VERDICT: `MRAGENT_RECONSTRUCTION_VERDICT_20260712.md` — PROMISING BUT NOT PROVEN → NO-SHIP. The literal go-gate (S2>S1 on ≥2 complex probes) is MET and replicates across both seeds (P1+P7), but value-over-baseline replicates on only P7, the pilot's P4 win did not replicate, and abstention safety broke under rephrasing. The one remaining gate is the LLM-in-loop arm (blind query planning + real `canary_fired`) on a semantic-index-rebuilt snapshot with a relative abstention gate. A harness bug was fixed en route: `aggregate()` was counting abstention passes toward the reconstruction quality gate.**
 Read-only retrieval-quality trial that asks one question: *does evidence-conditioned
 multi-round reconstruction (S2) beat one-shot retrieval (S0) and — the real test —
 beat a blind equal-budget multi-query control (S1)?*
