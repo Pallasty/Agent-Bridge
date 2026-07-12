@@ -37,6 +37,94 @@ fn result_text(res: &ToolResult) -> String {
     }
 }
 
+#[test]
+fn curated_memory_governance_scopes_inference_and_deduplicates_lineage() {
+    let mut memory = MemoryRecord {
+        key: "curated_governance_case".into(),
+        kind: "lesson".into(),
+        content: "A text transform produced this candidate.".into(),
+        tags: vec![
+            "auto_curated".into(),
+            "continuity_confidence:verified".into(),
+            "continuity_confidence:user_stated".into(),
+        ],
+        related_keys: vec!["source_a".into()],
+        scope: Some("project:/old".into()),
+        created_at: 0,
+        updated_at: 0,
+        last_accessed_at: 0,
+        access_count: 0,
+        importance: 0.5,
+        status: "active".into(),
+        trigger_pattern: None,
+        superseded_by: None,
+    };
+    let sources = vec![
+        "source_a".to_string(),
+        "source_b".to_string(),
+        "source_b".to_string(),
+        "  ".to_string(),
+    ];
+
+    apply_curated_memory_governance(
+        &mut memory,
+        Some("  project:/tmp/governed  "),
+        "memory_auto_curate",
+        Some(" session-governed "),
+        &sources,
+    );
+    let key_after_first_pass = memory.key.clone();
+    apply_curated_memory_governance(
+        &mut memory,
+        Some("project:/tmp/governed"),
+        "memory_auto_curate",
+        Some("session-governed"),
+        &sources,
+    );
+
+    assert_eq!(memory.scope.as_deref(), Some("project:/tmp/governed"));
+    assert_eq!(
+        memory.key, key_after_first_pass,
+        "governance must be idempotent"
+    );
+    let expected_scope_suffix = format!(
+        "__scope_{}",
+        &stable_fnv1a_hex("project:/tmp/governed")[..12]
+    );
+    assert!(
+        memory.key.ends_with(&expected_scope_suffix),
+        "scoped curator keys must be namespaced to avoid cross-project collisions: {}",
+        memory.key
+    );
+    let confidence_tags: Vec<&str> = memory
+        .tags
+        .iter()
+        .filter(|tag| tag.starts_with(CONTINUITY_CONFIDENCE_TAG_PREFIX))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        confidence_tags,
+        vec!["continuity_confidence:inferred"],
+        "automatic text transforms must replace stronger/conflicting confidence tags"
+    );
+    for expected in [
+        "provenance_transform:memory_auto_curate",
+        "provenance_source:memory_records",
+        "provenance_source_session:session-governed",
+    ] {
+        assert!(
+            memory.tags.iter().any(|tag| tag == expected),
+            "missing provenance tag {expected}: {:?}",
+            memory.tags
+        );
+    }
+    assert_eq!(
+        memory.related_keys,
+        vec!["source_a".to_string(), "source_b".to_string()],
+        "source keys should be durable and de-duplicated"
+    );
+}
+
 // #1758 hardening: bootstrap rows carrying a fabricatable identifier get a
 // ⚠ref marker (via tag or content detection); identifier-free rows do not.
 #[test]
@@ -2022,10 +2110,73 @@ async fn session_bootstrap_surfaces_work_memory_block() {
 }
 
 #[tokio::test]
+async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_foreign_scope() {
+    let (hub, _temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let cwd = "/tmp/bootstrap-semantic-scope-alpha";
+    let local_scope = format!("project:{cwd}");
+    let common = "semantic bootstrap scoped anchor phrase";
+
+    let rows = [
+        mk_mem_scoped(
+            "bootstrap_semantic_global_visible",
+            "fact",
+            &format!("{common} global visible evidence"),
+            &[],
+            None,
+        ),
+        mk_mem_scoped(
+            "bootstrap_semantic_local_visible",
+            "fact",
+            &format!("{common} local alpha visible evidence"),
+            &[],
+            Some(&local_scope),
+        ),
+        mk_mem_scoped(
+            "bootstrap_semantic_foreign_hidden",
+            "fact",
+            &format!("{common} foreign beta must stay hidden"),
+            &[],
+            Some("project:/tmp/bootstrap-semantic-scope-beta"),
+        ),
+    ];
+    for row in &rows {
+        store.memory_save(row).await.expect("save semantic row");
+    }
+
+    let out = SessionBootstrapTool::new(hub)
+        .execute(
+            json!({
+                "cwd": cwd,
+                "query": common,
+                "limit": 10,
+                "frontend": "claude-code",
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("semantic bootstrap");
+    let text = result_text(&out);
+    assert!(
+        text.contains("bootstrap_semantic_global_visible"),
+        "global semantic hit should remain visible: {text}"
+    );
+    assert!(
+        text.contains("bootstrap_semantic_local_visible"),
+        "same-project semantic hit should remain visible: {text}"
+    );
+    assert!(
+        !text.contains("bootstrap_semantic_foreign_hidden"),
+        "foreign-project semantic hit must not enter bootstrap: {text}"
+    );
+}
+
+#[tokio::test]
 async fn lifecycle_precompact_saves_work_memory_snapshot() {
     let (hub, _temp_dir) = mk_test_hub_with_store().await;
     let ctx = ToolContext::default();
     let cwd = "/tmp/agent-bridge-work-memory-precompact";
+    let store = hub.store.clone().expect("store");
 
     let res = SessionLifecycleStepTool::new(hub.clone())
         .execute(
@@ -2043,6 +2194,36 @@ async fn lifecycle_precompact_saves_work_memory_snapshot() {
         .expect("precompact ok");
     let body = result_json(&res);
     assert_eq!(body["work_memory"]["saved"], true);
+    assert_eq!(
+        body["session_curate"]["scope"],
+        format!("project:{cwd}"),
+        "precompact must pass its cwd-derived recall scope into session_curate"
+    );
+
+    let handoff_key = body["session_curate"]["session_handoff_key"]
+        .as_str()
+        .expect("curated handoff key");
+    let handoff = store
+        .memory_get(handoff_key)
+        .await
+        .expect("get curated handoff")
+        .expect("curated handoff persisted");
+    assert_eq!(
+        handoff.scope.as_deref(),
+        Some(format!("project:{cwd}").as_str())
+    );
+    for expected in [
+        "continuity_confidence:inferred",
+        "provenance_transform:session_curate",
+        "provenance_source:conversation_text",
+        "provenance_source_session:sess-precompact",
+    ] {
+        assert!(
+            handoff.tags.iter().any(|tag| tag == expected),
+            "curated handoff missing {expected}: {:?}",
+            handoff.tags
+        );
+    }
 
     let listed = WorkMemoryTool::new(hub)
         .execute(json!({"op": "list", "cwd": cwd, "compact": true}), &ctx)
@@ -2050,6 +2231,169 @@ async fn lifecycle_precompact_saves_work_memory_snapshot() {
         .expect("list work memory");
     let listed = result_json(&listed);
     assert_eq!(listed["rows"].as_array().expect("rows").len(), 1);
+}
+
+#[tokio::test]
+async fn memory_auto_curate_uses_scoped_sources_and_persists_derived_from_lineage() {
+    let (hub, _temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let target_scope = "project:/tmp/auto-curate-alpha";
+
+    let mut global_source = mk_mem_scoped(
+        "auto_curate_source_global",
+        "session_handoff",
+        "decision: Shared source evidence remains traceable.",
+        &[],
+        None,
+    );
+    global_source.importance = 0.8;
+    let mut local_source = mk_mem_scoped(
+        "auto_curate_source_alpha",
+        "session_handoff",
+        "lesson: Alpha source evidence remains inside its recall lane.",
+        &[],
+        Some(target_scope),
+    );
+    local_source.importance = 0.9;
+    let mut foreign_source = mk_mem_scoped(
+        "auto_curate_source_beta",
+        "session_handoff",
+        "todo: Beta forbidden marker must never enter the alpha curation batch.",
+        &[],
+        Some("project:/tmp/auto-curate-beta"),
+    );
+    foreign_source.importance = 1.0;
+
+    for source in [&global_source, &local_source, &foreign_source] {
+        store
+            .memory_save(source)
+            .await
+            .expect("save curation source");
+    }
+
+    let res = MemoryAutoCurateTool::new(hub.clone())
+        .execute(
+            json!({
+                "scope": target_scope,
+                "source_kind": "session_handoff",
+                "max_sources": 10,
+                "max_items": 10,
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("auto curate");
+    assert!(!res.is_error, "auto curate should succeed: {res:?}");
+    let body = result_json(&res);
+    assert_eq!(body["scope"], target_scope);
+
+    let used: std::collections::BTreeSet<&str> = body["sources_used"]
+        .as_array()
+        .expect("sources_used")
+        .iter()
+        .map(|value| value.as_str().expect("source key"))
+        .collect();
+    let expected_sources =
+        std::collections::BTreeSet::from([global_source.key.as_str(), local_source.key.as_str()]);
+    assert_eq!(
+        used, expected_sources,
+        "local+global sources should be visible, while a foreign project stays excluded"
+    );
+
+    let new_memories = body["new_memories"].as_array().expect("new_memories array");
+    assert_eq!(new_memories.len(), 2, "one candidate per visible marker");
+    assert_eq!(body["lineage_links_written"], 4);
+
+    for saved in new_memories {
+        let key = saved["key"].as_str().expect("saved key");
+        let record = store
+            .memory_get(key)
+            .await
+            .expect("get derived memory")
+            .expect("derived memory persisted");
+        assert_eq!(record.scope.as_deref(), Some(target_scope));
+        assert!(!record.content.contains("Beta forbidden marker"));
+        assert!(record
+            .tags
+            .iter()
+            .any(|tag| tag == "continuity_confidence:inferred"));
+        assert!(record
+            .tags
+            .iter()
+            .any(|tag| tag == "provenance_transform:memory_auto_curate"));
+
+        let related: std::collections::BTreeSet<&str> =
+            record.related_keys.iter().map(String::as_str).collect();
+        assert_eq!(related, expected_sources);
+
+        let derived_targets: std::collections::BTreeSet<String> = store
+            .memory_neighbors(key)
+            .await
+            .expect("derived memory neighbors")
+            .into_iter()
+            .filter(|edge| edge.from_key == key && edge.edge_type == "derived_from")
+            .map(|edge| edge.to_key)
+            .collect();
+        assert_eq!(
+            derived_targets,
+            expected_sources
+                .iter()
+                .map(|key| (*key).to_string())
+                .collect(),
+            "each derived row should retain explicit edges to every source"
+        );
+    }
+
+    // A later run may aggregate an additional source while producing the same
+    // candidates. Duplicate rows must still gain durable lineage instead of
+    // leaving `sources_used` only in the transient tool response.
+    let mut later_source = mk_mem_scoped(
+        "auto_curate_source_later",
+        "session_handoff",
+        "Additional lineage material.",
+        &[],
+        Some(target_scope),
+    );
+    later_source.importance = 0.1;
+    store
+        .memory_save(&later_source)
+        .await
+        .expect("save later source");
+    let second = MemoryAutoCurateTool::new(hub)
+        .execute(
+            json!({
+                "scope": target_scope,
+                "source_kind": "session_handoff",
+                "max_sources": 10,
+                "max_items": 10,
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("second auto curate");
+    let second_body = result_json(&second);
+    assert_eq!(second_body["saved_count"], 0);
+    assert_eq!(second_body["skipped_duplicates"], 2);
+    assert_eq!(second_body["lineage_backfilled"], 2);
+    for saved in new_memories {
+        let key = saved["key"].as_str().expect("saved key");
+        let record = store
+            .memory_get(key)
+            .await
+            .expect("get backfilled memory")
+            .expect("backfilled memory exists");
+        assert!(record.related_keys.contains(&later_source.key));
+        assert!(store
+            .memory_neighbors(key)
+            .await
+            .expect("backfilled edges")
+            .iter()
+            .any(|edge| {
+                edge.from_key == key
+                    && edge.to_key == later_source.key
+                    && edge.edge_type == "derived_from"
+            }));
+    }
 }
 
 #[test]
@@ -15382,6 +15726,61 @@ fn p4_pick_evolution_neighbors_skips_self_and_skill_and_below_threshold() {
     let picks_top1 = pick_evolution_neighbors(&cache, "self_dup", &new, 0.65, 1);
     assert_eq!(picks_top1.len(), 1);
     assert_eq!(picks_top1[0].0.key, "hot_kin");
+}
+
+#[test]
+fn p4_pick_evolution_neighbors_in_scope_filters_before_ranking() {
+    let scoped_cached = |key: &str, embedding: Vec<f32>, scope: Option<&str>| {
+        let mut row = mk_cached(key, "lesson", embedding);
+        row.0.scope = scope.map(str::to_string);
+        row
+    };
+    let new = vec![1.0_f32, 0.0, 0.0];
+    let cache = vec![
+        // The foreign row is the strongest geometric match. Scope filtering
+        // must happen before top-k so it cannot crowd out visible candidates.
+        scoped_cached(
+            "foreign_perfect",
+            vec![1.0, 0.0, 0.0],
+            Some("project:/tmp/evolve-beta"),
+        ),
+        scoped_cached(
+            "local_visible",
+            vec![0.98, 0.20, 0.0],
+            Some("project:/tmp/evolve-alpha"),
+        ),
+        scoped_cached("global_visible", vec![0.90, 0.44, 0.0], None),
+    ];
+
+    let local_picks = pick_evolution_neighbors_in_scope(
+        &cache,
+        "project:/tmp/evolve-alpha",
+        "new_local",
+        &new,
+        0.65,
+        2,
+    );
+    let local_keys: Vec<&str> = local_picks
+        .iter()
+        .map(|(record, _)| record.key.as_str())
+        .collect();
+    assert_eq!(
+        local_keys,
+        vec!["local_visible", "global_visible"],
+        "same-project and global neighbors remain after foreign candidates are removed"
+    );
+
+    let global_picks =
+        pick_evolution_neighbors_in_scope(&cache, "global", "new_global", &new, 0.65, 5);
+    let global_keys: Vec<&str> = global_picks
+        .iter()
+        .map(|(record, _)| record.key.as_str())
+        .collect();
+    assert_eq!(
+        global_keys,
+        vec!["global_visible"],
+        "a global source must never evolve links into a project lane"
+    );
 }
 
 #[test]
@@ -31116,8 +31515,14 @@ fn b3_mem(key: &str, kind: &str, content: &str) -> ab_store::MemoryRecord {
 #[tokio::test]
 async fn b3_preflight_empty_store_returns_no_signals() {
     let store = b3_test_store().await;
-    let (warnings, hints) =
-        super::b3_preflight(&store, "lesson_new", "anything goes here", "lesson").await;
+    let (warnings, hints) = super::b3_preflight(
+        &store,
+        "lesson_new",
+        "anything goes here",
+        "lesson",
+        "global",
+    )
+    .await;
     assert!(warnings.is_empty(), "no priors → no warnings");
     assert!(hints.is_empty(), "no priors → no hints");
 }
@@ -31140,6 +31545,7 @@ async fn b3_preflight_filters_cross_kind() {
         "lesson_new",
         "FTS5 column-scoped query syntax misuse warning",
         "lesson",
+        "global",
     )
     .await;
     assert!(
@@ -31148,6 +31554,37 @@ async fn b3_preflight_filters_cross_kind() {
         warnings
     );
     assert!(hints.is_empty(), "cross-kind prior must NOT yield hint");
+}
+
+#[tokio::test]
+async fn b3_preflight_excludes_foreign_project_near_duplicates() {
+    let store = b3_test_store().await;
+    let content = "scope bounded duplicate warning anchor phrase";
+    let mut local = b3_mem("lesson_local_prior", "lesson", content);
+    local.scope = Some("project:/tmp/b3-alpha".to_string());
+    let mut foreign = b3_mem("lesson_foreign_prior", "lesson", content);
+    foreign.scope = Some("project:/tmp/b3-beta".to_string());
+    store.memory_save(&local).await.expect("save local prior");
+    store
+        .memory_save(&foreign)
+        .await
+        .expect("save foreign prior");
+
+    let (warnings, hints) = super::b3_preflight(
+        &store,
+        "lesson_new",
+        content,
+        "lesson",
+        "project:/tmp/b3-alpha",
+    )
+    .await;
+    let keys: Vec<&str> = warnings
+        .iter()
+        .chain(hints.iter())
+        .filter_map(|row| row["key"].as_str())
+        .collect();
+    assert!(keys.contains(&"lesson_local_prior"), "{keys:?}");
+    assert!(!keys.contains(&"lesson_foreign_prior"), "{keys:?}");
 }
 
 #[tokio::test]
@@ -31168,6 +31605,7 @@ async fn b3_preflight_self_key_excluded() {
         "lesson_redo",
         "long-running content about migration discipline patterns",
         "lesson",
+        "global",
     )
     .await;
     assert!(warnings.is_empty(), "self key must not warn against itself");
@@ -31187,7 +31625,7 @@ async fn b3_preflight_warns_on_near_duplicate_same_kind() {
         .await
         .expect("save prior");
     let (warnings, hints) =
-        super::b3_preflight(&store, "lesson_new_attempt", content, "lesson").await;
+        super::b3_preflight(&store, "lesson_new_attempt", content, "lesson", "global").await;
     assert!(
         !warnings.is_empty(),
         "near-duplicate same-kind prior must yield ≥1 warning (got 0; \
@@ -31245,6 +31683,7 @@ async fn b3_preflight_warning_cosine_bounded_at_one() {
         "decision_new_attempt",
         "near-duplicate body text",
         "decision",
+        "global",
     )
     .await;
     assert!(

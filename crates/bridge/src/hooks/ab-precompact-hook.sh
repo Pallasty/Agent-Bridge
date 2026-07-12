@@ -202,7 +202,7 @@ PY
 
 # ── Build MCP JSON-RPC messages ───────────────────────────────────────────────
 python3 - "$CONVO_FILE" "$SESSION_ID" "$MCP_IN" <<'PY'
-import json, sys
+import json, os, sys
 
 convo_path, session_id, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
 text = open(convo_path, 'r', encoding='utf-8').read()
@@ -224,6 +224,7 @@ messages = [
         "name": "session_lifecycle_step",
         "arguments": {
             "step": "precompact",
+            "cwd": os.getcwd(),
             "conversation_text": text,
             "session_id": session_id,
             "max_items": 10,

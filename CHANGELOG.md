@@ -8,6 +8,11 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Typed Context Lane shadow contract.** A deterministic, side-effect-free
+  `agent_bridge.context_lane_decision.v0` separates workflow state,
+  interaction memory, source evidence, entity relations, and tool observations;
+  applies scope, temporal, provenance, claimant, and authority checks; and
+  grants neither memory-write nor tool-execution authority.
 - **Explicit retrieval traffic provenance (schema v42).**
   `retrieval_surfacing.traffic_class` records producer-boundary `organic`,
   `eval`, or fail-closed `unknown` provenance with a constrained column and
@@ -161,6 +166,14 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   consumed history before pending evidence.
 
 ### Changed
+- **Automatic curation now preserves epistemic boundaries.** Lifecycle-driven
+  `session_curate` inherits project scope, while `memory_auto_curate.scope`
+  bounds both source selection and derived output (default global-only).
+  Extracted rows are tagged `continuity_confidence:inferred`; auto-curated rows
+  retain source keys and `derived_from` edges instead of returning transient
+  lineage only, including lineage backfill on duplicate runs. Scoped curator
+  keys carry a stable scope digest to avoid cross-project key collisions. The
+  PreCompact hook now forwards its cwd.
 - **Release-candidate audit is reproducible without publishing.** The new
   `agent-bridge-release-candidate-audit.py` profiles conventional commits and
   public-surface changes since the latest source marker, partitions workspace
@@ -184,6 +197,12 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   `EmbeddingBackend` trait, and native version-vector sync.
 
 ### Fixed
+- **Closed cross-project automatic-recall paths.** Semantic session bootstrap,
+  warm/cold automatic evolution neighbors, and bootstrap BFS endpoint expansion
+  now enforce path-segment-aware project/domain recall scope before ranking,
+  truncation, rendering, or edge creation. Global/unscoped memory remains
+  visible; scope is explicitly documented as single-user recall isolation, not
+  a tenant/principal ACL.
 - **Declared continuity supersession now executes its row-level contract.**
   Saving a memory with `continuity.supersedes` retires each existing target in
   the same transaction (`status=superseded`, `superseded_by`, and canonical

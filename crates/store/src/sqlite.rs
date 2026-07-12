@@ -59,21 +59,21 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 }
 
 use crate::{
-    AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
-    CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
-    EmbeddingProfile, ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome,
-    ForumPostRecord, ForumThreadExport, ForumThreadRecord, GraphTopology, HebbianCluster,
-    IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow,
-    McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge,
-    MemoryEdgeExport, MemoryEvidenceProfile, MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot,
-    MemoryEvidenceSnapshotLimits, MemoryExportFilter, MemoryExportResult, MemoryListSort,
-    MemoryLiveMeta, MemoryPeekResult, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
-    MemorySearchHit, MemoryStats, MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord,
-    OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats,
-    RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts,
-    SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
-    AMBIENT_SURFACING_MODE, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP,
-    RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
+    memory_scope_visible_in_context, AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert,
+    CoactivationEdge, CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy,
+    DecayUnusedStats, EmbeddingProfile, ForumExportResult, ForumImportReport, ForumPostExport,
+    ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord, GraphTopology,
+    HebbianCluster, IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallFilter,
+    McpToolCallRow, McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit,
+    MemoryEdge, MemoryEdgeExport, MemoryEvidenceProfile, MemoryEvidenceRecordMarker,
+    MemoryEvidenceSnapshot, MemoryEvidenceSnapshotLimits, MemoryExportFilter, MemoryExportResult,
+    MemoryListSort, MemoryLiveMeta, MemoryPeekResult, MemoryQueryRecord, MemoryQueryStats,
+    MemoryRecord, MemorySearchHit, MemoryStats, MemoryTombstoneMarker, MisrankRow, ModeStats,
+    NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow,
+    ReplayAuditStats, RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary,
+    S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow,
+    WaypointStats, AMBIENT_SURFACING_MODE, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
+    MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -6932,6 +6932,51 @@ impl StateStore for SqliteStore {
         Ok(updated)
     }
 
+    async fn memory_add_related_keys(&self, key: &str, related_keys: &[String]) -> Result<bool> {
+        let key = key.to_string();
+        let add: Vec<String> = related_keys.to_vec();
+        let updated = self
+            .conn
+            .call(move |c| -> RusqliteResult<bool> {
+                let tx = c.unchecked_transaction()?;
+                let existing: Option<String> = tx
+                    .query_row(
+                        "SELECT related_keys FROM memories WHERE key = ?1 AND status = 'active'",
+                        params![key],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten();
+                let Some(raw) = existing else {
+                    return Ok(false);
+                };
+                let mut merged: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+                let before = merged.clone();
+                for related_key in add {
+                    let related_key = related_key.trim();
+                    if !related_key.is_empty()
+                        && !merged.iter().any(|existing| existing == related_key)
+                    {
+                        merged.push(related_key.to_string());
+                    }
+                }
+                if merged != before {
+                    let related_json =
+                        serde_json::to_string(&merged).unwrap_or_else(|_| "[]".to_string());
+                    tx.execute(
+                        "UPDATE memories SET related_keys = ?2 \
+                          WHERE key = ?1 AND status = 'active'",
+                        params![key, related_json],
+                    )?;
+                }
+                tx.commit()?;
+                Ok(true)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_add_related_keys: {e}")))?;
+        Ok(updated)
+    }
+
     async fn memory_add_tags(&self, key: &str, tags: &[String]) -> Result<bool> {
         let key = key.to_string();
         let add: Vec<String> = tags.to_vec();
@@ -7113,10 +7158,22 @@ impl StateStore for SqliteStore {
         limit: u32,
         threshold: f32,
     ) -> Result<Vec<MemorySearchHit>> {
+        self.memory_search_semantic_in_scope(query, "", limit, threshold)
+            .await
+    }
+
+    async fn memory_search_semantic_in_scope(
+        &self,
+        query: &str,
+        ctx: &str,
+        limit: u32,
+        threshold: f32,
+    ) -> Result<Vec<MemorySearchHit>> {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
         let query_vec = crate::vector::embed_text(query);
+        let ctx = ctx.trim().to_string();
         let limit_usize = limit as usize;
         let now = now_secs();
 
@@ -7167,6 +7224,7 @@ impl StateStore for SqliteStore {
 
         let mut hits: Vec<MemorySearchHit> = rows
             .into_iter()
+            .filter(|(rec, _)| memory_scope_visible_in_context(rec.scope.as_deref(), ctx.as_str()))
             .filter_map(|(rec, emb_bytes)| {
                 let stored_vec = crate::vector::decode_embedding(&emb_bytes);
                 if stored_vec.is_empty() {
@@ -7207,10 +7265,20 @@ impl StateStore for SqliteStore {
     }
 
     async fn memory_top_k_cosine(&self, query: &str, k: u32) -> Result<Vec<MemoryCosineHit>> {
+        self.memory_top_k_cosine_in_scope(query, "", k).await
+    }
+
+    async fn memory_top_k_cosine_in_scope(
+        &self,
+        query: &str,
+        ctx: &str,
+        k: u32,
+    ) -> Result<Vec<MemoryCosineHit>> {
         if query.trim().is_empty() || k == 0 {
             return Ok(Vec::new());
         }
         let query_vec = crate::vector::embed_text(query);
+        let ctx = ctx.trim().to_string();
         let k_usize = k as usize;
 
         let rows = self
@@ -7256,6 +7324,7 @@ impl StateStore for SqliteStore {
 
         let mut hits: Vec<MemoryCosineHit> = rows
             .into_iter()
+            .filter(|(rec, _)| memory_scope_visible_in_context(rec.scope.as_deref(), ctx.as_str()))
             .filter_map(|(rec, emb_bytes)| {
                 let stored_vec = crate::vector::decode_embedding(&emb_bytes);
                 if stored_vec.is_empty() {
@@ -13277,6 +13346,174 @@ mod tests {
             Some(expected_backend.as_str()),
             "memory_import should stamp embedding_backend for imported rows"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn scoped_semantic_and_cosine_search_never_cross_project_or_domain() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-scoped-semantic-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let rows = [
+            ("unscoped", None, "global fallback context"),
+            ("global", Some("global"), "global approved context"),
+            (
+                "local_project",
+                Some("project:/repo/a"),
+                "local project fallback context",
+            ),
+            (
+                "other_project",
+                Some("project:/repo/b"),
+                "exclusive cross scope needle exact match",
+            ),
+            (
+                "prefix_sibling",
+                Some("project:/repo/another"),
+                "exclusive cross scope needle exact match",
+            ),
+            (
+                "local_domain",
+                Some("domain:rust"),
+                "local domain fallback context",
+            ),
+            (
+                "other_domain",
+                Some("domain:python"),
+                "exclusive cross scope needle exact match",
+            ),
+        ];
+        for (key, scope, content) in rows {
+            let mut rec = mk_record(key, 1_700_000_000);
+            rec.content = content.to_string();
+            rec.scope = scope.map(str::to_string);
+            store.memory_save(&rec).await.expect("save scoped row");
+        }
+
+        let query = "exclusive cross scope needle exact match";
+        let expected_project = ["global", "local_project", "unscoped"];
+        let semantic = store
+            .memory_search_semantic_in_scope(query, "/repo/a/subdir", 3, -1.0)
+            .await
+            .expect("scoped semantic");
+        let mut semantic_keys: Vec<_> =
+            semantic.iter().map(|hit| hit.record.key.as_str()).collect();
+        semantic_keys.sort_unstable();
+        assert_eq!(semantic_keys, expected_project);
+
+        let cosine = store
+            .memory_top_k_cosine_in_scope(query, "project:/repo/a/subdir", 3)
+            .await
+            .expect("scoped cosine");
+        let mut cosine_keys: Vec<_> = cosine.iter().map(|hit| hit.record.key.as_str()).collect();
+        cosine_keys.sort_unstable();
+        assert_eq!(cosine_keys, expected_project);
+
+        // Segment-boundary regression: `/repo/a` is not an ancestor of
+        // `/repo/another`, despite sharing a string prefix.
+        let sibling = store
+            .memory_top_k_cosine_in_scope(query, "/repo/another/subdir", 3)
+            .await
+            .expect("prefix-sibling cosine");
+        let mut sibling_keys: Vec<_> = sibling.iter().map(|hit| hit.record.key.as_str()).collect();
+        sibling_keys.sort_unstable();
+        assert_eq!(sibling_keys, ["global", "prefix_sibling", "unscoped"]);
+
+        let expected_domain = ["global", "local_domain", "unscoped"];
+        let domain = store
+            .memory_top_k_cosine_in_scope(query, "domain:rust", 3)
+            .await
+            .expect("domain cosine");
+        let mut domain_keys: Vec<_> = domain.iter().map(|hit| hit.record.key.as_str()).collect();
+        domain_keys.sort_unstable();
+        assert_eq!(domain_keys, expected_domain);
+
+        // Backwards-compatible unscoped APIs still see the complete active
+        // corpus. The new methods are additive, not a behavior change for
+        // diagnostics/admin callers that intentionally search all scopes.
+        let unscoped_semantic = store
+            .memory_search_semantic(query, 20, -1.0)
+            .await
+            .expect("unscoped semantic");
+        assert_eq!(unscoped_semantic.len(), rows.len());
+        let unscoped_cosine = store
+            .memory_top_k_cosine(query, 20)
+            .await
+            .expect("unscoped cosine");
+        assert_eq!(unscoped_cosine.len(), rows.len());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_add_related_keys_merges_without_timestamp_or_supersession_churn() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-related-key-merge-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let mut record = mk_record("related_merge", 1_700_000_000);
+        record.related_keys = vec!["source_a".to_string()];
+        store.memory_save(&record).await.expect("save row");
+        let before = match store.memory_peek(&record.key).await.expect("peek before") {
+            MemoryPeekResult::Present { record } => record,
+            other => panic!("expected present row, got {other:?}"),
+        };
+
+        assert!(store
+            .memory_add_related_keys(
+                &record.key,
+                &[
+                    "source_a".to_string(),
+                    " source_b ".to_string(),
+                    "".to_string(),
+                ],
+            )
+            .await
+            .expect("merge related keys"));
+        let after = match store.memory_peek(&record.key).await.expect("peek after") {
+            MemoryPeekResult::Present { record } => record,
+            other => panic!("expected present row, got {other:?}"),
+        };
+        assert_eq!(after.related_keys, ["source_a", "source_b"]);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(after.status, "active");
+        assert!(after.superseded_by.is_none());
+
+        store
+            .conn
+            .call({
+                let key = record.key.clone();
+                move |connection| -> RusqliteResult<()> {
+                    connection.execute(
+                        "UPDATE memories SET status = 'archived' WHERE key = ?1",
+                        params![key],
+                    )?;
+                    Ok(())
+                }
+            })
+            .await
+            .expect("archive row");
+        assert!(!store
+            .memory_add_related_keys(&record.key, &["source_c".to_string()])
+            .await
+            .expect("archived merge is false"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

@@ -696,14 +696,14 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 | | `memory_orphan_candidates` | Scoped, read-only orphan-link candidate preview for graph hygiene |
 | | `memory_orphan_inventory` | Scoped, read-only inventory of remaining orphan memories by kind/tag/age/key |
 | | `memory_graph_export` | Export memory graph as Graphviz DOT or JSON (v0.11) |
-| | `memory_auto_curate` | Automated batch curation from `session_handoff` memories (v0.12) |
+| | `memory_auto_curate` | Scope-bounded batch curation from `session_handoff` memories; persists inferred confidence and source lineage (v0.12) |
 | multi-session | `agent_message` | Append JSON payload to another session's inbox (`agent_messages`, SQLite v10 / W6; Niche since the 2026-07 prune — the forum tools are the live path) |
 | | `agent_inbox` | Fetch inbox rows (`since_id`, `unread_only`, `limit`; Niche since the 2026-07 prune) |
 | plan | `plan_save` | Persist a structured task plan (steps, deps, per-step status) to SQLite (W5) |
 | | `plan_load` | Load plan + `progress` / `next_step_id` summary |
 | | `plan_update` | Set one step's status by id |
 | session | `session_bootstrap` | Build a compact memory bootstrap block for the current session |
-| | `session_curate` | Extract structured memories from conversation text (two-pass pipeline) |
+| | `session_curate` | Extract structured memories from conversation text; lifecycle calls inherit project scope and mark outputs inferred (two-pass pipeline) |
 | | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
 | | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3; Niche since the 2026-07 prune — `session_lifecycle_step` is the live successor) |
 | | `session_lifecycle_step` | Dispatch `bootstrap` / `precompact` (curate+finalize) / `finalize` in one call |
@@ -728,15 +728,24 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 | | `warp_launch_workflow` | `warp://launch/<configuration_name>` — saved Launch Configuration |
 | | `warp_status` | Env / opener / IPC bridge socket / `oz` on PATH — does not open UI |
 
-### Memory scopes
+### Memory recall scopes (single-user, not ACLs)
 
 `memory_save` accepts an optional `scope` field:
 
-| Value | Visibility |
-|-------|-----------|
+| Value | Recall visibility |
+|-------|-------------------|
 | _(omitted)_ or `"global"` | All sessions everywhere |
 | `"project:/abs/path"` | Only when cwd is inside `/abs/path` |
 | `"domain:rust"` | Any session tagged with the `rust` domain |
+
+These scopes prevent accidental cross-project recall in the local single-user
+store; they are **not** tenant, principal, ownership, or permission ACLs.
+`memory_get` and `memory_list` remain explicit operator/all-store surfaces.
+Do not expose one store to mutually untrusted users on the strength of `scope`.
+Automatic contextual paths are stricter: semantic `session_bootstrap`, graph
+BFS expansion, automatic evolution links, and lifecycle-driven curation admit
+only the current project/domain lane plus global memories. Project matching is
+path-segment-aware (`/repo/a` does not match `/repo/another`).
 
 ### Memory search / embeddings (operators & agents)
 
@@ -768,6 +777,16 @@ they are not recorded as coactivation training evidence.
 | **Coding agents** | Same rules via MCP schema; use `local_only` for implementation/status/release tasks, `local_plus_global` for local work plus general lessons, and `exploratory` only when cross-project analogies are part of the task. |
 
 See also: `docs/AGENT-BRIDGE-EVOLUTION-CORE.md` §8, `docs/AGENT-BRIDGE-AGENT-UX-ROADMAP.md` (phased follow-ups).
+
+### Context lanes (shadow-only)
+
+The internal `agent_bridge.context_lane_decision.v0` contract keeps workflow
+state, interaction memory, source evidence, entity relations, and tool
+observations in typed lanes while evaluating scope, `as_of`, provenance, and
+authority. `user_stated` evidence must retain an attributed claimant and may be
+context-only; source-backed `verified` evidence is required for load-bearing
+grounded answers. The contract is currently `shadow_only`: it has no MCP
+surface and can neither write memory nor execute tools.
 
 ---
 
@@ -902,7 +921,13 @@ All three tools require the `oz` CLI on `$PATH` and an active session
 **v0.12**: `memory_auto_curate` can be scheduled as a recurring Warp Oz
 cloud agent task (daily cron via `oz schedule`) to automatically distil
 accumulated `session_handoff` memories into structured lessons, decisions,
-and facts — no human prompt required.
+and facts — no human prompt required. Its `scope` (default `global`) bounds both
+source selection and derived output; each saved result keeps source keys in
+`related_keys`, writes `derived_from` edges, and is tagged
+`continuity_confidence:inferred`. Use an explicit project/domain scope for
+local runs; scoped derived keys include a stable scope digest so identical text
+cannot collide across projects. Automatic curation never upgrades extracted
+text to `verified`.
 
 ### `WarpBackend` capabilities
 

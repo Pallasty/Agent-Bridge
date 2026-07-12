@@ -11135,6 +11135,7 @@ async fn build_proactive_hint(
     key: &str,
     content: &str,
     tags: &[String],
+    recall_context: &str,
 ) -> Option<String> {
     // Existing direct edges
     let neighbors = store.memory_neighbors(key).await.unwrap_or_default();
@@ -11197,6 +11198,9 @@ async fn build_proactive_hint(
     // Filter: skip self and already-linked; no score threshold (BM25 isn't normalised)
     let candidates: Vec<_> = hits
         .into_iter()
+        .filter(|h| {
+            ab_store::memory_scope_visible_in_context(h.record.scope.as_deref(), recall_context)
+        })
         .filter(|h| h.record.key != key && !linked.contains(&h.record.key))
         .take(3)
         .collect();
@@ -11221,7 +11225,8 @@ async fn build_proactive_hint(
 }
 
 /// **B3 preflight** (audit-gap B3 v0) — cosine-rank the new save's content against
-/// same-kind active prior memories. Emits two structured signals:
+/// same-kind active prior memories visible in its recall context. Emits two
+/// structured signals:
 ///
 /// - `prior_decision_warning` (cos ≥ 0.75, capped at 3): likely near-duplicate;
 ///   sits at p99 of all-pairs same-kind cosines per the 2026-05-17 corpus probe.
@@ -11245,6 +11250,7 @@ async fn b3_preflight(
     new_key: &str,
     new_content: &str,
     new_kind: &str,
+    recall_context: &str,
 ) -> (Vec<Value>, Vec<Value>) {
     const HARD_THRESHOLD: f64 = 0.75;
     const SOFT_THRESHOLD: f64 = 0.60;
@@ -11259,7 +11265,12 @@ async fn b3_preflight(
     }
 
     let hits = match store
-        .memory_search_semantic(new_content, SEARCH_LIMIT, SOFT_THRESHOLD_F32)
+        .memory_search_semantic_in_scope(
+            new_content,
+            recall_context,
+            SEARCH_LIMIT,
+            SOFT_THRESHOLD_F32,
+        )
         .await
     {
         Ok(h) => h,
@@ -11308,23 +11319,17 @@ async fn b3_preflight(
     (warnings, hints)
 }
 
-/// **Phase 1 P4 (structural)** — Pick top-k cosine neighbors of a freshly
-/// saved memory from the in-process embedding cache. The graph-side of
-/// A-MEM evolution: insert `evolved` edges from the new memory to its
-/// nearest-existing kin, so future `memory_search_hybrid` (graph fusion)
-/// surfaces them together. Skill records are excluded from candidates
-/// (same intent as P1.5 coactivation filter).
-///
-/// Pure / synchronous so it's easy to unit-test. Returns full records
-/// (cloned from the cache) so callers — notably the P4b LLM filter step —
-/// have the body / tags / kind they need without a second round-trip.
-fn pick_evolution_neighbors(
+fn pick_evolution_neighbors_where<F>(
     cached: &[(MemoryRecord, Vec<f32>)],
     new_key: &str,
     new_embedding: &[f32],
     threshold: f32,
     top_k: usize,
-) -> Vec<(MemoryRecord, f64)> {
+    visible: F,
+) -> Vec<(MemoryRecord, f64)>
+where
+    F: Fn(&MemoryRecord) -> bool,
+{
     // Status filter is defense-in-depth against a race in MemoryDeleteTool /
     // MemoryCompactTool: those spawn fire-and-forget cache-cleanup tasks, so
     // a tombstoned/superseded record can still appear in `cached` for a few
@@ -11334,6 +11339,7 @@ fn pick_evolution_neighbors(
     // filters status='active'; this brings the cache path to parity.
     let mut sims: Vec<(MemoryRecord, f64)> = cached
         .iter()
+        .filter(|(record, _)| visible(record))
         .filter(|(rec, _)| rec.key != new_key && rec.kind != "skill" && rec.status == "active")
         .map(|(rec, emb)| {
             let c = cosine_similarity(new_embedding, emb);
@@ -11346,20 +11352,51 @@ fn pick_evolution_neighbors(
     sims
 }
 
-/// Cold-path counterpart of [`pick_evolution_neighbors`]: build the evolution
-/// candidate set from a `memory_top_k_cosine` pull when the embed cache is cold.
+/// Unscoped unit-test wrapper for the original P4 ranking invariants. Runtime
+/// callers must use [`pick_evolution_neighbors_in_scope`].
+#[cfg(test)]
+fn pick_evolution_neighbors(
+    cached: &[(MemoryRecord, Vec<f32>)],
+    new_key: &str,
+    new_embedding: &[f32],
+    threshold: f32,
+    top_k: usize,
+) -> Vec<(MemoryRecord, f64)> {
+    pick_evolution_neighbors_where(cached, new_key, new_embedding, threshold, top_k, |_| true)
+}
+
+/// Scope-preserving warm-cache wrapper for automatic evolution. The cache is
+/// process-wide, so callers must filter it before cosine ranking; filtering
+/// after top-k would let a very similar foreign project crowd out all visible
+/// candidates.
+fn pick_evolution_neighbors_in_scope(
+    cached: &[(MemoryRecord, Vec<f32>)],
+    recall_context: &str,
+    new_key: &str,
+    new_embedding: &[f32],
+    threshold: f32,
+    top_k: usize,
+) -> Vec<(MemoryRecord, f64)> {
+    pick_evolution_neighbors_where(cached, new_key, new_embedding, threshold, top_k, |record| {
+        ab_store::memory_scope_visible_in_context(record.scope.as_deref(), recall_context)
+    })
+}
+
+/// Cold-path counterpart of [`pick_evolution_neighbors_in_scope`]: build the evolution
+/// candidate set from a scoped pure-cosine pull when the embed cache is cold.
 /// Evolved edges are semantic-similarity links, so — exactly like the warm path —
 /// select and weight neighbors by PURE COSINE.
 ///
-/// The source is `memory_top_k_cosine` (pure-cosine top-k over ALL active rows),
+/// The source is `memory_top_k_cosine_in_scope` (pure-cosine top-k over all
+/// active rows visible to the new memory),
 /// NOT `memory_search_semantic`: the latter truncates to its `limit` by the
 /// importance/recency BLENDED score BEFORE any cosine re-sort, so a high-cosine
 /// neighbor ranked past the blend cutoff was silently lost from the cold pool
-/// while the warm `pick_evolution_neighbors` (which cosine-ranks every cached
+/// while the warm scoped picker (which cosine-ranks every visible cached
 /// row) kept it — a residual cache-warmth divergence (#54 follow-up). Pulling by
 /// cosine removes that: apply the same `threshold` the warm path uses (the cosine
 /// source is unthresholded), drop self/skills, re-sort by cosine, truncate to
-/// `top_k`. `memory_top_k_cosine` already filters `status='active'`.
+/// `top_k`. The store query already filters `status='active'`.
 fn evolution_neighbors_from_cosine_hits(
     hits: Vec<MemoryCosineHit>,
     new_key: &str,
@@ -11519,6 +11556,9 @@ const CONTINUITY_FRESHNESS_POLICY_TAG_PREFIX: &str = "continuity_freshness_polic
 const CONTINUITY_ACTIONABILITY_TAG_PREFIX: &str = "continuity_actionability:";
 const CONTINUITY_BLAST_RADIUS_TAG_PREFIX: &str = "continuity_blast_radius:";
 const CONTINUITY_SUPERSEDES_TAG_PREFIX: &str = "continuity_supersedes:";
+const PROVENANCE_TRANSFORM_TAG_PREFIX: &str = "provenance_transform:";
+const PROVENANCE_SOURCE_TAG_PREFIX: &str = "provenance_source:";
+const PROVENANCE_SOURCE_SESSION_TAG_PREFIX: &str = "provenance_source_session:";
 const CONTINUITY_RETRIEVAL_TRIGGER_MAX_CHARS: usize = 160;
 
 const CONTINUITY_TAG_PREFIXES: [&str; 7] = [
@@ -11716,6 +11756,113 @@ fn memory_push_unique_tag(tags: &mut Vec<String>, tag: String) {
     if !tags.iter().any(|existing| existing == &tag) {
         tags.push(tag);
     }
+}
+
+/// Normalize the public recall-scope convention used by memory tools.
+///
+/// `None`, an empty string, and `global` all mean the unscoped/global lane.
+/// This is a single-user recall boundary, not a principal/tenant ACL.
+fn normalized_recall_scope(scope: Option<&str>) -> Option<String> {
+    scope
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty() && !scope.eq_ignore_ascii_case("global"))
+        .map(str::to_string)
+}
+
+/// Store scoped-query APIs deliberately treat an empty context as the legacy
+/// all-store view. Automatic paths must never pass empty here: global memories
+/// may see only global/unscoped rows, while scoped memories see their local
+/// lane plus global rows.
+fn recall_context_for_scope(scope: Option<&str>) -> String {
+    normalized_recall_scope(scope).unwrap_or_else(|| "global".to_string())
+}
+
+/// Apply conservative governance to memories produced by an automatic text
+/// transform. Curated output is an inference until a separate evidence-backed
+/// process verifies it; it also inherits the caller's recall scope and keeps
+/// durable lineage to memory sources where such keys exist.
+fn apply_curated_memory_governance(
+    memory: &mut MemoryRecord,
+    target_scope: Option<&str>,
+    transform: &str,
+    source_session: Option<&str>,
+    source_keys: &[String],
+) {
+    memory.scope = normalized_recall_scope(target_scope);
+    if let Some(scope) = memory.scope.as_deref() {
+        // Curator keys are otherwise content/position based and live in one
+        // process-wide key namespace. Bind scoped products to a stable scope
+        // digest so identical text in two projects cannot collide or cause one
+        // project's candidate to be skipped as another project's duplicate.
+        let scope_hash = stable_fnv1a_hex(scope);
+        let suffix = format!("__scope_{}", &scope_hash[..12]);
+        if !memory.key.ends_with(&suffix) {
+            memory.key.push_str(&suffix);
+        }
+    }
+
+    memory
+        .tags
+        .retain(|tag| !tag.starts_with(CONTINUITY_CONFIDENCE_TAG_PREFIX));
+    memory_push_unique_tag(
+        &mut memory.tags,
+        format!("{CONTINUITY_CONFIDENCE_TAG_PREFIX}inferred"),
+    );
+    memory_push_unique_tag(
+        &mut memory.tags,
+        format!("{PROVENANCE_TRANSFORM_TAG_PREFIX}{transform}"),
+    );
+    memory_push_unique_tag(
+        &mut memory.tags,
+        format!(
+            "{PROVENANCE_SOURCE_TAG_PREFIX}{}",
+            if source_keys.is_empty() {
+                "conversation_text"
+            } else {
+                "memory_records"
+            }
+        ),
+    );
+    if let Some(session_id) = source_session.map(str::trim).filter(|s| !s.is_empty()) {
+        memory_push_unique_tag(
+            &mut memory.tags,
+            format!("{PROVENANCE_SOURCE_SESSION_TAG_PREFIX}{session_id}"),
+        );
+    }
+
+    for source_key in source_keys {
+        let source_key = source_key.trim();
+        if !source_key.is_empty()
+            && !memory
+                .related_keys
+                .iter()
+                .any(|existing| existing == source_key)
+        {
+            memory.related_keys.push(source_key.to_string());
+        }
+    }
+}
+
+async fn persist_curated_lineage_edges(
+    store: &Arc<dyn StateStore>,
+    derived_key: &str,
+    source_keys: &[String],
+) -> (usize, Vec<String>) {
+    let mut written = 0usize;
+    let mut errors = Vec::new();
+    for source_key in source_keys {
+        if source_key == derived_key {
+            continue;
+        }
+        match store
+            .memory_link(derived_key, source_key, "derived_from", 1.0)
+            .await
+        {
+            Ok(()) => written += 1,
+            Err(error) => errors.push(format!("{derived_key} -> {source_key}: {error}")),
+        }
+    }
+    (written, errors)
 }
 
 fn memory_apply_continuity_metadata_tags(
@@ -12014,7 +12161,14 @@ impl McpTool for MemorySaveTool {
         };
         let sync_advisory_enabled = memory_save_sync_advisory_enabled(&mem.content);
         let (b3_warnings, b3_hints) = if sync_advisory_enabled && !b3_disabled && b3_eligible_kind {
-            b3_preflight(&store, &mem.key, &mem.content, &mem.kind).await
+            b3_preflight(
+                &store,
+                &mem.key,
+                &mem.content,
+                &mem.kind,
+                &recall_context_for_scope(mem.scope.as_deref()),
+            )
+            .await
         } else {
             (Vec::new(), Vec::new())
         };
@@ -12031,7 +12185,7 @@ impl McpTool for MemorySaveTool {
                 // `session_bootstrap` or `memory_reindex` populates it. Pre-fix
                 // version silently exited if cache was empty — meaning P4
                 // never fired in cold sessions. Now: prefer cache when warm,
-                // fall back to `store.memory_search_semantic` when cold so
+                // fall back to scoped store cosine search when cold so
                 // edges always get written. The semantic-search call costs
                 // ~11ms per save (one embed + small cosine sweep), which is
                 // acceptable for a background spawn.
@@ -12045,6 +12199,7 @@ impl McpTool for MemorySaveTool {
                     let emb_for_evolve = emb.clone();
                     let new_kind_for_evolve = mem.kind.clone();
                     let new_tags_for_evolve = mem.tags.clone();
+                    let recall_context_for_evolve = recall_context_for_scope(mem.scope.as_deref());
                     tokio::spawn(async move {
                         tracing::debug!(
                             target: "p4_evolve",
@@ -12058,8 +12213,9 @@ impl McpTool for MemorySaveTool {
                             if let Some(ref mut cached) = *guard {
                                 cached.retain(|(r, _)| r.key != rec.key);
                                 cached.push((rec, emb));
-                                let n = pick_evolution_neighbors(
+                                let n = pick_evolution_neighbors_in_scope(
                                     cached,
+                                    &recall_context_for_evolve,
                                     &new_key_for_evolve,
                                     &emb_for_evolve,
                                     /* threshold */ 0.65,
@@ -12076,15 +12232,16 @@ impl McpTool for MemorySaveTool {
                                 n
                             } else {
                                 drop(guard);
-                                // Pull by PURE COSINE over all active rows, then
+                                // Pull by PURE COSINE over the source memory's
+                                // recall lane (local + global), then
                                 // threshold/exclude to match the warm
                                 // pick_evolution_neighbors. Using
                                 // memory_search_semantic here would truncate by the
                                 // blended score first and drop high-cosine, low-
                                 // importance neighbors (#54 follow-up).
                                 //
-                                // `memory_top_k_cosine` truncates to k BY COSINE
-                                // over ALL active rows BEFORE this helper filters
+                                // The scoped cosine query truncates to k BY COSINE
+                                // over all visible active rows BEFORE this helper filters
                                 // self/skill. The true top-5-eligible is lost only
                                 // if >(k-5) INELIGIBLE rows outrank the 5th real
                                 // neighbor by cosine — i.e. self(1) + skill rows,
@@ -12098,8 +12255,9 @@ impl McpTool for MemorySaveTool {
                                 // active row, so a larger k only grows the returned
                                 // Vec, which we immediately truncate to top_k.
                                 match store_for_evolve
-                                    .memory_top_k_cosine(
+                                    .memory_top_k_cosine_in_scope(
                                         &new_content_for_evolve,
+                                        &recall_context_for_evolve,
                                         /* k (headroom vs self+skill) */ 200,
                                     )
                                     .await
@@ -12125,7 +12283,7 @@ impl McpTool for MemorySaveTool {
                                             target: "p4_evolve",
                                             key = %new_key_for_evolve,
                                             error = %e,
-                                            "P4 evolve cold path memory_top_k_cosine FAILED"
+                                            "P4 evolve cold path scoped cosine query FAILED"
                                         );
                                         Vec::new()
                                     }
@@ -12204,7 +12362,14 @@ impl McpTool for MemorySaveTool {
                     });
                 }
                 let hint = if sync_advisory_enabled {
-                    build_proactive_hint(&store, &key, &mem.content, &mem.tags).await
+                    build_proactive_hint(
+                        &store,
+                        &key,
+                        &mem.content,
+                        &mem.tags,
+                        &recall_context_for_scope(mem.scope.as_deref()),
+                    )
+                    .await
                 } else {
                     None
                 };
@@ -12538,7 +12703,14 @@ impl McpTool for MemoryGetTool {
         match row {
             None => Ok(ToolResult::json_text(&Value::Null)),
             Some(rec) => {
-                let hint = build_proactive_hint(&store, &key, &rec.content, &rec.tags).await;
+                let hint = build_proactive_hint(
+                    &store,
+                    &key,
+                    &rec.content,
+                    &rec.tags,
+                    &recall_context_for_scope(rec.scope.as_deref()),
+                )
+                .await;
                 let mut resp = memory_record_value_with_continuity(&rec);
                 if let Some(obj) = resp.as_object_mut() {
                     obj.insert(
@@ -17255,7 +17427,7 @@ impl McpTool for SessionBootstrapTool {
         let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
             // Semantic path: cosine-ranked results, session_handoff always prepended.
             let semantic_hits = store
-                .memory_search_semantic(q, limit, 0.15)
+                .memory_search_semantic_in_scope(q, &cwd, limit, 0.15)
                 .await
                 .unwrap_or_default();
             let mut ranked: Vec<MemoryRecord> = semantic_hits
@@ -17941,6 +18113,10 @@ impl McpTool for SessionCurateTool {
                         "type": "string",
                         "description": "Optional session ID for key namespacing and deduplication."
                     },
+                    "scope": {
+                        "type": "string",
+                        "description": "Recall scope inherited by every extracted memory (for example project:/repo or domain:rust). Omit or use 'global' only for an intentional global curation run. This is not a principal ACL."
+                    },
                     "max_items": {
                         "type": "integer",
                         "minimum": 1,
@@ -17976,8 +18152,10 @@ impl McpTool for SessionCurateTool {
         let session_id = args
             .get("session_id")
             .and_then(|v| v.as_str())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
+        let target_scope = normalized_recall_scope(args.get("scope").and_then(Value::as_str));
         let max_items = args
             .get("max_items")
             .and_then(|v| v.as_u64())
@@ -18002,6 +18180,15 @@ impl McpTool for SessionCurateTool {
             max_items,
             curate_opts.clone(),
         );
+        for candidate in &mut candidates {
+            apply_curated_memory_governance(
+                candidate,
+                target_scope.as_deref(),
+                "session_curate",
+                session_id.as_deref(),
+                &[],
+            );
+        }
 
         if dry_run || store_opt.is_none() {
             // SSB lifecycle producer: a dry-run previews but persists nothing →
@@ -18012,6 +18199,7 @@ impl McpTool for SessionCurateTool {
             }
             return Ok(ToolResult::json_text(&json!({
                 "dry_run": true,
+                "scope": target_scope.as_deref().unwrap_or("global"),
                 "options": {
                     "implicit_score_threshold": curate_opts.implicit_score_threshold,
                     "implicit_dedup_jaccard": curate_opts.implicit_dedup_jaccard,
@@ -18021,6 +18209,8 @@ impl McpTool for SessionCurateTool {
                     "kind": m.kind,
                     "content": m.content,
                     "tags": m.tags,
+                    "related_keys": m.related_keys,
+                    "scope": m.scope,
                 })).collect::<Vec<_>>()
             })));
         }
@@ -18110,6 +18300,7 @@ impl McpTool for SessionCurateTool {
 
         Ok(ToolResult::json_text(&json!({
             "dry_run": false,
+            "scope": target_scope.as_deref().unwrap_or("global"),
             "saved_count": saved.len(),
             "new_memories": saved,
             "skipped_duplicates": skipped,
@@ -33698,7 +33889,10 @@ impl McpTool for SessionLifecycleStepTool {
                         "reason": if dry_run { "dry_run" } else { "disabled" }
                     })
                 };
-                let mut curate_args = json!({ "conversation_text": conv });
+                let mut curate_args = json!({
+                    "conversation_text": conv,
+                    "scope": work_memory_scope(&cwd),
+                });
                 for k in [
                     "session_id",
                     "max_items",
@@ -34258,10 +34452,11 @@ impl McpTool for MemoryGraphExportTool {
 //                          memory_auto_curate (v0.12)
 // ===========================================================================
 
-/// Automated memory curation: gathers recent `session_handoff` (or any
-/// configurable kind) memories, aggregates their content, runs the
+/// Automated memory curation: gathers recent in-scope `session_handoff` (or
+/// any configurable kind) memories, aggregates their content, runs the
 /// curate_conversation two-pass pipeline over the combined text, and
-/// persists the resulting structured memories.
+/// persists the resulting structured memories with inherited scope, inferred
+/// confidence, and durable source lineage.
 ///
 /// Designed to be called periodically (e.g. by an Oz cloud-agent schedule)
 /// to proactively accumulate lessons/decisions/facts from session summaries
@@ -34297,6 +34492,11 @@ impl McpTool for MemoryAutoCurateTool {
                         "type": "string",
                         "description": "Memory kind to gather as source material. Default: 'session_handoff'.",
                         "default": "session_handoff"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "default": "global",
+                        "description": "Recall scope used both to select source memories and to scope every derived memory. 'global' sees only global/unscoped sources; use project:/repo or domain:name for local+global recall. This is not a principal ACL."
                     },
                     "max_sources": {
                         "type": "integer",
@@ -34349,6 +34549,8 @@ impl McpTool for MemoryAutoCurateTool {
             .filter(|s| !s.is_empty())
             .unwrap_or("session_handoff")
             .to_string();
+        let target_scope = normalized_recall_scope(args.get("scope").and_then(Value::as_str));
+        let scope_context = recall_context_for_scope(target_scope.as_deref());
 
         let max_sources = args
             .get("max_sources")
@@ -34385,7 +34587,8 @@ impl McpTool for MemoryAutoCurateTool {
 
         // ── Gather source memories ───────────────────────────────────────
         let sources = store
-            .list_memories(
+            .list_memories_in_scope(
+                &scope_context,
                 Some(&source_kind),
                 MemoryListSort::ByImportance,
                 max_sources,
@@ -34398,6 +34601,7 @@ impl McpTool for MemoryAutoCurateTool {
                 "status": "no_sources",
                 "message": format!("No memories of kind '{}' found. Nothing to curate.", source_kind),
                 "source_kind": source_kind,
+                "scope": target_scope.as_deref().unwrap_or("global"),
                 "sources_found": 0,
                 "saved_count": 0,
             })));
@@ -34421,19 +34625,29 @@ impl McpTool for MemoryAutoCurateTool {
 
         let mut candidates = crate::curate::curate_conversation_with_options(
             &aggregated,
-            None, // no session_id namespace; these are global distillations
+            None, // source lineage/scope are applied below; no session key namespace
             max_items,
             curate_opts.clone(),
         );
 
         // Filter out excluded kinds
         candidates.retain(|c| !exclude_kinds.iter().any(|k| k == &c.kind));
+        for candidate in &mut candidates {
+            apply_curated_memory_governance(
+                candidate,
+                target_scope.as_deref(),
+                "memory_auto_curate",
+                None,
+                &source_keys,
+            );
+        }
 
         // ── Dry run: return preview ─────────────────────────────────────
         if dry_run {
             return Ok(ToolResult::json_text(&json!({
                 "dry_run": true,
                 "source_kind": source_kind,
+                "scope": target_scope.as_deref().unwrap_or("global"),
                 "sources_used": source_keys,
                 "aggregated_chars": aggregated.len(),
                 "options": {
@@ -34445,6 +34659,8 @@ impl McpTool for MemoryAutoCurateTool {
                     "kind":    m.kind,
                     "content": m.content,
                     "tags":    m.tags,
+                    "related_keys": m.related_keys,
+                    "scope": m.scope,
                 })).collect::<Vec<_>>()
             })));
         }
@@ -34453,12 +34669,102 @@ impl McpTool for MemoryAutoCurateTool {
         let mut saved: Vec<Value> = Vec::new();
         let mut skipped = 0usize;
         let mut errors: Vec<String> = Vec::new();
+        let mut lineage_links_written = 0usize;
+        let mut lineage_errors: Vec<String> = Vec::new();
+        let mut lineage_backfilled = 0usize;
 
         for mem in &candidates {
             match store.memory_get(&mem.key).await {
-                Ok(Some(_)) => skipped += 1,
+                Ok(Some(existing)) => {
+                    skipped += 1;
+                    // A deterministic key collision must never merge records
+                    // across scopes or different source text. Scoped curator
+                    // keys include a scope digest, but keep this fail-closed
+                    // check for legacy/global rows and hash collisions.
+                    if existing.scope != mem.scope || existing.content != mem.content {
+                        errors.push(format!(
+                            "{}: duplicate key belongs to a different scope/content; lineage not merged",
+                            mem.key
+                        ));
+                        continue;
+                    }
+
+                    let mut governed = existing.clone();
+                    apply_curated_memory_governance(
+                        &mut governed,
+                        target_scope.as_deref(),
+                        "memory_auto_curate",
+                        None,
+                        &source_keys,
+                    );
+                    if governed.key != existing.key {
+                        errors.push(format!(
+                            "{}: governance would change an existing key; lineage not merged",
+                            mem.key
+                        ));
+                        continue;
+                    }
+                    if governed.tags != existing.tags
+                        || governed.related_keys != existing.related_keys
+                    {
+                        let prefixes = [
+                            CONTINUITY_CONFIDENCE_TAG_PREFIX,
+                            PROVENANCE_TRANSFORM_TAG_PREFIX,
+                            PROVENANCE_SOURCE_TAG_PREFIX,
+                            PROVENANCE_SOURCE_SESSION_TAG_PREFIX,
+                        ]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>();
+                        let governance_tags = governed
+                            .tags
+                            .iter()
+                            .filter(|tag| prefixes.iter().any(|prefix| tag.starts_with(prefix)))
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        let tags_merged = store
+                            .memory_replace_tag_prefixes(&mem.key, &prefixes, &governance_tags)
+                            .await;
+                        let related_merged =
+                            store.memory_add_related_keys(&mem.key, &source_keys).await;
+                        match (tags_merged, related_merged) {
+                            (Ok(true), Ok(true)) => lineage_backfilled += 1,
+                            (Err(error), _) => {
+                                errors.push(format!("{} tag backfill: {error}", mem.key));
+                                continue;
+                            }
+                            (_, Err(error)) => {
+                                errors.push(format!("{} related-key backfill: {error}", mem.key));
+                                continue;
+                            }
+                            _ => {
+                                errors.push(format!(
+                                    "{} lineage backfill: active metadata row unavailable",
+                                    mem.key
+                                ));
+                                continue;
+                            }
+                        }
+                    }
+                    let (written, edge_errors) =
+                        persist_curated_lineage_edges(&store, &mem.key, &source_keys).await;
+                    lineage_links_written += written;
+                    lineage_errors.extend(edge_errors);
+                }
                 Ok(None) => match store.memory_save(mem).await {
-                    Ok(()) => saved.push(json!({ "key": mem.key, "kind": mem.kind })),
+                    Ok(()) => {
+                        let (memory_links_written, edge_errors) =
+                            persist_curated_lineage_edges(&store, &mem.key, &source_keys).await;
+                        lineage_links_written += memory_links_written;
+                        lineage_errors.extend(edge_errors);
+                        saved.push(json!({
+                            "key": mem.key,
+                            "kind": mem.kind,
+                            "scope": mem.scope.as_deref().unwrap_or("global"),
+                            "source_keys": mem.related_keys,
+                            "lineage_links_written": memory_links_written,
+                        }));
+                    }
                     Err(e) => errors.push(format!("{}: {e}", mem.key)),
                 },
                 Err(e) => errors.push(format!("{}: {e}", mem.key)),
@@ -34468,6 +34774,7 @@ impl McpTool for MemoryAutoCurateTool {
         Ok(ToolResult::json_text(&json!({
             "status": "ok",
             "source_kind": source_kind,
+            "scope": target_scope.as_deref().unwrap_or("global"),
             "sources_used": source_keys,
             "aggregated_chars": aggregated.len(),
             "candidates_found": candidates.len(),
@@ -34475,6 +34782,9 @@ impl McpTool for MemoryAutoCurateTool {
             "new_memories": saved,
             "skipped_duplicates": skipped,
             "errors": errors,
+            "lineage_links_written": lineage_links_written,
+            "lineage_backfilled": lineage_backfilled,
+            "lineage_errors": lineage_errors,
             "follow_up": if saved.is_empty() {
                 "No new memories saved (all duplicates or no signal). Consider widening source scope or adjusting thresholds."
             } else {

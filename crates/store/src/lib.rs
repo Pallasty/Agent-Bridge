@@ -325,6 +325,51 @@ pub struct MemoryRecord {
     pub superseded_by: Option<String>,
 }
 
+/// Return whether a memory scope is visible from `ctx`.
+///
+/// This is the store-level counterpart of [`StateStore::list_memories_in_scope`]:
+/// an empty context is the backwards-compatible unscoped/admin view; otherwise
+/// global/unscoped rows, an exact scope match, and a `project:/root` row viewed
+/// from `/root` (or one of its descendants) are visible. Other project and
+/// domain scopes are not. Project matching is path-segment aware, so
+/// `project:/repo/a` never matches `/repo/another`.
+///
+/// `ctx` accepts either a cwd-style path (`/repo/a/sub`) or a stored scope
+/// string (`project:/repo/a/sub`, `domain:rust`). This is recall scoping for the
+/// local single-user store, not a principal/ACL authorization check.
+pub fn memory_scope_visible_in_context(record_scope: Option<&str>, ctx: &str) -> bool {
+    let ctx = ctx.trim();
+    if ctx.is_empty() {
+        return true;
+    }
+
+    let Some(scope) = record_scope
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+    else {
+        return true;
+    };
+    if scope == "global" || scope == ctx {
+        return true;
+    }
+
+    let Some(project_root) = scope.strip_prefix("project:") else {
+        // Non-project scopes (including `domain:*`) are exact-match only.
+        return false;
+    };
+    let ctx_path = ctx.strip_prefix("project:").unwrap_or(ctx);
+    let project_root = project_root.trim_end_matches('/');
+    let ctx_path = ctx_path.trim_end_matches('/');
+    if project_root.is_empty() || ctx_path.is_empty() {
+        return false;
+    }
+
+    ctx_path == project_root
+        || ctx_path
+            .strip_prefix(project_root)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// Content-free privacy marker returned by [`StateStore::memory_peek`] and
 /// [`StateStore::memory_evidence_snapshot`]. Tombstoned content, tags, scope,
 /// and relationship fields must never be rehydrated through these surfaces.
@@ -3328,6 +3373,15 @@ pub trait StateStore: Send + Sync {
         Ok(false)
     }
 
+    /// Merge `related_keys` into one active memory's lineage list
+    /// (append-unique; existing order preserved) without re-running the full
+    /// save/supersession pipeline or changing timestamps. Returns `true` iff
+    /// the row exists and is active. Default is a no-op `false` for
+    /// non-SQLite stores.
+    async fn memory_add_related_keys(&self, _key: &str, _related_keys: &[String]) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Semantic search: embed `query` via feature hashing, load all stored
     /// embeddings, return memories ranked by cosine similarity ≥ `threshold`.
     /// Falls back gracefully when no embeddings are stored yet.
@@ -3337,6 +3391,29 @@ pub trait StateStore: Send + Sync {
         limit: u32,
         threshold: f32,
     ) -> Result<Vec<MemorySearchHit>>;
+
+    /// Scope-safe semantic search for bootstrap and other contextual recall.
+    ///
+    /// Returns only rows visible under [`memory_scope_visible_in_context`]:
+    /// global/unscoped plus the requested project/domain scope, never another
+    /// project/domain. SQLite overrides this method so scope filtering happens
+    /// before ranking/truncation. The default is deliberately fail-safe for
+    /// third-party/back-compat implementations: it filters their existing
+    /// result page and may therefore return fewer than `limit`, but cannot leak
+    /// a cross-scope row.
+    async fn memory_search_semantic_in_scope(
+        &self,
+        query: &str,
+        ctx: &str,
+        limit: u32,
+        threshold: f32,
+    ) -> Result<Vec<MemorySearchHit>> {
+        let hits = self.memory_search_semantic(query, limit, threshold).await?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| memory_scope_visible_in_context(hit.record.scope.as_deref(), ctx))
+            .collect())
+    }
 
     /// Pure-cosine top-K — embed `query` and return the K active memories
     /// whose stored embeddings have the highest cosine similarity to it,
@@ -3348,6 +3425,23 @@ pub trait StateStore: Send + Sync {
     async fn memory_top_k_cosine(&self, query: &str, k: u32) -> Result<Vec<MemoryCosineHit>> {
         let _ = (query, k);
         Ok(Vec::new())
+    }
+
+    /// Scope-safe pure-cosine top-K. Visibility matches
+    /// [`Self::memory_search_semantic_in_scope`]; ranking remains pure cosine.
+    /// The default filters the backend's existing top-K page (safe but possibly
+    /// under-filled), while SQLite ranks the complete visible candidate set.
+    async fn memory_top_k_cosine_in_scope(
+        &self,
+        query: &str,
+        ctx: &str,
+        k: u32,
+    ) -> Result<Vec<MemoryCosineHit>> {
+        let hits = self.memory_top_k_cosine(query, k).await?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| memory_scope_visible_in_context(hit.record.scope.as_deref(), ctx))
+            .collect())
     }
 
     /// Fresh ranking metadata for every `status='active'` memory, keyed by
