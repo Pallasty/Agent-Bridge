@@ -281,6 +281,12 @@ so they are versioned normally and are not added to the preservation-only
   transport/raw/state/semantic custody, exact transition, recurrence, resource,
   compression/JSON/order/integer adversarial, tamper, cache, failure-scope and CLI
   regressions.
+- `hubbard_l8_double_occupancy_adaptive_k_policy_v1.json`: output-independent
+  precommit for the bounded double-occupancy step-3 attempt.  It freezes the
+  nine-candidate `K=65,536..131,072` ladder, the exact future-checkpoint truncation
+  prefix envelope, parent boundary/transition anchors, one-propagation suffix-sum
+  selection rule and hard resource failures.  It contains no step-3 output pin;
+  any relaxed candidate or resource limit requires a new policy version.
 - The measurement-campaign, reference-qualification, proof-kernel, mapping,
   checkpoint, commutator, grouping-screen, generic-bound no-go, observable-Taylor
   step, double-occupancy-cluster no-go and L8 one/two-step interval artifacts are

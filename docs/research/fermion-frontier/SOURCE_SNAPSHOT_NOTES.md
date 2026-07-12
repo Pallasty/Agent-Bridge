@@ -152,6 +152,17 @@ These remain mapped product-formula enclosures only.  The remaining 98 transitio
 exact-Hubbard error, reference and READY are unassessed; no source-snapshot value or
 outer status changes.
 
+Before a formal double-occupancy step-3 adaptive attempt, policy v1 is separately
+precommitted with SHA-256
+`319c0905d78cf42de2973b5e82e762cec26fd929c86bc770a00bbd1b6cb8b372`.
+It interprets `1/4000` only as a scalar truncation-error-radius allocation, freezes
+the exact `E2+floor(q*(B-E2)/(98*144))` prefix envelope and the ordered
+`K=65,536..131,072` candidate ladder, and forbids expectation or future-gate data
+from selecting K.  Exploratory fixed-K runs are diagnostic and are not inputs to
+this policy.  A failed formal v1 attempt may not expand its candidates or resources;
+that would require a separately committed v2.  This precommit does not itself add a
+third transition or alter any snapshot/READY status.
+
 The Majorana implementation audit likewise changes no snapshot value.  It selects a
 future fork from registered `main@b7849cb` because the inferred paper-date commit
 precedes a documented splitting-sign fix; a complete Julia Manifest, deterministic
