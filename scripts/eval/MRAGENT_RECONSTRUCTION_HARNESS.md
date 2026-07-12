@@ -1,6 +1,6 @@
 # MRAgent active-reconstruction shadow trial — harness spec
 
-**Status: SCAFFOLD (fixture + spec + scorer + snapshot + arms committed; run.py + N≥8 + go-gate adjudication deferred).**
+**Status: CODE-COMPLETE (all 4 executor modules — scorer + snapshot + arms + run — built and validated, each with an offline selftest + a live run). Remaining is NOT code: author N≥8 real per-probe query plans (s2-fairness certified), run against the full-store snapshot, second-seed replication, and adjudicate the go-gate — the review-backed decision step.**
 Read-only retrieval-quality trial that asks one question: *does evidence-conditioned
 multi-round reconstruction (S2) beat one-shot retrieval (S0) and — the real test —
 beat a blind equal-budget multi-query control (S1)?*
@@ -144,6 +144,18 @@ Mirror `ab_eval.py`'s MCP-stdio driver:
    which hardened the "every class is required" check.
 4. `run.py` — iterate `fixtures/mragent_reconstruction_probes.json` × arms, write
    `baselines/mragent_<date>.json`, support `--compare`.
+   **✅ BUILT + validated: `mragent_reconstruction_run.py`.** Iterates probes×arms
+   (`arms.py`), scores each (`score.py`), aggregates metering into the go-gate
+   metrics (S2-solves-over-S1, S2/S0 context-token ratio, S2/S0 p95 latency
+   ratio, injection leak count), writes a baseline, and `--compare`s two baselines
+   on their DETERMINISTIC parts (per-probe solves, gate booleans, cost ratios
+   within a tolerance — never raw ms noise). `--selftest` decisively exercises the
+   gate math offline (p95 nearest-rank; tokens exactly 2.5x = MET / just above =
+   FAIL; p95 3.0x boundary = MET; the ≥2-over-S1 rule; a fired canary breaking the
+   go-gate; compare REGRESS on a lost solve). Live-validated end-to-end on a
+   synthetic snapshot: `--run` produced a baseline with correctly-computed
+   solves/ratios/gates, `--compare` returned OK on self and REGRESS (with the
+   `S2 solved: -['SP-gap']` diff) on a mutated copy.
 
 ## Boundary (red lines)
 
