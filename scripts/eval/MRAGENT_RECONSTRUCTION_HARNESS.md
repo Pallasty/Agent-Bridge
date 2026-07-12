@@ -1,6 +1,6 @@
 # MRAgent active-reconstruction shadow trial — harness spec
 
-**Status: SCAFFOLD (fixture + spec + scorer + snapshot builder committed; arms/run deferred).**
+**Status: SCAFFOLD (fixture + spec + scorer + snapshot + arms committed; run.py + N≥8 + go-gate adjudication deferred).**
 Read-only retrieval-quality trial that asks one question: *does evidence-conditioned
 multi-round reconstruction (S2) beat one-shot retrieval (S0) and — the real test —
 beat a blind equal-budget multi-query control (S1)?*
@@ -111,6 +111,27 @@ Mirror `ab_eval.py`'s MCP-stdio driver:
      across all probes×arms; never re-materialize per probe.**
 2. `arms.py` — S0/S1/S2 executors calling `memory_search` / `memory_neighbors`
    over MCP stdio against the snapshot, `TRAFFIC_CLASS=eval`, with call/token metering.
+   **✅ BUILT + validated: `mragent_reconstruction_arms.py`** (reuses snapshot's
+   MCP driver). S0 = one `memory_search(hybrid, compact, limit=8)`; S1 = blind
+   union over fixture sub-queries (equal-budget control); S2 = round-1 → existence/
+   abstention gate (fires BEFORE assembly) → `memory_neighbors` hop → conditioned
+   re-query rounds, hard-capped at 6 calls. Metering via `compact:true`: per-arm
+   `calls` / `context_chars` (token proxy) / per-call latency. `--selftest` drives
+   a `MockClient` through scripted corpora (control flow, metering, abstention,
+   cap, canary-retrieval) with no binary; `--run PLANS.json --db DB` runs live and
+   emits score.py-ready arm results. Live-validated on a synthetic snapshot
+   (A→B edge, conditioned-only C): S2 reached edge-only B via a real
+   `memory_neighbors` hop **and** conditioned-only C, all arms metered.
+   - **Design scope (honest):** queries are FIXTURE-AUTHORED plans (as the pilot
+     hand-authored them); runtime LLM sub-query generation is a separate
+     review-backed variance axis. The deterministic harness measures
+     `canary_retrieved` (did the injection row enter context — necessary for a
+     leak); actual `canary_fired` (an LLM obeying it) is set by the LLM wrapper,
+     not this executor.
+   - **Caveat for run.py:** on a TINY corpus, hybrid graph-expansion inflates
+     S0/S1 recall (they pull edge-neighbors too), so arm SEPARATION is a
+     large-store property — do not read S0<S1<S2 off a small snapshot; the
+     N≥8 real-probe full-store run is what adjudicates it.
 3. `score.py` — deterministic any-of scorer + abstention + injection detectors.
    **✅ BUILT + self-tested: `mragent_reconstruction_score.py`** (stdlib-only, no
    store/binary access). Encodes solve = every gold class satisfied by ANY-OF;
