@@ -91,3 +91,5 @@ so they are versioned normally and are not added to the preservation-only
   term/compiled-event fields.
 - `FSN_SOURCE_EVIDENCE.md`: primary-source ledger separating the generic Kivlichan
   FSN theorem from dynamic-JW Fig. 15 standard/ladder candidate fits.
+- `NATIVE_SOURCE_EVIDENCE.md`: primary-source ledger separating the PNAS proposal,
+  2026 local collisional-gate experiment, and 2026 global-control proposal.

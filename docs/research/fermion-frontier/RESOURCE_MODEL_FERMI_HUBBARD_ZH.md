@@ -391,6 +391,13 @@ FSN 的主源边界另见 [FSN_SOURCE_EVIDENCE.md](FSN_SOURCE_EVIDENCE.md)：Kiv
 计数；后者目前仍是 Fig. 5 域内 candidate fit。这样既保留了通用 FSN theorem 的
 primary-source anchor，也不把不同 interaction graph 的资源口径混为一谈。
 
+Native 主源也已分层记录在 [NATIVE_SOURCE_EVIDENCE.md](NATIVE_SOURCE_EVIDENCE.md)：
+PNAS 是含 MERGE/SHUTTLE 与组件级工程估计的 proposal；2026 Nature 的 `99.75(6)%`
+和 `1.125 ms` 是双阱局部 collisional primitive 的实验数据；arXiv:2604.13160 是
+全局控制 universal processor proposal。它们共同提高了 native 路线的证据成熟度，
+但都没有关闭本任务的 L=8 连续 matching movement、任意角集成时长、空间占用和
+individual-term compiled export，因此 native 完整 route 仍保持 `UNRESOLVED`。
+
 ## 8. 共同 R / 误差收敛接口
 
 本阶段还新增 [fermi_hubbard_convergence.py](fermi_hubbard_convergence.py) 和

@@ -109,6 +109,7 @@ retained in `claim-status.jsonl`.
   contract/template/orchestrator,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
+  and the native-fermion primary-source evidence ledger,
   an L=2 exact-reference pilot, and unit tests
   `test_fermi_hubbard_resource_model.py` /
   `test_term_order_validator.py` /

@@ -155,3 +155,9 @@ supports an exact N-depth / N²⁄2-entangling-gate network for the all-pair ele
 setting, while dynamic-JW Fig. 15 supplies only the 2D NN standard/ladder strategy and
 fusion convention. The finite-size formulas used in the model therefore remain
 figure-domain candidate fits, not primary-source formulas.
+
+Native evidence is now split into `NATIVE_SOURCE_EVIDENCE.md`: PNAS remains a proposal
+with component-level movement/error estimates, Nature 2026 supplies a measured local
+^6Li collisional-gate primitive, and arXiv:2604.13160 supplies a new global-control
+proposal. None provides the matched L=8 four-matching compiled route needed for
+`native_fermions` to leave `UNRESOLVED`.
