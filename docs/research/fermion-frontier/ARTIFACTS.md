@@ -56,3 +56,9 @@ so they are versioned normally and are not added to the preservation-only
   translation, route-specific shots, and validation tests.
 - `test_term_order_validator.py`: contract, fusion, term-set, and invalid-export
   regression tests.
+- `fermi_hubbard_convergence.py`: shared-metadata, two-interval convergence and
+  common-R assessor with uncertainty propagation;
+- `fermi_hubbard_convergence_template.json`: empty data template that returns
+  `UNRESOLVED` until route results are supplied;
+- `test_fermi_hubbard_convergence.py`: convergence, reference, metadata, missing
+  route, and statistical-error regression tests.

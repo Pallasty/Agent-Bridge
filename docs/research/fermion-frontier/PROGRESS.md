@@ -114,3 +114,9 @@ the reconstructed group-level Strang order and fusion rules,
 group-level checks. Individual-term exports for dynamic-JW and FSN are still
 absent, so the research status remains “target defined, cross-compiler equality
 unverified.”
+
+The common-`R` interface is also executable in
+`fermi_hubbard_convergence.py`: it requires shared observable metadata, an `R`
+grid, estimates with standard errors, and optionally an independent reference.
+The empty template correctly returns `UNRESOLVED`; no route has yet supplied the
+data needed for a convergence certificate.

@@ -104,7 +104,9 @@ retained in `claim-status.jsonl`.
 - Reproducible model: `fermi_hubbard_resource_model.py`, scenario
   `fermi_hubbard_resource_scenario.json`, Fig. 5 candidate points
   `fermi_hubbard_fig5_candidate_points.json`, term-order contract and validator,
-  and unit tests `test_fermi_hubbard_resource_model.py` /
-  `test_term_order_validator.py`
+  convergence template/assessor, and unit tests
+  `test_fermi_hubbard_resource_model.py` /
+  `test_term_order_validator.py` /
+  `test_fermi_hubbard_convergence.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

@@ -365,7 +365,29 @@ fidelity。Nature 的 `U_int` 也不是 PNAS 的纯 density-phase primitive。�
 和两种 FSN 仍没有机器可读导出，因此不会被验证器假定为已匹配。验证结果
 `VALIDATED` 只表示“给定导出符合契约”，不表示硬件实现或跨编译器等价已经成立。
 
-## 8. 复算与测试
+## 8. 共同 R / 误差收敛接口
+
+本阶段还新增 [fermi_hubbard_convergence.py](fermi_hubbard_convergence.py) 和
+[fermi_hubbard_convergence_template.json](fermi_hubbard_convergence_template.json)。
+每条路线需要在同一 workload metadata 下提供 `R`、observable estimate 和
+standard error；验证器使用
+
+\[
+|\hat O_{R_2}-\hat O_{R_1}|
++z\sqrt{\mathrm{SE}_{R_1}^2+\mathrm{SE}_{R_2}^2}
+\le \epsilon_{alg}
+\]
+
+检查相邻 refinement，并要求至少两个连续稳定区间、稳定区间内每个点满足
+`SE <= epsilon_stat`。若提供独立 reference，还会把 estimate-to-reference 的
+置信界纳入检查。只有所有 required routes 都有稳定窗口、并且都提供共同 `R` 的
+结果，才会输出 `READY_FOR_COMMON_R`；缺数据、metadata 不一致或统计误差过大都
+返回 `UNRESOLVED`。
+
+当前模板没有填入任何路线测量值，因此运行结果应为 `UNRESOLVED`。这不是失败，
+而是避免把 `R=100` 规划输入误写成已验证的算法误差。
+
+## 9. 复算与测试
 
 ```bash
 python3 docs/research/fermion-frontier/fermi_hubbard_resource_model.py \
@@ -380,15 +402,22 @@ python3 docs/research/fermion-frontier/term_order_validator.py \
   --format markdown
 
 python3 docs/research/fermion-frontier/test_term_order_validator.py
+
+python3 docs/research/fermion-frontier/fermi_hubbard_convergence.py \
+  --manifest docs/research/fermion-frontier/fermi_hubbard_convergence_template.json \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_fermi_hubbard_convergence.py
 ```
 
 资源模型的十个回归测试覆盖 Fig. 5 的全部 `L=4...10` candidate points、域外阻断、
 退化网格、共同分组 native schedule、两个 `C2D` 的第二 CZ layer、辅助 footprint、
 零/无限 cycle、factory 配置、route-specific expected executions、首步对 complete time
 的阻断和误差预算校验；项序验证器另有四个测试覆盖 group order、融合、term set 和
-fail-closed 行为。
+fail-closed 行为；收敛接口另有五个测试覆盖双区间稳定、reference、缺路线、metadata
+不一致和统计误差 fail-closed 行为。
 
-## 9. 下一阶段的决定性工作
+## 10. 下一阶段的决定性工作
 
 1. **跨编译器同序验证：**导出 native、dynamic-JW、standard/ladder FSN 的
    individual-term circuits；若共同顺序改变 `21N/4L` 或 candidate fits，重新计数。
