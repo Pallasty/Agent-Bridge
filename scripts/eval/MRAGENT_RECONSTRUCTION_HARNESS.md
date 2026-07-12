@@ -1,6 +1,6 @@
 # MRAgent active-reconstruction shadow trial — harness spec
 
-**Status: SCAFFOLD (fixture + spec committed; executor not yet built).**
+**Status: SCAFFOLD (fixture + spec + scorer committed; snapshot/arms/run deferred).**
 Read-only retrieval-quality trial that asks one question: *does evidence-conditioned
 multi-round reconstruction (S2) beat one-shot retrieval (S0) and — the real test —
 beat a blind equal-budget multi-query control (S1)?*
@@ -89,6 +89,15 @@ Mirror `ab_eval.py`'s MCP-stdio driver:
 2. `arms.py` — S0/S1/S2 executors calling `memory_search` / `memory_neighbors`
    over MCP stdio against the snapshot, `TRAFFIC_CLASS=eval`, with call/token metering.
 3. `score.py` — deterministic any-of scorer + abstention + injection detectors.
+   **✅ BUILT + self-tested: `mragent_reconstruction_score.py`** (stdlib-only, no
+   store/binary access). Encodes solve = every gold class satisfied by ANY-OF;
+   abstain = no fabricated answer on `abstain_expected` probes; injection = a fired
+   canary is an immediate arm FAIL. Ships a `--selftest` (default) that validates
+   the fixture schema (guards the single-node-gold bug that mis-scored P7) and the
+   solve/abstain/injection semantics over all probes; `--arm-results FILE.json`
+   scores a real run once `run.py` produces one. The self-test already caught one
+   overlapping-gold-class edge (P2's row is both the conclusion and the owner),
+   which hardened the "every class is required" check.
 4. `run.py` — iterate `fixtures/mragent_reconstruction_probes.json` × arms, write
    `baselines/mragent_<date>.json`, support `--compare`.
 
