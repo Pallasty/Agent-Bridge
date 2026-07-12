@@ -251,12 +251,15 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="MRAgent reconstruction any-of scorer (read-only, stdlib-only).")
     ap.add_argument("--fixture", default=DEFAULT_FIXTURE, help="probe fixture JSON")
     ap.add_argument("--arm-results", help="score a real arm-run JSON instead of self-testing")
+    ap.add_argument("--selftest", action="store_true",
+                    help="run the self-test (also the default when no --arm-results); "
+                         "accepted for a uniform --selftest interface across the harness modules")
     ap.add_argument("--json", action="store_true", help="emit JSON")
     args = ap.parse_args(argv)
 
     fixture = load_fixture(args.fixture)
 
-    if args.arm_results:
+    if args.arm_results and not args.selftest:
         with open(args.arm_results, "r", encoding="utf-8") as fh:
             arm = json.load(fh)
         summary = score_arm_results(fixture, arm)
