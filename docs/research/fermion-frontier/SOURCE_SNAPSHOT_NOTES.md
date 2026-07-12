@@ -25,6 +25,34 @@ bounds, globally unique per-route/R circuit fingerprints, or bounded independent
 references. Running the unified validator therefore remains `UNRESOLVED`. Candidate-fit
 rows are confined to the Fig. 5 domain and retain their non-source provenance.
 
+The standalone measurement-campaign preflight does not fill these snapshot gaps.
+It mechanically derives the final-reference family size `m=136` and, for the
+declared `h=0.002` residual allocation, a shared-batch floor of `4,300,768`
+effective independent shots per route/R cell and `103,218,432` across the 24-cell
+grid. It also confirms that the old `10,000`-shot resource placeholder is
+insufficient. These are acquisition targets, not observed shot counts. Because
+the campaign template retains null acceptance probability `p` and effective-shot
+fraction `eta`, it cannot derive accepted-shot totals, expected raw executions or
+a high-confidence stopping cap; its status remains
+`EFFECTIVE_TARGETS_DERIVED_RAW_UNRESOLVED` and it explicitly does not assess
+convergence certification.
+
+Likewise, the separate reference-qualification template contains no observable
+records and returns `UNRESOLVED`. Its validator can verify workload/value identity,
+safe local JSON certificate paths and SHA-256, exact record binding, deterministic
+error decomposition, externally supplied route-input independence, directed interval
+rounding, implementation/environment fingerprints and method-specific claims.
+Uncertified TN/Krylov/stochastic records remain `DIAGNOSTIC_ONLY`; even two complete
+records are only `STRUCTURALLY_COMPLETE_UNVERIFIED`. No fixed checker is executed,
+campaign-bound adequacy is `NOT_ASSESSED_NO_CAMPAIGN_CONTRACT`, and
+`ready_gate_eligible` is always false. No real L=8 certificate has been entered into
+the snapshot.
+
+Neither the campaign preflight nor the reference-qualification ledger is currently
+a component of `evidence_manifest_source_snapshot.json` or
+`fermi_hubbard_evidence.py`. Their standalone results therefore cannot change the
+outer snapshot status or promote it toward `READY_FOR_BENCHMARK`.
+
 The convergence status boundary is intentional. Finite-sample route data that pass the
 family-wise Bonferroni--Hoeffding grid checks but lack a fully bounded independent
 reference can reach only `SCREENED_FOR_TARGET_R`. The unified evidence orchestrator

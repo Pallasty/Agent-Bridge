@@ -460,7 +460,89 @@ samples，且目标点位于所有 route × observable 稳定窗中，才输出 
 当前模板没有填入任何路线测量值，因此运行结果应为 `UNRESOLVED`。这不是失败，
 而是避免把 `R=100` 规划输入误写成已验证的算法误差。
 
-### 8.1 L=2 双观测量 screening pilot
+### 8.1 Measurement campaign preflight
+
+新增 [measurement_campaign_contract.json](measurement_campaign_contract.json)、
+[measurement_campaign_template.json](measurement_campaign_template.json) 和
+[measurement_campaign_validator.py](measurement_campaign_validator.py)，把“需要多少 shots”
+从资源模型里的 `10,000` 占位改成由统一 evidence contract 机械推导的 preflight。
+planner 从 route map 去重得到四条 convergence routes，并固定全网格
+`4 routes x 6 R = 24` 个 joint-observable batches；surface physical route 不会被重复算成
+第五条独立 convergence route。
+
+最终计划包含 reference comparisons，因此 family size 是
+
+\[
+m=4\times2\times(6+5+6)=136.
+\]
+
+这里的 `136` 是保守的 declared-comparison multiplicity，不表示存在 136 个相互独立的
+随机事件。基本随机对象仍是 24 个 route/R joint batches 上的 48 个 point intervals；
+同一 interval 会被 point、adjacent 和 reference inequalities 复用。Union bound 不需要
+这些事件独立，使用 136 只会更保守。
+
+在 `alpha=0.05` 下，当前 `10,000` 个**有效独立** samples 的最佳情形 Hoeffding 半宽
+已经是 `0.0414766`（staggered magnetization）和 `0.0207383`（double occupancy），
+二者都超过 `0.01` point budget。更重要的是，point budget 本身不足以关闭 adjacent-
+`R` gate：即使 estimate delta 和两侧 systematic bounds 全为零，也必须有
+`2h <= 0.005`，即 `h <= 0.0025`。
+
+| 规划口径 | M 每点最小 effective | D 每点最小 effective | shared batch 每点 | 24 点总 effective |
+|---|---:|---:|---:|---:|
+| 只满足 `h <= 0.01` | 172,031 | 43,008 | 172,031 | 4,128,744 |
+| 零 residual pair floor，`h <= 0.0025` | 2,752,491 | 688,123 | 2,752,491 | 66,059,784 |
+| 当前 residual-budgeted plan，`h <= 0.002` | 4,300,768 | 1,075,192 | 4,300,768 | 103,218,432 |
+
+最后一行把每个 observable 的 adjacent budget 分成两侧 sampling half-width 各
+`0.002`、两侧 systematic 各 `0.00025` 和 estimate-delta reserve `0.0005`；reference
+budget 则分成 route half-width `0.002`、route/reference systematic 各 `0.00025` 和
+estimate-reference reserve `0.0025`。这只是可行的 error allocation，不是实测
+convergence 证据。
+
+模板中每个 route/R 的 acceptance probability 与 effective-per-accepted fraction 仍为
+`null`，因此 planner 正确输出
+`EFFECTIVE_TARGETS_DERIVED_RAW_UNRESOLVED`：accepted/raw totals 均为 `null`。即使未来
+填入 `p` 与 `eta`，`ceil(N_eff/eta/p)` 也只会标
+`EXPECTED_EXECUTION_PLAN_ONLY`，不能冒充 high-confidence stopping cap。planner 永不
+输出 `READY_FOR_TARGET_R`。其中 `eta` 必须是对两个联合观测量都成立的 conservative
+effective-independent-shot fraction；若只是经验 ESS ratio，则仍只能作 diagnostic
+assumption。`p` 同样需要固定 iid Bernoulli acceptance 模型，不能从同一批结果事后挑选。
+
+### 8.2 Independent bounded-reference qualification
+
+前沿复核没有找到直接匹配本任务 `8 x 8` OBC、`U/t=8,tT=1`、checkerboard Néel 和
+双 observable 的公开有界参考值。固定 `N_up=N_down=32` 后，full-ED 子空间维数为
+`C(64,32)^2 ≈ 3.36e36`，所以“再做一个 exact statevector”不是可执行方案。
+
+详细方法边界与执行顺序见
+[REFERENCE_CERTIFICATION_STRATEGY.md](REFERENCE_CERTIFICATION_STRATEGY.md)。当前首选是
+把 Majorana/Pauli Heisenberg operator propagation 改造成 deterministic certificate：
+每次 truncation 前先合并重复 strings，累加 dropped-coefficient `L1` bound，再加入目标
+OBC term split 的严格 product-formula bound、solver error 和 directed-rounding error。
+local-cluster locality + Krylov bound 是后备；普通 TDVP/MPS、PEPS、QMC 和当前 Majorana
+参数扫描都只保留为 diagnostic。
+
+新增 [reference_qualification_contract.json](reference_qualification_contract.json)、
+[reference_qualification_template.json](reference_qualification_template.json) 和
+[reference_qualification_validator.py](reference_qualification_validator.py)。双 observable
+identity 必须全匹配；本地 artifact 必须是严格 JSON，SHA-256 通过并逐字段绑定 ledger 中的
+value/bound、boundary/Hamiltonian convention、reference formula/term sequence、
+implementation/environment/checker 和 theorem fingerprints。四项 deterministic error
+decomposition 必须自洽，binding-looking record 还需 directed interval rounding、完整外部
+route batch/circuit snapshot、method-specific claims 成立且不复用 route inputs。
+
+这些条件只足以输出 `STRUCTURALLY_COMPLETE_UNVERIFIED`，不等于证书数值已核验：当前
+validator 不执行固定 machine checker，也不加载 campaign contract 判断
+`total_abs_bound <= 0.00025`，并始终给出 `ready_gate_eligible=false`。代码中刻意没有
+`QUALIFIED_BOUNDED` 状态。Uncertified tensor network/Krylov/stochastic records 即使填写
+binding-looking fields 也只能是 `DIAGNOSTIC_ONLY`；空模板为 `UNRESOLVED`。
+
+这两个新 artifact 当前保持独立生命周期：campaign preflight 规划数据获取，reference
+ledger 资格化外部证书；它们尚未接入 `fermi_hubbard_evidence.py` 的最终 outer READY gate。
+在真实 certificate 与 route data 出现前先保持这一边界，避免用空计划或合成证书制造
+新的自我认证回路。
+
+### 8.3 L=2 双观测量 screening pilot
 
 新增 [fermi_hubbard_l2_pilot.py](fermi_hubbard_l2_pilot.py) 后，已经可以在无
 NumPy/SciPy 的环境中运行一个纯 Python 算法 pilot：`L=2, U/t=8, tT=1`、checkerboard
@@ -478,7 +560,7 @@ point 的数值系统界也标为 `derived_unvalidated`；评估结果因此是
 不同编译器已经产生相同 individual-term order；真实路线数据仍需替换
 `group_order_pilot`。
 
-### 8.2 首步与计时账本
+### 8.4 首步与计时账本
 
 为避免把稳态 subtotal 误写成完整电路，新增
 [first_step_contract.json](first_step_contract.json)、
@@ -496,7 +578,7 @@ provenance。验证器的状态含义是：
 当前账本仍为空模板，五条 L=8 路线均为 `UNRESOLVED`；加入首步数据不会自动把
 leading 或 candidate-fit 证据升级为精确 compiled 资源。
 
-### 8.3 统一 evidence manifest
+### 8.5 统一 evidence manifest
 
 新增 [evidence_manifest_contract.json](evidence_manifest_contract.json)、
 [evidence_manifest_template.json](evidence_manifest_template.json) 和
@@ -584,6 +666,22 @@ python3 docs/research/fermion-frontier/fermi_hubbard_convergence.py \
 
 python3 docs/research/fermion-frontier/test_fermi_hubbard_convergence.py
 
+python3 docs/research/fermion-frontier/measurement_campaign_validator.py \
+  --contract docs/research/fermion-frontier/measurement_campaign_contract.json \
+  --plan docs/research/fermion-frontier/measurement_campaign_template.json \
+  --evidence-contract docs/research/fermion-frontier/evidence_manifest_contract.json \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_measurement_campaign_validator.py
+
+python3 docs/research/fermion-frontier/reference_qualification_validator.py \
+  --contract docs/research/fermion-frontier/reference_qualification_contract.json \
+  --ledger docs/research/fermion-frontier/reference_qualification_template.json \
+  --artifact-root docs/research/fermion-frontier \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_reference_qualification_validator.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
@@ -630,6 +728,14 @@ fail-closed 行为；收敛接口另有二十一个测试覆盖双观测量稳�
 reference、有限样本 family-wise 半宽、协方差 PSD、路线证据复制、reference identity、
 系统界/采样集中界 maturity、逐点 circuit 唯一性、完整网格和 provenance 的 fail-closed
 行为。
+Measurement campaign preflight 另有二十五个测试覆盖 canonical evidence hash、四路线/
+六点轴、family-size 与 shot ceilings、10k 阻断、shared-batch max、residual allocation、
+未知或非法 `p/eta`、range 放大、派生/实测字段注入、route/R 重标、bool/超大整数和 CLI
+fail-closed 行为。Reference qualification 另有二十九个测试覆盖双 observable identity、
+严格 JSON certificate path/SHA-256/record binding、arbitrary blob 与 content drift、error
+decomposition、缺失/部分/复用的外部 route-input snapshot、directed rounding、
+implementation/environment/checker fingerprints、五类 method claims，以及不存在可达
+`QUALIFIED_BOUNDED` 状态。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
@@ -644,28 +750,40 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `101` 个测试。
+全套共 `155` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
 1. **跨编译器同序验证：**导出 native、dynamic-JW、standard/ladder FSN 的
    individual-term circuits；若共同顺序改变 `21N/4L` 或 candidate fits，重新计数。
-2. **共同误差标定：**按固定 `R=[25,50,100,200,400,800]` 计划，对
-   `U/t=8,tT=1`、Néel 初态和两个 observables 生成逐路线联合 measurements、covariance
-   与 measurement-allocation；验证 effective-independent-shot 数、per-shot contribution
-   ranges 和 mitigation concentration model，补齐 identity-matched bounded references
-   与可绑定的 systematic-error evidence，区分 screening 与真正的
-   `READY_FOR_TARGET_R`。
-3. **首步闭账：**使用 `first_step_contract.json` 分别报告三条 qubit 路线
+2. **Campaign 参数闭合：**逐 route/R 测出或严格下界化 acceptance probability 与
+   effective-per-accepted fraction；在 `measurement_campaign_template.json` 中固定
+   mitigation contribution ranges。当前 `p/eta` 为 `null`，所以 `103,218,432`
+   effective target 还不能换算为 raw executions；若需要固定 attempt cap，另加入
+   family-wise high-confidence binomial stopping rule，不能把 expected count 代替它。
+3. **独立有界 reference：**固定 MajoranaPropagation implementation/checker/environment
+   commits，增加 deduplicate-before-truncation、per-slice dropped-L1 ledger、OBC
+   product-formula commutator certificate 和 directed intervals；若 L1 bound 爆炸，先算
+   locality tail，再决定 cluster Krylov。实现并 pin 一个真正重算证书的 machine checker，
+   再新增“checker 通过且 bound 不超过 `0.00025`”的资格状态；当前
+   `STRUCTURALLY_COMPLETE_UNVERIFIED` 不能作为交付边界。
+4. **真实双观测量网格：**按固定 `R=[25,50,100,200,400,800]` 对四条 unique
+   convergence routes 生成联合 measurements、covariance、有效样本与可绑定 systematic
+   evidence；严格区分 screening 与 `READY_FOR_TARGET_R`。
+5. **Outer gate 接入：**真实 campaign/certificate artifact 与固定 checker 出现后，把
+   execution-plan match、checker result 和 campaign-bound adequacy 接入
+   `fermi_hubbard_evidence.py`。当前保持独立 validator，不把
+   `STRUCTURALLY_COMPLETE_UNVERIFIED`、空模板或合成证书接入最终 READY。
+6. **首步闭账：**使用 `first_step_contract.json` 分别报告三条 qubit 路线
    first-step 的 CNOT count、depth、non-CNOT time；在 `compiled_exact=true` 前，
    只输出 `BOOKKEEPING_CLOSED_ESTIMATE`，不把稳态平均代替完整总量。
-4. **Native 微基准与空间：**连续执行四 matchings，测 inclusive transition time、
+7. **Native 微基准与空间：**连续执行四 matchings，测 inclusive transition time、
    move legs/distance、loss/leakage、cooling/echo、traps/tweezers/workspace 和回位。
-5. **Surface place-and-route：**用真实 compiler export 与 measured timing/error 数据
+8. **Surface place-and-route：**用真实 compiler export 与 measured timing/error 数据
    填充 `surface_place_route_template.json`：给出完整 spinful switch 的 C2D blocks、
    CZ/SWAP、boundary corridors、逐周期 active patches、decoder/前馈、rotation
    synthesis、factory startup/buffer/injection/failure 与 code-distance error allocation。
-6. **同误差 A/B：**在 route-specific acceptance、mitigation、prep/readout 和共同
+9. **同误差 A/B：**在 route-specific acceptance、mitigation、prep/readout 和共同
    observable error 下报告 latency、expected/high-confidence campaign、peak physical
    space 与 active physical-qubit-cycles。
 

@@ -77,6 +77,48 @@ so they are versioned normally and are not added to the preservation-only
   target stability, bounded-reference readiness, screening-only evidence,
   family-wise finite-sample gates, covariance/provenance validation, and
   fail-closed grid/identity behavior.
+- `measurement_campaign_contract.json`: standalone preflight policy pinned to the
+  canonical evidence contract. It fixes exact-bounded reference comparisons,
+  `alpha=0.05`, the residual half-width allocation `h=0.002`, and allowed bounded
+  mitigation modes; it is a planning contract, not a measurement record.
+- `measurement_campaign_template.json`: complete 24-cell route/R planning grid with
+  physical contribution ranges. Its acceptance probability `p` and effective-shot
+  fraction `eta` remain null, so no accepted-shot or raw-execution total is invented.
+- `measurement_campaign_validator.py`: derives the four routes, six R values and
+  point/adjacent/reference family rather than accepting user-supplied counts. The
+  current template has family size `136`, requires `4,300,768` effective shots per
+  shared route/R cell at `h=0.002`, and totals `103,218,432` effective shots; it also
+  demonstrates that `10,000` shots fail the required statistical gate. Its output is
+  preflight only and never certifies convergence.
+- `test_measurement_campaign_validator.py`: twenty-five campaign arithmetic,
+  identity, allocation, null-raw-total, numeric-boundary, CLI and fail-closed schema
+  regressions.
+- `reference_qualification_contract.json`: standalone qualification policy that
+  exactly matches the evidence convergence workload and fixes the two observable
+  identities, binding/diagnostic method classes, directed interval rounding, and
+  method-specific certification claims.
+- `reference_qualification_template.json`: empty two-observable qualification ledger;
+  with no reference records it intentionally returns `UNRESOLVED`.
+- `reference_qualification_validator.py`: verifies physical ranges and workload
+  identity, safe local JSON-certificate paths and SHA-256, exact ledger-to-certificate
+  record binding, four-part deterministic error decomposition,
+  solver/configuration/checker/commit/environment/theorem provenance, externally
+  supplied route-input independence, and method claims. Uncertified
+  TN/Krylov/stochastic methods are capped at `DIAGNOSTIC_ONLY`; because no fixed
+  machine checker is executed, the maximum state is
+  `STRUCTURALLY_COMPLETE_UNVERIFIED`, with bound-budget adequacy unassessed and
+  `ready_gate_eligible=false`.
+- `test_reference_qualification_validator.py`: twenty-nine focused regressions covering empty,
+  diagnostic and structurally complete states, arbitrary/non-JSON artifacts,
+  certificate/hash/content/identity drift, error sums, missing or reused external
+  route inputs, directed rounding, method claims, and the absence of any reachable
+  `QUALIFIED_BOUNDED` state.
+- `REFERENCE_CERTIFICATION_STRATEGY.md`: current primary-source assessment of full-ED,
+  Majorana/Pauli operator propagation, locality/Krylov, tensor-network and real-time
+  QMC reference routes, plus the proposed deterministic-certificate execution order.
+- The measurement-campaign and reference-qualification artifacts are currently
+  independent of `fermi_hubbard_evidence.py`; neither is yet an outer
+  `READY_FOR_BENCHMARK` component.
 - `fermi_hubbard_l2_pilot.py`: dependency-free L=2 dual-observable deterministic
   product-formula screening generator;
 - `fermi_hubbard_l2_pilot_manifest.json`: generated deterministic pilot data whose

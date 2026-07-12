@@ -112,6 +112,50 @@ It also requires a complete surface-code place-and-route ledger. Real compiler
 exports, route measurements, bounded references, and physical schedules remain
 `UNRESOLVED`.
 
+Two independent preflight interfaces now make the remaining measurement and
+reference gaps quantitative without claiming that they are closed. The
+measurement-campaign planner derives four unique convergence routes, six fixed
+`R` values, two observables, and all point/adjacent/reference comparisons directly
+from the pinned evidence contract, giving a Bonferroni family size of `136`. With
+the declared residual allocation `h=0.002`, the shared batch is controlled by the
+width-two staggered-magnetization estimator: `4,300,768` effective independent
+shots per route/R cell, or `103,218,432` over all 24 cells. The earlier `10,000`
+shot placeholder fails even the looser pointwise statistical budget. Because the
+template leaves acceptance probability `p` and effective-shot fraction `eta`
+null, accepted and raw execution totals remain unresolved; the planner explicitly
+returns `EFFECTIVE_TARGETS_DERIVED_RAW_UNRESOLVED`, reports
+`NOT_ASSESSED_BY_PREFLIGHT` for convergence certification, and is not measurement
+evidence.
+
+Here `136` is a conservative declared-comparison multiplicity, not a claim that
+136 independent random events exist: the same 48 route/R point intervals are reused
+inside adjacent and reference inequalities. Likewise, a future `eta` is usable for
+planning only if it is a conservative effective-independent-shot fraction valid for
+both jointly measured observables; an empirical ESS ratio remains diagnostic.
+
+The separate reference-qualification contract/template/validator fixes the same
+workload and two observable identities, verifies local JSON certificate paths and
+SHA-256 hashes, requires exact certificate-to-ledger record binding, checks the
+deterministic error decomposition, and compares reference inputs against an
+externally supplied batch/circuit snapshot. A binding-looking method must also
+provide formula/term-order, checker, implementation-commit, environment-lock and
+theorem/assumption fingerprints, directed-interval rounding, and its method-specific
+mechanical claims. Uncertified tensor-network, Krylov and stochastic records remain
+`DIAGNOSTIC_ONLY` even if they assert binding claims. Because the validator does not
+run a fixed machine checker or load the campaign budget, its maximum output is
+`STRUCTURALLY_COMPLETE_UNVERIFIED`; it explicitly returns
+`ready_gate_eligible=false`, and no `QUALIFIED_BOUNDED` state is reachable. The empty
+template is `UNRESOLVED`. External-snapshot completeness is only shape-checked here,
+not proven against convergence data, and even the structurally complete CLI state
+exits nonzero. The primary-source method assessment and proposed
+certificate pipeline are recorded in
+[REFERENCE_CERTIFICATION_STRATEGY.md](REFERENCE_CERTIFICATION_STRATEGY.md).
+
+These campaign and reference artifacts are currently standalone preflight and
+qualification tools. They have **not** yet been added as components of
+`fermi_hubbard_evidence.py`, so they do not alter the current outer
+`READY_FOR_BENCHMARK` gate.
+
 The focused 70-claim ledger is fully adjudicated: 56 unanimous verified, 8
 split/partial accepted, and 6 refuted as written, with every mandatory rewrite
 retained in `claim-status.jsonl`.
@@ -130,6 +174,8 @@ retained in `claim-status.jsonl`.
   first-step ledger contract/template/validator, unified evidence manifest
   contract/template/orchestrator, native transition contract/template/validator,
   surface-code place-and-route contract/template/validator,
+  standalone measurement-campaign preflight contract/template/validator and
+  standalone reference-qualification contract/template/validator,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -143,6 +189,8 @@ retained in `claim-status.jsonl`.
   `test_first_step_ledger_validator.py` /
   `test_fermi_hubbard_evidence.py` /
   `test_native_transition_validator.py` /
-  `test_surface_place_route_validator.py`
+  `test_surface_place_route_validator.py` /
+  `test_measurement_campaign_validator.py` /
+  `test_reference_qualification_validator.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`
