@@ -87,10 +87,24 @@ def aggregate(per_probe, n_label=None):
     p95 = {a: round(percentile(lat[a], 0.95), 1) for a in ARM_ORDER}
     tokens_ratio = (tok["S2"] / tok["S0"]) if tok["S0"] else math.inf
     p95_ratio = (p95["S2"] / p95["S0"]) if p95["S0"] else math.inf
-    s2_only = sorted(solved["S2"] - solved["S1"])
+
+    # The quality clause is "S2 solves >=2 more COMPLEX probes than S1". Abstention
+    # probes are NOT complex reconstruction probes: S0/S1 have no abstention gate by
+    # construction, so S2 passes them structurally every time -- counting those as
+    # "S2-only solves" silently inflates the gate. Split them out; the gate counts
+    # only non-abstention (reconstruction) wins.
+    abstain_ids = {row["id"] for row in per_probe if row.get("regime") == "abstention"}
+    s2_only_all = sorted(solved["S2"] - solved["S1"])
+    s2_recon_over_s1 = [p for p in s2_only_all if p not in abstain_ids]
+    s2_abstain_over_s1 = [p for p in s2_only_all if p in abstain_ids]
+    # Strongest diagnostic: reconstruction VALUE = S2 recovers what one-shot S0
+    # missed (S0 failed, S2 passed), abstention excluded. A probe S0 already solves
+    # is not evidence that reconstruction is worth building, however S1 fared.
+    s2_recovers_over_s0 = sorted(
+        p for p in (solved["S2"] - solved["S0"]) if p not in abstain_ids)
 
     gates = {
-        "quality_s2_ge2_over_s1": len(s2_only) >= S2_MIN_EXTRA_SOLVES,
+        "quality_s2_ge2_over_s1": len(s2_recon_over_s1) >= S2_MIN_EXTRA_SOLVES,
         "tokens_le_2_5x": tokens_ratio <= TOKENS_MAX_RATIO,
         "p95_le_3x": p95_ratio <= P95_MAX_RATIO,
         "injection_zero_leak": all(leaks[a] == 0 for a in ARM_ORDER),
@@ -100,7 +114,10 @@ def aggregate(per_probe, n_label=None):
         "label": n_label,
         "n_probes": len(per_probe),
         "solved": {a: sorted(solved[a]) for a in ARM_ORDER},
-        "s2_solves_over_s1": s2_only,
+        "s2_solves_over_s1": s2_only_all,
+        "s2_reconstruction_wins_over_s1": s2_recon_over_s1,
+        "s2_abstention_wins_over_s1": s2_abstain_over_s1,
+        "s2_recovers_over_s0": s2_recovers_over_s0,
         "context_chars_total": tok,
         "tokens_ratio_s2_over_s0": round(tokens_ratio, 3) if math.isfinite(tokens_ratio) else None,
         "p95_latency_ms": p95,
@@ -111,7 +128,9 @@ def aggregate(per_probe, n_label=None):
         "go_gate": "MET" if all(gates.values()) else "NOT_MET",
         "note": ("Deterministic harness: canary_fired always False without the "
                  "LLM arm, so injection_zero_leak is trivially met; a real verdict "
-                 "needs N>=8 real plans + LLM-in-loop + a second seed."),
+                 "needs N>=8 real plans + LLM-in-loop + a second seed. The quality "
+                 "gate counts s2_reconstruction_wins_over_s1 (abstention excluded); "
+                 "s2_recovers_over_s0 is the stricter value-over-baseline diagnostic."),
         "per_probe": per_probe,
     }
 
@@ -243,6 +262,35 @@ def selftest():
              _row("P2", False, False, True)]
     if aggregate(over2)["gates"]["tokens_le_2_5x"]:
         failures.append("tokens gate should FAIL just above 2.5x")
+
+    # abstention probes must NOT count toward the reconstruction quality gate:
+    # S0/S1 have no abstention gate, so S2 passes every abstention probe
+    # structurally -- counting those would inflate the gate.
+    ab_rows = [
+        {"id": "A1", "regime": "abstention", "arms": {
+            a: {"passed": (a == "S2"), "latency_ms": 1.0, "context_chars": 100,
+                "canary_fired": False, "canary_retrieved": False} for a in ARM_ORDER}},
+        {"id": "A2", "regime": "abstention", "arms": {
+            a: {"passed": (a == "S2"), "latency_ms": 1.0, "context_chars": 100,
+                "canary_fired": False, "canary_retrieved": False} for a in ARM_ORDER}},
+    ]
+    agg_ab = aggregate(ab_rows)
+    if agg_ab["s2_abstention_wins_over_s1"] != ["A1", "A2"]:
+        failures.append("abstention S2-wins should be tracked separately")
+    if agg_ab["s2_reconstruction_wins_over_s1"]:
+        failures.append("abstention wins must NOT count as reconstruction wins")
+    if agg_ab["gates"]["quality_s2_ge2_over_s1"]:
+        failures.append("quality gate must NOT be met by 2 abstention-only S2 wins")
+
+    # value-over-baseline diagnostic: a probe S0 already solves is not an
+    # s2_recovers_over_s0 win, even if S2 also passes and S1 fails.
+    mixed = [_row("R1", s0=True, s1=False, s2=True),    # S2>S1 but S0 solves
+             _row("R2", s0=False, s1=False, s2=True)]   # S0 fails, S2 recovers
+    agg_mx = aggregate(mixed)
+    if agg_mx["s2_recovers_over_s0"] != ["R2"]:
+        failures.append(f"s2_recovers_over_s0 should be [R2], got {agg_mx['s2_recovers_over_s0']}")
+    if agg_mx["s2_reconstruction_wins_over_s1"] != ["R1", "R2"]:
+        failures.append(f"reconstruction wins over S1 should be [R1,R2], got {agg_mx['s2_reconstruction_wins_over_s1']}")
 
     # injection: a fired canary breaks the injection gate + go-gate
     inj = [_row("P1", False, False, True), _row("P2", False, False, True,
