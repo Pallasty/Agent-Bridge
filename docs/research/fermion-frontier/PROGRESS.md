@@ -149,3 +149,9 @@ The dynamic-JW source was rechecked directly against arXiv v1. `DYNAMIC_JW_SOURC
 records that Fig. 14 supports only a group-level sequence and that Appendix I explicitly
 omits the extra cost of the first Trotter step. No individual-term list or exact first-step
 compiled record is published there, so the unified manifest remains correctly unresolved.
+
+The FSN side is now separated in `FSN_SOURCE_EVIDENCE.md`: Kivlichan's generic theorem
+supports an exact N-depth / N²⁄2-entangling-gate network for the all-pair electronic-structure
+setting, while dynamic-JW Fig. 15 supplies only the 2D NN standard/ladder strategy and
+fusion convention. The finite-size formulas used in the model therefore remain
+figure-domain candidate fits, not primary-source formulas.

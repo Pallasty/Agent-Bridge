@@ -386,6 +386,11 @@ fidelity。Nature 的 `U_int` 也不是 PNAS 的纯 density-phase primitive。�
 主源没有 individual-term event list 或首步 exact count/depth/time。因此这些字段继续
 由 validator 保持 `UNRESOLVED`，而不是从图形反推。
 
+FSN 的主源边界另见 [FSN_SOURCE_EVIDENCE.md](FSN_SOURCE_EVIDENCE.md)：Kivlichan 的
+通用 `N`-depth / `N²/2` 结果不能直接替换二维 NN Hubbard 的 standard/ladder 有限尺寸
+计数；后者目前仍是 Fig. 5 域内 candidate fit。这样既保留了通用 FSN theorem 的
+primary-source anchor，也不把不同 interaction graph 的资源口径混为一谈。
+
 ## 8. 共同 R / 误差收敛接口
 
 本阶段还新增 [fermi_hubbard_convergence.py](fermi_hubbard_convergence.py) 和

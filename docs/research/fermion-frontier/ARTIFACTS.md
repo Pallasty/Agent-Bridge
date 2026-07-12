@@ -89,3 +89,5 @@ so they are versioned normally and are not added to the preservation-only
 - `DYNAMIC_JW_SOURCE_EVIDENCE.md`: primary-source ledger for Fig. 5/Fig. 14,
   Appendix I leading counts, explicit first-step omission, and unresolved individual
   term/compiled-event fields.
+- `FSN_SOURCE_EVIDENCE.md`: primary-source ledger separating the generic Kivlichan
+  FSN theorem from dynamic-JW Fig. 15 standard/ladder candidate fits.

@@ -108,6 +108,7 @@ retained in `claim-status.jsonl`.
   first-step ledger contract/template/validator, unified evidence manifest
   contract/template/orchestrator,
   and the dynamic-JW primary-source evidence ledger,
+  plus the FSN primary-source evidence ledger,
   an L=2 exact-reference pilot, and unit tests
   `test_fermi_hubbard_resource_model.py` /
   `test_term_order_validator.py` /
