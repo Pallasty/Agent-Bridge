@@ -359,6 +359,13 @@ pub async fn run_apply_pass(
                 "importance_apply".to_string(),
                 "audit".to_string(),
                 "rollback_map".to_string(),
+                // Rollback maps are operator plumbing with a bounded useful life
+                // (the rollback window). Past it they are near-token-identical
+                // boilerplate that floods top-k on valence/retrieval queries
+                // (write-side consolidation audit, 2026-07-11). The `ttl:Nd` tag
+                // makes `record_ttl_is_live` suppress them from retrieval once
+                // the window passes; memory_compact then retires them.
+                "ttl:14d".to_string(),
             ],
             related_keys: Vec::new(),
             // DISTINCT per-pass scope: successive audit maps are near
