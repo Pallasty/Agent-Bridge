@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Pure-Python L=2 exact-reference pilot for the common Hubbard group order.
+"""Pure-Python L=2 dual-observable screening pilot for the Hubbard group order.
 
-This deliberately small simulator validates the convergence data path.  It is
-not a replacement for a compiler export and must not be extrapolated to L=8.
+This deliberately small simulator validates the convergence data path. Its
+scaled-Taylor ideal-evolution values are diagnostic because the artifact does
+not supply a rigorous truncation bound. It is not a replacement for a compiler
+export and must not be extrapolated to L=8.
 """
 
 from __future__ import annotations
@@ -11,7 +13,6 @@ import argparse
 import cmath
 import json
 import math
-from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 
@@ -197,6 +198,21 @@ def staggered_magnetization(state: Sequence[complex], l: int) -> float:
     return value
 
 
+def double_occupancy(state: Sequence[complex], l: int) -> float:
+    value = 0.0
+    for bits, amplitude in enumerate(state):
+        probability = abs(amplitude) ** 2
+        if probability == 0:
+            continue
+        occupied_sites = sum(
+            1
+            for site in range(l * l)
+            if bits & (1 << _mode(site, 0)) and bits & (1 << _mode(site, 1))
+        )
+        value += probability * occupied_sites / (l * l)
+    return value
+
+
 def build_pilot(
     l: int = 2,
     u_over_t: float = 8.0,
@@ -205,41 +221,110 @@ def build_pilot(
 ) -> Dict[str, object]:
     if l != 2:
         raise ValueError("the pure-Python pilot is deliberately restricted to L=2")
+    r_values = [int(value) for value in r_values]
     initial = neel_state(l)
     exact = exact_evolution(initial, l, u_over_t, total_time)
-    reference = staggered_magnetization(exact, l)
+    references = {
+        "staggered_magnetization": staggered_magnetization(exact, l),
+        "double_occupancy": double_occupancy(exact, l),
+    }
     points = []
     for r in r_values:
-        r = int(r)
         state = trotter_evolution(initial, l, u_over_t, total_time, r)
         points.append(
             {
                 "R": r,
-                "estimate": staggered_magnetization(state, l),
-                "standard_error": 0.0,
+                "batch_id": f"deterministic-L2-R{r}",
+                "attempted_shots": 0,
+                "accepted_shots": 0,
+                "observable_order": ["staggered_magnetization", "double_occupancy"],
+                "estimates": {
+                    "staggered_magnetization": staggered_magnetization(state, l),
+                    "double_occupancy": double_occupancy(state, l),
+                },
+                "covariance_of_estimator_mean": [[0.0, 0.0], [0.0, 0.0]],
+                "systematic_abs_bounds": {
+                    "staggered_magnetization": 1e-10,
+                    "double_occupancy": 1e-10,
+                },
+                "systematic_bound_status": "derived_unvalidated",
+                "covariance_provenance": "deterministic statevector; zero sampling covariance",
+                "measurement_provenance": "exact occupation-basis expectation of pilot state",
+                "mitigation_provenance": "not applicable to deterministic pilot",
+                "systematic_bound_provenance": "declared numerical tolerance; not a rigorous truncation theorem",
+                "circuit_fingerprint": f"FH_L2_group_order_product_formula_R{r}",
+                "term_sequence_fingerprint": "FH_L2_common_raw_group_order_v1",
             }
         )
-    metadata = {
-        "observable": "staggered magnetization",
+    workload_identity = {
+        "observable_order": ["staggered_magnetization", "double_occupancy"],
+        "measurement_setting": "joint_occupation_basis",
         "initial_state": "checkerboard Neel product state",
+        "initial_state_fingerprint": "checkerboard_Neel_product_state_v1",
         "hamiltonian_fingerprint": "FH_L2_UoverT8_tT1_half_filling",
+        "evolution_fingerprint": "FH_L2_UoverT8_tT1_ideal_time_evolution_v1",
         "trotter_formula": "second-order Suzuki--Trotter (Strang)",
+        "analysis_plan_fingerprint": "FH_L2_dual_observable_R1_2_4_8_16_32_64_128_v1",
     }
+    metadata = {"route": "group_order_pilot", **workload_identity}
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "pilot_status": "algorithmic_product_formula_pilot_not_hardware_or_L8_evidence",
         "workload": {
-            **metadata,
-            "algorithmic_error_budget": 0.005,
-            "statistical_error_budget": 0.0,
-            "confidence_z": 2.0,
+            **workload_identity,
+            "observables": {
+                "staggered_magnetization": {
+                    "definition_fingerprint": "staggered_magnetization_per_site_v1",
+                    "physical_range": [-1.0, 1.0],
+                    "algorithmic_error_budget": 0.005,
+                    "statistical_half_width_budget": 0.0,
+                },
+                "double_occupancy": {
+                    "definition_fingerprint": "double_occupancy_per_site_v1",
+                    "physical_range": [0.0, 1.0],
+                    "algorithmic_error_budget": 0.005,
+                    "statistical_half_width_budget": 0.0,
+                },
+            },
+            "target_R": 32,
+            "planned_R_values": r_values,
+            "minimum_stable_intervals": 2,
+            "familywise_error_rate": 0.05,
+            "familywise_method": "bonferroni_bounded_hoeffding",
+            "interval_method": "bounded_hoeffding_or_deterministic",
         },
-        "reference": {
-            "value": reference,
-            "provenance": "pure-Python sparse Hamiltonian action plus scaled Taylor evolution",
+        "references": {
+            observable: {
+                "value": value,
+                "kind": "approximate_unbounded",
+                "standard_error": 0.0,
+                "systematic_abs_bound": 0.0,
+                "uncertainty_evidence_status": "derived_unvalidated",
+                "independent_of_route_estimates": False,
+                "hamiltonian_fingerprint": metadata["hamiltonian_fingerprint"],
+                "initial_state_fingerprint": metadata["initial_state_fingerprint"],
+                "evolution_fingerprint": metadata["evolution_fingerprint"],
+                "observable_definition_fingerprint": (
+                    "staggered_magnetization_per_site_v1"
+                    if observable == "staggered_magnetization"
+                    else "double_occupancy_per_site_v1"
+                ),
+                "reference_target": "ideal_exact_time_evolution",
+                "provenance": (
+                    "pure-Python sparse Hamiltonian action plus scaled Taylor evolution; "
+                    "diagnostic only because no rigorous truncation bound is supplied"
+                ),
+            }
+            for observable, value in references.items()
         },
         "required_routes": ["group_order_pilot"],
-        "routes": {"group_order_pilot": {"metadata": metadata, "points": points}},
+        "routes": {
+            "group_order_pilot": {
+                "metadata": metadata,
+                "sampling_mode": "deterministic_simulation",
+                "points": points,
+            }
+        },
     }
 
 
@@ -250,9 +335,20 @@ def main() -> None:
     result = build_pilot()
     if args.format == "markdown":
         print("# L=2 product-formula pilot\n")
-        print(f"Reference staggered magnetization: `{result['reference']['value']:.12g}`\n")
+        print(
+            "Diagnostic reference staggered magnetization: "
+            f"`{result['references']['staggered_magnetization']['value']:.12g}`"
+        )
+        print(
+            "Diagnostic reference double occupancy: "
+            f"`{result['references']['double_occupancy']['value']:.12g}`\n"
+        )
         for point in result["routes"]["group_order_pilot"]["points"]:
-            print(f"- R={point['R']}: {point['estimate']:.12g}")
+            estimates = point["estimates"]
+            print(
+                f"- R={point['R']}: M_s={estimates['staggered_magnetization']:.12g}, "
+                f"D={estimates['double_occupancy']:.12g}"
+            )
     else:
         print(json.dumps(result, indent=2, sort_keys=True))
 

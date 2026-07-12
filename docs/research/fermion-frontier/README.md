@@ -91,10 +91,26 @@ final cross-cluster adversarial review with all required corrections applied.
    primary-source gaps remain explicit as `UNRESOLVED`.
 
 The fail-closed evidence path now binds each export's embedded `route` to its
-manifest key, applies the statistical budget to the `z * SE` confidence half-width,
-requires target `R=100` to be explicitly sampled inside every mapped stability
-window, and requires a complete surface-code place-and-route ledger. Real compiler
-exports, route measurements, and physical schedules remain `UNRESOLVED`.
+manifest key and uses convergence schema v2 for the fixed
+`staggered_magnetization` / `double_occupancy` observable pair. The convergence
+plan fixes the complete refinement grid and target `R=100`; every point is a
+joint-observable record with estimator-mean covariance, systematic bounds, and
+route/circuit provenance; circuit fingerprints are globally unique per route/R
+point. A `shared_shots` point additionally supplies attempted/accepted shots,
+effective-independent-shot counts, per-shot contribution ranges, and
+concentration/mitigation status. Finite-sample statistical gates use family-wise
+Bonferroni--Hoeffding half-widths from the validated contribution ranges and
+effective independent samples. Covariance-derived normal intervals are diagnostic
+rather than the binding finite-sample guarantee.
+
+Joint stability on the declared grid without a fully bounded independent
+reference is only `SCREENED_FOR_TARGET_R`. `READY_FOR_TARGET_R` additionally
+requires binding route systematics, validated independent bounded-sample assumptions,
+and a bounded independent reference for both observables; the unified evidence
+orchestrator accepts only that stronger state.
+It also requires a complete surface-code place-and-route ledger. Real compiler
+exports, route measurements, bounded references, and physical schedules remain
+`UNRESOLVED`.
 
 The focused 70-claim ledger is fully adjudicated: 56 unanimous verified, 8
 split/partial accepted, and 6 refuted as written, with every mandatory rewrite
@@ -118,7 +134,7 @@ retained in `claim-status.jsonl`.
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
   and the native-fermion primary-source evidence ledger,
-  an L=2 exact-reference pilot, and unit tests
+  an L=2 dual-observable deterministic screening pilot, and unit tests
   `test_fermi_hubbard_resource_model.py` /
   `test_term_order_validator.py` /
   `test_term_order_cross_route.py` /

@@ -328,8 +328,10 @@ SPAM 和 routing。它们只是“还需要多严”的乐观告警，不能与 
 直接等同，更不是预测成功率。
 
 Route-specific acceptance/mitigation 默认全为 `null`，所以 `10,000 accepted shots`
-不会被误写成 `10,000 raw runs`。真正 campaign 还要给每个 measurement group 的
-variance/置信界和必要时的高置信 post-selection stopping rule。
+不会被误写成 `10,000 raw runs`，也不能自动当作 `10,000` 个有效独立样本。真正
+campaign 还要给每个 measurement group 的 effective-independent-shot 依据、per-shot
+contribution range、mitigation concentration model、variance/置信界和必要时的高置信
+post-selection stopping rule。
 
 ## 6. 主源锚点与禁止外推
 
@@ -401,45 +403,80 @@ PNAS 是含 MERGE/SHUTTLE 与组件级工程估计的 proposal；2026 Nature 的
 但都没有关闭本任务的 L=8 连续 matching movement、任意角集成时长、空间占用和
 individual-term compiled export，因此 native 完整 route 仍保持 `UNRESOLVED`。
 
-## 8. 共同 R / 误差收敛接口
+## 8. 双观测量 target-R / 误差收敛接口
 
 本阶段还新增 [fermi_hubbard_convergence.py](fermi_hubbard_convergence.py) 和
 [fermi_hubbard_convergence_template.json](fermi_hubbard_convergence_template.json)。
-每条路线需要在同一 workload metadata 下提供 `R`、observable estimate 和
-standard error；验证器使用
+schema v2 把 `staggered_magnetization` 与 `double_occupancy` 的定义、物理取值范围、
+误差预算，以及完整的 `R=[25,50,100,200,400,800]` 网格固定在 workload 中；目标
+`R=100` 不能在看到数据后另选。每条路线必须提供完整网格，每个点都是同批次的
+双观测量向量，并带 estimator-mean covariance、逐观测量系统误差界、测量/线路/
+term-sequence provenance 以及与 workload 一致的身份指纹；每个 route/R 点的 circuit
+fingerprint 必须全局唯一。`shared_shots` 点还必须给出 attempted/accepted shots、
+effective-independent-shot 数、逐观测量 per-shot contribution range 以及 concentration/
+mitigation status，并满足 `attempted >= accepted >= 2`、`0 < effective <= accepted`。
+concentration evidence status 同时认证 concentration model、贡献范围和有效样本数的推导。
+
+shared-shot 点的绑定置信半宽不是用户填写的 `z * SE`，而是从已验证的单次贡献范围
+`[l_{r,o,k},u_{r,o,k}]`、该联合批次的有效独立样本数 `n^eff_{r,k}` 和声明的
+family-wise error rate `alpha` 推导：
+
+\[
+h_{r,o,k}=(u_{r,o,k}-l_{r,o,k})
+\sqrt{\frac{\log(2m/\alpha)}{2n^{eff}_{r,k}}}.
+\]
+
+这里 `m` 由预先声明的路线、两个观测量、所有网格点、相邻 refinement 和 reference
+比较的总数机械计算。无 mitigation 时 contribution range 必须等于物理范围；bounded
+weighted mitigation 必须给出包含所报告 estimate 的经验证有限范围，unbounded/
+unvalidated mitigation 不能进入 binding READY。deterministic simulation 的 sampling
+half-width 为零。covariance
+必须有限、对称且半正定，其对角线导出的 standard error 与 normal half-width 只作诊断，
+不能替代上述有限样本 Bonferroni--Hoeffding 门。相邻 refinement 的绑定检查为
 
 \[
 |\hat O_{R_2}-\hat O_{R_1}|
-+z\sqrt{\mathrm{SE}_{R_1}^2+\mathrm{SE}_{R_2}^2}
++h_{R_1}+h_{R_2}+s_{R_1}+s_{R_2}
 \le \epsilon_{alg}
 \]
 
-检查相邻 refinement，并要求至少两个连续稳定区间、稳定区间内每个点满足
-`z SE_R <= epsilon_stat`。这里 `epsilon_stat` 是置信半宽预算，不是裸 standard
-error。若提供独立 reference，还会把 estimate-to-reference 的
-置信界纳入检查。只有所有 required routes 都有稳定窗口、并且都提供共同 `R` 的
-结果，才会输出 `READY_FOR_COMMON_R`；缺数据、metadata 不一致或统计误差过大都
-返回 `UNRESOLVED`。
+其中 `s_R` 是声明的系统误差绝对界；这个三角不等式不要求不同 `R` 批次相互独立。
+稳定窗内每个点还必须满足 `h_R <= epsilon_stat`，且两个观测量都至少通过两个连续
+refinement interval。若存在 reference，验证器还会绑定 Hamiltonian、初态、目标演化、
+observable definition 和独立性，并逐点检查 estimate-to-reference 界。
 
-统一 manifest 另要求目标 `R=100` 在每条 mapped convergence route 中显式出现，且
-`100 >= stable_from_R`；目标点缺失或仍早于稳定窗时，整体返回 `INCONSISTENT`，不能
-用较大 `R` 已收敛来倒推目标 `R` 已经合格。
+通过完整网格联合稳定检查但没有完整的有界独立 reference，或路线系统误差界仍是
+`assumed` / `derived_unvalidated` 时，结果最多为 `SCREENED_FOR_TARGET_R`。只有两个
+reference 都是 identity-matched `exact_bounded`、其不确定性证据和每个路线点的系统界
+均为 binding maturity、shared-shot concentration 声明为经验证的 independent bounded
+samples，且目标点位于所有 route × observable 稳定窗中，才输出 `READY_FOR_TARGET_R`。
+缺数据、metadata/identity 不一致、协方差非法或统计预算超限均 fail closed 为
+`INVALID_SCHEMA` 或 `UNRESOLVED`。
+
+统一 manifest 会把整份 convergence workload 与独立 evidence contract 精确比较，
+并再次核验目标 `R=100` 的完整双观测量向量及 route × observable 稳定矩阵；不能通过
+在数据内同步改网格、预算或 analysis-plan 字符串来绕过外层策略。
 
 当前模板没有填入任何路线测量值，因此运行结果应为 `UNRESOLVED`。这不是失败，
 而是避免把 `R=100` 规划输入误写成已验证的算法误差。
 
-### 8.1 L=2 exact-reference pilot
+### 8.1 L=2 双观测量 screening pilot
 
 新增 [fermi_hubbard_l2_pilot.py](fermi_hubbard_l2_pilot.py) 后，已经可以在无
 NumPy/SciPy 的环境中运行一个纯 Python 算法 pilot：`L=2, U/t=8, tT=1`、checkerboard
-Néel 初态、staggered magnetization。它用稀疏 Hamiltonian 作用和 scaled Taylor
-evolution 得到 deterministic reference `0.655760337805`，再对共同 raw group order
-运行 `R=1,2,4,8,16,32,64,128`。
+Néel 初态，并同时测量 staggered magnetization 与 double occupancy。它用稀疏
+Hamiltonian 作用和 scaled Taylor evolution 得到诊断参考值
+`0.655760337805` 与 `0.0367897165024`，再对共同 raw group order 运行
+`R=1,2,4,8,16,32,64,128`。
 
 将结果写入 [fermi_hubbard_l2_pilot_manifest.json](fermi_hubbard_l2_pilot_manifest.json)
-后，收敛评估器给出该 **group-order pilot** 的 `R=32`。这是一个可复核的算法链路
-检查，不是 `L=8` 证据、不是 dynamic-JW/FSN/native 的硬件结果，也不能证明不同
-编译器已经产生相同 individual-term order；真实路线数据仍需替换 `group_order_pilot`。
+后，两个观测量分别从 `R=32` 与 `R=4` 进入声明网格上的稳定窗，因此共同筛选点为
+`R=32`。但 scaled-Taylor reference 没有随 artifact 提供严格 truncation-error bound，
+point 的数值系统界也标为 `derived_unvalidated`；评估结果因此是
+`SCREENED_FOR_TARGET_R`，不是 exact-reference 或 bounded certificate。这仍是一个可复核
+的算法链路检查，不是 `L=8` 证据、不是 dynamic-JW/FSN/native 的硬件结果，也不能证明
+不同编译器已经产生相同 individual-term order；真实路线数据仍需替换
+`group_order_pilot`。
 
 ### 8.2 首步与计时账本
 
@@ -464,7 +501,7 @@ leading 或 candidate-fit 证据升级为精确 compiled 资源。
 新增 [evidence_manifest_contract.json](evidence_manifest_contract.json)、
 [evidence_manifest_template.json](evidence_manifest_template.json) 和
 [fermi_hubbard_evidence.py](fermi_hubbard_evidence.py)。这个编排层把 term-order、
-首步账本、native transition、surface place-route 和共同-R 收敛结果放入同一
+首步账本、native transition、surface place-route 和 target-R 收敛结果放入同一
 manifest，并检查：
 
 - 五条路线的 route map 是否一致；
@@ -472,12 +509,15 @@ manifest，并检查：
 - term export 的 `trotter_steps` 是否等于首步账本的 `R`；
 - surface physical-route map 是否绑定现有的 term/convergence route pair；
 - surface event 数和 sequence fingerprint 是否分别匹配 term sequence 长度和共同指纹；
-- 共享的 qubit-route 收敛结果是否达到 `READY_FOR_COMMON_R`，且目标 `R` 位于稳定窗。
+- convergence workload 是否逐字段匹配独立 contract，两个观测量是否都覆盖目标点；
+- 共享的 qubit-route 收敛结果是否达到 `READY_FOR_TARGET_R`，且目标 `R` 位于每个
+  route × observable 稳定窗。
 
 它只在五类组件分别满足 term-order `MATCHED`、首步 `COMPLETE`、native transition
-`COMPLETE`、surface place-route `COMPLETE`、收敛 `READY_FOR_COMMON_R` 且没有身份或
-一致性错误时输出 `READY_FOR_BENCHMARK`。当前统一模板的五个组件均为 `UNRESOLVED`；
-测试中的闭合 manifest 是合成集成 fixture，不是论文或硬件证据。
+`COMPLETE`、surface place-route `COMPLETE`、收敛 `READY_FOR_TARGET_R` 且没有身份或
+一致性错误时输出 `READY_FOR_BENCHMARK`；`SCREENED_FOR_TARGET_R` 明确不足。当前统一
+模板的五个组件均为 `UNRESOLVED`；测试中的闭合 manifest 是合成集成 fixture，不是
+论文或硬件证据。
 
 现在统一 manifest 还纳入 [native_transition_contract.json](native_transition_contract.json)、
 [native_transition_template.json](native_transition_template.json) 和
@@ -511,7 +551,7 @@ evidence 全部属于 `compiler_export` 或 `measured` 时，surface 状态才�
 [SOURCE_SNAPSHOT_NOTES.md](SOURCE_SNAPSHOT_NOTES.md)。snapshot 写入 native 的
 `44,864/801` 逻辑 bookkeeping，以及 dynamic leading、dynamic fit、standard FSN、
 ladder FSN 的 steady count/depth；首步 timing、native occurrence table、individual
-terms 和共同-R 数据仍为缺失，surface row 也没有 patches/layouts/intervals。
+terms 和固定网格双观测量数据仍为缺失，surface row 也没有 patches/layouts/intervals。
 因此运行统一 validator 仍为 `UNRESOLVED`，不会把 source subtotal 误升级为完整
 benchmark。
 
@@ -586,29 +626,36 @@ python3 docs/research/fermion-frontier/test_native_transition_validator.py
 退化网格、共同分组 native schedule、两个 `C2D` 的第二 CZ layer、辅助 footprint、
 零/无限 cycle、factory 配置、route-specific expected executions、首步对 complete time
 的阻断和误差预算校验；项序验证器另有四个测试覆盖 group order、融合、term set 和
-fail-closed 行为；收敛接口另有六个测试覆盖双区间稳定、reference、缺路线、metadata
-不一致、置信半宽预算和 duplicate-R fail-closed 行为。
+fail-closed 行为；收敛接口另有二十一个测试覆盖双观测量稳定、bounded/diagnostic
+reference、有限样本 family-wise 半宽、协方差 PSD、路线证据复制、reference identity、
+系统界/采样集中界 maturity、逐点 circuit 唯一性、完整网格和 provenance 的 fail-closed
+行为。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
-L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和规模限制。
+L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
 首步账本另有六个测试覆盖空模板、bookkeeping-closed 状态、精确闭账、全路线闭账
 门槛和非法 timing 的 fail-closed 行为。
-统一 evidence manifest 另有十三个测试覆盖空 manifest、source snapshot、合成闭合、
-目标-R 稳定窗、term mismatch 优先级、surface closure/fingerprint/event cardinality、
-组件身份、R 不一致和 route-map 漂移的 fail-closed 行为。
+统一 evidence manifest 另有十七个测试覆盖空 manifest、source snapshot、合成闭合、
+双观测量目标-R 稳定矩阵、screening 阻断、convergence policy drift、term mismatch
+优先级、surface closure/fingerprint/event cardinality、组件身份、R 不一致和 route-map
+漂移的 fail-closed 行为。
 native transition validator 另有六个测试覆盖空模板、measured 完成、derived 估计、
 class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `82` 个测试。
+全套共 `101` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
 1. **跨编译器同序验证：**导出 native、dynamic-JW、standard/ladder FSN 的
    individual-term circuits；若共同顺序改变 `21N/4L` 或 candidate fits，重新计数。
-2. **共同误差标定：**对固定 `U/t=8,tT=1`、Néel 初态和两个 observables 做
-   `R` convergence、variance 和 measurement-allocation 测试。
+2. **共同误差标定：**按固定 `R=[25,50,100,200,400,800]` 计划，对
+   `U/t=8,tT=1`、Néel 初态和两个 observables 生成逐路线联合 measurements、covariance
+   与 measurement-allocation；验证 effective-independent-shot 数、per-shot contribution
+   ranges 和 mitigation concentration model，补齐 identity-matched bounded references
+   与可绑定的 systematic-error evidence，区分 screening 与真正的
+   `READY_FOR_TARGET_R`。
 3. **首步闭账：**使用 `first_step_contract.json` 分别报告三条 qubit 路线
    first-step 的 CNOT count、depth、non-CNOT time；在 `compiled_exact=true` 前，
    只输出 `BOOKKEEPING_CLOSED_ESTIMATE`，不把稳态平均代替完整总量。

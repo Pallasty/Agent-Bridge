@@ -16,6 +16,17 @@ unmeasured fields null. It is intentionally different from the empty template:
 
 The snapshot does **not** close any complete route. Native timing is missing its
 occurrence table; qubit routes lack first-step corrections and route timing; all routes
-lack individual-term exports and common-R measurement data; and the surface schedule is
-empty. Running the unified validator therefore remains `UNRESOLVED`. Candidate-fit rows
-are confined to the Fig. 5 domain and retain their non-source provenance.
+lack individual-term exports and the schema-v2 dual-observable measurements on the fixed
+`R=[25,50,100,200,400,800]` grid; and the surface schedule is empty. In particular,
+there are no joint `staggered_magnetization` / `double_occupancy` estimates, accepted-shot
+or effective-independent-shot counts, per-shot contribution ranges, validated
+concentration/mitigation assumptions, estimator-mean covariance matrices, systematic
+bounds, globally unique per-route/R circuit fingerprints, or bounded independent
+references. Running the unified validator therefore remains `UNRESOLVED`. Candidate-fit
+rows are confined to the Fig. 5 domain and retain their non-source provenance.
+
+The convergence status boundary is intentional. Finite-sample route data that pass the
+family-wise Bonferroni--Hoeffding grid checks but lack a fully bounded independent
+reference can reach only `SCREENED_FOR_TARGET_R`. The unified evidence orchestrator
+accepts only `READY_FOR_TARGET_R`, so neither the empty snapshot nor screening-only
+evidence can be promoted to `READY_FOR_BENCHMARK`.

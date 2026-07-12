@@ -3,9 +3,9 @@
 
 This is an orchestration layer, not a source of resource estimates. It joins
 the term-sequence, first-step resource, native-transition, surface place-and-route,
-and common-R convergence validators and checks that their identities, L, and R agree. Empty
-templates remain unresolved; synthetic fixtures must never be read as hardware
-or compiler evidence.
+and dual-observable target-R validators and checks that their identities, L, R,
+and preregistered convergence policy agree. Empty templates remain unresolved;
+synthetic fixtures must never be read as hardware or compiler evidence.
 """
 
 from __future__ import annotations
@@ -53,6 +53,31 @@ def validate_contract(contract: Mapping[str, Any]) -> List[str]:
         value = contract.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             errors.append(f"{key} must be a positive integer")
+    convergence_policy = contract.get("convergence_workload_policy")
+    if not isinstance(convergence_policy, Mapping):
+        errors.append("convergence_workload_policy must be an object")
+    else:
+        policy_probe = {
+            "schema_version": 2,
+            "workload": copy.deepcopy(dict(convergence_policy)),
+            "references": None,
+            "required_routes": ["contract_policy_probe"],
+            "routes": {},
+        }
+        errors.extend(
+            f"convergence_workload_policy: {error}"
+            for error in CONVERGENCE.validate_manifest(policy_probe)
+        )
+        if convergence_policy.get("target_R") != contract.get("target_trotter_steps"):
+            errors.append(
+                "convergence_workload_policy.target_R must match target_trotter_steps"
+            )
+        if convergence_policy.get("hamiltonian_fingerprint") != contract.get(
+            "workload_fingerprint"
+        ):
+            errors.append(
+                "convergence_workload_policy hamiltonian_fingerprint must match workload_fingerprint"
+            )
     if contract.get("native_transition_required") is not True:
         errors.append("native_transition_required must be true")
     if contract.get("surface_place_route_required") is not True:
@@ -212,12 +237,18 @@ def validate_manifest(
         component_errors.append("manifest convergence must be an object")
         convergence_manifest = {}
     convergence_workload = convergence_manifest.get("workload", {})
-    if not isinstance(convergence_workload, Mapping) or convergence_workload.get(
-        "hamiltonian_fingerprint"
-    ) != contract.get("workload_fingerprint"):
-        component_errors.append("convergence workload fingerprint does not match evidence contract")
+    if not isinstance(convergence_workload, Mapping) or convergence_workload != contract.get(
+        "convergence_workload_policy"
+    ):
+        component_errors.append(
+            "convergence workload must exactly match evidence convergence_workload_policy"
+        )
     convergence_routes = [route_map[route]["convergence_route"] for route in required]
     unique_convergence_routes = list(dict.fromkeys(convergence_routes))
+    if convergence_manifest.get("required_routes") != unique_convergence_routes:
+        component_errors.append(
+            "manifest convergence.required_routes do not match evidence route map"
+        )
     core_convergence_manifest = copy.deepcopy(dict(convergence_manifest))
     core_convergence_manifest["required_routes"] = unique_convergence_routes
     convergence_result = CONVERGENCE.assess_manifest(core_convergence_manifest)
@@ -282,20 +313,50 @@ def validate_manifest(
         if surface_manifest.get("logical_event_count") != term_result.get("sequence_length"):
             coherence_errors.append("surface logical_event_count does not match term sequence length")
 
-    if convergence_result.get("status") == "READY_FOR_COMMON_R":
+    if convergence_result.get("status") == "READY_FOR_TARGET_R":
         target_r = contract["target_trotter_steps"]
+        observable_order = contract["convergence_workload_policy"]["observable_order"]
+        if convergence_result.get("target_R") != target_r:
+            coherence_errors.append("convergence result target_R does not match target_trotter_steps")
+        if convergence_result.get("coverage_scope") != observable_order:
+            coherence_errors.append("convergence coverage_scope does not match required observables")
+        stable_matrix = convergence_result.get("stable_from_R_by_route_observable", {})
         for route in unique_convergence_routes:
-            route_result = convergence_result["routes"][route]
-            point_rs = {point["R"] for point in route_result["points"]}
-            if target_r not in point_rs:
+            route_result = convergence_result.get("routes", {}).get(route, {})
+            target_points = [
+                point
+                for point in route_result.get("points", [])
+                if point.get("R") == target_r
+            ]
+            if len(target_points) != 1:
                 coherence_errors.append(
-                    f"convergence route {route} has no result at target_trotter_steps={target_r}"
+                    f"convergence route {route} has no unique complete vector at "
+                    f"target_trotter_steps={target_r}"
                 )
-            stable_from_r = route_result.get("stable_from_R")
-            if stable_from_r is None or target_r < stable_from_r:
+            elif not isinstance(target_points[0].get("estimates"), Mapping) or set(
+                target_points[0]["estimates"]
+            ) != set(observable_order):
                 coherence_errors.append(
-                    f"convergence route {route} is not stable at target_trotter_steps={target_r}"
+                    f"convergence route {route} target vector does not cover required observables"
                 )
+            route_stability = (
+                stable_matrix.get(route, {}) if isinstance(stable_matrix, Mapping) else {}
+            )
+            for observable in observable_order:
+                stable_from_r = (
+                    route_stability.get(observable)
+                    if isinstance(route_stability, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(stable_from_r, bool)
+                    or not isinstance(stable_from_r, int)
+                    or target_r < stable_from_r
+                ):
+                    coherence_errors.append(
+                        f"convergence route {route} observable {observable} is not stable at "
+                        f"target_trotter_steps={target_r}"
+                    )
 
     if component_errors:
         errors.extend(component_errors)
@@ -332,7 +393,7 @@ def validate_manifest(
             first_step_result.get("status") == "COMPLETE",
             native_result.get("status") == "COMPLETE",
             surface_result.get("status") == "COMPLETE",
-            convergence_result.get("status") == "READY_FOR_COMMON_R",
+            convergence_result.get("status") == "READY_FOR_TARGET_R",
         )
     ):
         status = "READY_FOR_BENCHMARK"

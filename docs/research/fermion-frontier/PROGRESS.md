@@ -103,8 +103,8 @@ model separates:
 
 The model intentionally returns `UNRESOLVED` for complete totals and wall-clock
 quantities that the primary sources do not determine. The next update must
-supply individual-term cross-compiler validation, a same-observable convergence/
-variance study, full first-step circuit exports, native consecutive-matching
+supply individual-term cross-compiler validation, a joint dual-observable
+convergence/covariance study, full first-step circuit exports, native consecutive-matching
 movement benchmarks, and real compiler/measured data for the now-executable
 distance-`d` surface-code place-and-route ledger before claiming an end-to-end winner.
 
@@ -120,20 +120,47 @@ fixtures are test-only evidence. The comparator also rejects an export whose emb
 `route` differs from its manifest key, so one export cannot be relabeled as independent
 evidence for another route.
 
-The common-`R` interface is also executable in
-`fermi_hubbard_convergence.py`: it requires shared observable metadata, an `R`
-grid, estimates with standard errors, and optionally an independent reference.
-Its statistical gate is the confidence half-width `z * SE <= epsilon_stat`, not
-the bare standard error. The unified gate additionally requires target `R=100`
-to be explicitly present and no earlier than every mapped route's `stable_from_R`.
-The empty template correctly returns `UNRESOLVED`; no route has yet supplied the
-data needed for a convergence certificate.
+The target-`R` interface is also executable in
+`fermi_hubbard_convergence.py`. Schema v2 fixes the canonical
+`staggered_magnetization` / `double_occupancy` pair, their definitions and
+physical ranges, the full planned refinement grid, and target `R=100` before
+route data are inspected. Every route must supply the exact planned grid as
+joint-observable points with a finite symmetric positive-semidefinite covariance
+matrix for the estimator mean, per-observable systematic bounds, and
+measurement/circuit/term provenance. Shared-shot points additionally require
+attempted/accepted counts, effective-independent-shot counts, per-shot contribution
+ranges, and concentration/mitigation status. They enforce
+`attempted >= accepted >= 2` and `0 < effective <= accepted`; the concentration
+status certifies the model, contribution ranges, and effective-sample derivation.
+Circuit fingerprints must be globally unique across every route/R point. Standard
+errors are derived only from covariance diagonals.
 
-There is now one bounded algorithmic certificate: the dependency-free `L=2`
-group-order pilot converges against an exact-reference calculation and the
-assessor selects `R=32` under its two-interval rule. It is explicitly marked as
-an algorithmic pilot, not a hardware or `L=8` result; the next evidence step is
-to replace it with route-specific exports and measurement uncertainties.
+The binding finite-sample gate is not an asymptotic `z * SE` claim. It allocates
+the declared family-wise error rate across all planned point, adjacent-pair, and
+reference inequalities with Bonferroni, then uses bounded Hoeffding half-widths
+from a validated effective independent sample count and per-shot contribution
+range. With no mitigation, that range must equal the observable physical range;
+bounded weighted mitigation must supply a finite validated range containing the
+reported estimate. Adjacent-`R` checks add both point half-widths and both systematic
+bounds, so they do not assume independent batches across `R`. Both observables must
+have the required stable intervals and the target must lie inside their joint stable
+window.
+
+This yields two deliberately different positive states. Joint stability on the
+declared grid without a fully bounded independent reference is
+`SCREENED_FOR_TARGET_R`; only complete binding reference checks and binding route
+systematic bounds plus validated independent bounded-sample concentration assumptions
+can produce `READY_FOR_TARGET_R`. Unbounded/unvalidated mitigation or concentration
+evidence is screening-only. The empty L=8 template remains `UNRESOLVED`, and the
+unified evidence orchestrator accepts only `READY_FOR_TARGET_R` for
+`READY_FOR_BENCHMARK`.
+
+The dependency-free `L=2` group-order pilot now exercises both observables and
+is screened at `R=32`. Its scaled-Taylor reference values have no rigorous
+truncation-error bound and are therefore recorded as `approximate_unbounded`.
+Consequently the result is `SCREENED_FOR_TARGET_R`, not an exact-reference or
+bounded algorithmic certificate, and it remains neither hardware evidence nor
+an `L=8` result.
 
 The first-step interface is now executable as well. `first_step_contract.json`
 requires per-route steady and first-step logical resources, an explicit
@@ -150,7 +177,8 @@ ledger `R`, requires the native occurrence-level transition component, and requi
 surface place-route ledger whose event count and logical-sequence fingerprint match the
 term export. Its empty manifest is still `UNRESOLVED`; only real individual-term exports,
 exact first-step resources, measured native transitions, a `COMPLETE` surface schedule,
-and target-R route convergence data can produce `READY_FOR_BENCHMARK`.
+and convergence evidence at `READY_FOR_TARGET_R` can produce
+`READY_FOR_BENCHMARK`; `SCREENED_FOR_TARGET_R` is intentionally insufficient.
 
 The new `surface_place_route_validator.py` checks all `2L^2` live data patches,
 `2d^2-1` physical-qubit patch sizing, odd distance, tile conflicts, participant/corridor
@@ -181,6 +209,7 @@ proposal. None provides the matched L=8 four-matching compiled route needed for
 `evidence_manifest_source_snapshot.json` now preserves the known L=8/R=100 source-leading
 and derived bookkeeping values without inventing missing fields. Its native row exposes
 the `44,864` count / `801` depth schedule, while qubit-route first-step corrections,
-native occurrence timing, individual terms, and common-R data remain unresolved. The
+native occurrence timing, individual terms, and fixed-grid dual-observable convergence
+data remain unresolved. The
 surface row is likewise an empty placeholder with no patches, layouts, intervals, or
 operations. The validator therefore continues to report `UNRESOLVED` for the snapshot.

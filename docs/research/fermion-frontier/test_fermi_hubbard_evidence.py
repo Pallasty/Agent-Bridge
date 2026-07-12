@@ -3,6 +3,7 @@ import importlib.util
 import json
 import pathlib
 import unittest
+from unittest import mock
 
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -117,6 +118,101 @@ class EvidenceManifestTests(unittest.TestCase):
                 "timing_provenance": "synthetic integration timing",
             },
         }
+
+    def _convergence_metadata(self, workload, route):
+        metadata = {"route": route}
+        metadata.update(
+            {
+                key: copy.deepcopy(workload[key])
+                for key in (
+                    "observable_order",
+                    "measurement_setting",
+                    "initial_state",
+                    "initial_state_fingerprint",
+                    "hamiltonian_fingerprint",
+                    "evolution_fingerprint",
+                    "trotter_formula",
+                    "analysis_plan_fingerprint",
+                )
+            }
+        )
+        return metadata
+
+    def _convergence_point(self, route, r, magnetization, double_occupancy):
+        return {
+            "R": r,
+            "batch_id": f"synthetic-{route}-R{r}",
+            "attempted_shots": 0,
+            "accepted_shots": 0,
+            "observable_order": list(EVIDENCE.CONVERGENCE.OBSERVABLE_ORDER),
+            "estimates": {
+                "staggered_magnetization": magnetization,
+                "double_occupancy": double_occupancy,
+            },
+            "covariance_of_estimator_mean": [[0.0, 0.0], [0.0, 0.0]],
+            "systematic_abs_bounds": {
+                "staggered_magnetization": 0.0,
+                "double_occupancy": 0.0,
+            },
+            "systematic_bound_status": "rigorous_bound",
+            "covariance_provenance": "synthetic exact covariance",
+            "measurement_provenance": "synthetic deterministic simulation",
+            "mitigation_provenance": "none in synthetic fixture",
+            "systematic_bound_provenance": "zero in synthetic fixture",
+            "circuit_fingerprint": f"synthetic-circuit-{route}-R{r}",
+            "term_sequence_fingerprint": f"synthetic-terms-{route}-R{r}",
+        }
+
+    def _convergence_route(self, workload, route):
+        magnetization = [0.5, 0.996, 0.997, 0.998, 0.999, 0.9995]
+        double_occupancy = [0.05, 0.196, 0.197, 0.198, 0.199, 0.1995]
+        return {
+            "metadata": self._convergence_metadata(workload, route),
+            "sampling_mode": "deterministic_simulation",
+            "points": [
+                self._convergence_point(route, r, magnetization_value, occupancy_value)
+                for r, magnetization_value, occupancy_value in zip(
+                    workload["planned_R_values"], magnetization, double_occupancy
+                )
+            ],
+        }
+
+    def _binding_references(self, workload):
+        references = {
+            "staggered_magnetization": {
+                "value": 1.0,
+                "kind": "exact_bounded",
+                "standard_error": 0.0,
+                "systematic_abs_bound": 0.0,
+                "uncertainty_evidence_status": "rigorous_bound",
+                "independent_of_route_estimates": True,
+                "provenance": "synthetic independent exact reference",
+            },
+            "double_occupancy": {
+                "value": 0.2,
+                "kind": "exact_bounded",
+                "standard_error": 0.0,
+                "systematic_abs_bound": 0.0,
+                "uncertainty_evidence_status": "rigorous_bound",
+                "independent_of_route_estimates": True,
+                "provenance": "synthetic independent exact reference",
+            },
+        }
+        for observable, reference in references.items():
+            reference.update(
+                {
+                    "hamiltonian_fingerprint": workload["hamiltonian_fingerprint"],
+                    "initial_state_fingerprint": workload[
+                        "initial_state_fingerprint"
+                    ],
+                    "evolution_fingerprint": workload["evolution_fingerprint"],
+                    "observable_definition_fingerprint": workload["observables"][
+                        observable
+                    ]["definition_fingerprint"],
+                    "reference_target": "ideal_exact_time_evolution",
+                }
+            )
+        return references
 
     def _complete_surface_ledger(self, manifest, surface_contract):
         term_result = EVIDENCE.TERM.compare_routes(self.term_contract, manifest["term_order"])
@@ -318,6 +414,12 @@ class EvidenceManifestTests(unittest.TestCase):
     def _ready_manifest(self):
         contract = copy.deepcopy(self.contract)
         contract["target_trotter_steps"] = 2
+        convergence_workload = contract["convergence_workload_policy"]
+        convergence_workload["target_R"] = 2
+        convergence_workload["planned_R_values"] = [1, 2, 4, 8, 16, 32]
+        convergence_workload[
+            "analysis_plan_fingerprint"
+        ] = "synthetic_dual_observable_R1_2_4_8_16_32_v1"
         surface_contract = copy.deepcopy(self.surface_place_route_contract)
         surface_contract["target_trotter_steps"] = 2
         manifest = copy.deepcopy(self.manifest)
@@ -370,16 +472,20 @@ class EvidenceManifestTests(unittest.TestCase):
         manifest["surface_place_route"] = self._complete_surface_ledger(
             manifest, surface_contract
         )
-        convergence_workload = manifest["convergence"]["workload"]
-        points = [
-            {"R": 1, "estimate": 0.5, "standard_error": 0.0},
-            {"R": 2, "estimate": 0.995, "standard_error": 0.0},
-            {"R": 4, "estimate": 0.999, "standard_error": 0.0},
-            {"R": 8, "estimate": 0.9995, "standard_error": 0.0},
-        ]
+        convergence_routes = list(
+            dict.fromkeys(
+                contract["route_map"][route]["convergence_route"] for route in routes
+            )
+        )
+        manifest["convergence"]["schema_version"] = 2
+        manifest["convergence"]["workload"] = copy.deepcopy(convergence_workload)
+        manifest["convergence"]["references"] = self._binding_references(
+            convergence_workload
+        )
+        manifest["convergence"]["required_routes"] = convergence_routes
         manifest["convergence"]["routes"] = {
-            route: {"metadata": copy.deepcopy(convergence_workload), "points": copy.deepcopy(points)}
-            for route in manifest["convergence"]["required_routes"]
+            route: self._convergence_route(convergence_workload, route)
+            for route in convergence_routes
         }
         return contract, manifest, surface_contract
 
@@ -401,7 +507,7 @@ class EvidenceManifestTests(unittest.TestCase):
                 "first_step": "COMPLETE",
                 "native_transition": "COMPLETE",
                 "surface_place_route": "COMPLETE",
-                "convergence": "READY_FOR_COMMON_R",
+                "convergence": "READY_FOR_TARGET_R",
             },
         )
         self.assertEqual(result["coherence_errors"], [])
@@ -470,18 +576,12 @@ class EvidenceManifestTests(unittest.TestCase):
         self.assertTrue(result["coherence_errors"])
         self.assertEqual(result["status"], "MISMATCH")
 
-    def test_target_r_before_convergence_window_is_inconsistent(self):
+    def test_target_r_before_one_observable_window_is_unresolved(self):
         contract, manifest, surface_contract = self._ready_manifest()
-        late_points = [
-            {"R": 1, "estimate": 0.5, "standard_error": 0.0},
-            {"R": 2, "estimate": 0.8, "standard_error": 0.0},
-            {"R": 4, "estimate": 0.95, "standard_error": 0.0},
-            {"R": 8, "estimate": 0.995, "standard_error": 0.0},
-            {"R": 16, "estimate": 0.999, "standard_error": 0.0},
-            {"R": 32, "estimate": 0.9995, "standard_error": 0.0},
-        ]
+        late_occupancy = [0.05, 0.08, 0.11, 0.1965, 0.198, 0.199]
         for route in manifest["convergence"]["routes"].values():
-            route["points"] = copy.deepcopy(late_points)
+            for value, point in zip(late_occupancy, route["points"]):
+                point["estimates"]["double_occupancy"] = value
         result = EVIDENCE.validate_manifest(
             contract,
             manifest,
@@ -490,8 +590,14 @@ class EvidenceManifestTests(unittest.TestCase):
             self.native_transition_contract,
             surface_contract,
         )
-        self.assertEqual(result["status"], "INCONSISTENT")
-        self.assertTrue(any("not stable" in error for error in result["coherence_errors"]))
+        self.assertEqual(result["status"], "UNRESOLVED")
+        self.assertEqual(result["component_statuses"]["convergence"], "UNRESOLVED")
+        self.assertEqual(
+            result["components"]["convergence"]["routes"]["native_fermions"][
+                "stable_from_R_by_observable"
+            ]["double_occupancy"],
+            8,
+        )
 
     def test_route_map_drift_is_invalid_schema(self):
         contract = copy.deepcopy(self.contract)
@@ -547,6 +653,8 @@ class EvidenceManifestTests(unittest.TestCase):
         manifest["convergence"]["workload"]["hamiltonian_fingerprint"] = "different"
         for route in manifest["convergence"]["routes"].values():
             route["metadata"]["hamiltonian_fingerprint"] = "different"
+        for reference in manifest["convergence"]["references"].values():
+            reference["hamiltonian_fingerprint"] = "different"
         result = EVIDENCE.validate_manifest(
             contract,
             manifest,
@@ -555,9 +663,90 @@ class EvidenceManifestTests(unittest.TestCase):
             self.native_transition_contract,
             surface_contract,
         )
-        self.assertEqual(result["component_statuses"]["convergence"], "READY_FOR_COMMON_R")
+        self.assertEqual(result["component_statuses"]["convergence"], "READY_FOR_TARGET_R")
         self.assertEqual(result["status"], "INVALID_SCHEMA")
-        self.assertTrue(any("convergence workload fingerprint" in error for error in result["errors"]))
+        self.assertTrue(
+            any("convergence_workload_policy" in error for error in result["errors"])
+        )
+
+    def test_convergence_policy_drift_is_invalid_even_when_self_consistent(self):
+        contract, manifest, surface_contract = self._ready_manifest()
+        manifest["convergence"]["workload"]["familywise_error_rate"] = 0.1
+        result = EVIDENCE.validate_manifest(
+            contract,
+            manifest,
+            self.term_contract,
+            self.first_step_contract,
+            self.native_transition_contract,
+            surface_contract,
+        )
+        self.assertEqual(result["component_statuses"]["convergence"], "READY_FOR_TARGET_R")
+        self.assertEqual(result["status"], "INVALID_SCHEMA")
+        self.assertTrue(
+            any("exactly match" in error for error in result["errors"])
+        )
+
+    def test_missing_second_observable_cannot_reach_ready(self):
+        contract, manifest, surface_contract = self._ready_manifest()
+        target_point = manifest["convergence"]["routes"]["native_fermions"]["points"][1]
+        target_point["estimates"].pop("double_occupancy")
+        result = EVIDENCE.validate_manifest(
+            contract,
+            manifest,
+            self.term_contract,
+            self.first_step_contract,
+            self.native_transition_contract,
+            surface_contract,
+        )
+        self.assertEqual(result["component_statuses"]["convergence"], "UNRESOLVED")
+        self.assertEqual(result["status"], "UNRESOLVED")
+
+    def test_screening_without_binding_references_cannot_reach_ready(self):
+        contract, manifest, surface_contract = self._ready_manifest()
+        manifest["convergence"]["references"] = None
+        result = EVIDENCE.validate_manifest(
+            contract,
+            manifest,
+            self.term_contract,
+            self.first_step_contract,
+            self.native_transition_contract,
+            surface_contract,
+        )
+        self.assertEqual(
+            result["component_statuses"]["convergence"], "SCREENED_FOR_TARGET_R"
+        )
+        self.assertEqual(result["status"], "UNRESOLVED")
+
+    def test_outer_gate_rechecks_route_observable_stability_matrix(self):
+        contract, manifest, surface_contract = self._ready_manifest()
+        convergence_result = EVIDENCE.CONVERGENCE.assess_manifest(
+            manifest["convergence"]
+        )
+        self.assertEqual(convergence_result["status"], "READY_FOR_TARGET_R")
+        convergence_result["stable_from_R_by_route_observable"]["native_fermions"][
+            "double_occupancy"
+        ] = 4
+        with mock.patch.object(
+            EVIDENCE.CONVERGENCE,
+            "assess_manifest",
+            return_value=convergence_result,
+        ):
+            result = EVIDENCE.validate_manifest(
+                contract,
+                manifest,
+                self.term_contract,
+                self.first_step_contract,
+                self.native_transition_contract,
+                surface_contract,
+            )
+        self.assertEqual(result["component_statuses"]["convergence"], "READY_FOR_TARGET_R")
+        self.assertEqual(result["status"], "INCONSISTENT")
+        self.assertTrue(
+            any(
+                "native_fermions observable double_occupancy is not stable" in error
+                for error in result["coherence_errors"]
+            )
+        )
 
     def test_surface_event_cardinality_must_match_term_sequence(self):
         contract, manifest, surface_contract = self._ready_manifest()

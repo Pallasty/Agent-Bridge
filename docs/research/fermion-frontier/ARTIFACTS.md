@@ -62,19 +62,28 @@ so they are versioned normally and are not added to the preservation-only
   translation, route-specific shots, and validation tests.
 - `test_term_order_validator.py`: contract, fusion, term-set, and invalid-export
   regression tests.
-- `fermi_hubbard_convergence.py`: shared-metadata, two-interval convergence and
-  common-R assessor with pairwise uncertainty propagation and a per-point
-  `z * SE <= epsilon_stat` confidence-half-width gate;
-- `fermi_hubbard_convergence_template.json`: empty data template that returns
-  `UNRESOLVED` until route results are supplied;
-- `test_fermi_hubbard_convergence.py`: six convergence, reference, metadata, missing
-  route, confidence-half-width, and duplicate-R regression tests.
-- `fermi_hubbard_l2_pilot.py`: dependency-free L=2 exact-reference/product-formula
-  pilot generator;
-- `fermi_hubbard_l2_pilot_manifest.json`: generated deterministic pilot data with
-  an assessor recommendation `R=32` for the group-order pilot only;
-- `test_fermi_hubbard_l2_pilot.py`: reference, R-grid, recommendation, and size-bound
-  regression tests.
+- `fermi_hubbard_convergence.py`: schema-v2 dual-observable target-R assessor. It
+  fixes the complete refinement grid, validates joint estimator covariance and
+  provenance, requires a globally unique circuit fingerprint per route/R point,
+  derives standard errors only from covariance diagonals, and uses validated
+  effective-independent-sample counts and contribution ranges for finite-sample
+  Bonferroni--Hoeffding checks. Unvalidated concentration/mitigation assumptions
+  cannot produce binding readiness;
+- `fermi_hubbard_convergence_template.json`: empty L=8 template for the canonical
+  `staggered_magnetization` / `double_occupancy` pair and fixed
+  `R=[25,50,100,200,400,800]` analysis plan; it remains `UNRESOLVED` until every
+  required route supplies the complete vector-valued grid;
+- `test_fermi_hubbard_convergence.py`: regression coverage for dual-observable
+  target stability, bounded-reference readiness, screening-only evidence,
+  family-wise finite-sample gates, covariance/provenance validation, and
+  fail-closed grid/identity behavior.
+- `fermi_hubbard_l2_pilot.py`: dependency-free L=2 dual-observable deterministic
+  product-formula screening generator;
+- `fermi_hubbard_l2_pilot_manifest.json`: generated deterministic pilot data whose
+  scaled-Taylor references are `approximate_unbounded`; it is
+  `SCREENED_FOR_TARGET_R` at `R=32`, not an error-bounded certificate;
+- `test_fermi_hubbard_l2_pilot.py`: dual-observable values, fixed R-grid,
+  screening status, reference boundary, and size-bound regression coverage.
 - `first_step_contract.json`: required per-route first-step, steady-state, and timing
   fields with fail-closed status rules;
 - `first_step_ledger_template.json`: empty five-route ledger, intentionally unresolved;
@@ -86,8 +95,12 @@ so they are versioned normally and are not added to the preservation-only
 - `evidence_manifest_template.json`: empty unified manifest with unresolved term-order,
   first-step, native-transition, surface-place-route, and convergence components;
 - `fermi_hubbard_evidence.py`: orchestration validator producing `UNRESOLVED`,
-  `INCONSISTENT`, `MISMATCH`, or `READY_FOR_BENCHMARK`;
-- `test_fermi_hubbard_evidence.py`: thirteen integration regression tests.
+  `INCONSISTENT`, `MISMATCH`, or `READY_FOR_BENCHMARK`; convergence contributes
+  to the last state only when it is `READY_FOR_TARGET_R`, never when it is merely
+  `SCREENED_FOR_TARGET_R`;
+- `test_fermi_hubbard_evidence.py`: seventeen integration regression tests,
+  including convergence-policy drift, missing-observable, screening-only, and
+  route-by-observable stability rechecks.
 - `native_transition_contract.json`: occurrence-level native matching class/count and
   measured timing contract;
 - `native_transition_template.json`: empty 801-occurrence L=8/R=100 ledger;
