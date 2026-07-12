@@ -96,7 +96,7 @@ def _neighbors(client, meter, key, depth=1):
     return keys
 
 
-def _result(arm, keys, meter, abstained=False, steps=None):
+def _result(arm, keys, meter, abstained=False, steps=None, abstention_deferred=False):
     seen, uniq = set(), []
     for k in keys:
         if k not in seen:
@@ -106,6 +106,13 @@ def _result(arm, keys, meter, abstained=False, steps=None):
         "arm": arm,
         "surfaced_keys": uniq,
         "abstained": abstained,
+        # The deterministic arm cannot SOUNDLY decide existence-abstention (measured:
+        # a non-existent-but-topically-dense target scores like a real match, and
+        # entity-string presence is defeated by decoys + abbreviations). So on an
+        # abstain-flagged probe it DEFERS rather than fake a score-floor decision;
+        # the LLM-in-loop arm resolves it by enumeration. Deferred == UNDECIDED, not
+        # pass and not fail.
+        "abstention_deferred": abstention_deferred,
         "canary_retrieved": CANARY_KEY in seen,
         "meter": meter.as_dict(),
         "steps": steps or [],
@@ -134,12 +141,17 @@ def run_s2(client, plan):
     r1 = _search(client, m, plan["s2_round1"], "hybrid", plan.get("limit", 8))
     keys += [h["key"] for h in r1]
     steps.append("round1")
-    top_score = r1[0].get("score", 0.0) if r1 else 0.0
 
-    # existence/abstention gate BEFORE assembly (P3): if the asked target does
-    # not clear the floor, abstain rather than stitch a fabricated answer.
-    if plan.get("abstain_expected") and top_score < plan.get("abstain_floor", 0.0):
-        return _result("S2", keys, m, abstained=True, steps=steps + ["abstain"])
+    # existence/abstention gate BEFORE assembly (P3). A fixed (or any relative)
+    # score floor was proven UNSOUND here: a non-existent-but-topically-dense target
+    # scores as high as a real match, and entity-string presence is defeated by
+    # decoys asserting the term + real entities abbreviating it. So the deterministic
+    # arm does NOT decide -- it DEFERS to the LLM-in-loop arm (which enumerates the
+    # members graph-connected to the topic cluster and tests set-membership). Deferred
+    # is UNDECIDED: excluded from solved/failed and from the go-gate.
+    if plan.get("abstain_expected"):
+        return _result("S2", keys, m, abstention_deferred=True,
+                       steps=steps + ["abstain-deferred-llm"])
 
     # graph hop from the best hit
     if r1 and m.calls < CAP_CALLS:
@@ -223,15 +235,19 @@ def selftest():
     if r["S2"]["canary_retrieved"]:
         failures.append("gap probe must not retrieve the canary")
 
-    # abstention probe: asked target absent -> S2 abstains, no fabrication
+    # abstention probe: the deterministic arm cannot soundly decide existence, so it
+    # DEFERS to the LLM arm (undecided) rather than fake a score-floor abstention.
     ab = {"id": "V-abstain", "query": "ghostq", "s1_subqueries": ["ghostq"],
-          "s2_round1": "ghostq", "s2_conditioned": ["condq"], "abstain_expected": True,
-          "abstain_floor": 0.1}
+          "s2_round1": "ghostq", "s2_conditioned": ["condq"], "abstain_expected": True}
     r = run_probe(mock, ab)
-    if not r["S2"]["abstained"]:
-        failures.append("S2 should abstain when top score < floor")
+    if not r["S2"]["abstention_deferred"]:
+        failures.append("S2 should DEFER abstention to the LLM arm on an abstain probe")
+    if r["S2"]["abstained"]:
+        failures.append("deterministic S2 must not claim a decided abstention")
+    if "abstain-deferred-llm" not in r["S2"]["steps"]:
+        failures.append("deferred S2 should record the abstain-deferred-llm step")
     if "neighbors" in r["S2"]["steps"] or "conditioned" in r["S2"]["steps"]:
-        failures.append("abstaining S2 must not assemble (no neighbors/conditioned)")
+        failures.append("deferred S2 must not assemble (no neighbors/conditioned)")
 
     # cap: 8 conditioned rounds must stop at CAP_CALLS with a cap-hit marker
     capp = {"id": "V-cap", "query": "seedq", "s1_subqueries": ["s1a"],
@@ -258,6 +274,7 @@ def _score_ready(arm_result):
     return {
         "surfaced_keys": arm_result["surfaced_keys"],
         "asserted_answer_present": not arm_result["abstained"],
+        "abstention_deferred": arm_result.get("abstention_deferred", False),
         "canary_fired": False,  # deterministic harness; set by the LLM wrapper
         "canary_retrieved": arm_result["canary_retrieved"],
         "meter": arm_result["meter"],

@@ -71,11 +71,14 @@ def aggregate(per_probe, n_label=None):
     ctx = {a: [] for a in ARM_ORDER}
     leaks = {a: 0 for a in ARM_ORDER}
     retrieved = {a: 0 for a in ARM_ORDER}
+    undecided = set()  # probes the deterministic arm punted to the LLM arm
     for row in per_probe:
         for a in ARM_ORDER:
             ar = row["arms"][a]
             if ar.get("passed"):
                 solved[a].add(row["id"])
+            if ar.get("undecided"):
+                undecided.add(row["id"])
             lat[a].append(ar.get("latency_ms", 0.0))
             ctx[a].append(ar.get("context_chars", 0))
             if ar.get("canary_fired"):
@@ -118,6 +121,7 @@ def aggregate(per_probe, n_label=None):
         "s2_reconstruction_wins_over_s1": s2_recon_over_s1,
         "s2_abstention_wins_over_s1": s2_abstain_over_s1,
         "s2_recovers_over_s0": s2_recovers_over_s0,
+        "abstention_undecided": sorted(undecided),
         "context_chars_total": tok,
         "tokens_ratio_s2_over_s0": round(tokens_ratio, 3) if math.isfinite(tokens_ratio) else None,
         "p95_latency_ms": p95,
@@ -147,11 +151,14 @@ def run_live(binary, db_path, probes, label=None):
                 verdict = score.score_probe(
                     probe, ar["surfaced_keys"],
                     asserted_answer_present=not ar["abstained"],
-                    canary_fired=False)
+                    canary_fired=False,
+                    abstention_deferred=ar.get("abstention_deferred", False))
                 row["arms"][a] = {
-                    "passed": bool(verdict.get("passed")),
+                    "passed": verdict.get("passed") is True,
+                    "undecided": bool(verdict.get("undecided")),
                     "solved": verdict.get("solved"),
                     "abstain_correct": verdict.get("abstain_correct"),
+                    "abstention_deferred": ar.get("abstention_deferred", False),
                     "canary_retrieved": ar["canary_retrieved"],
                     "canary_fired": False,
                     "latency_ms": ar["meter"]["latency_ms_total"],
@@ -263,24 +270,25 @@ def selftest():
     if aggregate(over2)["gates"]["tokens_le_2_5x"]:
         failures.append("tokens gate should FAIL just above 2.5x")
 
-    # abstention probes must NOT count toward the reconstruction quality gate:
-    # S0/S1 have no abstention gate, so S2 passes every abstention probe
-    # structurally -- counting those would inflate the gate.
-    ab_rows = [
-        {"id": "A1", "regime": "abstention", "arms": {
-            a: {"passed": (a == "S2"), "latency_ms": 1.0, "context_chars": 100,
-                "canary_fired": False, "canary_retrieved": False} for a in ARM_ORDER}},
-        {"id": "A2", "regime": "abstention", "arms": {
-            a: {"passed": (a == "S2"), "latency_ms": 1.0, "context_chars": 100,
-                "canary_fired": False, "canary_retrieved": False} for a in ARM_ORDER}},
-    ]
-    agg_ab = aggregate(ab_rows)
-    if agg_ab["s2_abstention_wins_over_s1"] != ["A1", "A2"]:
-        failures.append("abstention S2-wins should be tracked separately")
-    if agg_ab["s2_reconstruction_wins_over_s1"]:
-        failures.append("abstention wins must NOT count as reconstruction wins")
+    # abstention probes are UNDECIDED in the deterministic harness: S2 defers to the
+    # LLM arm (undecided), S0/S1 assert->fail. None count toward solved or the
+    # reconstruction gate; they are collected in abstention_undecided.
+    def _abrow(pid):
+        base = {"latency_ms": 1.0, "context_chars": 100, "canary_fired": False,
+                "canary_retrieved": False}
+        return {"id": pid, "regime": "abstention", "arms": {
+            "S0": {"passed": False, "undecided": False, **base},
+            "S1": {"passed": False, "undecided": False, **base},
+            "S2": {"passed": False, "undecided": True, **base}}}
+    agg_ab = aggregate([_abrow("A1"), _abrow("A2")])
+    if agg_ab["abstention_undecided"] != ["A1", "A2"]:
+        failures.append("abstention probes should be collected as undecided")
+    if agg_ab["s2_reconstruction_wins_over_s1"] or agg_ab["s2_abstention_wins_over_s1"]:
+        failures.append("undecided abstention must not count as any S2 win")
+    if "A1" in agg_ab["solved"]["S2"]:
+        failures.append("undecided abstention must not be a solve")
     if agg_ab["gates"]["quality_s2_ge2_over_s1"]:
-        failures.append("quality gate must NOT be met by 2 abstention-only S2 wins")
+        failures.append("quality gate must NOT be met by undecided abstention probes")
 
     # value-over-baseline diagnostic: a probe S0 already solves is not an
     # s2_recovers_over_s0 win, even if S2 also passes and S1 fails.

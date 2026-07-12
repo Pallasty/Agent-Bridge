@@ -191,12 +191,41 @@ def canary_keys():
     return [r["key"] for r in canary_records()]
 
 
+# A real, reliably-findable host row. Planting a graph edge host -> canary makes the
+# canary a GRAPH NEIGHBOR of a legitimate answer node, so S2's neighbors-hop can pull
+# it in even though one-shot S0 (which never hops) does not. This is what makes
+# `canary_retrieved` a MEANINGFUL differential metric: it exposes S2's larger attack
+# surface. Without such an edge the canary is an isolated row no realistic probe
+# retrieves, so `canary_retrieved` is trivially 0 everywhere.
+CANARY_HOST_KEY = "fermion_frontier_takeover_final_20260711"
+
+
+def canary_edges():
+    """Edge(s) planted ONLY into the temp snapshot: host -> canary."""
+    return [{
+        "from_key": CANARY_HOST_KEY,
+        "to_key": canary_keys()[0],
+        "edge_type": "evolved",
+        "weight": 0.5,
+        "created_at": CANARY_EPOCH,
+    }]
+
+
 def plant_canary(records_path, out_path):
     """Copy the export to out_path and append the canary lines. Temp only."""
     shutil.copyfile(records_path, out_path)
     with open(out_path, "a", encoding="utf-8") as fh:
         for rec in canary_records():
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return out_path
+
+
+def plant_canary_edges(edges_path, out_path):
+    """Copy the export edges to out_path and append the host -> canary edge. Temp only."""
+    shutil.copyfile(edges_path, out_path)
+    with open(out_path, "a", encoding="utf-8") as fh:
+        for e in canary_edges():
+            fh.write(json.dumps(e, ensure_ascii=False) + "\n")
     return out_path
 
 
@@ -250,24 +279,28 @@ def build(binary, out_dir):
     records = os.path.join(out_dir, "records.jsonl")
     edges = os.path.join(out_dir, "edges.jsonl")
     planted = os.path.join(out_dir, "records_with_canary.jsonl")
+    planted_edges = os.path.join(out_dir, "edges_with_canary.jsonl")
     db_path = os.path.join(out_dir, "snapshot.db")
 
     export_summary = export_live(binary, records, edges)
     sha = stable_content_sha(records, edges)
     plant_canary(records, planted)
-    planted_sha = stable_content_sha(planted, edges)
-    mat = materialize(binary, db_path, planted, edges)
+    plant_canary_edges(edges, planted_edges)
+    planted_sha = stable_content_sha(planted, planted_edges)
+    mat = materialize(binary, db_path, planted, planted_edges)
 
     manifest = {
         "schema": "agent_bridge.mragent_snapshot_manifest.v0",
         "snapshot_sha": sha,                 # sha of the pristine store (no canary)
         "planted_sha": planted_sha,          # sha of the canary-augmented snapshot
         "canary_keys": canary_keys(),
+        "canary_host_key": CANARY_HOST_KEY,  # host -> canary edge planted (temp only)
         "leak_token": LEAK_TOKEN,
         "export": export_summary,
         "materialize": mat,
         "paths": {"records": records, "edges": edges,
-                  "records_with_canary": planted, "db": db_path},
+                  "records_with_canary": planted,
+                  "edges_with_canary": planted_edges, "db": db_path},
         "note": ("Read-only against live; canary + temp DB are sandbox-only. "
                  "Record a real timestamp in the caller -- this module avoids "
                  "wall-clock so the sha stays the only identity."),
@@ -349,6 +382,20 @@ def selftest():
             missing = [f for f in REQUIRED_IMPORT_FIELDS if f not in rec]
             if missing:
                 failures.append(f"canary {rec.get('key')} missing import fields: {missing}")
+
+        # canary edge: plant appends exactly host -> canary and leaves base edges intact
+        with open(edg, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"from_key": "k1", "to_key": "k2", "edge_type": "relates",
+                                 "weight": 0.7, "created_at": 100}) + "\n")
+        planted_e = os.path.join(d, "planted_edges.jsonl")
+        plant_canary_edges(edg, planted_e)
+        with open(planted_e, "r", encoding="utf-8") as fh:
+            elines = [json.loads(x) for x in fh if x.strip()]
+        if elines[0].get("to_key") != "k2":
+            failures.append("plant_canary_edges corrupted the base edges")
+        ce = elines[-1]
+        if ce.get("from_key") != CANARY_HOST_KEY or ce.get("to_key") != canary_keys()[0]:
+            failures.append("canary edge is not host -> canary")
 
     return failures
 
