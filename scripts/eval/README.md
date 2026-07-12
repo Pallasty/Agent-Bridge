@@ -233,6 +233,43 @@ preregistration of a separate write-side trial. None is authority for digest
 regeneration, a compact default, retrieval/runtime changes, benchmark claims,
 versioning, tagging, or release.
 
+Contract v3 is isolated in `portfolio_continuity_successor_v3_trial.py`; the
+source-bound v2 harness remains unchanged. V3 retains the v2 corpus,
+generation, coverage, projection, and all-gates score but uses a fresh
+execution and blind identity. It replaces free-form reviewer identities with
+two fixed headless-model slots: Claude `claude-opus-4-8` and Codex
+`gpt-5.6-sol` at max effort. Gemini is forbidden. The OpenAI review slot's
+provider overlap with the `gpt-5.4` generator and the scheduler's corpus COI
+are explicit contract fields.
+
+Each v3 score requires two private review packets, custodian receipts, full
+strict parsed command records, and structured model responses byte-identical
+to the review packets. Their CLI/model/effort argv, command, deterministic request, response/review,
+workspace, no-tool/no-MCP, and COI hashes are validated before
+condition-labelled generation or map bytes are opened. A
+single-use score claim is created immediately before unblinding. V3 also makes
+forbidden-claim labels opaque in the blind packet and reports cross-provider
+agreement only as a diagnostic; reviewer results are never pooled for gates.
+
+```bash
+python3 scripts/eval/portfolio_continuity_successor_v3_trial.py \
+  validate-contract \
+  --contract scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json
+python3 scripts/eval/portfolio_continuity_successor_v3_trial.py score ... \
+  --review data/eval/<trial>/review.anthropic.json \
+  --review data/eval/<trial>/review.openai.json \
+  --review-receipt data/eval/<trial>/receipt.anthropic.json \
+  --review-receipt data/eval/<trial>/receipt.openai.json \
+  --review-command data/eval/<trial>/command.anthropic.json \
+  --review-command data/eval/<trial>/command.openai.json \
+  --review-response data/eval/<trial>/response.anthropic.json \
+  --review-response data/eval/<trial>/response.openai.json
+```
+
+The score claim is not an operator argument. V3 derives one fixed private
+claim path from the frozen contract hash before unblinding, so changing the
+score output path cannot create another allowance.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with

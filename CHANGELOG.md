@@ -13,6 +13,18 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   interaction memory, source evidence, entity relations, and tool observations;
   applies scope, temporal, provenance, claimant, and authority checks; and
   grants neither memory-write nor tool-execution authority.
+- **Portfolio-continuity successor v3 preregistration.** A source-isolated v3
+  harness preserves the v2 question/generation comparison under a fresh
+  execution and blind identity while replacing reviewer self-identification
+  with fixed Claude Opus 4.8 and GPT-5.6-Sol slots. Custodian receipts bind
+  private command, deterministic request, byte-identical response/review,
+  CLI/model, empty-workspace, no-tool/no-MCP, and COI evidence before
+  unblinding. Command records are parsed against exact model/effort argv
+  profiles. Forbidden-claim labels are opaque, reviewer gates remain unpooled,
+  and a deterministic contract-scoped score claim blocks review replacement
+  or rescore after unblinding, even under a new output path. This
+  preregistration executes no capture or answer-generation call and
+  authorizes no CI, runtime, write-side, release, version, or tag action.
 - **Explicit retrieval traffic provenance (schema v42).**
   `retrieval_surfacing.traffic_class` records producer-boundary `organic`,
   `eval`, or fail-closed `unknown` provenance with a constrained column and
