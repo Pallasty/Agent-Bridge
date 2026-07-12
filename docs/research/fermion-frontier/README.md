@@ -197,8 +197,20 @@ would require at least `R=4344`.  Mapping/truncation certificates are not compos
 the physical L=8 workload identity and observable-specific tightening remain
 unassessed, and this result cannot qualify a reference or READY gate.
 
-These campaign, reference, proof-kernel, mapping, checkpoint and commutator artifacts
-remain standalone preflight, qualification and conformance tools. They have **not** yet
+The follow-on grouping screen exhausts all 120 permutations of those five groups and
+all 24 permutations of an exact OBC candidate made from two disjoint bulk-plaquette
+families, a disjoint boundary residual, and onsite interactions.  The best five-group
+order has `C=7072/3`, only a `1/1769` relative reduction; the best plaquette-boundary
+candidate is worse at `C=7232/3`.  Since R=100 requires `C<=5/4`, neither reordering
+nor regrouping can supply the missing three orders of magnitude under the same
+coefficient-L1 reduction.  The candidate bulk exponentials also contain
+noncommuting edges inside each plaquette and do not match the declared benchmark
+circuit.  This screen therefore selects certified cluster spectral norms or
+observable/locality-specific bounds as the next mathematical layer.
+
+These campaign, reference, proof-kernel, mapping, checkpoint, commutator and
+grouping-screen artifacts remain standalone preflight, qualification and conformance
+tools. They have **not** yet
 been added as components of `fermi_hubbard_evidence.py`, so they do not alter the
 current outer `READY_FOR_BENCHMARK` gate.
 
@@ -228,6 +240,7 @@ retained in `claim-status.jsonl`.
   exact bitset Pauli/checkpoint prototype,
   source-pinned full L=2 checkpointed propagation contract/template/checker,
   source-pinned L=2/L=3/L=8 Strang commutator contract/template/checker,
+  source-pinned L=8 Strang grouping-screen contract/template/checker,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -249,6 +262,7 @@ retained in `claim-status.jsonl`.
   `test_hubbard_jw_mapping_validator.py` /
   `test_pauli_bitset_backend.py` /
   `test_operator_propagation_checkpointed_l2.py` /
-  `test_hubbard_strang_commutator_checker.py`
+  `test_hubbard_strang_commutator_checker.py` /
+  `test_hubbard_strang_grouping_screen.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

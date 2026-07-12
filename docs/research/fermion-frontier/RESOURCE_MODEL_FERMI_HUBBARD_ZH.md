@@ -645,6 +645,29 @@ observable tightening、plaquette grouping 或独立高阶 formula。最高状�
 `VERIFIED_STRANG_COMMUTATOR_L1_SUBCERTIFICATE` 不组合 mapping/truncation，不认证
 physical L8 workload、reference 或 READY，CLI 固定非零。
 
+#### 8.2.5 L8 group-order 与 OBC plaquette coefficient-L1 screen
+
+[hubbard_strang_grouping_screen.py](hubbard_strang_grouping_screen.py) 继续回答一个更窄的
+问题：保持 Proposition 2 / Eq. (13) 与 fully merged Pauli coefficient-L1 norm 时，换
+group order 或改成 plaquette grouping 能否在 R=100 接近预算？Checker source-pin 上节
+三件套并要求其正状态，然后穷举原五组全部 120 个 permutations。最佳顺序之一为
+`H1,H2,HU,H4,H3`，`C=7072/3`、generic observable bound `884/1875`、minimum R=4343；
+相对 declared `C=7076/3` 只减少 `1/1769≈0.0565%`，低于预先固定的 1% materiality
+threshold。
+
+主源 plaquette decomposition 是 PBC 三组并假定同一 plaquette 的四条 hopping 同时实现。
+为避免直接移植，checker 构造了精确 OBC cover：`P0/P1/B` 分别含 64/36/12 条 spatial
+bonds，加 `HU` 后 Pauli term counts 为 `(256,144,48,192)`，与原 640-term Hamiltonian
+完全相等。全部 24 个 orders 的最佳 `C=7232/3`，generic bound `904/1875`、minimum
+R=4392，反而比 declared split 更差。`P0/P1` 内一个 plaquette 的边不全对易，因此这些
+cluster exponentials 也不等于 benchmark individual-term circuit。
+
+R=100 与 `1/4000` allocation 要求 `C<=5/4`；当前最优仍为 `7072/3`。最高状态仅
+`VERIFIED_STRANG_GROUPING_COEFFICIENT_L1_SCREEN`，明确不导入论文 PBC decimal norm、
+不认证 candidate circuit identity、observable/locality tightening、truncation、reference
+或 READY。结果把后续实现方向收敛到 certified cluster spectral norm 或 observable-specific
+locality cone，而不是继续枚举同类 coefficient-L1 grouping。
+
 ### 8.3 L=2 双观测量 screening pilot
 
 新增 [fermi_hubbard_l2_pilot.py](fermi_hubbard_l2_pilot.py) 后，已经可以在无
@@ -820,6 +843,13 @@ python3 docs/research/fermion-frontier/hubbard_strang_commutator_checker.py \
 
 python3 docs/research/fermion-frontier/test_hubbard_strang_commutator_checker.py
 
+# 成功的 grouping screen 仍按设计 exit 1
+python3 docs/research/fermion-frontier/hubbard_strang_grouping_screen.py \
+  docs/research/fermion-frontier/hubbard_strang_grouping_screen_contract.json \
+  docs/research/fermion-frontier/hubbard_strang_grouping_screen_template.json
+
+python3 docs/research/fermion-frontier/test_hubbard_strang_grouping_screen.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
   --format markdown
 
@@ -893,6 +923,10 @@ commutator checker 另有五十个测试覆盖公式常数、L2/L3/L8 groups、�
 palindrome/term binding、common identity phase、exact nested-family L1、L2/L3 action
 oracles、R scaling/generic factor two、allocation boundary、source same-byte execution、
 strict schema/types、资源上限、pre-exec pin、失败清零和 CLI 非零边界。
+Grouping screen 另有三十九个测试覆盖基础 checker source pins、120/24 permutations、
+declared/best exact values、OBC 112-bond cover、plaquette/boundary term counts 与 commuting
+structure、materiality/allocation decision、paper-scope boundary、strict JSON/types、
+well-shaped tamper、pre-exec pin、失败 scope 清零和 CLI 非零边界。
 跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
 导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖双观测量诊断 reference、R 网格、`R=32` screening 和规模限制。
@@ -907,7 +941,7 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
 surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
 全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
 overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
-全套共 `357` 个测试。
+全套共 `396` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
@@ -921,8 +955,9 @@ overlap、operation window/资源冲突、event binding、dependency、非法 ID
 3. **独立有界 reference：**完整 L2 `R=2` checkpointed checker 已闭合 112 门 mapped
    circuit，且本次容量截断的 dropped-`L1` 为零；这消除了旧的纯字符串资源 defer。
    L8 五组 Strang generic commutator-L1 也已机检，但 R=100 的通用 observable bound
-   `1769/3750` 远超 `0.00025`，不能进入 reference。下一步比较 observable/locality-
-   specific tightening、plaquette split 与独立高阶 formula，并把 L8 初态、两个
+   `1769/3750` 远超 `0.00025`；全部 group orders 与精确 OBC plaquette+boundary
+   coefficient-L1 screen 也没有实质改进。下一步直接实现 certified cluster spectral norm
+   或 observable/locality-specific bound，并比较独立高阶 formula；同时把 L8 初态、两个
    observables、occurrence-level sequence、truncation 和 product-formula bound 组合成
    同一 source-pinned chain。只有全链通过且 `total_abs_bound<=0.00025` 才能新增 reference
    资格状态；当前 subcertificates 与 `STRUCTURALLY_COMPLETE_UNVERIFIED` 都不能作为交付

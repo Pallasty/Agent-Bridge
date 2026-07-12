@@ -183,8 +183,22 @@ so they are versioned normally and are not added to the preservation-only
 - `test_hubbard_strang_commutator_checker.py`: fifty regressions covering the formula,
   group order, commutation, raw palindrome, common phase, exact values, action oracles,
   source execution, strict schema, resources, failure scopes and the CLI boundary.
+- `hubbard_strang_grouping_screen_contract.json`: fixed L8 OBC policy for exhaustive
+  five-group and plaquette-boundary order screens, source pins, materiality threshold,
+  R=100 allocation and exact expected-screen digest.
+- `hubbard_strang_grouping_screen_template.json`: positive nonqualifying screen.  The
+  best five-group value is `C=7072/3`; the best OBC plaquette-boundary value is
+  `C=7232/3`; both remain far above the exact R=100 ceiling `C=5/4`.
+- `hubbard_strang_grouping_screen.py`: verifies the pinned base subcertificate, exact
+  OBC Hamiltonian cover and all 144 permutations.  It imports no PBC paper decimal as
+  OBC evidence, does not match candidate cluster exponentials to the benchmark
+  circuit, returns at most `VERIFIED_STRANG_GROUPING_COEFFICIENT_L1_SCREEN`, and
+  always exits nonzero.
+- `test_hubbard_strang_grouping_screen.py`: thirty-nine exact-value, permutation,
+  Hamiltonian-cover, plaquette-structure, source-pin, strict-schema, tamper,
+  failure-scope and CLI regressions.
 - The measurement-campaign, reference-qualification, proof-kernel, mapping,
-  checkpoint and commutator artifacts are currently independent of
+  checkpoint, commutator and grouping-screen artifacts are currently independent of
   `fermi_hubbard_evidence.py`;
   none is yet an outer `READY_FOR_BENCHMARK` component.
 - `fermi_hubbard_l2_pilot.py`: dependency-free L=2 dual-observable deterministic

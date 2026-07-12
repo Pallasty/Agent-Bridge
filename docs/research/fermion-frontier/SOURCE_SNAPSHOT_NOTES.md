@@ -74,9 +74,17 @@ checker does not compose mapping/truncation certificates or bind the physical L8
 initial state and observables.  Neither new subcertificate is part of the source
 snapshot or outer evidence orchestrator.
 
+The subsequent grouping screen exhausts all 120 orders of the fixed five groups and
+all 24 orders of an exact OBC plaquette-plus-boundary cover.  It finds only a
+`1/1769` relative coefficient reduction from reordering and a worse plaquette
+coefficient-L1 result.  This is a source-pinned nonqualifying feasibility screen,
+not a new reference: the candidate plaquette cluster exponentials do not match the
+benchmark circuit, the paper's PBC decimal norm bounds are not imported, and no
+observable/locality-specific tightening is assessed.
+
 None of the campaign preflight, reference-qualification ledger, proof kernel, L=2
-conformance witness, mapping checker, checkpointed L2 checker, bitset prototype or
-Strang commutator checker is currently a component of
+conformance witness, mapping checker, checkpointed L2 checker, bitset prototype,
+Strang commutator checker or grouping-screen checker is currently a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the
 outer snapshot status or promote it toward `READY_FOR_BENCHMARK`.

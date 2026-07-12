@@ -287,8 +287,22 @@ mapping certificate; L8 sparse-action validation, physical workload identity,
 truncation composition, observable-specific tightening, reference qualification and
 READY remain outside the positive status.
 
-None of the campaign, reference-qualification, proof-kernel, mapping, checkpoint or
-commutator interfaces is currently loaded by `fermi_hubbard_evidence.py`. They do not
+`hubbard_strang_grouping_screen.py` now closes the immediate regrouping question.
+It source-pins the positive commutator checker and enumerates every order of two
+exact L8 OBC decompositions.  Among all 120 orders of the declared five groups, the
+minimum is `C=7072/3` with generic R=100 observable bound `884/1875`; the reduction
+from the declared `7076/3` is only `1/1769`, below the predeclared 1% materiality
+threshold.  The exact OBC plaquette adaptation covers all 112 spatial bonds using
+64/36 bulk bonds and 12 boundary residual bonds, but its best of 24 orders has
+`C=7232/3` and bound `904/1875`, which is worse.  Its bulk group exponentials require
+noncommuting plaquette-cluster evolution and are not the benchmark circuit.  Since
+the R=100 allocation requires `C<=5/4`, the screen proves that coefficient-L1
+reordering/regrouping is not the next viable tightening; it does not prove a
+no-go for cluster spectral norms or observable/locality-specific analysis.
+
+None of the campaign, reference-qualification, proof-kernel, mapping, checkpoint,
+commutator or grouping-screen interfaces is currently loaded by
+`fermi_hubbard_evidence.py`. They do not
 add components to `component_statuses`, and none can yet participate
 in or strengthen the outer `READY_FOR_BENCHMARK` decision. Outer integration remains
 a subsequent implementation step.

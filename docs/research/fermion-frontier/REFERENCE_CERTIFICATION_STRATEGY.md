@@ -270,6 +270,42 @@ plaquette grouping 给出更弱的界，所以不能把论文的 PBC plaquette �
 OBC 五组 split。当前状态仍不组合 mapping/truncation，也没有认证 physical L8 initial
 state、两个 observables 或 READY。
 
+### 已实现的 grouping coefficient-L1 穷举筛选
+
+`hubbard_strang_grouping_screen.py` 把“是否只需换 group order 或 plaquette split”变成
+独立 machine check。它 source-pin 上述 commutator checker/contract/template，先要求基础
+子证书为正，再对固定 L8 OBC Hamiltonian 执行两组穷举：
+
+- 原 `H1,H2,HU,H3,H4` 的全部 120 个 permutations；
+- 两个 bulk plaquette families `P0/P1`、一个 boundary residual `B` 与 `HU` 的全部
+  24 个 permutations。
+
+OBC candidate 将 112 条 spatial bonds 精确分为 `64+36+12`，对应 Pauli term counts
+`(256,144,48,192)`，与原 640-term nonidentity Hamiltonian 完全相等。`P0/P1` 分别包含
+16/9 个互不重叠 plaquettes；不同 plaquettes 互不作用，但一个 plaquette 内的边不全对易，
+所以 `exp(-itP0)` / `exp(-itP1)` 需要真正的 cluster evolution，不能冒充当前逐 hopping
+term benchmark circuit。
+
+穷举结果是：
+
+| screen | best `C` | generic R=100 observable bound | allocation 所需最小 R |
+|---|---:|---:|---:|
+| declared five groups | `7076/3` | `1769/3750` | 4344 |
+| best of 120 orders | `7072/3` | `884/1875` | 4343 |
+| best OBC plaquette+boundary order | `7232/3` | `904/1875` | 4392 |
+
+重排相对改进只有 `1/1769≈0.0565%`，低于合同预先固定的 1% material threshold；OBC
+plaquette regrouping 在同一 coefficient-L1 reduction 下反而更差。R=100 的 `1/4000`
+observable allocation 等价于 `C<=5/4`，所以仍缺约三个数量级。
+
+主源的 Section III.B / Eq. (19) 是 even-L PBC 三组方案，并假设 plaquette 四条 hopping
+可同时实现；其 Section V.C 使用最多 14 fermionic modes 的 exact/cluster spectral norms，
+这正是论文优于简单 Pauli-L1 的来源。将论文打印的四位小数系数在 `|v|=1,|u|=8` 下仅作
+nonbinding diagnostic，会得到每 site `C≈25.4537`；即使形式上乘 64 sites，generic R=100
+仍约 `0.326`，远超预算。由于 boundary、rounding direction 和 implementation identity
+均不匹配，这个数没有进入 certificate。机器结论只排除 coefficient-L1 regrouping，下一
+层必须是 certified cluster spectral norm 或直接面向两个 observables/locality cones 的界。
+
 `standard_error=0` 只表示 deterministic certificate，不等于 bound 为零。未经证书的
 Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGNOSTIC_ONLY`。
 
@@ -278,9 +314,10 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
 1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结，完整 L2
    checkpoint propagation 已闭合；下一步为 L8 固定 A/B Néel 相位、两个 observable 和
    与真实 campaign 相同的 occurrence-level term-sequence identity。
-2. 不把 `R=100` 的 generic commutator-L1 结果写成可接受误差。先比较 observable/locality-
-   specific tightening、plaquette grouping 和独立四阶 reference formula，要求每个候选都
-   保留 source-pinned formula constants、common-phase ledger 与可机检 commutator records。
+2. 不把 `R=100` 的 generic commutator-L1 结果写成可接受误差。Group-order 与 OBC
+   plaquette coefficient-L1 穷举均已失败；停止继续枚举同类 split，转而实现最多 14 modes
+   的 certified cluster spectral norm 或 observable/locality-specific tightening。每个候选
+   仍须保留 source-pinned constants、common-phase ledger 与可机检 commutator records。
 3. 固定 MajoranaPropagation implementation commit；补 deduplicate-before-truncation、
    per-slice dropped-L1 ledger、directed coefficient intervals 和小尺寸 ED 对照，并把
    L8 initial observable/state identity 与完整 mapped sequence 组合进 checker。
