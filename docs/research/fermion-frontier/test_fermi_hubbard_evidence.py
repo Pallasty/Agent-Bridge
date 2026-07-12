@@ -32,10 +32,15 @@ class EvidenceManifestTests(unittest.TestCase):
         self.manifest = load_json("evidence_manifest_template.json")
         self.term_contract = load_json("term_order_contract.json")
         self.first_step_contract = load_json("first_step_contract.json")
+        self.native_transition_contract = load_json("native_transition_contract.json")
 
     def test_empty_manifest_is_unresolved_with_component_statuses(self):
         result = EVIDENCE.validate_manifest(
-            self.contract, self.manifest, self.term_contract, self.first_step_contract
+            self.contract,
+            self.manifest,
+            self.term_contract,
+            self.first_step_contract,
+            self.native_transition_contract,
         )
         self.assertEqual(result["status"], "UNRESOLVED")
         self.assertEqual(
@@ -43,6 +48,7 @@ class EvidenceManifestTests(unittest.TestCase):
             {
                 "term_order": "UNRESOLVED",
                 "first_step": "UNRESOLVED",
+                "native_transition": "UNRESOLVED",
                 "convergence": "UNRESOLVED",
             },
         )
@@ -92,6 +98,42 @@ class EvidenceManifestTests(unittest.TestCase):
             route: self._complete_first_step_route()
             for route in routes
         }
+        native_occurrences = []
+        occurrence_index = 0
+        for occurrence_class, count_fn in EVIDENCE.NATIVE.CLASS_COUNTS.items():
+            for _ in range(count_fn(2)):
+                native_occurrences.append(
+                    {
+                        "occurrence_index": occurrence_index,
+                        "class": occurrence_class,
+                        "group": EVIDENCE.NATIVE.CLASS_GROUPS[occurrence_class],
+                        "incoming_layout_id": f"layout_{occurrence_index}",
+                        "outgoing_layout_id": f"layout_{occurrence_index + 1}",
+                        "move_legs": 1,
+                        "move_distance_um": 2.0,
+                        "move_us": 1.0,
+                        "gate_us": 2.0,
+                        "cooling_echo_us": 0.5,
+                        "return_us": 0.5,
+                        "other_us": 0.0,
+                        "transition_us": 4.0,
+                        "loss_rate": 0.001,
+                        "leakage_rate": 0.002,
+                        "measurement_status": "measured",
+                        "provenance": "synthetic native transition fixture",
+                    }
+                )
+                occurrence_index += 1
+        manifest["native_transition"] = {
+            "schema_version": 1,
+            "workload_fingerprint": self.contract["workload_fingerprint"],
+            "route": "native_fermions",
+            "linear_size": 8,
+            "trotter_steps": 2,
+            "compiled_exact": True,
+            "timing_provenance": "synthetic native timing fixture",
+            "occurrences": native_occurrences,
+        }
         convergence_workload = manifest["convergence"]["workload"]
         points = [
             {"R": 1, "estimate": 0.5, "standard_error": 0.0},
@@ -110,7 +152,11 @@ class EvidenceManifestTests(unittest.TestCase):
     def test_synthetic_all_component_closure_reaches_ready(self):
         contract, manifest = self._ready_manifest()
         result = EVIDENCE.validate_manifest(
-            contract, manifest, self.term_contract, self.first_step_contract
+            contract,
+            manifest,
+            self.term_contract,
+            self.first_step_contract,
+            self.native_transition_contract,
         )
         self.assertEqual(result["status"], "READY_FOR_BENCHMARK")
         self.assertEqual(
@@ -118,6 +164,7 @@ class EvidenceManifestTests(unittest.TestCase):
             {
                 "term_order": "MATCHED",
                 "first_step": "COMPLETE",
+                "native_transition": "COMPLETE",
                 "convergence": "READY_FOR_COMMON_R",
             },
         )
@@ -127,7 +174,11 @@ class EvidenceManifestTests(unittest.TestCase):
         contract, manifest = self._ready_manifest()
         manifest["first_step"]["routes"]["native_fermions"]["R"] = 3
         result = EVIDENCE.validate_manifest(
-            contract, manifest, self.term_contract, self.first_step_contract
+            contract,
+            manifest,
+            self.term_contract,
+            self.first_step_contract,
+            self.native_transition_contract,
         )
         self.assertEqual(result["status"], "INCONSISTENT")
         self.assertTrue(any("trotter_steps" in error for error in result["coherence_errors"]))
@@ -139,7 +190,11 @@ class EvidenceManifestTests(unittest.TestCase):
             "convergence_route": "unexpected_route",
         }
         result = EVIDENCE.validate_manifest(
-            contract, self.manifest, self.term_contract, self.first_step_contract
+            contract,
+            self.manifest,
+            self.term_contract,
+            self.first_step_contract,
+            self.native_transition_contract,
         )
         self.assertEqual(result["status"], "INVALID_SCHEMA")
         self.assertTrue(any("route_map keys" in error for error in result["errors"]))

@@ -18,6 +18,16 @@
     "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
     "routes": {}
   },
+  "native_transition": {
+    "schema_version": 1,
+    "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+    "route": "native_fermions",
+    "linear_size": 8,
+    "trotter_steps": 100,
+    "compiled_exact": false,
+    "timing_provenance": "",
+    "occurrences": []
+  },
   "convergence": {
     "schema_version": 1,
     "workload": {

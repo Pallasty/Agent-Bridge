@@ -140,9 +140,10 @@ totals merely by supplying a first-step subtotal.
 
 The three interfaces are now joined by `evidence_manifest_contract.json`,
 `evidence_manifest_template.json`, and `fermi_hubbard_evidence.py`. The orchestrator
-checks route-map/workload consistency and cross-checks term-export `trotter_steps`
-against ledger `R`. Its empty manifest is still `UNRESOLVED`; only real individual-term
-exports, exact first-step resources, and route-specific common-R data can produce
+checks route-map/workload consistency, cross-checks term-export `trotter_steps` against
+ledger `R`, and now requires the native occurrence-level transition component. Its empty
+manifest is still `UNRESOLVED`; only real individual-term exports, exact first-step
+resources, measured native transitions, and route-specific common-R data can produce
 `READY_FOR_BENCHMARK`.
 
 The dynamic-JW source was rechecked directly against arXiv v1. `DYNAMIC_JW_SOURCE_EVIDENCE.md`

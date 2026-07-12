@@ -106,7 +106,7 @@ retained in `claim-status.jsonl`.
   `fermi_hubbard_fig5_candidate_points.json`, term-order contract/validator and
   cross-route sequence comparator/template, convergence template/assessor,
   first-step ledger contract/template/validator, unified evidence manifest
-  contract/template/orchestrator,
+  contract/template/orchestrator, native transition contract/template/validator,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
   and the native-fermion primary-source evidence ledger,
@@ -117,6 +117,7 @@ retained in `claim-status.jsonl`.
   `test_fermi_hubbard_convergence.py` /
   `test_fermi_hubbard_l2_pilot.py` /
   `test_first_step_ledger_validator.py` /
-  `test_fermi_hubbard_evidence.py`
+  `test_fermi_hubbard_evidence.py` /
+  `test_native_transition_validator.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

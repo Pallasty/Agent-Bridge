@@ -463,9 +463,19 @@ leading 或 candidate-fit 证据升级为精确 compiled 资源。
 - term export 的 `trotter_steps` 是否等于首步账本的 `R`；
 - 共享的 qubit-route 收敛结果是否达到 `READY_FOR_COMMON_R`。
 
-它只在三类组件分别为 `MATCHED`、`COMPLETE`、`READY_FOR_COMMON_R` 且没有一致性
-错误时输出 `READY_FOR_BENCHMARK`。当前统一模板的三个组件均为 `UNRESOLVED`；
+它只在四类组件分别满足 term-order `MATCHED`、首步 `COMPLETE`、native transition
+`COMPLETE`、收敛 `READY_FOR_COMMON_R` 且没有一致性错误时输出 `READY_FOR_BENCHMARK`。
+当前统一模板的四个组件均为 `UNRESOLVED`；
 测试中的闭合 manifest 是合成集成 fixture，不是论文或硬件证据。
+
+现在统一 manifest 还纳入 [native_transition_contract.json](native_transition_contract.json)、
+[native_transition_template.json](native_transition_template.json) 和
+[native_transition_validator.py](native_transition_validator.py)。它要求 `R=100` 的
+`801=8R+1` 个 native layer occurrence 按 `H1/H2/H3/H4/HU` class 计数，记录每次
+incoming/outgoing layout、move legs/distance、move/gate/cooling/return/other 时间、
+loss/leakage 和 provenance。只有所有 occurrence 都是 measured 且
+`compiled_exact=true` 才能给出 `complete_circuit_us`；否则最多是
+`BOOKKEEPING_CLOSED_ESTIMATE`，空模板为 `UNRESOLVED`。
 
 ## 9. 复算与测试
 
@@ -513,9 +523,17 @@ python3 docs/research/fermion-frontier/fermi_hubbard_evidence.py \
   --manifest docs/research/fermion-frontier/evidence_manifest_template.json \
   --term-contract docs/research/fermion-frontier/term_order_contract.json \
   --first-step-contract docs/research/fermion-frontier/first_step_contract.json \
+  --native-transition-contract docs/research/fermion-frontier/native_transition_contract.json \
   --format markdown
 
 python3 docs/research/fermion-frontier/test_fermi_hubbard_evidence.py
+
+python3 docs/research/fermion-frontier/native_transition_validator.py \
+  --contract docs/research/fermion-frontier/native_transition_contract.json \
+  --ledger docs/research/fermion-frontier/native_transition_template.json \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_native_transition_validator.py
 ```
 
 资源模型的十个回归测试覆盖 Fig. 5 的全部 `L=4...10` candidate points、域外阻断、
@@ -531,6 +549,8 @@ L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和
 门槛和非法 timing 的 fail-closed 行为。
 统一 evidence manifest 另有四个测试覆盖空 manifest、合成闭合、R 不一致和 route-map
 漂移的 fail-closed 行为。
+native transition validator 另有六个测试覆盖空模板、measured 完成、derived 估计、
+class count、timing decomposition 和 fingerprint fail-closed 行为。
 
 ## 10. 下一阶段的决定性工作
 

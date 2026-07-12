@@ -3,6 +3,7 @@
   "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
   "target_linear_size": 8,
   "target_trotter_steps": 100,
+  "native_transition_required": true,
   "required_routes": [
     "native_fermions",
     "dynamic_jw_local_grid_source_leading",

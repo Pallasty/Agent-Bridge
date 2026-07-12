@@ -86,6 +86,11 @@ so they are versioned normally and are not added to the preservation-only
 - `fermi_hubbard_evidence.py`: orchestration validator producing `UNRESOLVED`,
   `INCONSISTENT`, `MISMATCH`, or `READY_FOR_BENCHMARK`;
 - `test_fermi_hubbard_evidence.py`: four integration regression tests.
+- `native_transition_contract.json`: occurrence-level native matching class/count and
+  measured timing contract;
+- `native_transition_template.json`: empty 801-occurrence L=8/R=100 ledger;
+- `native_transition_validator.py`: fail-closed transition/timing validator;
+- `test_native_transition_validator.py`: six native transition regression tests.
 - `DYNAMIC_JW_SOURCE_EVIDENCE.md`: primary-source ledger for Fig. 5/Fig. 14,
   Appendix I leading counts, explicit first-step omission, and unresolved individual
   term/compiled-event fields.

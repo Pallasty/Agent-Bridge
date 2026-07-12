@@ -2,8 +2,8 @@
 """Validate the matched Fermi--Hubbard evidence manifest.
 
 This is an orchestration layer, not a source of resource estimates. It joins
-the term-sequence, first-step resource, and common-R convergence validators and
-checks that their route names, workload fingerprint, L, and R agree. Empty
+the term-sequence, first-step resource, native-transition, and common-R convergence
+validators and checks that their route names, workload fingerprint, L, and R agree. Empty
 templates remain unresolved; synthetic fixtures must never be read as hardware
 or compiler evidence.
 """
@@ -33,6 +33,7 @@ def _load_module(name: str, path: Path):
 
 TERM = _load_module("term_order_cross_route", HERE / "term_order_cross_route.py")
 FIRST_STEP = _load_module("first_step_ledger_validator", HERE / "first_step_ledger_validator.py")
+NATIVE = _load_module("native_transition_validator", HERE / "native_transition_validator.py")
 CONVERGENCE = _load_module("fermi_hubbard_convergence", HERE / "fermi_hubbard_convergence.py")
 
 
@@ -83,6 +84,7 @@ def validate_manifest(
     manifest: Mapping[str, Any],
     term_contract: Mapping[str, Any],
     first_step_contract: Mapping[str, Any],
+    native_transition_contract: Mapping[str, Any],
 ) -> Dict[str, Any]:
     errors = validate_contract(contract)
     if manifest.get("schema_version") != 1:
@@ -121,6 +123,16 @@ def validate_manifest(
         component_errors.append("manifest first_step must be an object")
         first_step_manifest = {}
     first_step_result = FIRST_STEP.validate_ledger(first_step_contract, first_step_manifest)
+
+    if native_transition_contract.get("workload_fingerprint") != contract.get("workload_fingerprint"):
+        component_errors.append("native-transition contract workload_fingerprint does not match")
+    if native_transition_contract.get("route") != "native_fermions":
+        component_errors.append("native-transition contract route must be native_fermions")
+    native_manifest = manifest.get("native_transition")
+    if not isinstance(native_manifest, Mapping):
+        component_errors.append("manifest native_transition must be an object")
+        native_manifest = {}
+    native_result = NATIVE.validate_ledger(native_transition_contract, native_manifest)
 
     convergence_manifest = manifest.get("convergence")
     if not isinstance(convergence_manifest, Mapping):
@@ -165,6 +177,16 @@ def validate_manifest(
             ]:
                 coherence_errors.append(f"{route}: ledger R does not match target_trotter_steps")
 
+    if isinstance(native_manifest, Mapping):
+        if isinstance(native_manifest.get("linear_size"), int) and native_manifest["linear_size"] != contract[
+            "target_linear_size"
+        ]:
+            coherence_errors.append("native transition linear_size does not match target_linear_size")
+        if isinstance(native_manifest.get("trotter_steps"), int) and native_manifest["trotter_steps"] != contract[
+            "target_trotter_steps"
+        ]:
+            coherence_errors.append("native transition trotter_steps does not match target_trotter_steps")
+
     if component_errors:
         errors.extend(component_errors)
     if coherence_errors:
@@ -173,9 +195,13 @@ def validate_manifest(
     component_statuses = {
         "term_order": term_result.get("status"),
         "first_step": first_step_result.get("status"),
+        "native_transition": native_result.get("status"),
         "convergence": convergence_result.get("status"),
     }
-    if any(_component_schema_status(result) for result in (term_result, first_step_result, convergence_result)):
+    if any(
+        _component_schema_status(result)
+        for result in (term_result, first_step_result, native_result, convergence_result)
+    ):
         status = "INVALID_SCHEMA"
     elif coherence_errors:
         status = "INCONSISTENT"
@@ -185,6 +211,7 @@ def validate_manifest(
         (
             term_result.get("status") == "MATCHED",
             first_step_result.get("status") == "COMPLETE",
+            native_result.get("status") == "COMPLETE",
             convergence_result.get("status") == "READY_FOR_COMMON_R",
         )
     ):
@@ -197,6 +224,7 @@ def validate_manifest(
         "components": {
             "term_order": term_result,
             "first_step": first_step_result,
+            "native_transition": native_result,
             "convergence": convergence_result,
         },
         "component_statuses": component_statuses,
@@ -210,6 +238,7 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--term-contract", type=Path, required=True)
     parser.add_argument("--first-step-contract", type=Path, required=True)
+    parser.add_argument("--native-transition-contract", type=Path, required=True)
     parser.add_argument("--format", choices=("json", "markdown"), default="json")
     args = parser.parse_args()
     with args.contract.open(encoding="utf-8") as handle:
@@ -220,7 +249,15 @@ def main() -> None:
         term_contract = json.load(handle)
     with args.first_step_contract.open(encoding="utf-8") as handle:
         first_step_contract = json.load(handle)
-    result = validate_manifest(contract, manifest, term_contract, first_step_contract)
+    with args.native_transition_contract.open(encoding="utf-8") as handle:
+        native_transition_contract = json.load(handle)
+    result = validate_manifest(
+        contract,
+        manifest,
+        term_contract,
+        first_step_contract,
+        native_transition_contract,
+    )
     if args.format == "markdown":
         print(f"# Fermi-Hubbard evidence manifest: {result['status']}\n")
         for name, status in result.get("component_statuses", {}).items():
