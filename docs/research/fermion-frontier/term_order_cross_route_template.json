@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "required_routes": [
+    "native_fermions",
+    "dynamic_jw_local_grid_source_leading",
+    "dynamic_jw_local_grid_figure_candidate_fit",
+    "fsn_standard_figure_candidate_fit",
+    "fsn_ladder_figure_candidate_fit"
+  ],
+  "exports": {}
+}

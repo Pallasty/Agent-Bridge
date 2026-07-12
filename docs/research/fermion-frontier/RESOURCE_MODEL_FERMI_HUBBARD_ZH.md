@@ -365,6 +365,21 @@ fidelity。Nature 的 `U_int` 也不是 PNAS 的纯 density-phase primitive。�
 和两种 FSN 仍没有机器可读导出，因此不会被验证器假定为已匹配。验证结果
 `VALIDATED` 只表示“给定导出符合契约”，不表示硬件实现或跨编译器等价已经成立。
 
+### 7.1 跨路线 individual-term 序列比较
+
+新增 [term_order_cross_route.py](term_order_cross_route.py) 与
+[term_order_cross_route_template.json](term_order_cross_route_template.json)。它调用
+旧 validator 检查每条导出，再要求每个事件都带 `terms` 列表，生成原始
+`group + term sequence` 的 SHA-256 指纹，并逐事件比较五条 required routes。状态为：
+
+- `UNRESOLVED`：路线缺失、导出非法，或只有 group-level 而没有 individual terms；
+- `MISMATCH`：所有路线都有 individual terms，但至少一处序列不同；
+- `MATCHED`：所有路线的原始 group/term 序列完全相同。
+
+当前 cross-route 模板仍返回 `UNRESOLVED`。测试中的同序导出只是合成 fixture，不能
+替代 dynamic-JW/FSN 的真实编译器导出；因此研究结论仍是“共同顺序目标已定义，跨
+编译器 individual-term equality 未验证”。
+
 ## 8. 共同 R / 误差收敛接口
 
 本阶段还新增 [fermi_hubbard_convergence.py](fermi_hubbard_convergence.py) 和
@@ -434,6 +449,13 @@ python3 docs/research/fermion-frontier/term_order_validator.py \
 
 python3 docs/research/fermion-frontier/test_term_order_validator.py
 
+python3 docs/research/fermion-frontier/term_order_cross_route.py \
+  --contract docs/research/fermion-frontier/term_order_contract.json \
+  --manifest docs/research/fermion-frontier/term_order_cross_route_template.json \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_term_order_cross_route.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_convergence.py \
   --manifest docs/research/fermion-frontier/fermi_hubbard_convergence_template.json \
   --format markdown
@@ -459,6 +481,8 @@ python3 docs/research/fermion-frontier/test_first_step_ledger_validator.py
 的阻断和误差预算校验；项序验证器另有四个测试覆盖 group order、融合、term set 和
 fail-closed 行为；收敛接口另有五个测试覆盖双区间稳定、reference、缺路线、metadata
 不一致和统计误差 fail-closed 行为。
+跨路线比较器另有五个测试覆盖空模板、group-only 阻断、同序指纹、序列错排和非法
+导出 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和规模限制。
 首步账本另有六个测试覆盖空模板、bookkeeping-closed 状态、精确闭账、全路线闭账
 门槛和非法 timing 的 fail-closed 行为。

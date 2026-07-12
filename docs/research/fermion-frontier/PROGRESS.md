@@ -113,7 +113,10 @@ the reconstructed group-level Strang order and fusion rules,
 `term_order_validator.py` validates route exports, and the native fixture passes
 group-level checks. Individual-term exports for dynamic-JW and FSN are still
 absent, so the research status remains “target defined, cross-compiler equality
-unverified.”
+unverified.” A stricter `term_order_cross_route.py` comparator now requires all
+five route exports to carry individual-term lists and compares their raw sequence
+fingerprints; its empty manifest remains `UNRESOLVED`, and synthetic same-sequence
+fixtures are test-only evidence.
 
 The common-`R` interface is also executable in
 `fermi_hubbard_convergence.py`: it requires shared observable metadata, an `R`

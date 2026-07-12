@@ -9,6 +9,13 @@
     "within_step": [{"left": "H4", "right": "H4", "count": 1}],
     "across_steps": [{"left": "H1", "right": "H1", "count": 1}]
   },
+  "required_routes": [
+    "native_fermions",
+    "dynamic_jw_local_grid_source_leading",
+    "dynamic_jw_local_grid_figure_candidate_fit",
+    "fsn_standard_figure_candidate_fit",
+    "fsn_ladder_figure_candidate_fit"
+  ],
   "required_route_export_fields": [
     "schema_version",
     "route",

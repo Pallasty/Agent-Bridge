@@ -51,6 +51,11 @@ so they are versioned normally and are not added to the preservation-only
 - `term_order_validator.py`: fail-closed group/term-set export validator;
 - `term_order_native_fixture.json`: abstract native group-level fixture, not a
   hardware circuit export;
+- `term_order_cross_route.py`: strict five-route individual-term sequence comparator
+  with per-route SHA-256 fingerprints;
+- `term_order_cross_route_template.json`: empty cross-route manifest, intentionally
+  unresolved until all compiler exports are supplied;
+- `test_term_order_cross_route.py`: five regression tests for exact sequence comparison.
 - `test_fermi_hubbard_resource_model.py`: all plotted candidate points, domain
   guards, common-order scheduling, first-step blocking, lattice-surgery
   translation, route-specific shots, and validation tests.

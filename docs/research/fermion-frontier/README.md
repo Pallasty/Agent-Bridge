@@ -103,11 +103,13 @@ retained in `claim-status.jsonl`.
 - [Evidence-bounded 2D Fermi--Hubbard resource model (Chinese)](RESOURCE_MODEL_FERMI_HUBBARD_ZH.md)
 - Reproducible model: `fermi_hubbard_resource_model.py`, scenario
   `fermi_hubbard_resource_scenario.json`, Fig. 5 candidate points
-  `fermi_hubbard_fig5_candidate_points.json`, term-order contract and validator,
-  convergence template/assessor, first-step ledger contract/template/validator,
+  `fermi_hubbard_fig5_candidate_points.json`, term-order contract/validator and
+  cross-route sequence comparator/template, convergence template/assessor,
+  first-step ledger contract/template/validator,
   an L=2 exact-reference pilot, and unit tests
   `test_fermi_hubbard_resource_model.py` /
   `test_term_order_validator.py` /
+  `test_term_order_cross_route.py` /
   `test_fermi_hubbard_convergence.py` /
   `test_fermi_hubbard_l2_pilot.py` /
   `test_first_step_ledger_validator.py`
