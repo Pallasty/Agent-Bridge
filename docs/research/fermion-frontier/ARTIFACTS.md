@@ -79,3 +79,10 @@ so they are versioned normally and are not added to the preservation-only
 - `first_step_ledger_validator.py`: validator that separates unresolved, bookkeeping-closed
   estimates, and exact compiled totals;
 - `test_first_step_ledger_validator.py`: six regression tests for the first-step contract.
+- `evidence_manifest_contract.json`: route map, workload fingerprint, and L/R coherence
+  contract joining the three evidence interfaces;
+- `evidence_manifest_template.json`: empty unified manifest with unresolved term-order,
+  first-step, and convergence components;
+- `fermi_hubbard_evidence.py`: orchestration validator producing `UNRESOLVED`,
+  `INCONSISTENT`, `MISMATCH`, or `READY_FOR_BENCHMARK`;
+- `test_fermi_hubbard_evidence.py`: four integration regression tests.

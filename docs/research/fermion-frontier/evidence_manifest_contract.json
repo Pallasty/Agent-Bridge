@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "target_linear_size": 8,
+  "target_trotter_steps": 100,
+  "required_routes": [
+    "native_fermions",
+    "dynamic_jw_local_grid_source_leading",
+    "dynamic_jw_local_grid_figure_candidate_fit",
+    "fsn_standard_figure_candidate_fit",
+    "fsn_ladder_figure_candidate_fit"
+  ],
+  "route_map": {
+    "native_fermions": {
+      "term_route": "native_fermions",
+      "convergence_route": "native_fermions"
+    },
+    "dynamic_jw_local_grid_source_leading": {
+      "term_route": "dynamic_jw_local_grid_source_leading",
+      "convergence_route": "dynamic_jw_local_grid"
+    },
+    "dynamic_jw_local_grid_figure_candidate_fit": {
+      "term_route": "dynamic_jw_local_grid_figure_candidate_fit",
+      "convergence_route": "dynamic_jw_local_grid"
+    },
+    "fsn_standard_figure_candidate_fit": {
+      "term_route": "fsn_standard_figure_candidate_fit",
+      "convergence_route": "fsn_standard"
+    },
+    "fsn_ladder_figure_candidate_fit": {
+      "term_route": "fsn_ladder_figure_candidate_fit",
+      "convergence_route": "fsn_ladder"
+    }
+  }
+}

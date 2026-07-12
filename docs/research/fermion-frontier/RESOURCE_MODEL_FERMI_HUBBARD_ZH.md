@@ -433,6 +433,22 @@ provenance。验证器的状态含义是：
 当前账本仍为空模板，五条 L=8 路线均为 `UNRESOLVED`；加入首步数据不会自动把
 leading 或 candidate-fit 证据升级为精确 compiled 资源。
 
+### 8.3 统一 evidence manifest
+
+新增 [evidence_manifest_contract.json](evidence_manifest_contract.json)、
+[evidence_manifest_template.json](evidence_manifest_template.json) 和
+[fermi_hubbard_evidence.py](fermi_hubbard_evidence.py)。这个编排层把 term-order、
+首步账本和共同-R 收敛结果放入同一 manifest，并检查：
+
+- 五条路线的 route map 是否一致；
+- workload fingerprint、目标 `L=8` 与目标 `R=100` 是否一致；
+- term export 的 `trotter_steps` 是否等于首步账本的 `R`；
+- 共享的 qubit-route 收敛结果是否达到 `READY_FOR_COMMON_R`。
+
+它只在三类组件分别为 `MATCHED`、`COMPLETE`、`READY_FOR_COMMON_R` 且没有一致性
+错误时输出 `READY_FOR_BENCHMARK`。当前统一模板的三个组件均为 `UNRESOLVED`；
+测试中的闭合 manifest 是合成集成 fixture，不是论文或硬件证据。
+
 ## 9. 复算与测试
 
 ```bash
@@ -473,6 +489,15 @@ python3 docs/research/fermion-frontier/first_step_ledger_validator.py \
   --format markdown
 
 python3 docs/research/fermion-frontier/test_first_step_ledger_validator.py
+
+python3 docs/research/fermion-frontier/fermi_hubbard_evidence.py \
+  --contract docs/research/fermion-frontier/evidence_manifest_contract.json \
+  --manifest docs/research/fermion-frontier/evidence_manifest_template.json \
+  --term-contract docs/research/fermion-frontier/term_order_contract.json \
+  --first-step-contract docs/research/fermion-frontier/first_step_contract.json \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_fermi_hubbard_evidence.py
 ```
 
 资源模型的十个回归测试覆盖 Fig. 5 的全部 `L=4...10` candidate points、域外阻断、
@@ -486,6 +511,8 @@ fail-closed 行为；收敛接口另有五个测试覆盖双区间稳定、refer
 L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和规模限制。
 首步账本另有六个测试覆盖空模板、bookkeeping-closed 状态、精确闭账、全路线闭账
 门槛和非法 timing 的 fail-closed 行为。
+统一 evidence manifest 另有四个测试覆盖空 manifest、合成闭合、R 不一致和 route-map
+漂移的 fail-closed 行为。
 
 ## 10. 下一阶段的决定性工作
 

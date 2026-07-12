@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "term_order": {
+    "schema_version": 1,
+    "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+    "required_routes": [
+      "native_fermions",
+      "dynamic_jw_local_grid_source_leading",
+      "dynamic_jw_local_grid_figure_candidate_fit",
+      "fsn_standard_figure_candidate_fit",
+      "fsn_ladder_figure_candidate_fit"
+    ],
+    "exports": {}
+  },
+  "first_step": {
+    "schema_version": 1,
+    "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+    "routes": {}
+  },
+  "convergence": {
+    "schema_version": 1,
+    "workload": {
+      "observable": "staggered magnetization",
+      "initial_state": "checkerboard Neel product state",
+      "hamiltonian_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+      "trotter_formula": "second-order Suzuki--Trotter (Strang)",
+      "algorithmic_error_budget": 0.005,
+      "statistical_error_budget": 0.01,
+      "confidence_z": 2.0
+    },
+    "reference": null,
+    "required_routes": [
+      "native_fermions",
+      "dynamic_jw_local_grid",
+      "fsn_standard",
+      "fsn_ladder"
+    ],
+    "routes": {}
+  }
+}

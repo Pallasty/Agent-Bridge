@@ -37,6 +37,7 @@ class CrossRouteTermOrderTests(unittest.TestCase):
     def manifest(self, exports):
         return {
             "schema_version": 1,
+            "workload_fingerprint": self.contract["workload_fingerprint"],
             "required_routes": list(self.contract["required_routes"]),
             "exports": exports,
         }

@@ -54,6 +54,9 @@ def compare_routes(
         required = []
     if manifest.get("schema_version") != 1:
         errors.append("manifest schema_version must be 1")
+    contract_fingerprint = contract.get("workload_fingerprint")
+    if contract_fingerprint is not None and manifest.get("workload_fingerprint") != contract_fingerprint:
+        errors.append("manifest workload_fingerprint does not match contract")
     if manifest.get("required_routes") != required:
         errors.append("manifest required_routes must exactly match the contract")
     exports = manifest.get("exports")

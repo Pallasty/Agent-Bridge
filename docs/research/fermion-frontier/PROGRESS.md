@@ -137,3 +137,10 @@ requires per-route steady and first-step logical resources, an explicit
 `BOOKKEEPING_CLOSED_ESTIMATE`, and `COMPLETE`; the empty five-route ledger remains
 unresolved, and candidate/source-leading steady values cannot be promoted to exact
 totals merely by supplying a first-step subtotal.
+
+The three interfaces are now joined by `evidence_manifest_contract.json`,
+`evidence_manifest_template.json`, and `fermi_hubbard_evidence.py`. The orchestrator
+checks route-map/workload consistency and cross-checks term-export `trotter_steps`
+against ledger `R`. Its empty manifest is still `UNRESOLVED`; only real individual-term
+exports, exact first-step resources, and route-specific common-R data can produce
+`READY_FOR_BENCHMARK`.

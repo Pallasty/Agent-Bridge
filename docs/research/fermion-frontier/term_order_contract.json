@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
   "workload": {
     "hamiltonian": "open-boundary spinful nearest-neighbor square Fermi-Hubbard",
     "group_order": ["H1", "H2", "HU", "H3", "H4", "H4", "H3", "HU", "H2", "H1"],
