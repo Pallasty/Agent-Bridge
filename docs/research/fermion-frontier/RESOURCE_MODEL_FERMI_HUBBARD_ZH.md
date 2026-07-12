@@ -376,6 +376,9 @@ fidelity。Nature 的 `U_int` 也不是 PNAS 的纯 density-phase primitive。�
 - `MISMATCH`：所有路线都有 individual terms，但至少一处序列不同；
 - `MATCHED`：所有路线的原始 group/term 序列完全相同。
 
+比较器还要求每份导出内部的 `route` 与 manifest route key 完全一致；把同一导出
+改挂到另一 route key 会返回 `UNRESOLVED`，不能充当另一条路线的独立证据。
+
 当前 cross-route 模板仍返回 `UNRESOLVED`。测试中的同序导出只是合成 fixture，不能
 替代 dynamic-JW/FSN 的真实编译器导出；因此研究结论仍是“共同顺序目标已定义，跨
 编译器 individual-term equality 未验证”。
@@ -412,10 +415,15 @@ standard error；验证器使用
 \]
 
 检查相邻 refinement，并要求至少两个连续稳定区间、稳定区间内每个点满足
-`SE <= epsilon_stat`。若提供独立 reference，还会把 estimate-to-reference 的
+`z SE_R <= epsilon_stat`。这里 `epsilon_stat` 是置信半宽预算，不是裸 standard
+error。若提供独立 reference，还会把 estimate-to-reference 的
 置信界纳入检查。只有所有 required routes 都有稳定窗口、并且都提供共同 `R` 的
 结果，才会输出 `READY_FOR_COMMON_R`；缺数据、metadata 不一致或统计误差过大都
 返回 `UNRESOLVED`。
+
+统一 manifest 另要求目标 `R=100` 在每条 mapped convergence route 中显式出现，且
+`100 >= stable_from_R`；目标点缺失或仍早于稳定窗时，整体返回 `INCONSISTENT`，不能
+用较大 `R` 已收敛来倒推目标 `R` 已经合格。
 
 当前模板没有填入任何路线测量值，因此运行结果应为 `UNRESOLVED`。这不是失败，
 而是避免把 `R=100` 规划输入误写成已验证的算法误差。
@@ -456,16 +464,19 @@ leading 或 candidate-fit 证据升级为精确 compiled 资源。
 新增 [evidence_manifest_contract.json](evidence_manifest_contract.json)、
 [evidence_manifest_template.json](evidence_manifest_template.json) 和
 [fermi_hubbard_evidence.py](fermi_hubbard_evidence.py)。这个编排层把 term-order、
-首步账本和共同-R 收敛结果放入同一 manifest，并检查：
+首步账本、native transition、surface place-route 和共同-R 收敛结果放入同一
+manifest，并检查：
 
 - 五条路线的 route map 是否一致；
 - workload fingerprint、目标 `L=8` 与目标 `R=100` 是否一致；
 - term export 的 `trotter_steps` 是否等于首步账本的 `R`；
-- 共享的 qubit-route 收敛结果是否达到 `READY_FOR_COMMON_R`。
+- surface physical-route map 是否绑定现有的 term/convergence route pair；
+- surface event 数和 sequence fingerprint 是否分别匹配 term sequence 长度和共同指纹；
+- 共享的 qubit-route 收敛结果是否达到 `READY_FOR_COMMON_R`，且目标 `R` 位于稳定窗。
 
-它只在四类组件分别满足 term-order `MATCHED`、首步 `COMPLETE`、native transition
-`COMPLETE`、收敛 `READY_FOR_COMMON_R` 且没有一致性错误时输出 `READY_FOR_BENCHMARK`。
-当前统一模板的四个组件均为 `UNRESOLVED`；
+它只在五类组件分别满足 term-order `MATCHED`、首步 `COMPLETE`、native transition
+`COMPLETE`、surface place-route `COMPLETE`、收敛 `READY_FOR_COMMON_R` 且没有身份或
+一致性错误时输出 `READY_FOR_BENCHMARK`。当前统一模板的五个组件均为 `UNRESOLVED`；
 测试中的闭合 manifest 是合成集成 fixture，不是论文或硬件证据。
 
 现在统一 manifest 还纳入 [native_transition_contract.json](native_transition_contract.json)、
@@ -477,13 +488,32 @@ loss/leakage 和 provenance。只有所有 occurrence 都是 measured 且
 `compiled_exact=true` 才能给出 `complete_circuit_us`；否则最多是
 `BOOKKEEPING_CLOSED_ESTIMATE`，空模板为 `UNRESOLVED`。
 
+Surface 侧新增 [surface_place_route_contract.json](surface_place_route_contract.json)、
+[surface_place_route_template.json](surface_place_route_template.json) 和
+[surface_place_route_validator.py](surface_place_route_validator.py)。台账必须列出
+`2L^2` 个全程 live 的 data patches；当前 rotated-patch 口径要求 odd `d` 且每 patch
+为 `2d^2-1` physical qubits，并要求 factory/buffer patches 与 cycle/error budget 留在
+固定 scenario contract 内。验证器还检查 layout tile conflict、participant/corridor
+的 Manhattan 连通、live patch 不可跨 layout 无成本瞬移、连续 interval、operation
+cycle window、共享 patch 的时间冲突、
+相向 boundary、distill→buffer→inject→rotation 的前置链、每个 `10R` logical event 的
+按 term order 唯一 ladder-operation binding、active physical-qubit-cycles，以及不超过
+contract budget 的 logical-failure union bound。
+
+只有 `compiled_exact=true`、`place_route_validated=true`，且 timing/error/operation
+evidence 全部属于 `compiler_export` 或 `measured` 时，surface 状态才是 `COMPLETE`；
+结构和算术虽闭合但仍含 derived/assumed 证据时只是
+`BOOKKEEPING_CLOSED_ESTIMATE`。这个 validator 验证给定台账并要求外部
+`place_route_validated=true`，不自行综合或证明一个 routing solution。
+
 为了保留已知但未闭合的数字，新增
 [evidence_manifest_source_snapshot.json](evidence_manifest_source_snapshot.json) 和
 [SOURCE_SNAPSHOT_NOTES.md](SOURCE_SNAPSHOT_NOTES.md)。snapshot 写入 native 的
 `44,864/801` 逻辑 bookkeeping，以及 dynamic leading、dynamic fit、standard FSN、
 ladder FSN 的 steady count/depth；首步 timing、native occurrence table、individual
-terms 和共同-R 数据仍为缺失。因此运行统一 validator 仍为 `UNRESOLVED`，不会把
-source subtotal 误升级为完整 benchmark。
+terms 和共同-R 数据仍为缺失，surface row 也没有 patches/layouts/intervals。
+因此运行统一 validator 仍为 `UNRESOLVED`，不会把 source subtotal 误升级为完整
+benchmark。
 
 ## 9. 复算与测试
 
@@ -526,12 +556,20 @@ python3 docs/research/fermion-frontier/first_step_ledger_validator.py \
 
 python3 docs/research/fermion-frontier/test_first_step_ledger_validator.py
 
+python3 docs/research/fermion-frontier/surface_place_route_validator.py \
+  --contract docs/research/fermion-frontier/surface_place_route_contract.json \
+  --ledger docs/research/fermion-frontier/surface_place_route_template.json \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_surface_place_route_validator.py
+
 python3 docs/research/fermion-frontier/fermi_hubbard_evidence.py \
   --contract docs/research/fermion-frontier/evidence_manifest_contract.json \
   --manifest docs/research/fermion-frontier/evidence_manifest_template.json \
   --term-contract docs/research/fermion-frontier/term_order_contract.json \
   --first-step-contract docs/research/fermion-frontier/first_step_contract.json \
   --native-transition-contract docs/research/fermion-frontier/native_transition_contract.json \
+  --surface-place-route-contract docs/research/fermion-frontier/surface_place_route_contract.json \
   --format markdown
 
 python3 docs/research/fermion-frontier/test_fermi_hubbard_evidence.py
@@ -548,17 +586,22 @@ python3 docs/research/fermion-frontier/test_native_transition_validator.py
 退化网格、共同分组 native schedule、两个 `C2D` 的第二 CZ layer、辅助 footprint、
 零/无限 cycle、factory 配置、route-specific expected executions、首步对 complete time
 的阻断和误差预算校验；项序验证器另有四个测试覆盖 group order、融合、term set 和
-fail-closed 行为；收敛接口另有五个测试覆盖双区间稳定、reference、缺路线、metadata
-不一致和统计误差 fail-closed 行为。
-跨路线比较器另有五个测试覆盖空模板、group-only 阻断、同序指纹、序列错排和非法
-导出 fail-closed 行为。
+fail-closed 行为；收敛接口另有六个测试覆盖双区间稳定、reference、缺路线、metadata
+不一致、置信半宽预算和 duplicate-R fail-closed 行为。
+跨路线比较器另有六个测试覆盖空模板、group-only 阻断、同序指纹、序列错排、非法
+导出和 route-key 重标记的 fail-closed 行为。
 L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和规模限制。
 首步账本另有六个测试覆盖空模板、bookkeeping-closed 状态、精确闭账、全路线闭账
 门槛和非法 timing 的 fail-closed 行为。
-统一 evidence manifest 另有五个测试覆盖空 manifest、source snapshot、合成闭合、R
-不一致和 route-map 漂移的 fail-closed 行为。
+统一 evidence manifest 另有十三个测试覆盖空 manifest、source snapshot、合成闭合、
+目标-R 稳定窗、term mismatch 优先级、surface closure/fingerprint/event cardinality、
+组件身份、R 不一致和 route-map 漂移的 fail-closed 行为。
 native transition validator 另有六个测试覆盖空模板、measured 完成、derived 估计、
 class count、timing decomposition 和 fingerprint fail-closed 行为。
+surface place-route validator 另有二十七个测试覆盖 exact/derived 状态、active volume、
+全 data-live、patch sizing、odd distance、failure budget、几何 corridor、interval gap/
+overlap、operation window/资源冲突、event binding、dependency、非法 ID 和 evidence policy。
+全套共 `82` 个测试。
 
 ## 10. 下一阶段的决定性工作
 
@@ -571,9 +614,10 @@ class count、timing decomposition 和 fingerprint fail-closed 行为。
    只输出 `BOOKKEEPING_CLOSED_ESTIMATE`，不把稳态平均代替完整总量。
 4. **Native 微基准与空间：**连续执行四 matchings，测 inclusive transition time、
    move legs/distance、loss/leakage、cooling/echo、traps/tweezers/workspace 和回位。
-5. **Surface place-and-route：**给出完整 spinful switch 的 C2D blocks、CZ/SWAP、
-   boundary corridors、逐层 active patches、decoder/前馈、rotation synthesis、factory
-   startup/buffer/injection/failure 与 code-distance error allocation。
+5. **Surface place-and-route：**用真实 compiler export 与 measured timing/error 数据
+   填充 `surface_place_route_template.json`：给出完整 spinful switch 的 C2D blocks、
+   CZ/SWAP、boundary corridors、逐周期 active patches、decoder/前馈、rotation
+   synthesis、factory startup/buffer/injection/failure 与 code-distance error allocation。
 6. **同误差 A/B：**在 route-specific acceptance、mitigation、prep/readout 和共同
    observable error 下报告 latency、expected/high-confidence campaign、peak physical
    space 与 active physical-qubit-cycles。

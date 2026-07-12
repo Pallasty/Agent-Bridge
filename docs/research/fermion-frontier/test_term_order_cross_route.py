@@ -49,6 +49,14 @@ class CrossRouteTermOrderTests(unittest.TestCase):
                 event["terms"] = list(self.terms[event["group"]])
         return export
 
+    def exports_for_all_routes(self, export):
+        exports = {}
+        for route in self.contract["required_routes"]:
+            route_export = copy.deepcopy(export)
+            route_export["route"] = route
+            exports[route] = route_export
+        return exports
+
     def test_empty_template_is_unresolved(self):
         result = COMPARATOR.compare_routes(
             self.contract, load_json("term_order_cross_route_template.json")
@@ -57,25 +65,37 @@ class CrossRouteTermOrderTests(unittest.TestCase):
         self.assertTrue(any("missing required route exports" in error for error in result["errors"]))
 
     def test_group_only_exports_are_not_comparison_evidence(self):
-        exports = {
-            route: copy.deepcopy(self.fixture)
-            for route in self.contract["required_routes"]
-        }
+        exports = self.exports_for_all_routes(self.fixture)
         result = COMPARATOR.compare_routes(self.contract, self.manifest(exports))
         self.assertEqual(result["status"], "UNRESOLVED")
         self.assertTrue(any("individual-term sequence" in error for error in result["errors"]))
 
     def test_matching_exact_sequences_are_fingerprinted(self):
         exact = self.exact_fixture()
-        exports = {route: copy.deepcopy(exact) for route in self.contract["required_routes"]}
+        exports = self.exports_for_all_routes(exact)
         result = COMPARATOR.compare_routes(self.contract, self.manifest(exports))
         self.assertEqual(result["status"], "MATCHED")
         self.assertEqual(result["sequence_length"], 20)
         self.assertEqual(len(result["common_sequence_fingerprint"]), 64)
 
+    def test_same_export_cannot_be_reused_under_a_different_route_key(self):
+        exact = self.exact_fixture()
+        exports = self.exports_for_all_routes(exact)
+        route = "dynamic_jw_local_grid_source_leading"
+        exports[route] = copy.deepcopy(exports["native_fermions"])
+        result = COMPARATOR.compare_routes(self.contract, self.manifest(exports))
+        self.assertEqual(result["status"], "UNRESOLVED")
+        self.assertEqual(result["routes"][route]["status"], "UNRESOLVED")
+        self.assertTrue(
+            any(
+                "export.route must match manifest route key" in error
+                for error in result["routes"][route]["errors"]
+            )
+        )
+
     def test_permuted_terms_are_a_cross_route_mismatch(self):
         exact = self.exact_fixture()
-        exports = {route: copy.deepcopy(exact) for route in self.contract["required_routes"]}
+        exports = self.exports_for_all_routes(exact)
         exports["fsn_ladder_figure_candidate_fit"]["steps"][0]["events"][0]["terms"] = list(
             reversed(exports["fsn_ladder_figure_candidate_fit"]["steps"][0]["events"][0]["terms"])
         )
@@ -86,7 +106,7 @@ class CrossRouteTermOrderTests(unittest.TestCase):
 
     def test_invalid_export_remains_unresolved(self):
         exact = self.exact_fixture()
-        exports = {route: copy.deepcopy(exact) for route in self.contract["required_routes"]}
+        exports = self.exports_for_all_routes(exact)
         exports["dynamic_jw_local_grid_source_leading"]["steps"].pop()
         result = COMPARATOR.compare_routes(self.contract, self.manifest(exports))
         self.assertEqual(result["status"], "UNRESOLVED")

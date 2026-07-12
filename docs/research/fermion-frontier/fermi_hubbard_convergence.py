@@ -173,7 +173,7 @@ def assess_route(
         if len(later_pairs) < 2 or not all(item["passes_algorithmic_budget"] for item in later_pairs):
             continue
         later_points = normalized[start:]
-        if not all(point["standard_error"] <= statistical_budget for point in later_points):
+        if not all(z * point["standard_error"] <= statistical_budget for point in later_points):
             continue
         if reference_checks and not all(
             item["passes_algorithmic_budget"] for item in reference_checks[start:]
@@ -183,7 +183,7 @@ def assess_route(
         break
     if stable_from_R is None:
         warnings.append(
-            "no two-interval R window satisfies the algorithmic and statistical budgets"
+            "no two-interval R window satisfies the algorithmic and confidence-half-width budgets"
         )
     status = "VALIDATED" if not errors and stable_from_R is not None else "UNRESOLVED"
     return {

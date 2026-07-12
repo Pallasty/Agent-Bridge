@@ -52,21 +52,23 @@ so they are versioned normally and are not added to the preservation-only
 - `term_order_native_fixture.json`: abstract native group-level fixture, not a
   hardware circuit export;
 - `term_order_cross_route.py`: strict five-route individual-term sequence comparator
-  with per-route SHA-256 fingerprints;
+  with per-route SHA-256 fingerprints and embedded-route/manifest-key identity checks;
 - `term_order_cross_route_template.json`: empty cross-route manifest, intentionally
   unresolved until all compiler exports are supplied;
-- `test_term_order_cross_route.py`: five regression tests for exact sequence comparison.
+- `test_term_order_cross_route.py`: six regression tests for exact sequence comparison
+  and route-key relabeling rejection.
 - `test_fermi_hubbard_resource_model.py`: all plotted candidate points, domain
   guards, common-order scheduling, first-step blocking, lattice-surgery
   translation, route-specific shots, and validation tests.
 - `test_term_order_validator.py`: contract, fusion, term-set, and invalid-export
   regression tests.
 - `fermi_hubbard_convergence.py`: shared-metadata, two-interval convergence and
-  common-R assessor with uncertainty propagation;
+  common-R assessor with pairwise uncertainty propagation and a per-point
+  `z * SE <= epsilon_stat` confidence-half-width gate;
 - `fermi_hubbard_convergence_template.json`: empty data template that returns
   `UNRESOLVED` until route results are supplied;
-- `test_fermi_hubbard_convergence.py`: convergence, reference, metadata, missing
-  route, and statistical-error regression tests.
+- `test_fermi_hubbard_convergence.py`: six convergence, reference, metadata, missing
+  route, confidence-half-width, and duplicate-R regression tests.
 - `fermi_hubbard_l2_pilot.py`: dependency-free L=2 exact-reference/product-formula
   pilot generator;
 - `fermi_hubbard_l2_pilot_manifest.json`: generated deterministic pilot data with
@@ -79,20 +81,27 @@ so they are versioned normally and are not added to the preservation-only
 - `first_step_ledger_validator.py`: validator that separates unresolved, bookkeeping-closed
   estimates, and exact compiled totals;
 - `test_first_step_ledger_validator.py`: six regression tests for the first-step contract.
-- `evidence_manifest_contract.json`: route map, workload fingerprint, and L/R coherence
-  contract joining the three evidence interfaces;
+- `evidence_manifest_contract.json`: logical/physical route maps, workload fingerprint,
+  L/R coherence, target-R stability, and required native/surface component contract;
 - `evidence_manifest_template.json`: empty unified manifest with unresolved term-order,
-  first-step, and convergence components;
+  first-step, native-transition, surface-place-route, and convergence components;
 - `fermi_hubbard_evidence.py`: orchestration validator producing `UNRESOLVED`,
   `INCONSISTENT`, `MISMATCH`, or `READY_FOR_BENCHMARK`;
-- `test_fermi_hubbard_evidence.py`: five integration regression tests.
+- `test_fermi_hubbard_evidence.py`: thirteen integration regression tests.
 - `native_transition_contract.json`: occurrence-level native matching class/count and
   measured timing contract;
 - `native_transition_template.json`: empty 801-occurrence L=8/R=100 ledger;
 - `native_transition_validator.py`: fail-closed transition/timing validator;
 - `test_native_transition_validator.py`: six native transition regression tests.
+- `surface_place_route_contract.json`: surface patch, operation, timing, evidence,
+  active-volume, event-binding, and failure-union-bound contract;
+- `surface_place_route_template.json`: empty L=8/R=100 surface schedule ledger;
+- `surface_place_route_validator.py`: fail-closed patch-count/distance, placement,
+  contiguous corridor, timeline, operation-window, shared-patch conflict, live-data,
+  dependency, logical-event, active-volume, and failure-budget validator;
+- `test_surface_place_route_validator.py`: twenty-seven closure and adversarial regression tests.
 - `evidence_manifest_source_snapshot.json`: known L=8/R=100 source-leading and derived
-  subtotals with unresolved timing/term/convergence fields;
+  subtotals with unresolved timing/term/surface/convergence fields;
 - `SOURCE_SNAPSHOT_NOTES.md`: provenance and non-closure explanation for the snapshot.
 - `DYNAMIC_JW_SOURCE_EVIDENCE.md`: primary-source ledger for Fig. 5/Fig. 14,
   Appendix I leading counts, explicit first-step omission, and unresolved individual

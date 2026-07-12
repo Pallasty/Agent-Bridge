@@ -85,6 +85,7 @@ def compare_routes(
             }
             continue
         validation = validate_export(contract, export)
+        route_matches_manifest_key = export.get("route") == route
         route_result: Dict[str, Any] = {
             "status": "UNRESOLVED",
             "validator_status": validation["status"],
@@ -92,7 +93,11 @@ def compare_routes(
             "errors": list(validation["errors"]),
             "warnings": list(validation["warnings"]),
         }
-        if not validation["valid"]:
+        if not route_matches_manifest_key:
+            route_result["errors"].append(
+                f"export.route must match manifest route key {route!r}"
+            )
+        elif not validation["valid"]:
             route_result["errors"].append("route export failed term-order validation")
         elif not validation["individual_term_sets_validated"]:
             route_result["warnings"].append(

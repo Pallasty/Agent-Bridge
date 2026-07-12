@@ -90,6 +90,12 @@ final cross-cluster adversarial review with all required corrections applied.
    translation are implemented. Cross-compiler term-order validation and current
    primary-source gaps remain explicit as `UNRESOLVED`.
 
+The fail-closed evidence path now binds each export's embedded `route` to its
+manifest key, applies the statistical budget to the `z * SE` confidence half-width,
+requires target `R=100` to be explicitly sampled inside every mapped stability
+window, and requires a complete surface-code place-and-route ledger. Real compiler
+exports, route measurements, and physical schedules remain `UNRESOLVED`.
+
 The focused 70-claim ledger is fully adjudicated: 56 unanimous verified, 8
 split/partial accepted, and 6 refuted as written, with every mandatory rewrite
 retained in `claim-status.jsonl`.
@@ -107,6 +113,7 @@ retained in `claim-status.jsonl`.
   cross-route sequence comparator/template, convergence template/assessor,
   first-step ledger contract/template/validator, unified evidence manifest
   contract/template/orchestrator, native transition contract/template/validator,
+  surface-code place-and-route contract/template/validator,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
@@ -119,6 +126,7 @@ retained in `claim-status.jsonl`.
   `test_fermi_hubbard_l2_pilot.py` /
   `test_first_step_ledger_validator.py` /
   `test_fermi_hubbard_evidence.py` /
-  `test_native_transition_validator.py`
+  `test_native_transition_validator.py` /
+  `test_surface_place_route_validator.py`
 - Batch reviews: `BATCH1_GAUSSIAN_NONGAUSSIAN_REVIEW.md`,
   `BATCH2_DPP_REVIEW.md`, and `BATCH3_ENCODING_HARDWARE_REVIEW.md`

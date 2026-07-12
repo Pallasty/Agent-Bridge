@@ -106,6 +106,29 @@
     "timing_provenance": "",
     "occurrences": []
   },
+  "surface_place_route": {
+    "schema_version": 1,
+    "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+    "route": "dynamic_jw_surface_code",
+    "linear_size": 8,
+    "trotter_steps": 100,
+    "logical_sequence_fingerprint": "",
+    "logical_event_count": 1000,
+    "distance": 21,
+    "cycle_us": 1.0,
+    "patch_model": "rotated_surface_code_one_patch_per_tile",
+    "compiled_exact": false,
+    "place_route_validated": false,
+    "timing_evidence_status": "assumed",
+    "error_evidence_status": "assumed",
+    "schedule_provenance": "",
+    "timing_provenance": "",
+    "error_model_provenance": "",
+    "logical_failure_budget": 0.005,
+    "patches": [],
+    "layouts": [],
+    "intervals": []
+  },
   "convergence": {
     "schema_version": 1,
     "workload": {

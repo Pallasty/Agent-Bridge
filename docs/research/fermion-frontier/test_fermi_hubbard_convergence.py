@@ -71,19 +71,25 @@ class ConvergenceTests(unittest.TestCase):
         self.assertEqual(result["status"], "UNRESOLVED")
         self.assertTrue(result["routes"]["native_fermions"]["errors"])
 
-    def test_invalid_point_and_high_statistical_error_fail_closed(self):
+    def test_confidence_half_width_above_statistical_budget_fails_closed(self):
         manifest = copy.deepcopy(self.manifest)
-        manifest["routes"]["native_fermions"]["points"][0]["standard_error"] = 0.2
+        manifest["workload"]["algorithmic_error_budget"] = 1.0
+        for route in manifest["routes"].values():
+            route["metadata"] = copy.deepcopy(manifest["workload"])
+        manifest["routes"]["native_fermions"]["points"][4]["standard_error"] = 0.006
+        result = CONVERGENCE.assess_manifest(manifest)
+        self.assertEqual(result["status"], "UNRESOLVED")
+
+    def test_duplicate_r_fails_closed(self):
+        manifest = copy.deepcopy(self.manifest)
         manifest["routes"]["native_fermions"]["points"].append(
             {"R": 320, "estimate": 1.0, "standard_error": 0.001}
         )
         result = CONVERGENCE.assess_manifest(manifest)
         self.assertEqual(result["status"], "UNRESOLVED")
-
-        manifest["routes"]["dynamic_jw_local_grid"]["points"][0]["R"] = 20
-        invalid = CONVERGENCE.assess_manifest(manifest)
-        self.assertEqual(invalid["status"], "UNRESOLVED")
-        self.assertTrue(any("duplicate R" in error for error in invalid["routes"]["dynamic_jw_local_grid"]["errors"]))
+        self.assertTrue(
+            any("duplicate R" in error for error in result["routes"]["native_fermions"]["errors"])
+        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "route": "dynamic_jw_surface_code",
+  "parent_term_route": "dynamic_jw_local_grid_source_leading",
+  "parent_convergence_route": "dynamic_jw_local_grid",
+  "target_linear_size": 8,
+  "target_trotter_steps": 100,
+  "logical_events_per_trotter_step": 10,
+  "max_logical_events_per_operation": 1,
+  "patch_model": "rotated_surface_code_one_patch_per_tile",
+  "distance_rule": "odd positive integer",
+  "physical_qubits_per_patch_rule": "2d^2-1",
+  "cycle_us": 1.0,
+  "logical_failure_budget": 0.005,
+  "operation_timing_rule": "integer start_offset_cycles >= 0 and positive duration_cycles contained within the interval; operations sharing a participant or corridor patch cannot overlap",
+  "allowed_patch_roles": [
+    "data",
+    "auxiliary",
+    "routing",
+    "factory",
+    "buffer"
+  ],
+  "allowed_operation_kinds": [
+    "prep",
+    "ladder_joint_measurement",
+    "aux_readout",
+    "single_qubit_clifford",
+    "frame_update",
+    "feedforward",
+    "cz",
+    "swap",
+    "rotation",
+    "distill",
+    "buffer",
+    "inject",
+    "readout",
+    "idle"
+  ],
+  "required_operation_kinds": [
+    "ladder_joint_measurement",
+    "rotation",
+    "distill",
+    "buffer",
+    "inject"
+  ],
+  "logical_event_operation_kinds": [
+    "ladder_joint_measurement"
+  ],
+  "non_logical_event_operation_kinds": [
+    "distill",
+    "buffer",
+    "idle"
+  ],
+  "allowed_evidence_statuses": [
+    "compiler_export",
+    "measured",
+    "derived",
+    "assumed"
+  ],
+  "exact_evidence_statuses": [
+    "compiler_export",
+    "measured"
+  ],
+  "allowed_boundaries": [
+    "N",
+    "E",
+    "S",
+    "W"
+  ],
+  "allowed_orientations": [
+    "N",
+    "E",
+    "S",
+    "W"
+  ],
+  "required_live_patch_roles": [
+    "data",
+    "factory",
+    "buffer"
+  ],
+  "required_patch_roles": [
+    "data",
+    "auxiliary",
+    "factory",
+    "buffer"
+  ],
+  "allowed_corridor_patch_roles": [
+    "auxiliary",
+    "routing",
+    "buffer"
+  ],
+  "required_data_patch_count": "2L^2",
+  "active_volume_rule": "sum over intervals of duration_cycles times the physical qubits of every live syndrome-protected patch; all data patches must remain live",
+  "failure_rule": "sum operation logical_failure_probability as a conservative union bound and require it not to exceed logical_failure_budget",
+  "status_rules": {
+    "complete": "distance/patch sizing, live data/factory/buffer patches, connected placement, facing boundaries, nonoverlapping operation windows, distill-buffer-inject-rotation dependencies, term-ordered one-to-one logical-event binding, fixed cycle timing, active volume, and failure allocation are closed; compiled_exact=true; place_route_validated=true; and every evidence status is compiler_export or measured",
+    "bookkeeping_closed_estimate": "all structural and arithmetic checks close, but exact compilation/place-route validation is false or at least one evidence status is derived/assumed",
+    "unresolved": "a required header, patch, layout, connectivity, interval, operation window, dependency, logical-event binding, or failure-budget check is missing or invalid",
+    "invalid_schema": "the contract or ledger identity fields do not match"
+  }
+}

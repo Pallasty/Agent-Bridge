@@ -105,8 +105,8 @@ The model intentionally returns `UNRESOLVED` for complete totals and wall-clock
 quantities that the primary sources do not determine. The next update must
 supply individual-term cross-compiler validation, a same-observable convergence/
 variance study, full first-step circuit exports, native consecutive-matching
-movement benchmarks, and a distance-`d` surface-code place-and-route before
-claiming an end-to-end winner.
+movement benchmarks, and real compiler/measured data for the now-executable
+distance-`d` surface-code place-and-route ledger before claiming an end-to-end winner.
 
 The first of those interfaces is now executable: `term_order_contract.json` pins
 the reconstructed group-level Strang order and fusion rules,
@@ -116,11 +116,16 @@ absent, so the research status remains “target defined, cross-compiler equalit
 unverified.” A stricter `term_order_cross_route.py` comparator now requires all
 five route exports to carry individual-term lists and compares their raw sequence
 fingerprints; its empty manifest remains `UNRESOLVED`, and synthetic same-sequence
-fixtures are test-only evidence.
+fixtures are test-only evidence. The comparator also rejects an export whose embedded
+`route` differs from its manifest key, so one export cannot be relabeled as independent
+evidence for another route.
 
 The common-`R` interface is also executable in
 `fermi_hubbard_convergence.py`: it requires shared observable metadata, an `R`
 grid, estimates with standard errors, and optionally an independent reference.
+Its statistical gate is the confidence half-width `z * SE <= epsilon_stat`, not
+the bare standard error. The unified gate additionally requires target `R=100`
+to be explicitly present and no earlier than every mapped route's `stable_from_R`.
 The empty template correctly returns `UNRESOLVED`; no route has yet supplied the
 data needed for a convergence certificate.
 
@@ -138,13 +143,23 @@ requires per-route steady and first-step logical resources, an explicit
 unresolved, and candidate/source-leading steady values cannot be promoted to exact
 totals merely by supplying a first-step subtotal.
 
-The three interfaces are now joined by `evidence_manifest_contract.json`,
+Five evidence components are now joined by `evidence_manifest_contract.json`,
 `evidence_manifest_template.json`, and `fermi_hubbard_evidence.py`. The orchestrator
 checks route-map/workload consistency, cross-checks term-export `trotter_steps` against
-ledger `R`, and now requires the native occurrence-level transition component. Its empty
-manifest is still `UNRESOLVED`; only real individual-term exports, exact first-step
-resources, measured native transitions, and route-specific common-R data can produce
-`READY_FOR_BENCHMARK`.
+ledger `R`, requires the native occurrence-level transition component, and requires a
+surface place-route ledger whose event count and logical-sequence fingerprint match the
+term export. Its empty manifest is still `UNRESOLVED`; only real individual-term exports,
+exact first-step resources, measured native transitions, a `COMPLETE` surface schedule,
+and target-R route convergence data can produce `READY_FOR_BENCHMARK`.
+
+The new `surface_place_route_validator.py` checks all `2L^2` live data patches,
+`2d^2-1` physical-qubit patch sizing, odd distance, tile conflicts, participant/corridor
+connectivity, continuous intervals, operation windows and shared-patch conflicts,
+dependencies, the distill/buffer/inject/rotation support chain, term-ordered one-to-one
+logical-event bindings, the active physical-qubit-cycle sum, and fixed cycle/failure
+budgets. It does not synthesize a routing solution:
+`COMPLETE` also requires an external compiler export, `place_route_validated=true`, and
+measured/compiler evidence; derived schedules remain `BOOKKEEPING_CLOSED_ESTIMATE`.
 
 The dynamic-JW source was rechecked directly against arXiv v1. `DYNAMIC_JW_SOURCE_EVIDENCE.md`
 records that Fig. 14 supports only a group-level sequence and that Appendix I explicitly
@@ -167,4 +182,5 @@ proposal. None provides the matched L=8 four-matching compiled route needed for
 and derived bookkeeping values without inventing missing fields. Its native row exposes
 the `44,864` count / `801` depth schedule, while qubit-route first-step corrections,
 native occurrence timing, individual terms, and common-R data remain unresolved. The
-validator therefore continues to report `UNRESOLVED` for the snapshot.
+surface row is likewise an empty placeholder with no patches, layouts, intervals, or
+operations. The validator therefore continues to report `UNRESOLVED` for the snapshot.

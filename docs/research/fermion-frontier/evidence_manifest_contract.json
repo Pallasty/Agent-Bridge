@@ -4,6 +4,14 @@
   "target_linear_size": 8,
   "target_trotter_steps": 100,
   "native_transition_required": true,
+  "surface_place_route_required": true,
+  "physical_route_map": {
+    "surface_place_route": {
+      "route": "dynamic_jw_surface_code",
+      "term_route": "dynamic_jw_local_grid_source_leading",
+      "convergence_route": "dynamic_jw_local_grid"
+    }
+  },
   "required_routes": [
     "native_fermions",
     "dynamic_jw_local_grid_source_leading",
