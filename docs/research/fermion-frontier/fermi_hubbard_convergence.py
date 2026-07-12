@@ -63,11 +63,14 @@ def validate_manifest(manifest: Mapping[str, Any]) -> List[str]:
     for key in ("observable", "initial_state", "hamiltonian_fingerprint", "trotter_formula"):
         if not isinstance(workload.get(key), str) or not workload[key].strip():
             errors.append(f"workload.{key} must be a non-empty string")
-    for key in ("algorithmic_error_budget", "statistical_error_budget"):
-        try:
-            _positive(workload[key], f"workload.{key}")
-        except (KeyError, ValueError) as exc:
-            errors.append(str(exc))
+    try:
+        _positive(workload["algorithmic_error_budget"], "workload.algorithmic_error_budget")
+    except (KeyError, ValueError) as exc:
+        errors.append(str(exc))
+    try:
+        _nonnegative(workload["statistical_error_budget"], "workload.statistical_error_budget")
+    except (KeyError, ValueError) as exc:
+        errors.append(str(exc))
     try:
         _positive(workload["confidence_z"], "workload.confidence_z")
     except (KeyError, ValueError) as exc:

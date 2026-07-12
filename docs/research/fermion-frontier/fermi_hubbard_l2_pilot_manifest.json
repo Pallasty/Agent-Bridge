@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "pilot_status": "algorithmic_product_formula_pilot_not_hardware_or_L8_evidence",
+  "workload": {
+    "observable": "staggered magnetization",
+    "initial_state": "checkerboard Neel product state",
+    "hamiltonian_fingerprint": "FH_L2_UoverT8_tT1_half_filling",
+    "trotter_formula": "second-order Suzuki--Trotter (Strang)",
+    "algorithmic_error_budget": 0.005,
+    "statistical_error_budget": 0.0,
+    "confidence_z": 2.0
+  },
+  "reference": {
+    "value": 0.6557603378046181,
+    "provenance": "pure-Python sparse Hamiltonian action plus scaled Taylor evolution"
+  },
+  "required_routes": ["group_order_pilot"],
+  "routes": {
+    "group_order_pilot": {
+      "metadata": {
+        "observable": "staggered magnetization",
+        "initial_state": "checkerboard Neel product state",
+        "hamiltonian_fingerprint": "FH_L2_UoverT8_tT1_half_filling",
+        "trotter_formula": "second-order Suzuki--Trotter (Strang)"
+      },
+      "points": [
+        {"R": 1, "estimate": -0.29602861694045296, "standard_error": 0.0},
+        {"R": 2, "estimate": 0.781713978559467, "standard_error": 0.0},
+        {"R": 4, "estimate": 0.7673437718114093, "standard_error": 0.0},
+        {"R": 8, "estimate": 0.6871121718292442, "standard_error": 0.0},
+        {"R": 16, "estimate": 0.6637745937861403, "standard_error": 0.0},
+        {"R": 32, "estimate": 0.6577742025843922, "standard_error": 0.0},
+        {"R": 64, "estimate": 0.6562644363083332, "standard_error": 0.0},
+        {"R": 128, "estimate": 0.6558864017693032, "standard_error": 0.0}
+      ]
+    }
+  }
+}

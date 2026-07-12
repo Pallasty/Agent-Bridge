@@ -387,6 +387,19 @@ standard error；验证器使用
 当前模板没有填入任何路线测量值，因此运行结果应为 `UNRESOLVED`。这不是失败，
 而是避免把 `R=100` 规划输入误写成已验证的算法误差。
 
+### 8.1 L=2 exact-reference pilot
+
+新增 [fermi_hubbard_l2_pilot.py](fermi_hubbard_l2_pilot.py) 后，已经可以在无
+NumPy/SciPy 的环境中运行一个纯 Python 算法 pilot：`L=2, U/t=8, tT=1`、checkerboard
+Néel 初态、staggered magnetization。它用稀疏 Hamiltonian 作用和 scaled Taylor
+evolution 得到 deterministic reference `0.655760337805`，再对共同 raw group order
+运行 `R=1,2,4,8,16,32,64,128`。
+
+将结果写入 [fermi_hubbard_l2_pilot_manifest.json](fermi_hubbard_l2_pilot_manifest.json)
+后，收敛评估器给出该 **group-order pilot** 的 `R=32`。这是一个可复核的算法链路
+检查，不是 `L=8` 证据、不是 dynamic-JW/FSN/native 的硬件结果，也不能证明不同
+编译器已经产生相同 individual-term order；真实路线数据仍需替换 `group_order_pilot`。
+
 ## 9. 复算与测试
 
 ```bash
@@ -408,6 +421,11 @@ python3 docs/research/fermion-frontier/fermi_hubbard_convergence.py \
   --format markdown
 
 python3 docs/research/fermion-frontier/test_fermi_hubbard_convergence.py
+
+python3 docs/research/fermion-frontier/fermi_hubbard_l2_pilot.py \
+  --format markdown
+
+python3 docs/research/fermion-frontier/test_fermi_hubbard_l2_pilot.py
 ```
 
 资源模型的十个回归测试覆盖 Fig. 5 的全部 `L=4...10` candidate points、域外阻断、
@@ -416,6 +434,7 @@ python3 docs/research/fermion-frontier/test_fermi_hubbard_convergence.py
 的阻断和误差预算校验；项序验证器另有四个测试覆盖 group order、融合、term set 和
 fail-closed 行为；收敛接口另有五个测试覆盖双区间稳定、reference、缺路线、metadata
 不一致和统计误差 fail-closed 行为。
+L=2 pilot 另有四个测试覆盖 reference、R 网格、`R=32` 评估结果和规模限制。
 
 ## 10. 下一阶段的决定性工作
 

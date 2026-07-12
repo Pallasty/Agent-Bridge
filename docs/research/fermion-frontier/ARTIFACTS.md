@@ -62,3 +62,9 @@ so they are versioned normally and are not added to the preservation-only
   `UNRESOLVED` until route results are supplied;
 - `test_fermi_hubbard_convergence.py`: convergence, reference, metadata, missing
   route, and statistical-error regression tests.
+- `fermi_hubbard_l2_pilot.py`: dependency-free L=2 exact-reference/product-formula
+  pilot generator;
+- `fermi_hubbard_l2_pilot_manifest.json`: generated deterministic pilot data with
+  an assessor recommendation `R=32` for the group-order pilot only;
+- `test_fermi_hubbard_l2_pilot.py`: reference, R-grid, recommendation, and size-bound
+  regression tests.

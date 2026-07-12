@@ -120,3 +120,9 @@ The common-`R` interface is also executable in
 grid, estimates with standard errors, and optionally an independent reference.
 The empty template correctly returns `UNRESOLVED`; no route has yet supplied the
 data needed for a convergence certificate.
+
+There is now one bounded algorithmic certificate: the dependency-free `L=2`
+group-order pilot converges against an exact-reference calculation and the
+assessor selects `R=32` under its two-interval rule. It is explicitly marked as
+an algorithmic pilot, not a hardware or `L=8` result; the next evidence step is
+to replace it with route-specific exports and measurement uncertainties.
