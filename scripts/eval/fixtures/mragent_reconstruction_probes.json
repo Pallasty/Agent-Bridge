@@ -69,8 +69,8 @@
         { "class": "downgrade_mechanism", "any_of": ["continuity_restore_drill_1_20260706"] },
         { "class": "downgraded_example", "any_of": ["decision_ab_project_review_local_v38_preflight_20260629", "agent_bridge_gte_dimension_gate_anchor_289f962_20260624"] }
       ],
-      "observed_n7": { "S0": "1/2 (example buried at rank 6, mechanism missed)", "S2": "2/2 (mechanism + example)" },
-      "note": "Under ANY-OF semantics S2 SOLVES: round-1 surfaces the v38 example (carrying 'governance-downgrade / kernel must-block bucket' vocabulary), a conditioned re-query then surfaces the mechanism row (restore drill #1) that S0 missed. The SECOND example (gte_289f962) is an 'orphan' -- no graph edge and no distinctive shared vocabulary with round-1 evidence, so it is unreachable; this illustrates the double_unreachable failure mode but does not block the probe (any-of example is already satisfied). S1 control NOT yet run here."
+      "observed_n7": { "S0": "1/2 (example buried at rank 6, mechanism missed)", "S1": "1/2 (blind union: q4c surfaces the v38 example only; the mechanism row restore_drill_1 is unreachable blind)", "S2": "2/2 (mechanism + example)" },
+      "note": "Under ANY-OF semantics S2 SOLVES: round-1 surfaces the v38 example (carrying 'governance-downgrade / kernel must-block bucket' vocabulary), a conditioned re-query then surfaces the mechanism row (restore drill #1) that S0 missed. The SECOND example (gte_289f962) is an 'orphan' -- no graph edge and no distinctive shared vocabulary with round-1 evidence, so it is unreachable; this illustrates the double_unreachable failure mode but does not block the probe (any-of example is already satisfied). CLEAN S2>S1: the blind S1 control gets the example but never the mechanism, because 'a restore drill caused the downgrade' is evidence-locked vocabulary you can only query for after reading the v38 row. Same structure as P1."
     },
     {
       "id": "P5",
@@ -98,19 +98,22 @@
       "regime": "cross_project",
       "question": "What is the resting point / current status of the biocortex-rs substrate science program?",
       "gold": [
-        { "class": "biocortex_status_conclusion", "any_of": ["biocortex_rs_resting_point_reconciled_with_ab_downstream_20260705", "biocortex_reframe_biomimicry_rd_math_product_20260706"] }
+        { "class": "biocortex_status_conclusion", "any_of": ["biocortex_rs_resting_point_reconciled_with_ab_downstream_20260705", "biocortex_reframe_biomimicry_rd_math_product_20260706", "biocortex_non_memory_direction_research_20260710"] }
       ],
-      "observed_n7": { "S0": "0/1 (returned the older 2026-06-10 biocortex-AB integration cluster)", "S2": "1/1 (surfaced the reframe status row S0 missed)" },
-      "note": "Under ANY-OF semantics S2 SOLVES via the reframe row. S0 anchored on a lexically dense but stale integration cluster and returned neither valid answer. This probe is why gold MUST be any-of: the initial single-node gold would have mis-scored S2 as a miss. S1 control NOT yet run here."
+      "observed_n7": { "S0": "0/1 (returned the older 2026-06-10 biocortex-AB integration cluster)", "S1": "ambiguous: 0/1 vs the originally-declared two-key gold, BUT blind q7c surfaced biocortex_non_memory_direction_research_20260710 -- a THIRD legitimate status row -> under the honest broadened any-of, S1 also solves (1/1)", "S2": "1/1 (surfaced the reframe status row S0 missed)" },
+      "note": "NOT a clean S2>S1. Under ANY-OF semantics S2 solves via the reframe row and S0 fails. But running the blind S1 control forced an honest broadening of the gold class: S1's q7c stumbled onto a third valid status row (non_memory_direction). Lesson compounds P7's own any-of point: when the any-of class is BROAD (many valid status rows), blind multi-query can hit a member, so this probe does NOT distinguish evidence-conditioning from parallelism. The clean S2>S1 evidence is P1 and P4, where the missing node's vocabulary is genuinely evidence-locked."
     }
   ],
   "n7_summary": {
     "s2_beats_s0_on_hard_probes": ["P1", "P4", "P7"],
+    "s2_beats_s1_clean": ["P1", "P4"],
+    "s2_vs_s1_ambiguous": ["P7"],
     "no_headroom_s0_sufficient": ["P2", "P5"],
     "s2_genuine_failure_double_unreachable": ["P6"],
     "abstention_correct": ["P3"],
-    "s1_control_run_on": ["P1"],
-    "verdict": "Evidence-conditioned reconstruction (S2) reliably beats one-shot S0 whenever the answer node is reachable via a graph edge or evidence-derived vocabulary (P1, P4, P7); it ties on concentrated answers (P2, P5), fails only on genuinely double-unreachable nodes (P6), and abstains correctly on non-existent targets (P3) IF the protocol includes an existence gate. OPEN go-gate question: does S2 beat the blind multi-query control S1 beyond P1? -- requires running S1 on P4/P7 and the full >=8 battery in the harness.",
+    "s1_control_run_on": ["P1", "P4", "P7"],
+    "interpretation_gate": "PASSED. S2 cleanly beats the blind equal-budget multi-query control S1 on P1 and P4 (>=2 complex probes), where the missing node's vocabulary is evidence-locked and blind decomposition provably cannot reach it. So S2's advantage is NOT mere parallelism -> the reconstruction is worth building. P7 does NOT count (broad any-of class; blind S1 hit a member).",
+    "verdict": "Evidence-conditioned reconstruction (S2) reliably beats one-shot S0 whenever the answer node is reachable via a graph edge or evidence-derived vocabulary (P1, P4, P7); it ties on concentrated answers (P2, P5), fails only on genuinely double-unreachable nodes (P6), and abstains correctly on non-existent targets (P3) IF the protocol includes an existence gate. The go-gate CENTRAL comparison -- S2 solves >=2 more complex probes than the blind control S1 -- is MET read-only (P1 + P4 clean). REMAINING for the harness: injection zero-leak, tokens<=2.5x, p95<=3x, N>=8, second-seed replication, automated scorer.",
   "call_cost_note": "S2 used ~2-3x the memory calls of S0 (within the <=2.5x budget order of magnitude). Exact token/p95 accounting requires the instrumented harness."
   }
 }
