@@ -777,10 +777,30 @@ q68 horizon，68/68 committed；总 peak/visits 为 688,548/82,618,707，last E 
 `2288712409577855/2^64`，canonical SHA 为
 `b1f072c84cc676151fe3cddbb8a0db445df946f299dbb81f41e34f765d30dfc8`。
 
-下一判别器仍按 observable 分开：M 应另行固定 `K=557,056`、31-slot ladder 并重放至
-q82；该档比 q81 minimum 高 11,927。D 尚未暴露新 failure，应先保持 33-slot/
-`K=573,440` capability 不变，只把 horizon 延到下一个八门对齐 q70，测量 q69--70 后
-再决定是否扩容。不得根据 q66--68 连续选择最大档预写未测结果。
+下一判别器也已完成。M 使用独立 direct-v2 capability wrapper；相对 arithmetic-v2
+唯一变化是 `max_retained_K: 524,288 -> 557,056`，candidate-count capacity 仍为 32，
+K=540,672 wrapper 只作未执行的 route reference。wrapper/manifest SHA 分别为
+`4c54b9a2451ad9ae76e4b4036705558cdc527f22b015fd67c035118ad2c8506f` 与
+`cc60b39010c55fa3a95f7160e5ccb0a4985ab6926aa8076841d75e660a954868`。M 在原 30
+档后追加 `557,056`；q1--80 common state/history 与前 30 行保持 exact，q81 也保持
+旧 propagation 与前 30 行，新增 index 30 首次可行。q81--82 均选择 557,056，
+pre-count 为 597,254/641,180，dropped count 为 40,198/84,124，最终 82/82 committed；
+总 peak/visits 为 643,624/91,592,879，canonical SHA 为
+`1d6cbcddac8a8c596746f24b8c8498f24874e86db5235532d7d269220043cdd4`。
+
+D 不改变 candidate、policy 或 kernel capability；外层 screen 只把隔离 q68 parent 的
+horizon 从 68 改为 70，并从 q1 完整 replay。旧 q68 canonical 仅在结果产生后验证
+prefix，不提供 propagation state。q1--68 records/history 完整不变；q69（gates
+272--275）pre-count 为 644,504，minimum effective K 为 579,098，超过 ceiling 5,658，
+因此以 K-ceiling failure 结束。总 peak/visits 为 688,548/84,984,299，canonical SHA 为
+`38fa337482dbd323d68f36b6debfdc6fff94d4cf8c42e68d6477b45dc02368d6`。两条新增账本
+覆盖 `82x31 + 69x33 = 4,819` 个 candidate rows，仍未触发 live/digest cap。
+
+下一条 M 路线可保持 31-slot/`K=557,056` 不变，只把 horizon 延至下一个八门对齐
+q84。D 若要保持 prefix，则应在 33 档后追加 `589,824`，形成 34-slot ladder 并重放至
+q70；该档比 q69 minimum 高 10,726。现有 33 个 D 候选都曾被 selected，不能通过删除
+旧档来保持 33-slot 而仍宣称同一轨迹；任何替换档位方案都必须标成新的 trajectory。
+不得把 q69 failure 外推为 q70 结果。
 
 这些 screens 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
 product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY

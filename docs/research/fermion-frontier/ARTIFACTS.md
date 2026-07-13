@@ -495,6 +495,47 @@ so they are versioned normally and are not added to the preservation-only
   sentinel and exception identity, reference-only predecessor, synthetic tamper
   rejection, 4 MiB atomic output and complete 68-record/2,244-row ledger with all
   canonical hashes; full replay is opt-in.
+- `hubbard_l8_adaptive_k_arithmetic_k557056.py`: fail-closed direct-v2 capability
+  wrapper with source SHA-256
+  `4c54b9a2451ad9ae76e4b4036705558cdc527f22b015fd67c035118ad2c8506f`
+  and manifest SHA-256
+  `cc60b39010c55fa3a95f7160e5ccb0a4985ab6926aa8076841d75e660a954868`.
+  It changes only retained K 524,288 -> 557,056, keeps candidate-count capacity
+  at 32, and treats K=540,672 only as an unexecuted route-predecessor reference.
+- `test_hubbard_l8_adaptive_k_arithmetic_k557056.py`: same-byte/fail-closed
+  loading, exact direct and route deltas, provider/global binding, 557,056/557,057
+  K boundaries, candidate-count invariance, manifest/layer hashes and strict
+  rejection of missing or malformed public pins.
+- `hubbard_l8_magnetization_adaptive_k_four_gate_k557056_c31_q82_screen.py`
+  and its `*_transcript.json`: append-only M31 route through q82.  Screen source
+  SHA-256 is
+  `ba1c221b57fa59655612ad7209b38c83337f6f21b794132f7a9e1600b8d60fed`.
+  q1--80 common state/history and all first 30 rows are exact; q81 retains the old
+  propagation/rows before appended index 30 becomes first feasible.  K=557,056
+  is selected at q81--82, whose pre-counts are 597,254/641,180 and dropped counts
+  are 40,198/84,124.  The route reaches 82/82 with peak/visits
+  643,624/91,592,879; canonical transcript SHA-256 is
+  `1d6cbcddac8a8c596746f24b8c8498f24874e86db5235532d7d269220043cdd4`.
+- `test_hubbard_l8_magnetization_adaptive_k_four_gate_k557056_c31_q82_screen.py`:
+  exact source/configuration/capability pins, M31 append-only construction,
+  private-path and exception identity, reference-only predecessor handoff,
+  atomic output, provenance and complete 82-record/2,542-row canonical ledger;
+  full propagation replay remains opt-in.
+- `hubbard_l8_double_occupancy_adaptive_k_four_gate_k573440_c33_q70_screen.py`
+  and its `*_transcript.json`: D33 same-cap horizon-only extension.  The outer
+  source SHA-256 is
+  `3e0ae3c21f4d8b2e56a95573ecb238dfe0542ed891ac6bbadceb72b2d03b3045`;
+  it calls the exact q68 private parent, changes only D horizon 68 -> 70 and
+  replays from q1.  The q68 artifact is post-replay prefix evidence rather than a
+  state-resume input.  q1--68 is exact and q69 fails at pre-count 644,504,
+  minimum K 579,098 and excess 5,658; peak/visits are 688,548/84,984,299.
+  Canonical transcript SHA-256 is
+  `38fa337482dbd323d68f36b6debfdc6fff94d4cf8c42e68d6477b45dc02368d6`.
+- `test_hubbard_l8_double_occupancy_adaptive_k_four_gate_k573440_c33_q70_screen.py`:
+  exact parent/artifact pins, isolated horizon override and restoration, real
+  private-path/exception identity, reference-only q68 predecessor, atomic output,
+  provenance and complete 69-record/2,277-row canonical ledger; full propagation
+  replay remains opt-in.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

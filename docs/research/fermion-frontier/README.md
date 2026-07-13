@@ -491,11 +491,30 @@ transcript SHA-256 is
 `b1f072c84cc676151fe3cddbb8a0db445df946f299dbb81f41e34f765d30dfc8`.
 Both branches remain diagnostic-only and leave certified depths at 3/2.
 
-The next discriminator again splits cleanly.  M needs a separately pinned
-`K=557,056` capability and a 31st candidate through q82; that rung covers the q81
-minimum by 11,927.  D has not exposed a new failure, so its least-assumptive next
-move is a same-cap `K=573,440`/33-slot horizon-only extension through the next
-aligned q70 boundary.  Neither route may predeclare the unmeasured q69--70 result.
+The next split discriminator is also complete.  M uses a direct-v2 wrapper whose
+only capability change is `max_retained_K: 524,288 -> 557,056`; candidate-count
+capacity remains 32.  Its 31-rung ladder appends `557,056`, preserves q1--80 common
+records/history and all first 30 rows, then preserves q81 propagation before the
+new row becomes first feasible.  M selects `557,056` at q81 and q82, with
+pre-counts `597,254/641,180` and dropped counts `40,198/84,124`, and reaches the
+aligned q82 horizon with 82/82 commits.  Peak/visits are
+`643,624/91,592,879`; canonical transcript SHA-256 is
+`1d6cbcddac8a8c596746f24b8c8498f24874e86db5235532d7d269220043cdd4`.
+
+D changes no candidate, policy or kernel capability.  Its outer wrapper changes
+only the isolated q68 screen horizon from 68 to 70 and replays from q1; the q68
+artifact is post-replay prefix evidence, not a state-resume input.  The exact
+q1--68 prefix is unchanged, but q69/gates 272--275 fails at pre-count 644,504 and
+minimum effective `K=579,098`, 5,658 above the current maximum.  Overall
+peak/visits are `688,548/84,984,299`; canonical transcript SHA-256 is
+`38fa337482dbd323d68f36b6debfdc6fff94d4cf8c42e68d6477b45dc02368d6`.
+Both results remain diagnostic-only and certified depths stay at 3/2.
+
+The cheapest next M discriminator is a same-cap horizon-only extension through
+the next aligned q84 boundary.  D instead needs a prefix-preserving 34-slot,
+`K=589,824` capability through q70: that next grid rung covers q69 by 10,726, and
+all 33 current D rungs have already been selected, leaving no trajectory-neutral
+deletion.  A different 33-slot ladder must be labeled as a new trajectory.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

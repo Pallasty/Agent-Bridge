@@ -558,7 +558,28 @@ commits; pre-counts are 679,285/688,548/630,616, peak/visits are
 The two full ledgers cover 81x30 plus 68x33 candidate rows.  No policy, witness,
 boundary, transition, READY component or certified-depth increase is created.
 
-The next bounded decision is M `K=557,056` with 31 candidates through q82, and a
-D same-cap 33-slot/`K=573,440` horizon-only extension through q70.  The former
-covers q81 by 11,927; the latter deliberately measures q69--70 before changing
-the D capability again.
+That next split discriminator is complete.  M's direct-v2 capability wrapper
+changes only retained K from 524,288 to 557,056 while leaving candidate-count
+capacity at 32.  Its append-only 31-slot ladder preserves q1--80 common
+records/history and all first 30 candidate rows, then preserves q81 propagation
+before the new index 30 becomes first feasible.  M selects 557,056 at q81--82 and
+reaches 82/82 commits; the two pre-counts are 597,254/641,180, dropped counts are
+40,198/84,124, peak/visits are 643,624/91,592,879, and the canonical SHA-256 is
+`1d6cbcddac8a8c596746f24b8c8498f24874e86db5235532d7d269220043cdd4`.
+
+D's outer horizon-only screen changes only q68 -> q70 and replays from q1, using
+the q68 artifact solely for post-replay prefix validation.  Its q1--68 prefix is
+exact, but q69/gates 272--275 fails at pre-count 644,504 with minimum effective K
+579,098, 5,658 above the retained maximum.  Peak/visits are 688,548/84,984,299,
+and the canonical SHA-256 is
+`38fa337482dbd323d68f36b6debfdc6fff94d4cf8c42e68d6477b45dc02368d6`.
+The two new ledgers cover 82x31 plus 69x33 = 4,819 candidate rows.  Both outputs
+remain diagnostic-only; policy, witness, boundary, transition, READY components,
+certified depths 3/2 and all authority-bearing artifacts remain unchanged.
+
+The next bounded decisions split again.  M can keep its current 31-slot,
+`K=557,056` capability and extend only the horizon through the next aligned q84
+boundary.  D needs an append-only 34-slot, `K=589,824` capability through q70:
+that rung covers q69 by 10,726, while all 33 current D candidates have already
+been selected, so deleting one would create a distinct trajectory rather than a
+prefix-preserving continuation.
