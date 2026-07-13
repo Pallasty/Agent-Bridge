@@ -577,9 +577,28 @@ The two new ledgers cover 82x31 plus 69x33 = 4,819 candidate rows.  Both outputs
 remain diagnostic-only; policy, witness, boundary, transition, READY components,
 certified depths 3/2 and all authority-bearing artifacts remain unchanged.
 
-The next bounded decisions split again.  M can keep its current 31-slot,
-`K=557,056` capability and extend only the horizon through the next aligned q84
-boundary.  D needs an append-only 34-slot, `K=589,824` capability through q70:
-that rung covers q69 by 10,726, while all 33 current D candidates have already
-been selected, so deleting one would create a distinct trajectory rather than a
-prefix-preserving continuation.
+Those bounded decisions are complete.  M's horizon-only outer screen changes
+only q82 -> q84 and replays from q1, with the q82 artifact used solely for
+post-replay prefix validation.  q1--82 records/history are exact; q83/gates
+328--331 fails at pre-count 652,016 with minimum effective K 565,994 and excess
+8,938, so q84 is not attempted.  Peak/visits are 652,016/93,965,211, and the
+canonical SHA-256 is
+`2f866d658570c9cf667088662a98288c14b41144c3ffacdefd862aaf8f185138`.
+
+D's direct-v2 wrapper changes only retained K 524,288 -> 589,824 and candidate
+capacity 32 -> 34.  Its append-only D34 ladder preserves q1--68 common state,
+history and first 33 rows, then preserves q69 propagation and first 33 rows
+before index 33 becomes first feasible.  q69 selects 589,824 with drop
+61,286,012,190 ticks.  q70/gates 276--279 then fails at pre-count 718,805,
+minimum effective K 597,272 and excess 7,448.  Peak/visits are
+718,805/87,505,002, and the canonical SHA-256 is
+`65d6f5ba3e45b5b57b12d1b9e1daadb17064f8aece7dc914697191f822b3a8d7`.
+The two ledgers cover 83x31 plus 70x34 = 4,953 candidate rows.  No policy,
+witness, boundary, transition, READY component, certified-depth or other
+authority-bearing artifact changes.
+
+The next prefix-preserving routes both append one standard grid rung.  M needs a
+minimal retained-K-only `K=573,440`/C32 capability through q84, covering q83 by
+7,446 without changing candidate-count capacity.  D needs `K=606,208`/C35
+through q70, covering q70 by 8,936.  Every current D34 rung has been selected,
+so no trajectory-neutral deletion is available.

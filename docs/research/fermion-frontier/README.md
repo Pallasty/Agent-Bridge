@@ -510,11 +510,31 @@ peak/visits are `688,548/84,984,299`; canonical transcript SHA-256 is
 `38fa337482dbd323d68f36b6debfdc6fff94d4cf8c42e68d6477b45dc02368d6`.
 Both results remain diagnostic-only and certified depths stay at 3/2.
 
-The cheapest next M discriminator is a same-cap horizon-only extension through
-the next aligned q84 boundary.  D instead needs a prefix-preserving 34-slot,
-`K=589,824` capability through q70: that next grid rung covers q69 by 10,726, and
-all 33 current D rungs have already been selected, leaving no trajectory-neutral
-deletion.  A different 33-slot ladder must be labeled as a new trajectory.
+That next stage is complete.  M changes only the isolated q82 screen horizon
+from 82 to 84 and again replays from q1; its q82 canonical is post-replay prefix
+evidence only.  The exact q1--82 prefix is unchanged, but q83/gates 328--331
+fails at pre-count 652,016 and minimum effective `K=565,994`, 8,938 above the
+current maximum.  q84 is therefore not attempted.  Peak/visits are
+`652,016/93,965,211`; canonical transcript SHA-256 is
+`2f866d658570c9cf667088662a98288c14b41144c3ffacdefd862aaf8f185138`.
+
+D uses a direct-v2 wrapper that changes only retained K 524,288 -> 589,824 and
+candidate-count capacity 32 -> 34.  The append-only 34th rung preserves q1--68
+common records/history and the first 33 rows, then preserves q69 propagation and
+the first 33 rows before index 33 becomes first feasible.  D selects 589,824 at
+q69 with drop 61,286,012,190 ticks, but q70/gates 276--279 fails at pre-count
+718,805 and minimum effective `K=597,272`, 7,448 above the new maximum.
+Peak/visits are `718,805/87,505,002`; canonical transcript SHA-256 is
+`65d6f5ba3e45b5b57b12d1b9e1daadb17064f8aece7dc914697191f822b3a8d7`.
+The two ledgers cover 83x31 plus 70x34 = 4,953 candidate rows.  Both remain
+diagnostic-only and leave certified depths at 3/2.
+
+Both next discriminators now require capability changes.  M should append the
+standard `K=573,440` rung to form C32 and replay through q84; that rung covers
+q83 by 7,446 while retaining the original candidate-count capacity of 32.  D
+should append `K=606,208` to form C35 and replay through q70; it covers q70 by
+8,936.  All 34 current D candidates have been selected, so a smaller fixed-width
+ladder would be a distinct trajectory.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

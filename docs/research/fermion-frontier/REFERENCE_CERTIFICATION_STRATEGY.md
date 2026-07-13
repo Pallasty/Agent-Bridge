@@ -796,11 +796,33 @@ prefix，不提供 propagation state。q1--68 records/history 完整不变；q69
 `38fa337482dbd323d68f36b6debfdc6fff94d4cf8c42e68d6477b45dc02368d6`。两条新增账本
 覆盖 `82x31 + 69x33 = 4,819` 个 candidate rows，仍未触发 live/digest cap。
 
-下一条 M 路线可保持 31-slot/`K=557,056` 不变，只把 horizon 延至下一个八门对齐
-q84。D 若要保持 prefix，则应在 33 档后追加 `589,824`，形成 34-slot ladder 并重放至
-q70；该档比 q69 minimum 高 10,726。现有 33 个 D 候选都曾被 selected，不能通过删除
-旧档来保持 33-slot 而仍宣称同一轨迹；任何替换档位方案都必须标成新的 trajectory。
-不得把 q69 failure 外推为 q70 结果。
+该阶段现已完成。M 外层只把隔离 q82 parent 的 horizon 从 82 改为 84，并从 q1 完整
+replay；旧 q82 canonical 只在结果产生后验证 q1--82 prefix，不提供 propagation state。
+q1--82 records/history 完整不变；q83（gates 328--331）pre-count 为 652,016，minimum
+effective K 为 565,994，超过 ceiling 8,938，因此以 K-ceiling failure 结束，q84 未尝试。
+总 peak/visits 为 652,016/93,965,211，canonical SHA 为
+`2f866d658570c9cf667088662a98288c14b41144c3ffacdefd862aaf8f185138`。
+
+D 使用新的 direct-v2 capability wrapper；相对 arithmetic-v2 唯一变化是
+`max_retained_K: 524,288 -> 589,824` 与 `max_candidate_count: 32 -> 34`，其余 caps 与
+provider bindings 保持不变。wrapper/manifest SHA 分别为
+`7758cc1bf0cd71545a7135c92848059dc69e5d934c79f1d8c60ea61019459254` 与
+`36694fa3e72ad78fde91826c6a1ae81ae5a7f07e51db2d008769d97eabce5b1a`；K=573,440/C33
+wrapper 及其 q70 screen 只作未编译、未执行的 route reference。D 在原 33 档后追加
+`589,824`。q1--68 common state/history 与前 33 行保持 exact；q69 也保持旧 propagation
+和前 33 行，新增 index 33 以 61,286,012,190 ticks drop first-feasible commit。q70
+（gates 276--279）pre-count 为 718,805，minimum effective K 为 597,272，超过 ceiling
+7,448，因此再次 fail-stop。总 peak/visits 为 718,805/87,505,002，last E 为
+`2288773695590045/2^64`，canonical SHA 为
+`65d6f5ba3e45b5b57b12d1b9e1daadb17064f8aece7dc914697191f822b3a8d7`。两条账本覆盖
+`83x31 + 70x34 = 4,953` 个 candidate rows，均未触发 live/digest cap。
+
+下一阶段两条路线都必须扩 capability。M 应使用 retained-K-only 的 direct-v2
+`K=573,440` wrapper，保持 candidate capacity 32，在当前 31 档后 append 新档并重放至
+q84；该档比 q83 minimum 高 7,446。现有 D 用 K=573,440/C33 wrapper 额外改变 candidate
+capacity，不能作为最小 M 执行层。D 应在 34 档后 append `606,208`，形成 C35 并重放至
+q70；该标准网格比 q70 minimum 高 8,936。D34 的每个候选都曾被 selected，不能删除
+旧档而仍宣称 prefix-preserving trajectory。不得外推这两个新档后的未测结果。
 
 这些 screens 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
 product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY
