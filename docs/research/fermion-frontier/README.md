@@ -317,6 +317,16 @@ fixed-`K=262,144` run ends below the scalar `1/4000` ceiling, but needs 337,691,
 term-gate visits and a 446,188-term peak, violating every corresponding v1 cap;
 it is evidence for designing a separately precommitted v2, not a certificate.
 
+A committed-arithmetic v2 design probe now tests the bounded `K<=327,680` policy
+surface without certificate authority.  Magnetization step 4 commits 28 diagnostic
+checkpoints and then needs effective `K=333,983` at checkpoint 29; double occupancy
+step 3 commits 21 and then needs `K=350,604` at checkpoint 22.  Their peaks/visits
+are respectively 397,526/48,646,721 and 501,254/37,271,764, so the observed stop is
+the frozen candidate ceiling rather than the proposed resource envelope.  These
+canonical transcripts omit runtime/RSS/host/path fields and may guide a separately
+committed v2 policy, but they are not child boundaries, transitions or positive
+certificate witnesses.
+
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
 which predates a documented splitting-sign fix.  The fork must pin a complete Julia

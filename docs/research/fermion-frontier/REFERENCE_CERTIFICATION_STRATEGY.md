@@ -636,6 +636,12 @@ fail closed 且不提交 child boundary。该 screen 的 ledger/failure SHA 分�
 `8d8aff7ab17148df346857cb9d86b07c9a031cb3a1ffec5945b3183938f0e5cd`。
 诊断 K=262,144 虽得到 `E3~=1.86259e-4`，但 peak/visits 为
 446,188/337,691,387，违反 v1 的 262,144/200,000,000 caps；它只能指导 v2。
+已提交算术内核上的 v2 design probe 进一步冻结 `K<=327,680` 的候选面：磁化量
+step 4 先提交 28 个诊断 checkpoint，第 29 个需要 effective `K=333,983`；double
+occupancy step 3 先提交 21 个，第 22 个需要 `K=350,604`。对应 peak/visits 为
+397,526/48,646,721 与 501,254/37,271,764，故当前停止原因是候选 K ceiling，而非
+拟议资源 envelope。两份 canonical transcript 明确为 `DIAGNOSTIC_ONLY`，没有 sidecar、
+transition、child depth 或正证 authority，只能用于下一份独立 precommit。
 任何走势都不能线性外推到 R100；product-formula-to-exact-Hubbard 项仍须独立组合。
 
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、

@@ -300,6 +300,18 @@ so they are versioned normally and are not added to the preservation-only
   root-source drift, local-kernel isolation, transient/resource cap, exact schema,
   deterministic tie, first-feasible/no-commit and retained-`K=65,536` truncation
   regressions.
+- `hubbard_l8_adaptive_k_v2_design_probe.py` and the magnetization/double-occupancy
+  `*_adaptive_k_v2_design_transcript.json` files: explicitly non-authoritative,
+  deterministic policy-design probes using the committed v2 kernel.  They exclude
+  runtime, RSS, host, path and floating-point fields from the semantic bytes.  With
+  policy maximum `K=327,680`, magnetization commits 28 checkpoints before
+  checkpoint 29 needs effective `K=333,983`; double occupancy commits 21 before
+  checkpoint 22 needs `K=350,604`.  No transcript is a child witness, transition or
+  sidecar, and both leave certified depth unchanged.
+- `test_hubbard_l8_adaptive_k_v2_design_probe.py`: source/kernel isolation,
+  canonical transcript, exact prefix/recurrence, every-candidate feasibility,
+  first-feasible, deterministic replay hash, failure summary, resource and
+  diagnostic-only scope regressions.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,
