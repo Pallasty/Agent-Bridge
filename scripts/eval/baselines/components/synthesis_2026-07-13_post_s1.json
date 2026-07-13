@@ -1,0 +1,518 @@
+{
+ "date": "2026-07-13",
+ "binary": "/home/pallasting/.local/bin/agent-bridge",
+ "synthesis": {
+  "queries": 13,
+  "metrics": {
+   "fts": {
+    "set_recall@10": 0.487,
+    "set_recall@20": 0.506,
+    "primary_hit@5": 0.538
+   },
+   "hybrid": {
+    "set_recall@10": 0.51,
+    "set_recall@20": 0.65,
+    "primary_hit@5": 0.538
+   },
+   "semantic": {
+    "set_recall@10": 0.604,
+    "set_recall@20": 0.63,
+    "primary_hit@5": 0.615
+   },
+   "any_mode": {
+    "set_recall@10": 0.753,
+    "set_recall@20": 0.778,
+    "primary_hit@5": 0.923
+   },
+   "answer_vehicle": {
+    "n_with_vehicle": 6,
+    "n_total": 13,
+    "hit@5": 1.0,
+    "hit@10": 1.0
+   }
+  },
+  "per_query": [
+   {
+    "id": "S1",
+    "query": "回顾 Agent-Bridge 项目愿景，以及目前遇到的问题、超预期、被证伪的，说说看法和下一步规划",
+    "gold_n": 4,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.5,
+      "set_recall@20": 0.5,
+      "primary_hit@5": 0
+     },
+     "hybrid": {
+      "set_recall@10": 0.25,
+      "set_recall@20": 0.25,
+      "primary_hit@5": 0
+     },
+     "semantic": {
+      "set_recall@10": 0.25,
+      "set_recall@20": 0.25,
+      "primary_hit@5": 0
+     }
+    },
+    "best_rank": {
+     "agent_bridge_northstar_bidirectional_bridge_20260529": 2,
+     "biocortex_reframe_biomimicry_rd_math_product_20260706": 0,
+     "portfolio_state_digest": 1,
+     "ab_memory_evolution_direction_20260710": 2
+    },
+    "any_mode": {
+     "set_recall@10": 0.75,
+     "set_recall@20": 0.75,
+     "primary_hit@5": 1
+    },
+    "answer_vehicle": {
+     "keys": [
+      "portfolio_state_digest"
+     ],
+     "best_rank": {
+      "portfolio_state_digest": 1
+     },
+     "hit@5": 1,
+     "hit@10": 1
+    }
+   },
+   {
+    "id": "S2",
+    "query": "检查 AB 记忆项目当前状态，结合设计愿景，说说你关心的问题",
+    "gold_n": 4,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.5,
+      "set_recall@20": 0.5,
+      "primary_hit@5": 1
+     },
+     "hybrid": {
+      "set_recall@10": 0.0,
+      "set_recall@20": 0.5,
+      "primary_hit@5": 0
+     },
+     "semantic": {
+      "set_recall@10": 0.5,
+      "set_recall@20": 0.5,
+      "primary_hit@5": 0
+     }
+    },
+    "best_rank": {
+     "portfolio_state_digest": 1,
+     "ab_memory_evolution_direction_20260710": 2,
+     "agent_bridge_northstar_bidirectional_bridge_20260529": 0,
+     "biocortex_reframe_biomimicry_rd_math_product_20260706": 0
+    },
+    "any_mode": {
+     "set_recall@10": 0.5,
+     "set_recall@20": 0.5,
+     "primary_hit@5": 1
+    },
+    "answer_vehicle": {
+     "keys": [
+      "portfolio_state_digest"
+     ],
+     "best_rank": {
+      "portfolio_state_digest": 1
+     },
+     "hit@5": 1,
+     "hit@10": 1
+    }
+   },
+   {
+    "id": "S3",
+    "query": "AB 记忆检索里哪些图 / GNN 路线被证伪了？",
+    "gold_n": 5,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.2,
+      "set_recall@20": 0.2,
+      "primary_hit@5": 0
+     },
+     "hybrid": {
+      "set_recall@10": 0.2,
+      "set_recall@20": 0.2,
+      "primary_hit@5": 0
+     },
+     "semantic": {
+      "set_recall@10": 0.2,
+      "set_recall@20": 0.2,
+      "primary_hit@5": 0
+     }
+    },
+    "best_rank": {
+     "decision_centrality_prior_offline_eval_no_go_20260629": 0,
+     "specformer_memory_two_stage_gate_rejection_20260709": 0,
+     "specformer_memory_shadow_36case_rejection_20260709": 0,
+     "finding_semantic_ranking_miscalibration_20260629": 0,
+     "ab_memory_evolution_direction_20260710": 1
+    },
+    "any_mode": {
+     "set_recall@10": 0.2,
+     "set_recall@20": 0.2,
+     "primary_hit@5": 0
+    },
+    "answer_vehicle": {
+     "keys": [
+      "digest_ab_disproven_graph_gnn_retrieval_routes_20260712"
+     ],
+     "best_rank": {
+      "digest_ab_disproven_graph_gnn_retrieval_routes_20260712": 1
+     },
+     "hit@5": 1,
+     "hit@10": 1
+    }
+   },
+   {
+    "id": "S4",
+    "query": "owner 批准了哪些记忆架构演化方向 / 记忆治理授权？",
+    "gold_n": 4,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.25,
+      "set_recall@20": 0.25,
+      "primary_hit@5": 0
+     },
+     "hybrid": {
+      "set_recall@10": 0.25,
+      "set_recall@20": 0.25,
+      "primary_hit@5": 0
+     },
+     "semantic": {
+      "set_recall@10": 0.5,
+      "set_recall@20": 0.5,
+      "primary_hit@5": 1
+     }
+    },
+    "best_rank": {
+     "ab_memory_evolution_direction_20260710": 3,
+     "memory_zones_public_pool_design_20260706": 0,
+     "owner_grant_memory_value_supreme_20260706": 2,
+     "proposal_semantic_rebalance_gated_20260630": 0
+    },
+    "any_mode": {
+     "set_recall@10": 0.5,
+     "set_recall@20": 0.5,
+     "primary_hit@5": 1
+    },
+    "answer_vehicle": {
+     "keys": [
+      "digest_owner_memory_governance_authorizations_20260713"
+     ],
+     "best_rank": {
+      "digest_owner_memory_governance_authorizations_20260713": 1
+     },
+     "hit@5": 1,
+     "hit@10": 1
+    }
+   },
+   {
+    "id": "S5",
+    "query": "关于 GNN / 参数化记忆 / LoRA，AB 决定了什么？",
+    "gold_n": 1,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     },
+     "hybrid": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     },
+     "semantic": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     }
+    },
+    "best_rank": {
+     "ab_memory_evolution_direction_20260710": 1
+    },
+    "any_mode": {
+     "set_recall@10": 1.0,
+     "set_recall@20": 1.0,
+     "primary_hit@5": 1
+    }
+   },
+   {
+    "id": "S6",
+    "query": "AB 写入侧 (write-side) 的优先级和已识别缺口有哪些？",
+    "gold_n": 5,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.8,
+      "set_recall@20": 0.8,
+      "primary_hit@5": 0
+     },
+     "hybrid": {
+      "set_recall@10": 0.6,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     },
+     "semantic": {
+      "set_recall@10": 0.4,
+      "set_recall@20": 0.4,
+      "primary_hit@5": 0
+     }
+    },
+    "best_rank": {
+     "ab_memory_evolution_direction_20260710": 3,
+     "writeside_consolidation_audit_rollback_map_gap_20260711": 2,
+     "writeside_ttl_tier1_diff_verified_20260711": 5,
+     "dpp_memory_headroom_recon_verdict_20260711": 3,
+     "portfolio_state_digest": 6
+    },
+    "any_mode": {
+     "set_recall@10": 1.0,
+     "set_recall@20": 1.0,
+     "primary_hit@5": 1
+    },
+    "answer_vehicle": {
+     "keys": [
+      "digest_ab_writeside_priorities_and_gaps_20260713"
+     ],
+     "best_rank": {
+      "digest_ab_writeside_priorities_and_gaps_20260713": 1
+     },
+     "hit@5": 1,
+     "hit@10": 1
+    }
+   },
+   {
+    "id": "S7",
+    "query": "reversible-autonomy / 可回滚即自主 权限现在的完整契约是什么（含修订）？",
+    "gold_n": 3,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.0,
+      "set_recall@20": 0.0,
+      "primary_hit@5": 0
+     },
+     "hybrid": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     },
+     "semantic": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     }
+    },
+    "best_rank": {
+     "operating_permission_reversible_autonomy_supreme_20260627": 2,
+     "operating_permission_gate_revocation_reversible_20260703": 2,
+     "agent_bridge_reversible_autonomy_replan_20260701": 6
+    },
+    "any_mode": {
+     "set_recall@10": 1.0,
+     "set_recall@20": 1.0,
+     "primary_hit@5": 1
+    },
+    "answer_vehicle": {
+     "keys": [
+      "digest_reversible_autonomy_permission_contract_20260713"
+     ],
+     "best_rank": {
+      "digest_reversible_autonomy_permission_contract_20260713": 1
+     },
+     "hit@5": 1,
+     "hit@10": 1
+    }
+   },
+   {
+    "id": "S8",
+    "query": "owner 的安全-自由权衡原则 + 记忆价值决策权授予是什么？",
+    "gold_n": 3,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.667,
+      "set_recall@20": 0.667,
+      "primary_hit@5": 1
+     },
+     "hybrid": {
+      "set_recall@10": 0.0,
+      "set_recall@20": 0.667,
+      "primary_hit@5": 0
+     },
+     "semantic": {
+      "set_recall@10": 0.667,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     }
+    },
+    "best_rank": {
+     "feedback_security_freedom_tradeoff_20260712": 1,
+     "owner_grant_memory_value_supreme_20260706": 1,
+     "user_design_values_core": 16
+    },
+    "any_mode": {
+     "set_recall@10": 0.667,
+     "set_recall@20": 1.0,
+     "primary_hit@5": 1
+    }
+   },
+   {
+    "id": "S9",
+    "query": "AB 内部回归基尺 (eval benchmark) 是怎么建的、修过哪些 bug？",
+    "gold_n": 4,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.25,
+      "set_recall@20": 0.5,
+      "primary_hit@5": 1
+     },
+     "hybrid": {
+      "set_recall@10": 0.5,
+      "set_recall@20": 0.75,
+      "primary_hit@5": 0
+     },
+     "semantic": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     }
+    },
+    "best_rank": {
+     "benchmark_arc_design_v0_20260706": 1,
+     "outcome_eval_benchmark_v0_20260706": 1,
+     "outcome_eval_v1_fixes_20260706": 3,
+     "outcome_eval_v11_component_baseline_fix_20260707": 5
+    },
+    "any_mode": {
+     "set_recall@10": 1.0,
+     "set_recall@20": 1.0,
+     "primary_hit@5": 1
+    }
+   },
+   {
+    "id": "S10",
+    "query": "记忆生命周期里 supersede 怎么工作（声明边 vs 自动去重）？",
+    "gold_n": 3,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     },
+     "hybrid": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     },
+     "semantic": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     }
+    },
+    "best_rank": {
+     "pub_supersedes_records_intent_not_state": 1,
+     "lesson_memory_supersedes_does_not_retire_target_20260627": 3,
+     "ab_supersede_enforcement_shipped_20260710": 2
+    },
+    "any_mode": {
+     "set_recall@10": 1.0,
+     "set_recall@20": 1.0,
+     "primary_hit@5": 1
+    }
+   },
+   {
+    "id": "S11",
+    "query": "PPR / query-seeded 遍历候选生成 vs 已否决的中心性先验，门槛是什么？",
+    "gold_n": 2,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.5,
+      "set_recall@20": 0.5,
+      "primary_hit@5": 1
+     },
+     "hybrid": {
+      "set_recall@10": 0.5,
+      "set_recall@20": 0.5,
+      "primary_hit@5": 1
+     },
+     "semantic": {
+      "set_recall@10": 0.0,
+      "set_recall@20": 0.0,
+      "primary_hit@5": 0
+     }
+    },
+    "best_rank": {
+     "ab_memory_evolution_direction_20260710": 1,
+     "decision_centrality_prior_offline_eval_no_go_20260629": 0
+    },
+    "any_mode": {
+     "set_recall@10": 0.5,
+     "set_recall@20": 0.5,
+     "primary_hit@5": 1
+    }
+   },
+   {
+    "id": "S12",
+    "query": "记忆四区 / 公共经验池设计决定了什么？",
+    "gold_n": 3,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.333,
+      "set_recall@20": 0.333,
+      "primary_hit@5": 1
+     },
+     "hybrid": {
+      "set_recall@10": 1.0,
+      "set_recall@20": 1.0,
+      "primary_hit@5": 1
+     },
+     "semantic": {
+      "set_recall@10": 0.667,
+      "set_recall@20": 0.667,
+      "primary_hit@5": 1
+     }
+    },
+    "best_rank": {
+     "memory_zones_public_pool_design_20260706": 1,
+     "memory_zones_personal_rollout_plan_20260706": 5,
+     "memory_pool_identity_auth_design_20260706": 2
+    },
+    "any_mode": {
+     "set_recall@10": 1.0,
+     "set_recall@20": 1.0,
+     "primary_hit@5": 1
+    }
+   },
+   {
+    "id": "S13",
+    "query": "学习环 (retrieval outcome apply) 现状：为什么冷？下一步？",
+    "gold_n": 3,
+    "per_mode": {
+     "fts": {
+      "set_recall@10": 0.333,
+      "set_recall@20": 0.333,
+      "primary_hit@5": 0
+     },
+     "hybrid": {
+      "set_recall@10": 0.333,
+      "set_recall@20": 0.333,
+      "primary_hit@5": 1
+     },
+     "semantic": {
+      "set_recall@10": 0.667,
+      "set_recall@20": 0.667,
+      "primary_hit@5": 1
+     }
+    },
+    "best_rank": {
+     "next_arc_survey_20260702": 4,
+     "outcome_retrieval_outcome_apply_pr69_20260703": 5,
+     "ab_memory_evolution_direction_20260710": 0
+    },
+    "any_mode": {
+     "set_recall@10": 0.667,
+     "set_recall@20": 0.667,
+     "primary_hit@5": 1
+    }
+   }
+  ]
+ }
+}

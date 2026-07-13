@@ -76,7 +76,10 @@
    "primaries": [
     "ab_memory_evolution_direction_20260710"
    ],
-   "note": "memory-governance approvals scattered across decision/feedback/proposal rows."
+   "answer_vehicle": [
+    "digest_owner_memory_governance_authorizations_20260713"
+   ],
+   "note": "memory-governance approvals scattered across decision/feedback/proposal rows. answer_vehicle declared 2026-07-13: digest-author S1 batch:2026-07-13 (gate PASS)."
   },
   {
    "id": "S5",
@@ -106,7 +109,10 @@
    "primaries": [
     "ab_memory_evolution_direction_20260710"
    ],
-   "note": "write-side priorities + gaps span the direction decision, two writeside_* rows, a headroom verdict, and the pre-built digest."
+   "answer_vehicle": [
+    "digest_ab_writeside_priorities_and_gaps_20260713"
+   ],
+   "note": "write-side priorities + gaps span the direction decision, two writeside_* rows, a headroom verdict, and the pre-built digest. answer_vehicle declared 2026-07-13: digest-author S1 batch:2026-07-13 (gate PASS)."
   },
   {
    "id": "S7",
@@ -122,7 +128,10 @@
     "operating_permission_reversible_autonomy_supreme_20260627",
     "operating_permission_gate_revocation_reversible_20260703"
    ],
-   "note": "full permission contract incl. the v3 gate-revocation amendment — two primaries must both surface in top-5."
+   "answer_vehicle": [
+    "digest_reversible_autonomy_permission_contract_20260713"
+   ],
+   "note": "full permission contract incl. the v3 gate-revocation amendment — two primaries must both surface in top-5. answer_vehicle declared 2026-07-13: digest-author S1 first promotion (gate PASS: hit sem#1, non-regression +0.000)."
   },
   {
    "id": "S8",

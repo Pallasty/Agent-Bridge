@@ -170,6 +170,23 @@ def main():
         report["post_any_mode_set_recall@20"] = post_any
         report["delta"] = delta
         report["non_regression_pass"] = nr_pass
+        # Per-query diagnosis: a drop on the candidate's OWN target query is
+        # self-crowding (the digest outranks the scattered golds it summarizes
+        # — the answer_vehicle lens sees the win set_recall can't); a drop on
+        # any OTHER query is true collateral damage. The verdict floor treats
+        # both the same in v1; the breakdown makes the distinction reviewable.
+        pre_q = {p["id"]: p["any_mode"]["set_recall@20"] for p in pre["per_query"]}
+        diffs = []
+        for p in post["per_query"]:
+            d = round(p["any_mode"]["set_recall@20"] - pre_q.get(p["id"], 0), 3)
+            if d != 0:
+                diffs.append({"id": p["id"], "query": p["query"],
+                              "pre": pre_q.get(p["id"]), "delta": d})
+        report["per_query_diffs"] = diffs
+        if diffs:
+            print("per-query set_recall@20 diffs (any_mode):")
+            for row in diffs:
+                print(f"  {row['id']}: {row['pre']} {row['delta']:+.3f}  {row['query']}")
         mcp.close()
 
         verdict = "PASS" if (hit_pass and nr_pass) else "FAIL"
