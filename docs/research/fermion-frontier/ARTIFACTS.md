@@ -337,6 +337,21 @@ so they are versioned normally and are not added to the preservation-only
   canonical-policy, verified-module loader/escape, live-monkeypatch self-exec,
   exact ledger/budget/first-feasible, tamper, resource, diagnostic-separation,
   compact-witness and structured CLI regressions, plus an opt-in full public replay.
+- `hubbard_l8_adaptive_k_v3_design_probe.py` and the magnetization/double-occupancy
+  `*_adaptive_k_v3_design_transcript.json` files: non-authoritative extended-`K`
+  diagnostics that leave all v2 evidence immutable.  The wrapper fresh-executes its
+  exact bounded self bytes and compiles the pinned v2 implementation and dependencies
+  from the same verified payloads.  Its 21/25-candidate ladders end at `K=393,216`;
+  magnetization commits 32 checkpoints before checkpoint 33 requires `K=405,291`,
+  while double occupancy commits 23 before checkpoint 24 requires `K=397,750`.
+  Canonical transcript SHA-256 values are
+  `8ac6f010a136ace8f1d5be73e0d076c7090e4ee7d70adef86ae72c0782a2703e` and
+  `263636de9e788bde4ad0b85f872fcfa22fae9ac73a5029af4c81383360584d90`.
+  They commit no policy, boundary, transition, sidecar or positive witness.
+- `test_hubbard_l8_adaptive_k_v3_design_probe.py`: exact base/source loader,
+  same-byte self-exec bypass, isolated configuration, candidate/kernel containment,
+  canonical transcript, every-prefix/candidate/first-feasible recurrence, frozen
+  record/failure/history/resource hashes and exact v2-prefix handoff regressions.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

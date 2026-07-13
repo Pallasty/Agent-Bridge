@@ -442,3 +442,16 @@ five resource diagnostics are bound, while no child sidecar or transition is wri
 Certified mapped depth remains 3 for magnetization and 2 for double occupancy; the
 outer evidence orchestrator, exact-Hubbard error, remaining R100 evolution, physical
 reference and READY status are unchanged.
+
+A non-authoritative v3 design generation has now tested the next bounded ladder
+without altering any v2 policy or formal artifact.  A same-byte fresh-executed
+wrapper reuses the pinned v2 implementation, expands the magnetization/double-
+occupancy candidate sets to 21/25 values through `K=393,216`, and leaves all other
+resource envelopes fixed.  Magnetization advances from the old checkpoint-29 stop
+through checkpoint 32 and then needs `K=405,291` at checkpoint 33; double occupancy
+advances through checkpoint 23 and then needs `K=397,750` at checkpoint 24.  The
+observed peaks/visits (550,806/61,421,993 and 525,968/44,079,570) remain within the
+design caps, and the entire formerly committed v2 prefix is unchanged.  Thus this
+generation diagnoses another maximum-K ceiling and establishes `K=409,600` as the
+minimum next ladder endpoint worth testing.  No v3 policy, formal witness, child
+sidecar, transition, exact-Hubbard statement or depth increment has been created.

@@ -657,6 +657,18 @@ kernel/root/parent，外层再次复核全部 prefix、candidate、first-feasibl
 因此 M/D certified mapped depth 仍分别为 3/2，没有 boundary、transition 或 sidecar。
 任何走势都不能线性外推到 R100；product-formula-to-exact-Hubbard 项仍须独立组合。
 
+随后完成的 v3 extended-`K` design probe 仍不具有 certificate authority。它从一次
+bounded 读取的自身字节 fresh-exec，并把已固定 v2 probe、kernel、root 与 immediate
+parent 依赖从同一批已验哈希字节编译；旧 v2 文件不作任何修改。magnetization / double
+occupancy 分别采用 21/25 个候选并延伸到 `K=393,216`，仅放宽 candidate/output ceiling，
+其余 `786,432` live/digest 与 `536,870,912` visits caps 保持不变。结果分别在提交 32/23
+个 checkpoint 后，于 checkpoint 33/24 需要最低有效 `K=405,291/397,750`；peak/visits
+为 550,806/61,421,993 与 525,968/44,079,570。旧 v2 committed prefix 的 propagation、
+first-feasible 选择、drop、retained digest 与 E recurrence 全部保持一致，故两次停止仍是
+K ceiling，而非资源失败。该结果只排除完整 attempted step 使用 `K<=393,216`；下一轮
+设计候选至少须包含 `409,600`，且仍必须在 formal replay 前另行预提交，不得原地放宽 v2
+policy，也不增加当前 M/D depth 3/2。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若

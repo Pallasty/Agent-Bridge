@@ -349,6 +349,20 @@ therefore remains 3 and double-occupancy depth 2; no boundary, transition or sid
 is emitted, and exact-Hubbard error, remaining R100 steps, physical reference and
 READY remain unassessed.
 
+An extended-`K` v3 design probe now reuses the exact committed v2 implementation
+through a same-byte, source-bounded wrapper while remaining explicitly outside
+certificate authority.  Its magnetization/double-occupancy ladders contain 21/25
+candidates through `K=393,216`; only the candidate/output ceiling is relaxed, while
+the `786,432` live/digest and `536,870,912` visit envelopes remain unchanged.
+Magnetization commits 32 diagnostic checkpoints and fails at checkpoint 33 with
+minimum effective `K=405,291`; double occupancy commits 23 and fails at checkpoint
+24 with minimum `K=397,750`.  Their peaks/visits are 550,806/61,421,993 and
+525,968/44,079,570, so both are again candidate-ceiling stops rather than resource
+stops.  Every previously committed v2 diagnostic prefix selection, drop and retained
+state is unchanged.  This rules out `K<=393,216` as a complete attempted-step ladder
+and requires any next design ladder to include at least `K=409,600`; it does not
+precommit a v3 policy or increase either certified depth.
+
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
 which predates a documented splitting-sign fix.  The fork must pin a complete Julia
