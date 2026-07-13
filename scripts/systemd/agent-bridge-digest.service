@@ -1,0 +1,45 @@
+# systemd user unit for the nightly digest-author draft batch
+# (consolidation middle — docs/DESIGN-nightly-digest-author.md).
+#
+# `dream digest` picks up to 3 under-served synthesis topics (eval-fixture
+# answer_vehicle gaps + telemetry NL miss clusters), asks `claude -p` for a
+# citation-ledger digest draft per topic, and writes `digest_draft_*` review
+# rows. Propose-only: it NEVER writes live `digest` rows; every draft goes
+# through the offline eval gate (scripts/eval/digest_gate.py: shadow-DB hit
+# gate + set_recall non-regression) plus manual promotion.
+#
+# Like distill this calls the local `claude -p` CLI (zero API key). Cost
+# envelope: digest prompts carry up to 12 full rows, estimated 90-180 s/topic,
+# so a top-3 round sits well under the 3900 s timeout. A failed or timed-out
+# topic writes no row and is retried the next night.
+#
+# Runs at 05:00 — after the 03:42 hygiene pass and the 04:30 distill batch,
+# so the picker sees the post-hygiene, post-distill store.
+#
+# Kill switch: systemctl --user disable --now agent-bridge-digest.timer
+#              (or set AB_DIGEST_AUTHOR_DISABLE=1 in the environment).
+# Rollback:    every pipeline row carries the derived:digest_author tag.
+#
+# Install:
+#   cp scripts/systemd/agent-bridge-digest.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agent-bridge-digest.timer
+# One-shot manual run (don't wait for the timer):
+#   systemctl --user start agent-bridge-digest.service
+# Logs:
+#   tail -f ~/.cache/agent-bridge/digest.log
+
+[Unit]
+Description=agent-bridge nightly digest-author draft batch (propose-only, claude -p)
+
+[Service]
+Type=oneshot
+# Wrapper, not `.real`: the batch writes memory rows, so it must inherit
+# per-machine env from machine.env (embedding model etc.).
+# AGENT_BRIDGE_CLAUDE_BIN pinned explicitly: the systemd user PATH does
+# not include ~/.local/bin, where the claude CLI lives.
+Environment=AGENT_BRIDGE_CLAUDE_BIN=%h/.local/bin/claude
+ExecStart=%h/.local/bin/agent-bridge dream digest --top-n 3 --fixtures /Data/CascadeProjects/agent-bridge/scripts/eval/fixtures/synthesis_queries.json
+StandardOutput=append:%h/.cache/agent-bridge/digest.log
+StandardError=append:%h/.cache/agent-bridge/digest.log
+TimeoutStartSec=3900

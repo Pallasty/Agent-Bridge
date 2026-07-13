@@ -205,7 +205,7 @@ pub async fn run(top_n: usize, dry_run: bool, timeout_secs: u64) -> Result<()> {
 /// Spawn `claude -p <prompt>` (the pilot's exact channel — zero API key,
 /// default model) and return stdout. `AGENT_BRIDGE_CLAUDE_BIN` overrides the
 /// binary, matching the agent-runtime convention.
-async fn call_claude(prompt: &str, timeout_secs: u64) -> Result<String> {
+pub(crate) async fn call_claude(prompt: &str, timeout_secs: u64) -> Result<String> {
     let bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.arg("-p").arg(prompt);
@@ -237,7 +237,7 @@ async fn call_claude(prompt: &str, timeout_secs: u64) -> Result<String> {
 
 /// Strip an optional markdown code fence (the pilot saw `claude -p` wrap
 /// JSON in ```json fences intermittently) and return the inner text.
-fn strip_fences(raw: &str) -> &str {
+pub(crate) fn strip_fences(raw: &str) -> &str {
     let raw = raw.trim();
     if !raw.starts_with("```") {
         return raw;
@@ -488,7 +488,7 @@ pub fn build_draft_record(
     }
 }
 
-fn today_batch_tag() -> String {
+pub(crate) fn today_batch_tag() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

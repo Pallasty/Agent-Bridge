@@ -2142,6 +2142,37 @@ enum DreamOp {
         #[arg(long, default_value_t = 600)]
         timeout_secs: u64,
     },
+    /// **Consolidation middle** — Nightly digest-author draft queue
+    /// (propose-only). Picks under-served synthesis topics (eval-fixture
+    /// answer_vehicle gaps + telemetry NL miss clusters), asks `claude -p`
+    /// to synthesize a citation-ledger `digest` draft from real source rows,
+    /// and writes `digest_draft_*` review rows. NEVER writes live `digest`
+    /// rows itself — promotion goes through the offline eval gate
+    /// (`scripts/eval/digest_gate.py`) plus manual review. Designed for cron
+    /// (e.g. `0 5 * * *`, after hygiene and distill). Kill switch:
+    /// `AB_DIGEST_AUTHOR_DISABLE=1`. See docs/DESIGN-nightly-digest-author.md.
+    Digest {
+        /// Maximum topics to draft this round.
+        #[arg(long, default_value_t = 3)]
+        top_n: usize,
+        /// Inspect-only: print the picked topics but skip LLM + writes.
+        #[arg(long)]
+        dry_run: bool,
+        /// Per-topic `claude -p` timeout in seconds (digest prompts carry
+        /// up to 12 full rows, so the envelope is larger than distill's).
+        #[arg(long, default_value_t = 900)]
+        timeout_secs: u64,
+        /// Synthesis eval fixture driving T1 topic selection. An unreadable
+        /// path skips T1 with a log line instead of failing the run.
+        #[arg(long, default_value = "scripts/eval/fixtures/synthesis_queries.json")]
+        fixtures: String,
+        /// Telemetry lookback window (days) for T2 miss-cluster topics.
+        #[arg(long, default_value_t = 14)]
+        window_days: i64,
+        /// Minimum miss count for a T2 topic.
+        #[arg(long, default_value_t = 3)]
+        min_miss_count: u64,
+    },
     /// 呼吸式画布 / Hebbian feedback — Promote strong co-activation pairs
     /// (`memory_coactivation` rows with count ≥ `--min-count`) into explicit
     /// `cofires` edges in `memory_edges`. Pairs that already have a `cofires`
@@ -6256,6 +6287,24 @@ async fn real_main() -> Result<()> {
                 dry_run,
                 timeout_secs,
             } => ab_bridge::dream_distill::run(*top_n, *dry_run, *timeout_secs).await,
+            DreamOp::Digest {
+                top_n,
+                dry_run,
+                timeout_secs,
+                fixtures,
+                window_days,
+                min_miss_count,
+            } => {
+                ab_bridge::dream_digest::run(ab_bridge::dream_digest::DigestRunOpts {
+                    top_n: *top_n,
+                    dry_run: *dry_run,
+                    timeout_secs: *timeout_secs,
+                    fixtures: fixtures.clone(),
+                    window_days: *window_days,
+                    min_miss_count: *min_miss_count,
+                })
+                .await
+            }
             DreamOp::Promote {
                 min_count,
                 limit,
