@@ -469,3 +469,16 @@ candidate `K=475,136` covers both current minima but remains untested beyond the
 handoff.  This generation is diagnostic only: certified depths remain 3/2 and no
 policy, formal witness, child sidecar, transition, exact-Hubbard claim or READY
 component is added.
+
+The v5 kernel-edge generation now tests the last dense ladder that fits the current
+double-occupancy candidate-count capability.  Adding `475,136/491,520/507,904`
+produces 28/32 candidate sets without changing the v4 live/digest/visit or bit-width
+caps.  Magnetization advances through checkpoint 38 and fails at checkpoint 39 with
+minimum K 521,800; double occupancy advances through checkpoint 31 and fails at
+checkpoint 32 with minimum K 518,097.  Their peaks/visits are
+714,754/86,294,299 and 694,872/76,953,164, so both remain K-ceiling diagnostics.
+The standard `K=524,288` endpoint covers the two current minima but is also the
+kernel retained-K maximum.  Double occupancy has no remaining candidate slot;
+testing that endpoint requires a new sparse/merged ladder rather than appending to
+v5.  No policy, formal witness, child sidecar, transition, depth increase,
+exact-Hubbard conclusion or READY component has been added.

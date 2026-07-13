@@ -377,6 +377,22 @@ by `K=409,600`.  The next standard ladder value `K=475,136` covers both current
 minimum-K requirements, but has not yet been tested beyond those handoff points.
 No v4 policy, formal witness, child boundary, transition or depth increment exists.
 
+The v5 kernel-edge design generation adds `475,136`, `491,520` and `507,904`,
+bringing the magnetization/double-occupancy ladders to 28/32 candidates while
+keeping every non-K v4 resource cap fixed.  Its provenance separates the direct
+v5-over-canonical-v4 delta from the effective configured-v4 override and binds the
+ordered v5/v4/v3/v2 source layers.  Magnetization selects
+`475,136/475,136/491,520` at checkpoints 36--38, then checkpoint 39 needs effective
+`K=521,800`; double occupancy selects
+`475,136/475,136/507,904/507,904` at checkpoints 28--31, then checkpoint 32 needs
+`K=518,097`.  Peaks/visits are 714,754/86,294,299 and 694,872/76,953,164, so both
+are still K-ceiling rather than resource failures.  The next standard value
+`K=524,288` covers both current minima but equals the kernel retained-K maximum.
+Double occupancy already uses all 32 candidate slots, so it cannot append that value
+without deleting or merging an older candidate in a separately designed generation.
+No v5 policy or positive certificate artifact is created, and certified depths stay
+at 3/2.
+
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
 which predates a documented splitting-sign fix.  The fork must pin a complete Julia

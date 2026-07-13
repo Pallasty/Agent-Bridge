@@ -681,6 +681,18 @@ failure 的 propagation/budget/candidate-prefix 全部保持一致，旧 failure
 档 `475,136` 足以跨过这两个当前 failure，但尚未证明后续 checkpoint。v4 同样没有 policy、
 formal witness、boundary、transition、sidecar 或 depth 增量，不能被提升为正式证书。
 
+v5 kernel-edge design generation 再追加 `475,136/491,520/507,904`，使 M/D 候选数
+达到 28/32，并保持所有非 K 的 v4 resource caps 不变。它把 direct
+v5-over-canonical-v4 delta 与 configured-v4 effective override 分开绑定，同时固定有序
+v5/v4/v3/v2 source layers。magnetization 在 checkpoint 36--38 选择
+`475,136/475,136/491,520`，checkpoint 39 需要最低有效 `K=521,800`；double occupancy
+在 checkpoint 28--31 选择 `475,136/475,136/507,904/507,904`，checkpoint 32 需要
+`K=518,097`。两路 peak/visits 为 714,754/86,294,299 与
+694,872/76,953,164，仍是 K ceiling 而非资源失败。下一标准档 `524,288` 同时覆盖当前
+minimum K，但它正好等于 kernel retained-K 上界；D 已用满 32 个候选槽，下一设计代必须
+删除或合并旧档，不能直接追加第 33 项。该结果没有 precommit policy、formal witness、
+boundary、transition、sidecar 或 depth 增量，也没有证明 `K=524,288` 能完成后续 checkpoint。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
