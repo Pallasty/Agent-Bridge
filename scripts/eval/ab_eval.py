@@ -159,9 +159,17 @@ def eval_synthesis(mcp, fixture_name="synthesis_queries.json"):
     for q in fixture["queries"]:
         gold = q["gold_set"]
         primaries = q.get("primaries", [])
+        # answer_vehicle: digest key(s) meant to answer this whole query in one
+        # row (the consolidation-middle lever). Scored separately from set_recall
+        # so both lenses report side by side — set_recall measures scattered-gold
+        # assembly; answer_vehicle measures "did the one digest that answers this
+        # surface". Absent field = no consolidating digest exists yet (write-side
+        # backlog); such queries are simply excluded from the answer_vehicle mean.
+        vehicles = q.get("answer_vehicle", [])
         g = len(gold)
         # best_rank[k] = min 1-based rank of gold key k across all modes (0 = missed everywhere)
         best_rank = {k: 0 for k in gold}
+        av_best_rank = {k: 0 for k in vehicles}
         rec = {"id": q.get("id"), "query": q["query"][:50], "gold_n": g,
                "per_mode": {}}
         for mode in modes:
@@ -178,8 +186,21 @@ def eval_synthesis(mcp, fixture_name="synthesis_queries.json"):
             for k, p in pos.items():
                 if best_rank[k] == 0 or p < best_rank[k]:
                     best_rank[k] = p
+            for k in vehicles:
+                if k in keys:
+                    p = keys.index(k) + 1
+                    if av_best_rank[k] == 0 or p < av_best_rank[k]:
+                        av_best_rank[k] = p
         rec["best_rank"] = best_rank
         rec["any_mode"] = _set_scores(gold, primaries, best_rank)
+        if vehicles:
+            av_ranks = [r for r in av_best_rank.values() if r > 0]
+            rec["answer_vehicle"] = {
+                "keys": vehicles,
+                "best_rank": av_best_rank,
+                "hit@5": 1 if any(0 < r <= 5 for r in av_ranks) else 0,
+                "hit@10": 1 if any(0 < r <= 10 for r in av_ranks) else 0,
+            }
         per_query.append(rec)
 
     metrics = {}
@@ -192,6 +213,17 @@ def eval_synthesis(mcp, fixture_name="synthesis_queries.json"):
             "set_recall@20": round(sum(sel(p)["set_recall@20"] for p in per_query) / n, 3),
             "primary_hit@5": round(sum(sel(p)["primary_hit@5"] for p in per_query) / n, 3),
         }
+    # answer_vehicle: the digest-as-single-row-answer metric, meaned only over
+    # queries that declare a vehicle. n_with_vehicle / n_total is the write-side
+    # coverage (how many synthesis queries have a consolidating digest yet).
+    av_qs = [p for p in per_query if "answer_vehicle" in p]
+    n_av = len(av_qs)
+    metrics["answer_vehicle"] = {
+        "n_with_vehicle": n_av,
+        "n_total": n,
+        "hit@5": round(sum(p["answer_vehicle"]["hit@5"] for p in av_qs) / n_av, 3) if n_av else None,
+        "hit@10": round(sum(p["answer_vehicle"]["hit@10"] for p in av_qs) / n_av, 3) if n_av else None,
+    }
     return {"queries": n, "metrics": metrics, "per_query": per_query}
 
 
@@ -358,6 +390,8 @@ def compare(base, current):
     b_syn = base.get("synthesis", {}).get("metrics", {})
     c_syn = current.get("synthesis", {}).get("metrics", {})
     for mode in c_syn:
+        if mode == "answer_vehicle":
+            continue  # not a per-mode set_recall block; informational only
         if mode in b_syn:
             delta = c_syn[mode]["set_recall@20"] - b_syn[mode]["set_recall@20"]
             gates = mode == "any_mode"
@@ -455,8 +489,14 @@ def main():
             print(f"relational[{mode}]: hit@5={m['hit@5']} hit@10={m['hit@10']} mrr={m['mrr']}")
     if "synthesis" in result:
         for mode, m in result["synthesis"]["metrics"].items():
+            if mode == "answer_vehicle":
+                continue
             print(f"synthesis[{mode}]: set_recall@10={m['set_recall@10']} "
                   f"set_recall@20={m['set_recall@20']} primary_hit@5={m['primary_hit@5']}")
+        av = result["synthesis"]["metrics"].get("answer_vehicle")
+        if av:
+            print(f"synthesis[answer_vehicle]: hit@5={av['hit@5']} hit@10={av['hit@10']} "
+                  f"({av['n_with_vehicle']}/{av['n_total']} queries have a digest vehicle)")
     if "continuity" in result:
         c = result["continuity"]
         for tier, t in sorted(c["tiers"].items()):

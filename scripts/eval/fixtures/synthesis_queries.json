@@ -17,6 +17,9 @@
     "agent_bridge_northstar_bidirectional_bridge_20260529",
     "portfolio_state_digest"
    ],
+   "answer_vehicle": [
+    "portfolio_state_digest"
+   ],
    "note": "canonical 62%-miss query #1. portfolio_state_digest is a pre-built write-side digest whose own retrieval_trigger targets exactly this review — a primary lever the direction proposes; test whether it actually surfaces."
   },
   {
@@ -34,6 +37,9 @@
     "portfolio_state_digest",
     "ab_memory_evolution_direction_20260710"
    ],
+   "answer_vehicle": [
+    "portfolio_state_digest"
+   ],
    "note": "canonical 62%-miss query #2 (project-state review opener)."
   },
   {
@@ -50,6 +56,9 @@
    ],
    "primaries": [
     "decision_centrality_prior_offline_eval_no_go_20260629"
+   ],
+   "answer_vehicle": [
+    "digest_ab_disproven_graph_gnn_retrieval_routes_20260712"
    ],
    "note": "dropped gold `dense-fusion-recall-finding` (cited by the direction decision but PURGED/MISSING as of 2026-07-12) — a live corpus-decay example. 5 active golds remain."
   },
