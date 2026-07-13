@@ -755,14 +755,34 @@ visits 为 77,762,021；canonical SHA 为
 规划中的旧 q40 对齐比较面，而 D 暴露出新的 K-ceiling stop，并未触发 live/digest cap。
 两条有限 horizon 都没有完成每步 288 checkpoints。
 
-下一单元应按 observable 分开。M 可在不改 `K=540,672` 或资源 caps 的前提下先延伸至
-q82，定位下一个八门对齐边界。D 当前 q66 minimum 已比下一 16,384 网格档
-`557,056` 高 1,542，因此真正覆盖它的下一档是 `573,440`；同时 q1--65 已实际使用
-现有全部 32 档，没有 trajectory-neutral 删除槽。若要保留当前 committed prefix，最干净
-的判别器应独立固定 33-slot/`K=573,440` capability，并在 live/digest 仍为 786,432 时
-回放到下一个 q68 对齐边界；否则必须明确承认采用了新的 ladder trajectory。
+该 observable-split 单元现已完成。M 外层只把隔离的 K=540,672 parent horizon 从
+q80 改为 q82，仍从 q1 完整 replay；旧 q80 canonical 只在结果产生后验证 prefix，绝不
+提供 propagation state。q1--80 records/history 完整不变，q81（gates 320--323）
+pre-count 597,254，minimum effective K 545,129，超过 ceiling 4,457，因此以
+K-ceiling failure 结束。总 peak/visits 为 643,624/89,253,151，canonical SHA 为
+`0486a8b19077de9e90f134c7b3c0d43fdf3504a4876d6e0b2c3d01b37b89cb52`。
 
-该 screen 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
+D 使用 direct-v2 capability wrapper；唯一 kernel 变化是
+`max_retained_K: 524,288 -> 573,440` 与 `max_candidate_count: 32 -> 33`，其余 caps
+保持不变。公开 pinned loader 还会严格拒绝 `None` 或非 canonical 64-hex pin。wrapper/
+manifest SHA 分别为
+`811a16b6a47bca60281fb4afe8280783146e6f4ee28955dde7907b47fc65bb49` 与
+`c2787b105553b80ee9a1e5e1d925d6cac2ab819b0cdfab305484bf89bbba32c5`；K=540,672
+wrapper 仅作未编译、未执行的 route-lineage reference。D ladder 在原 32 档后追加
+`573,440`。完整 replay 中 q1--65 的 common state/history 与前 32 行全部 exact；q66
+也保持旧 propagation 和前 32 行，新增 index 32 的 drop 为 75,084,546,988 ticks、
+dropped count 105,845，并 first-feasible commit。q67/q68 继续选择 573,440，drop 分别为
+128,389,336,170/62,098,539,389 ticks，pre-count 为 688,548/630,616。最终到达对齐的
+q68 horizon，68/68 committed；总 peak/visits 为 688,548/82,618,707，last E 为
+`2288712409577855/2^64`，canonical SHA 为
+`b1f072c84cc676151fe3cddbb8a0db445df946f299dbb81f41e34f765d30dfc8`。
+
+下一判别器仍按 observable 分开：M 应另行固定 `K=557,056`、31-slot ladder 并重放至
+q82；该档比 q81 minimum 高 11,927。D 尚未暴露新 failure，应先保持 33-slot/
+`K=573,440` capability 不变，只把 horizon 延到下一个八门对齐 q70，测量 q69--70 后
+再决定是否扩容。不得根据 q66--68 连续选择最大档预写未测结果。
+
+这些 screens 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
 product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY
 authority。任何后续正式采用四门 cadence 的路线仍需新的独立 policy、checker、
 same-byte parent custody 和完整认证回放。

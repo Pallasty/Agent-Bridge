@@ -539,9 +539,26 @@ Full ledger tests cover 80x30 plus 66x32 candidate rows and bind the old committ
 prefixes and failure handoffs.  The route remains diagnostic-only and leaves
 certified depths 3/2 and all authority-bearing artifacts unchanged.
 
-Next, M's discriminator is a same-cap horizon extension through q82.  D needs a joint
-candidate-count/retained-K decision: `557,056` is 1,542 below the measured minimum,
-so the next 16,384-spaced covering rung is `573,440`; moreover all 32 current D
-rungs are selected in q1--65, leaving no trajectory-neutral deletion.  The clean
-prefix-preserving discriminator is therefore a separately pinned 33-slot,
-`K=573,440` screen through q68 with the 786,432 live/digest caps still unchanged.
+The observable-split discriminator is now complete.  M's same-cap q82 wrapper
+replays from q1 and uses the q80 artifact only for post-replay validation.  All
+q1--80 records and selected history are exact, while q81/gates 320--323 fails at
+pre-count 597,254 with minimum effective K 545,129, excess 4,457.  Overall
+peak/visits are 643,624/89,253,151, and the canonical SHA-256 is
+`0486a8b19077de9e90f134c7b3c0d43fdf3504a4876d6e0b2c3d01b37b89cb52`.
+
+D's direct-v2 capability wrapper raises retained K to 573,440 and candidate count
+to 33, with all other kernel limits unchanged and the K=540,672 wrapper retained
+only as a non-executed route reference.  The new ladder appends 573,440 to the
+old 32 values.  Full replay preserves q1--65 common records/history and the first
+32 rows, then preserves q66 propagation and its first 32 rows before the appended
+row becomes first feasible.  D selects 573,440 at q66--68 and reaches 68/68
+commits; pre-counts are 679,285/688,548/630,616, peak/visits are
+688,548/82,618,707, and the canonical SHA-256 is
+`b1f072c84cc676151fe3cddbb8a0db445df946f299dbb81f41e34f765d30dfc8`.
+The two full ledgers cover 81x30 plus 68x33 candidate rows.  No policy, witness,
+boundary, transition, READY component or certified-depth increase is created.
+
+The next bounded decision is M `K=557,056` with 31 candidates through q82, and a
+D same-cap 33-slot/`K=573,440` horizon-only extension through q70.  The former
+covers q81 by 11,927; the latter deliberately measures q69--70 before changing
+the D capability again.

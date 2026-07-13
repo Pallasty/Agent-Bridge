@@ -471,15 +471,31 @@ K-ceiling rather than a live/digest stop.  Neither finite horizon completes the
 288-checkpoint mapped step, and no policy, witness, boundary, transition, READY
 component or certified-depth increase is created.
 
-The next route should split by observable.  M can first extend the unchanged
-`K=540,672` screen through q82 to locate the next aligned eight-gate boundary.
-For D, the `557,056` rung is already below the measured q66 minimum, so the next
-16,384-spaced endpoint that covers it is `573,440`.  Every one of the current 32 D
-rungs is selected in the committed q1--65 history, so no trajectory-neutral slot
-deletion remains.  Preserving that prefix therefore calls for a separately pinned
-33-slot/`K=573,440` capability screen (or, explicitly, a new ladder trajectory),
-again keeping the 786,432 live/digest caps fixed and testing through the next
-aligned q68 boundary.
+That split discriminator has now been executed.  The M branch changes only its
+runtime horizon from q80 to q82 and replays from q1; the q80 transcript is used
+only for post-replay prefix validation, never as a state-resume input.  Its exact
+q1--80 prefix is unchanged, but q81/gates 320--323 fails at minimum effective
+`K=545,129`, 4,457 above the retained maximum.  The q81 pre-count is 597,254 and
+overall peak/visits are `643,624/89,253,151`.  The canonical transcript SHA-256 is
+`0486a8b19077de9e90f134c7b3c0d43fdf3504a4876d6e0b2c3d01b37b89cb52`.
+
+The D branch uses a separately pinned direct-v2 wrapper that changes only
+`max_retained_K: 524,288 -> 573,440` and `max_candidate_count: 32 -> 33`; the
+K=540,672 wrapper is route-lineage evidence only and is not executed.  Appending
+`573,440` preserves the old 32-rung order.  Exact q1--65 state/history and every
+old candidate row remain unchanged, and q66 preserves the old propagation and
+first 32 rows before index 32 becomes first feasible.  D then selects `573,440`
+at q66--68, with pre-counts `679,285/688,548/630,616`, and reaches the aligned q68
+horizon with 68/68 commits; peak/visits are `688,548/82,618,707`.  Its canonical
+transcript SHA-256 is
+`b1f072c84cc676151fe3cddbb8a0db445df946f299dbb81f41e34f765d30dfc8`.
+Both branches remain diagnostic-only and leave certified depths at 3/2.
+
+The next discriminator again splits cleanly.  M needs a separately pinned
+`K=557,056` capability and a 31st candidate through q82; that rung covers the q81
+minimum by 11,927.  D has not exposed a new failure, so its least-assumptive next
+move is a same-cap `K=573,440`/33-slot horizon-only extension through the next
+aligned q70 boundary.  Neither route may predeclare the unmeasured q69--70 result.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
