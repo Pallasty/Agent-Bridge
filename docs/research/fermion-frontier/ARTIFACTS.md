@@ -403,6 +403,30 @@ so they are versioned normally and are not added to the preservation-only
   three-level override tamper checks, canonical M file/ledger/failure/history hashes,
   full v5-prefix handoff, atomic failure preservation, explicit absence of a partial
   D transcript, and opt-in exact D resource-failure/resource-measurement replays.
+- `hubbard_l8_adaptive_k_four_gate_granularity_screen.py` and the mode-specific
+  `*_adaptive_k_four_gate_granularity_transcript.json` files: independent diagnostic
+  checkpoint-cadence screens.  They retain the pinned nine-stage/1,152-gate physical
+  sequence and take exact v6 candidates/caps as configuration only, but own their
+  four-gate/288-checkpoint control flow.  Exact v2 is a verified helper provider;
+  neither v2 nor v6 is an execution parent.  M commits 77 checkpoints before q78
+  needs `K=529,897`; D commits 64 before q65 needs `K=532,869`.  Their canonical
+  transcript SHA-256 values are
+  `18629c9a0841e1e3308eda0bc7f3cbc568c8ed2925a6b95d1c3e7b7665b142a0` and
+  `2b83f7f349cb0b7fedab4ad8b8058606c239b01d45579722afc490c35f684060`.
+  A noncanonical D ladder sensitivity restores `491,520`, removes unused `65,536`
+  and still fails at q65 with minimum K `536,203`; it is intentionally not published
+  as a transcript because that ladder is absent from the pinned v6 source.
+  Outputs are canonical, atomic and bounded by 4 MiB.  They are not v7, policies,
+  boundaries, transitions or certificate witnesses.
+- `test_hubbard_l8_adaptive_k_four_gate_granularity_screen.py`: exact source and
+  configuration pins, fresh-self isolation, rebuilt boundary/source custody,
+  fixed geometry and aligned-budget identities, four-gate commit-to-next-input
+  continuity, gate digests, full candidate/ledger/resource recurrence,
+  v6-parent negation, D `491,520` counterfactuals, resource-exception identity,
+  4 MiB atomic failure preservation, frozen transcript summaries and opt-in full
+  canonical replays.  A separate opt-in noncanonical replay freezes the 32-slot D
+  sensitivity at q65/minimum K `536,203`, peak 645,044 and 75,255,249 visits without
+  writing a provenance-ambiguous output file.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

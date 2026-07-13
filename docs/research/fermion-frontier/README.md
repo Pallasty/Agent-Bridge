@@ -414,6 +414,42 @@ explicit kernel/resource or checkpointing redesign.  No v6 policy, formal witnes
 boundary, transition, exact-Hubbard claim, READY component or certified-depth
 increase is created.
 
+An independent four-gate checkpoint-granularity screen now evaluates one explicit
+redesign without creating a v7 generation.  The screen fresh-executes only its own
+same-byte control flow.  Exact v2 bytes provide helper routines and exact v6 bytes
+provide the candidate ladders and resource caps as configuration only; neither run
+entrypoint is invoked, and v6 is not a same-byte execution parent.  The physical
+nine-stage, 1,152-gate sequence is unchanged, while ranking and commit occur every
+four gates, giving 288 checkpoints per mapped step.  Doubling the denominator
+preserves every aligned budget boundary, `cap4(2q)=cap8(q)`, but the additional
+commits deliberately produce a different retained-state trajectory.
+
+With the exact v6 ladders, magnetization commits 77 four-gate checkpoints and fails
+at checkpoint 78, gates 308--311, with minimum effective `K=529,897`, 5,609 above
+the kernel limit; peak/visits are 643,624/82,493,877.  Because checkpoint 78 is the
+second half of old eight-gate checkpoint 39, this lower observed peak does not
+increase M reach.  Double occupancy commits 64 checkpoints and fails at checkpoint
+65, gates 256--259, with minimum `K=532,869`, excess 8,581 and peak/visits
+645,011/75,412,433.  The finer cadence therefore avoids the old 825,000-term live
+stop long enough to expose a retained-K stop in the first half of old checkpoint
+33.  The v6-removed `K=491,520` rung would be first feasible at four-gate
+checkpoints 58 and 59, so its old eight-gate nonselection is not trajectory-neutral
+under the new cadence.  A controlled noncanonical 32-slot sensitivity restores that
+rung while removing the still-unused `65,536` rung.  It changes q58--59 as expected
+but still commits only 64 checkpoints and fails at the same q65/gates 256--259;
+minimum K worsens to 536,203 (excess 11,915), with peak/visits
+645,044/75,255,249.  No sensitivity transcript is published because its altered
+ladder is not contained in the pinned v6 configuration source; the opt-in regression
+recreates the numerical comparison directly.  Thus neither checkpoint halving alone
+nor this one-rung repair crosses the D frontier.  This remains an independent
+diagnostic sensitivity screen, not v7, a policy or a parent/child certificate
+continuation.  It writes no boundary, transition, sidecar, exact-Hubbard claim or
+READY component, and certified depths remain 3/2.
+The next discriminating route is a separately source-pinned kernel generation that
+tests the next standard retained value `K=540,672` under four-gate cadence while
+holding the 786,432 live/digest caps fixed; this is an explicit kernel extension,
+not another ladder-only claim.
+
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
 which predates a documented splitting-sign fix.  The fork must pin a complete Julia

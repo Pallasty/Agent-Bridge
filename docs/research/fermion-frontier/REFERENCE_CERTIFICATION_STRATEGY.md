@@ -709,6 +709,40 @@ live-digest 扩容、checkpoint 粒度重构或不同 propagation/proof 路线�
 不产生 policy、formal witness、boundary、transition、sidecar、exact-Hubbard/READY 结论
 或 M/D depth 3/2 增量。
 
+在选择 kernel 扩容或不同 propagation 路线前，另行执行了一个独立
+four-gate checkpoint-granularity screen。它不是 v7：screen 只 same-byte 执行
+自身，v2 仅提供已验字节 helper，v6 仅提供 candidates/caps 配置，二者的
+run entrypoint 均未调用，v6 也不是 same-byte parent。物理九 stage、1,152 gate
+顺序不变，但每四门 ranking/commit 一次，故每 mapped step 为 288
+checkpoints；预算分母同步加倍，所有对齐边界严格满足 `C4(2q)=C8(q)`。
+额外 commit 会改变 retained-state 轨迹，因此不宣称与八门 v6 共享状态前缀。
+
+M 在 q1--77 提交后，于 q78（物理 gates 308--311）需要 `K=529,897`，比
+kernel retained-K 上界高 5,609；peak/visits 为 643,624/82,493,877。q78 正是旧
+八门 q39 的后半，所以 peak 降低不等于 M 可达深度增加。D 在 q1--64
+提交后，于 q65（gates 256--259）需要 `K=532,869`，超出上界 8,581；
+peak/visits 为 645,011/75,412,433。相较八门路径在完整 gates 256--263
+propagation 时触发 825,000-term live cap，四门路径先在半块处截断并转为
+K-ceiling stop。这只是 checkpoint cadence 的敏感性对照，不是同一个 retained
+state 前缀。D 中被 v6 删除的 `491,520` counterfactual 在 q58、q59 会先于
+实际 `507,904` 被选择，说明八门前缀中的“未使用候选”不能直接视为
+四门轨迹中的安全删除项。为隔离该变量，又做了一次不发布 transcript 的
+32-slot 敏感性回放：恢复 `491,520`，删除在四门规范轨迹中仍未被选中的
+`65,536`。新轨迹按预期在 q58--59 改选 `491,520`，但仍只提交 64 个
+checkpoints，并在同一 q65/gates 256--259 失败；minimum K 反而升至
+`536,203`（超出 11,915），peak/visits 为 645,044/75,255,249。由于该候选集不存在于
+已固定的 v6 配置源中，数值结果只由 opt-in regression 重现，不伪装成来源正确的
+canonical artifact。因此已能排除“单纯减半 checkpoint 间隔”和“仅补回该候选档”
+这两个简单修复，但不把它外推为所有 cadence/ladder 协同设计的 no-go。
+下一个有判别力的单元应是独立固定源字节的 kernel generation：在四门 cadence 下测试
+下一标准 retained 档 `K=540,672`，同时保持 786,432 live/digest caps 不变。这将是
+显式 kernel capability 扩展，不再冒充为 configuration-only 候选阶梯修补。
+
+该 screen 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
+product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY
+authority。任何后续正式采用四门 cadence 的路线仍需新的独立 policy、checker、
+same-byte parent custody 和完整认证回放。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若

@@ -499,3 +499,26 @@ propagated, so no partial D transcript is published; the complete M transcript i
 canonical and atomic.  This exhausts candidate-only continuation under the current
 kernel.  Certified depths remain 3/2, with no policy, formal witness, boundary,
 transition, exact-Hubbard conclusion or READY component added.
+
+A separate four-gate granularity screen now evaluates checkpoint cadence while
+holding the v6 candidates and caps fixed as configuration-only inputs.  It owns
+independent control flow, does not call the v2 or v6 run entrypoints, and does not
+treat v6 as a same-byte parent or a v7 generation.  The physical 1,152-gate sequence
+is unchanged; 288 four-gate checkpoints preserve every aligned prefix budget.
+Magnetization commits 77 checkpoints and fails at q78/gates 308--311 with minimum
+K 529,897, peak 643,624 and 82,493,877 visits.  This is the second half of old
+eight-gate q39, so the reduced peak does not improve M reach.  Double occupancy
+commits 64 and fails at q65/gates 256--259 with minimum K 532,869, peak 645,011 and
+75,412,433 visits, converting the corresponding frontier from a full-eight-gate
+live-cap stop into an earlier half-block K stop.  The deleted `491,520` rung is
+counterfactually first feasible at q58--59, showing that ladder sparsification and
+checkpoint cadence cannot be assessed independently.  A noncanonical 32-slot
+sensitivity restores `491,520` and removes unused `65,536`; it changes both choices
+but still fails at q65, now with minimum K 536,203, peak 645,044 and 75,255,249
+visits.  The altered ladder is reproduced only by an opt-in test and is not saved as
+a misleading v6-configured transcript.  Checkpoint halving and this one-rung repair
+therefore both fail to cross the D frontier.  The screen remains diagnostic-only and
+leaves certified depths 3/2 and all authority-bearing artifacts unchanged.
+The next planned discriminator is a separately pinned kernel generation testing the
+next standard retained value `K=540,672` with four-gate cadence and unchanged
+786,432 live/digest caps, rather than another configuration-only ladder mutation.
