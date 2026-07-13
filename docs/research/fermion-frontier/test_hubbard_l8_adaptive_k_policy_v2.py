@@ -207,6 +207,10 @@ class AdaptiveKV2PolicyTests(unittest.TestCase):
             self.assertEqual(payload["state"]["expansion_sha256"], boundary["expansion_sha256"])
             self.assertEqual(payload["state"]["term_count"], boundary["term_count"])
             self.assertEqual(
+                payload["state"].get("previous_transition_sha256"),
+                boundary["previous_transition_recorded_inside_state_sha256"],
+            )
+            self.assertEqual(
                 int(payload["state"]["cumulative_dropped_l1_ticks"]),
                 boundary["cumulative_dropped_l1_ticks"],
             )

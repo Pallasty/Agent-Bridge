@@ -428,3 +428,17 @@ native occurrence timing, individual terms, and fixed-grid dual-observable conve
 data remain unresolved. The
 surface row is likewise an empty placeholder with no patches, layouts, intervals, or
 operations. The validator therefore continues to report `UNRESOLVED` for the snapshot.
+
+The adaptive L8 interval route has advanced through a second, independently
+precommitted resource generation.  A certificate-authority-free v2 arithmetic kernel
+was first committed and old-domain parity tested; deterministic design probes then
+fixed separate 17/21-candidate policies through `K=327,680` before formal execution.
+The final source-pinned dual screen same-byte verifies the positive step-3/two-step
+parent chain and independently replays both policies from prehashed modules.  It
+certifies maximum-K infeasibility at magnetization checkpoint 29 (minimum effective
+K 333,983 after 28 commits) and double-occupancy checkpoint 22 (minimum K 350,604
+after 21 commits).  Exact ledgers, candidate feasibility, first-feasible choices and
+five resource diagnostics are bound, while no child sidecar or transition is written.
+Certified mapped depth remains 3 for magnetization and 2 for double occupancy; the
+outer evidence orchestrator, exact-Hubbard error, remaining R100 evolution, physical
+reference and READY status are unchanged.

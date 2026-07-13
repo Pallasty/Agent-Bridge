@@ -324,6 +324,19 @@ so they are versioned normally and are not added to the preservation-only
 - `test_hubbard_l8_adaptive_k_policy_v2.py`: exact top-level schema, same-byte
   kernel/transcript/parent/boundary custody, candidate SHA, integer budget,
   kernel-capability containment, output-pin absence and precommit-scope tests.
+- `hubbard_l8_adaptive_k_v2_dual_screen_checker.py`, contract and template:
+  source-pinned, contract-self-executing formal authority for the two precommitted
+  v2 infeasibility screens.  It same-byte executes the positive magnetization
+  step-3 parent (and its transitive positive two-step parent), runs both new attempts
+  from prehashed kernel/root/parent modules, independently recomputes every prefix,
+  candidate, first-feasible choice and ledger digest, and certifies only the
+  checkpoint-29/checkpoint-22 maximum-K failures.  No child boundary, transition,
+  sidecar or depth increment is generated; the compact witness SHA-256 is
+  `79f5cfeebfe87ea45af1c29eefe9b1468af0099d9cd3501dc732cbff0ca8fcf5`.
+- `test_hubbard_l8_adaptive_k_v2_dual_screen_checker.py`: checker/contract/source,
+  canonical-policy, verified-module loader/escape, live-monkeypatch self-exec,
+  exact ledger/budget/first-feasible, tamper, resource, diagnostic-separation,
+  compact-witness and structured CLI regressions, plus an opt-in full public replay.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

@@ -333,8 +333,21 @@ at `K=327,680`; each caps live/digest terms at 786,432 and visits at 536,870,912
 They source-pin the correct immediate parent, v2 arithmetic kernel and diagnostic
 provenance while deliberately omitting formal failure checkpoints, selected-K
 histories, child hashes/values, resource observations and positive statuses.  A
-formal result may be issued only by a later policy-pinned checker, and any looser
+formal result is authorized only through a policy-pinned checker, and any looser
 ladder, budget, resource or output schema requires a new policy version.
+
+The policy-pinned dual formal screen has now completed.  Magnetization formally
+commits the first-feasible ladder for 28 checkpoints, then fails at checkpoint 29:
+the current slack is 284,729,064,009 ticks, `K=327,680` drops 415,018,229,551,
+and the minimum effective K is 333,983.  Double occupancy commits 21 checkpoints,
+then fails at checkpoint 22 with 229,230,395,634 ticks of slack, a maximum-policy-K
+drop of 1,074,313,509,825 and minimum effective K 350,604.  The formal ledger/failure
+hashes are `30c538ed...ca6fa`/`1a8ec752...02894` and
+`504964a8...9b051`/`f3e78409...50820`.  Both stops are maximum-K infeasibility
+screens under the precommitted policies, not resource failures.  Magnetization depth
+therefore remains 3 and double-occupancy depth 2; no boundary, transition or sidecar
+is emitted, and exact-Hubbard error, remaining R100 steps, physical reference and
+READY remain unassessed.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
@@ -342,12 +355,11 @@ which predates a documented splitting-sign fix.  The fork must pin a complete Ju
 Manifest/PauliPropagation version, sort composite bitmasks deterministically, and add
 outward coefficient intervals plus a post-dedup per-gate/stage dropped-L1 ledger.
 That work is a parallel implementation-custody route rather than authority for the
-Python interval certificates.  The next interval route is a new resource-policy
-version rather than another current-policy child: both magnetization step 4 and
-double-occupancy step 3 require larger/adaptive retained caps.  Any v2 must be
-precommitted, use a separately source-pinned arithmetic kernel and sidecar state,
-and preserve per-observable adjacent-transition depth; the diagnostic `K=262,144`
-numbers cannot be promoted in place.
+Python interval certificates.  The current v2 policies have now been exhausted by
+formal maximum-K screens; any continuation to a larger ladder or different method
+requires a new precommit.  Per-observable adjacent-transition depth remains separate,
+and neither the old `K=262,144` diagnostics nor the v2 design transcripts can be
+promoted in place.
 
 These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
 grouping-screen, fixed-generic-bound no-go, observable-Taylor-step and

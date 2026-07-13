@@ -647,6 +647,14 @@ transition、child depth 或正证 authority，只能用于下一份独立 preco
 786,432/786,432/536,870,912。policy 绑定 immediate parent、输入 boundary、v2 kernel 与
 non-normative transcript，但刻意不含 formal failure checkpoint、selected-K history、
 child hash/value、实测资源或 positive status；正式 screen 必须在该 precommit 之后独立重放。
+该 policy-pinned formal dual screen 现已完成：magnetization 前 28 个 checkpoint 按
+first-feasible 规则提交，第 29 个的 slack 为 284,729,064,009 ticks，而
+`K=327,680` drop 为 415,018,229,551，最低有效 K 为 333,983；double occupancy
+前 21 个提交，第 22 个 slack 为 229,230,395,634，最大 policy K drop 为
+1,074,313,509,825，最低有效 K 为 350,604。两者均是 max-K infeasibility，不是
+resource-cap failure；正式 checker 未解析 design records，并从预哈希字节执行
+kernel/root/parent，外层再次复核全部 prefix、candidate、first-feasible 与 ledger SHA。
+因此 M/D certified mapped depth 仍分别为 3/2，没有 boundary、transition 或 sidecar。
 任何走势都不能线性外推到 R100；product-formula-to-exact-Hubbard 项仍须独立组合。
 
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
