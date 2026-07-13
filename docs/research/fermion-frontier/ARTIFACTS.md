@@ -288,6 +288,18 @@ so they are versioned normally and are not added to the preservation-only
   prefix envelope, parent boundary/transition anchors, one-propagation suffix-sum
   selection rule and hard resource failures.  It contains no step-3 output pin;
   any relaxed candidate or resource limit requires a new policy version.
+- `hubbard_l8_adaptive_k_arithmetic_v2.py`: certificate-authority-free, source-pinned
+  high-cap arithmetic kernel for the next adaptive-K policy generation.  It keeps
+  the v1 fixed-tick digest domain while locally implementing propagation, interval
+  multiplication, expectation, deterministic ranking, suffix drops and
+  first-feasible selection; it neither patches nor calls the v1 propagation,
+  digest or truncation routines.  Its broad kernel caps do not themselves authorize
+  a child transition: each observable still requires a tighter precommitted policy
+  and a separately pinned formal checker.
+- `test_hubbard_l8_adaptive_k_arithmetic_v2.py`: old-domain arithmetic/digest parity,
+  root-source drift, local-kernel isolation, transient/resource cap, exact schema,
+  deterministic tie, first-feasible/no-commit and retained-`K=65,536` truncation
+  regressions.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,
