@@ -1,0 +1,217 @@
+{
+ "_source": "Step 0 of ab_memory_evolution_direction_20260710 — synthesis eval set (the measured 62%-miss class: NL queries answered by a SET of rows, no single gold, so R@k/MRR are undefined). Hand-curated 2026-07-12, NOT auto-derived from used_at. Gold-SET recall scoring (see A.3 of the recon draft). All gold keys re-verified status=active 2026-07-12 via read-only DB (mode=ro).",
+ "_scoring": "set_recall — per query: set_recall@k = |gold_set ∩ top_k| / |gold_set| (report @10 and @20); primary_hit@5 = 1 iff every `primaries` key appears in top-5. Modes fts/hybrid/semantic + any_mode. any_mode is the per-gold-key UNION across modes (a gold key counts as retrieved@k if AT LEAST ONE mode ranks it ≤ k; primary_hit@5 counts a primary hit if it is top-5 in ANY mode) — the faithful set generalization of retrieval_pairs any_mode (best-rank-per-key). This is the most favorable of the honest interpretations: if even the union of all three modes misses, the workload is genuinely under-served.",
+ "queries": [
+  {
+   "id": "S1",
+   "query": "回顾 Agent-Bridge 项目愿景，以及目前遇到的问题、超预期、被证伪的，说说看法和下一步规划",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "agent_bridge_northstar_bidirectional_bridge_20260529",
+    "biocortex_reframe_biomimicry_rd_math_product_20260706",
+    "portfolio_state_digest",
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "primaries": [
+    "agent_bridge_northstar_bidirectional_bridge_20260529",
+    "portfolio_state_digest"
+   ],
+   "note": "canonical 62%-miss query #1. portfolio_state_digest is a pre-built write-side digest whose own retrieval_trigger targets exactly this review — a primary lever the direction proposes; test whether it actually surfaces."
+  },
+  {
+   "id": "S2",
+   "query": "检查 AB 记忆项目当前状态，结合设计愿景，说说你关心的问题",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "portfolio_state_digest",
+    "ab_memory_evolution_direction_20260710",
+    "agent_bridge_northstar_bidirectional_bridge_20260529",
+    "biocortex_reframe_biomimicry_rd_math_product_20260706"
+   ],
+   "primaries": [
+    "portfolio_state_digest",
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "note": "canonical 62%-miss query #2 (project-state review opener)."
+  },
+  {
+   "id": "S3",
+   "query": "AB 记忆检索里哪些图 / GNN 路线被证伪了？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "decision_centrality_prior_offline_eval_no_go_20260629",
+    "specformer_memory_two_stage_gate_rejection_20260709",
+    "specformer_memory_shadow_36case_rejection_20260709",
+    "finding_semantic_ranking_miscalibration_20260629",
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "primaries": [
+    "decision_centrality_prior_offline_eval_no_go_20260629"
+   ],
+   "note": "dropped gold `dense-fusion-recall-finding` (cited by the direction decision but PURGED/MISSING as of 2026-07-12) — a live corpus-decay example. 5 active golds remain."
+  },
+  {
+   "id": "S4",
+   "query": "owner 批准了哪些记忆架构演化方向 / 记忆治理授权？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "ab_memory_evolution_direction_20260710",
+    "memory_zones_public_pool_design_20260706",
+    "owner_grant_memory_value_supreme_20260706",
+    "proposal_semantic_rebalance_gated_20260630"
+   ],
+   "primaries": [
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "note": "memory-governance approvals scattered across decision/feedback/proposal rows."
+  },
+  {
+   "id": "S5",
+   "query": "关于 GNN / 参数化记忆 / LoRA，AB 决定了什么？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "primaries": [
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "note": "HONEST LIMIT: near-single-gold — the LLM-vs-brain / 'GNN=范畴错误' framing lives in one dense row; no separate LoRA/parametric-memory row exists. Kept as a degenerate 1-element set (set_recall = 0/1) for an honest data point, NOT inflated with weakly-relevant keys. Retire or expand once a companion row is written."
+  },
+  {
+   "id": "S6",
+   "query": "AB 写入侧 (write-side) 的优先级和已识别缺口有哪些？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "ab_memory_evolution_direction_20260710",
+    "writeside_consolidation_audit_rollback_map_gap_20260711",
+    "writeside_ttl_tier1_diff_verified_20260711",
+    "dpp_memory_headroom_recon_verdict_20260711",
+    "portfolio_state_digest"
+   ],
+   "primaries": [
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "note": "write-side priorities + gaps span the direction decision, two writeside_* rows, a headroom verdict, and the pre-built digest."
+  },
+  {
+   "id": "S7",
+   "query": "reversible-autonomy / 可回滚即自主 权限现在的完整契约是什么（含修订）？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "operating_permission_reversible_autonomy_supreme_20260627",
+    "operating_permission_gate_revocation_reversible_20260703",
+    "agent_bridge_reversible_autonomy_replan_20260701"
+   ],
+   "primaries": [
+    "operating_permission_reversible_autonomy_supreme_20260627",
+    "operating_permission_gate_revocation_reversible_20260703"
+   ],
+   "note": "full permission contract incl. the v3 gate-revocation amendment — two primaries must both surface in top-5."
+  },
+  {
+   "id": "S8",
+   "query": "owner 的安全-自由权衡原则 + 记忆价值决策权授予是什么？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "feedback_security_freedom_tradeoff_20260712",
+    "owner_grant_memory_value_supreme_20260706",
+    "user_design_values_core"
+   ],
+   "primaries": [
+    "feedback_security_freedom_tradeoff_20260712",
+    "owner_grant_memory_value_supreme_20260706"
+   ],
+   "note": "owner behavioral-values synthesis."
+  },
+  {
+   "id": "S9",
+   "query": "AB 内部回归基尺 (eval benchmark) 是怎么建的、修过哪些 bug？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "benchmark_arc_design_v0_20260706",
+    "outcome_eval_benchmark_v0_20260706",
+    "outcome_eval_v1_fixes_20260706",
+    "outcome_eval_v11_component_baseline_fix_20260707"
+   ],
+   "primaries": [
+    "benchmark_arc_design_v0_20260706"
+   ],
+   "note": "benchmark build + bugfix chain (design + v0 + v1 + v1.1)."
+  },
+  {
+   "id": "S10",
+   "query": "记忆生命周期里 supersede 怎么工作（声明边 vs 自动去重）？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "pub_supersedes_records_intent_not_state",
+    "lesson_memory_supersedes_does_not_retire_target_20260627",
+    "ab_supersede_enforcement_shipped_20260710"
+   ],
+   "primaries": [
+    "pub_supersedes_records_intent_not_state"
+   ],
+   "note": "supersede semantics: declared edge vs auto-dedup, spanning a pub_ lesson, a lesson row, and the enforcement decision."
+  },
+  {
+   "id": "S11",
+   "query": "PPR / query-seeded 遍历候选生成 vs 已否决的中心性先验，门槛是什么？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "ab_memory_evolution_direction_20260710",
+    "decision_centrality_prior_offline_eval_no_go_20260629"
+   ],
+   "primaries": [
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "note": "HONEST LIMIT: near-2-gold — the PPR Gate A/B/C spec lives inside the direction decision; the test is distinguishing it from the rejected centrality-prior. Do not inflate."
+  },
+  {
+   "id": "S12",
+   "query": "记忆四区 / 公共经验池设计决定了什么？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "memory_zones_public_pool_design_20260706",
+    "memory_zones_personal_rollout_plan_20260706",
+    "memory_pool_identity_auth_design_20260706"
+   ],
+   "primaries": [
+    "memory_zones_public_pool_design_20260706"
+   ],
+   "note": "four-zone / public-experience-pool design triad."
+  },
+  {
+   "id": "S13",
+   "query": "学习环 (retrieval outcome apply) 现状：为什么冷？下一步？",
+   "class": "synthesis",
+   "scoring": "set_recall",
+   "gold_set": [
+    "next_arc_survey_20260702",
+    "outcome_retrieval_outcome_apply_pr69_20260703",
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "primaries": [
+    "outcome_retrieval_outcome_apply_pr69_20260703"
+   ],
+   "note": "learning-loop status (why cold + next step)."
+  }
+ ],
+ "dropped": [
+  {
+   "id": "S3.dense-fusion",
+   "key": "dense-fusion-recall-finding",
+   "reason": "cited by ab_memory_evolution_direction_20260710 but MISSING/purged from store 2026-07-12 (status!=active) — live corpus-decay artifact; removed from S3 gold_set"
+  }
+ ]
+}

@@ -90,8 +90,12 @@ def load_fixture(name):
 
 
 # ---------------------------------------------------------------- retrieval
-def eval_retrieval(mcp):
-    fixture = load_fixture("retrieval_pairs.json")
+def eval_retrieval(mcp, fixture_name="retrieval_pairs.json"):
+    # `fixture_name` is parametrized so the single-gold scorer can also drive
+    # the relational fixture (fixtures/relational_pairs.json) verbatim — its
+    # pairs use the same expected_key / expected_any contract; the extra
+    # descriptive fields (id, edge, note) are ignored here.
+    fixture = load_fixture(fixture_name)
     modes = ["fts", "hybrid", "semantic"]
     per_pair = []
     for pair in fixture["pairs"]:
@@ -131,6 +135,78 @@ def eval_retrieval(mcp):
         "mrr": round(sum(1 / r for r in any_ranks if r > 0) / n, 3),
     }
     return {"pairs": n, "metrics": metrics, "per_pair": per_pair}
+
+
+# ----------------------------------------------------------------- synthesis
+SYNTHESIS_LIMIT = 20  # top-20 needed to compute set_recall@10 and @20 in one search
+
+
+def eval_synthesis(mcp, fixture_name="synthesis_queries.json"):
+    """Recall-over-gold-SET scorer for the synthesis miss-class (NL queries with
+    no single gold). Additive: does not touch eval_retrieval's single-gold path.
+
+    Per query, per mode: set_recall@k = |gold_set ∩ top_k| / |gold_set| for
+    k in {10, 20}; primary_hit@5 = 1 iff every `primaries` key is in top-5.
+    `any_mode` is the per-gold-key UNION across the three modes — a gold key
+    counts as retrieved@k if AT LEAST ONE mode ranks it within top-k (mirrors
+    retrieval_pairs' best-rank-per-key any_mode; the most favorable honest
+    interpretation, so a low number is unambiguous evidence of under-service).
+    Deterministic; searches under the harness's eval traffic class.
+    """
+    fixture = load_fixture(fixture_name)
+    modes = ["fts", "hybrid", "semantic"]
+    per_query = []
+    for q in fixture["queries"]:
+        gold = q["gold_set"]
+        primaries = q.get("primaries", [])
+        g = len(gold)
+        # best_rank[k] = min 1-based rank of gold key k across all modes (0 = missed everywhere)
+        best_rank = {k: 0 for k in gold}
+        rec = {"id": q.get("id"), "query": q["query"][:50], "gold_n": g,
+               "per_mode": {}}
+        for mode in modes:
+            try:
+                text = mcp.call_tool("memory_search", {
+                    "query": q["query"], "mode": mode, "limit": SYNTHESIS_LIMIT})
+                hits = json.loads(text)
+                keys = [h.get("record", h).get("key") for h in hits]
+            except Exception as e:  # search failure = full miss for this mode
+                keys = []
+                rec.setdefault("errors", {})[mode] = str(e)[:120]
+            pos = {k: keys.index(k) + 1 for k in gold if k in keys}
+            rec["per_mode"][mode] = _set_scores(gold, primaries, pos)
+            for k, p in pos.items():
+                if best_rank[k] == 0 or p < best_rank[k]:
+                    best_rank[k] = p
+        rec["best_rank"] = best_rank
+        rec["any_mode"] = _set_scores(gold, primaries, best_rank)
+        per_query.append(rec)
+
+    metrics = {}
+    n = len(per_query)
+    for mode in modes + ["any_mode"]:
+        def sel(p, m=mode):
+            return p["per_mode"][m] if m != "any_mode" else p["any_mode"]
+        metrics[mode] = {
+            "set_recall@10": round(sum(sel(p)["set_recall@10"] for p in per_query) / n, 3),
+            "set_recall@20": round(sum(sel(p)["set_recall@20"] for p in per_query) / n, 3),
+            "primary_hit@5": round(sum(sel(p)["primary_hit@5"] for p in per_query) / n, 3),
+        }
+    return {"queries": n, "metrics": metrics, "per_query": per_query}
+
+
+def _set_scores(gold, primaries, pos):
+    """`pos`: {gold_key -> 1-based rank} (missing keys absent, rank 0 excluded).
+    Returns the set-recall scores for one query under one ranking view."""
+    def within(k, kk):
+        r = pos.get(kk, 0)
+        return 0 < r <= k
+    g = len(gold) or 1
+    return {
+        "set_recall@10": round(sum(1 for k in gold if within(10, k)) / g, 3),
+        "set_recall@20": round(sum(1 for k in gold if within(20, k)) / g, 3),
+        "primary_hit@5": 1 if primaries and all(within(5, k) for k in primaries) else 0,
+    }
 
 
 # --------------------------------------------------------------- continuity
@@ -265,6 +341,31 @@ def compare(base, current):
             notes.append(f"retrieval {mode} MRR {b_m[mode]['mrr']} -> {c_m[mode]['mrr']} ({delta:+.3f}){tag}")
             if gates and delta < -MRR_REGRESS_EPS:
                 verdict = "REGRESS"
+    # relational reuses the retrieval scorer, so mirror its any_mode-only MRR
+    # gate (guarded: only fires if both snapshots carried a relational run).
+    b_rel = base.get("relational", {}).get("metrics", {})
+    c_rel = current.get("relational", {}).get("metrics", {})
+    for mode in c_rel:
+        if mode in b_rel:
+            delta = c_rel[mode]["mrr"] - b_rel[mode]["mrr"]
+            gates = mode == "any_mode"
+            tag = "" if gates or delta >= -MRR_REGRESS_EPS else " [drift, informational]"
+            notes.append(f"relational {mode} MRR {b_rel[mode]['mrr']} -> {c_rel[mode]['mrr']} ({delta:+.3f}){tag}")
+            if gates and delta < -MRR_REGRESS_EPS:
+                verdict = "REGRESS"
+    # synthesis: only any_mode mean set_recall@20 gates REGRESS (living-corpus
+    # discipline); per-mode deltas print as informational drift.
+    b_syn = base.get("synthesis", {}).get("metrics", {})
+    c_syn = current.get("synthesis", {}).get("metrics", {})
+    for mode in c_syn:
+        if mode in b_syn:
+            delta = c_syn[mode]["set_recall@20"] - b_syn[mode]["set_recall@20"]
+            gates = mode == "any_mode"
+            tag = "" if gates or delta >= -MRR_REGRESS_EPS else " [drift, informational]"
+            notes.append(f"synthesis {mode} set_recall@20 {b_syn[mode]['set_recall@20']} -> "
+                         f"{c_syn[mode]['set_recall@20']} ({delta:+.3f}){tag}")
+            if gates and delta < -MRR_REGRESS_EPS:
+                verdict = "REGRESS"
     b_miss = set(base.get("continuity", {}).get("missing_required", []))
     c_miss = set(current.get("continuity", {}).get("missing_required", []))
     newly = c_miss - b_miss
@@ -286,7 +387,8 @@ def main():
     ap.add_argument("--binary", default=DEFAULT_BINARY)
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--component",
-                    choices=["retrieval", "continuity", "lint", "distillation"],
+                    choices=["retrieval", "continuity", "lint", "distillation",
+                             "relational", "synthesis"],
                     default=None)
     ap.add_argument("--compare", default=None, metavar="BASELINE_JSON")
     ap.add_argument("--out", default=None, help="output path (default baselines/<date>.json)")
@@ -304,7 +406,11 @@ def main():
         "date": datetime.date.today().isoformat(),
         "binary": args.binary,
     }
-    need_mcp = args.component in (None, "retrieval", "continuity")
+    # relational/synthesis are explicit-only components — they never run in the
+    # default (None) full pass, so the default baseline snapshot and its
+    # single-gold scoring are untouched.
+    need_mcp = args.component in (None, "retrieval", "continuity",
+                                  "relational", "synthesis")
     mcp = McpClient(args.binary) if need_mcp else None
     try:
         if args.component in (None, "retrieval"):
@@ -315,6 +421,10 @@ def main():
             result["governance_lint"] = eval_governance_lint(args.db)
         if args.component in (None, "distillation"):
             result["distillation"] = eval_distillation(args.db)
+        if args.component == "relational":
+            result["relational"] = eval_retrieval(mcp, "relational_pairs.json")
+        if args.component == "synthesis":
+            result["synthesis"] = eval_synthesis(mcp, "synthesis_queries.json")
     finally:
         if mcp:
             mcp.close()
@@ -340,6 +450,13 @@ def main():
     if "retrieval" in result:
         for mode, m in result["retrieval"]["metrics"].items():
             print(f"retrieval[{mode}]: hit@5={m['hit@5']} hit@10={m['hit@10']} mrr={m['mrr']}")
+    if "relational" in result:
+        for mode, m in result["relational"]["metrics"].items():
+            print(f"relational[{mode}]: hit@5={m['hit@5']} hit@10={m['hit@10']} mrr={m['mrr']}")
+    if "synthesis" in result:
+        for mode, m in result["synthesis"]["metrics"].items():
+            print(f"synthesis[{mode}]: set_recall@10={m['set_recall@10']} "
+                  f"set_recall@20={m['set_recall@20']} primary_hit@5={m['primary_hit@5']}")
     if "continuity" in result:
         c = result["continuity"]
         for tier, t in sorted(c["tiers"].items()):

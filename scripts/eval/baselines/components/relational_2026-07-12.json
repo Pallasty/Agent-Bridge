@@ -1,0 +1,266 @@
+{
+ "date": "2026-07-12",
+ "binary": "/home/pallasting/.local/bin/agent-bridge",
+ "relational": {
+  "pairs": 22,
+  "metrics": {
+   "fts": {
+    "hit@5": 0.955,
+    "hit@10": 1.0,
+    "mrr": 0.773
+   },
+   "hybrid": {
+    "hit@5": 0.909,
+    "hit@10": 0.955,
+    "mrr": 0.633
+   },
+   "semantic": {
+    "hit@5": 0.864,
+    "hit@10": 1.0,
+    "mrr": 0.695
+   },
+   "any_mode": {
+    "hit@5": 1.0,
+    "hit@10": 1.0,
+    "mrr": 0.909
+   }
+  },
+  "per_pair": [
+   {
+    "query": "portfolio continuity successor v3 的最终定稿决策是哪条？(取代了 ",
+    "expected": "portfolio_continuity_successor_v3_prereg_frozen_20260710",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 1,
+     "semantic": 1
+    }
+   },
+   {
+    "query": "哪条决策取代了 eval 遥测过滤 shipped 行 / retrieval traffic 溯源",
+    "expected": "retrieval_traffic_class_v42_deployed_20260710",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 1,
+     "semantic": 8
+    }
+   },
+   {
+    "query": "owner-blinded portfolio continuity answer trial 现在",
+    "expected": "portfolio_continuity_blinded_answer_trial_completed_20260710",
+    "ranks": {
+     "fts": 2,
+     "hybrid": 2,
+     "semantic": 2
+    }
+   },
+   {
+    "query": "C1 AB shadow consumer 落地决策的当前权威版本是哪条？",
+    "expected": "portfolio_biocortex_ab_shadow_2026_06_29",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 0,
+     "semantic": 1
+    }
+   },
+   {
+    "query": "关于 memory_save supersedes 不退役目标的教训，当前有效版本是哪条？",
+    "expected": "lesson_memory_supersedes_does_not_retire_target_20260627",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 2,
+     "semantic": 1
+    }
+   },
+   {
+    "query": "AB 干扰-巩固消融计划 (correction-over-stale) 后来怎样了？",
+    "expected": "biocortex_ab_interference_step0_low_coverage_park_20260706",
+    "ranks": {
+     "fts": 3,
+     "hybrid": 1,
+     "semantic": 2
+    }
+   },
+   {
+    "query": "Branch B / B4 reset 原语 decision 的后续 ceiling-escape",
+    "expected": "biocortex_branch_b_b4_ceiling_partial_2026_07_02",
+    "ranks": {
+     "fts": 2,
+     "hybrid": 1,
+     "semantic": 2
+    }
+   },
+   {
+    "query": "successor v2 generation-complete-wait-reviews 决策声明",
+    "expected": "portfolio_continuity_successor_generation_complete_wait_reviews_20260710",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 3,
+     "semantic": 6
+    }
+   },
+   {
+    "query": "successor review protocol failure 终态行取代了 generatio",
+    "expected": "portfolio_continuity_successor_review_protocol_failure_20260710",
+    "ranks": {
+     "fts": 2,
+     "hybrid": 2,
+     "semantic": 3
+    }
+   },
+   {
+    "query": "shared-embedding delegation ENABLED 决策后来的 soak 验证更",
+    "expected": "correction:agent_bridge_shared_embedding_delegation_enabled_20260627:522e0cb357c6fecf",
+    "ranks": {
+     "fts": 2,
+     "hybrid": 1,
+     "semantic": 1
+    },
+    "accepted": [
+     "correction:agent_bridge_shared_embedding_delegation_enabled_20260627:522e0cb357c6fecf",
+     "agent_bridge_shared_embedding_delegation_enabled_20260627"
+    ]
+   },
+   {
+    "query": "memory authorization contract ledger 的优先级澄清 (subsy",
+    "expected": "correction:agent_bridge_memory_authorization_contracts_20260625:0c4795435f1b72ec",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 1,
+     "semantic": 1
+    },
+    "accepted": [
+     "correction:agent_bridge_memory_authorization_contracts_20260625:0c4795435f1b72ec",
+     "agent_bridge_memory_authorization_contracts_20260625"
+    ]
+   },
+   {
+    "query": "GTE-768 owner review packet 的 aio2 部分现在解决了吗？更正行是哪条",
+    "expected": "correction:gte_768_owner_review_packet_20260625:e302f3890bd69931",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 1,
+     "semantic": 1
+    },
+    "accepted": [
+     "correction:gte_768_owner_review_packet_20260625:e302f3890bd69931",
+     "gte_768_owner_review_packet_20260625"
+    ]
+   },
+   {
+    "query": "correction co-surface S1 keep-disabled 决策被哪条更正 (20",
+    "expected": "correction:correction_cosurface_s1_closed_keep_disabled_20260701:7c5763f9a3620514",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 1,
+     "semantic": 2
+    },
+    "accepted": [
+     "correction:correction_cosurface_s1_closed_keep_disabled_20260701:7c5763f9a3620514",
+     "correction_cosurface_s1_closed_keep_disabled_20260701"
+    ]
+   },
+   {
+    "query": "MRAgent 主动重构 pilot finding 被哪条更正 (LLM-in-loop arm ",
+    "expected": "correction:mragent_active_reconstruction_pilot_finding_20260712:22c305087ef74605",
+    "ranks": {
+     "fts": 2,
+     "hybrid": 3,
+     "semantic": 2
+    },
+    "accepted": [
+     "correction:mragent_active_reconstruction_pilot_finding_20260712:22c305087ef74605",
+     "correction:mragent_active_reconstruction_pilot_finding_20260712:d05f572ad0d5f5e5",
+     "mragent_active_reconstruction_pilot_finding_20260712"
+    ]
+   },
+   {
+    "query": "cascadeprojects portfolio audit 2026-07-09 的时效性更正是",
+    "expected": "correction:cascadeprojects_portfolio_audit_20260709:a6296401d8408e0c",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 1,
+     "semantic": 1
+    },
+    "accepted": [
+     "correction:cascadeprojects_portfolio_audit_20260709:a6296401d8408e0c",
+     "cascadeprojects_portfolio_audit_20260709"
+    ]
+   },
+   {
+    "query": "present_voice/ab-tts 交接里 candle/clang STT 选型不准确表述被",
+    "expected": "correction:session_handoff_present_voice_tts_subsystem_20260601:e8f0ab2032038682",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 5,
+     "semantic": 1
+    },
+    "accepted": [
+     "correction:session_handoff_present_voice_tts_subsystem_20260601:e8f0ab2032038682",
+     "session_handoff_present_voice_tts_subsystem_20260601"
+    ]
+   },
+   {
+    "query": "写入侧审计行 TTL Tier1 diff decision 的补全/更正是哪条？",
+    "expected": "correction:writeside_ttl_tier1_diff_verified_20260711:17c810762805338a",
+    "ranks": {
+     "fts": 2,
+     "hybrid": 3,
+     "semantic": 1
+    },
+    "accepted": [
+     "correction:writeside_ttl_tier1_diff_verified_20260711:17c810762805338a",
+     "writeside_ttl_tier1_diff_verified_20260711"
+    ]
+   },
+   {
+    "query": "gte_768 Mac stale reader cleanup 决策的 2026-06-27 (D",
+    "expected": "correction:gte_768_mac_stale_reader_cleanup_20260625:5f475856968723ad",
+    "ranks": {
+     "fts": 2,
+     "hybrid": 4,
+     "semantic": 1
+    },
+    "accepted": [
+     "correction:gte_768_mac_stale_reader_cleanup_20260625:5f475856968723ad",
+     "gte_768_mac_stale_reader_cleanup_20260625"
+    ]
+   },
+   {
+    "query": "从 cross-session cargo OOM 事件蒸馏出的 distill_draft 是哪条",
+    "expected": "distill_draft_agent_bridge_cross_session_cargo_oom_20260710",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 3,
+     "semantic": 1
+    }
+   },
+   {
+    "query": "从 no-CI merge-push failfast 事故蒸馏出的草稿是哪条？",
+    "expected": "distill_draft_no_ci_merge_push_failfast_incident_20260710",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 1,
+     "semantic": 2
+    }
+   },
+   {
+    "query": "从 thinkbook rogue env shim footgun 蒸馏的草稿是哪条？",
+    "expected": "distill_draft_thinkbook_rogue_env_shim_footgun_20260710",
+    "ranks": {
+     "fts": 1,
+     "hybrid": 7,
+     "semantic": 2
+    }
+   },
+   {
+    "query": "m21 lambda budget verdict 是被哪条 verdict 引发的 (caused",
+    "expected": "m20_lyapunov_verdict_20260706",
+    "ranks": {
+     "fts": 6,
+     "hybrid": 2,
+     "semantic": 6
+    }
+   }
+  ]
+ }
+}
