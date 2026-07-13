@@ -352,6 +352,22 @@ so they are versioned normally and are not added to the preservation-only
   same-byte self-exec bypass, isolated configuration, candidate/kernel containment,
   canonical transcript, every-prefix/candidate/first-feasible recurrence, frozen
   record/failure/history/resource hashes and exact v2-prefix handoff regressions.
+- `hubbard_l8_adaptive_k_v4_design_probe.py` and the magnetization/double-occupancy
+  `*_adaptive_k_v4_design_transcript.json` files: diagnostic-only higher-`K`
+  continuations with 25/29 candidates through `K=458,752`.  Their wrapper binds the
+  exact v4/v3/v2 implementation chain, restricts configuration overrides to the
+  candidate/output names and two K ceilings, preserves all other resource caps, and
+  atomically publishes at most 1 MiB.  Magnetization commits 35 checkpoints before
+  checkpoint 36 requires `K=464,310`; double occupancy commits 27 before checkpoint
+  28 requires `K=461,297`.  Canonical transcript SHA-256 values are
+  `962a3b14c5836e12d50debc82b0f4681fe167e075d4b7579766354ff2c3e79db` and
+  `e6f5e2299f3f892d2f24230df32a93a8acb10d49433079db500ee0102d085350`.
+  Neither transcript commits a policy, child boundary, transition or witness.
+- `test_hubbard_l8_adaptive_k_v4_design_probe.py`: same-byte parent/private-call,
+  three-layer provenance, override-tamper, output-collision/atomic-cap, exact
+  candidate/kernel containment, canonical transcript, every-checkpoint budget and
+  first-feasible recurrence, frozen result/resource hashes, and full v3-prefix plus
+  old-failure handoff regressions.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

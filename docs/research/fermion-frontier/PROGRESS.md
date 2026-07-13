@@ -455,3 +455,17 @@ design caps, and the entire formerly committed v2 prefix is unchanged.  Thus thi
 generation diagnoses another maximum-K ceiling and establishes `K=409,600` as the
 minimum next ladder endpoint worth testing.  No v3 policy, formal witness, child
 sidecar, transition, exact-Hubbard statement or depth increment has been created.
+
+The v4 higher-K design generation now extends the same diagnostic surface to
+`K=458,752`, using 25 magnetization and 29 double-occupancy candidates while
+retaining the v3 resource envelope.  Its bounded same-byte wrapper records the
+v4/v3/v2 source chain and publishes only complete atomic transcripts.  Magnetization
+selects `409,600/425,984/442,368` at checkpoints 33--35 and fails at checkpoint 36
+with minimum effective K 464,310.  Double occupancy selects
+`409,600/425,984/442,368/458,752` at checkpoints 24--27 and fails at checkpoint 28
+with minimum K 461,297.  Peaks/visits are 660,262/73,130,963 and
+591,330/59,719,825, so neither stop is a resource failure.  The next standard
+candidate `K=475,136` covers both current minima but remains untested beyond the
+handoff.  This generation is diagnostic only: certified depths remain 3/2 and no
+policy, formal witness, child sidecar, transition, exact-Hubbard claim or READY
+component is added.

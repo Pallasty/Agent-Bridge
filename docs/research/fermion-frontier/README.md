@@ -363,6 +363,20 @@ state is unchanged.  This rules out `K<=393,216` as a complete attempted-step la
 and requires any next design ladder to include at least `K=409,600`; it does not
 precommit a v3 policy or increase either certified depth.
 
+The next v4 design generation extends those same ladders to `K=458,752` with
+25/29 candidates and preserves the v3 `786,432` live/digest and `536,870,912`
+visit envelopes.  Its same-byte provenance is explicit across v4, the pinned v3
+parent probe, the pinned v2 implementation and the original kernel/root/parent
+sources; bounded output is atomically published.  Magnetization commits 35
+checkpoints and then needs effective `K=464,310` at checkpoint 36, while double
+occupancy commits 27 and needs `K=461,297` at checkpoint 28.  Their peaks/visits
+are 660,262/73,130,963 and 591,330/59,719,825, so both stops remain maximum-K
+diagnostics rather than resource failures.  The complete v3 committed prefixes
+and old failure computations are unchanged; each old failure is first continued
+by `K=409,600`.  The next standard ladder value `K=475,136` covers both current
+minimum-K requirements, but has not yet been tested beyond those handoff points.
+No v4 policy, formal witness, child boundary, transition or depth increment exists.
+
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
 which predates a documented splitting-sign fix.  The fork must pin a complete Julia

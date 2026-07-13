@@ -669,6 +669,18 @@ K ceiling，而非资源失败。该结果只排除完整 attempted step 使用 
 设计候选至少须包含 `409,600`，且仍必须在 formal replay 前另行预提交，不得原地放宽 v2
 policy，也不增加当前 M/D depth 3/2。
 
+再下一代 v4 higher-`K` design probe 将相同梯度扩为 25/29 个候选、最大
+`K=458,752`，并保持 v3 的 `786,432` live/digest 与 `536,870,912` visits envelope。
+其 provenance 明确绑定 v4 same-byte self、v3 parent probe、v2 implementation 及
+kernel/root/immediate-parent 已验字节；输出另有 1 MiB cap 并原子落盘。magnetization
+提交 35 个 checkpoint 后在 checkpoint 36 需要最低有效 `K=464,310`；double occupancy
+提交 27 个后在 checkpoint 28 需要 `K=461,297`。两路 peak/visits 分别为
+660,262/73,130,963 与 591,330/59,719,825，仍未触发资源帽。v3 committed prefix 与旧
+failure 的 propagation/budget/candidate-prefix 全部保持一致，旧 failure 均由
+`K=409,600` first-feasible 接管。因此 `K<=458,752` 仍不能完成 attempted step；下一标准
+档 `475,136` 足以跨过这两个当前 failure，但尚未证明后续 checkpoint。v4 同样没有 policy、
+formal witness、boundary、transition、sidecar 或 depth 增量，不能被提升为正式证书。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
