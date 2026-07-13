@@ -642,6 +642,11 @@ occupancy step 3 先提交 21 个，第 22 个需要 `K=350,604`。对应 peak/v
 397,526/48,646,721 与 501,254/37,271,764，故当前停止原因是候选 K ceiling，而非
 拟议资源 envelope。两份 canonical transcript 明确为 `DIAGNOSTIC_ONLY`，没有 sidecar、
 transition、child depth 或正证 authority，只能用于下一份独立 precommit。
+现已分别预提交 magnetization step-4 与 double-occupancy step-3 的 v2 policy：候选数为
+17/21、共同最大 `K=327,680`，live/digest/visits caps 为
+786,432/786,432/536,870,912。policy 绑定 immediate parent、输入 boundary、v2 kernel 与
+non-normative transcript，但刻意不含 formal failure checkpoint、selected-K history、
+child hash/value、实测资源或 positive status；正式 screen 必须在该 precommit 之后独立重放。
 任何走势都不能线性外推到 R100；product-formula-to-exact-Hubbard 项仍须独立组合。
 
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、

@@ -327,6 +327,15 @@ canonical transcripts omit runtime/RSS/host/path fields and may guide a separate
 committed v2 policy, but they are not child boundaries, transitions or positive
 certificate witnesses.
 
+Two separate v2 policies now freeze those attempts before formal replay.  The
+magnetization route has 17 candidates and the double-occupancy route 21, both ending
+at `K=327,680`; each caps live/digest terms at 786,432 and visits at 536,870,912.
+They source-pin the correct immediate parent, v2 arithmetic kernel and diagnostic
+provenance while deliberately omitting formal failure checkpoints, selected-K
+histories, child hashes/values, resource observations and positive statuses.  A
+formal result may be issued only by a later policy-pinned checker, and any looser
+ladder, budget, resource or output schema requires a new policy version.
+
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
 which predates a documented splitting-sign fix.  The fork must pin a complete Julia

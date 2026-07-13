@@ -312,6 +312,18 @@ so they are versioned normally and are not added to the preservation-only
   canonical transcript, exact prefix/recurrence, every-candidate feasibility,
   first-feasible, deterministic replay hash, failure summary, resource and
   diagnostic-only scope regressions.
+- `hubbard_l8_magnetization_adaptive_k_policy_v2.json` and
+  `hubbard_l8_double_occupancy_adaptive_k_policy_v2.json`: design-informed but
+  formal-output-unpinned precommits for the next two adaptive attempts.  They bind
+  the immediate positive parent and input boundary, committed v2 kernel,
+  non-normative design transcript, exact future-prefix budget, respectively 17/21
+  candidates through `K=327,680`, policy-specific `786,432` live/digest and
+  `536,870,912` visit caps, fail-closed output rules and v3 child-state schema.
+  Neither policy contains a formal failure checkpoint, selected-K history, child
+  hash/value, resource observation, witness or positive status.
+- `test_hubbard_l8_adaptive_k_policy_v2.py`: exact top-level schema, same-byte
+  kernel/transcript/parent/boundary custody, candidate SHA, integer budget,
+  kernel-capability containment, output-pin absence and precommit-scope tests.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,
