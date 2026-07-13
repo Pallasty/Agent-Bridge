@@ -1364,6 +1364,39 @@ fn work_memory_lifecycle_and_ttl_classification_is_explicit() {
 }
 
 #[test]
+fn record_ttl_is_live_suppresses_expired_rollback_map_audit_rows() {
+    let now = unix_now_secs();
+    let mk = |key: &str, tags: Vec<String>, age_days: i64| MemoryRecord {
+        key: key.to_string(),
+        kind: "observation".to_string(),
+        content: "outcome_valence_importance_apply rollback map (3 rows)".to_string(),
+        tags,
+        related_keys: vec![],
+        scope: Some(format!("valence-audit:{key}")),
+        created_at: now - age_days * WORK_MEMORY_SECONDS_PER_DAY,
+        updated_at: now - age_days * WORK_MEMORY_SECONDS_PER_DAY,
+        last_accessed_at: now,
+        access_count: 0,
+        importance: 0.5,
+        status: "active".to_string(),
+        trigger_pattern: None,
+        superseded_by: None,
+    };
+
+    // Past its 14d window → suppressed from retrieval.
+    let expired = mk("expired", vec!["rollback_map".to_string(), "ttl:14d".to_string()], 15);
+    assert!(!record_ttl_is_live(&expired, now));
+
+    // Within its window → still live (rollback correctness during the window).
+    let fresh = mk("fresh", vec!["rollback_map".to_string(), "ttl:14d".to_string()], 3);
+    assert!(record_ttl_is_live(&fresh, now));
+
+    // No ttl tag → never affected (byte-identical to prior behavior).
+    let untagged = mk("untagged", vec!["rollback_map".to_string()], 400);
+    assert!(record_ttl_is_live(&untagged, now));
+}
+
+#[test]
 fn work_memory_list_fan_in_surfaces_alias_compatible_cross_node_lanes() {
     let mk = |key: &str, scope: &str, accessed: i64| MemoryRecord {
         key: key.to_string(),

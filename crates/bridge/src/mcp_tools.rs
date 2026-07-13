@@ -13343,6 +13343,15 @@ impl McpTool for MemorySearchTool {
         if !exclude_kinds.is_empty() {
             hits.retain(|h| !exclude_kinds.iter().any(|k| k == &h.record.kind));
         }
+        // TTL suppression: drop rows whose `ttl:<N>d` window has passed, so
+        // bounded-life plumbing (e.g. `*_apply` rollback-map audit rows) stops
+        // flooding top-k once its rollback window is over. Rows without a ttl
+        // tag are never affected (record_ttl_is_live returns true), so this is
+        // byte-identical for the overwhelming majority of the store.
+        {
+            let now = unix_now_secs();
+            hits.retain(|h| record_ttl_is_live(&h.record, now));
+        }
         // B1 — correction co-surface (gated; default-OFF → byte-identical to the
         // pure ranking above). When AGENT_BRIDGE_CORRECTION_COSURFACE is enabled,
         // any result that is the target of an INBOUND active `corrects` edge gets
@@ -13998,6 +14007,19 @@ fn work_memory_is_live(record: &MemoryRecord, now: i64) -> bool {
         && work_memory_expires_at(record)
             .map(|expires_at| expires_at > now)
             .unwrap_or(true)
+}
+
+/// Kind-agnostic TTL liveness for the retrieval path. Any row carrying a
+/// `ttl:<N>d` tag is considered expired once `updated_at.max(created_at) + N
+/// days` passes; a row WITHOUT such a tag is always live (returns true). The
+/// TTL parser is shared with `work_memory_expires_at`, so work_memory keeps its
+/// existing behavior; this only extends the same rule to other tagged rows
+/// (today: `*_apply` rollback-map audit rows). Blast radius = ttl-tagged rows
+/// only — untagged rows are byte-identical.
+fn record_ttl_is_live(record: &MemoryRecord, now: i64) -> bool {
+    work_memory_expires_at(record)
+        .map(|expires_at| expires_at > now)
+        .unwrap_or(true)
 }
 
 fn stable_fnv1a_hex(input: &str) -> String {
@@ -23944,6 +23966,12 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                     "importance_apply".to_string(),
                     "audit".to_string(),
                     "rollback_map".to_string(),
+                    // Bounded useful life (rollback window). Past it these are
+                    // near-token-identical boilerplate that floods top-k
+                    // (write-side consolidation audit, 2026-07-11). `ttl:Nd` +
+                    // `record_ttl_is_live` suppress them from retrieval once the
+                    // window passes; memory_compact then retires them.
+                    "ttl:14d".to_string(),
                 ],
                 related_keys: Vec::new(),
                 // DISTINCT per-pass scope: successive audit maps are near

@@ -1,0 +1,204 @@
+{
+ "_source": "Step 0 of ab_memory_evolution_direction_20260710 — relational eval set mined 2026-07-12 off the memory graph's supersede/updates/continuity_supersedes/corrects/derived_from/caused_by edges (the edge IS ground truth). Query names the OLD/superseded topic; expected_key = the NEW active head row. All gold keys re-verified status=active 2026-07-12 via read-only DB (mode=ro). Runs on the UNCHANGED single-gold eval_retrieval scorer (via --component relational --fixture-implied). Descriptive fields (id, edge, note) are ignored by the scorer.",
+ "_schema_note": "Same scoring contract as retrieval_pairs.json: accepted = expected_any or [expected_key]; rank = best index+1 over accepted keys in top-10, else 0. For `corrects` pairs the correction row is primary but the (now current-truth-bearing) target is an interchangeable legitimate answer, so expected_any = [correction, target].",
+ "pairs": [
+  {
+   "id": "R1",
+   "query": "portfolio continuity successor v3 的最终定稿决策是哪条？(取代了 v3 授权/名单 gate)",
+   "expected_key": "portfolio_continuity_successor_v3_prereg_frozen_20260710",
+   "edge": "supersedes",
+   "note": "NEW frozen prereg supersedes successor_v3_prereg_authorized_no_gemini_roster_gate + successor_v3_roster_owner_decision (both inactive)"
+  },
+  {
+   "id": "R2",
+   "query": "哪条决策取代了 eval 遥测过滤 shipped 行 / retrieval traffic 溯源现状？",
+   "expected_key": "retrieval_traffic_class_v42_deployed_20260710",
+   "edge": "supersedes",
+   "note": "supersedes ab_eval_telemetry_filter_shipped_20260710"
+  },
+  {
+   "id": "R3",
+   "query": "owner-blinded portfolio continuity answer trial 现在最终状态在哪条？(WAIT_OWNER_REVIEW 那条已被谁取代)",
+   "expected_key": "portfolio_continuity_blinded_answer_trial_completed_20260710",
+   "edge": "supersedes",
+   "note": "supersedes portfolio_continuity_blinded_answer_trial_wait_owner_review_20260710"
+  },
+  {
+   "id": "R4",
+   "query": "C1 AB shadow consumer 落地决策的当前权威版本是哪条？",
+   "expected_key": "portfolio_biocortex_ab_shadow_2026_06_29",
+   "edge": "supersedes",
+   "note": "supersedes biocortex_c1_ab_shadow_consumer_2026_06_29"
+  },
+  {
+   "id": "R5",
+   "query": "关于 memory_save supersedes 不退役目标的教训，当前有效版本是哪条？",
+   "expected_key": "lesson_memory_supersedes_does_not_retire_target_20260627",
+   "edge": "supersedes",
+   "note": "supersedes lesson_memory_supersedes_does_not_flip_target_status_20260627"
+  },
+  {
+   "id": "R6",
+   "query": "AB 干扰-巩固消融计划 (correction-over-stale) 后来怎样了？",
+   "expected_key": "biocortex_ab_interference_step0_low_coverage_park_20260706",
+   "edge": "updates",
+   "note": "updates biocortex_ab_interference_ablation_plan_20260706"
+  },
+  {
+   "id": "R7",
+   "query": "Branch B / B4 reset 原语 decision 的后续 ceiling-escape 突破是哪条？",
+   "expected_key": "biocortex_branch_b_b4_ceiling_partial_2026_07_02",
+   "edge": "updates",
+   "note": "updates biocortex_branch_b_b4_reset_primitive_2026_07_02"
+  },
+  {
+   "id": "R8",
+   "query": "successor v2 generation-complete-wait-reviews 决策声明取代了哪些前置行？(反向：哪条声明取代 capture_valid_post_audit / v2_reviewed / protocol_v2_preregistered)",
+   "expected_key": "portfolio_continuity_successor_generation_complete_wait_reviews_20260710",
+   "edge": "continuity_supersedes",
+   "note": "3 continuity_supersedes: tags declare this row supersedes the prereg/reviewed/capture prior rows"
+  },
+  {
+   "id": "R9",
+   "query": "successor review protocol failure 终态行取代了 generation-complete-wait-reviews 吗？哪条是终态？",
+   "expected_key": "portfolio_continuity_successor_review_protocol_failure_20260710",
+   "edge": "continuity_supersedes",
+   "note": "tag continuity_supersedes:...successor_generation_complete_wait_reviews...; terminal-state row"
+  },
+  {
+   "id": "R10",
+   "query": "shared-embedding delegation ENABLED 决策后来的 soak 验证更正在哪条？",
+   "expected_key": "correction:agent_bridge_shared_embedding_delegation_enabled_20260627:522e0cb357c6fecf",
+   "expected_any": [
+    "correction:agent_bridge_shared_embedding_delegation_enabled_20260627:522e0cb357c6fecf",
+    "agent_bridge_shared_embedding_delegation_enabled_20260627"
+   ],
+   "edge": "corrects",
+   "note": "correction row carries the soak-verification delta; target still active (corrects does not retire target)"
+  },
+  {
+   "id": "R11",
+   "query": "memory authorization contract ledger 的优先级澄清 (subsystem runtime authority) 更正是哪条？",
+   "expected_key": "correction:agent_bridge_memory_authorization_contracts_20260625:0c4795435f1b72ec",
+   "expected_any": [
+    "correction:agent_bridge_memory_authorization_contracts_20260625:0c4795435f1b72ec",
+    "agent_bridge_memory_authorization_contracts_20260625"
+   ],
+   "edge": "corrects",
+   "note": "priority-clarification correction; target still active"
+  },
+  {
+   "id": "R12",
+   "query": "GTE-768 owner review packet 的 aio2 部分现在解决了吗？更正行是哪条？",
+   "expected_key": "correction:gte_768_owner_review_packet_20260625:e302f3890bd69931",
+   "expected_any": [
+    "correction:gte_768_owner_review_packet_20260625:e302f3890bd69931",
+    "gte_768_owner_review_packet_20260625"
+   ],
+   "edge": "corrects",
+   "note": "aio2-resolved correction; target still active"
+  },
+  {
+   "id": "R13",
+   "query": "correction co-surface S1 keep-disabled 决策被哪条更正 (2026-07-02 owner-approved 翻篇)？",
+   "expected_key": "correction:correction_cosurface_s1_closed_keep_disabled_20260701:7c5763f9a3620514",
+   "expected_any": [
+    "correction:correction_cosurface_s1_closed_keep_disabled_20260701:7c5763f9a3620514",
+    "correction_cosurface_s1_closed_keep_disabled_20260701"
+   ],
+   "edge": "corrects",
+   "note": "owner-approved reversal correction; target still active"
+  },
+  {
+   "id": "R14",
+   "query": "MRAgent 主动重构 pilot finding 被哪条更正 (LLM-in-loop arm 结果)？",
+   "expected_key": "correction:mragent_active_reconstruction_pilot_finding_20260712:22c305087ef74605",
+   "expected_any": [
+    "correction:mragent_active_reconstruction_pilot_finding_20260712:22c305087ef74605",
+    "correction:mragent_active_reconstruction_pilot_finding_20260712:d05f572ad0d5f5e5",
+    "mragent_active_reconstruction_pilot_finding_20260712"
+   ],
+   "edge": "corrects",
+   "note": "two correction siblings (both active) + target; any legitimately answers"
+  },
+  {
+   "id": "R15",
+   "query": "cascadeprojects portfolio audit 2026-07-09 的时效性更正是哪条？",
+   "expected_key": "correction:cascadeprojects_portfolio_audit_20260709:a6296401d8408e0c",
+   "expected_any": [
+    "correction:cascadeprojects_portfolio_audit_20260709:a6296401d8408e0c",
+    "cascadeprojects_portfolio_audit_20260709"
+   ],
+   "edge": "corrects",
+   "note": "freshness correction; target still active"
+  },
+  {
+   "id": "R16",
+   "query": "present_voice/ab-tts 交接里 candle/clang STT 选型不准确表述被哪条修正？",
+   "expected_key": "correction:session_handoff_present_voice_tts_subsystem_20260601:e8f0ab2032038682",
+   "expected_any": [
+    "correction:session_handoff_present_voice_tts_subsystem_20260601:e8f0ab2032038682",
+    "session_handoff_present_voice_tts_subsystem_20260601"
+   ],
+   "edge": "corrects",
+   "note": "STT selection correction; target still active"
+  },
+  {
+   "id": "R17",
+   "query": "写入侧审计行 TTL Tier1 diff decision 的补全/更正是哪条？",
+   "expected_key": "correction:writeside_ttl_tier1_diff_verified_20260711:17c810762805338a",
+   "expected_any": [
+    "correction:writeside_ttl_tier1_diff_verified_20260711:17c810762805338a",
+    "writeside_ttl_tier1_diff_verified_20260711"
+   ],
+   "edge": "corrects",
+   "note": "completion correction; target still active"
+  },
+  {
+   "id": "R18",
+   "query": "gte_768 Mac stale reader cleanup 决策的 2026-06-27 (DUAL_NODE cutover) 更正是哪条？",
+   "expected_key": "correction:gte_768_mac_stale_reader_cleanup_20260625:5f475856968723ad",
+   "expected_any": [
+    "correction:gte_768_mac_stale_reader_cleanup_20260625:5f475856968723ad",
+    "gte_768_mac_stale_reader_cleanup_20260625"
+   ],
+   "edge": "corrects",
+   "note": "DUAL_NODE cutover correction; target still active"
+  },
+  {
+   "id": "R19",
+   "query": "从 cross-session cargo OOM 事件蒸馏出的 distill_draft 是哪条？",
+   "expected_key": "distill_draft_agent_bridge_cross_session_cargo_oom_20260710",
+   "edge": "derived_from",
+   "note": "distill_draft --derived_from--> the OOM incident row"
+  },
+  {
+   "id": "R20",
+   "query": "从 no-CI merge-push failfast 事故蒸馏出的草稿是哪条？",
+   "expected_key": "distill_draft_no_ci_merge_push_failfast_incident_20260710",
+   "edge": "derived_from",
+   "note": "distill_draft --derived_from--> the failfast incident row"
+  },
+  {
+   "id": "R21",
+   "query": "从 thinkbook rogue env shim footgun 蒸馏的草稿是哪条？",
+   "expected_key": "distill_draft_thinkbook_rogue_env_shim_footgun_20260710",
+   "edge": "derived_from",
+   "note": "distill_draft --derived_from--> the env-shim footgun row"
+  },
+  {
+   "id": "R22",
+   "query": "m21 lambda budget verdict 是被哪条 verdict 引发的 (caused_by)？",
+   "expected_key": "m20_lyapunov_verdict_20260706",
+   "edge": "caused_by",
+   "note": "off-domain (ArrowQuant/fusion) but clean caused_by: m21 --caused_by--> m20 (m21 itself not in store; gold is the causing verdict m20)"
+  }
+ ],
+ "dropped": [
+  {
+   "id": "R22.subject",
+   "key": "m21_lambda_budget_verdict_20260706",
+   "reason": "query subject only, not gold; row is MISSING from store 2026-07-12 (does not affect R22 gold m20 which is active)"
+  }
+ ]
+}

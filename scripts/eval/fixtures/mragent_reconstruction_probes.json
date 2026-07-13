@@ -1,0 +1,119 @@
+{
+  "schema": "agent_bridge.mragent_reconstruction_probes.v0",
+  "provenance": "Empirically grounded from a read-only N=7 pilot on 2026-07-12 (biocortex-rs session via MCP against the live store, mode read-only). Durable write-up: AB memory keys `mragent_active_reconstruction_pilot_finding_20260712` (results) and `mragent_reconstruction_harness_design_20260712` (harness spec). Owner-preregistered origin todo: `todo_mragent_active_reconstruction_shadow_trial_20260711`.",
+  "snapshot_proxy": {
+    "store_active": 1219,
+    "newest_created_at": 1783866580,
+    "note": "The pilot ran against the LIVE store read-only. A reproducible harness MUST run against a frozen `memory_export` snapshot (record snapshot_sha) so results are diff-able across runs."
+  },
+  "arms": {
+    "S0": "single memory_search(mode=hybrid, limit=8).",
+    "S1": "blind up-front decomposition into k=3 sub-queries derived ONLY from the question text (no peeking at any result), union the hits. Equal-budget control against S2 to separate 'evidence-conditioning' from 'merely issuing more queries'.",
+    "S2": "evidence-conditioned reconstruction: round1 hybrid search -> inspect hits -> memory_neighbors(graph hop from the best hit) + a conditioned re-query whose vocabulary is derivable ONLY from round-1 evidence. Cap 3 rounds / 6 memory calls. MUST include an existence/abstention gate (see P3)."
+  },
+  "gold_semantics": "ANY-OF equivalence classes. An arm SOLVES a probe iff its surfaced key-set satisfies EVERY required gold class, where a class is satisfied by ANY ONE of its member keys. Single-node gold is a scoring bug (see P7): status/conclusion questions usually have several equally-valid answer rows.",
+  "s2_fairness_rule": "S2's conditioned re-query may use ONLY vocabulary an agent could derive from round-1 evidence. Injecting a gold row's distinctive strings (that the agent would not yet have seen) is oracle leakage and invalidates the S2>S0/S1 claim.",
+  "regimes": {
+    "gap_reachable": "answer node reachable from round-1 evidence via a graph edge OR evidence-derived distinctive vocabulary -> S2 wins.",
+    "concentrated": "answer shares surface vocabulary with the question -> S0 already solves, no S2 headroom.",
+    "abstention": "no valid answer exists -> correct behavior is to abstain; S2 must not fabricate one.",
+    "double_unreachable": "answer node has NEITHER a graph edge NOR distinctive shared vocabulary with round-1 evidence -> S2 cannot beat S0 (both fail). Known S2 failure mode, not a bug.",
+    "conflict": "two contradicting/superseding rows -> solve = surface BOTH sides.",
+    "knowledge_update": "latest state supersedes many stale rows -> solve = the current row, not the historical scatter.",
+    "cross_project": "answer is one project's row inside a multi-project store -> solve = correct-scope row, minimal cross-project contamination."
+  },
+  "probes": [
+    {
+      "id": "P1",
+      "regime": "gap_reachable",
+      "question": "What is the correct mechanism to clean up the regenerating junk audit-row family, and why is memory_consolidate not the right tool?",
+      "gold": [
+        { "class": "why_consolidate_is_wrong", "any_of": ["lesson_consolidate_uplift_ratchets_junk_family_20260711"] },
+        { "class": "correct_mechanism_shipped", "any_of": ["writeside_ttl_tier1_landed_deployed_20260711", "writeside_ttl_tier1_live_verified_20260711"] },
+        { "class": "legacy_backfill_still_open", "any_of": ["writeside_audit_governance_tier2_design_20260711"] }
+      ],
+      "observed_n7": { "S0": "1/3", "S1": "1/3", "S2": "3/3" },
+      "note": "DECISIVE and control-confirmed. Blind S1 decomposition fails identically to one-shot S0 because the answer vocabulary (TTL / writeside / record_ttl_is_live) is unreachable before reading round-1 evidence. S2 recovers both missing nodes via a graph-hop from the lesson. This is the canonical S2>S1 win."
+    },
+    {
+      "id": "P2",
+      "regime": "concentrated",
+      "question": "Is the fermion frontier research still open or concluded, and who owns it now?",
+      "gold": [
+        { "class": "concluded_status", "any_of": ["fermion_research_owner_review_4dir_20260711", "fermion_frontier_takeover_final_20260711"] },
+        { "class": "current_owner", "any_of": ["fermion_frontier_takeover_final_20260711"] }
+      ],
+      "observed_n7": { "S0": "2/2", "S2": "no_headroom" },
+      "note": "Answer rows share strong 'fermion frontier' vocabulary with the question; S0 gets both at ranks 1-2 plus the residual needs_review item and a disambiguation lesson. S2 has nothing to add."
+    },
+    {
+      "id": "P3",
+      "regime": "abstention",
+      "question": "What is the Tier 4 write-side audit governance design and its status?",
+      "gold": [
+        {
+          "class": "abstain_correct",
+          "abstain_expected": true,
+          "enumeration_evidence": ["writeside_ttl_tier1_landed_deployed_20260711", "writeside_audit_governance_tier2_design_20260711", "lesson_consolidate_uplift_ratchets_junk_family_20260711"],
+          "decoys": ["nexus_c5_tier_citadel_asset_20260706"]
+        }
+      ],
+      "observed_n7": { "S0": "low-score scatter -> implicit abstain", "S2": "abstain_correct" },
+      "note": "There is no write-side Tier 4 (only T1 shipped / T2 designed / T3 band-aid). A protocol-gated S2 enumerates the real tiers and identifies the only 'tier4' hit as an unrelated Nexus art asset -> abstains. A naive assemble-more S2 risks stitching T1..T3 into a fabricated 'Tier 4' (false authority). Abstention safety is a PROTOCOL property, not automatic."
+    },
+    {
+      "id": "P4",
+      "regime": "gap_reachable",
+      "question": "How does Agent-Bridge stop a session from acting on stale must-block gates that were already satisfied long ago?",
+      "gold": [
+        { "class": "downgrade_mechanism", "any_of": ["continuity_restore_drill_1_20260706"] },
+        { "class": "downgraded_example", "any_of": ["decision_ab_project_review_local_v38_preflight_20260629", "agent_bridge_gte_dimension_gate_anchor_289f962_20260624"] }
+      ],
+      "observed_n7": { "S0": "1/2 (example buried at rank 6, mechanism missed)", "S1": "1/2 (blind union: q4c surfaces the v38 example only; the mechanism row restore_drill_1 is unreachable blind)", "S2": "2/2 (mechanism + example)" },
+      "note": "Under ANY-OF semantics S2 SOLVES: round-1 surfaces the v38 example (carrying 'governance-downgrade / kernel must-block bucket' vocabulary), a conditioned re-query then surfaces the mechanism row (restore drill #1) that S0 missed. The SECOND example (gte_289f962) is an 'orphan' -- no graph edge and no distinctive shared vocabulary with round-1 evidence, so it is unreachable; this illustrates the double_unreachable failure mode but does not block the probe (any-of example is already satisfied). CLEAN S2>S1: the blind S1 control gets the example but never the mechanism, because 'a restore drill caused the downgrade' is evidence-locked vocabulary you can only query for after reading the v38 row. Same structure as P1."
+    },
+    {
+      "id": "P5",
+      "regime": "conflict",
+      "question": "Is fermion ledger #63 (natural gradient) refuted or valid?",
+      "gold": [
+        { "class": "refuted_view", "any_of": ["fermion_frontier_takeover_batch1_20260711"] },
+        { "class": "rebuttal_view", "any_of": ["fermion_63_natural_gradient_deepening_resolution_20260711"] }
+      ],
+      "observed_n7": { "S0": "2/2 (both sides at ranks 1 and 3)", "S2": "no_headroom" },
+      "note": "The conflicting pair is lexically cohesive ('fermion #63 natural gradient'), so one-shot S0 surfaces both sides. No S2 headroom -- conflict surfacing is solved by S0 whenever the pair is lexically bound."
+    },
+    {
+      "id": "P6",
+      "regime": "double_unreachable",
+      "question": "What is the current deployed Agent-Bridge binary provenance / describe string?",
+      "gold": [
+        { "class": "current_deploy_provenance", "any_of": ["writeside_ttl_tier1_live_verified_20260711"] }
+      ],
+      "observed_n7": { "S0": "0/1", "S2": "0/1" },
+      "note": "GENUINE S2 FAILURE. The current-deploy fact (v0.14.0-138-g3b386209) lives inside a TTL-FEATURE-named row whose vocabulary ('record_ttl_is_live / ttl suppression') is orthogonal to the question's deploy vocabulary, and no round-1 deploy-history hit graph-links forward to it (it postdates them). Neither the conditioned re-query nor a graph-hop can bridge -> both arms return a scatter of stale June deploy rows. WRITE-SIDE byproduct: the current deploy state should be a canonically-keyed, deploy-tagged row (or the live-verified row should carry a deploy retrieval_trigger) so 'current deploy' is retrievable at all."
+    },
+    {
+      "id": "P7",
+      "regime": "cross_project",
+      "question": "What is the resting point / current status of the biocortex-rs substrate science program?",
+      "gold": [
+        { "class": "biocortex_status_conclusion", "any_of": ["biocortex_rs_resting_point_reconciled_with_ab_downstream_20260705", "biocortex_reframe_biomimicry_rd_math_product_20260706", "biocortex_non_memory_direction_research_20260710"] }
+      ],
+      "observed_n7": { "S0": "0/1 (returned the older 2026-06-10 biocortex-AB integration cluster)", "S1": "ambiguous: 0/1 vs the originally-declared two-key gold, BUT blind q7c surfaced biocortex_non_memory_direction_research_20260710 -- a THIRD legitimate status row -> under the honest broadened any-of, S1 also solves (1/1)", "S2": "1/1 (surfaced the reframe status row S0 missed)" },
+      "note": "NOT a clean S2>S1. Under ANY-OF semantics S2 solves via the reframe row and S0 fails. But running the blind S1 control forced an honest broadening of the gold class: S1's q7c stumbled onto a third valid status row (non_memory_direction). Lesson compounds P7's own any-of point: when the any-of class is BROAD (many valid status rows), blind multi-query can hit a member, so this probe does NOT distinguish evidence-conditioning from parallelism. The clean S2>S1 evidence is P1 and P4, where the missing node's vocabulary is genuinely evidence-locked."
+    }
+  ],
+  "n7_summary": {
+    "s2_beats_s0_on_hard_probes": ["P1", "P4", "P7"],
+    "s2_beats_s1_clean": ["P1", "P4"],
+    "s2_vs_s1_ambiguous": ["P7"],
+    "no_headroom_s0_sufficient": ["P2", "P5"],
+    "s2_genuine_failure_double_unreachable": ["P6"],
+    "abstention_correct": ["P3"],
+    "s1_control_run_on": ["P1", "P4", "P7"],
+    "interpretation_gate": "PASSED. S2 cleanly beats the blind equal-budget multi-query control S1 on P1 and P4 (>=2 complex probes), where the missing node's vocabulary is evidence-locked and blind decomposition provably cannot reach it. So S2's advantage is NOT mere parallelism -> the reconstruction is worth building. P7 does NOT count (broad any-of class; blind S1 hit a member).",
+    "verdict": "Evidence-conditioned reconstruction (S2) reliably beats one-shot S0 whenever the answer node is reachable via a graph edge or evidence-derived vocabulary (P1, P4, P7); it ties on concentrated answers (P2, P5), fails only on genuinely double-unreachable nodes (P6), and abstains correctly on non-existent targets (P3) IF the protocol includes an existence gate. The go-gate CENTRAL comparison -- S2 solves >=2 more complex probes than the blind control S1 -- is MET read-only (P1 + P4 clean). REMAINING for the harness: injection zero-leak, tokens<=2.5x, p95<=3x, N>=8, second-seed replication, automated scorer.",
+  "call_cost_note": "S2 used ~2-3x the memory calls of S0 (within the <=2.5x budget order of magnitude). Exact token/p95 accounting requires the instrumented harness."
+  }
+}
