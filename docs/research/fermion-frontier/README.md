@@ -529,12 +529,33 @@ Peak/visits are `718,805/87,505,002`; canonical transcript SHA-256 is
 The two ledgers cover 83x31 plus 70x34 = 4,953 candidate rows.  Both remain
 diagnostic-only and leave certified depths at 3/2.
 
-Both next discriminators now require capability changes.  M should append the
-standard `K=573,440` rung to form C32 and replay through q84; that rung covers
-q83 by 7,446 while retaining the original candidate-count capacity of 32.  D
-should append `K=606,208` to form C35 and replay through q70; it covers q70 by
-8,936.  All 34 current D candidates have been selected, so a smaller fixed-width
-ladder would be a distinct trajectory.
+That capability-extension stage is complete.  M's direct-v2 wrapper changes only
+retained K 524,288 -> 573,440 and keeps candidate capacity 32.  Appending the
+standard rung forms M32: q1--82 common records/history and their first 31 rows
+remain exact, while q83 preserves the old propagation and first 31 rows before
+index 31 becomes first feasible.  q83 selects 573,440, but q84/gates 332--335
+fails at pre-count 694,130 and minimum effective `K=586,381`, 12,941 above the
+new maximum.  Peak/visits are `694,130/96,423,989`; canonical transcript SHA-256
+is `f379f6a72caba82c0f1aca599ef9872666cfed8b4ea72003194438ed01806f48`.
+
+D's direct-v2 wrapper changes retained K 524,288 -> 606,208 and candidate
+capacity 32 -> 35.  Appended index 34 preserves q1--69 common state/history and
+the first 34 rows, then preserves q70 propagation and its first 34 rows before
+becoming first feasible.  q70 selects 606,208 with drop 97,846,623,202 ticks and
+53,451,620,700 ticks of feasibility margin, reaching 70/70 committed.  Its
+peak/visits remain `718,805/87,505,002`; canonical transcript SHA-256 is
+`55e9d305c90b62dea918071cd6ae383668c2ffb2f7dc108f7d4abcbcb772aa36`.
+The two exact ledgers cover 84x32 plus 70x35 = 5,138 candidate rows.  Both remain
+diagnostic-only and leave certified depths at 3/2.  Every one of the 35 current D
+candidates has now been selected at least once.
+
+The next bounded routes now split again.  M can stay at C32 by replacing
+`K=65,536`, which is infeasible in all 84 attempted rows and never selected, with
+standard `K=589,824`; this preserves the selected/state trajectory but deliberately
+does not claim strict candidate-row-prefix identity.  The new rung covers q84's
+minimum by 3,443; a strict append-only row-prefix route would instead require C33.
+D requires no new capability yet: a same-cap C35 horizon-only screen should replay
+from q1 through aligned q72, using the q70 artifact only as post-replay evidence.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

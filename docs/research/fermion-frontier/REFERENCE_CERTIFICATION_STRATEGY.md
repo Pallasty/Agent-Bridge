@@ -817,12 +817,45 @@ wrapper 及其 q70 screen 只作未编译、未执行的 route reference。D 在
 `65d6f5ba3e45b5b57b12d1b9e1daadb17064f8aece7dc914697191f822b3a8d7`。两条账本覆盖
 `83x31 + 70x34 = 4,953` 个 candidate rows，均未触发 live/digest cap。
 
-下一阶段两条路线都必须扩 capability。M 应使用 retained-K-only 的 direct-v2
-`K=573,440` wrapper，保持 candidate capacity 32，在当前 31 档后 append 新档并重放至
-q84；该档比 q83 minimum 高 7,446。现有 D 用 K=573,440/C33 wrapper 额外改变 candidate
-capacity，不能作为最小 M 执行层。D 应在 34 档后 append `606,208`，形成 C35 并重放至
-q70；该标准网格比 q70 minimum 高 8,936。D34 的每个候选都曾被 selected，不能删除
-旧档而仍宣称 prefix-preserving trajectory。不得外推这两个新档后的未测结果。
+该 capability 扩展阶段现已完成。M 使用 retained-K-only direct-v2 wrapper；相对
+arithmetic-v2 唯一变化是 `max_retained_K: 524,288 -> 573,440`，candidate capacity
+保持 32，其余 caps/provider bindings 不变。wrapper/manifest SHA 分别为
+`c644dfeaf2a0b27be40403715aec8711818ae11ff575b230339af745f0a56ff1` 与
+`fb6d6c241ab7ee2f535aa2f1cdff38a5e8f47bab1035ba29249332ca2d4f3f39`；screen SHA 为
+`1246023edea93e89db2ec0071c51c1cb15f60b8a928b934aad08cebb593240b2`。M 在 31 档后
+append `573,440`。q1--82 common state/history 与前 31 行 exact；q83 保留旧 propagation
+与前 31 行，新增 index 31 首次可行。q83 的 pre-count/cap/slack/drop/dropped 分别为
+652,016 / 1,700,172,776,259,030 / 133,727,664,071 / 49,417,284,097 / 78,576，E 从
+`1700039048594959/2^64` 增至 `1700088465879056/2^64`。q84（gates 332--335）则在
+pre-count 694,130 处 32/32 infeasible，minimum effective K 为 586,381，K excess
+12,941；最大档的 counterfactual drop excess 为 177,725,804,621 ticks。总 peak/visits
+为 694,130/96,423,989，canonical SHA 为
+`f379f6a72caba82c0f1aca599ef9872666cfed8b4ea72003194438ed01806f48`。
+
+D 使用 direct-v2 K=606,208/C35 wrapper；相对 arithmetic-v2 唯一变化是
+`max_retained_K: 524,288 -> 606,208` 与 `max_candidate_count: 32 -> 35`。wrapper/
+manifest SHA 分别为
+`34757028d695e2542cade50f4be5c214006dee6945e01afc2483e7338d6cb7dd` 与
+`c55df50288334226a4d8ba37a257ca645d601967f8778f426a313773c1c73629`；screen SHA 为
+`dffd720464566ef443909b5e7b01518ac82bf5defd68e72ce9de079422985068`。D 在 D34 后
+append `606,208`。q1--69 common state/history 与前 34 行 exact；q70 继续保持旧
+propagation 与前 34 行，新增 index 34 first-feasible。q70 的 pre-count/cap/slack/drop/
+dropped 分别为 718,805 / 2,288,924,993,833,947 / 151,298,243,902 /
+97,846,623,202 / 112,597，feasibility margin 为 53,451,620,700 ticks，E 从
+`2288773695590045/2^64` 增至 `2288871542213247/2^64`，并到达 70/70 committed。
+总 peak/visits 为 718,805/87,505,002，canonical SHA 为
+`55e9d305c90b62dea918071cd6ae383668c2ffb2f7dc108f7d4abcbcb772aa36`。两份完整账本
+覆盖 `84x32 + 70x35 = 5,138` 行；独立逐行复算、closed-schema 与 canonical 定向测试
+均通过，未触发 live/digest cap；D 的 35 个 candidate index 均至少被选择一次。
+
+下一阶段再次按 observable 分路。M q84 账本证明 `K=65,536` 在 84/84 行均 infeasible、
+从未 selected；其行集 SHA 为
+`01eaffaa790187714ae2a81acd0bea6f779df99c4dfc6b0dc9b1693e13b98d96`。因此可在 C32
+内用标准 `K=589,824` 替换该档并重放 q84，新档比 minimum 高 3,443。这一路径保持所有
+selected K 与 propagation state trajectory，但必须明确不宣称 candidate-row prefix
+identity；若要求行级严格 append-only，则需 C33。D 已到达 q70，下一最小判别器不扩
+capability：保持 K=606,208/C35，只把 horizon 扩到对齐 q72并从 q1 replay；q70 artifact
+仍只作结果产生后的 prefix evidence，不作 state resume。不得外推 q71/q72 的未测结果。
 
 这些 screens 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
 product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY

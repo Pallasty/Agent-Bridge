@@ -577,6 +577,54 @@ so they are versioned normally and are not added to the preservation-only
   execution-component schema, atomic/provenance/authority checks, and complete
   70-record/2,380-row canonical ledger with exact q69/q70 anchors; full replay is
   opt-in.
+- `hubbard_l8_adaptive_k_arithmetic_k573440.py`: fail-closed direct-v2 M
+  capability wrapper with source SHA-256
+  `c644dfeaf2a0b27be40403715aec8711818ae11ff575b230339af745f0a56ff1`
+  and manifest SHA-256
+  `fb6d6c241ab7ee2f535aa2f1cdff38a5e8f47bab1035ba29249332ca2d4f3f39`.
+  It changes only retained K 524,288 -> 573,440 and keeps candidate capacity 32;
+  K=557,056 and D K=573,440/C33 artifacts are non-executed route references.
+- `test_hubbard_l8_adaptive_k_arithmetic_k573440.py`: same-byte/fail-closed
+  direct-v2 loading, exact direct/route deltas, provider/global binding,
+  573,440/573,441 and C32/C33 boundaries, manifest/layer hashes and strict pins.
+- `hubbard_l8_magnetization_adaptive_k_four_gate_k573440_c32_q84_screen.py`
+  and its `*_transcript.json`: append-only M32 route through q84.  Screen source
+  SHA-256 is
+  `1246023edea93e89db2ec0071c51c1cb15f60b8a928b934aad08cebb593240b2`.
+  q1--82 common state/history and first 31 rows are exact; q83 retains the old
+  propagation/rows before appended index 31 becomes first feasible and selects
+  K=573,440.  q84 fails at pre-count 694,130, minimum K 586,381 and excess
+  12,941; peak/visits are 694,130/96,423,989.  Canonical transcript SHA-256 is
+  `f379f6a72caba82c0f1aca599ef9872666cfed8b4ea72003194438ed01806f48`.
+- `test_hubbard_l8_magnetization_adaptive_k_four_gate_k573440_c32_q84_screen.py`:
+  exact direct-parent/route/capability pins, M32 append construction, q83
+  failure-to-success handoff, closed success/failure schemas, atomic provenance,
+  authority and complete 84-record/2,688-row canonical ledger with exact q83/q84
+  anchors; full replay is opt-in.
+- `hubbard_l8_adaptive_k_arithmetic_k606208_c35.py`: fail-closed direct-v2 D
+  capability wrapper with source SHA-256
+  `34757028d695e2542cade50f4be5c214006dee6945e01afc2483e7338d6cb7dd`
+  and manifest SHA-256
+  `c55df50288334226a4d8ba37a257ca645d601967f8778f426a313773c1c73629`.
+  It changes only retained K 524,288 -> 606,208 and candidate capacity 32 -> 35;
+  K=589,824/C34 is a non-executed route reference.
+- `test_hubbard_l8_adaptive_k_arithmetic_k606208_c35.py`: same-byte/fail-closed
+  direct-v2 loading, exact direct/route deltas, provider/global binding,
+  606,208/606,209 and C34/C35/C36 boundaries, manifest/layer hashes and pins.
+- `hubbard_l8_double_occupancy_adaptive_k_four_gate_k606208_c35_q70_screen.py`
+  and its `*_transcript.json`: append-only D35 route through q70.  Screen source
+  SHA-256 is
+  `dffd720464566ef443909b5e7b01518ac82bf5defd68e72ce9de079422985068`.
+  q1--69 common state/history and first 34 rows are exact; q70 retains the old
+  propagation/rows before appended index 34 becomes first feasible and selects
+  K=606,208 with 53,451,620,700 ticks of margin, reaching 70/70 committed.
+  Peak/visits are 718,805/87,505,002.  Canonical transcript SHA-256 is
+  `55e9d305c90b62dea918071cd6ae383668c2ffb2f7dc108f7d4abcbcb772aa36`.
+- `test_hubbard_l8_double_occupancy_adaptive_k_four_gate_k606208_c35_q70_screen.py`:
+  exact direct-parent/route/capability pins, D35 append construction, q70
+  failure-to-success handoff, closed raw/relabeled/terminal/candidate schemas,
+  atomic provenance, authority and complete 70-record/2,450-row canonical ledger
+  with an exact q70 anchor; full replay is opt-in.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

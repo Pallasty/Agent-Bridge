@@ -597,8 +597,33 @@ The two ledgers cover 83x31 plus 70x34 = 4,953 candidate rows.  No policy,
 witness, boundary, transition, READY component, certified-depth or other
 authority-bearing artifact changes.
 
-The next prefix-preserving routes both append one standard grid rung.  M needs a
-minimal retained-K-only `K=573,440`/C32 capability through q84, covering q83 by
-7,446 without changing candidate-count capacity.  D needs `K=606,208`/C35
-through q70, covering q70 by 8,936.  Every current D34 rung has been selected,
-so no trajectory-neutral deletion is available.
+Those capability extensions are complete.  M's direct-v2 wrapper changes only
+retained K 524,288 -> 573,440 while keeping candidate capacity 32.  Its append-only
+M32 ladder preserves q1--82 common records/history and all first 31 rows, then
+preserves q83 propagation and the first 31 rows before appended index 31 becomes
+first feasible.  q83 selects 573,440 with pre-count 652,016, drop
+49,417,284,097 ticks and dropped count 78,576.  q84/gates 332--335 fails at
+pre-count 694,130, minimum effective K 586,381 and excess 12,941.  Peak/visits are
+694,130/96,423,989, and the canonical SHA-256 is
+`f379f6a72caba82c0f1aca599ef9872666cfed8b4ea72003194438ed01806f48`.
+
+D's direct-v2 wrapper changes retained K 524,288 -> 606,208 and candidate capacity
+32 -> 35, with all other kernel limits unchanged.  Its append-only D35 ladder
+preserves q1--69 common state/history and all first 34 rows; q70 retains the old
+propagation and first 34 rows before index 34 becomes first feasible.  q70 selects
+606,208 with drop 97,846,623,202 ticks, dropped count 112,597 and feasibility
+margin 53,451,620,700 ticks, reaching 70/70 committed.  Peak/visits remain
+718,805/87,505,002, and the canonical SHA-256 is
+`55e9d305c90b62dea918071cd6ae383668c2ffb2f7dc108f7d4abcbcb772aa36`.
+The exact ledgers cover 84x32 plus 70x35 = 5,138 rows.  No policy, witness,
+boundary, transition, READY component, certified-depth or other authority-bearing
+artifact changes.  All 35 current D candidate indices have now been selected at
+least once.
+
+The next routes split by observable.  M's q84 ledger proves that K=65,536 is
+infeasible in 84/84 rows and never selected.  Replacing that rung with standard
+K=589,824 therefore keeps C32 and preserves every selected K and propagated state,
+while intentionally changing the candidate-row set; the rung covers q84's minimum
+by 3,443.  A strict row-prefix route would require C33 instead.  D has reached q70,
+so its next discriminator is a same-cap K=606,208/C35 horizon-only replay through
+aligned q72, with the q70 artifact serving only as post-replay prefix evidence.
