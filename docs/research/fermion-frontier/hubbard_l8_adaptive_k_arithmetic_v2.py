@@ -481,16 +481,39 @@ def commit_candidate(
     selected_index: int,
 ) -> Tuple[TickExpansion, Dict[str, Any]]:
     selected_index = _exact_int(selected_index, "selected candidate index", nonnegative=True)
+    if type(expansion) is not dict:
+        raise SchemaError("expansion must be an exact dict")
     if type(ranked) is not list:
         raise SchemaError("ranked keys must be an exact list")
-    canonical_ranked, canonical_suffix = rank_with_suffix(expansion)
-    if ranked != canonical_ranked:
-        raise SchemaError("ranked keys do not match the canonical deterministic order")
-    if type(suffix) is not list or suffix != canonical_suffix:
-        raise SchemaError("suffix array does not match the canonical ranked expansion")
+    if len(ranked) != len(expansion) or len(set(ranked)) != len(ranked):
+        raise SchemaError("ranked keys are not a complete unique permutation")
+    if set(ranked) != set(expansion):
+        raise SchemaError("ranked keys do not match the expansion")
+    previous_rank_key: Tuple[int, int, int] | None = None
+    for key in ranked:
+        key = _validate_key(key, "ranked key")
+        interval = _validate_interval(expansion[key], "ranked coefficient")
+        bits = max(abs(interval[0]).bit_length(), abs(interval[1]).bit_length())
+        if bits > RESOURCE_LIMITS["max_expansion_coefficient_tick_bits"]:
+            raise SchemaError("ranked coefficient exceeds tick bit cap")
+        if interval == (0, 0):
+            raise SchemaError("ranked expansion contains an exact sparse zero")
+        rank_key = (-abs_upper(interval), key[0], key[1])
+        if previous_rank_key is not None and rank_key <= previous_rank_key:
+            raise SchemaError("ranked keys violate the canonical deterministic order")
+        previous_rank_key = rank_key
+    if type(suffix) is not list or len(suffix) != len(ranked) + 1:
+        raise SchemaError("suffix array does not match the ranked expansion length")
+    expected_suffix = 0
+    if type(suffix[-1]) is not int or suffix[-1] != 0:
+        raise SchemaError("suffix array must have an exact zero tail")
+    for index in range(len(ranked) - 1, -1, -1):
+        expected_suffix += abs_upper(expansion[ranked[index]])
+        if type(suffix[index]) is not int or suffix[index] != expected_suffix:
+            raise SchemaError("suffix array violates the canonical recurrence")
     candidate_records, expected_index = evaluate_candidates(
-        len(canonical_ranked),
-        canonical_suffix,
+        len(ranked),
+        suffix,
         candidates,
         cumulative_drop_ticks,
         prefix_cap_ticks,

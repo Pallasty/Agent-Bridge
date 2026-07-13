@@ -243,7 +243,7 @@ class AdaptiveKArithmeticV2Tests(unittest.TestCase):
         with self.assertRaises(KERNEL.SchemaError):
             KERNEL.commit_candidate(expansion, ranked[:1], suffix, [1, 2], 0, 3, selected)
 
-    def test_19b_split_commit_recomputes_order_suffix_and_first_feasible(self):
+    def test_19b_split_commit_revalidates_order_suffix_and_first_feasible(self):
         expansion = {(0, 1): (5, 5), (0, 2): (5, 5), (0, 3): (1, 1)}
         ranked, suffix = KERNEL.rank_with_suffix(expansion)
         self.assertEqual(ranked, [(0, 1), (0, 2), (0, 3)])
