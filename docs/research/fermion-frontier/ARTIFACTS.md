@@ -427,6 +427,36 @@ so they are versioned normally and are not added to the preservation-only
   canonical replays.  A separate opt-in noncanonical replay freezes the 32-slot D
   sensitivity at q65/minimum K `536,203`, peak 645,044 and 75,255,249 visits without
   writing a provenance-ambiguous output file.
+- `hubbard_l8_adaptive_k_arithmetic_k540672.py`: source-pinned capability wrapper
+  over the exact arithmetic-v2 bytes.  It changes only
+  `RESOURCE_LIMITS.max_retained_K` from 524,288 to 540,672, keeps every exported
+  arithmetic function and counter method bound to the isolated v2 provider, and
+  publishes a diagnostic manifest with SHA-256
+  `d51151fc1d6c73c33f1b50da0a09de4d3346212599716feaba578839dde37526`.
+  The wrapper source SHA-256 is
+  `327837e4646cb79cb237611ab49e645b51a47a36a97006e94838d1f5fa05af60`;
+  it has no certificate authority.
+- `hubbard_l8_adaptive_k_four_gate_k540672_screen.py` and the mode-specific
+  `*_adaptive_k_four_gate_k540672_transcript.json` files: controlled capability
+  screen using the pinned four-gate private control-flow parent, exact v6 baseline
+  configuration, exact v2 arithmetic and the separate K=540,672 wrapper.  Policy
+  configuration changes only the two K ceilings; all non-K caps remain fixed.  M
+  uses 30 candidates and commits q1--80, selecting 540,672 at q78--80; peak/visits
+  are 643,624/87,032,691.  D uses 32 candidates after replacing baseline 65,536,
+  commits q1--65 and fails at q66 with pre-count 679,285, minimum K 558,598 and
+  excess 17,926; visits are 77,762,021.  Canonical transcript SHA-256 values are
+  `d4a0f952a3d4a93bd78d370fae50c5c043e33caa4d1452e841987976e43354a5` and
+  `5ced57f7f6fc8aef50a6536920243d00af083b0a113b09d19f239bc1266fd8a5`.
+  The screen source SHA-256 is
+  `81ac62fa093c48d57667cb56958ad58a8ed26e8ff81abd7c35365e01fb981d6f`.
+  Both outputs are canonical, atomic, bounded by 4 MiB and diagnostic-only.
+- `test_hubbard_l8_adaptive_k_four_gate_k540672_screen.py`: exact source/capability
+  pins, provider isolation, M30/D32 ladder construction, recomputed D-65,536 removal
+  evidence, K-only cap deltas, fixed geometry/aligned budgets, fresh/private-path
+  exception identity, provenance hashes, 4 MiB atomic failure preservation, and
+  complete canonical ledger regressions over 146 records and 4,512 candidate rows.
+  It verifies the old committed prefixes, q78/q65 handoffs, M q80 horizon and D q66
+  failure; exact full propagation replays remain opt-in.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

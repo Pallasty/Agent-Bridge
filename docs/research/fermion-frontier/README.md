@@ -445,10 +445,41 @@ nor this one-rung repair crosses the D frontier.  This remains an independent
 diagnostic sensitivity screen, not v7, a policy or a parent/child certificate
 continuation.  It writes no boundary, transition, sidecar, exact-Hubbard claim or
 READY component, and certified depths remain 3/2.
-The next discriminating route is a separately source-pinned kernel generation that
-tests the next standard retained value `K=540,672` under four-gate cadence while
-holding the 786,432 live/digest caps fixed; this is an explicit kernel extension,
-not another ladder-only claim.
+That controlled capability-extension route is now complete.  A separately pinned
+wrapper compiles the exact arithmetic-v2 bytes and changes only
+`max_retained_K: 524,288 -> 540,672`; the diagnostic configuration changes only
+the candidate/output K ceilings, while the 786,432 live/digest and all other caps
+remain fixed.  Magnetization appends `540,672` for 30 candidates.  Double occupancy
+keeps 32 slots by deleting `65,536`, which is infeasible in every one of the 65
+pinned four-gate baseline rows and is never selected, then appending `540,672`.
+The screen runs the exact pinned four-gate parent's private entrypoint and records
+the v6 configuration, v2 arithmetic and capability wrapper as distinct source
+roles; it is not a v7 execution parent or a policy.
+
+Magnetization hands the old q78 failure to `K=540,672`, selects the same value at
+q79 and q80, and reaches the precommitted 80-checkpoint horizon with all 80 commits.
+The q78--80 pretruncation counts are `643,624/624,312/587,900`; overall peak/visits
+are `643,624/87,032,691`.  Its canonical transcript SHA-256 is
+`d4a0f952a3d4a93bd78d370fae50c5c043e33caa4d1452e841987976e43354a5`.
+Double occupancy hands q65 to `K=540,672` but fails at q66, gates 260--263, where
+the 679,285-term expansion requires minimum effective `K=558,598`, 17,926 above
+the new retained maximum; overall visits are `77,762,021`.  Its canonical
+transcript SHA-256 is
+`5ced57f7f6fc8aef50a6536920243d00af083b0a113b09d19f239bc1266fd8a5`.
+Thus M reaches the planned old-q40 comparison horizon, while D exposes a new
+K-ceiling rather than a live/digest stop.  Neither finite horizon completes the
+288-checkpoint mapped step, and no policy, witness, boundary, transition, READY
+component or certified-depth increase is created.
+
+The next route should split by observable.  M can first extend the unchanged
+`K=540,672` screen through q82 to locate the next aligned eight-gate boundary.
+For D, the `557,056` rung is already below the measured q66 minimum, so the next
+16,384-spaced endpoint that covers it is `573,440`.  Every one of the current 32 D
+rungs is selected in the committed q1--65 history, so no trajectory-neutral slot
+deletion remains.  Preserving that prefix therefore calls for a separately pinned
+33-slot/`K=573,440` capability screen (or, explicitly, a new ladder trajectory),
+again keeping the 786,432 live/digest caps fixed and testing through the next
+aligned q68 boundary.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

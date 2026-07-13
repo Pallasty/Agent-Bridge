@@ -519,6 +519,29 @@ visits.  The altered ladder is reproduced only by an opt-in test and is not save
 a misleading v6-configured transcript.  Checkpoint halving and this one-rung repair
 therefore both fail to cross the D frontier.  The screen remains diagnostic-only and
 leaves certified depths 3/2 and all authority-bearing artifacts unchanged.
-The next planned discriminator is a separately pinned kernel generation testing the
-next standard retained value `K=540,672` with four-gate cadence and unchanged
-786,432 live/digest caps, rather than another configuration-only ladder mutation.
+The planned `K=540,672` discriminator has now been executed as an explicit,
+separately pinned capability extension.  Its arithmetic wrapper compiles exact v2
+bytes and changes only `max_retained_K` from 524,288 to 540,672.  The diagnostic
+configuration changes only the candidate/output K ceilings; live/digest stay at
+786,432 and every other resource cap is unchanged.  M appends the new rung for 30
+candidates.  D replaces `65,536`, which is infeasible in all 65 rows and never
+selected in the pinned four-gate baseline, so its count remains 32.
+
+M selects `540,672` at q78--80 and reaches the fixed q80 horizon with 80/80
+commits; q78--80 pre-counts are 643,624/624,312/587,900 and total peak/visits are
+643,624/87,032,691.  D selects `540,672` at q65, then fails at q66/gates 260--263:
+pre-count/peak is 679,285, minimum effective K is 558,598, excess over the configured
+maximum is 17,926 and total visits are 77,762,021.  The canonical M/D transcript
+SHA-256 values are
+`d4a0f952a3d4a93bd78d370fae50c5c043e33caa4d1452e841987976e43354a5` and
+`5ced57f7f6fc8aef50a6536920243d00af083b0a113b09d19f239bc1266fd8a5`.
+Full ledger tests cover 80x30 plus 66x32 candidate rows and bind the old committed
+prefixes and failure handoffs.  The route remains diagnostic-only and leaves
+certified depths 3/2 and all authority-bearing artifacts unchanged.
+
+Next, M's discriminator is a same-cap horizon extension through q82.  D needs a joint
+candidate-count/retained-K decision: `557,056` is 1,542 below the measured minimum,
+so the next 16,384-spaced covering rung is `573,440`; moreover all 32 current D
+rungs are selected in q1--65, leaving no trajectory-neutral deletion.  The clean
+prefix-preserving discriminator is therefore a separately pinned 33-slot,
+`K=573,440` screen through q68 with the 786,432 live/digest caps still unchanged.

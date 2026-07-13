@@ -734,9 +734,33 @@ checkpoints，并在同一 q65/gates 256--259 失败；minimum K 反而升至
 已固定的 v6 配置源中，数值结果只由 opt-in regression 重现，不伪装成来源正确的
 canonical artifact。因此已能排除“单纯减半 checkpoint 间隔”和“仅补回该候选档”
 这两个简单修复，但不把它外推为所有 cadence/ladder 协同设计的 no-go。
-下一个有判别力的单元应是独立固定源字节的 kernel generation：在四门 cadence 下测试
-下一标准 retained 档 `K=540,672`，同时保持 786,432 live/digest caps 不变。这将是
-显式 kernel capability 扩展，不再冒充为 configuration-only 候选阶梯修补。
+该显式 kernel capability 扩展现已完成。独立 wrapper 从已验 arithmetic-v2 字节隔离
+编译，唯一资源变化是 `max_retained_K: 524,288 -> 540,672`；诊断配置只同步
+candidate/output 两个 K ceiling，786,432 live/digest 及其余 caps 全部不变。M 在 v6
+基线后追加 `540,672`，形成 30 档。D 为保持 32-slot 上界，删除旧四门 canonical
+q1--65 中逐行均 infeasible 且从未 selected 的 `65,536`，再追加 `540,672`。screen
+固定自身、four-gate private control-flow parent、v6 baseline、v2 arithmetic 和 capability
+wrapper 五类来源角色；wrapper/screen SHA 分别为
+`327837e4646cb79cb237611ab49e645b51a47a36a97006e94838d1f5fa05af60` 与
+`81ac62fa093c48d57667cb56958ad58a8ed26e8ff81abd7c35365e01fb981d6f`。
+
+M 在 q78 正确接过旧 `minK=529,897` failure，并在 q78--80 连续选择
+`540,672`，最终 80/80 committed 到达预提交 horizon；三步 pre-count 为
+643,624/624,312/587,900，总 peak/visits 为 643,624/87,032,691，canonical SHA 为
+`d4a0f952a3d4a93bd78d370fae50c5c043e33caa4d1452e841987976e43354a5`。D 在 q65
+以 `540,672` 接过旧 `minK=532,869` failure，但 q66（gates 260--263）再次无可行档：
+pre-count/peak 为 679,285，minimum effective K 为 558,598，超出新 ceiling 17,926，
+visits 为 77,762,021；canonical SHA 为
+`5ced57f7f6fc8aef50a6536920243d00af083b0a113b09d19f239bc1266fd8a5`。因此 M 已到达
+规划中的旧 q40 对齐比较面，而 D 暴露出新的 K-ceiling stop，并未触发 live/digest cap。
+两条有限 horizon 都没有完成每步 288 checkpoints。
+
+下一单元应按 observable 分开。M 可在不改 `K=540,672` 或资源 caps 的前提下先延伸至
+q82，定位下一个八门对齐边界。D 当前 q66 minimum 已比下一 16,384 网格档
+`557,056` 高 1,542，因此真正覆盖它的下一档是 `573,440`；同时 q1--65 已实际使用
+现有全部 32 档，没有 trajectory-neutral 删除槽。若要保留当前 committed prefix，最干净
+的判别器应独立固定 33-slot/`K=573,440` capability，并在 live/digest 仍为 786,432 时
+回放到下一个 q68 对齐边界；否则必须明确承认采用了新的 ladder trajectory。
 
 该 screen 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
 product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY
