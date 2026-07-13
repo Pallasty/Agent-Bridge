@@ -482,3 +482,20 @@ kernel retained-K maximum.  Double occupancy has no remaining candidate slot;
 testing that endpoint requires a new sparse/merged ladder rather than appending to
 v5.  No policy, formal witness, child sidecar, transition, depth increase,
 exact-Hubbard conclusion or READY component has been added.
+
+The v6 kernel-limit generation now exercises `K=524,288`, the current arithmetic
+kernel's maximum retained value.  Magnetization uses 29 candidates by appending that
+endpoint.  Double occupancy remains at the 32-candidate capability by replacing the
+unused v5-only `491,520` slot, preserving every ancestral v2--v4 candidate and every
+K selected in the v5 committed prefix.  Five ordered same-byte source layers and
+three distinct override levels are bound.  Magnetization commits checkpoint 39 with
+`K=524,288` and fails at checkpoint 40 with minimum K 525,859; peak/visits are
+714,754/91,034,065.  Double occupancy commits checkpoint 32 with `K=524,288`, then
+the unchanged 786,432 live/digest cap stops checkpoint 33 before ranking.  A separate
+noncanonical measurement at the kernel's 1,048,576-term capability records an
+825,000-term peak, 82,050,350 visits and minimum K 553,717 for that checkpoint, with
+the K requirement 29,429 above the retained maximum.  The resource exception is
+propagated, so no partial D transcript is published; the complete M transcript is
+canonical and atomic.  This exhausts candidate-only continuation under the current
+kernel.  Certified depths remain 3/2, with no policy, formal witness, boundary,
+transition, exact-Hubbard conclusion or READY component added.

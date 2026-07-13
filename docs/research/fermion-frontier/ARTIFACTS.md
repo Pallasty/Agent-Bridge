@@ -384,6 +384,25 @@ so they are versioned normally and are not added to the preservation-only
   and effective/direct-override tamper, atomic output, canonical transcript,
   every-checkpoint recurrence, frozen result/resource hashes, and full v4-prefix
   plus old-failure handoff regressions.
+- `hubbard_l8_adaptive_k_v6_design_probe.py` and
+  `hubbard_l8_magnetization_adaptive_k_v6_design_transcript.json`: diagnostic-only
+  kernel-limit continuation through `K=524,288`.  The probe uses 29 M candidates and
+  a 32-slot D ladder that replaces unused v5-only `491,520`, binds ordered
+  v6/v5/v4/v3/v2 source layers, separates the direct v6/configured-v5/configured-v4
+  overrides, propagates resource failures and atomically publishes at most 1 MiB.
+  M commits checkpoint 39 and fails at checkpoint 40 with minimum K `525,859`;
+  its canonical transcript SHA-256 is
+  `7b0f4509a067a41da849c86c0e3e8e0ec585217d6c44a7d48aeeedc2e9aa6102`.
+  D commits checkpoint 32 in replay but checkpoint 33 exceeds the unchanged
+  786,432 live/digest cap, so no partial D v6 transcript is published.  A separate
+  noncanonical kernel-cap measurement gives peak 825,000, 82,050,350 visits and
+  minimum K `553,717`, 29,429 above the retained maximum, at that checkpoint.
+  Neither route commits policy or positive authority.
+- `test_hubbard_l8_adaptive_k_v6_design_probe.py`: exact kernel-limit ladders/caps,
+  same-byte/private-call and exception-identity checks, five-layer source and
+  three-level override tamper checks, canonical M file/ledger/failure/history hashes,
+  full v5-prefix handoff, atomic failure preservation, explicit absence of a partial
+  D transcript, and opt-in exact D resource-failure/resource-measurement replays.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

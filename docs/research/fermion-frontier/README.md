@@ -393,6 +393,27 @@ without deleting or merging an older candidate in a separately designed generati
 No v5 policy or positive certificate artifact is created, and certified depths stay
 at 3/2.
 
+The v6 kernel-limit generation tests the final retained-K value supported by the
+current arithmetic kernel.  Magnetization appends `K=524,288` for 29 candidates;
+double occupancy replaces the unused v5-only `491,520` slot with `524,288`, keeping
+32 candidates while preserving every v2--v4 candidate and every K actually selected
+by v5.  The wrapper binds ordered v6/v5/v4/v3/v2 same-byte source layers and records
+the direct v6 delta, the configured-v5 effective override and its embedded
+configured-v4 override separately.  Magnetization selects `524,288` at checkpoint
+39 and then stops at checkpoint 40, whose minimum effective K is `525,859`, only
+1,571 above the kernel maximum; peak/visits are `714,754/91,034,065`.  Under the
+unchanged non-K caps, double occupancy selects `524,288` at checkpoint 32 but the
+next propagation aborts before ranking because its 825,000-term expansion exceeds
+the 786,432 live/digest envelope.  A noncanonical resource measurement at the
+kernel's 1,048,576-term capability confirms that checkpoint 33 would additionally
+need `K=553,717`, 29,429 above the retained-K maximum, with 82,050,350 visits.
+Resource exceptions propagate without fallback, so only the complete magnetization
+v6 transcript is published and no partial double-occupancy transcript exists.
+Candidate-only extension of this kernel is now exhausted; continuation requires an
+explicit kernel/resource or checkpointing redesign.  No v6 policy, formal witness,
+boundary, transition, exact-Hubbard claim, READY component or certified-depth
+increase is created.
+
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
 which predates a documented splitting-sign fix.  The fork must pin a complete Julia

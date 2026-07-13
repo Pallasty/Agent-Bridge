@@ -693,6 +693,22 @@ minimum K，但它正好等于 kernel retained-K 上界；D 已用满 32 个候�
 删除或合并旧档，不能直接追加第 33 项。该结果没有 precommit policy、formal witness、
 boundary、transition、sidecar 或 depth 增量，也没有证明 `K=524,288` 能完成后续 checkpoint。
 
+v6 kernel-limit design generation 随后测试当前算术内核支持的最后一个 retained-K 档。
+magnetization 直接追加 `524,288`，形成 29 项；double occupancy 删除 v5 新增且从未被选中的
+`491,520`，再加入 `524,288`，故仍为 32 项，并完整保留 v2--v4 候选集及 v5 的全部实际选择。
+same-byte wrapper 固定有序 v6/v5/v4/v3/v2 五层来源，同时把 direct v6 delta、configured-v5
+effective override 及其内含的 configured-v4 effective override 分层绑定。M 在 checkpoint 39
+选择 `524,288`，checkpoint 40 随即需要最低有效 `K=525,859`，超过内核上界 1,571；其
+peak/visits 为 `714,754/91,034,065`。D 在未改变非 K caps 的精确回放中先以 `524,288`
+跨过 checkpoint 32，但 checkpoint 33 在 ranking 前因 825,000 项展开超过 786,432
+live/digest envelope 而终止。仅用于测量、不得提升为 policy 的 1,048,576-term 内核能力回放
+进一步表明同一 checkpoint 还需 `K=553,717`，超过 retained-K 上界 29,429，visits 为
+82,050,350。资源异常不被捕获或降级，因此只发布完整 M v6 transcript，不存在 D 半成品
+transcript。当前内核的纯候选扩展路线至此耗尽；下一步必须显式选择 kernel retained-K/
+live-digest 扩容、checkpoint 粒度重构或不同 propagation/proof 路线，再另行预提交。v6 仍
+不产生 policy、formal witness、boundary、transition、sidecar、exact-Hubbard/READY 结论
+或 M/D depth 3/2 增量。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
