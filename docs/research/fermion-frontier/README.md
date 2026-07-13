@@ -287,9 +287,35 @@ two-step cumulative drop `211995779549182/2^64` and mapped-circuit interval
 `2152392847533726/2^64`, giving cumulative `2283149854538588/2^64` and interval
 `[23418151510906025,27984451220025405]/2^64`, approximately
 `[0.0012695005371859505,0.0015170401404283085]`.  The latter already consumes
-about 49.5% of the `1/4000` observable allocation after only two mapped steps.
+about 49.5% of the `1/4000` scalar truncation-error-radius allocation after only
+two mapped steps.  That allocation does not include coefficient-box width or
+product-formula-to-exact-Hubbard error.
 This is a two-step custody/transition certificate, not an R=100 or exact-Hubbard
 result.
+
+The magnetization chain now closes one further adjacent transition.  The step-3
+checker same-byte executes the positive two-step parent, selects only its
+magnetization output, binds the previous transition, and replays a fresh
+1,152-gate/144-checkpoint fixed-`K=65,536` child.  The third child drops
+`1479500890039114/2^64`; cumulative drop is `1691496669588296/2^64`, and the
+declared three-step mapped-circuit interval is
+`[18329701971403435870,18333084964742654970]/2^64`, approximately
+`[0.9936551349203719,0.9938385273567662]`.  Term-gate visits are 83,365,144 and
+the peak expansion is 92,964 terms.  A separate fixed-K step-4 diagnostic gives
+cumulative drop `7166451866997599/2^64`, about `3.88494e-4`, already above the
+`1/4000` truncation-radius allocation; no boundary-4 sidecar or four-step
+certificate is issued.
+
+Double occupancy remains certified only through step 2.  Adaptive-K policy v1 was
+committed before its formal run and fixes nine candidates from 65,536 through
+131,072 plus a future-checkpoint prefix envelope.  It selects
+`[73728,81920,90112,98304,114688,122880]` for the first six checkpoints, then
+fails closed at checkpoint 7: even `K=131,072` requires a drop of
+`429299248198/2^64` while only `177868057779/2^64` remains below that prefix cap.
+The infeasibility screen therefore commits no step-3 child boundary.  A diagnostic
+fixed-`K=262,144` run ends below the scalar `1/4000` ceiling, but needs 337,691,387
+term-gate visits and a 446,188-term peak, violating every corresponding v1 cap;
+it is evidence for designing a separately precommitted v2, not a certificate.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
@@ -297,13 +323,17 @@ which predates a documented splitting-sign fix.  The fork must pin a complete Ju
 Manifest/PauliPropagation version, sort composite bitmasks deterministically, and add
 outward coefficient intervals plus a post-dedup per-gate/stage dropped-L1 ledger.
 That work is a parallel implementation-custody route rather than authority for the
-Python interval certificates.  The next fixed-K experiment is magnetization step 3;
-double occupancy must first freeze a larger cap or a deterministic adaptive-K rule,
-because its second-step drop increased by a factor of 16.46 over step 1.
+Python interval certificates.  The next interval route is a new resource-policy
+version rather than another current-policy child: both magnetization step 4 and
+double-occupancy step 3 require larger/adaptive retained caps.  Any v2 must be
+precommitted, use a separately source-pinned arithmetic kernel and sidecar state,
+and preserve per-observable adjacent-transition depth; the diagnostic `K=262,144`
+numbers cannot be promoted in place.
 
 These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
 grouping-screen, fixed-generic-bound no-go, observable-Taylor-step and
-double-occupancy-cluster no-go and L8 one/two-step interval artifacts remain
+double-occupancy-cluster no-go, shared two-step L8 intervals, the
+magnetization-only step-3 interval and the depth-2 double-occupancy screen remain
 standalone preflight, qualification and conformance tools. They have **not** yet
 been added as components of `fermi_hubbard_evidence.py`, so they do not alter the
 current outer `READY_FOR_BENCHMARK` gate.

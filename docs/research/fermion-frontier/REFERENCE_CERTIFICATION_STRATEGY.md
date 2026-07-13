@@ -612,11 +612,31 @@ expansion、累计 drop 与 Néel expectation，随后 step 2 独立执行固定
 | staggered magnetization | 103,720 / 65,536 | `207375793741436/2^64` | `211995779549182/2^64` | `[18395060021948335379,18395484013507455340]/2^64` |
 | double occupancy | 105,350 / 65,536 | `2152392847533726/2^64` | `2283149854538588/2^64` | `[23418151510906025,27984451220025405]/2^64` |
 
-double occupancy 的累计 half-width 已约为 `1.23770e-4`，占 `1/4000` allocation 的
-49.5%；step-2 local drop 又是 step 1 的 16.46 倍。因此不得直接执行 fixed-K step 3，
-必须先冻结更大 retained/single-expansion caps 或 deterministic adaptive-K rule。
-磁化量累计约 `1.14923e-5`，可继续做 fixed-K step-3/4 稳态资源测量。任何走势都不能
-线性外推到 R100；product-formula-to-exact-Hubbard 项仍须独立组合。
+double occupancy 的累计 dropped-L1 radius 已约为 `1.23770e-4`，占 `1/4000`
+scalar truncation-error-radius allocation 的 49.5%；该 allocation 不含 coefficient-box
+width 与 product-formula-to-exact-Hubbard error。step-2 local drop 又是 step 1 的
+16.46 倍，因此不得直接执行 fixed-K step 3。
+
+磁化量的相邻 `2 -> 3` transition 现已正证闭合。新 state v2 同时绑定 immediate-parent
+checker/witness、previous transition 与 transition-policy SHA；boundary 3 仍为完整
+65,536-term box。第三步 `d3=1479500890039114/2^64`，所以
+`E3=1691496669588296/2^64 ~=9.16962e-5`，declared mapped interval 为
+`[18329701971403435870,18333084964742654970]/2^64`。本步 peak/visits 为
+92,964/83,365,144。固定 K 的 step-4 诊断得到 `E4=7166451866997599/2^64 ~=3.88494e-4`，
+已超过 `1/4000` scalar truncation-error-radius allocation；它没有 sidecar、transition
+或正证 authority。
+
+double occupancy adaptive-K v1 在正式执行前单独提交，候选为
+`65,536,73,728,...,131,072`，并用
+`C(q)=E2+floor(q(B-E2)/(98*144))` 保留余下 checkpoint 的 truncation slack。前六个
+checkpoint 选择 `[73728,81920,90112,98304,114688,122880]`；第七个 checkpoint 的
+最大 K 仍需 drop 429,299,248,198 ticks，高于 177,868,057,779 ticks slack，故
+fail closed 且不提交 child boundary。该 screen 的 ledger/failure SHA 分别为
+`f1210e3bdd2d505195b93029fcd9ec3a05e29a5ee99ab854e910c7726d2ad9bb` 与
+`8d8aff7ab17148df346857cb9d86b07c9a031cb3a1ffec5945b3183938f0e5cd`。
+诊断 K=262,144 虽得到 `E3~=1.86259e-4`，但 peak/visits 为
+446,188/337,691,387，违反 v1 的 262,144/200,000,000 caps；它只能指导 v2。
+任何走势都不能线性外推到 R100；product-formula-to-exact-Hubbard 项仍须独立组合。
 
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
@@ -633,12 +653,14 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
 
 1. L2/L3 的 OBC、未平移 `U n_up n_down` 和 canonical JW term split 已冻结，完整 L2
    checkpoint propagation 已闭合；L8 初态、双 observable、mapped fused sequence 与
-   首个和第二个 interval boundary 以及 step-2 child 已闭合。下一步为磁化量 fixed-K
-   step 3，并先为 double occupancy 冻结 cap/adaptive-K policy。
+   首个和第二个 interval boundary、step-2 child，以及磁化量 boundary 3/step-3 child
+   已闭合；double occupancy adaptive-K v1 已以 checkpoint-7 不可行为正 screen 结果，
+   其 certified depth 仍为 2。
 2. 固定五组 generic bound、uniform-supremum Pauli-L1 shortcut，以及 double occupancy
    用 fixed greedy14 cluster-exact-norm triangle 作为 uniform supremum 的架构都已被 exact
    witness 严格排除；逐 `k` cluster triangle ledger 仍开放。直接 evolved-observable
-   propagation 已完成两步，不再逐 `k` 重算 495 paths；cross-cluster/global
+   propagation 对两个 observable 共同完成两步，magnetization 另完成第三步；不再逐
+   `k` 重算 495 paths；cross-cluster/global
    cancellation-aware 方法仍作为平行数学路线。
 3. Majorana 执行基线已固定为从 `main@b7849cb` 建 certificate fork，pin Julia Manifest 与
    PauliPropagation v0.7.3，并移植 deterministic composite bitmask sort。补
@@ -646,7 +668,9 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
    intervals 和 L2/L3 ED 对照。该 fork 是平行 custody/实现路线，不能覆盖现有 Python
    one-step checker 的 authority。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
-   double occupancy 必须先通过 cap 升级或合同固定的 adaptive-K child policy；
+   当前 fixed-K 磁化量 step 4 与 double occupancy step 3 都必须另发资源/sidecar v2；
+   v2 至少需审计 K=262,144、single-expansion 446,188 与 visits 337,691,387 这一诊断点，
+   且必须在正式运行前重新提交候选、prefix budget 与 hard caps；
    两个 observables 可以采用不同 certified methods，不能只因增大 R 就跳过资源与独立性
    复核。
 5. 若 Majorana L1 或 locality tail 已超过 allocation，再决定是否执行 cluster Krylov。

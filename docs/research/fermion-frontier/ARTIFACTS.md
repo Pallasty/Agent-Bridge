@@ -261,9 +261,10 @@ so they are versioned normally and are not added to the preservation-only
   raw/fused sequence, phase, fixed-tick interval, checkpoint, deterministic ranking,
   nonzero-drop, exact tick-value, resource-cap, tamper, fail-closed and CLI-boundary
   regressions.
-- `hubbard_l8_interval_checkpoints/*.b85`: four canonical 100-column Base85-wrapped
-  single-zlib-stream sidecars containing the complete 65,536-term retained interval
-  expansions for both observables at boundaries one and two.  Each state binds the
+- `hubbard_l8_interval_checkpoints/*.b85`: five canonical 100-column Base85-wrapped
+  single-zlib-stream sidecars containing both observables' complete 65,536-term
+  retained interval expansions at boundaries one and two plus magnetization
+  boundary three.  Each state binds the
   root one-step checker/witness, fixed backprop sequence, cumulative drop and retained
   Néel expectation; the child contract separately pins encoded, compressed and raw
   SHA-256 identities.
@@ -287,9 +288,26 @@ so they are versioned normally and are not added to the preservation-only
   prefix envelope, parent boundary/transition anchors, one-propagation suffix-sum
   selection rule and hard resource failures.  It contains no step-3 output pin;
   any relaxed candidate or resource limit requires a new policy version.
+- `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
+  same-byte execute the positive immediate two-step parent and certify only the
+  adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,
+  previous-transition and policy identities, 144 fresh checkpoints, `E3=E2+d3`,
+  the complete boundary-3 sidecar and the three-step mapped interval; double
+  occupancy, step 4, exact-Hubbard error, reference and READY remain unassessed.
+- `test_hubbard_l8_magnetization_interval_step3_checker.py`: 46 parent-DAG, adjacent
+  sidecar, state-v2, anchor, sequence, recurrence, resource, cache, tamper and CLI
+  regressions with one full public replay.
+- `hubbard_l8_double_occupancy_adaptive_k_v1_screen_checker.py`, contract and
+  template: same-byte replay the positive two-step parent and precommitted policy,
+  verify six first-feasible K selections, and certify the seventh-checkpoint
+  infeasibility result without committing a child boundary or increasing depth.
+- `test_hubbard_l8_double_occupancy_adaptive_k_v1_screen_checker.py`: 43 policy,
+  source, parent, suffix-selection, exact-ledger, failure, resources, cache, scope and
+  CLI regressions with one full public replay.
 - The measurement-campaign, reference-qualification, proof-kernel, mapping,
   checkpoint, commutator, grouping-screen, generic-bound no-go, observable-Taylor
-  step, double-occupancy-cluster no-go and L8 one/two-step interval artifacts are
+  step, double-occupancy-cluster no-go, shared L8 two-step intervals,
+  magnetization-only step 3 and depth-2 double-occupancy screen artifacts are
   currently independent of
   `fermi_hubbard_evidence.py`;
   none is yet an outer `READY_FOR_BENCHMARK` component.

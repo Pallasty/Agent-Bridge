@@ -163,6 +163,17 @@ this policy.  A failed formal v1 attempt may not expand its candidates or resour
 that would require a separately committed v2.  This precommit does not itself add a
 third transition or alter any snapshot/READY status.
 
+The formal v1 screen subsequently commits six checkpoints with selected K history
+`[73728,81920,90112,98304,114688,122880]` and fails closed at checkpoint seven.
+The maximum candidate needs 429,299,248,198 ticks of drop against only
+177,868,057,779 ticks of prefix slack, so no double-occupancy boundary 3 exists and
+its certified mapped depth remains two.  In parallel, a same-byte immediate-parent
+child checker closes only staggered-magnetization step 3: cumulative dropped `L1` is
+`1691496669588296/2^64` and the mapped interval is approximately
+`[0.9936551349203719,0.9938385273567662]`.  A fixed-K step-4 diagnostic exceeds the
+scalar allocation and is not certified.  These standalone changes do not alter a
+source-snapshot value, exact-Hubbard/reference claim, or outer READY status.
+
 The Majorana implementation audit likewise changes no snapshot value.  It selects a
 future fork from registered `main@b7849cb` because the inferred paper-date commit
 precedes a documented splitting-sign fix; a complete Julia Manifest, deterministic
@@ -173,8 +184,9 @@ convergence data therefore remain diagnostic only.
 None of the campaign preflight, reference-qualification ledger, proof kernel, L=2
 conformance witness, mapping checker, checkpointed L2 checker, bitset prototype,
 Strang commutator checker, grouping-screen checker, fixed-generic-bound no-go checker,
-observable-Taylor-step checker, double-occupancy-cluster no-go checker or L8
-one/two-step interval checker is currently
+observable-Taylor-step checker, double-occupancy-cluster no-go checker, shared L8
+two-step interval checker, magnetization-only step-3 checker or depth-2
+double-occupancy adaptive-policy screen is currently
 a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the
