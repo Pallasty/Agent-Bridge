@@ -1,0 +1,133 @@
+{
+  "schema": "agent_bridge.memory_temporal_evidence_substrate_s2_synthetic.v0",
+  "fixture_only": true,
+  "real_capture_authorized": false,
+  "legacy_rows_qualified": false,
+  "adapter_allowed": false,
+  "biocortex_runtime_influence": false,
+  "migration": {
+    "from_version": "42",
+    "to_version": "43",
+    "legacy_memory_rows_before": 1,
+    "truth_rows_after_migration": 0,
+    "legacy_backfill": false
+  },
+  "authority_policies": [
+    {
+      "policy_revision_id": "synthetic-policy-employment-v1",
+      "policy_lineage_id": "synthetic-policy-employment",
+      "revision_seq": 1,
+      "recorded_at": 10,
+      "predicate_id": "synthetic.employment.organization",
+      "source_key": "synthetic:hr-registry",
+      "resolved_truth_tier": "authoritative",
+      "status": "active"
+    },
+    {
+      "policy_revision_id": "synthetic-policy-status-v1",
+      "policy_lineage_id": "synthetic-policy-status",
+      "revision_seq": 1,
+      "recorded_at": 10,
+      "predicate_id": "synthetic.employment.status",
+      "source_key": "synthetic:ops-registry",
+      "resolved_truth_tier": "verified",
+      "status": "active"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "synthetic-employment-old-v1",
+      "lineage_id": "synthetic-employment-old",
+      "referent_id": "synthetic:employee:alpha",
+      "predicate_id": "synthetic.employment.organization",
+      "revision_seq": 1,
+      "recorded_at": 100,
+      "relationships": []
+    },
+    {
+      "evidence_id": "synthetic-employment-current-v1",
+      "lineage_id": "synthetic-employment-current",
+      "referent_id": "synthetic:employee:alpha",
+      "predicate_id": "synthetic.employment.organization",
+      "revision_seq": 1,
+      "recorded_at": 150,
+      "relationships": [
+        {
+          "kind": "supersedes",
+          "target_lineage_id": "synthetic-employment-old",
+          "effective_from": 200
+        }
+      ]
+    },
+    {
+      "evidence_id": "synthetic-employment-current-v2",
+      "lineage_id": "synthetic-employment-current",
+      "referent_id": "synthetic:employee:alpha",
+      "predicate_id": "synthetic.employment.organization",
+      "revision_seq": 2,
+      "recorded_at": 180,
+      "relationships": [
+        {
+          "kind": "supersedes",
+          "target_lineage_id": "synthetic-employment-old",
+          "effective_from": 200
+        }
+      ]
+    },
+    {
+      "evidence_id": "synthetic-status-late-v1",
+      "lineage_id": "synthetic-status-late",
+      "referent_id": "synthetic:employee:alpha",
+      "predicate_id": "synthetic.employment.status",
+      "revision_seq": 1,
+      "recorded_at": 350,
+      "relationships": []
+    }
+  ],
+  "tombstones": [
+    {
+      "tombstone_id": "synthetic-tombstone-employment-old-v1",
+      "lineage_id": "synthetic-employment-old",
+      "tombstoned_at": 240,
+      "had_outgoing_governance": false,
+      "content_free": true
+    }
+  ],
+  "snapshot": {
+    "knowledge_cutoff": 160,
+    "full_ledger_not_cutoff_filtered": true,
+    "expected_counts": {
+      "lineages": 3,
+      "policy_revisions": 2,
+      "evidence_revisions": 4,
+      "relationships": 2,
+      "tombstones": 1
+    },
+    "limits": {
+      "max_lineages": 8,
+      "max_policy_revisions": 8,
+      "max_evidence_revisions": 8,
+      "max_relationships": 8,
+      "max_tombstones": 8,
+      "max_payload_bytes": 1048576
+    },
+    "post_cutoff_evidence_ids_retained": [
+      "synthetic-employment-current-v2",
+      "synthetic-status-late-v1"
+    ],
+    "inbound_relationship_to_tombstoned_target_retained": true,
+    "canonical_order": "binary_utf8_v0"
+  },
+  "expected_rejection_codes": [
+    "truth_evidence_identity",
+    "truth_evidence_migration_collision",
+    "truth_evidence_policy_not_latest_visible",
+    "truth_evidence_same_second_target_ambiguity",
+    "truth_evidence_lower_tier_suppression",
+    "truth_evidence_relationship_cycle",
+    "truth_evidence_dropped_relationship",
+    "truth_evidence_tombstoned_lineage",
+    "truth_evidence_snapshot_truncated",
+    "truth_evidence_snapshot_payload"
+  ]
+}

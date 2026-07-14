@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio_rusqlite::{params, rusqlite, Connection};
 
+mod temporal_evidence;
+
 // Local alias matches the `E` parameter that `tokio_rusqlite::Connection::call`
 // expects from the user closure.
 type RusqliteResult<T> = std::result::Result<T, tokio_rusqlite::rusqlite::Error>;
@@ -1774,6 +1776,7 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V42_RETRIEVAL_TRAFFIC_CLASS)?;
                 let _ = c.execute("UPDATE schema_meta SET value='42' WHERE key='version'", []);
             }
+            temporal_evidence::migrate_or_verify_v43(c)?;
             Ok(())
         })
         .await
@@ -13662,6 +13665,7 @@ mod tests {
                     "UPDATE memories SET fts_content = NULL WHERE key = 'trigger_projection_legacy'",
                     [],
                 )?;
+                temporal_evidence::remove_v43_for_legacy_migration_test(c)?;
                 c.execute("UPDATE schema_meta SET value='35' WHERE key='version'", [])?;
                 Ok(())
             })
@@ -15803,7 +15807,7 @@ mod tests {
         // "22" via raw rusqlite. Dropping the column auto-drops the
         // partial index. (SQLite ≥3.35 supports DROP COLUMN.)
         {
-            let raw = rusqlite::Connection::open(&db_path).expect("raw open");
+            let mut raw = rusqlite::Connection::open(&db_path).expect("raw open");
             // Partial index references the column → must drop it first.
             raw.execute("DROP INDEX IF EXISTS idx_memories_dedupe_key", [])
                 .expect("drop dedupe_key index");
@@ -15819,6 +15823,8 @@ mod tests {
                 .expect("drop embedding_backend index");
             raw.execute("ALTER TABLE memories DROP COLUMN embedding_backend", [])
                 .expect("drop embedding_backend column");
+            temporal_evidence::remove_v43_for_legacy_migration_test(&mut raw)
+                .expect("remove additive v43 schema before v22 replay");
             raw.execute(
                 "UPDATE schema_meta SET value = '22' WHERE key = 'version'",
                 [],
@@ -19224,6 +19230,7 @@ mod tests {
                     "UPDATE forum_posts SET created_at = ?1 WHERE thread_id = ?2",
                     params!["2026-05-24T16:47:09.209Z", t.thread_id],
                 )?;
+                temporal_evidence::remove_v43_for_legacy_migration_test(c)?;
                 c.execute("UPDATE schema_meta SET value='31' WHERE key='version'", [])?;
                 Ok(())
             })
@@ -19270,7 +19277,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "42"); // v42 = retrieval traffic provenance; latest after all migrations
+        assert_eq!(version, "43"); // v43 = temporal evidence substrate; latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -21577,7 +21584,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(v, "42", "schema after all migrations");
+        assert_eq!(v, "43", "schema after all migrations");
         assert_eq!(n, 1, "last_cofire_at present exactly once");
 
         seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
@@ -21600,6 +21607,7 @@ mod tests {
             .conn
             .call(|c| -> RusqliteResult<()> {
                 c.execute("UPDATE memory_coactivation SET last_cofire_at = 0", [])?;
+                temporal_evidence::remove_v43_for_legacy_migration_test(c)?;
                 c.execute("UPDATE schema_meta SET value='37' WHERE key='version'", [])?;
                 Ok(())
             })
@@ -21627,7 +21635,7 @@ mod tests {
             })
             .await
             .expect("probe after upgrade");
-        assert_eq!(v, "42", "re-open ran through all migrations");
+        assert_eq!(v, "43", "re-open ran through all migrations");
         assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -21667,7 +21675,7 @@ mod tests {
             })
             .await
             .expect("probe v39 schema");
-        assert_eq!(v, "42", "schema after all migrations");
+        assert_eq!(v, "43", "schema after all migrations");
         assert_eq!(table_n, 1, "retrieval_surfacing table exists");
         assert_eq!(key_idx_n, 1, "key/surfaced_at index exists");
         assert_eq!(at_idx_n, 1, "surfaced_at index exists");
@@ -21705,7 +21713,7 @@ mod tests {
             })
             .await
             .expect("probe v40 schema");
-        assert_eq!(v, "42", "schema after v40+v41+v42");
+        assert_eq!(v, "43", "schema after v40+v41+v42+v43");
         assert_eq!(col_n, 1, "consumed_at column exists exactly once");
         assert_eq!(idx_n, 1, "pending partial index exists");
 
@@ -21813,6 +21821,7 @@ mod tests {
         store
             .conn
             .call(|c| -> RusqliteResult<()> {
+                temporal_evidence::remove_v43_for_legacy_migration_test(c)?;
                 c.execute_batch(
                     "DROP INDEX IF EXISTS idx_retrieval_surfacing_traffic_at;
                      ALTER TABLE retrieval_surfacing DROP COLUMN traffic_class;
@@ -21861,7 +21870,7 @@ mod tests {
             })
             .await
             .expect("inspect v42 migration");
-        assert_eq!(version, "42");
+        assert_eq!(version, "43");
         assert_eq!(column_n, 1, "traffic_class exists exactly once");
         assert_eq!(index_n, 1, "traffic class index exists exactly once");
         assert_eq!(traffic_class, "unknown", "historical rows fail closed");
@@ -25242,7 +25251,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("42"),
+            Some("43"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -25867,7 +25876,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, "42", "schema must be at the latest version");
+        assert_eq!(probe.0, "43", "schema must be at the latest version");
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),
@@ -25900,7 +25909,7 @@ mod tests {
             .expect("probe after reopen");
         assert_eq!(
             again,
-            ("42".to_string(), 2),
+            ("43".to_string(), 2),
             "re-open stays at the latest version with both columns, no duplicate ALTER"
         );
 

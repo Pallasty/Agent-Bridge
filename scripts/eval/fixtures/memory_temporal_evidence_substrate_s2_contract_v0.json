@@ -1,0 +1,121 @@
+{
+  "schema": "agent_bridge.memory_temporal_evidence_substrate_implementation.v0",
+  "baseline_commit": "1c1770579c46f325ef4a1dee3f870bfe20a5a09a",
+  "implementation_status": "READY_FOR_SEPARATE_S3_ADAPTER_REVIEW",
+  "schema_contract": {
+    "from_version": "42",
+    "to_version": "43",
+    "ledger_format_version": "0",
+    "transaction": "immediate",
+    "legacy_backfill": false,
+    "tables": [
+      "truth_lineages",
+      "truth_authority_policy_revisions",
+      "truth_evidence_revisions",
+      "truth_evidence_relationships",
+      "truth_lineage_tombstones"
+    ],
+    "explicit_indexes": 6,
+    "append_only_update_delete_triggers": 10,
+    "total_triggers": 15,
+    "identity_meta_keys": [
+      "truth_evidence.schema_sha256",
+      "truth_evidence.migration_sha256",
+      "truth_evidence.ledger_format_version"
+    ],
+    "reserved_identity_meta_namespace": "truth_evidence.*",
+    "identity_meta_exact_row_count": 3,
+    "reserved_persistent_namespaces": ["truth_*", "idx_truth_*"],
+    "reserved_temp_namespaces": ["truth_*", "idx_truth_*"],
+    "schema_manifest_includes_all_object_types": true,
+    "schema_manifest_includes_objects_attached_to_truth_tables": true,
+    "temp_guard_includes_objects_attached_to_truth_tables": true,
+    "sqlite_identifier_case_insensitive_guard": true,
+    "runtime_truth_table_queries_main_qualified": true,
+    "schema_digest_recomputed_from_live_manifest": true,
+    "migration_digest_binds_manifest_schema_and_ddl": true
+  },
+  "snapshot_contract": {
+    "full_ledger_not_cutoff_filtered": true,
+    "knowledge_cutoff_is_bound_metadata": true,
+    "one_read_transaction": true,
+    "canonical_order": "binary_utf8_v0",
+    "canonical_payload_sha256": true,
+    "bounded_streaming_canonical_digest": true,
+    "cycle_validation_iterative": true,
+    "fetch_plus_one_rejects_count_greater_than_or_equal_to_cap": true,
+    "payload_bytes_greater_than_or_equal_to_cap_rejected": true,
+    "hard_cap_maxima": {
+      "max_lineages": 10000,
+      "max_policy_revisions": 10000,
+      "max_evidence_revisions": 10000,
+      "max_relationships": 50000,
+      "max_tombstones": 10000,
+      "max_payload_bytes": 16777216
+    }
+  },
+  "implementation_boundary": {
+    "crate_internal_writer": true,
+    "synthetic_write_token_test_only": true,
+    "crate_internal_snapshot_reader": true,
+    "state_store_surface": false,
+    "bridge_surface": false,
+    "mcp_surface": false,
+    "store_adapter": false,
+    "producer_profile_changed": false,
+    "legacy_rows_qualified": false,
+    "real_capture_authorized": false,
+    "biocortex_runtime_influence": false,
+    "physical_privacy_deletion_resolved": false,
+    "authority_policy_custody_resolved": false
+  },
+  "source_contract": {
+    "rust_module": "crates/store/src/sqlite/temporal_evidence.rs",
+    "rust_tests": "crates/store/src/sqlite/temporal_evidence/tests.rs",
+    "sqlite_integration": "crates/store/src/sqlite.rs",
+    "store_manifest": "crates/store/Cargo.toml",
+    "lockfile": "Cargo.lock",
+    "rust_test_prefix": "truth_evidence_s2_",
+    "minimum_prefixed_tests": 6,
+    "allowed_delta_paths": [
+      "Cargo.lock",
+      "crates/store/Cargo.toml",
+      "crates/store/src/sqlite.rs",
+      "crates/store/src/sqlite/temporal_evidence.rs",
+      "crates/store/src/sqlite/temporal_evidence/tests.rs",
+      "docs/design/MEMORY_TEMPORAL_EVIDENCE_SUBSTRATE_S2_2026_07_14.md",
+      "docs/reports/goal-c-u/2026-07-14-biocortex-ab-track-b-evidence-substrate-s2.md",
+      "scripts/check-memory-temporal-evidence-substrate-s2.sh",
+      "scripts/eval/check_memory_temporal_evidence_substrate_s2.py",
+      "scripts/eval/fixtures/memory_temporal_evidence_substrate_s2.expected.v0.tsv",
+      "scripts/eval/fixtures/memory_temporal_evidence_substrate_s2_contract_v0.json",
+      "scripts/eval/fixtures/memory_temporal_evidence_substrate_s2_synthetic_v0.json"
+    ]
+  },
+  "unchanged_s1_sha256": {
+    "docs/design/MEMORY_TEMPORAL_EVIDENCE_SUBSTRATE_S1_2026_07_14.md": "e4425eabc6eb801525cfc98fb70ce70f45d1a814d93e00e74006650052284a63",
+    "docs/reports/goal-c-u/2026-07-14-biocortex-ab-track-b-evidence-substrate-s1.md": "5818f03fa7a233e89e6844775b752e741ef525b4b0fd832bfd1c761596cc2c30",
+    "scripts/check-memory-temporal-evidence-substrate-s1.sh": "6094054796c6181d3048f4fef21b50072e512f1ebcf78e2ccca9bdc78ba06cae",
+    "scripts/eval/check_memory_temporal_evidence_substrate_s1.py": "6137281fd2920cb09467d2c93d462a0bd515ad35d81625e86875c45dd15be13c",
+    "scripts/eval/fixtures/memory_temporal_evidence_substrate_s1.expected.v0.tsv": "56fa48154222c55547af34734749a91a9c927c47280867a8b059bbc41f0fa233",
+    "scripts/eval/fixtures/memory_temporal_evidence_substrate_s1_contract_v0.json": "67f05ef574960a0d46db9313b7c8a498c41531c22d6d546f7741617a0c250fe5",
+    "scripts/eval/fixtures/memory_temporal_evidence_substrate_s1_synthetic_v0.json": "fea71602105364ca41df936d04981c6238fb9955ed69d8de9e0256a08c679a6a"
+  },
+  "unchanged_adapter_guard": {
+    "path": "crates/bridge/src/memory_truth_adapter.rs",
+    "sha256": "c459e96919778c24b0bc699653d8c12b83332e6318b7298deee071a01e90e023",
+    "profile": "MutableSqliteV41",
+    "gap_count": 8,
+    "gaps": [
+      "CompleteLineageRevisionHistoryUnavailable",
+      "UniqueLineageRevisionOrderUnavailable",
+      "CompleteTombstoneGovernanceIndexUnavailable",
+      "AllRelationshipChannelsAndHistoryUnavailable",
+      "RelationshipEndpointClosureUnprovable",
+      "DurableGovernanceAttestationUnavailable",
+      "ExplicitTemporalClaimProvenanceBindingsUnavailable",
+      "PredicateScopedAuthorityPolicyUnavailable"
+    ]
+  },
+  "decision": "BLOCKED_FAIL_CLOSED"
+}
