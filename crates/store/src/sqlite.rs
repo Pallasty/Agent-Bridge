@@ -4299,6 +4299,22 @@ impl StateStore for SqliteStore {
         tags_any: &[String],
         limit: u32,
     ) -> Result<Vec<MemorySearchHit>> {
+        self.memory_search_as_of(query, tags_any, limit, now_secs())
+            .await
+    }
+
+    async fn memory_search_as_of(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        as_of_secs: i64,
+    ) -> Result<Vec<MemorySearchHit>> {
+        if as_of_secs < 0 {
+            return Err(Error::Backend(
+                "memory_search_as_of requires a non-negative as_of_secs".into(),
+            ));
+        }
         let q = query.trim().to_string();
         if q.is_empty() {
             return Ok(Vec::new());
@@ -4309,7 +4325,7 @@ impl StateStore for SqliteStore {
         let fts_query_any = sanitise_fts_query_any(&q);
         let tags = tags_any.to_vec();
         let limit_i = limit as i64;
-        let now = now_secs();
+        let now = as_of_secs;
 
         let hits = self
             .conn
@@ -4328,7 +4344,7 @@ impl StateStore for SqliteStore {
                          JOIN memories m ON m.rowid = memories_fts.rowid
                          WHERE memories_fts MATCH ?1
                            AND m.status = 'active'
-                         ORDER BY bm25_score
+                         ORDER BY bm25_score, m.key COLLATE BINARY
                          LIMIT ?2",
                     )?;
                     let rows = stmt
@@ -4460,6 +4476,7 @@ impl StateStore for SqliteStore {
                     b.score
                         .partial_cmp(&a.score)
                         .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.record.key.cmp(&b.record.key))
                 });
                 hits.truncate(limit_i as usize);
                 Ok(hits)
@@ -4477,12 +4494,36 @@ impl StateStore for SqliteStore {
         k: f64,
         expand_top: u32,
     ) -> Result<Vec<MemorySearchHit>> {
+        self.memory_search_hybrid_as_of(
+            query,
+            tags_any,
+            limit,
+            k,
+            expand_top,
+            now_secs(),
+            usize::MAX,
+            true,
+        )
+        .await
+    }
+
+    async fn memory_search_hybrid_as_of(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        k: f64,
+        expand_top: u32,
+        as_of_secs: i64,
+        graph_fanout: usize,
+        mutate_graph_reads: bool,
+    ) -> Result<Vec<MemorySearchHit>> {
         use std::collections::HashMap;
 
         // ── Step 1: FTS5 search (list A) ──────────────────────────────────────
         // Fetch 4× limit so graph expansion has candidates to work with.
         let fts_hits = self
-            .memory_search(query, tags_any, limit.saturating_mul(4).max(40))
+            .memory_search_as_of(query, tags_any, limit.saturating_mul(4).max(40), as_of_secs)
             .await?;
 
         if fts_hits.is_empty() {
@@ -4496,10 +4537,37 @@ impl StateStore for SqliteStore {
         let mut graph_scores: HashMap<String, f64> = HashMap::new();
 
         for hit in fts_hits.iter().take(expand_n) {
-            let edges = self
-                .memory_neighbors(&hit.record.key)
-                .await
-                .unwrap_or_default();
+            let mut edges = if graph_fanout == usize::MAX {
+                self.memory_neighbors(&hit.record.key)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                self.memory_neighbors_bounded(&hit.record.key, graph_fanout)
+                    .await
+                    .unwrap_or_default()
+            };
+            edges.sort_by(|a, b| {
+                b.weight
+                    .partial_cmp(&a.weight)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        let a_other = if a.from_key == hit.record.key {
+                            &a.to_key
+                        } else {
+                            &a.from_key
+                        };
+                        let b_other = if b.from_key == hit.record.key {
+                            &b.to_key
+                        } else {
+                            &b.from_key
+                        };
+                        a_other
+                            .cmp(b_other)
+                            .then_with(|| a.edge_type.cmp(&b.edge_type))
+                            .then_with(|| a.from_key.cmp(&b.from_key))
+                            .then_with(|| a.to_key.cmp(&b.to_key))
+                    })
+            });
             for edge in edges {
                 // Neighbour key is the other end of the edge
                 let neighbour_key = if edge.from_key == hit.record.key {
@@ -4520,12 +4588,24 @@ impl StateStore for SqliteStore {
         // Fetch full records for graph candidates not already in FTS list
         let mut graph_records: Vec<(String, f64)> = graph_scores.into_iter().collect();
         // Sort graph candidates by accumulated score (higher = more relevant neighbor)
-        graph_records.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        graph_records.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
 
         // Collect full MemoryRecords for graph list
         let mut graph_hits: Vec<MemorySearchHit> = Vec::new();
         for (key, gscore) in &graph_records {
-            if let Ok(Some(rec)) = self.memory_get(key).await {
+            let rec = if mutate_graph_reads {
+                self.memory_get(key).await.ok().flatten()
+            } else {
+                match self.memory_peek(key).await {
+                    Ok(crate::MemoryPeekResult::Present { record }) => Some(*record),
+                    _ => None,
+                }
+            };
+            if let Some(rec) = rec {
                 // Only include active memories
                 if rec.status == "active" {
                     graph_hits.push(MemorySearchHit {
@@ -4549,6 +4629,12 @@ impl StateStore for SqliteStore {
             *rrf_scores.entry(key).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
         }
         // List B: Graph neighbor results
+        graph_hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        });
         for (rank, hit) in graph_hits.iter().enumerate() {
             let key = hit.record.key.clone();
             *rrf_scores.entry(key).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
@@ -4583,6 +4669,7 @@ impl StateStore for SqliteStore {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.record.key.cmp(&b.record.key))
         });
         merged.truncate(limit as usize);
         Ok(merged)
@@ -4725,7 +4812,11 @@ impl StateStore for SqliteStore {
                 let mut stmt = c.prepare(
                     "SELECT from_key, to_key, edge_type, weight FROM memory_edges
                      WHERE from_key = ?1 OR to_key = ?1
-                     ORDER BY weight DESC",
+                     ORDER BY weight DESC,
+                              CASE WHEN from_key = ?1 THEN to_key ELSE from_key END COLLATE BINARY,
+                              edge_type COLLATE BINARY,
+                              from_key COLLATE BINARY,
+                              to_key COLLATE BINARY",
                 )?;
                 let rows = stmt
                     .query_map(params![key], |row| {
@@ -4741,6 +4832,42 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("memory_neighbors: {e}")))?;
+        Ok(edges)
+    }
+
+    async fn memory_neighbors_bounded(&self, key: &str, limit: usize) -> Result<Vec<MemoryEdge>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let key = key.to_string();
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let edges = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<MemoryEdge>> {
+                let mut stmt = c.prepare(
+                    "SELECT from_key, to_key, edge_type, weight FROM memory_edges
+                     WHERE from_key = ?1 OR to_key = ?1
+                     ORDER BY weight DESC,
+                              CASE WHEN from_key = ?1 THEN to_key ELSE from_key END COLLATE BINARY,
+                              edge_type COLLATE BINARY,
+                              from_key COLLATE BINARY,
+                              to_key COLLATE BINARY
+                     LIMIT ?2",
+                )?;
+                let rows = stmt
+                    .query_map(params![key, limit], |row| {
+                        Ok(MemoryEdge {
+                            from_key: row.get(0)?,
+                            to_key: row.get(1)?,
+                            edge_type: row.get(2)?,
+                            weight: row.get(3)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_neighbors_bounded: {e}")))?;
         Ok(edges)
     }
 
@@ -12450,6 +12577,153 @@ mod tests {
             hits2.iter().any(|h| h.record.key == "k_fts_fallback"),
             "all-terms-match query must still hit"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reference_search_freezes_as_of_and_tie_breaks_by_key() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-reference-search-order-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        for key in ["tie_b", "tie_a"] {
+            let mut rec = mk_record(key, 1_700_000_000);
+            rec.content = "frozen order phrase".into();
+            store.memory_save(&rec).await.expect("save");
+        }
+        drop_timestamp_guards(&store).await;
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories
+                        SET status = 'active', superseded_by = NULL,
+                            last_accessed_at = 1000, access_count = 0, importance = 0.5
+                      WHERE key IN ('tie_a', 'tie_b')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("freeze metadata");
+
+        let first = store
+            .memory_search_as_of("frozen order", &[], 10, 2_000)
+            .await
+            .expect("reference search");
+        let second = store
+            .memory_search_as_of("frozen order", &[], 10, 2_000)
+            .await
+            .expect("reference search repeat");
+        let keys = |hits: &[MemorySearchHit]| {
+            hits.iter()
+                .map(|hit| hit.record.key.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keys(&first), vec!["tie_a", "tie_b"]);
+        assert_eq!(keys(&first), keys(&second));
+        assert!(store
+            .memory_search_as_of("frozen order", &[], 10, -1)
+            .await
+            .is_err());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reference_hybrid_bounds_graph_reads_and_preserves_access_telemetry() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-reference-hybrid-bound-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let mut seed = mk_record("seed_reference", 1_700_000_000);
+        seed.content = "reference seed phrase".into();
+        store.memory_save(&seed).await.expect("save seed");
+        let mut excluded = mk_record("reference_skill", 1_700_000_000);
+        excluded.kind = "skill".into();
+        excluded.content = "reference seed phrase skill catalog".into();
+        excluded.importance = 1.0;
+        store.memory_save(&excluded).await.expect("save excluded skill");
+        for idx in 0..5 {
+            let key = format!("reference_neighbor_{idx}");
+            let mut neighbor = mk_record(&key, 1_700_000_000);
+            neighbor.content = format!("graph-only body {idx}");
+            store.memory_save(&neighbor).await.expect("save neighbor");
+            store
+                .memory_link("seed_reference", &key, "relates", 1.0)
+                .await
+                .expect("link neighbor");
+        }
+        drop_timestamp_guards(&store).await;
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET access_count = 19, last_accessed_at = 1234
+                      WHERE key = 'reference_neighbor_0'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed telemetry");
+
+        let bounded = store
+            .memory_neighbors_bounded("seed_reference", 2)
+            .await
+            .expect("bounded neighbor query");
+        assert_eq!(bounded.len(), 2);
+        assert_eq!(bounded[0].to_key, "reference_neighbor_0");
+        assert_eq!(bounded[1].to_key, "reference_neighbor_1");
+
+        let mut options = crate::MemorySearchReferenceOptions::at(2_000);
+        options.graph_fanout = 2;
+        options.max_context_bytes = 16 * 1024;
+        let context = store
+            .memory_search_reference("reference seed", &[], 10, 60.0, 1, options)
+            .await
+            .expect("reference hybrid");
+        assert!(context.hits.iter().any(|row| row.key == "seed_reference"));
+        assert!(context.hits.iter().all(|row| row.kind != "skill"));
+        assert!(
+            context.hits.len() <= 3,
+            "one seed plus two graph neighbors: {:?}",
+            context.hits
+        );
+
+        let telemetry: (i64, i64) = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT access_count, last_accessed_at FROM memories
+                      WHERE key = 'reference_neighbor_0'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .await
+            .expect("read telemetry");
+        assert_eq!(telemetry, (19, 1234));
+        assert!(context.context_bytes <= 16 * 1024);
+        assert!(!context.context_json.contains("access_count"));
+        assert!(!context.context_json.contains("score"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

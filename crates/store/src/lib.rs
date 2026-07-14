@@ -570,6 +570,129 @@ pub struct MemorySearchHit {
     pub cosine: Option<f32>,
 }
 
+/// Conservative fan-out for the frozen reference surface. A content-free
+/// structural audit of the current owner store observed p99 degree 36 and max
+/// degree 123 on 2026-07-14, so 64 bounds work while retaining more than 99%
+/// of observed neighbourhoods. This remains an engineering cap, not a quality
+/// target. The legacy hybrid API is unchanged.
+pub const MEMORY_REFERENCE_GRAPH_FANOUT: usize = 64;
+
+/// Hard exact UTF-8 budget for the final context sent to a generator. The
+/// separately frozen model-tokenizer binding required by Track B remains a
+/// later admission gate; this surface does not pretend whitespace counts are
+/// model tokens.
+pub const MEMORY_REFERENCE_MAX_CONTEXT_BYTES: usize = 128 * 1024;
+
+/// Runtime controls for the deterministic, read-only reference search
+/// surface. `as_of_secs` is mandatory so a future runner can bind one clock
+/// value for every paired condition. The regular search APIs do not consume
+/// this type and retain their existing wall-clock/telemetry behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemorySearchReferenceOptions {
+    pub as_of_secs: i64,
+    pub graph_fanout: usize,
+    pub max_context_bytes: usize,
+    pub exclude_kinds: Vec<String>,
+}
+
+impl MemorySearchReferenceOptions {
+    pub fn at(as_of_secs: i64) -> Self {
+        Self {
+            as_of_secs,
+            graph_fanout: MEMORY_REFERENCE_GRAPH_FANOUT,
+            max_context_bytes: MEMORY_REFERENCE_MAX_CONTEXT_BYTES,
+            exclude_kinds: vec!["skill".to_string()],
+        }
+    }
+}
+
+/// Stable context projection for the deterministic reference surface.
+/// Access telemetry is intentionally absent: `last_accessed_at` and
+/// `access_count` are mutable read-side signals and must not enter a frozen
+/// paired context payload.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemorySearchReferenceHit {
+    pub rank: usize,
+    pub key: String,
+    pub kind: String,
+    pub content: String,
+    pub tags: Vec<String>,
+    pub related_keys: Vec<String>,
+    pub scope: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub status: String,
+    pub trigger_pattern: Option<String>,
+    pub superseded_by: Option<String>,
+}
+
+/// Exact context and its normalized rows. `context_json` is the byte string a
+/// future generator receives; callers must not reserialize `hits` under a
+/// different policy and still claim this receipt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemorySearchReferenceContext {
+    pub context_json: String,
+    pub context_bytes: usize,
+    pub hits: Vec<MemorySearchReferenceHit>,
+}
+
+/// Project the complete selected page into a telemetry-free context. Budget
+/// overflow is terminal: silently truncating the tail could hide a recalled
+/// gold item and turn a retrieval success into an unreported synthesis input
+/// change.
+pub fn project_memory_search_reference_hits(
+    hits: &[MemorySearchHit],
+    max_context_bytes: usize,
+) -> Result<MemorySearchReferenceContext> {
+    if max_context_bytes < 2 {
+        return Err(ab_core::Error::Backend(
+            "reference context byte budget must be at least two".into(),
+        ));
+    }
+
+    let projected: Vec<MemorySearchReferenceHit> = hits
+        .iter()
+        .enumerate()
+        .map(|(index, hit)| {
+            let mut tags = hit.record.tags.clone();
+            tags.sort();
+            tags.dedup();
+            let mut related_keys = hit.record.related_keys.clone();
+            related_keys.sort();
+            related_keys.dedup();
+            MemorySearchReferenceHit {
+                rank: index + 1,
+                key: hit.record.key.clone(),
+                kind: hit.record.kind.clone(),
+                content: hit.record.content.clone(),
+                tags,
+                related_keys,
+                scope: hit.record.scope.clone(),
+                created_at: hit.record.created_at,
+                updated_at: hit.record.updated_at,
+                status: hit.record.status.clone(),
+                trigger_pattern: hit.record.trigger_pattern.clone(),
+                superseded_by: hit.record.superseded_by.clone(),
+            }
+        })
+        .collect();
+    let context_json = serde_json::to_string(&projected).map_err(|error| {
+        ab_core::Error::Backend(format!("reference context serialize: {error}"))
+    })?;
+    let context_bytes = context_json.len();
+    if context_bytes > max_context_bytes {
+        return Err(ab_core::Error::Backend(format!(
+            "reference context byte budget exceeded: {context_bytes} > {max_context_bytes}"
+        )));
+    }
+
+    Ok(MemorySearchReferenceContext {
+        context_json,
+        context_bytes,
+        hits: projected,
+    })
+}
+
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_STORE_CONTRACT_SCHEMA: &str =
     "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_SEARCH_AUDIT_SCHEMA: &str =
@@ -2831,6 +2954,22 @@ pub trait StateStore: Send + Sync {
         limit: u32,
     ) -> Result<Vec<MemorySearchHit>>;
 
+    /// Frozen-clock search used by the reference admission surface. Backends
+    /// that cannot bind an as-of value fail closed instead of silently falling
+    /// back to a wall-clock ranking.
+    async fn memory_search_as_of(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        as_of_secs: i64,
+    ) -> Result<Vec<MemorySearchHit>> {
+        let _ = (query, tags_any, limit, as_of_secs);
+        Err(ab_core::Error::Backend(
+            "memory_search_as_of unsupported by this store backend".into(),
+        ))
+    }
+
     /// Protected BioCortex opt-in search surface.
     ///
     /// Default calls still use baseline `memory_search`. This protected wrapper
@@ -2909,8 +3048,27 @@ pub trait StateStore: Send + Sync {
     ) -> Result<()>;
 
     /// Return all edges where `key` is `from_key` or `to_key`.
-    /// Results are ordered by `weight DESC` (highest-weight / most causal first).
+    /// Results are ordered by weight descending and then canonical edge
+    /// identity, so equal-weight neighbours do not inherit SQLite row order.
     async fn memory_neighbors(&self, key: &str) -> Result<Vec<MemoryEdge>>;
+
+    /// Deterministic bounded neighbour read used by frozen reference search.
+    /// Backends may override this to enforce the cap in their query. The
+    /// default is functionally bounded after retrieval and preserves the
+    /// canonical ordering contract.
+    async fn memory_neighbors_bounded(&self, key: &str, limit: usize) -> Result<Vec<MemoryEdge>> {
+        let mut edges = self.memory_neighbors(key).await?;
+        edges.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.from_key.cmp(&b.from_key))
+                .then_with(|| a.to_key.cmp(&b.to_key))
+                .then_with(|| a.edge_type.cmp(&b.edge_type))
+        });
+        edges.truncate(limit);
+        Ok(edges)
+    }
 
     /// Active memory keys that start with `prefix` (literal byte-prefix match
     /// on the primary key — `substr()` comparison, so `_`/`%` in the prefix
@@ -2959,6 +3117,108 @@ pub trait StateStore: Send + Sync {
         k: f64,
         expand_top: u32,
     ) -> Result<Vec<MemorySearchHit>>;
+
+    /// Deterministic hybrid leg for a frozen reference request. The graph
+    /// read is explicitly non-telemetry-mutating and bounded by
+    /// `graph_fanout`; unsupported backends fail closed.
+    async fn memory_search_hybrid_as_of(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        k: f64,
+        expand_top: u32,
+        as_of_secs: i64,
+        graph_fanout: usize,
+        mutate_graph_reads: bool,
+    ) -> Result<Vec<MemorySearchHit>> {
+        let _ = (
+            query,
+            tags_any,
+            limit,
+            k,
+            expand_top,
+            as_of_secs,
+            graph_fanout,
+            mutate_graph_reads,
+        );
+        Err(ab_core::Error::Backend(
+            "memory_search_hybrid_as_of unsupported by this store backend".into(),
+        ))
+    }
+
+    /// Fully bounded reference search: frozen as-of, bounded graph fan-out,
+    /// deterministic ordering, and a telemetry-free context projection.
+    async fn memory_search_reference(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        k: f64,
+        expand_top: u32,
+        options: MemorySearchReferenceOptions,
+    ) -> Result<MemorySearchReferenceContext> {
+        if options.as_of_secs < 0 {
+            return Err(ab_core::Error::Backend(
+                "reference as_of_secs must be non-negative".into(),
+            ));
+        }
+        if limit == 0 || limit > 40 {
+            return Err(ab_core::Error::Backend(
+                "reference final limit must be in 1..=40".into(),
+            ));
+        }
+        if options.graph_fanout == 0 || options.graph_fanout > 256 {
+            return Err(ab_core::Error::Backend(
+                "reference graph fanout must be in 1..=256".into(),
+            ));
+        }
+        if !k.is_finite() || !(1.0..=200.0).contains(&k) {
+            return Err(ab_core::Error::Backend(
+                "reference RRF k must be finite and in 1..=200".into(),
+            ));
+        }
+        if expand_top == 0 || expand_top > 20 {
+            return Err(ab_core::Error::Backend(
+                "reference expand_top must be in 1..=20".into(),
+            ));
+        }
+        if options
+            .exclude_kinds
+            .iter()
+            .any(|kind| kind.trim().is_empty())
+        {
+            return Err(ab_core::Error::Backend(
+                "reference excluded kinds must be non-empty".into(),
+            ));
+        }
+
+        // Mirror the declared full-hybrid reference pipeline: an output
+        // exclusion overfetches fivefold before filtering. With the frozen
+        // limit=10 this yields fused pool 50, FTS-ranked pool 200 and raw FTS
+        // scan cap 800.
+        let fused_pool_limit = limit.saturating_mul(5).min(200);
+        let mut hits = self
+            .memory_search_hybrid_as_of(
+                query,
+                tags_any,
+                fused_pool_limit,
+                k,
+                expand_top,
+                options.as_of_secs,
+                options.graph_fanout,
+                false,
+            )
+            .await?;
+        hits.retain(|hit| {
+            !options
+                .exclude_kinds
+                .iter()
+                .any(|kind| kind == &hit.record.kind)
+        });
+        hits.truncate(limit as usize);
+        project_memory_search_reference_hits(&hits, options.max_context_bytes)
+    }
 
     /// Apply importance time-decay: `new_importance = old × 0.5^(days_since_update / half_life)`.
     /// Memories dropping below `archive_threshold` are marked `status='archived'`
@@ -4319,6 +4579,80 @@ pub trait StateStore: Send + Sync {
     /// backends silently no-op the daemon's S2-S4 forum-channel alerts.
     async fn s234_counts(&self) -> Result<S234Counts> {
         Ok(S234Counts::default())
+    }
+}
+
+#[cfg(test)]
+mod reference_search_projection_tests {
+    use super::*;
+
+    fn hit(key: &str, content: &str) -> MemorySearchHit {
+        MemorySearchHit {
+            record: MemoryRecord {
+                key: key.to_string(),
+                kind: "decision".to_string(),
+                content: content.to_string(),
+                tags: vec!["s0".to_string()],
+                related_keys: vec![
+                    "z-edge".to_string(),
+                    "a-edge".to_string(),
+                    "a-edge".to_string(),
+                ],
+                scope: Some("project:/frozen".to_string()),
+                created_at: 10,
+                updated_at: 11,
+                last_accessed_at: 999,
+                access_count: 77,
+                importance: 0.8,
+                status: "active".to_string(),
+                trigger_pattern: None,
+                superseded_by: None,
+            },
+            score: 1.0,
+            cosine: None,
+        }
+    }
+
+    #[test]
+    fn reference_projection_excludes_access_telemetry_and_is_bounded() {
+        let context = project_memory_search_reference_hits(
+            &[hit("a", "alpha beta"), hit("b", "gamma delta")],
+            1_024,
+        )
+        .expect("bounded projection");
+        assert_eq!(context.hits.len(), 2);
+        assert_eq!(context.context_bytes, context.context_json.len());
+        assert_eq!(
+            context.context_json,
+            serde_json::to_string(&context.hits).expect("serialize projection")
+        );
+        let serialized = context.context_json;
+        assert!(!serialized.contains("last_accessed_at"));
+        assert!(!serialized.contains("access_count"));
+        assert!(!serialized.contains("importance"));
+        assert!(!serialized.contains("score"));
+        assert_eq!(context.hits[0].related_keys, vec!["a-edge", "z-edge"]);
+    }
+
+    #[test]
+    fn reference_projection_fails_closed_instead_of_truncating() {
+        let result = project_memory_search_reference_hits(
+            &[hit("a", "one two"), hit("b", &"x ".repeat(100))],
+            128,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reference_options_bind_defaults_to_explicit_as_of() {
+        let options = MemorySearchReferenceOptions::at(1234);
+        assert_eq!(options.as_of_secs, 1234);
+        assert_eq!(options.graph_fanout, MEMORY_REFERENCE_GRAPH_FANOUT);
+        assert_eq!(
+            options.max_context_bytes,
+            MEMORY_REFERENCE_MAX_CONTEXT_BYTES
+        );
+        assert_eq!(options.exclude_kinds, vec!["skill"]);
     }
 }
 
