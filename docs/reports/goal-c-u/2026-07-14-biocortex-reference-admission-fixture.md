@@ -20,7 +20,9 @@ generator, or qualify any memory row as truth evidence. `fixture_only=true`,
   `scripts/eval/fixtures/biocortex_ab_reference_admission.expected.v0.tsv`
 - Expected receipt SHA-256:
   `b253e4873300d9d357e51eb1a6b2531867acedbd4dfec1db92cbf4f67418d8a0`
-- Source HEAD during the gate: `ad0c688504b317d066a1edd8d4e5d24dade3682b`
+- Implementation/source commit under test:
+  `82e07bc2a5f32f67000c58496bf1add437a911f2` (the gate receipt always binds
+  the current HEAD, including any later documentation-only commit).
 
 The input has fixed memory rows, edge rows, an `as_of_secs` value, a 5-edge
 graph fan-out, a 16 KiB exact UTF-8 context budget, and a one-day timestamp
@@ -61,7 +63,7 @@ worktree and index drift. The observed receipt is:
 
 ```text
 BOUND_TO_HEAD_BIOCORTEX_AB_REFERENCE_ADMISSION_FIXTURE
-head=ad0c688504b317d066a1edd8d4e5d24dade3682b
+head=82e07bc2a5f32f67000c58496bf1add437a911f2
 fixture_sha256=9045999ee6e0b8b4fab884684820eb8ab26c3a26f628a264fa90ee065d8e67c8
 receipt_sha256=b253e4873300d9d357e51eb1a6b2531867acedbd4dfec1db92cbf4f67418d8a0
 fresh_clones=3
@@ -69,6 +71,10 @@ repeated_runs=2
 real_capture_authorized=false
 decision=BLOCKED_FAIL_CLOSED
 ```
+
+The receipt above was captured on the implementation commit before this
+report-only wording amendment; the direct gate was rerun after the amendment
+and must be rerun again after any future tracked change.
 
 This is mechanism evidence only. The exact binary/source identity, closed
 private snapshot, live prevalence frame, frozen tokenizer, hardware/storage
