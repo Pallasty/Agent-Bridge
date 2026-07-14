@@ -1,0 +1,596 @@
+{
+  "admission": {
+    "capture_allowed": false,
+    "current_stage": "PRE_OUTPUT_ADMISSION",
+    "real_run_admitted": false,
+    "status": "BLOCKED_FAIL_CLOSED",
+    "unblock_rule": "EACH_STAGE_REQUIRES_ITS_DECLARED_BINDINGS_BEFORE_ITS_SIDE_EFFECT"
+  },
+  "authority": {
+    "agent_bridge_db_write": false,
+    "agent_bridge_retrieval_execution": false,
+    "biocortex_runtime_influence": false,
+    "capture": false,
+    "deployment": false,
+    "generation": false,
+    "production_promotion": false,
+    "real_review": false,
+    "scientific_claim": false,
+    "scoring": false,
+    "unblinding": false
+  },
+  "blockers": [
+    "REFERENCE_FROZEN_CLOCK_UNAVAILABLE",
+    "REFERENCE_CLEAN_ENV_HARNESS_UNIMPLEMENTED",
+    "REFERENCE_DETERMINISTIC_TIE_BREAK_UNPROVED",
+    "REFERENCE_HARD_CONTEXT_BUDGET_UNSET",
+    "REFERENCE_RUNTIME_BINARY_AND_SNAPSHOT_UNSET",
+    "CANDIDATE_STORE_ADAPTER_BLOCKED_DATA_MODEL",
+    "PREVALENCE_FRAME_SAMPLING_AND_POWER_UNSET",
+    "TRUTH_AS_OF_AND_AUTHORITY_MANIFEST_UNSET",
+    "FRESH_REVIEWER_AND_BLIND_MAP_BINDINGS_UNSET",
+    "LATENCY_HARDWARE_TOKENIZER_AND_ORDER_UNSET",
+    "CANONICAL_SOURCE_AND_STORAGE_MANIFEST_UNSET",
+    "POST_FIX_CAPTURE_DATE_NOT_REACHED_IN_THIS_PREREG"
+  ],
+  "candidate_condition": {
+    "adapter": {
+      "adapter_allowed": false,
+      "current_profile": "mutable_sqlite_v41",
+      "live_snapshot_preflight_run": false,
+      "minimum_static_gaps": [
+        "all_relationship_channels_and_history_unavailable",
+        "complete_lineage_revision_history_unavailable",
+        "complete_tombstone_governance_index_unavailable",
+        "durable_governance_attestation_unavailable",
+        "explicit_temporal_claim_provenance_bindings_unavailable",
+        "predicate_scoped_authority_policy_unavailable",
+        "relationship_endpoint_closure_unprovable",
+        "unique_lineage_revision_order_unavailable"
+      ],
+      "observation_scope": "STATIC_PRODUCER_PROFILE_FACTS_ONLY",
+      "status": "BLOCKED_DATA_MODEL"
+    },
+    "candidate_context_builder_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "candidate_id": "temporal_truth_projection_v0_with_future_reviewed_store_adapter",
+    "resolver_status": "PURE_RESOLVER_SOURCE_BOUND_ADAPTER_NOT_ADMITTED"
+  },
+  "context_and_result": {
+    "candidate_may_exceed_reference_case_bytes": false,
+    "candidate_may_exceed_reference_case_tokens": false,
+    "context_builder_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "context_token_ratio_max": 1.0,
+    "exact_tokenizer_code_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "exact_tokenizer_id": "UNSET_BLOCKS_REAL_RUN",
+    "exact_tokenizer_model_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "legacy_builder_admissible": false,
+    "legacy_builder_dropped_fields": [
+      "key"
+    ],
+    "legacy_builder_retains_volatile_fields": [
+      "access_count",
+      "last_accessed_at"
+    ],
+    "max_context_bytes_per_case": "UNSET_BLOCKS_REAL_RUN",
+    "max_context_tokens_per_case": "UNSET_BLOCKS_REAL_RUN",
+    "result_bytes_definition": "EXACT_UTF8_BYTES_OF_FINAL_FROZEN_CONTEXT_SENT_TO_GENERATOR",
+    "status": "BLOCKED_BINDINGS_UNSET"
+  },
+  "contract_id": "biocortex_ab_track_b_real_run_admission_20260713",
+  "data_quality": {
+    "availability_is_not_admissibility": true,
+    "checks": [
+      "KEY_UNIQUENESS",
+      "VALIDITY_AND_DOMAIN",
+      "RELATIONAL_INTEGRITY",
+      "TIMELINESS_AND_FROZEN_AS_OF",
+      "LEAKAGE_AND_CONSUMED_CASE_EXCLUSION",
+      "MISSINGNESS_AND_TIMEOUT_INTENTION_TO_TREAT",
+      "SOURCE_LINEAGE_AND_HASH_BINDING"
+    ],
+    "grain": {
+      "latency": "case_id_x_condition_x_repetition",
+      "primary_estimator": "case_id",
+      "retrieval": "case_id_x_condition",
+      "review": "trial_id_x_reviewer_slot_x_case_id_x_opaque_answer_id",
+      "storage": "canonical_package_x_condition"
+    },
+    "old_successor_v3_data_admissible_as_confirmatory": false,
+    "old_successor_v3_mechanism_reusable": true
+  },
+  "date": "2026-07-13",
+  "earliest_post_fix_capture_date": "2026-07-17",
+  "generation": {
+    "condition_roster_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "execution_profile_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "generator_cli_identity_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "generator_instruction_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "generator_model_identity_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "harness_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "independent_invocations": true,
+    "private_map_read_allowed": false,
+    "status": "BLOCKED_PRE_OUTPUT_BINDINGS_UNSET",
+    "tool_or_external_fact_access_allowed": false
+  },
+  "latency": {
+    "affinity_policy_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "aggregation_population": "UNTOUCHED_PREVALENCE_HOLDOUT_ONLY",
+    "aggregation_weighting": "CASE_SAMPLING_WEIGHT_DIVIDED_EQUALLY_ACROSS_FIXED_REPETITIONS",
+    "cache_mode": "WARM_PRETOUCH_ON_SACRIFICIAL_CLONE_THEN_FRESH_TIMED_PROCESS_AND_PRISTINE_CLONE",
+    "candidate_to_reference_p95_ratio_max": 1.25,
+    "clock_source": "PYTHON_TIME_PERF_COUNTER_NS_MONOTONIC",
+    "clock_unit": "INTEGER_NANOSECONDS",
+    "condition_assignment_domain": "agent-bridge/track-b/latency-assignment/v1",
+    "condition_assignment_rule": "WITHIN_EACH_CASE_HMAC_RANK_LOWER_HALF_REFERENCE_FIRST",
+    "condition_order_algorithm": "DOMAIN_SEPARATED_HMAC_GLOBAL_ORDINAL_AND_WITHIN_CASE_EXACT_AB_BA",
+    "condition_order_domain": "agent-bridge/track-b/latency-order/v1",
+    "condition_order_message": "domain_utf8_NUL_case_id_utf8_NUL_repetition_ascii",
+    "condition_order_seed_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "context_hash_must_be_constant_across_repetitions": true,
+    "dropped_timeout_or_error_units_allowed": false,
+    "execution_order_independent_from_condition_assignment": true,
+    "hardware_guard_policy_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "hardware_guard_required_fields": [
+      "boot_session_sha256",
+      "load1",
+      "power_governor",
+      "swap_used_bytes",
+      "thermal_throttle_count"
+    ],
+    "hardware_profile_required_fields": [
+      "affinity",
+      "architecture",
+      "cpu_model",
+      "cpu_vendor",
+      "filesystem",
+      "host_slot",
+      "kernel",
+      "logical_cores",
+      "memory_bytes",
+      "os",
+      "physical_cores",
+      "power_governor",
+      "python_version",
+      "runtime_version",
+      "smt_enabled",
+      "thread_environment"
+    ],
+    "hardware_profile_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "measured_repetitions_per_case_condition": 6,
+    "order_balance_rule": "EACH_CASE_EXACTLY_HALF_REFERENCE_FIRST_AND_GLOBAL_SURVEY_WEIGHT_MASS_EXACTLY_BALANCED",
+    "p95_rule": "FIRST_OBSERVED_LATENCY_WITH_CUMULATIVE_WEIGHT_GTE_0.95_TOTAL_WEIGHT_NO_INTERPOLATION",
+    "pre_touch_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "process_startup_and_snapshot_clone_included": false,
+    "runner_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sacrificial_warmup_units_per_case_condition": 1,
+    "status": "PROTOCOL_FROZEN_SYNTHETIC_ARITHMETIC_PASS_BINDINGS_UNSET",
+    "timed_start_snapshot_rule": "TIMED_CLONE_SHA256_MUST_EQUAL_SHARED_BASE_AFTER_SACRIFICIAL_WARMUP_IS_DISCARDED",
+    "timeout_disposition": "ANY_NON_OK_UNIT_BLOCKS_RUN_NO_DROP_NO_IMPUTATION",
+    "timeout_ns": "UNSET_BLOCKS_REAL_RUN",
+    "timer_end": "FINAL_CONTEXT_VALIDATED_AND_UTF8_BYTES_COMPUTED",
+    "timer_start": "IMMEDIATELY_BEFORE_FIRST_TIMED_MCP_CALL",
+    "total_expected_units": "UNSET_BLOCKS_REAL_RUN",
+    "warmup_query_manifest_sha256": "UNSET_BLOCKS_REAL_RUN"
+  },
+  "legacy_precedent": {
+    "base_snapshot_sha256": "ef8679fc81a2640a79db5553c2f7cc9a104d6ebbb12bdf8cb83ebfafc4f3b16f",
+    "binary_sha256": "5ea3008c49bcc501e58f5cd6091b779350cb39b1b0105b3bce81b9439900ff7a",
+    "consumed_case_count": 12,
+    "consumed_map_reusable": false,
+    "consumed_score_claim_reusable": false,
+    "consumed_sealed_cases_reusable": false,
+    "mechanism_only": true,
+    "runtime_source_commit": "1f75ede032b36db321c3e767d620eac5a6a44c6e"
+  },
+  "parent_commit": "533ab2607825d877278edd6548e897f93c2acf19",
+  "power_and_estimator": {
+    "bootstrap_or_lcb_seed_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "case_weight_applied_once_after_reviewer_and": true,
+    "challenge_population_confirmatory": false,
+    "cluster_variance_policy_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "confidence_rule": "ONE_SIDED_95_PERCENT_PAIRED_CASE_LEVEL_LCB_GT_ZERO",
+    "minimum_point_lift": 0.05,
+    "minimum_total_coverage_floor": 24,
+    "paired_method_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "pilot_population_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "power_analysis_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "required_primary_case_count": "UNSET_BLOCKS_REAL_RUN",
+    "required_primary_case_count_rule": "MAX_OF_24_AND_POWER_REQUIRED_N_EXCLUDING_DIAGNOSTIC_CHALLENGE",
+    "statistical_unit": "CASE_NOT_ANSWER_CLAIM_OR_REVIEWER",
+    "target_power": "UNSET_BLOCKS_REAL_RUN"
+  },
+  "public_fixture": {
+    "benchmark_claim": false,
+    "private_material_allowed": false,
+    "required_adversarial_obligations": [
+      "NORMAL_FTS_HIT",
+      "GRAPH_ONLY_HIT_WITH_ACCESS_MUTATION",
+      "EXCLUDED_SKILL_HIT",
+      "EQUAL_SCORE_TIE",
+      "TTL_BOUNDARY",
+      "SEED_OR_COACTIVATION_ORDER_CHANGE"
+    ],
+    "runtime_execution": false,
+    "scientific_result": false,
+    "scope": "CONTRACT_AND_SYNTHETIC_ARITHMETIC_CHECKER_PLUMBING_ONLY",
+    "synthetic_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_admission_synthetic_v0.json",
+    "synthetic_fixture_sha256": "3c1f57abb41a92692bc84d019635073b97b32ae3ee3fe231ba3048017a2d0b43"
+  },
+  "reference_condition": {
+    "ambient_inputs": {
+      "inherit_parent_environment": false,
+      "required_effective_environment": {
+        "AB_BOOTSTRAP_SURFACING_DISABLE": "1",
+        "AGENT_BRIDGE_COACTIVATION_RERANK_DISABLE": "0",
+        "AGENT_BRIDGE_CORRECTION_COSURFACE": "0",
+        "AGENT_BRIDGE_MEMORY_CLASS_QUOTA": "UNSET",
+        "AGENT_BRIDGE_MEMORY_SEARCH_EXCLUDE_KINDS": "UNSET",
+        "AGENT_BRIDGE_OUTCOME_COLLECTOR": "0",
+        "AGENT_BRIDGE_RECALL_SEMANTIC_FALLBACK": "0",
+        "AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS": "eval",
+        "AGENT_BRIDGE_SEED_BOOST_DISABLE": "1",
+        "LC_ALL": "C",
+        "TZ": "UTC"
+      }
+    },
+    "binary_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "context_builder_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "effective_config_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "fixed_as_of_utc": "UNSET_BLOCKS_REAL_RUN",
+    "implementation_commit": "533ab2607825d877278edd6548e897f93c2acf19",
+    "internal_budget_observation": {
+      "final_output_top_k": 10,
+      "graph_expansion_seed_cap": 10,
+      "graph_neighbor_fanout": "UNBOUNDED_BLOCKS_EXACT_BUDGET",
+      "mcp_filter_overfetch": 50,
+      "sqlite_fts_raw_scan_cap": 800,
+      "store_fts_ranked_pool": 200,
+      "store_fused_cap": 50
+    },
+    "request": {
+      "compact": false,
+      "exclude_kinds": [
+        "skill"
+      ],
+      "expand_top": 10,
+      "include_global": false,
+      "limit": 10,
+      "mode": "hybrid",
+      "rrf_k": 60.0,
+      "scope": null,
+      "scope_mode": "local_only",
+      "tags_any": [],
+      "tool": "memory_search"
+    },
+    "runtime_features_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "snapshot_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sqlite_runtime_version": "UNSET_BLOCKS_REAL_RUN",
+    "status": "NO_GO_EXACT_REFERENCE_BINDING"
+  },
+  "review_and_blinding": {
+    "answer_blinding_seed_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "blind_map_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "blind_packet_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "capture_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "condition_map_private": true,
+    "condition_roster_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "fresh_roster_required": true,
+    "generation_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "map_bijection_checker_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "map_identity_required_bindings": [
+      "trial_id",
+      "contract_sha256",
+      "sampling_receipt_sha256",
+      "eligible_frame_manifest_sha256",
+      "selected_case_manifest_sha256",
+      "condition_roster_sha256",
+      "capture_sha256",
+      "generation_sha256",
+      "blind_packet_sha256",
+      "answer_blinding_seed_sha256"
+    ],
+    "map_schema_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "old_reviewer_roster_reusable_without_refreeze": false,
+    "pooled_reviewer_rescue_allowed": false,
+    "required_reviewer_count": 2,
+    "review_command_schema_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "review_instruction_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "review_provenance_checker_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "review_raw_response_schema_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "review_receipt_schema_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "review_schema_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "reviewer_case_rule": "STRICT_CASE_PASS_IS_AND_ACROSS_BOTH_FIXED_REVIEWER_SLOTS",
+    "reviewer_conflict_and_overlap_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "reviewer_roster_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "score_order": "VALIDATE_BOTH_RECEIPTS_THEN_O_EXCL_SCORE_CLAIM_THEN_FIRST_UNBLIND",
+    "single_use_trial_specific_map_required": true,
+    "status": "BLOCKED_BINDINGS_UNSET",
+    "zero_retry": true
+  },
+  "sampling": {
+    "answer_blinding_seed_distinct_from_sampling_seed": true,
+    "challenge_case_count_range": [
+      4,
+      6
+    ],
+    "challenge_role": "DIAGNOSTIC_ONLY",
+    "confirmatory_population": "UNTOUCHED_PREVALENCE_HOLDOUT_ONLY",
+    "dedup_rule": "DEDUP_REPLAYED_OR_IMPORTED_SAME_EVENT_KEEP_DISTINCT_REAL_EPISODES",
+    "dependence_cluster_rule": "SEMANTIC_NEAR_DUPLICATES_CLUSTERED_NOT_POST_HOC_DELETED",
+    "eligible_frame_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "exclusion_ledger_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "frame_builder_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "frame_window_end_utc": "UNSET_BLOCKS_REAL_RUN",
+    "frame_window_start_utc": "UNSET_BLOCKS_REAL_RUN",
+    "inclusion_exclusion_rules_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "observation_unit": "ONE_REAL_QUERY_EPISODE_BEFORE_CONDITION_ASSIGNMENT",
+    "old_successor_v3_cases_allowed": false,
+    "pilot_confirmatory_disjointness_checker_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "primary_floor_excludes_diagnostic_challenge": true,
+    "primary_selection": "STRATIFIED_SRSWOR_BY_HMAC_SHA256_ASCENDING",
+    "raw_frame_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "reserve_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "reserve_replacement_after_condition_output_allowed": false,
+    "sample_weight": "N_h_DIV_n_h_APPLIED_ONCE_AT_CASE_GRAIN",
+    "sampling_receipt_must_precede_condition_output": true,
+    "sampling_receipt_required_bindings": [
+      "trial_id",
+      "contract_sha256",
+      "receipt_schema_sha256",
+      "receipt_writer_sha256",
+      "created_at_utc",
+      "frame_o_excl_receipt_sha256",
+      "seed_entropy_receipt_sha256",
+      "seed_derivation_sha256",
+      "sampling_selection_algorithm_sha256",
+      "sampling_selection_domain",
+      "sampling_selection_message",
+      "eligible_frame_manifest_sha256",
+      "strata_allocation_manifest_sha256",
+      "selected_case_manifest_sha256",
+      "reserve_manifest_sha256",
+      "case_inclusion_probabilities",
+      "case_sampling_weights",
+      "receipt_precedes_first_condition_output"
+    ],
+    "sampling_receipt_schema_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sampling_receipt_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sampling_receipt_writer_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sampling_seed_anti_shopping_protocol": "EXTERNAL_UNPREDICTABLE_BEACON_OR_MULTI_PARTY_COMMIT_REVEAL_NO_SINGLE_PARTY_SEED_CHOICE",
+    "sampling_seed_derivation_message": "domain_utf8_NUL_contract_sha256_ascii_NUL_trial_id_utf8_NUL_eligible_frame_sha256_ascii_NUL_external_entropy_sha256_ascii",
+    "sampling_seed_derivation_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sampling_seed_entropy_receipt_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sampling_seed_pairwise_distinct_from_latency_and_blinding": true,
+    "sampling_seed_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sampling_seed_timing": "O_EXCL_FRAME_RECEIPT_THEN_EXTERNAL_UNPREDICTABLE_ENTROPY_THEN_DERIVE_AND_O_EXCL_SAMPLE_RECEIPT_BEFORE_OUTPUT",
+    "sampling_selection_algorithm_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sampling_selection_domain": "agent-bridge/track-b/sample/v1",
+    "sampling_selection_message": "domain_utf8_NUL_frame_sha256_ascii_NUL_stratum_utf8_NUL_case_id_utf8",
+    "selected_case_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "status": "BLOCKED_PENDING_PREVALENCE_ADMISSION_BINDINGS",
+    "strata_allocation_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "target_population_definition_sha256": "UNSET_BLOCKS_REAL_RUN"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_real_run_admission.v0",
+  "source_bindings": [
+    {
+      "path": "Cargo.lock",
+      "role": "rust_dependency_lock",
+      "sha256": "5ebad772d0d0d48d1414bf02939feeb56ad0aa3e15aa7ee0db6fb4cb46e6c613",
+      "status": "BOUND_CODE_ONLY"
+    },
+    {
+      "path": "crates/bridge/src/mcp_tools.rs",
+      "role": "reference_search_implementation",
+      "sha256": "9a0f486b9bdf101d264f386efd0eb08c64299bba2c627c61e1ece19f5f79b448",
+      "status": "BOUND_CODE_ONLY"
+    },
+    {
+      "path": "crates/bridge/src/memory_truth.rs",
+      "role": "candidate_pure_truth_resolver",
+      "sha256": "2e46a521332820b07171b425c95004f35a98887c7c49a2d78baf7740f07195a4",
+      "status": "BOUND_RESOLVER_ONLY"
+    },
+    {
+      "path": "crates/bridge/src/memory_truth_adapter.rs",
+      "role": "candidate_adapter_preflight",
+      "sha256": "c459e96919778c24b0bc699653d8c12b83332e6318b7298deee071a01e90e023",
+      "status": "BOUND_BLOCKER_EVIDENCE"
+    },
+    {
+      "path": "crates/store/src/lib.rs",
+      "role": "reference_store_contract",
+      "sha256": "8b38d1471ba7abc0f47092ee1a7af67504f80b539f0a3787c4982aaf229f3398",
+      "status": "BOUND_CODE_ONLY"
+    },
+    {
+      "path": "crates/store/src/sqlite.rs",
+      "role": "reference_sqlite_implementation",
+      "sha256": "cba4f527f4e32b7241f84829c95b47ad179e05ce9a5e7b72e55a54f20b0dc3b4",
+      "status": "BOUND_CODE_ONLY"
+    },
+    {
+      "path": "docs/design/MEMORY_PEEK_TRUTH_ADAPTER_PREFLIGHT_V0_2026_07_10.md",
+      "role": "candidate_adapter_design_contract",
+      "sha256": "c457e574fa40c711f70ba3085f114044eae37686911fedfe77a2efa718bf7aaa",
+      "status": "BOUND_BLOCKER_EVIDENCE"
+    },
+    {
+      "path": "docs/design/TEMPORAL_TRUTH_PROJECTION_V0_2026_07_10.md",
+      "role": "candidate_resolver_design_contract",
+      "sha256": "5d8c4a31fe595606f5033c950b38ba969e3b9642a8e28a067fc5f4165e435481",
+      "status": "BOUND_RESOLVER_ONLY"
+    },
+    {
+      "path": "scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json",
+      "role": "consumed_legacy_contract",
+      "sha256": "da9e190492d74824159bbff18eaeff02a4848921989f4077072f126e1d4e4bcc",
+      "status": "MECHANISM_ONLY_CONSUMED"
+    },
+    {
+      "path": "scripts/eval/portfolio_continuity_ab_trial.py",
+      "role": "legacy_shared_trial_surface",
+      "sha256": "b6f599e748088e36424bd03e70a5bc3112aeaf728f6679b19297889a98e5b7f3",
+      "status": "MECHANISM_ONLY_CONSUMED"
+    },
+    {
+      "path": "scripts/eval/portfolio_continuity_successor_v3_trial.py",
+      "role": "legacy_successor_v3_harness",
+      "sha256": "0b92b1153a77257a49fc847eb37be3e20d687c41067559c22b2ebed72649e003",
+      "status": "MECHANISM_ONLY_CONSUMED"
+    }
+  ],
+  "stages": {
+    "post_generation_pre_review": {
+      "required_artifacts": [
+        "capture_sha256",
+        "generation_sha256",
+        "blind_packet_sha256",
+        "blind_map_sha256",
+        "map_bijection_receipt_sha256"
+      ],
+      "side_effect_unlocked": "FIXED_BLIND_REVIEW_ONLY",
+      "status": "NOT_REACHED"
+    },
+    "pre_output_admission": {
+      "required_binding_groups": [
+        "reference_runtime_clock_environment_snapshot_and_context",
+        "candidate_adapter_and_truth_authority",
+        "prevalence_frame_sampling_power_and_sampling_receipt",
+        "generator_condition_roster_reviewer_roster_and_seed_commitments",
+        "hardware_latency_tokenizer_and_storage_protocol_identities"
+      ],
+      "side_effect_unlocked": "CONDITION_CAPTURE_AND_GENERATION_ONLY",
+      "status": "BLOCKED"
+    },
+    "pre_unblind": {
+      "required_artifacts": [
+        "both_complete_review_objects",
+        "both_command_request_raw_response_and_receipt_chains",
+        "contract_scoped_o_excl_score_claim"
+      ],
+      "side_effect_unlocked": "FIRST_CONDITION_MAP_READ_AND_SINGLE_SCORE_ONLY",
+      "status": "NOT_REACHED"
+    }
+  },
+  "storage": {
+    "allowed_persistent_artifact_roles": [
+      "main_sqlite",
+      "truth_index"
+    ],
+    "arm_builder_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "arm_manifest_required_fields": [
+      "condition_id",
+      "builder_sha256",
+      "canonical_package_sha256",
+      "closed",
+      "main_sqlite_st_size",
+      "page_size",
+      "page_count",
+      "freelist_count",
+      "user_version",
+      "schema_meta_version",
+      "sqlite_version",
+      "schema_digest_sha256",
+      "quick_check",
+      "artifacts",
+      "total_persistent_condition_bytes",
+      "normalized_persistent_bytes"
+    ],
+    "artifact_directory_scan_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "candidate_to_reference_normalized_ratio_max": 1.1,
+    "canonical_edge_order": "source_key_asc_target_key_asc_edge_type_asc_created_at_asc",
+    "canonical_memory_order": "created_at_asc_key_asc",
+    "canonical_package_manifest_required_fields": [
+      "package_sha256",
+      "serializer_sha256",
+      "serialization_rule",
+      "memories_sha256",
+      "memory_order",
+      "edges_sha256",
+      "edge_order",
+      "memory_source_bytes",
+      "edge_source_bytes",
+      "canonical_source_bytes",
+      "memory_row_count",
+      "edge_row_count"
+    ],
+    "canonical_package_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "canonical_serialization_rule": "UTF8_LF_ONE_SORTED_KEY_JSON_OBJECT_PER_LINE_NO_NAN",
+    "canonical_source_bytes": "UNSET_BLOCKS_REAL_RUN",
+    "canonical_source_definition": "SUM_EXACT_UNCOMPRESSED_BYTES_OF_DETERMINISTIC_LF_UTF8_MEMORIES_JSONL_AND_EDGES_JSONL",
+    "directory_scan_required": true,
+    "edge_row_count": "UNSET_BLOCKS_REAL_RUN",
+    "edge_source_bytes": "UNSET_BLOCKS_REAL_RUN",
+    "forbidden_artifact_suffixes": [
+      "-journal",
+      "-shm",
+      "-wal"
+    ],
+    "memory_row_count": "UNSET_BLOCKS_REAL_RUN",
+    "memory_source_bytes": "UNSET_BLOCKS_REAL_RUN",
+    "normalized_index_ratio_definition": "total_persistent_condition_bytes_DIV_canonical_source_bytes",
+    "persistent_artifact_allowlist_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "schema_digest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "serializer_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "sqlite_page_size_allowed_values": [
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768,
+      65536
+    ],
+    "sqlite_quick_check_required": true,
+    "sqlite_runtime_and_page_size_must_match_across_arms": true,
+    "status": "PROTOCOL_FROZEN_SYNTHETIC_ARITHMETIC_PASS_BINDINGS_UNSET",
+    "total_persistent_condition_bytes_definition": "SUM_ST_SIZE_OF_CLOSED_MAIN_SQLITE_AND_ALL_CONDITION_SPECIFIC_PERSISTENT_ARTIFACTS",
+    "unlisted_persistent_artifact_allowed": false,
+    "wal_or_shm_allowed_at_measurement": false
+  },
+  "strict_case_pass": {
+    "answerable_all_gold_recalled": true,
+    "answerable_authority_exists": true,
+    "answerable_current_referent_correct": true,
+    "answerable_required_claim_score": 2,
+    "currentness_required": "pass",
+    "field_sources": {
+      "deterministic_retrieval_truth_gates": [
+        "authority_exists",
+        "all_gold_recalled",
+        "current_referent_correct"
+      ],
+      "each_reviewer_answer_gates": [
+        "required_claim_score",
+        "currentness",
+        "response_mode",
+        "required_abstention",
+        "forbidden_or_stale_count",
+        "unsupported_assertion_count",
+        "usefulness"
+      ]
+    },
+    "forbidden_claim_count_max": 0,
+    "missingness_disposition": {
+      "capture_timeout_or_error": "TERMINAL_PROTOCOL_FAILURE_NO_REPLACEMENT",
+      "generation_failure": "TERMINAL_PROTOCOL_FAILURE_NO_REPLACEMENT",
+      "missing_or_invalid_review": "TERMINAL_PROTOCOL_FAILURE_NO_UNBLIND_NO_REPLACEMENT"
+    },
+    "response_mode_must_be_correct": true,
+    "unanswerable_requires_correct_abstention": true,
+    "unsupported_assertion_count_max": 0,
+    "usefulness_min": 4
+  },
+  "truth_inputs": {
+    "claim_authority_policy_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "gold_evidence_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "referent_schema_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "status": "BLOCKED_PRE_OUTPUT_BINDINGS_UNSET",
+    "strict_case_algorithm_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "truth_as_of_utc": "UNSET_BLOCKS_REAL_RUN",
+    "truth_authority_manifest_sha256": "UNSET_BLOCKS_REAL_RUN",
+    "truth_manifest_schema_sha256": "UNSET_BLOCKS_REAL_RUN"
+  }
+}

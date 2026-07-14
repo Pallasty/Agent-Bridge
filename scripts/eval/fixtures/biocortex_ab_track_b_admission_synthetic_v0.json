@@ -1,0 +1,1012 @@
+{
+  "base_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b",
+  "canonical_source": {
+    "canonical_source_bytes": 10000,
+    "edge_order": "source_key_asc_target_key_asc_edge_type_asc_created_at_asc",
+    "edge_row_count": 5,
+    "edge_source_bytes": 2000,
+    "edges_sha256": "1d024853d9ab16dc206ad38b2df7f3ee9f5a52348ed2c122a38815372d11a72c",
+    "memories_sha256": "e2c0215a8401706bfb110e997c3f8a901b49c5f08ee0c9f206ade4916c8d3783",
+    "memory_order": "created_at_asc_key_asc",
+    "memory_row_count": 10,
+    "memory_source_bytes": 8000,
+    "package_sha256": "368080542656d0438c76926cc09a8fe9c2e369ecd79d5af24d0e7ae6b9fc73f9",
+    "serialization_rule": "UTF8_LF_ONE_SORTED_KEY_JSON_OBJECT_PER_LINE_NO_NAN",
+    "serializer_sha256": "372599b42fb43a639041890c58f1e9fa095c3985dde01b72e0eba30c73e97316"
+  },
+  "cases": [
+    {
+      "case_id": "public_synth_a",
+      "sampling_weight": {
+        "denominator": 1,
+        "numerator": 1
+      }
+    },
+    {
+      "case_id": "public_synth_b",
+      "sampling_weight": {
+        "denominator": 3,
+        "numerator": 4
+      }
+    },
+    {
+      "case_id": "public_synth_c",
+      "sampling_weight": {
+        "denominator": 3,
+        "numerator": 4
+      }
+    },
+    {
+      "case_id": "public_synth_d",
+      "sampling_weight": {
+        "denominator": 3,
+        "numerator": 4
+      }
+    }
+  ],
+  "conditions": [
+    "reference",
+    "candidate"
+  ],
+  "hardware": {
+    "guard_policy": {
+      "max_load1": 1.0,
+      "max_swap_used_bytes": 0,
+      "max_thermal_throttle_delta": 0,
+      "required_power_governor": "performance"
+    },
+    "guard_policy_sha256": "85e1f16d19484ee8180deed324de4613ea975fb0d3af5c3ca15bf5afa0804b87",
+    "post_guard": {
+      "boot_session_sha256": "340bc64a7aadb4dce4da09f335e0332097ced05fd6dcd877bb7fd5914a61050a",
+      "load1": 0.2,
+      "power_governor": "performance",
+      "swap_used_bytes": 0,
+      "thermal_throttle_count": 5
+    },
+    "pre_guard": {
+      "boot_session_sha256": "340bc64a7aadb4dce4da09f335e0332097ced05fd6dcd877bb7fd5914a61050a",
+      "load1": 0.1,
+      "power_governor": "performance",
+      "swap_used_bytes": 0,
+      "thermal_throttle_count": 5
+    },
+    "profile": {
+      "affinity": "cpu:2",
+      "architecture": "x86_64",
+      "cpu_model": "public-synthetic-cpu",
+      "cpu_vendor": "public-synthetic-vendor",
+      "filesystem": "ext4",
+      "host_slot": "public_synthetic_slot_0",
+      "kernel": "public-synthetic-kernel",
+      "logical_cores": 8,
+      "memory_bytes": 17179869184,
+      "os": "public-synthetic-linux",
+      "physical_cores": 4,
+      "power_governor": "performance",
+      "python_version": "3.13.0-synthetic",
+      "runtime_version": "agent-bridge-synthetic",
+      "smt_enabled": true,
+      "thread_environment": {
+        "RAYON_NUM_THREADS": "1"
+      }
+    },
+    "profile_sha256": "9b11f5fbb0a3d18998cedf8a68efa94a6d63bd70ea1bf68474857eb816aca9c4"
+  },
+  "latency_units": [
+    {
+      "case_id": "public_synth_a",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 105400,
+          "result_bytes": 21,
+          "result_sha256": "567cece6da7888b7252eb14859f1e34919e4ed04d2ca3605daa42391b3171b95",
+          "result_text": "alpha current context",
+          "retrieval_wire_ns": 94900,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 100400,
+          "result_bytes": 30,
+          "result_sha256": "096b7af3d4dc2b98f3810641d12d1b973e8359304434a497928260cd578fb5b9",
+          "result_text": "alpha reference context stable",
+          "retrieval_wire_ns": 90400,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 1,
+      "repetition": 4,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_b",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 130400,
+          "result_bytes": 21,
+          "result_sha256": "2f462678c9f2d46d531ff12406aa145d46eaf98171ae391389db13d4327380e9",
+          "result_text": "bravo current context",
+          "retrieval_wire_ns": 119900,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 120400,
+          "result_bytes": 30,
+          "result_sha256": "1bf54e92e264e0e1e99a44e76326db014c2d807fe343555174ad216524151d2a",
+          "result_text": "bravo reference context stable",
+          "retrieval_wire_ns": 110400,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 2,
+      "repetition": 4,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_c",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 150500,
+          "result_bytes": 20,
+          "result_sha256": "c7a58a9a08cdd825acbea4310ec550b0a966a7bbcb3f794ed017bcbefaf97d18",
+          "result_text": "查理 当前 语境",
+          "retrieval_wire_ns": 140000,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 140500,
+          "result_bytes": 27,
+          "result_sha256": "a4ed700be9d187f06fceda66529b5028c37416e85069b60c4ec8551820afe258",
+          "result_text": "查理 参考 稳定 语境",
+          "retrieval_wire_ns": 130500,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 3,
+      "repetition": 5,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_d",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 180300,
+          "result_bytes": 21,
+          "result_sha256": "80aadf53cd15926fe8554473ebf6479501d2bfb1396fbfd99360b0a1d54fcc74",
+          "result_text": "delta current context",
+          "retrieval_wire_ns": 169800,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 160300,
+          "result_bytes": 30,
+          "result_sha256": "f6d5ab1efe1283a604090125cad33e289b4916480f88c13ac4a66e37ccf9755d",
+          "result_text": "delta reference context stable",
+          "retrieval_wire_ns": 150300,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 4,
+      "repetition": 3,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_b",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 130500,
+          "result_bytes": 21,
+          "result_sha256": "2f462678c9f2d46d531ff12406aa145d46eaf98171ae391389db13d4327380e9",
+          "result_text": "bravo current context",
+          "retrieval_wire_ns": 120000,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 120500,
+          "result_bytes": 30,
+          "result_sha256": "1bf54e92e264e0e1e99a44e76326db014c2d807fe343555174ad216524151d2a",
+          "result_text": "bravo reference context stable",
+          "retrieval_wire_ns": 110500,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 5,
+      "repetition": 5,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_a",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 105200,
+          "result_bytes": 21,
+          "result_sha256": "567cece6da7888b7252eb14859f1e34919e4ed04d2ca3605daa42391b3171b95",
+          "result_text": "alpha current context",
+          "retrieval_wire_ns": 94700,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 100200,
+          "result_bytes": 30,
+          "result_sha256": "096b7af3d4dc2b98f3810641d12d1b973e8359304434a497928260cd578fb5b9",
+          "result_text": "alpha reference context stable",
+          "retrieval_wire_ns": 90200,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 6,
+      "repetition": 2,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_c",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 150600,
+          "result_bytes": 20,
+          "result_sha256": "c7a58a9a08cdd825acbea4310ec550b0a966a7bbcb3f794ed017bcbefaf97d18",
+          "result_text": "查理 当前 语境",
+          "retrieval_wire_ns": 140100,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 140600,
+          "result_bytes": 27,
+          "result_sha256": "a4ed700be9d187f06fceda66529b5028c37416e85069b60c4ec8551820afe258",
+          "result_text": "查理 参考 稳定 语境",
+          "retrieval_wire_ns": 130600,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 7,
+      "repetition": 6,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_d",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 180500,
+          "result_bytes": 21,
+          "result_sha256": "80aadf53cd15926fe8554473ebf6479501d2bfb1396fbfd99360b0a1d54fcc74",
+          "result_text": "delta current context",
+          "retrieval_wire_ns": 170000,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 160500,
+          "result_bytes": 30,
+          "result_sha256": "f6d5ab1efe1283a604090125cad33e289b4916480f88c13ac4a66e37ccf9755d",
+          "result_text": "delta reference context stable",
+          "retrieval_wire_ns": 150500,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 8,
+      "repetition": 5,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_b",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 130300,
+          "result_bytes": 21,
+          "result_sha256": "2f462678c9f2d46d531ff12406aa145d46eaf98171ae391389db13d4327380e9",
+          "result_text": "bravo current context",
+          "retrieval_wire_ns": 119800,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 120300,
+          "result_bytes": 30,
+          "result_sha256": "1bf54e92e264e0e1e99a44e76326db014c2d807fe343555174ad216524151d2a",
+          "result_text": "bravo reference context stable",
+          "retrieval_wire_ns": 110300,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 9,
+      "repetition": 3,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_c",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 150200,
+          "result_bytes": 20,
+          "result_sha256": "c7a58a9a08cdd825acbea4310ec550b0a966a7bbcb3f794ed017bcbefaf97d18",
+          "result_text": "查理 当前 语境",
+          "retrieval_wire_ns": 139700,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 140200,
+          "result_bytes": 27,
+          "result_sha256": "a4ed700be9d187f06fceda66529b5028c37416e85069b60c4ec8551820afe258",
+          "result_text": "查理 参考 稳定 语境",
+          "retrieval_wire_ns": 130200,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 10,
+      "repetition": 2,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_c",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 150100,
+          "result_bytes": 20,
+          "result_sha256": "c7a58a9a08cdd825acbea4310ec550b0a966a7bbcb3f794ed017bcbefaf97d18",
+          "result_text": "查理 当前 语境",
+          "retrieval_wire_ns": 139600,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 140100,
+          "result_bytes": 27,
+          "result_sha256": "a4ed700be9d187f06fceda66529b5028c37416e85069b60c4ec8551820afe258",
+          "result_text": "查理 参考 稳定 语境",
+          "retrieval_wire_ns": 130100,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 11,
+      "repetition": 1,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_d",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 180200,
+          "result_bytes": 21,
+          "result_sha256": "80aadf53cd15926fe8554473ebf6479501d2bfb1396fbfd99360b0a1d54fcc74",
+          "result_text": "delta current context",
+          "retrieval_wire_ns": 169700,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 160200,
+          "result_bytes": 30,
+          "result_sha256": "f6d5ab1efe1283a604090125cad33e289b4916480f88c13ac4a66e37ccf9755d",
+          "result_text": "delta reference context stable",
+          "retrieval_wire_ns": 150200,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 12,
+      "repetition": 2,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_d",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 180400,
+          "result_bytes": 21,
+          "result_sha256": "80aadf53cd15926fe8554473ebf6479501d2bfb1396fbfd99360b0a1d54fcc74",
+          "result_text": "delta current context",
+          "retrieval_wire_ns": 169900,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 160400,
+          "result_bytes": 30,
+          "result_sha256": "f6d5ab1efe1283a604090125cad33e289b4916480f88c13ac4a66e37ccf9755d",
+          "result_text": "delta reference context stable",
+          "retrieval_wire_ns": 150400,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 13,
+      "repetition": 4,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_d",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 180600,
+          "result_bytes": 21,
+          "result_sha256": "80aadf53cd15926fe8554473ebf6479501d2bfb1396fbfd99360b0a1d54fcc74",
+          "result_text": "delta current context",
+          "retrieval_wire_ns": 170100,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 160600,
+          "result_bytes": 30,
+          "result_sha256": "f6d5ab1efe1283a604090125cad33e289b4916480f88c13ac4a66e37ccf9755d",
+          "result_text": "delta reference context stable",
+          "retrieval_wire_ns": 150600,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 14,
+      "repetition": 6,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_c",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 150300,
+          "result_bytes": 20,
+          "result_sha256": "c7a58a9a08cdd825acbea4310ec550b0a966a7bbcb3f794ed017bcbefaf97d18",
+          "result_text": "查理 当前 语境",
+          "retrieval_wire_ns": 139800,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 140300,
+          "result_bytes": 27,
+          "result_sha256": "a4ed700be9d187f06fceda66529b5028c37416e85069b60c4ec8551820afe258",
+          "result_text": "查理 参考 稳定 语境",
+          "retrieval_wire_ns": 130300,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 15,
+      "repetition": 3,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_a",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 105300,
+          "result_bytes": 21,
+          "result_sha256": "567cece6da7888b7252eb14859f1e34919e4ed04d2ca3605daa42391b3171b95",
+          "result_text": "alpha current context",
+          "retrieval_wire_ns": 94800,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 100300,
+          "result_bytes": 30,
+          "result_sha256": "096b7af3d4dc2b98f3810641d12d1b973e8359304434a497928260cd578fb5b9",
+          "result_text": "alpha reference context stable",
+          "retrieval_wire_ns": 90300,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 16,
+      "repetition": 3,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_a",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 105100,
+          "result_bytes": 21,
+          "result_sha256": "567cece6da7888b7252eb14859f1e34919e4ed04d2ca3605daa42391b3171b95",
+          "result_text": "alpha current context",
+          "retrieval_wire_ns": 94600,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 100100,
+          "result_bytes": 30,
+          "result_sha256": "096b7af3d4dc2b98f3810641d12d1b973e8359304434a497928260cd578fb5b9",
+          "result_text": "alpha reference context stable",
+          "retrieval_wire_ns": 90100,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 17,
+      "repetition": 1,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_d",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 180100,
+          "result_bytes": 21,
+          "result_sha256": "80aadf53cd15926fe8554473ebf6479501d2bfb1396fbfd99360b0a1d54fcc74",
+          "result_text": "delta current context",
+          "retrieval_wire_ns": 169600,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 160100,
+          "result_bytes": 30,
+          "result_sha256": "f6d5ab1efe1283a604090125cad33e289b4916480f88c13ac4a66e37ccf9755d",
+          "result_text": "delta reference context stable",
+          "retrieval_wire_ns": 150100,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 18,
+      "repetition": 1,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_b",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 130200,
+          "result_bytes": 21,
+          "result_sha256": "2f462678c9f2d46d531ff12406aa145d46eaf98171ae391389db13d4327380e9",
+          "result_text": "bravo current context",
+          "retrieval_wire_ns": 119700,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 120200,
+          "result_bytes": 30,
+          "result_sha256": "1bf54e92e264e0e1e99a44e76326db014c2d807fe343555174ad216524151d2a",
+          "result_text": "bravo reference context stable",
+          "retrieval_wire_ns": 110200,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 19,
+      "repetition": 2,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_a",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 105500,
+          "result_bytes": 21,
+          "result_sha256": "567cece6da7888b7252eb14859f1e34919e4ed04d2ca3605daa42391b3171b95",
+          "result_text": "alpha current context",
+          "retrieval_wire_ns": 95000,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 100500,
+          "result_bytes": 30,
+          "result_sha256": "096b7af3d4dc2b98f3810641d12d1b973e8359304434a497928260cd578fb5b9",
+          "result_text": "alpha reference context stable",
+          "retrieval_wire_ns": 90500,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 20,
+      "repetition": 5,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_c",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 150400,
+          "result_bytes": 20,
+          "result_sha256": "c7a58a9a08cdd825acbea4310ec550b0a966a7bbcb3f794ed017bcbefaf97d18",
+          "result_text": "查理 当前 语境",
+          "retrieval_wire_ns": 139900,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 140400,
+          "result_bytes": 27,
+          "result_sha256": "a4ed700be9d187f06fceda66529b5028c37416e85069b60c4ec8551820afe258",
+          "result_text": "查理 参考 稳定 语境",
+          "retrieval_wire_ns": 130400,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 21,
+      "repetition": 4,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_b",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 130100,
+          "result_bytes": 21,
+          "result_sha256": "2f462678c9f2d46d531ff12406aa145d46eaf98171ae391389db13d4327380e9",
+          "result_text": "bravo current context",
+          "retrieval_wire_ns": 119600,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 120100,
+          "result_bytes": 30,
+          "result_sha256": "1bf54e92e264e0e1e99a44e76326db014c2d807fe343555174ad216524151d2a",
+          "result_text": "bravo reference context stable",
+          "retrieval_wire_ns": 110100,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 22,
+      "repetition": 1,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_a",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 105600,
+          "result_bytes": 21,
+          "result_sha256": "567cece6da7888b7252eb14859f1e34919e4ed04d2ca3605daa42391b3171b95",
+          "result_text": "alpha current context",
+          "retrieval_wire_ns": 95100,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 100600,
+          "result_bytes": 30,
+          "result_sha256": "096b7af3d4dc2b98f3810641d12d1b973e8359304434a497928260cd578fb5b9",
+          "result_text": "alpha reference context stable",
+          "retrieval_wire_ns": 90600,
+          "status": "ok"
+        }
+      },
+      "first_condition": "candidate",
+      "ordinal": 23,
+      "repetition": 6,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    },
+    {
+      "case_id": "public_synth_b",
+      "conditions": {
+        "candidate": {
+          "assembly_ns": 10500,
+          "context_tokens": 3,
+          "latency_ns": 130600,
+          "result_bytes": 21,
+          "result_sha256": "2f462678c9f2d46d531ff12406aa145d46eaf98171ae391389db13d4327380e9",
+          "result_text": "bravo current context",
+          "retrieval_wire_ns": 120100,
+          "status": "ok"
+        },
+        "reference": {
+          "assembly_ns": 10000,
+          "context_tokens": 4,
+          "latency_ns": 120600,
+          "result_bytes": 30,
+          "result_sha256": "1bf54e92e264e0e1e99a44e76326db014c2d807fe343555174ad216524151d2a",
+          "result_text": "bravo reference context stable",
+          "retrieval_wire_ns": 110600,
+          "status": "ok"
+        }
+      },
+      "first_condition": "reference",
+      "ordinal": 24,
+      "repetition": 6,
+      "sacrificial_warmup_discarded": true,
+      "timed_start_snapshot_sha256": "c83bf888e231238ea22e9354996c609c02e242baf48b71b375344afa8acd887b"
+    }
+  ],
+  "private_material": false,
+  "sampling": {
+    "algorithm": "STRATIFIED_SRSWOR_BY_HMAC_SHA256_ASCENDING",
+    "allocations": [
+      {
+        "N_h": 1,
+        "n_h": 1,
+        "stratum": "census"
+      },
+      {
+        "N_h": 4,
+        "n_h": 3,
+        "stratum": "oversampled"
+      }
+    ],
+    "case_inclusion_probabilities": [
+      {
+        "case_id": "public_synth_a",
+        "denominator": 1,
+        "numerator": 1
+      },
+      {
+        "case_id": "public_synth_b",
+        "denominator": 4,
+        "numerator": 3
+      },
+      {
+        "case_id": "public_synth_c",
+        "denominator": 4,
+        "numerator": 3
+      },
+      {
+        "case_id": "public_synth_d",
+        "denominator": 4,
+        "numerator": 3
+      }
+    ],
+    "case_sampling_weights": [
+      {
+        "case_id": "public_synth_a",
+        "denominator": 1,
+        "numerator": 1
+      },
+      {
+        "case_id": "public_synth_b",
+        "denominator": 3,
+        "numerator": 4
+      },
+      {
+        "case_id": "public_synth_c",
+        "denominator": 3,
+        "numerator": 4
+      },
+      {
+        "case_id": "public_synth_d",
+        "denominator": 3,
+        "numerator": 4
+      }
+    ],
+    "contract_id": "biocortex_ab_track_b_real_run_admission_20260713",
+    "domain": "agent-bridge/track-b/sample/v1",
+    "eligible_frame": [
+      {
+        "case_id": "public_reserve_e",
+        "dependence_cluster_id": "cluster_e",
+        "event_id": "event_e",
+        "stratum": "oversampled"
+      },
+      {
+        "case_id": "public_synth_a",
+        "dependence_cluster_id": "cluster_a",
+        "event_id": "event_a",
+        "stratum": "census"
+      },
+      {
+        "case_id": "public_synth_b",
+        "dependence_cluster_id": "cluster_b",
+        "event_id": "event_b",
+        "stratum": "oversampled"
+      },
+      {
+        "case_id": "public_synth_c",
+        "dependence_cluster_id": "cluster_c",
+        "event_id": "event_c",
+        "stratum": "oversampled"
+      },
+      {
+        "case_id": "public_synth_d",
+        "dependence_cluster_id": "cluster_d",
+        "event_id": "event_d",
+        "stratum": "oversampled"
+      }
+    ],
+    "eligible_frame_sha256": "9b8ca8dfb7464757619da3345d28ecba53aa01b90772231ee8a56f4eafbd3a7b",
+    "frame_o_excl_frozen": true,
+    "message_format": "domain_utf8_NUL_frame_sha256_ascii_NUL_stratum_utf8_NUL_case_id_utf8",
+    "receipt_precedes_first_condition_output": true,
+    "receipt_schema": "agent_bridge.biocortex_ab_track_b_sampling_receipt.v0",
+    "receipt_writer_sha256": "0109b7e059008b2d34206c69e9946ce526db92120e6901f6cfe40d4adbb77c99",
+    "reserve_case_ids": [
+      "public_reserve_e"
+    ],
+    "sampling_receipt_sha256": "df006560d2ba303c1bdcd0d72e552b8966a442d1081ca06ed14f0d5a9991daf6",
+    "seed_hex": "0404040404040404040404040404040404040404040404040404040404040404",
+    "seed_protocol": "PUBLIC_SYNTHETIC_FIXED_SEED_NO_REAL_RANDOMNESS",
+    "seed_sha256": "9f4fb68f3e1dac82202f9aa581ce0bbf1f765df0e9ac3c8c57e20f685abab8ed",
+    "selected_case_ids": [
+      "public_synth_a",
+      "public_synth_b",
+      "public_synth_c",
+      "public_synth_d"
+    ],
+    "trial_id": "public_synthetic_track_b_admission_v0"
+  },
+  "schedule": {
+    "algorithm": "HMAC_SHA256_DOMAIN_SEPARATED_GLOBAL_ORDINAL_WITHIN_CASE_HALF_BALANCED",
+    "assignment_domain": "agent-bridge/track-b/latency-assignment/v1",
+    "message_format": "domain_utf8_NUL_case_id_utf8_NUL_repetition_ascii",
+    "order_domain": "agent-bridge/track-b/latency-order/v1",
+    "pair_count": 24,
+    "seed_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "seed_sha256": "02d449a31fbb267c8f352e9968a79e3e5fc95c1bbeaa502fd6454ebde5a4bedc"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_admission_synthetic.v0",
+  "storage_arms": [
+    {
+      "artifacts": [
+        {
+          "path": "reference/state.db",
+          "role": "main_sqlite",
+          "sha256": "ea9d1423a67a7bbf87221b5389e7bfa7c56264561dfc10d18ebde941415782ed",
+          "st_size": 40960
+        }
+      ],
+      "builder_sha256": "c5141ddafd15ca9c6107beaf846e746f720afc259c0279b5e9eafc54c21cf66b",
+      "canonical_package_sha256": "368080542656d0438c76926cc09a8fe9c2e369ecd79d5af24d0e7ae6b9fc73f9",
+      "closed": true,
+      "condition_id": "reference",
+      "freelist_count": 0,
+      "main_sqlite_st_size": 40960,
+      "normalized_persistent_bytes": {
+        "denominator": 10000,
+        "numerator": 40960
+      },
+      "page_count": 10,
+      "page_size": 4096,
+      "quick_check": "ok",
+      "schema_digest_sha256": "f3f3372d9f86f2335dcd20070dcd550a111b53b3ba7fe19a4d8df40b49b5d82c",
+      "schema_meta_version": 42,
+      "sqlite_version": "3.50.0-synthetic",
+      "total_persistent_condition_bytes": 40960,
+      "user_version": 42
+    },
+    {
+      "artifacts": [
+        {
+          "path": "candidate/state.db",
+          "role": "main_sqlite",
+          "sha256": "1c08e8dbf022522036b45a06d13bab1112601469e0328758070502ca530b7129",
+          "st_size": 40960
+        },
+        {
+          "path": "candidate/truth.idx",
+          "role": "truth_index",
+          "sha256": "205bd3890faf73ada54ae38ddeb79429d29277829adb407710e79ad46359c820",
+          "st_size": 2048
+        }
+      ],
+      "builder_sha256": "375a4abd30f569a213a5098f7b410b6169bf3ea6eaa9c8cdcf1c5ee26dd4f234",
+      "canonical_package_sha256": "368080542656d0438c76926cc09a8fe9c2e369ecd79d5af24d0e7ae6b9fc73f9",
+      "closed": true,
+      "condition_id": "candidate",
+      "freelist_count": 0,
+      "main_sqlite_st_size": 40960,
+      "normalized_persistent_bytes": {
+        "denominator": 10000,
+        "numerator": 43008
+      },
+      "page_count": 10,
+      "page_size": 4096,
+      "quick_check": "ok",
+      "schema_digest_sha256": "d343bcd6f49b7f6c9cb775ca04f4a2ccc93cb3edea1f254a06fc846bf087514a",
+      "schema_meta_version": 42,
+      "sqlite_version": "3.50.0-synthetic",
+      "total_persistent_condition_bytes": 43008,
+      "user_version": 42
+    }
+  ],
+  "synthetic_only": true,
+  "timeout_ns": 1000000000,
+  "tokenizer": {
+    "algorithm": "UNICODE_WHITESPACE_SPLIT_V0",
+    "config_sha256": "a72055d554fb53606551d765f1675de630cc9b547a8cad6e45b353e4f8e7b8a0",
+    "id": "public_synthetic_unicode_whitespace_v0"
+  }
+}
