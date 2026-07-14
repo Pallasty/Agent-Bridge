@@ -1,0 +1,535 @@
+{
+ "summary": {
+  "date": "2026-07-14",
+  "fixture": "synthesis_queries.json",
+  "queries": 13,
+  "baseline_recall20": 0.778,
+  "budgeted_recall20": 0.917,
+  "unbounded_1hop_recall": 1.0,
+  "mean_hood_n": 168.8,
+  "missed_total": 11,
+  "reachable_1hop": 11,
+  "reachable_2hop": 0,
+  "unreachable_2hop": 0,
+  "unbounded_gains": 11,
+  "unbounded_gains_via_digest_seed": 6
+ },
+ "per_query": [
+  {
+   "id": "S1",
+   "query": "回顾 Agent-Bridge 项目愿景，以及目前遇到的问题、超预期、被证伪的，说说看法和下一步规划",
+   "gold_n": 4,
+   "seed_union_n": 24,
+   "hood_n": 264,
+   "baseline_recall20": 0.75,
+   "budgeted_recall20": 0.75,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {
+    "biocortex_reframe_biomimicry_rd_math_product_20260706": {
+     "seed": "ab_memory_evolution_direction_20260710",
+     "seed_kind": "decision",
+     "ch": "rk"
+    }
+   },
+   "per_channel_gains": {
+    "rk": [
+     "biocortex_reframe_biomimicry_rd_math_product_20260706"
+    ],
+    "cite": [],
+    "edge": []
+   },
+   "missed_baseline": [
+    "biocortex_reframe_biomimicry_rd_math_product_20260706"
+   ],
+   "ceiling": {
+    "biocortex_reframe_biomimicry_rd_math_product_20260706": "1hop"
+   },
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S2",
+   "query": "检查 AB 记忆项目当前状态，结合设计愿景，说说你关心的问题",
+   "gold_n": 4,
+   "seed_union_n": 27,
+   "hood_n": 196,
+   "baseline_recall20": 0.5,
+   "budgeted_recall20": 0.5,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {
+    "agent_bridge_northstar_bidirectional_bridge_20260529": {
+     "seed": "lesson_live_falsifier_proof_extract_consts_browser_eval_20260529",
+     "seed_kind": "lesson",
+     "ch": "cite"
+    },
+    "biocortex_reframe_biomimicry_rd_math_product_20260706": {
+     "seed": "ab_memory_evolution_direction_20260710",
+     "seed_kind": "decision",
+     "ch": "rk"
+    }
+   },
+   "per_channel_gains": {
+    "rk": [
+     "biocortex_reframe_biomimicry_rd_math_product_20260706"
+    ],
+    "cite": [
+     "agent_bridge_northstar_bidirectional_bridge_20260529"
+    ],
+    "edge": []
+   },
+   "missed_baseline": [
+    "agent_bridge_northstar_bidirectional_bridge_20260529",
+    "biocortex_reframe_biomimicry_rd_math_product_20260706"
+   ],
+   "ceiling": {
+    "agent_bridge_northstar_bidirectional_bridge_20260529": "1hop",
+    "biocortex_reframe_biomimicry_rd_math_product_20260706": "1hop"
+   },
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S3",
+   "query": "AB 记忆检索里哪些图 / GNN 路线被证伪了？",
+   "gold_n": 5,
+   "seed_union_n": 16,
+   "hood_n": 108,
+   "baseline_recall20": 0.2,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [
+    "decision_centrality_prior_offline_eval_no_go_20260629",
+    "finding_semantic_ranking_miscalibration_20260629",
+    "specformer_memory_shadow_36case_rejection_20260709",
+    "specformer_memory_two_stage_gate_rejection_20260709"
+   ],
+   "budget_lost": [],
+   "gained_via": {
+    "decision_centrality_prior_offline_eval_no_go_20260629": [
+     {
+      "mode": "fts",
+      "seed": "digest_ab_disproven_graph_gnn_retrieval_routes_20260712",
+      "seed_kind": "digest",
+      "ch": "rk"
+     },
+     {
+      "mode": "hybrid",
+      "seed": "ab_memory_evolution_direction_20260710",
+      "seed_kind": "decision",
+      "ch": "rk"
+     },
+     {
+      "mode": "semantic",
+      "seed": "ab_memory_evolution_direction_20260710",
+      "seed_kind": "decision",
+      "ch": "rk"
+     }
+    ],
+    "specformer_memory_two_stage_gate_rejection_20260709": [
+     {
+      "mode": "fts",
+      "seed": "digest_ab_disproven_graph_gnn_retrieval_routes_20260712",
+      "seed_kind": "digest",
+      "ch": "rk"
+     }
+    ],
+    "specformer_memory_shadow_36case_rejection_20260709": [
+     {
+      "mode": "fts",
+      "seed": "digest_ab_disproven_graph_gnn_retrieval_routes_20260712",
+      "seed_kind": "digest",
+      "ch": "rk"
+     }
+    ],
+    "finding_semantic_ranking_miscalibration_20260629": [
+     {
+      "mode": "fts",
+      "seed": "digest_ab_disproven_graph_gnn_retrieval_routes_20260712",
+      "seed_kind": "digest",
+      "ch": "rk"
+     }
+    ]
+   },
+   "unbounded_gained_via": {
+    "specformer_memory_shadow_36case_rejection_20260709": {
+     "seed": "digest_ab_disproven_graph_gnn_retrieval_routes_20260712",
+     "seed_kind": "digest",
+     "ch": "rk"
+    },
+    "specformer_memory_two_stage_gate_rejection_20260709": {
+     "seed": "digest_ab_disproven_graph_gnn_retrieval_routes_20260712",
+     "seed_kind": "digest",
+     "ch": "rk"
+    },
+    "finding_semantic_ranking_miscalibration_20260629": {
+     "seed": "digest_ab_disproven_graph_gnn_retrieval_routes_20260712",
+     "seed_kind": "digest",
+     "ch": "rk"
+    },
+    "decision_centrality_prior_offline_eval_no_go_20260629": {
+     "seed": "digest_ab_disproven_graph_gnn_retrieval_routes_20260712",
+     "seed_kind": "digest",
+     "ch": "rk"
+    }
+   },
+   "per_channel_gains": {
+    "rk": [
+     "decision_centrality_prior_offline_eval_no_go_20260629",
+     "finding_semantic_ranking_miscalibration_20260629",
+     "specformer_memory_shadow_36case_rejection_20260709",
+     "specformer_memory_two_stage_gate_rejection_20260709"
+    ],
+    "cite": [
+     "decision_centrality_prior_offline_eval_no_go_20260629",
+     "finding_semantic_ranking_miscalibration_20260629",
+     "specformer_memory_shadow_36case_rejection_20260709",
+     "specformer_memory_two_stage_gate_rejection_20260709"
+    ],
+    "edge": [
+     "finding_semantic_ranking_miscalibration_20260629",
+     "specformer_memory_two_stage_gate_rejection_20260709"
+    ]
+   },
+   "missed_baseline": [
+    "decision_centrality_prior_offline_eval_no_go_20260629",
+    "specformer_memory_two_stage_gate_rejection_20260709",
+    "specformer_memory_shadow_36case_rejection_20260709",
+    "finding_semantic_ranking_miscalibration_20260629"
+   ],
+   "ceiling": {
+    "decision_centrality_prior_offline_eval_no_go_20260629": "1hop",
+    "finding_semantic_ranking_miscalibration_20260629": "1hop",
+    "specformer_memory_shadow_36case_rejection_20260709": "1hop",
+    "specformer_memory_two_stage_gate_rejection_20260709": "1hop"
+   },
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S4",
+   "query": "owner 批准了哪些记忆架构演化方向 / 记忆治理授权？",
+   "gold_n": 4,
+   "seed_union_n": 21,
+   "hood_n": 282,
+   "baseline_recall20": 0.5,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [
+    "memory_zones_public_pool_design_20260706",
+    "proposal_semantic_rebalance_gated_20260630"
+   ],
+   "budget_lost": [],
+   "gained_via": {
+    "memory_zones_public_pool_design_20260706": [
+     {
+      "mode": "fts",
+      "seed": "digest_owner_memory_governance_authorizations_20260713",
+      "seed_kind": "digest",
+      "ch": "rk"
+     },
+     {
+      "mode": "semantic",
+      "seed": "digest_owner_memory_governance_authorizations_20260713",
+      "seed_kind": "digest",
+      "ch": "rk"
+     }
+    ],
+    "proposal_semantic_rebalance_gated_20260630": [
+     {
+      "mode": "fts",
+      "seed": "digest_owner_memory_governance_authorizations_20260713",
+      "seed_kind": "digest",
+      "ch": "rk"
+     },
+     {
+      "mode": "semantic",
+      "seed": "digest_owner_memory_governance_authorizations_20260713",
+      "seed_kind": "digest",
+      "ch": "rk"
+     }
+    ]
+   },
+   "unbounded_gained_via": {
+    "proposal_semantic_rebalance_gated_20260630": {
+     "seed": "digest_owner_memory_governance_authorizations_20260713",
+     "seed_kind": "digest",
+     "ch": "rk"
+    },
+    "memory_zones_public_pool_design_20260706": {
+     "seed": "digest_owner_memory_governance_authorizations_20260713",
+     "seed_kind": "digest",
+     "ch": "rk"
+    }
+   },
+   "per_channel_gains": {
+    "rk": [
+     "memory_zones_public_pool_design_20260706",
+     "proposal_semantic_rebalance_gated_20260630"
+    ],
+    "cite": [
+     "memory_zones_public_pool_design_20260706",
+     "proposal_semantic_rebalance_gated_20260630"
+    ],
+    "edge": [
+     "memory_zones_public_pool_design_20260706",
+     "proposal_semantic_rebalance_gated_20260630"
+    ]
+   },
+   "missed_baseline": [
+    "memory_zones_public_pool_design_20260706",
+    "proposal_semantic_rebalance_gated_20260630"
+   ],
+   "ceiling": {
+    "memory_zones_public_pool_design_20260706": "1hop",
+    "proposal_semantic_rebalance_gated_20260630": "1hop"
+   },
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S5",
+   "query": "关于 GNN / 参数化记忆 / LoRA，AB 决定了什么？",
+   "gold_n": 1,
+   "seed_union_n": 19,
+   "hood_n": 110,
+   "baseline_recall20": 1.0,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {},
+   "per_channel_gains": {
+    "rk": [],
+    "cite": [],
+    "edge": []
+   },
+   "missed_baseline": [],
+   "ceiling": {},
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S6",
+   "query": "AB 写入侧 (write-side) 的优先级和已识别缺口有哪些？",
+   "gold_n": 5,
+   "seed_union_n": 18,
+   "hood_n": 102,
+   "baseline_recall20": 1.0,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {},
+   "per_channel_gains": {
+    "rk": [],
+    "cite": [],
+    "edge": []
+   },
+   "missed_baseline": [],
+   "ceiling": {},
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S7",
+   "query": "reversible-autonomy / 可回滚即自主 权限现在的完整契约是什么（含修订）？",
+   "gold_n": 3,
+   "seed_union_n": 12,
+   "hood_n": 76,
+   "baseline_recall20": 1.0,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {},
+   "per_channel_gains": {
+    "rk": [],
+    "cite": [],
+    "edge": []
+   },
+   "missed_baseline": [],
+   "ceiling": {},
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S8",
+   "query": "owner 的安全-自由权衡原则 + 记忆价值决策权授予是什么？",
+   "gold_n": 3,
+   "seed_union_n": 20,
+   "hood_n": 243,
+   "baseline_recall20": 1.0,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {},
+   "per_channel_gains": {
+    "rk": [],
+    "cite": [],
+    "edge": []
+   },
+   "missed_baseline": [],
+   "ceiling": {},
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S9",
+   "query": "AB 内部回归基尺 (eval benchmark) 是怎么建的、修过哪些 bug？",
+   "gold_n": 4,
+   "seed_union_n": 25,
+   "hood_n": 198,
+   "baseline_recall20": 1.0,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {},
+   "per_channel_gains": {
+    "rk": [],
+    "cite": [],
+    "edge": []
+   },
+   "missed_baseline": [],
+   "ceiling": {},
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S10",
+   "query": "记忆生命周期里 supersede 怎么工作（声明边 vs 自动去重）？",
+   "gold_n": 3,
+   "seed_union_n": 20,
+   "hood_n": 156,
+   "baseline_recall20": 1.0,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {},
+   "per_channel_gains": {
+    "rk": [],
+    "cite": [],
+    "edge": []
+   },
+   "missed_baseline": [],
+   "ceiling": {},
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S11",
+   "query": "PPR / query-seeded 遍历候选生成 vs 已否决的中心性先验，门槛是什么？",
+   "gold_n": 2,
+   "seed_union_n": 22,
+   "hood_n": 113,
+   "baseline_recall20": 0.5,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [
+    "decision_centrality_prior_offline_eval_no_go_20260629"
+   ],
+   "budget_lost": [],
+   "gained_via": {
+    "decision_centrality_prior_offline_eval_no_go_20260629": [
+     {
+      "mode": "fts",
+      "seed": "ab_memory_evolution_direction_20260710",
+      "seed_kind": "decision",
+      "ch": "rk"
+     },
+     {
+      "mode": "hybrid",
+      "seed": "ab_memory_evolution_direction_20260710",
+      "seed_kind": "decision",
+      "ch": "rk"
+     }
+    ]
+   },
+   "unbounded_gained_via": {
+    "decision_centrality_prior_offline_eval_no_go_20260629": {
+     "seed": "ab_memory_evolution_direction_20260710",
+     "seed_kind": "decision",
+     "ch": "rk"
+    }
+   },
+   "per_channel_gains": {
+    "rk": [
+     "decision_centrality_prior_offline_eval_no_go_20260629"
+    ],
+    "cite": [
+     "decision_centrality_prior_offline_eval_no_go_20260629"
+    ],
+    "edge": []
+   },
+   "missed_baseline": [
+    "decision_centrality_prior_offline_eval_no_go_20260629"
+   ],
+   "ceiling": {
+    "decision_centrality_prior_offline_eval_no_go_20260629": "1hop"
+   },
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S12",
+   "query": "记忆四区 / 公共经验池设计决定了什么？",
+   "gold_n": 3,
+   "seed_union_n": 16,
+   "hood_n": 209,
+   "baseline_recall20": 1.0,
+   "budgeted_recall20": 1.0,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {},
+   "per_channel_gains": {
+    "rk": [],
+    "cite": [],
+    "edge": []
+   },
+   "missed_baseline": [],
+   "ceiling": {},
+   "unreachable_2hop": []
+  },
+  {
+   "id": "S13",
+   "query": "学习环 (retrieval outcome apply) 现状：为什么冷？下一步？",
+   "gold_n": 3,
+   "seed_union_n": 19,
+   "hood_n": 138,
+   "baseline_recall20": 0.667,
+   "budgeted_recall20": 0.667,
+   "unbounded_1hop_recall": 1.0,
+   "budget_gained": [],
+   "budget_lost": [],
+   "gained_via": {},
+   "unbounded_gained_via": {
+    "ab_memory_evolution_direction_20260710": {
+     "seed": "outcome_collection_activation_proposal_20260710",
+     "seed_kind": "decision",
+     "ch": "rk"
+    }
+   },
+   "per_channel_gains": {
+    "rk": [
+     "ab_memory_evolution_direction_20260710"
+    ],
+    "cite": [],
+    "edge": [
+     "ab_memory_evolution_direction_20260710"
+    ]
+   },
+   "missed_baseline": [
+    "ab_memory_evolution_direction_20260710"
+   ],
+   "ceiling": {
+    "ab_memory_evolution_direction_20260710": "1hop"
+   },
+   "unreachable_2hop": []
+  }
+ ]
+}
