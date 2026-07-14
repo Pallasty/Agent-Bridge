@@ -993,12 +993,47 @@ SHA 分别为
 `4421f5973253968167b1c8bd77e024b18450325ea9581ed39dbe975ec8163ec9`，canonical
 大小为 773,489 bytes。当前两份账本合计覆盖 5,730 行。
 
-下一最小路线保持 ladder 与全部 caps 固定：M 保持 `K=622,592/C34`，只把 horizon
-88 -> 90；D 保持 `K=655,360/C37`，只把 horizon 74 -> 76。两者都必须从 q1 fresh
-replay，当前 canonical 仅作 post-replay evidence，q89/q90 与 q75/q76 outcomes 均不
-precommit。`K=607,993` 与 `K=638,976` 仍只适用于各自原始 fixed predecessor
-state/prefix，不能外推。认证深度保持 M3/D2，不产生 boundary、witness、READY 或
-certificate authority。
+这两条 same-cap horizon 路线现已完成。冻结的 replay 前审计均为 P0=0、P1=0、
+P2=0，随后两条 fresh replay 串行执行而非并发执行。M 保持 `K=622,592/C34`，只把
+horizon 88 -> 90；exact q88 private parent 从 q1 replay，q88 canonical 仅在 replay
+完成后作为 q1--88 exact evidence 载入。q89 pre-count 718,896，选择 index 33/
+`K=622,592`，丢弃 96,304 项、drop 174,253,874,408 ticks，commit 到
+`1700709292382471/2^64`；retained digest 为
+`b7d1e16a3f344eb1353593fd66c379d36272c49d1ebfe5c5c2b3e6958ed98c19`。
+q90 pre-count 741,376，minimum effective K=635,284，比 ceiling 多 12,692，因而
+terminal branch 为 `Q89_SUCCESS_Q90_FAILURE`，不是 resource abort。账本含 90 个
+records、89 个 history entries 与 3,060 行；records/history SHA 分别为
+`8978329b712168dce39991af25f6903deaf69c45f236521bb0e08e74f3d8741f` 与
+`c6755c7655d6b2ff37da7b1a8ac8c16cfc4295ef9ad0b687ddaa3dcd3c785d53`。89,527-byte
+screen 与 842,060-byte canonical SHA 分别为
+`f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a` 与
+`d30359d9dd38c8e3a1461a0c7048645e35f478fa66920711871b3dc1c44bbd49`；执行时间
+13:05，maximum RSS 689,500 KiB。
+
+D 保持 `K=655,360/C37` 与全部 caps 不变，只把 horizon 74 -> 76。exact q74 private
+parent 保留 q72 raw parent，从 q1 replay 后才载入 q74 canonical。普通 source pin 上限
+为 262,144 bytes；唯一较大的 `double_occupancy_boundary_002.b85` encoded boundary
+单独使用 1,048,576-byte cap，其大小为 841,495 bytes、SHA 为
+`f92d5eadc01e1d9ebef86328b9eed92d867a2dd79b8bb2ba0baa821fe3b037ab`。q75
+pre-count 733,965，选择 index 36/`K=655,360`，丢弃 78,605 项、drop
+127,874,290,338 ticks，commit 到 `2289318681442732/2^64`；retained digest 为
+`1a0c6aae47e81c4473b43ca5c27f8580a8754c72f9332e761bbddc1b31722def`。
+q76 pre-count 789,691，minimum effective K=665,836，比 ceiling 多 10,476，因而
+terminal branch 为 `Q75_SUCCESS_Q76_FAILURE`，不是 resource abort。账本含 76 个
+records、75 个 history entries 与 2,812 行；records/history SHA 分别为
+`5ba16ae933ae9a17633a1c3c4d7edba28b2c115bef475480272fa2cf9df39274` 与
+`b72e24b2dbe1d8eff88ff9ad1e1bc47cebeb59807168603cd86ff91c218c604a`。58,178-byte
+screen 与 798,861-byte canonical SHA 分别为
+`621f9c97b72c3582314d360b9b29b46a9cb40bf60298776adfc52849300bd14e` 与
+`856ede1f5774795c25ca2c36eafa8ac0696402194c6bf4e17ea5e8874efc22e0`；执行时间
+11:29，maximum RSS 715,972 KiB。
+
+两份 canonical 都是完整 candidate-row failure：`resource_policy_abort=null`，没有
+child-boundary commit 或 positive artifact。failure-local threshold 把下一离散 ladder
+点限定为 M 的 `K=638,976/C35` 与 D 的 `K=671,744/C38`；两者均尚未执行，也不能
+预承诺成功。旧 `K=607,993` 与 `K=638,976` 证据继续严格限于各自原始 fixed
+predecessor state/prefix。认证深度保持 M3/D2，不产生 boundary、witness、READY 或
+certificate authority；两份当前账本合计覆盖 5,872 行。
 
 这些 screens 不发布 authority-bearing policy artifact；任何下一 ladder、horizon 与 caps
 仍必须在 replay 前独立 precommit。它们不发布 child boundary/transition/sidecar，不组合

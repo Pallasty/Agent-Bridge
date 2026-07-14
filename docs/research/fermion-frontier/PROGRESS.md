@@ -766,10 +766,50 @@ The 117,108-byte screen and 773,489-byte canonical SHA-256 values are
 and `4421f5973253968167b1c8bd77e024b18450325ea9581ed39dbe975ec8163ec9`.
 The current ledgers cover 2,992 + 2,738 = 5,730 rows.
 
-The next minimum routes freeze ladders and caps.  M keeps K=622,592/C34 and
-extends only horizon 88 -> 90; D keeps K=655,360/C37 and extends only horizon
-74 -> 76.  Both require fresh q1 replay, with the current canonicals admitted
-only afterward as post-replay evidence and all new checkpoint outcomes left
-uncommitted.  K=607,993 and K=638,976 remain local evidence for their original
-fixed predecessor state/prefix and cannot be extrapolated.  Certified depths
-remain M3/D2, with no boundary, witness, READY or certificate authority.
+Those same-cap horizon routes are now complete.  Their frozen pre-replay audits
+both closed at P0=0, P1=0 and P2=0, after which the fresh replays were run
+serially rather than concurrently.  M keeps K=622,592/C34 and changes only
+horizon 88 -> 90.  Its q88 private parent starts from q1; the old q88 canonical is
+loaded only after replay as exact q1--88 evidence.  q89 pre-count 718,896 selects
+index 33/K=622,592, drops 96,304 terms and 174,253,874,408 ticks, and commits
+E=1,700,709,292,382,471 with retained digest
+`b7d1e16a3f344eb1353593fd66c379d36272c49d1ebfe5c5c2b3e6958ed98c19`.
+q90 pre-count 741,376 has no feasible row: minimum effective K is 635,284,
+12,692 above the ceiling.  The branch is `Q89_SUCCESS_Q90_FAILURE`, with 90
+records, 89 history entries, 3,060 rows and no resource abort.  Records/history
+SHA-256 values are
+`8978329b712168dce39991af25f6903deaf69c45f236521bb0e08e74f3d8741f`
+and `c6755c7655d6b2ff37da7b1a8ac8c16cfc4295ef9ad0b687ddaa3dcd3c785d53`.
+The 89,527-byte screen and 842,060-byte canonical SHA-256 values are
+`f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a`
+and `d30359d9dd38c8e3a1461a0c7048645e35f478fa66920711871b3dc1c44bbd49`.
+The replay took 13:05 with maximum RSS 689,500 KiB.
+
+D keeps K=655,360/C37 and changes only horizon 74 -> 76.  The q74 private parent
+retains q72 as its raw parent, replays from q1, and exposes the q74 canonical only
+afterward as exact q1--74 evidence.  The screen keeps ordinary source pins under
+262,144 bytes and gives the unique 841,495-byte encoded `.b85` boundary a
+separate 1,048,576-byte exact-pin cap.  q75 pre-count 733,965 selects index
+36/K=655,360, drops 78,605 terms and 127,874,290,338 ticks, and commits
+E=2,289,318,681,442,732 with retained digest
+`1a0c6aae47e81c4473b43ca5c27f8580a8754c72f9332e761bbddc1b31722def`.
+q76 pre-count 789,691 has no feasible row: minimum effective K is 665,836,
+10,476 above the ceiling.  The branch is `Q75_SUCCESS_Q76_FAILURE`, with 76
+records, 75 history entries, 2,812 rows and no resource abort.  Records/history
+SHA-256 values are
+`5ba16ae933ae9a17633a1c3c4d7edba28b2c115bef475480272fa2cf9df39274`
+and `b72e24b2dbe1d8eff88ff9ad1e1bc47cebeb59807168603cd86ff91c218c604a`.
+The 58,178-byte screen and 798,861-byte canonical SHA-256 values are
+`621f9c97b72c3582314d360b9b29b46a9cb40bf60298776adfc52849300bd14e`
+and `856ede1f5774795c25ca2c36eafa8ac0696402194c6bf4e17ea5e8874efc22e0`.
+The replay took 11:29 with maximum RSS 715,972 KiB.
+
+These are complete no-feasible-candidate diagnostics, not resource aborts or
+positive results: both canonicals keep `resource_policy_abort=null`, do not commit
+a child boundary and add no certificate authority.  The local failure thresholds
+identify `K=638,976/C35` as M's next discrete ladder point and `K=671,744/C38`
+as D's; neither candidate has been executed and neither may be precommitted as a
+success.  K=607,993 and the older K=638,976 evidence remain scoped to their
+original predecessor state/prefix.  Certified depths remain M3/D2, with no new
+boundary, witness, READY or certificate authority.  The two current ledgers
+cover 3,060 + 2,812 = 5,872 rows.

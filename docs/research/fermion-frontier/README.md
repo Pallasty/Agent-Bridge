@@ -689,13 +689,48 @@ screen/canonical SHA-256 values are
 `4421f5973253968167b1c8bd77e024b18450325ea9581ed39dbe975ec8163ec9`,
 and the canonical is 773,489 bytes.  The two current ledgers cover 5,730 rows.
 
-The next minimum routes keep each ladder and all caps fixed.  M keeps
-`K=622,592/C34` and changes only horizon 88 -> 90; D keeps `K=655,360/C37` and
-changes only horizon 74 -> 76.  Each must replay freshly from q1, load the current
-canonical only as post-replay evidence, and leave q89/q90 and q75/q76 outcomes
-uncommitted.  `K=607,993` and `K=638,976` remain evidence scoped to their original
-fixed predecessor state/prefix and cannot be extrapolated.  Certified depths stay
-M3/D2; these diagnostics create no boundary, witness, READY or certificate authority.
+Those same-cap horizon routes are now complete.  Both frozen pre-replay audits
+closed at P0=0, P1=0 and P2=0, and the two fresh replays then ran serially.  M
+keeps `K=622,592/C34` and changes only horizon 88 -> 90.  Its exact q88 private
+parent replays from q1 and the q88 canonical is loaded only afterward.  q89
+reaches 718,896 terms, selects index 33/`K=622,592`, drops 96,304 terms and
+174,253,874,408 ticks, and commits E=1,700,709,292,382,471; retained digest is
+`b7d1e16a3f344eb1353593fd66c379d36272c49d1ebfe5c5c2b3e6958ed98c19`.
+q90 reaches 741,376 terms but requires minimum effective K=635,284, 12,692 above
+the ceiling.  The exact branch is `Q89_SUCCESS_Q90_FAILURE`, not a resource
+abort; the ledger has 90 records, 89 history entries and 3,060 rows.  Its
+89,527-byte screen and 842,060-byte canonical SHA-256 values are
+`f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a` /
+`d30359d9dd38c8e3a1461a0c7048645e35f478fa66920711871b3dc1c44bbd49`;
+records/history hashes are
+`8978329b712168dce39991af25f6903deaf69c45f236521bb0e08e74f3d8741f` /
+`c6755c7655d6b2ff37da7b1a8ac8c16cfc4295ef9ad0b687ddaa3dcd3c785d53`.
+The replay took 13:05 with maximum RSS 689,500 KiB.
+
+D keeps `K=655,360/C37` and changes only horizon 74 -> 76.  Its exact q74
+private parent retains q72 as the raw parent; the q74 canonical is post-replay
+evidence only.  Ordinary source inputs use the 262,144-byte pin cap, while the
+unique 841,495-byte `double_occupancy_boundary_002.b85` input is exact-pinned
+under its own 1,048,576-byte cap.  q75 reaches 733,965 terms, selects index
+36/`K=655,360`, drops 78,605 terms and 127,874,290,338 ticks, and commits
+E=2,289,318,681,442,732; retained digest is
+`1a0c6aae47e81c4473b43ca5c27f8580a8754c72f9332e761bbddc1b31722def`.
+q76 reaches 789,691 terms but requires minimum effective K=665,836, 10,476 above
+the ceiling.  The exact branch is `Q75_SUCCESS_Q76_FAILURE`, not a resource
+abort; the ledger has 76 records, 75 history entries and 2,812 rows.  Its
+58,178-byte screen and 798,861-byte canonical SHA-256 values are
+`621f9c97b72c3582314d360b9b29b46a9cb40bf60298776adfc52849300bd14e` /
+`856ede1f5774795c25ca2c36eafa8ac0696402194c6bf4e17ea5e8874efc22e0`;
+records/history hashes are
+`5ba16ae933ae9a17633a1c3c4d7edba28b2c115bef475480272fa2cf9df39274` /
+`b72e24b2dbe1d8eff88ff9ad1e1bc47cebeb59807168603cd86ff91c218c604a`.
+The replay took 11:29 with maximum RSS 715,972 KiB.
+
+Both canonicals have `resource_policy_abort=null`, no child-boundary commit and
+no positive artifact.  Their failure-local thresholds nominate the next discrete
+ladder points `K=638,976/C35` for M and `K=671,744/C38` for D, but neither has
+been executed or precommitted as successful.  Certified depths remain M3/D2;
+these diagnostics add no boundary, witness, READY or certificate authority.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

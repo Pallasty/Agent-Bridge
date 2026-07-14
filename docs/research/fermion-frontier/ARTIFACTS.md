@@ -856,6 +856,71 @@ so they are versioned normally and are not added to the preservation-only
   post-replay-only predecessor custody, raw67/final96 schemas, 11 components/10
   custody entries, and the exact 74-record/2,738-row canonical; default tests do
   not replay.
+- `hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q90_screen.py`
+  and its `*_transcript.json`: same-cap M34 horizon extension through q90.  The
+  89,527-byte screen source SHA-256 is
+  `f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a`.
+  It exact-byte executes the q88 M34 private parent from q1 and admits the q88
+  canonical only afterward as q1--88 prefix evidence.  q89 pre-count 718,896
+  selects index 33/`K=622,592`, drops 96,304 terms and 174,253,874,408 ticks,
+  commits E=1,700,709,292,382,471 and retained digest
+  `b7d1e16a3f344eb1353593fd66c379d36272c49d1ebfe5c5c2b3e6958ed98c19`;
+  its ranking boundary is the exact tie 13,718,154 = 13,718,154.  q90 pre-count
+  741,376 has no feasible C34 row: minimum effective K is 635,284, exceeding
+  622,592 by 12,692.  Its maximum row drops 369,541,613,084 ticks, exceeding
+  prefix slack by 174,337,896,824 ticks.  The terminal branch is
+  `Q89_SUCCESS_Q90_FAILURE`, not a resource abort.  The ledger has 90 records,
+  89 history entries and 3,060 rows; records/history SHA-256 values are
+  `8978329b712168dce39991af25f6903deaf69c45f236521bb0e08e74f3d8741f`
+  and `c6755c7655d6b2ff37da7b1a8ac8c16cfc4295ef9ad0b687ddaa3dcd3c785d53`.
+  The 842,060-byte canonical SHA-256 is
+  `d30359d9dd38c8e3a1461a0c7048645e35f478fa66920711871b3dc1c44bbd49`.
+- `test_hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q90_screen.py`:
+  53,085-byte static, synthetic, adversarial and opt-in exact-replay suite with
+  source SHA-256
+  `9cd2dfadcd89bc5d35eed690aaa4cafc35f5e0f07eeb0325023981d931a1380e`.
+  Its default gate closes all five branches, six structured-abort cases, unknown
+  exception identity, exact q1--88 handoff, parent restoration, post-only order,
+  11 components/10 custody entries and bounded atomic output without replay.
+- `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
+  and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
+  58,178-byte screen source SHA-256 is
+  `621f9c97b72c3582314d360b9b29b46a9cb40bf60298776adfc52849300bd14e`.
+  It exact-byte executes q74, which retains q72 as its private raw parent, and
+  loads the q74 canonical only after the fresh q1 replay.  Ordinary pinned source
+  inputs are bounded by 262,144 bytes.  The sole larger, non-source execution
+  component,
+  `hubbard_l8_interval_checkpoints/double_occupancy_boundary_002.b85`, is an
+  independently bounded 841,495-byte encoded boundary under its own 1,048,576-byte
+  cap and exact SHA-256
+  `f92d5eadc01e1d9ebef86328b9eed92d867a2dd79b8bb2ba0baa821fe3b037ab`.
+  q75 pre-count 733,965 selects index 36/`K=655,360`, drops 78,605 terms and
+  127,874,290,338 ticks, commits E=2,289,318,681,442,732 and retained digest
+  `1a0c6aae47e81c4473b43ca5c27f8580a8754c72f9332e761bbddc1b31722def`;
+  its ranking boundary is the exact tie 5,447,500 = 5,447,500.  q76 pre-count
+  789,691 has no feasible C37 row: minimum effective K is 665,836, exceeding
+  655,360 by 10,476.  Its maximum row drops 160,308,954,820 ticks, exceeding
+  prefix slack by 58,984,624,003 ticks.  The terminal branch is
+  `Q75_SUCCESS_Q76_FAILURE`, not a resource abort.  The ledger has 76 records,
+  75 history entries and 2,812 rows; records/history SHA-256 values are
+  `5ba16ae933ae9a17633a1c3c4d7edba28b2c115bef475480272fa2cf9df39274`
+  and `b72e24b2dbe1d8eff88ff9ad1e1bc47cebeb59807168603cd86ff91c218c604a`.
+  The 798,861-byte canonical SHA-256 is
+  `856ede1f5774795c25ca2c36eafa8ac0696402194c6bf4e17ea5e8874efc22e0`.
+- `test_hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`:
+  57,919-byte static, synthetic, adversarial and opt-in exact-replay suite with
+  source SHA-256
+  `5a750e9eddff605cb880fa494307806c40c8fe0f224ce7960e846619072792fd`.
+  Its default gate closes the nested q74/q72 restoration, post-only order, five
+  branches, six structured-abort cases, exact q1--74 handoff, 11 components/10
+  custody entries, unique boundary pin and bounded atomic output without replay.
+- The M q90 and D q76 frozen pre-replay audits both closed at P0=0, P1=0 and
+  P2=0.  Their fresh replays were then run serially, never concurrently: M took
+  13:05 with maximum RSS 689,500 KiB, followed by D at 11:29 with maximum RSS
+  715,972 KiB.  Both canonicals record an exact no-feasible-candidate failure row,
+  `resource_policy_abort=null`, no child-boundary commit and no positive artifact.
+  The failure-local next discrete ladder points are `K=638,976/C35` for M and
+  `K=671,744/C38` for D; neither has been executed or precommitted as successful.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,
