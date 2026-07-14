@@ -2,7 +2,7 @@
   "schema_version": 1,
   "contract_id": "MAJORANA-P0-PRECOMMIT-S0",
   "contract_role": "result_unpinned_formal_replay_input_and_isolation_contract",
-  "required_parent_commit": "dddf8ec4f14494165e23fd3a7a1b64fb6967cda6",
+  "required_parent_commit": "fc9cf278876d2f053cda707f0aa529cdc8001c50",
   "self_relative_path": "majorana_certificate_p0_precommit_contract.json",
   "source_files": [
     {
@@ -50,8 +50,8 @@
     {
       "relative_path": "test_majorana_certificate_p0.py",
       "mode": "100644",
-      "size_bytes": 11481,
-      "sha256": "b5272ef19629b274a9f463e46e3cc3adc6c10a6c1665b048305e953f88526532"
+      "size_bytes": 12561,
+      "sha256": "2af92f7a6860d422da95f4dd3513cb70fa87092330b5b9e441f863169f197a7c"
     }
   ],
   "result_artifacts_required_absent": [

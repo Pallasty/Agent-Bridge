@@ -8,6 +8,7 @@ from fractions import Fraction
 import importlib.util
 import math
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -244,16 +245,43 @@ class MajoranaP0PrecommitTests(unittest.TestCase):
     def test_23_precommit_contract_and_result_absence_validate(self) -> None:
         contract = CHECKER.load_json(BASE / CHECKER.PRECOMMIT_CONTRACT_NAME)
         CHECKER.validate_precommit_contract(contract)
+        present = [
+            artifact for artifact in CHECKER.RESULT_ARTIFACTS
+            if (BASE / artifact).exists()
+        ]
+        if not present:
+            return
+        self.assertEqual(set(present), set(CHECKER.RESULT_ARTIFACTS))
+        result = CHECKER.load_json(BASE / CHECKER.RESULT_CONTRACT_NAME)
+        repo = Path(
+            subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"], cwd=BASE,
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+        )
         for artifact in CHECKER.RESULT_ARTIFACTS:
-            self.assertFalse((BASE / artifact).exists())
+            check = subprocess.run(
+                [
+                    "git", "cat-file", "-e",
+                    f"{result['precommit_commit_sha']}:"
+                    f"docs/research/fermion-frontier/{artifact}",
+                ],
+                cwd=repo,
+                capture_output=True,
+            )
+            self.assertNotEqual(check.returncode, 0)
 
     def test_24_full_precommit_verifier_succeeds_without_a_result(self) -> None:
-        summary = CHECKER.verify_precommit()
-        self.assertEqual(
-            summary["status"],
-            "VERIFIED_MAJORANA_P0_RESULT_UNPINNED_PRECOMMIT_INPUTS",
-        )
-        self.assertEqual(summary["scope_ceiling"], CHECKER.MAXIMUM_STATUS)
+        if (BASE / CHECKER.RESULT_CONTRACT_NAME).exists():
+            summary = CHECKER.verify_final()
+            self.assertEqual(summary["status"], CHECKER.MAXIMUM_STATUS)
+        else:
+            summary = CHECKER.verify_precommit()
+            self.assertEqual(
+                summary["status"],
+                "VERIFIED_MAJORANA_P0_RESULT_UNPINNED_PRECOMMIT_INPUTS",
+            )
+            self.assertEqual(summary["scope_ceiling"], CHECKER.MAXIMUM_STATUS)
 
 
 if __name__ == "__main__":
