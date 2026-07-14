@@ -882,6 +882,30 @@ so they are versioned normally and are not added to the preservation-only
   Its default gate closes all five branches, six structured-abort cases, unknown
   exception identity, exact q1--88 handoff, parent restoration, post-only order,
   11 components/10 custody entries and bounded atomic output without replay.
+- `hubbard_l8_magnetization_q90_formal_s0_policy.json`,
+  `hubbard_l8_magnetization_q90_formal_s0_precommit_contract.json`,
+  `hubbard_l8_magnetization_q90_formal_s0_checker.py` and
+  `test_hubbard_l8_magnetization_q90_formal_s0.py`: result-unpinned
+  retrospective-replication precommit at
+  `d3e58a62c1ca8c7c33512acfc3db141c329490fd`.  Policy/checker/precommit-contract
+  SHA-256 values are
+  `8084ab612c6d3cefb8f779d4dfe24450cb5c7d612d14b485feabb7044ae7cab5`,
+  `7edfb6f4b811db6f97b8bd8dc9245793ee24c0613d908ded3dc7bb340c6f7bfe`
+  and `557447ed7de793571a1f192023fa1a3e8c2c8e95e231ebd346d4127c09cf023c`.
+  The checker stages an exact 13-file allowlist and excludes prior q90
+  result/test bytes.
+- `hubbard_l8_magnetization_q90_formal_s0_contract.json`,
+  `hubbard_l8_magnetization_q90_formal_s0_certificate.json` and
+  `test_hubbard_l8_magnetization_q90_formal_s0_result.py`: post-precommit
+  result binding.  Fresh result SHA-256
+  `d30359d9dd38c8e3a1461a0c7048645e35f478fa66920711871b3dc1c44bbd49`
+  was compared with the old diagnostic canonical only after replay and is
+  byte-identical; canonical witness SHA-256 is
+  `26d4996bc8977f8e9cfa0a62817166cd5b122a1355bdb455e77b9cd87382deda`.
+  It verifies `Q89_SUCCESS_Q90_FAILURE`, 90 records, 89 history entries,
+  3,060 rows, all 34 q90 candidates infeasible and no resource abort.  The
+  external receipt is 13:35.69 / 671,592 KiB; authority is fixed-policy
+  M3-only, with no M4, child artifact or READY.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is

@@ -1,6 +1,6 @@
 # L=8 Fermi--Hubbard 有界参考策略
 
-更新日期：2026-07-12。
+更新日期：2026-07-14。
 
 ## 结论
 
@@ -1035,12 +1035,30 @@ child-boundary commit 或 positive artifact。failure-local threshold 把下一�
 predecessor state/prefix。认证深度保持 M3/D2，不产生 boundary、witness、READY 或
 certificate authority；两份当前账本合计覆盖 5,872 行。
 
-这些 screens 不发布 authority-bearing policy artifact；任何下一 ladder、horizon 与 caps
-仍必须在 replay 前独立 precommit。它们不发布 child boundary/transition/sidecar，不组合
-product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY
-authority。任何后续正式采用四门 cadence 的路线仍需新的独立 policy、checker、
-same-byte parent custody 和完整认证回放；当前不产生 boundary、witness、READY 或
-certificate authority。
+上述 diagnostic screens 自身不发布 authority-bearing policy artifact；任何下一
+ladder、horizon 与 caps 仍必须在 replay 前独立 precommit。它们不发布 child
+boundary/transition/sidecar，不组合 product-formula-to-exact-Hubbard error，也不增加
+M/D certified depth 3/2 或 READY authority。
+
+`M-Q90-FORMAL-S0` 已把其中仅 M q90 的 fixed-policy ceiling 结论收为回溯性正式复现。
+result-unpinned policy/checker 先在 commit
+`d3e58a62c1ca8c7c33512acfc3db141c329490fd` 冻结，SHA-256 分别为
+`8084ab612c6d3cefb8f779d4dfe24450cb5c7d612d14b485feabb7044ae7cab5` 与
+`7edfb6f4b811db6f97b8bd8dc9245793ee24c0613d908ded3dc7bb340c6f7bfe`。
+随后 q1--q90 fresh replay 只 stage 13-file allowlist，旧 q90 transcript/test 均未读取或
+进入执行闭包；仅在 replay 完成后才确认结果与旧 diagnostic canonical byte-for-byte
+相同，SHA 为
+`d30359d9dd38c8e3a1461a0c7048645e35f478fa66920711871b3dc1c44bbd49`。
+正式分支为 `Q89_SUCCESS_Q90_FAILURE`，含 90/89 个 records/history、3,060 行、q90
+的 34 个候选全不可行且无 resource abort；witness SHA 为
+`26d4996bc8977f8e9cfa0a62817166cd5b122a1355bdb455e77b9cd87382deda`。
+外部非规范资源回执为 13:35.69、maximum RSS 671,592 KiB。该 authority 只排除固定
+M3 输入、four-gate q1--q90、`K<=622,592/C34` 策略；它不是 prospective discovery
+或一般 no-go，认证深度仍为 M3，不产生 M4、child boundary/transition/sidecar、
+exact-Hubbard reference 或 READY。
+
+D q76、任何更大 K、不同 cadence/horizon/caps 或不同算法仍需新的独立
+precommit/checker/same-byte replay。
 
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全

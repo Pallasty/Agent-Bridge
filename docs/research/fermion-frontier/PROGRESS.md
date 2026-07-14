@@ -1,6 +1,6 @@
 # Research progress ledger
 
-Status date: 2026-07-12
+Status date: 2026-07-14
 
 ## State labels
 
@@ -813,3 +813,24 @@ success.  K=607,993 and the older K=638,976 evidence remain scoped to their
 original predecessor state/prefix.  Certified depths remain M3/D2, with no new
 boundary, witness, READY or certificate authority.  The two current ledgers
 cover 3,060 + 2,812 = 5,872 rows.
+
+`M-Q90-FORMAL-S0` subsequently converted only the M q90 ceiling result into a
+retrospective fixed-policy replication.  Result-unpinned policy, checker and
+precommit contract were committed first at
+`d3e58a62c1ca8c7c33512acfc3db141c329490fd` (policy/checker SHA-256
+`8084ab612c6d3cefb8f779d4dfe24450cb5c7d612d14b485feabb7044ae7cab5` /
+`7edfb6f4b811db6f97b8bd8dc9245793ee24c0613d908ded3dc7bb340c6f7bfe`).
+A later q1--q90 replay used a 13-file allowlist with the prior q90 transcript
+and exact-result test absent.  Post-replay-only comparison established byte
+equality with canonical SHA-256
+`d30359d9dd38c8e3a1461a0c7048645e35f478fa66920711871b3dc1c44bbd49`;
+branch/counts are `Q89_SUCCESS_Q90_FAILURE`, 90/89 records/history, 3,060
+rows, 34 infeasible q90 candidates and `resource_policy_abort=null`.  Witness
+SHA-256 is
+`26d4996bc8977f8e9cfa0a62817166cd5b122a1355bdb455e77b9cd87382deda`;
+the external timing receipt is 13:35.69 / 671,592 KiB maximum RSS.
+
+This is narrow fixed-policy negative authority, not prospective discovery or
+a general no-go.  It creates no M4 boundary, transition or sidecar; certified
+magnetization depth remains M3 and exact-Hubbard error, physical reference
+qualification and READY remain unassessed.

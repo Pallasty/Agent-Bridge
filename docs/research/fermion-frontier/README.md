@@ -1,6 +1,6 @@
 # Fermion frontier research takeover
 
-Status date: 2026-07-12
+Status date: 2026-07-14
 
 Scope: physical fermions, not the historical Fermion Memory service.
 
@@ -731,6 +731,26 @@ no positive artifact.  Their failure-local thresholds nominate the next discrete
 ladder points `K=638,976/C35` for M and `K=671,744/C38` for D, but neither has
 been executed or precommitted as successful.  Certified depths remain M3/D2;
 these diagnostics add no boundary, witness, READY or certificate authority.
+
+`M-Q90-FORMAL-S0` now closes only the M q90 fixed-policy ceiling result as a
+retrospective formal replication.  Precommit
+`d3e58a62c1ca8c7c33512acfc3db141c329490fd` froze the result-unpinned
+policy/checker with SHA-256 values
+`8084ab612c6d3cefb8f779d4dfe24450cb5c7d612d14b485feabb7044ae7cab5` /
+`7edfb6f4b811db6f97b8bd8dc9245793ee24c0613d908ded3dc7bb340c6f7bfe`.
+The later fresh q1--q90 replay staged only its 13-file allowlist and neither
+read nor staged the prior q90 transcript or exact-result test.  Only after
+replay was its result found byte-for-byte equal to the diagnostic canonical,
+SHA-256
+`d30359d9dd38c8e3a1461a0c7048645e35f478fa66920711871b3dc1c44bbd49`.
+It verifies branch `Q89_SUCCESS_Q90_FAILURE`, 90 records, 89 history entries,
+3,060 candidate rows, all 34 q90 candidates infeasible and no resource abort;
+witness SHA-256 is
+`26d4996bc8977f8e9cfa0a62817166cd5b122a1355bdb455e77b9cd87382deda`.
+The non-authoritative host receipt was 13:35.69 with maximum RSS 671,592 KiB.
+Authority is limited to this fixed M3-input, four-gate, q1--q90,
+`K<=622,592/C34` policy: depth remains M3, with no M4, child
+boundary/transition/sidecar, exact-Hubbard reference or READY authority.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
