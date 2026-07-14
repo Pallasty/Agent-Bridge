@@ -1,0 +1,417 @@
+{
+  "$defs": {
+    "authentication": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "const": "HMAC-SHA-256"
+        },
+        "canonicalization": {
+          "const": "serde_json_compact_struct_field_order_utf8_v1"
+        },
+        "domain": {
+          "const": "agent-bridge/track-b/candidate-evidence-envelope/v0"
+        },
+        "hmac_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "key_id": {
+          "$ref": "#/$defs/label"
+        },
+        "message_profile": {
+          "const": "u64be_len_domain_domain_u64be_len_key_id_key_id_exact_payload_json"
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "algorithm",
+        "canonicalization",
+        "domain",
+        "hmac_sha256",
+        "key_id",
+        "message_profile",
+        "payload_sha256"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "authority_custody_resolved": {
+          "const": false
+        },
+        "biocortex_runtime_influence": {
+          "const": false
+        },
+        "capture_provenance_attested": {
+          "const": false
+        },
+        "contains_raw_evidence_ids": {
+          "const": false
+        },
+        "contains_raw_predicate_ids": {
+          "const": false
+        },
+        "contains_raw_provenance": {
+          "const": false
+        },
+        "contains_raw_referent_ids": {
+          "const": false
+        },
+        "contains_raw_source_bindings": {
+          "const": false
+        },
+        "contains_raw_values": {
+          "const": false
+        },
+        "cross_repository_transport_authorized": {
+          "const": false
+        },
+        "live_binding_satisfied": {
+          "const": false
+        },
+        "physical_privacy_deletion_resolved": {
+          "const": false
+        },
+        "production_profile_active": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      },
+      "required": [
+        "authority_custody_resolved",
+        "biocortex_runtime_influence",
+        "capture_provenance_attested",
+        "contains_raw_evidence_ids",
+        "contains_raw_predicate_ids",
+        "contains_raw_provenance",
+        "contains_raw_referent_ids",
+        "contains_raw_source_bindings",
+        "contains_raw_values",
+        "cross_repository_transport_authorized",
+        "live_binding_satisfied",
+        "physical_privacy_deletion_resolved",
+        "production_profile_active",
+        "side_effects_unlocked"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "caseId": {
+      "maxLength": 37,
+      "minLength": 37,
+      "pattern": "^case_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "claim": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_binding_hmac_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "evidence_count": {
+          "maximum": 1023,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "evidence_handles": {
+          "items": {
+            "$ref": "#/$defs/evidenceHandle"
+          },
+          "maxItems": 1023,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "noncurrent_evidence_count": {
+          "maximum": 1023,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "referent": {
+          "$ref": "#/$defs/referent"
+        },
+        "shadowed_evidence_count": {
+          "maximum": 1023,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_binding_handles": {
+          "items": {
+            "$ref": "#/$defs/sourceHandle"
+          },
+          "maxItems": 1023,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "supporting_evidence_handles": {
+          "items": {
+            "$ref": "#/$defs/evidenceHandle"
+          },
+          "maxItems": 1023,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "temporal_state": {
+          "enum": [
+            "current",
+            "future",
+            "historical",
+            "indeterminate"
+          ]
+        },
+        "truth_state": {
+          "enum": [
+            "conflicted",
+            "supported",
+            "unknown"
+          ]
+        },
+        "truth_tier": {
+          "enum": [
+            "authoritative",
+            "inferred",
+            "none",
+            "observed",
+            "verified"
+          ]
+        },
+        "value_handles": {
+          "items": {
+            "$ref": "#/$defs/valueHandle"
+          },
+          "maxItems": 1023,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "claim_binding_hmac_sha256",
+        "evidence_count",
+        "evidence_handles",
+        "noncurrent_evidence_count",
+        "referent",
+        "shadowed_evidence_count",
+        "source_binding_handles",
+        "supporting_evidence_handles",
+        "temporal_state",
+        "truth_state",
+        "truth_tier",
+        "value_handles"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "claimHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^clm_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "evidenceHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^evd_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "label": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "limits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_claims": {
+          "const": 1023
+        },
+        "max_envelope_bytes": {
+          "const": 4194303
+        },
+        "max_evidence_per_claim": {
+          "const": 1023
+        },
+        "max_source_bindings_per_claim": {
+          "const": 1023
+        },
+        "max_ttl_seconds": {
+          "const": 3599
+        },
+        "max_values_per_claim": {
+          "const": 1023
+        }
+      },
+      "required": [
+        "max_claims",
+        "max_envelope_bytes",
+        "max_evidence_per_claim",
+        "max_source_bindings_per_claim",
+        "max_ttl_seconds",
+        "max_values_per_claim"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "predicateHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^prd_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "projectionHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^prj_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "referent": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_handle": {
+          "$ref": "#/$defs/claimHandle"
+        },
+        "predicate_handle": {
+          "$ref": "#/$defs/predicateHandle"
+        },
+        "referent_handle": {
+          "$ref": "#/$defs/referentHandle"
+        }
+      },
+      "required": [
+        "claim_handle",
+        "predicate_handle",
+        "referent_handle"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "referentHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ref_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "sourceHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^src_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "valueHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^val_[0-9a-f]{32}$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:candidate-evidence-envelope:v0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Source-level schema for a synthetic, request-scoped candidate evidence binding. Schema validity does not authorize transport, live binding, capture, generation, review, scoring or runtime influence.",
+  "properties": {
+    "authentication": {
+      "$ref": "#/$defs/authentication"
+    },
+    "boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "candidate_evidence_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "candidate_id": {
+      "const": "temporal_truth_projection_v1_synthetic_source_binding"
+    },
+    "case_id": {
+      "$ref": "#/$defs/caseId"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/claim"
+      },
+      "maxItems": 1023,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "expires_at_utc": {
+      "description": "Exclusive expiry as a non-negative signed 64-bit Unix timestamp in seconds.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "foundational_schema_pack_manifest_sha256": {
+      "const": "fbfbf5738dd81e0afe8dbc45b1e91a35e92382a1913006a9b2e5ded67c077f36"
+    },
+    "handle_key_id": {
+      "$ref": "#/$defs/label"
+    },
+    "handle_profile_id": {
+      "const": "request_scoped_hmac_sha256_trunc128_v1"
+    },
+    "issued_at_utc": {
+      "description": "Issue time as a non-negative signed 64-bit Unix timestamp in seconds.",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "limits": {
+      "$ref": "#/$defs/limits"
+    },
+    "projection_binding_handle": {
+      "$ref": "#/$defs/projectionHandle"
+    },
+    "request_id": {
+      "$ref": "#/$defs/label"
+    },
+    "request_nonce": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_candidate_evidence_envelope.v0"
+    },
+    "trial_id": {
+      "$ref": "#/$defs/label"
+    },
+    "truth_referent_schema_sha256": {
+      "const": "5da057e70675cbd259e0d1beb98039d2eee8589c73aa910f92f90cb0374545a8"
+    }
+  },
+  "required": [
+    "authentication",
+    "boundary",
+    "candidate_evidence_schema_sha256",
+    "candidate_id",
+    "case_id",
+    "claims",
+    "contract_sha256",
+    "expires_at_utc",
+    "foundational_schema_pack_manifest_sha256",
+    "handle_key_id",
+    "handle_profile_id",
+    "issued_at_utc",
+    "limits",
+    "projection_binding_handle",
+    "request_id",
+    "request_nonce",
+    "schema",
+    "trial_id",
+    "truth_referent_schema_sha256"
+  ],
+  "title": "BioCortex AB Track B candidate evidence envelope v0",
+  "type": "object",
+  "unevaluatedProperties": false
+}

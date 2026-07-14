@@ -8,6 +8,7 @@ license.workspace = true
 default = ["onnx-embed"]
 onnx-embed = ["dep:fastembed"]
 temporal-evidence-s4-synthetic = []
+temporal-evidence-s5-candidate-synthetic = ["temporal-evidence-s4-synthetic", "dep:ring"]
 
 [dependencies]
 ab-core.workspace = true
@@ -15,6 +16,7 @@ async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
+ring = { version = "0.17", optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

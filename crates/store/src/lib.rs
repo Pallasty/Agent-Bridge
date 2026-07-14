@@ -14,6 +14,8 @@ pub mod embedding;
 pub mod lineage_audit;
 pub mod quant;
 pub mod sqlite;
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+mod temporal_candidate_evidence;
 pub use sqlite::{
     default_db_path, now_secs, semantic_blend_score, semantic_rank_weights, temporal_bonus,
     weight_for_edge_type, SqliteStore,
@@ -30,6 +32,19 @@ pub use sqlite::{
     TemporalTruthSuppressionKindV1, TemporalTruthTemporalStateV1, TemporalTruthTierV1,
     TEMPORAL_TRUTH_PROJECTION_V1_MAPPING, TEMPORAL_TRUTH_PROJECTION_V1_MODE,
     TEMPORAL_TRUTH_PROJECTION_V1_PROFILE, TEMPORAL_TRUTH_PROJECTION_V1_SCHEMA,
+};
+#[cfg(all(test, feature = "temporal-evidence-s5-candidate-synthetic"))]
+pub(crate) use temporal_candidate_evidence::synthetic_track_b_candidate_evidence_permit_v1;
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+pub use temporal_candidate_evidence::{
+    bind_synthetic_track_b_candidate_evidence_v1, project_synthetic_track_b_candidate_source_v1,
+    BoundTrackBCandidateEvidenceV1, SyntheticTrackBCandidateEvidencePermitV1,
+    SyntheticTrackBCandidateProjectionPairV1, TrackBCandidateEvidenceClaimViewV1,
+    TrackBCandidateEvidenceV1Error, TRACK_B_CANDIDATE_EVIDENCE_SCHEMA_SHA256,
+    TRACK_B_CANDIDATE_EVIDENCE_V1_MODE, TRACK_B_CANDIDATE_EVIDENCE_V1_SCHEMA,
+    TRACK_B_CANDIDATE_HANDLE_PROFILE_V1, TRACK_B_FOUNDATIONAL_ARTIFACT_CATALOG_SHA256,
+    TRACK_B_FOUNDATIONAL_PACK_MANIFEST_SHA256, TRACK_B_TRUTH_REFERENT_SCHEMA_ID,
+    TRACK_B_TRUTH_REFERENT_SCHEMA_SHA256,
 };
 pub mod vector;
 pub use embedding::{

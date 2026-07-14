@@ -141,6 +141,7 @@ dependencies = [
  "ab-core",
  "async-trait",
  "fastembed",
+ "ring",
  "serde",
  "serde_json",
  "sha2",
