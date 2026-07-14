@@ -1,0 +1,45 @@
+{
+  "$defs": {
+    "claimHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^clm_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "predicateHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^prd_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "referentHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ref_[0-9a-f]{32}$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:truth-referent:v0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Leaf claim identity containing only request-scoped opaque handles. The enclosing truth manifest binds schema version, sealed snapshot, cutoff, policy and trial identity.",
+  "properties": {
+    "claim_handle": {
+      "$ref": "#/$defs/claimHandle"
+    },
+    "predicate_handle": {
+      "$ref": "#/$defs/predicateHandle"
+    },
+    "referent_handle": {
+      "$ref": "#/$defs/referentHandle"
+    }
+  },
+  "required": [
+    "claim_handle",
+    "predicate_handle",
+    "referent_handle"
+  ],
+  "title": "BioCortex AB Track B truth referent v0",
+  "type": "object",
+  "unevaluatedProperties": false
+}

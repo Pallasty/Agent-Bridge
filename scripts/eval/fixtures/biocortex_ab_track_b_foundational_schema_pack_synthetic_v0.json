@@ -1,0 +1,168 @@
+{
+  "boundary": {
+    "authority_asserted": false,
+    "condition_mapping_public": false,
+    "credentials_present": false,
+    "private_source_data_present": false,
+    "real_run_authorized": false,
+    "side_effects_unlocked": false
+  },
+  "expected": {
+    "answer_count": 4,
+    "case_count": 2,
+    "condition_count_per_case": 2,
+    "instance_schema_class_count": 4,
+    "sampling_probability_row_count": 2,
+    "sampling_weight_row_count": 2,
+    "truth_referent_count": 2
+  },
+  "instances": {
+    "blind_map": {
+      "answer_blinding_seed_sha256": "1010101010101010101010101010101010101010101010101010101010101010",
+      "blind_packet_sha256": "2020202020202020202020202020202020202020202020202020202020202020",
+      "boundary": {
+        "mapping_private": true,
+        "reviewer_must_not_read_before_review": true,
+        "single_use_trial_specific": true,
+        "unblinding_allowed": false
+      },
+      "capture_sha256": "3030303030303030303030303030303030303030303030303030303030303030",
+      "cases": [
+        {
+          "assignments": [
+            {
+              "answer_id": "ans_11111111111111111111111111111111",
+              "condition_id": "cond_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "answer_id": "ans_22222222222222222222222222222222",
+              "condition_id": "cond_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "case_id": "case_00000000000000000000000000000001"
+        },
+        {
+          "assignments": [
+            {
+              "answer_id": "ans_33333333333333333333333333333333",
+              "condition_id": "cond_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            {
+              "answer_id": "ans_44444444444444444444444444444444",
+              "condition_id": "cond_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ],
+          "case_id": "case_00000000000000000000000000000002"
+        }
+      ],
+      "condition_roster_sha256": "4040404040404040404040404040404040404040404040404040404040404040",
+      "contract_sha256": "5050505050505050505050505050505050505050505050505050505050505050",
+      "created_at_utc": "2026-07-14T12:01:00Z",
+      "eligible_frame_manifest_sha256": "6060606060606060606060606060606060606060606060606060606060606060",
+      "generation_sha256": "7070707070707070707070707070707070707070707070707070707070707070",
+      "sampling_receipt_sha256": "7c369e0b722055223c4d48b3aca7ff6ff8eceeffd078496f3c30aeeca7cb8d43",
+      "schema": "agent_bridge.biocortex_ab_track_b_blind_map.v0",
+      "selected_case_manifest_sha256": "8080808080808080808080808080808080808080808080808080808080808080",
+      "trial_id": "trial_synthetic_20260714"
+    },
+    "review_command": {
+      "argv": [
+        "reviewer-runtime",
+        "--tools",
+        "",
+        "-"
+      ],
+      "argv_execution": "DIRECT_EXECVE_NO_SHELL",
+      "blind_packet_sha256": "2020202020202020202020202020202020202020202020202020202020202020",
+      "boundary": {
+        "authorizes_execution": false,
+        "automatic_retry": false,
+        "condition_mapping_present": false,
+        "contains_credentials": false,
+        "external_fact_access": false,
+        "mcp_access": false,
+        "parent_environment_inherited": false,
+        "postprocessing_applied": false,
+        "project_access": false,
+        "provider_neutral_record": true,
+        "raw_private_input_present": false,
+        "repository_access": false,
+        "tool_access": false,
+        "unblinding_allowed": false,
+        "workspace_mode": "EMPTY_EPHEMERAL"
+      },
+      "context_environment_keys": [],
+      "contract_sha256": "5050505050505050505050505050505050505050505050505050505050505050",
+      "created_at_utc": "2026-07-14T12:02:00Z",
+      "executor_profile_sha256": "9090909090909090909090909090909090909090909090909090909090909090",
+      "response_sink_id": "review_response_01",
+      "response_sink_must_not_exist": true,
+      "response_write_mode": "O_EXCL_SINGLE_FILE",
+      "retry_policy": "ZERO_RETRY",
+      "review_instruction_sha256": "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0",
+      "reviewer_slot": "reviewer_slot_01",
+      "schema": "agent_bridge.biocortex_ab_track_b_review_command.v0",
+      "stdin_delivery": "EXACT_BYTES_BY_STDIN",
+      "stdin_request_sha256": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "trial_id": "trial_synthetic_20260714",
+      "working_directory_manifest_sha256": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0"
+    },
+    "sampling_receipt": {
+      "case_inclusion_probabilities": [
+        {
+          "case_id": "case_00000000000000000000000000000001",
+          "denominator": 4,
+          "numerator": 1
+        },
+        {
+          "case_id": "case_00000000000000000000000000000002",
+          "denominator": 4,
+          "numerator": 1
+        }
+      ],
+      "case_sampling_weights": [
+        {
+          "case_id": "case_00000000000000000000000000000001",
+          "denominator": 1,
+          "numerator": 4
+        },
+        {
+          "case_id": "case_00000000000000000000000000000002",
+          "denominator": 1,
+          "numerator": 4
+        }
+      ],
+      "contract_sha256": "5050505050505050505050505050505050505050505050505050505050505050",
+      "created_at_utc": "2026-07-14T12:00:00Z",
+      "eligible_frame_manifest_sha256": "6060606060606060606060606060606060606060606060606060606060606060",
+      "frame_o_excl_receipt_sha256": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+      "receipt_precedes_first_condition_output": true,
+      "receipt_schema_sha256": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+      "receipt_writer_sha256": "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0",
+      "reserve_manifest_sha256": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+      "sampling_selection_algorithm_sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+      "sampling_selection_domain": "agent-bridge/track-b/sample/v1",
+      "sampling_selection_message": "domain_utf8_NUL_frame_sha256_ascii_NUL_stratum_utf8_NUL_case_id_utf8",
+      "schema": "agent_bridge.biocortex_ab_track_b_sampling_receipt.v0",
+      "seed_derivation_sha256": "1313131313131313131313131313131313131313131313131313131313131313",
+      "seed_entropy_receipt_sha256": "1414141414141414141414141414141414141414141414141414141414141414",
+      "selected_case_manifest_sha256": "8080808080808080808080808080808080808080808080808080808080808080",
+      "strata_allocation_manifest_sha256": "1515151515151515151515151515151515151515151515151515151515151515",
+      "trial_id": "trial_synthetic_20260714"
+    },
+    "truth_referents": [
+      {
+        "claim_handle": "clm_cccccccccccccccccccccccccccccccc",
+        "predicate_handle": "prd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "referent_handle": "ref_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "claim_handle": "clm_dddddddddddddddddddddddddddddddd",
+        "predicate_handle": "prd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "referent_handle": "ref_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_foundational_schema_pack_synthetic.v0",
+  "synthetic_only": true
+}

@@ -1,0 +1,191 @@
+{
+  "$defs": {
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "authorizes_execution": {
+          "const": false
+        },
+        "automatic_retry": {
+          "const": false
+        },
+        "condition_mapping_present": {
+          "const": false
+        },
+        "contains_credentials": {
+          "const": false
+        },
+        "external_fact_access": {
+          "const": false
+        },
+        "mcp_access": {
+          "const": false
+        },
+        "parent_environment_inherited": {
+          "const": false
+        },
+        "postprocessing_applied": {
+          "const": false
+        },
+        "project_access": {
+          "const": false
+        },
+        "provider_neutral_record": {
+          "const": true
+        },
+        "raw_private_input_present": {
+          "const": false
+        },
+        "repository_access": {
+          "const": false
+        },
+        "tool_access": {
+          "const": false
+        },
+        "unblinding_allowed": {
+          "const": false
+        },
+        "workspace_mode": {
+          "const": "EMPTY_EPHEMERAL"
+        }
+      },
+      "required": [
+        "authorizes_execution",
+        "automatic_retry",
+        "condition_mapping_present",
+        "contains_credentials",
+        "external_fact_access",
+        "mcp_access",
+        "parent_environment_inherited",
+        "postprocessing_applied",
+        "project_access",
+        "provider_neutral_record",
+        "raw_private_input_present",
+        "repository_access",
+        "tool_access",
+        "unblinding_allowed",
+        "workspace_mode"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "label": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "utc": {
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:review-command:v0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Provider-neutral immutable review invocation record. Exact provider argv is a later roster-bound instance and this record never authorizes execution.",
+  "properties": {
+    "argv": {
+      "items": {
+        "maxLength": 8192,
+        "minLength": 0,
+        "pattern": "^[ -~]*$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 2,
+      "type": "array"
+    },
+    "argv_execution": {
+      "const": "DIRECT_EXECVE_NO_SHELL"
+    },
+    "blind_packet_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "context_environment_keys": {
+      "items": {
+        "$ref": "#/$defs/label"
+      },
+      "maxItems": 0,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "created_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "executor_profile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "response_sink_id": {
+      "$ref": "#/$defs/label"
+    },
+    "response_sink_must_not_exist": {
+      "const": true
+    },
+    "response_write_mode": {
+      "const": "O_EXCL_SINGLE_FILE"
+    },
+    "retry_policy": {
+      "const": "ZERO_RETRY"
+    },
+    "review_instruction_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "reviewer_slot": {
+      "$ref": "#/$defs/label"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_review_command.v0"
+    },
+    "stdin_delivery": {
+      "const": "EXACT_BYTES_BY_STDIN"
+    },
+    "stdin_request_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "trial_id": {
+      "$ref": "#/$defs/label"
+    },
+    "working_directory_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "required": [
+    "argv",
+    "argv_execution",
+    "blind_packet_sha256",
+    "boundary",
+    "context_environment_keys",
+    "contract_sha256",
+    "created_at_utc",
+    "executor_profile_sha256",
+    "response_sink_id",
+    "response_sink_must_not_exist",
+    "response_write_mode",
+    "retry_policy",
+    "review_instruction_sha256",
+    "reviewer_slot",
+    "schema",
+    "stdin_delivery",
+    "stdin_request_sha256",
+    "trial_id",
+    "working_directory_manifest_sha256"
+  ],
+  "title": "BioCortex AB Track B review command v0",
+  "type": "object",
+  "unevaluatedProperties": false
+}
