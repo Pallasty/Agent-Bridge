@@ -1,0 +1,355 @@
+{
+  "$defs": {
+    "assertion": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_handle": {
+          "$ref": "#/$defs/assertionHandle"
+        }
+      },
+      "required": [
+        "assertion_handle"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "assertionHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ast_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "authorizes_capture": {
+          "const": false
+        },
+        "authorizes_review_execution": {
+          "const": false
+        },
+        "authorizes_scoring": {
+          "const": false
+        },
+        "authorizes_unblinding": {
+          "const": false
+        },
+        "contains_raw_claim_ids": {
+          "const": false
+        },
+        "contains_raw_predicate_ids": {
+          "const": false
+        },
+        "contains_raw_referent_ids": {
+          "const": false
+        },
+        "contains_raw_source_keys": {
+          "const": false
+        },
+        "contains_raw_values": {
+          "const": false
+        },
+        "opaque_handles_request_scoped_required": {
+          "const": true
+        },
+        "provider_neutral_record": {
+          "const": true
+        },
+        "sealed_snapshot_binding_required": {
+          "const": true
+        }
+      },
+      "required": [
+        "authorizes_capture",
+        "authorizes_review_execution",
+        "authorizes_scoring",
+        "authorizes_unblinding",
+        "contains_raw_claim_ids",
+        "contains_raw_predicate_ids",
+        "contains_raw_referent_ids",
+        "contains_raw_source_keys",
+        "contains_raw_values",
+        "opaque_handles_request_scoped_required",
+        "provider_neutral_record",
+        "sealed_snapshot_binding_required"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "case": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "$ref": "#/$defs/caseId"
+        },
+        "claim_rubrics": {
+          "items": {
+            "$ref": "#/$defs/claimRubric"
+          },
+          "maxItems": 64,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "expected_response_mode": {
+          "$ref": "#/$defs/responseMode"
+        }
+      },
+      "required": [
+        "case_id",
+        "claim_rubrics",
+        "expected_response_mode"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "caseId": {
+      "maxLength": 37,
+      "minLength": 37,
+      "pattern": "^case_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "claimHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^clm_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "claimRubric": {
+      "additionalProperties": false,
+      "properties": {
+        "authority_basis_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "currentness_basis_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "forbidden_assertions": {
+          "items": {
+            "$ref": "#/$defs/forbiddenAssertion"
+          },
+          "maxItems": 64,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "gold_evidence_slice_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "referent": {
+          "$ref": "#/$defs/referent"
+        },
+        "required_assertions": {
+          "items": {
+            "$ref": "#/$defs/assertion"
+          },
+          "maxItems": 64,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "review_requirement": {
+          "$ref": "#/$defs/reviewRequirement"
+        }
+      },
+      "required": [
+        "authority_basis_sha256",
+        "currentness_basis_sha256",
+        "forbidden_assertions",
+        "gold_evidence_slice_sha256",
+        "referent",
+        "required_assertions",
+        "review_requirement"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "forbiddenAssertion": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_handle": {
+          "$ref": "#/$defs/assertionHandle"
+        },
+        "reason": {
+          "$ref": "#/$defs/forbiddenReason"
+        }
+      },
+      "required": [
+        "assertion_handle",
+        "reason"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "forbiddenReason": {
+      "maxLength": 16,
+      "minLength": 5,
+      "pattern": "^(policy_forbidden|stale|unsupported)$",
+      "type": "string"
+    },
+    "label": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "predicateHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^prd_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "referent": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_handle": {
+          "$ref": "#/$defs/claimHandle"
+        },
+        "predicate_handle": {
+          "$ref": "#/$defs/predicateHandle"
+        },
+        "referent_handle": {
+          "$ref": "#/$defs/referentHandle"
+        }
+      },
+      "required": [
+        "claim_handle",
+        "predicate_handle",
+        "referent_handle"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "referentHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ref_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "responseMode": {
+      "maxLength": 7,
+      "minLength": 6,
+      "pattern": "^(abstain|answer)$",
+      "type": "string"
+    },
+    "reviewRequirement": {
+      "maxLength": 12,
+      "minLength": 5,
+      "pattern": "^(context_only|score)$",
+      "type": "string"
+    },
+    "sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "utc": {
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:truth-manifest:v0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Request-scoped opaque truth-authority input manifest. Value-level required and forbidden assertions are distinct from the referent/predicate claim identity and are privately bound by exact evidence, authority and currentness digests.",
+  "properties": {
+    "boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/case"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "claim_authority_policy_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "created_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "custody_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "gold_evidence_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "knowledge_cutoff_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "opaque_handle_profile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "prepared_input_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "private_handle_map_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "projection_envelope_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "projection_interface_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "referent_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "request_nonce_commitment_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_truth_manifest.v0"
+    },
+    "sealed_snapshot_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "selected_case_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "snapshot_producer_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "trial_id": {
+      "$ref": "#/$defs/label"
+    },
+    "truth_as_of_utc": {
+      "$ref": "#/$defs/utc"
+    }
+  },
+  "required": [
+    "boundary",
+    "cases",
+    "claim_authority_policy_sha256",
+    "contract_sha256",
+    "created_at_utc",
+    "custody_receipt_sha256",
+    "gold_evidence_manifest_sha256",
+    "knowledge_cutoff_utc",
+    "opaque_handle_profile_sha256",
+    "prepared_input_sha256",
+    "private_handle_map_sha256",
+    "projection_envelope_sha256",
+    "projection_interface_schema_sha256",
+    "referent_schema_sha256",
+    "request_nonce_commitment_sha256",
+    "schema",
+    "sealed_snapshot_sha256",
+    "selected_case_manifest_sha256",
+    "snapshot_producer_identity_sha256",
+    "trial_id",
+    "truth_as_of_utc"
+  ],
+  "title": "BioCortex AB Track B truth manifest v0",
+  "type": "object",
+  "unevaluatedProperties": false
+}
