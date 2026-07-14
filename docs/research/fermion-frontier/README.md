@@ -752,17 +752,25 @@ Authority is limited to this fixed M3-input, four-gate, q1--q90,
 `K<=622,592/C34` policy: depth remains M3, with no M4, child
 boundary/transition/sidecar, exact-Hubbard reference or READY authority.
 
-The Majorana implementation audit selects a certificate fork of registered
-`MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,
-which predates a documented splitting-sign fix.  The fork must pin a complete Julia
-Manifest/PauliPropagation version, sort composite bitmasks deterministically, and add
-outward coefficient intervals plus a post-dedup per-gate/stage dropped-L1 ledger.
-That work is a parallel implementation-custody route rather than authority for the
-Python interval certificates.  The current v2 policies have now been exhausted by
-formal maximum-K screens; any continuation to a larger ladder or different method
-requires a new precommit.  Per-observable adjacent-transition depth remains separate,
-and neither the old `K=262,144` diagnostics nor the v2 design transcripts can be
-promoted in place.
+`MAJORANA-P0-S0` now closes the first implementation-custody subcertificate on the
+registered `MajoranaPropagation v0.3.0` / `main@b7849cb` baseline with
+`PauliPropagation v0.7.3` and Julia 1.11.9.  Result-unpinned commit
+`c6050be2fcc0beb1454465aa77240f6b1f88c71b` was pushed before replay.  Two fresh
+Git-blob-staged, read-only, network-isolated Julia processes produced byte-identical
+transcripts (`ff7a6f42...5344c`); the independently recomputed canonical witness is
+`b06a7a16...d13f8`.  It covers all 4,096 small-mask algebra pairs, 17,856 fixed
+primitive interval rotations, deterministic two-site composite ordering, strict
+post-merge thresholding and five dropped-L1 ledger events.  The final fixed-fixture
+declared interval is
+`[93625438148147199/2^62, 1839136320355657149/2^64]` with 26 retained terms.
+
+This is only
+`VERIFIED_MAJORANA_P0_DETERMINISTIC_INTERVAL_LEDGER_CONFORMANCE_SUBCERTIFICATE`.
+It does not execute L8, compose product-formula error to exact Hubbard dynamics,
+qualify a physical reference, increase M/D depth or create READY authority.  The
+current M/D v2 policies have likewise been exhausted by their formal maximum-K
+screens; any larger ladder, L8 Majorana workload or different method requires a new
+result-unpinned precommit.
 
 These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
 grouping-screen, fixed-generic-bound no-go, observable-Taylor-step and
@@ -806,6 +814,8 @@ retained in `claim-status.jsonl`.
   source-pinned L8 mapped one-step interval contract/template/checker,
   source-pinned L8 two-step parent--child interval contract/template/checker and
   four canonical boundary sidecars,
+  source/runtime-pinned Majorana P0 Julia project, result-unpinned policy/checker,
+  formal result contract/subcertificate and phase-aware result tests,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,

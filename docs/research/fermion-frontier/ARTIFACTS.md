@@ -906,6 +906,32 @@ so they are versioned normally and are not added to the preservation-only
   3,060 rows, all 34 q90 candidates infeasible and no resource abort.  The
   external receipt is 13:35.69 / 671,592 KiB; authority is fixed-policy
   M3-only, with no M4, child artifact or READY.
+- `majorana_certificate_p0/Project.toml`, `Manifest.toml` and
+  `majorana_p0_runner.jl`: exact Julia 1.11.9 execution environment and
+  deterministic small-fixture runner.  The lock selects MajoranaPropagation
+  0.3.0 / `b7849cb4` and PauliPropagation 0.7.3 / `2a96e9a9`; runner SHA-256 is
+  `67a72a6ac2f02dd7572a48694c9e07ecaf84936411d212b48a996e6710946941`.
+- `majorana_certificate_p0_fixture.json`, `majorana_certificate_p0_policy.json`,
+  `majorana_certificate_p0_runtime_lock.json`,
+  `majorana_certificate_p0_precommit_contract.json`,
+  `majorana_certificate_p0_checker.py` and `test_majorana_certificate_p0.py`:
+  result-unpinned P0 source/custody/independent-oracle closure.  Final precommit
+  `c6050be2fcc0beb1454465aa77240f6b1f88c71b` contains no result contract,
+  certificate or exact-result test.  Its checker independently rebuilds the
+  Majorana algebra, outward intervals, merge/drop policy, Fock expectation and
+  five-event ledger, while formal replay uses a nine-file Git-object allowlist and
+  two fresh bubblewrap network namespaces.
+- `majorana_certificate_p0_contract.json`,
+  `majorana_certificate_p0_certificate.json` and
+  `test_majorana_certificate_p0_result.py`: post-replay-only result binding.
+  Both transcript SHA-256 values are
+  `ff7a6f420e9ddadcba32df575c6b9e653a1ef703b3299b5a95e3b51442f5344c`;
+  canonical witness SHA-256 is
+  `b06a7a16bc6697b92e6d3fa05a33089a2437195d5d12133346b68438177d13f8`.
+  The certificate covers 4,096 algebra pairs, 17,856 fixed primitive rotations
+  and one frozen two-site composite fixture only.  L8, exact-Hubbard/reference
+  composition and READY are explicitly excluded.  Majorana-specific tests pass
+  34/34; complete discovery passes 1,208 tests with 26 expected skips.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is

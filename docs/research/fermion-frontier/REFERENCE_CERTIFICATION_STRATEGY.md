@@ -1060,6 +1060,21 @@ exact-Hubbard reference 或 READY。
 D q76、任何更大 K、不同 cadence/horizon/caps 或不同算法仍需新的独立
 precommit/checker/same-byte replay。
 
+`MAJORANA-P0-S0` 随后完成了平行实现托管路线的首个正式子证书。最终 result-unpinned
+precommit 为 `c6050be2fcc0beb1454465aa77240f6b1f88c71b`；它固定 Julia 1.11.9、完整
+Manifest、MajoranaPropagation 0.3.0 / `b7849cb4`、PauliPropagation 0.7.3 / `2a96e9a9`、
+递归源码闭包、unsigned-mask composite 排序、`2^64` outward rational intervals、
+merge-before-strict-threshold 与逐项 dropped-L1 账本。两个 fresh Git-object-staged、
+read-only、network-isolated Julia 进程给出相同 transcript SHA
+`ff7a6f420e9ddadcba32df575c6b9e653a1ef703b3299b5a95e3b51442f5344c`；独立 Python
+oracle 逐字段复算后的 witness SHA 为
+`b06a7a16bc6697b92e6d3fa05a33089a2437195d5d12133346b68438177d13f8`。
+
+该 authority 只覆盖 4,096 个小 mask 代数对、17,856 个固定 primitive rotation cases
+与单一 two-site composite fixture。它明确不覆盖 L8、1,152 gates/R=100、PF-to-exact
+Hubbard error、physical reference、complex/vector/GPU/multithread path 或 READY；因此它
+关闭的是 P0 custody/kernel conformance，而不是本节所需的最终 bounded reference。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
@@ -1084,11 +1099,12 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
    propagation 对两个 observable 共同完成两步，magnetization 另完成第三步；不再逐
    `k` 重算 495 paths；cross-cluster/global
    cancellation-aware 方法仍作为平行数学路线。
-3. Majorana 执行基线已固定为从 `main@b7849cb` 建 certificate fork，pin Julia Manifest 与
-   PauliPropagation v0.7.3，并移植 deterministic composite bitmask sort。补
-   deduplicate-before-truncation、per-gate/stage dropped-L1 ledger、directed coefficient
-   intervals 和 L2/L3 ED 对照。该 fork 是平行 custody/实现路线，不能覆盖现有 Python
-   one-step checker 的 authority。
+3. Majorana P0 已在 `main@b7849cb`、Julia 1.11.9 与 PauliPropagation v0.7.3 上闭合
+   runtime/source custody、deterministic composite sort、deduplicate-before-threshold、
+   per-boundary dropped-L1 ledger 与 directed rational intervals。下一步是另行预提交 P1：
+   扩展 L2/L3 全 occupation/observable cross-language ED/JW oracle、hopping/非 hopping
+   cadence matrix 与 adversarial mutation；P1 通过前不启动或解释 L8 pilot。该路线仍不能
+   覆盖现有 Python one-step checker 的 authority。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
    当前 fixed-K 磁化量 step 4 与 double occupancy step 3 都必须另发资源/sidecar v2；
    v2 至少需审计 K=262,144、single-expansion 446,188 与 visits 337,691,387 这一诊断点，

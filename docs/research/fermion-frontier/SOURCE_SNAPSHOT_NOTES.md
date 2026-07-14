@@ -174,19 +174,22 @@ child checker closes only staggered-magnetization step 3: cumulative dropped `L1
 scalar allocation and is not certified.  These standalone changes do not alter a
 source-snapshot value, exact-Hubbard/reference claim, or outer READY status.
 
-The Majorana implementation audit likewise changes no snapshot value.  It selects a
-future fork from registered `main@b7849cb` because the inferred paper-date commit
-precedes a documented splitting-sign fix; a complete Julia Manifest, deterministic
-composite ordering, outward intervals, and a per-gate/stage dropped-L1 ledger are
-still missing from the future Majorana certificate fork.  Current Majorana
-convergence data therefore remain diagnostic only.
+The Majorana implementation route now has a standalone P0 custody and deterministic
+small-fixture conformance subcertificate.  It pins Julia 1.11.9, a complete Manifest,
+registered `main@b7849cb`, PauliPropagation 0.7.3, loaded-source closures,
+deterministic composite ordering, outward rational intervals and a post-dedup
+dropped-L1 ledger.  Two fresh network-isolated replay transcripts are byte-identical,
+and an independent Python oracle reproduces the complete witness.  This still changes
+no source-snapshot value: P0 executes neither the matching L8/R=100 workload nor a
+product-formula-to-exact-Hubbard error composition, and current published Majorana
+convergence data remain diagnostic only.
 
 None of the campaign preflight, reference-qualification ledger, proof kernel, L=2
 conformance witness, mapping checker, checkpointed L2 checker, bitset prototype,
 Strang commutator checker, grouping-screen checker, fixed-generic-bound no-go checker,
 observable-Taylor-step checker, double-occupancy-cluster no-go checker, shared L8
 two-step interval checker, magnetization-only step-3 checker or depth-2
-double-occupancy adaptive-policy screen is currently
+double-occupancy adaptive-policy screen, or Majorana P0 subcertificate is currently
 a component of
 `evidence_manifest_source_snapshot.json` or `fermi_hubbard_evidence.py`. Their
 standalone results therefore cannot change the

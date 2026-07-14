@@ -834,3 +834,40 @@ This is narrow fixed-policy negative authority, not prospective discovery or
 a general no-go.  It creates no M4 boundary, transition or sidecar; certified
 magnetization depth remains M3 and exact-Hubbard error, physical reference
 qualification and READY remain unassessed.
+
+## Majorana P0 deterministic conformance subcertificate
+
+The parallel Majorana custody route has completed its first formal result.  The
+execution closure pins Julia 1.11.9, a complete Manifest,
+MajoranaPropagation 0.3.0 (`b7849cb4`, tree `d62823f2`) and
+PauliPropagation 0.7.3 (`2a96e9a9`, tree `757b43af`), including recursively
+hashed loaded-source closures.  Composite constituents are sorted by unsigned
+Majorana mask in the runner; coefficient arithmetic uses exact rational Taylor
+enclosures followed by outward `2^64` quantization, global deduplication and a
+strict `< 1/100` threshold.
+
+The final result-unpinned precommit is
+`c6050be2fcc0beb1454465aa77240f6b1f88c71b`.  Formal replay staged its exact
+nine-file Git allowlist, mounted all non-scratch inputs read-only, unshared the
+network namespace and ran two fresh Julia processes with compiled modules disabled.
+Both transcript SHA-256 values are
+`ff7a6f420e9ddadcba32df575c6b9e653a1ef703b3299b5a95e3b51442f5344c`;
+the independently reproduced witness SHA-256 is
+`b06a7a16bc6697b92e6d3fa05a33089a2437195d5d12133346b68438177d13f8`.
+
+The witness closes 4,096 ordered multiplication/phase/commutation cases and
+17,856 fixed primitive rotation cases.  Its two-site composite fixture has five
+ledger events, 26 final retained terms, cumulative dropped L1
+`45769830242595739/2^60`, retained expectation
+`[276704759118530155/2^62, 1106819036474125325/2^64]` and the declared
+dropped-L1-widened interval
+`[93625438148147199/2^62, 1839136320355657149/2^64]`.  The complete repository
+regression then passed 1,208 tests with 26 expected skips.
+
+Authority is intentionally limited to the frozen small fixture and status
+`VERIFIED_MAJORANA_P0_DETERMINISTIC_INTERVAL_LEDGER_CONFORMANCE_SUBCERTIFICATE`.
+L8 propagation, 1,152-gate/R=100 execution, product-formula-to-exact-Hubbard
+error, physical-reference qualification, complex/vector/GPU/multithread paths,
+M4/D-route authority and READY remain unassessed.  The next Majorana stage must
+therefore be a separately precommitted P1 cross-language L2/L3 oracle and cadence
+matrix before any bounded L8 pilot is considered.
