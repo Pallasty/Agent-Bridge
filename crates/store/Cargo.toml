@@ -9,6 +9,7 @@ default = ["onnx-embed"]
 onnx-embed = ["dep:fastembed"]
 temporal-evidence-s4-synthetic = []
 temporal-evidence-s5-candidate-synthetic = ["temporal-evidence-s4-synthetic", "dep:ring"]
+temporal-evidence-s6-detached-verifier-synthetic = ["temporal-evidence-s5-candidate-synthetic"]
 
 [dependencies]
 ab-core.workspace = true

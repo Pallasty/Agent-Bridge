@@ -1,0 +1,75 @@
+{
+  "authentication": {
+    "algorithm": "HMAC-SHA-256",
+    "canonicalization": "serde_json_compact_struct_field_order_utf8_v1",
+    "domain": "agent-bridge/track-b/candidate-evidence-envelope/v0",
+    "message_profile": "u64be_len_domain_domain_u64be_len_key_id_key_id_exact_payload_json"
+  },
+  "canonical_encoding": {
+    "duplicate_keys_allowed": false,
+    "exact_round_trip_required": true,
+    "key_order": "payload_fields_in_order_recursively",
+    "non_ascii_escaping": "serde_json_default",
+    "parse_reserialize_for_authentication": false,
+    "trailing_bytes_allowed": false,
+    "utf8_required": true,
+    "whitespace_outside_strings": "none"
+  },
+  "fixed_bindings": {
+    "candidate_evidence_schema_sha256": "edba8da90abeeda83e33943d9b87f76c0deff9fad34cb314cd27c28b85ed1b77",
+    "foundational_schema_pack_manifest_sha256": "fbfbf5738dd81e0afe8dbc45b1e91a35e92382a1913006a9b2e5ded67c077f36",
+    "logical_envelope_schema": "agent_bridge.biocortex_ab_track_b_candidate_evidence_envelope.v0",
+    "truth_referent_schema_sha256": "5da057e70675cbd259e0d1beb98039d2eee8589c73aa910f92f90cb0374545a8"
+  },
+  "limits": {
+    "max_claims_exclusive": 1024,
+    "max_payload_bytes_exclusive": 4194304,
+    "max_ttl_seconds_exclusive": 3600
+  },
+  "logical_envelope_schema_path": "docs/design/fixtures/biocortex-ab-track-b-candidate-evidence-envelope-schema-v0.json",
+  "logical_envelope_schema_sha256": "edba8da90abeeda83e33943d9b87f76c0deff9fad34cb314cd27c28b85ed1b77",
+  "payload_fields_in_order": [
+    "boundary",
+    "candidate_evidence_schema_sha256",
+    "candidate_id",
+    "case_id",
+    "claims",
+    "contract_sha256",
+    "expires_at_utc",
+    "foundational_schema_pack_manifest_sha256",
+    "handle_key_id",
+    "handle_profile_id",
+    "issued_at_utc",
+    "limits",
+    "projection_binding_handle",
+    "request_id",
+    "request_nonce",
+    "schema",
+    "trial_id",
+    "truth_referent_schema_sha256"
+  ],
+  "required_boundary": {
+    "authority_custody_resolved": false,
+    "biocortex_runtime_influence": false,
+    "capture_provenance_attested": false,
+    "contains_raw_evidence_ids": false,
+    "contains_raw_predicate_ids": false,
+    "contains_raw_provenance": false,
+    "contains_raw_referent_ids": false,
+    "contains_raw_source_bindings": false,
+    "contains_raw_values": false,
+    "cross_repository_transport_authorized": false,
+    "live_binding_satisfied": false,
+    "physical_privacy_deletion_resolved": false,
+    "production_profile_active": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_candidate_exact_payload_profile.v0",
+  "semantics": {
+    "authentication_metadata_is_detached": true,
+    "exact_bytes_authenticated_before_payload_parse": true,
+    "logical_envelope_requires_authentication_join": true,
+    "payload_contains_authentication_field": false,
+    "profile_authorizes_transport": false
+  }
+}

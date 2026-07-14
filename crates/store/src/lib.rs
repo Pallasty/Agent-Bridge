@@ -16,6 +16,8 @@ pub mod quant;
 pub mod sqlite;
 #[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
 mod temporal_candidate_evidence;
+#[cfg(feature = "temporal-evidence-s6-detached-verifier-synthetic")]
+mod temporal_replay_transport;
 pub use sqlite::{
     default_db_path, now_secs, semantic_blend_score, semantic_rank_weights, temporal_bonus,
     weight_for_edge_type, SqliteStore,
