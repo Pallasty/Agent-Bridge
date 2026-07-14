@@ -147,7 +147,10 @@
     "feedback_security_freedom_tradeoff_20260712",
     "owner_grant_memory_value_supreme_20260706"
    ],
-   "note": "owner behavioral-values synthesis."
+   "note": "owner behavioral-values synthesis. answer_vehicle declared 2026-07-14: digest-author batch:2026-07-14 (gate PASS: hit sem#2, non-regression +0.000; reviewer cleaned one in-stream typo citation).",
+   "answer_vehicle": [
+    "digest_owner_security_freedom_and_memory_value_grants_20260714"
+   ]
   },
   {
    "id": "S9",
@@ -163,7 +166,10 @@
    "primaries": [
     "benchmark_arc_design_v0_20260706"
    ],
-   "note": "benchmark build + bugfix chain (design + v0 + v1 + v1.1)."
+   "note": "benchmark build + bugfix chain (design + v0 + v1 + v1.1). answer_vehicle declared 2026-07-14: digest-author batch:2026-07-14 (gate PASS: hit sem#1, non-regression +0.000).",
+   "answer_vehicle": [
+    "digest_ab_internal_eval_benchmark_build_and_fixes_20260714"
+   ]
   },
   {
    "id": "S10",
@@ -178,7 +184,10 @@
    "primaries": [
     "pub_supersedes_records_intent_not_state"
    ],
-   "note": "supersede semantics: declared edge vs auto-dedup, spanning a pub_ lesson, a lesson row, and the enforcement decision."
+   "note": "supersede semantics: declared edge vs auto-dedup, spanning a pub_ lesson, a lesson row, and the enforcement decision. answer_vehicle declared 2026-07-14: digest-author batch:2026-07-14 (gate PASS: hit sem#1, non-regression +0.000).",
+   "answer_vehicle": [
+    "digest_supersede_lifecycle_declared_vs_autodedup_20260714"
+   ]
   },
   {
    "id": "S11",
