@@ -1,0 +1,227 @@
+{
+  "schema": "agent_bridge.memory_temporal_evidence_substrate_design.v0",
+  "design_status": "READY_FOR_SEPARATE_MIGRATION_REVIEW",
+  "scope": {
+    "design_only": true,
+    "schema_migration_present": false,
+    "runtime_writer_present": false,
+    "store_adapter_present": false,
+    "projector_invoked": false,
+    "legacy_rows_qualified": false,
+    "real_capture_authorized": false,
+    "biocortex_runtime_influence": false
+  },
+  "logical_ledgers": [
+    {
+      "name": "truth_lineages",
+      "append_only": true,
+      "primary_key": ["lineage_id"],
+      "fields": [
+        "lineage_id",
+        "referent_id",
+        "predicate_id",
+        "created_at",
+        "claim_identity_sha256"
+      ],
+      "store_derived_fields": ["claim_identity_sha256"],
+      "foreign_keys": []
+    },
+    {
+      "name": "truth_authority_policy_revisions",
+      "append_only": true,
+      "primary_key": ["policy_revision_id"],
+      "fields": [
+        "policy_revision_id",
+        "policy_lineage_id",
+        "revision_seq",
+        "recorded_at",
+        "predicate_id",
+        "source_key",
+        "resolved_truth_tier",
+        "valid_from",
+        "valid_until",
+        "status"
+      ],
+      "store_derived_fields": ["revision_seq"],
+      "foreign_keys": []
+    },
+    {
+      "name": "truth_evidence_revisions",
+      "append_only": true,
+      "primary_key": ["evidence_id"],
+      "fields": [
+        "evidence_id",
+        "lineage_id",
+        "revision_seq",
+        "value",
+        "aliases",
+        "observed_at",
+        "recorded_at",
+        "validity",
+        "lifecycle",
+        "source_bindings",
+        "authority_policy_revision_id",
+        "resolved_truth_tier"
+      ],
+      "store_derived_fields": ["revision_seq", "resolved_truth_tier"],
+      "foreign_keys": [
+        "lineage_id->truth_lineages.lineage_id",
+        "authority_policy_revision_id->truth_authority_policy_revisions.policy_revision_id"
+      ]
+    },
+    {
+      "name": "truth_evidence_relationships",
+      "append_only": true,
+      "primary_key": [
+        "declared_evidence_id",
+        "relationship_kind",
+        "target_lineage_id",
+        "effective_from"
+      ],
+      "fields": [
+        "declared_evidence_id",
+        "relationship_kind",
+        "target_lineage_id",
+        "effective_from"
+      ],
+      "store_derived_fields": [],
+      "foreign_keys": [
+        "declared_evidence_id->truth_evidence_revisions.evidence_id",
+        "target_lineage_id->truth_lineages.lineage_id"
+      ]
+    },
+    {
+      "name": "truth_lineage_tombstones",
+      "append_only": true,
+      "primary_key": ["tombstone_id"],
+      "fields": [
+        "tombstone_id",
+        "lineage_id",
+        "tombstoned_at",
+        "had_outgoing_governance",
+        "attestation_version",
+        "attestation_sha256"
+      ],
+      "store_derived_fields": [
+        "had_outgoing_governance",
+        "attestation_sha256"
+      ],
+      "foreign_keys": ["lineage_id->truth_lineages.lineage_id"]
+    }
+  ],
+  "writer_contract": {
+    "single_immediate_transaction": true,
+    "update_allowed": false,
+    "delete_allowed": false,
+    "revision_seq_store_allocated": true,
+    "truth_tier_store_derived": true,
+    "governance_attestation_store_derived": true,
+    "unknown_authority_default": "reject",
+    "authority_policy_identity_stable": true,
+    "authority_policy_recorded_at": "strictly_increasing_by_revision_seq",
+    "authority_policy_binding": "latest_visible_exact_revision",
+    "authority_policy_pair_lineage": "unique_by_predicate_and_source",
+    "relationship_tier_view": "strictly_before_source_recorded_at_latest_target_revision",
+    "tombstone_after_revision_blocks_future_revision": true,
+    "legacy_memory_backfill": "forbidden_without_separate_admission"
+  },
+  "resolver_v0_compatibility": {
+    "revision_seq_required": true,
+    "recorded_at_unique_per_lineage": true,
+    "revision_seq_substitutes_recorded_at": false,
+    "same_recorded_at_allowed": false,
+    "same_second_support_requires_resolver_v1": true,
+    "cross_lineage_same_second_relationship_allowed": false,
+    "world_clock_field": "observed_at",
+    "knowledge_clock_field": "recorded_at",
+    "validity_boundary": "inclusive",
+    "relationship_target_grain": "lineage_id",
+    "relationship_snapshot": "complete_per_revision_carry_forward"
+  },
+  "snapshot_contract": {
+    "transaction": "one_sqlite_read_transaction",
+    "required_sets": [
+      "truth_lineages",
+      "truth_authority_policy_revisions",
+      "truth_evidence_revisions",
+      "truth_evidence_relationships",
+      "truth_lineage_tombstones"
+    ],
+    "hard_caps": [
+      "max_lineages",
+      "max_policy_revisions",
+      "max_evidence_revisions",
+      "max_relationships",
+      "max_tombstones",
+      "max_payload_bytes"
+    ],
+    "hard_cap_maxima": {
+      "max_lineages": 10000,
+      "max_policy_revisions": 10000,
+      "max_evidence_revisions": 10000,
+      "max_relationships": 50000,
+      "max_tombstones": 10000,
+      "max_payload_bytes": 16777216
+    },
+    "fetch_plus_one": true,
+    "truncation_terminal": true,
+    "endpoint_nonclosure_terminal": true,
+    "tombstone_index_incomplete_terminal": true,
+    "relationship_channel_incomplete_terminal": true,
+    "canonical_order": "binary_utf8_v0",
+    "canonical_digest": "sha256_canonical_json_v0",
+    "producer_identity_fields": [
+      "schema_meta_version",
+      "schema_digest",
+      "migration_digest",
+      "ledger_format_version"
+    ]
+  },
+  "adapter_boundary": {
+    "adapter_allowed": false,
+    "current_mutable_profile_gaps_remain": 8,
+    "caller_declared_tier_allowed": false,
+    "memory_key_is_referent": false,
+    "governed_tombstone_source_allowed": false,
+    "raw_values_may_leave_agent_bridge": false,
+    "new_producer_profile_reserved": false
+  },
+  "required_negative_cases": [
+    "primary_key_contract_drift",
+    "foreign_key_contract_drift",
+    "store_derived_contract_drift",
+    "duplicate_revision_seq",
+    "missing_revision_seq",
+    "ambiguous_recorded_at",
+    "lineage_claim_drift",
+    "dropped_relationship",
+    "dangling_relationship",
+    "self_relationship",
+    "relationship_cycle",
+    "cross_claim_relationship",
+    "dual_relationship_kind",
+    "conflicting_relationship_time",
+    "lower_tier_suppression",
+    "missing_provenance",
+    "caller_declared_tier",
+    "unknown_authority_policy",
+    "authority_predicate_fallback",
+    "policy_revocation_bypass",
+    "policy_recorded_at_regression",
+    "policy_tier_shopping",
+    "observation_after_recording",
+    "inverted_validity",
+    "missing_governance_attestation",
+    "tombstone_content_leak",
+    "later_target_downgrade",
+    "same_second_target_downgrade",
+    "snapshot_truncated",
+    "endpoint_nonclosure",
+    "unbounded_snapshot_caps",
+    "canonical_payload_hash_drift",
+    "noncanonical_order",
+    "duplicate_evidence_id",
+    "unknown_field",
+    "duplicate_json_key"
+  ]
+}
