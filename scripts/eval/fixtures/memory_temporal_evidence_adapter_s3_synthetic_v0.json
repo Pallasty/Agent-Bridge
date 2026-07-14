@@ -1,0 +1,147 @@
+{
+  "schema": "agent_bridge.memory_temporal_evidence_adapter_s3_synthetic.v0",
+  "fixture_only": true,
+  "producer_identity": {
+    "schema_meta_version": "43",
+    "schema_digest": "6d321d45aafe65ef06efb49c46ccf9f1931624aada9e8873d7e29765826e3aa0",
+    "migration_digest": "f0d9a3a2505d301a266bb41c09ce2fbaebd8572aa9340affd7e62b6d29faa8bb",
+    "ledger_format_version": "0",
+    "payload_sha256": "d4b21b99fc11d4b0fb71f901cb7d7a531e8e2e706d18baea12cd234a90c1b7a4",
+    "canonical_order": "binary_utf8_v0",
+    "synthetic_identity_only": true
+  },
+  "read_only_attestation": {
+    "actual_read_only_open_bound": false,
+    "query_only_verified": false,
+    "snapshot_counts_bound": false,
+    "snapshot_limits_bound": false,
+    "prepared_input_sha256": null,
+    "projection_sha256": null
+  },
+  "governance_receipts": {
+    "capture_authorization_receipt_sha256": null,
+    "capture_provenance_receipt_sha256": null,
+    "deletion_mechanism_receipt_sha256": null,
+    "authority_custody_receipt_sha256": null
+  },
+  "cases": [
+    {
+      "case_id": "synthetic_exact_schema_identity_is_not_capture_authority",
+      "kind": "governance_boundary",
+      "schema_identity_verified": true,
+      "capture_authorized": false,
+      "authority_custody_resolved": false,
+      "physical_deletion_resolved": false,
+      "expected_action": "BLOCK_BEFORE_PROFILE_ADMISSION"
+    },
+    {
+      "case_id": "synthetic_content_free_tombstoned_inbound_target",
+      "kind": "content_free_tombstone",
+      "tombstone": {
+        "tombstone_id": "synthetic-tombstone-target-v1",
+        "lineage_id": "synthetic-target",
+        "tombstoned_at": 240,
+        "had_outgoing_governance": false,
+        "attestation_version": "content_free_governance_v0",
+        "attestation_sha256": "27b5772bd96e5d730b82037736a2dca90f584eb92c3e5f9738ec638a37d88094",
+        "content_fields_present": false
+      },
+      "historical_inbound_relationship_retained": true,
+      "retained_revision_must_be_recarried_by_v0": true,
+      "expected_s4_action": "PRUNE_TARGET_WITHOUT_SYNTHESIZING_EVIDENCE"
+    },
+    {
+      "case_id": "synthetic_content_free_tombstoned_governance_source",
+      "kind": "governed_tombstone",
+      "tombstone": {
+        "tombstone_id": "synthetic-tombstone-source-v1",
+        "lineage_id": "synthetic-source",
+        "tombstoned_at": 260,
+        "had_outgoing_governance": true,
+        "attestation_version": "content_free_governance_v0",
+        "attestation_sha256": "0d6ff84170713ebe83c9f13711897c354a718ea551c73be5e376b17de0242cfa",
+        "content_fields_present": false
+      },
+      "expected_s4_action": "TERMINAL_REJECT_BEFORE_MAPPING"
+    },
+    {
+      "case_id": "synthetic_source_time_authority_survives_later_target_upgrade",
+      "kind": "relationship_source_time_authority_basis",
+      "source": {
+        "evidence_id": "synthetic-source-v1",
+        "recorded_at": 100,
+        "truth_tier": "verified"
+      },
+      "target_revisions": [
+        {
+          "evidence_id": "synthetic-target-v1",
+          "revision_seq": 1,
+          "recorded_at": 90,
+          "truth_tier": "observed"
+        },
+        {
+          "evidence_id": "synthetic-target-v2",
+          "revision_seq": 2,
+          "recorded_at": 200,
+          "truth_tier": "authoritative"
+        }
+      ],
+      "relationship_admitted_by_s2": true,
+      "source_time_target_evidence_id": "synthetic-target-v1",
+      "knowledge_cutoff": 250,
+      "projector_v0_cutoff_latest_target_evidence_id": "synthetic-target-v2",
+      "projector_v0_would_reject": true,
+      "expected_s4_action": "DERIVE_AND_BIND_SOURCE_TIME_BASIS_WITHOUT_CUTOFF_RECHECK"
+    },
+    {
+      "case_id": "synthetic_full_ledger_retains_post_cutoff_revision",
+      "kind": "complete_snapshot",
+      "knowledge_cutoff": 160,
+      "post_cutoff_revision": {
+        "evidence_id": "synthetic-post-cutoff-v2",
+        "recorded_at": 180
+      },
+      "present_in_snapshot": true,
+      "adapter_prefilter_allowed": false,
+      "expected_s4_action": "PRESERVE_FOR_PROJECTOR_SELECTION"
+    },
+    {
+      "case_id": "synthetic_projection_snapshot_mix_and_match",
+      "kind": "sealed_binding",
+      "snapshot_a_sha256": "71beeffc45bc5251ab9e2a55e74a870491988615279137fac333971ca1789e69",
+      "snapshot_b_sha256": "c0be1f76738b95bbd87cddce8357ca87a6c18694b9705bc203f4a0e52ac241d1",
+      "projection_prepared_from": "snapshot_a",
+      "envelope_claimed_snapshot": "snapshot_b",
+      "per_evidence_provenance_digest_present": true,
+      "expected_s4_action": "REJECT_SEALED_BINDING_MISMATCH"
+    }
+  ],
+  "expected_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CANDIDATE_EVIDENCE_INTERFACE_UNIMPLEMENTED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CONTENT_FREE_TOMBSTONE_CHANNEL_UNREPRESENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED",
+    "PROVENANCE_DIGEST_CHANNEL_UNREPRESENTED",
+    "READ_ONLY_OPEN_IDENTITY_UNBOUND",
+    "RELATIONSHIP_SOURCE_TIME_AUTHORITY_BASIS_UNREPRESENTED",
+    "SEALED_SNAPSHOT_PROJECTION_BINDING_UNREPRESENTED"
+  ],
+  "boundary": {
+    "producer_profile_reserved": false,
+    "s3_adapter_present": false,
+    "projector_invoked": false,
+    "legacy_rows_qualified": false,
+    "real_capture_authorized": false,
+    "physical_privacy_deletion_resolved": false,
+    "authority_policy_custody_resolved": false,
+    "track_b_artifact_binding_satisfied": false,
+    "state_store_surface_present": false,
+    "bridge_runtime_surface_present": false,
+    "mcp_surface_present": false,
+    "biocortex_runtime_influence": false,
+    "side_effects_unlocked": "NONE",
+    "decision": "BLOCKED_FAIL_CLOSED"
+  }
+}

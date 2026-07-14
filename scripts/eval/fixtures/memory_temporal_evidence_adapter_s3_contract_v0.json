@@ -1,0 +1,205 @@
+{
+  "schema": "agent_bridge.memory_temporal_evidence_adapter_preregistration.v0",
+  "baseline_commit": "a989cf6e09d60cb4d3d9b6d5f6a60e55ecd65259",
+  "design_status": "PREREGISTERED_BLOCKED_PENDING_S4_INTERFACE",
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "upstream_bindings": {
+    "s2": {
+      "commit": "a989cf6e09d60cb4d3d9b6d5f6a60e55ecd65259",
+      "schema_version": 43,
+      "ledger_format_version": 0,
+      "schema_sha256": "6d321d45aafe65ef06efb49c46ccf9f1931624aada9e8873d7e29765826e3aa0",
+      "migration_sha256": "f0d9a3a2505d301a266bb41c09ce2fbaebd8572aa9340affd7e62b6d29faa8bb",
+      "files": {
+        "Cargo.lock": "4e2e14ff2806796690da12831c5f9a19a64497401b445b2e8501482ccb0ab4e1",
+        "crates/store/Cargo.toml": "cbc31c4c465267a39225f9dd520bcf00d64b7076f924f99643ffe81b44b6f062",
+        "crates/store/src/sqlite.rs": "81d512cd8323d027aae898a846c2b5a4af53aa42ff7d31b9194ebfedc8a2e7d3",
+        "crates/store/src/sqlite/temporal_evidence.rs": "1792da840e16de506049bffdca2c3e5fb498003aa811ec56d633fab651e35492",
+        "crates/store/src/sqlite/temporal_evidence/tests.rs": "acba71edc6a8809d8761f13c802c4408a51ce211642b437037a35e56a12d6e61",
+        "docs/design/MEMORY_TEMPORAL_EVIDENCE_SUBSTRATE_S2_2026_07_14.md": "dd837929fdd1acf29be4c17ce06f3dacd4ae25f2bb13cf6ed190b84f65098f5b",
+        "docs/reports/goal-c-u/2026-07-14-biocortex-ab-track-b-evidence-substrate-s2.md": "974d45a40b66517ce2c4445731c76f8dc0af66f976fa634cbf024ab7b020a337",
+        "scripts/check-memory-temporal-evidence-substrate-s2.sh": "169906cbe3104b6cf6fdbaa5de74bdaee434e6668efce502da70d0569880989d",
+        "scripts/eval/check_memory_temporal_evidence_substrate_s2.py": "229afa062c1887c0b8337f14b679d70c86983af3261a8d1e7f45739adb8cee1b",
+        "scripts/eval/fixtures/memory_temporal_evidence_substrate_s2.expected.v0.tsv": "d139c6e6efbbbe2032b39478826cbc8b148691cf7f594314c30aeb15d7a363bf",
+        "scripts/eval/fixtures/memory_temporal_evidence_substrate_s2_contract_v0.json": "4dc7f459baa6de49755b79578c1ffdd6818c56d7f15916af72b024ef04c793da",
+        "scripts/eval/fixtures/memory_temporal_evidence_substrate_s2_synthetic_v0.json": "28ed92bbf909a9ca24579966a54cee394545d798efd0fae0db8c572ddc5955da"
+      }
+    },
+    "projector_v0": {
+      "path": "crates/bridge/src/memory_truth.rs",
+      "sha256": "2e46a521332820b07171b425c95004f35a98887c7c49a2d78baf7740f07195a4",
+      "schema": "agent_bridge.truth_projection.v0",
+      "request_type": "TruthProjectionRequest",
+      "independent_tombstone_channel": false,
+      "provenance_digest_channel": false,
+      "source_time_authority_basis": false,
+      "sealed_snapshot_projection_binding": false
+    },
+    "legacy_preflight": {
+      "path": "crates/bridge/src/memory_truth_adapter.rs",
+      "sha256": "c459e96919778c24b0bc699653d8c12b83332e6318b7298deee071a01e90e023",
+      "profile": "MutableSqliteV41",
+      "gap_count": 8,
+      "mapping_present": false,
+      "projector_invoked": false
+    },
+    "track_b": {
+      "unrepresented_marker": "CANDIDATE_EVIDENCE_SUBSTRATE_INTERFACE_UNREPRESENTED",
+      "files": {
+        "docs/reports/goal-c-u/2026-07-14-biocortex-track-b-artifact-dependency-graph.md": "99092b968afe09bf96849c64558b8fce3785787b502493428dcb2e8366585395",
+        "scripts/check-biocortex-ab-track-b-artifact-dependency-graph.sh": "20e0b36d583ad729b992a423834dbb7c05245c3689a5887e53fb04103222b001",
+        "scripts/eval/check_biocortex_ab_track_b_artifact_dependency_graph.py": "cd92c7c309b4cee07f16256a59b33abb3da4b526c825780e7a3e92ab30d53b26",
+        "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph.expected.v0.tsv": "8c0025b8e7e905b130ffde3e3c9a070ef2f0198941a84193b938e541f426f088",
+        "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph_v0.json": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af"
+      }
+    }
+  },
+  "gap_contract": {
+    "count": 10,
+    "codes": [
+      "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+      "CANDIDATE_EVIDENCE_INTERFACE_UNIMPLEMENTED",
+      "CAPTURE_PROVENANCE_UNATTESTED",
+      "CONTENT_FREE_TOMBSTONE_CHANNEL_UNREPRESENTED",
+      "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+      "PRODUCTION_PRODUCER_PROFILE_UNADMITTED",
+      "PROVENANCE_DIGEST_CHANNEL_UNREPRESENTED",
+      "READ_ONLY_OPEN_IDENTITY_UNBOUND",
+      "RELATIONSHIP_SOURCE_TIME_AUTHORITY_BASIS_UNREPRESENTED",
+      "SEALED_SNAPSHOT_PROJECTION_BINDING_UNREPRESENTED"
+    ]
+  },
+  "s4_interface_contract": {
+    "prepared_type": {
+      "name": "PreparedTemporalEvidenceV1",
+      "crate_internal": true,
+      "serde_serializable": false,
+      "opaque_to_callers": true,
+      "mapping_version_required": true
+    },
+    "read_only_snapshot": {
+      "producer_identity_fields": [
+        "schema_meta_version",
+        "schema_digest",
+        "migration_digest",
+        "ledger_format_version"
+      ],
+      "snapshot_binding_fields": [
+        "payload_sha256",
+        "payload_bytes",
+        "counts",
+        "limits",
+        "knowledge_cutoff",
+        "canonical_order"
+      ],
+      "actual_read_only_attestation_required": true,
+      "full_ledger_required": true,
+      "adapter_prefilter_at_cutoff_allowed": false
+    },
+    "content_free_tombstone_channel": {
+      "independent_from_evidence": true,
+      "fields": [
+        "tombstone_id",
+        "lineage_id",
+        "tombstoned_at",
+        "had_outgoing_governance",
+        "attestation_version",
+        "attestation_sha256"
+      ],
+      "forbidden_fields": [
+        "aliases",
+        "claim",
+        "observed_at",
+        "source_keys",
+        "truth_tier",
+        "validity",
+        "value"
+      ],
+      "placeholder_evidence_allowed": false,
+      "governed_source_terminal": true,
+      "inbound_target_prunable": true
+    },
+    "relationship_authority_basis": {
+      "basis": "complete_snapshot_latest_target_strictly_before_source_recorded_at",
+      "origin": "derived_from_complete_validated_snapshot",
+      "persisted_at_original_admission": false,
+      "fields": [
+        "source_evidence_id",
+        "source_recorded_at",
+        "target_lineage_id",
+        "target_evidence_id",
+        "target_revision_seq",
+        "target_recorded_at",
+        "target_truth_tier"
+      ],
+      "same_second_target_allowed": false,
+      "cutoff_latest_tier_recheck_allowed": false,
+      "bound_by_snapshot_digest": true,
+      "original_physical_admission_witness_claimed": false
+    },
+    "provenance_channel": {
+      "fields": [
+        "source_key",
+        "provenance_sha256"
+      ],
+      "lossless_preservation_required": true
+    },
+    "sealed_projection_envelope": {
+      "fields": [
+        "producer_identity",
+        "snapshot_payload_sha256",
+        "snapshot_payload_bytes",
+        "snapshot_counts",
+        "snapshot_limits",
+        "knowledge_cutoff",
+        "as_of",
+        "mapping_version",
+        "prepared_input_sha256",
+        "projection_sha256"
+      ],
+      "atomic_map_and_project": true,
+      "mix_and_match_rejected": true
+    },
+    "cross_biocortex_boundary": {
+      "request_scoped_opaque_handles": true,
+      "nonce_hmac_binding": true,
+      "raw_identifiers_values_and_sources_serializable": false,
+      "persistence_allowed": false,
+      "network_forwarding_allowed": false
+    }
+  },
+  "governance_boundary": {
+    "fixture_only": true,
+    "real_capture_authorized": false,
+    "private_material_allowed": false,
+    "production_profile_active": false,
+    "physical_privacy_deletion_resolved": false,
+    "authority_policy_custody_resolved": false,
+    "capture_authorization_receipt_sha256": null,
+    "capture_provenance_receipt_sha256": null,
+    "deletion_mechanism_receipt_sha256": null,
+    "authority_custody_receipt_sha256": null,
+    "caller_profile_allowed": false,
+    "caller_tier_allowed": false,
+    "raw_values_serializable": false,
+    "legacy_rows_qualified": false
+  },
+  "track_b_boundary": {
+    "candidate_interface_status": "PREREGISTERED_NOT_IMPLEMENTED_OR_BOUND",
+    "artifact_binding_satisfied": false,
+    "dependency_graph_rewritten": false,
+    "live_binding_ledger_rewritten": false,
+    "real_run_admission_rewritten": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "source_contract": {
+    "rust_delta_allowed": false,
+    "producer_profile_reserved": false,
+    "s3_adapter_present": false,
+    "projector_invoked": false,
+    "state_store_surface_present": false,
+    "bridge_runtime_surface_present": false,
+    "mcp_surface_present": false,
+    "biocortex_runtime_influence": false
+  }
+}
