@@ -731,17 +731,45 @@ four-gate q72 predecessor state/prefix: threshold 642,206, shortfall 3,230, with
 no executed candidate row and no asserted exact drop.
 Together the current ledgers cover 2,904 + 2,664 = 5,568 candidate rows.
 
-The next minimum routes are evidence-driven and still require contract review.
-M should append the next standard rung K=622,592 with a separately pinned
-direct-v2 K622592/C34 wrapper.  Relative to M33 it must add only K=622,592, raise
-the candidate/output ceiling and retained-K/candidate-count capability from
-606,208/33 to 622,592/34, leave every other cap unchanged, and replay freshly
-through q88.  The q88 canonical is post-replay comparison evidence only.  The
-standard rung has 14,599 terms of headroom over the local minimum 607,993; that
-minimum is threshold evidence, not a post-hoc execution candidate.  D should
-keep K=655,360/C37 and all caps fixed, change only horizon 72 -> 74, and use a
-fresh q1 replay to locate the next failure or resource boundary.  Its q72
-canonical remains post-replay evidence, and q73/q74 outcomes are not
-precommitted.  The q72-only K=638,976 exclusion cannot be extrapolated across
-cadence, prefix or horizon changes.  Certified depths remain M3/D2, and there is
-no boundary, witness, READY or certificate authority.
+Those follow-on discriminators are complete.  M's direct-v2 K622592/C34 wrapper
+and capability manifest SHA-256 values are
+`f4e676da40535903301181cf482119e051066b90921793e34152403b3b74b976`
+and `3c2b66149d524cc63a4d04838b3eec47fb69677466fe1f208e226df92bf0dac3`.
+Relative to M33 it appends only K=622,592 as index 33 and raises only the
+candidate/output and retained-K/candidate-count ceilings; all other caps remain
+fixed.  A fresh q1--88 replay precedes loading the old q88 canonical.  The result
+commits 88/88 checkpoints with 88 records/history entries and 2,992 rows.  q88
+pre-count is 689,242; index 33/K=622,592 drops 66,650 terms and 33,833,242,742
+ticks, commits E=1,700,535,038,508,063 ticks, and closes the ranking boundary at
+3,434,232 > 3,434,132.  No failure or resource abort is present.  Records/history
+SHA-256 values are
+`8832c0fd7c61146f2aa3c5e9a3a827972c459a126c2d371b5a5c41bac700c804`
+and `58cd214e13f4c122f710aad62ac0e52ead1aed0fa7d8a7e2498ea6013c7f4726`.
+The 78,218-byte screen and 821,781-byte canonical SHA-256 values are
+`6867dda2d6bd34ab2eed6b31d02a587e16762263a493e9890d0caa40f23a58a4`
+and `0074b1eea5fa574378d5a9fae9e748e7145efaa0c96b622ddf50587a72a2551a`.
+
+D keeps K=655,360/C37 and every candidate, policy and kernel cap fixed, changing
+only horizon 72 -> 74.  Its fresh q1 replay loads the q72 canonical only after
+execution and commits 74/74 checkpoints, 74 records/history entries and 2,738
+rows.  q73 pre-count is 794,529; index 36/K=655,360 drops 139,169 terms and
+100,499,996,927 ticks, commits E=2,289,146,735,930,407 ticks and has ranking
+boundary 3,668,234 > 3,667,375.  q74 pre-count is 726,450; the same index drops
+71,090 terms and 44,071,221,987 ticks, commits E=2,289,190,807,152,394 ticks and
+has exact ranking tie 4,009,413 = 4,009,413.  The terminal branch is
+`Q73_AND_Q74_SUCCESS_HORIZON_REACHED`; there is no failure or resource abort.
+Records/history SHA-256 values are
+`f765797dad4f6892524fc651a259786dff9c10187a6c634fc088fd3508c1e89f`
+and `d521cdf189b54254cf3ca3d0e9033b52c90ea6ec91dc571d95a605e520972ff8`.
+The 117,108-byte screen and 773,489-byte canonical SHA-256 values are
+`5e2e077a9cab2a2b83f9830d755bafb7cc6dfa1d1c8a1ffade840d09e5016376`
+and `4421f5973253968167b1c8bd77e024b18450325ea9581ed39dbe975ec8163ec9`.
+The current ledgers cover 2,992 + 2,738 = 5,730 rows.
+
+The next minimum routes freeze ladders and caps.  M keeps K=622,592/C34 and
+extends only horizon 88 -> 90; D keeps K=655,360/C37 and extends only horizon
+74 -> 76.  Both require fresh q1 replay, with the current canonicals admitted
+only afterward as post-replay evidence and all new checkpoint outcomes left
+uncommitted.  K=607,993 and K=638,976 remain local evidence for their original
+fixed predecessor state/prefix and cannot be extrapolated.  Certified depths
+remain M3/D2, with no boundary, witness, READY or certificate authority.

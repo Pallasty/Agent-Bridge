@@ -800,6 +800,62 @@ so they are versioned normally and are not added to the preservation-only
   success38/failure32 and row7 schemas, 11 components/10 custody entries and the
   exact 72-record/2,664-row canonical ledger.  No full replay runs in the default
   suite.
+- `hubbard_l8_adaptive_k_arithmetic_k622592_c34.py`: 21,957-byte fail-closed
+  direct-v2 M capability wrapper with source SHA-256
+  `f4e676da40535903301181cf482119e051066b90921793e34152403b3b74b976`
+  and manifest SHA-256
+  `3c2b66149d524cc63a4d04838b3eec47fb69677466fe1f208e226df92bf0dac3`.
+  Relative to M33 it appends only K=622,592, changes retained K 606,208 ->
+  622,592 and candidate capacity 33 -> 34, and leaves all other capability limits
+  fixed; M33 and same-K D36 are non-executed route/cross-route references.
+- `test_hubbard_l8_adaptive_k_arithmetic_k622592_c34.py`: 22,229-byte exact
+  wrapper/base/route/cross-route pin, limit-delta, C34/C35 boundary, layer and
+  manifest regression suite.  Its source SHA-256 is
+  `7fd4700bc3be8eec606e32fa72844a7c299283abd745d7160d0c36259e4a29e3`.
+- `hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q88_screen.py`
+  and its `*_transcript.json`: fixed-q88 M34 fresh replay.  The 78,218-byte screen
+  source SHA-256 is
+  `6867dda2d6bd34ab2eed6b31d02a587e16762263a493e9890d0caa40f23a58a4`.
+  The M33 screen/canonical are post-replay evidence only.  The route commits
+  88/88 checkpoints, 88 history entries and 2,992 rows.  At q88, pre-count
+  689,242 selects index 33/K=622,592, dropping 66,650 terms and 33,833,242,742
+  ticks; E becomes 1,700,535,038,508,063 and the ranking boundary is
+  3,434,232 > 3,434,132.  Branch `Q88_INDEX33_FIRST_FEASIBLE_SUCCESS` has no
+  failure or resource abort.  Records/history SHA-256 values are
+  `8832c0fd7c61146f2aa3c5e9a3a827972c459a126c2d371b5a5c41bac700c804`
+  and `58cd214e13f4c122f710aad62ac0e52ead1aed0fa7d8a7e2498ea6013c7f4726`.
+  The 821,781-byte canonical SHA-256 is
+  `0074b1eea5fa574378d5a9fae9e748e7145efaa0c96b622ddf50587a72a2551a`.
+- `test_hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q88_screen.py`:
+  35,686-byte static, synthetic and opt-in exact-replay suite with source SHA-256
+  `3617e92e356354bc2c75137bddbfbabbc9ecd15a83c3935a96bae40561d26f22`.
+  It closes direct-parent execution, route/cross-route custody, all q88 terminal
+  paths, resource pass-through, raw67/final96 schemas, 11 components/10 custody
+  entries, and the exact 88-record/2,992-row canonical; default tests do not replay.
+- `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q74_screen.py`
+  and its `*_transcript.json`: same-cap D37 horizon extension.  The 117,108-byte
+  screen source SHA-256 is
+  `5e2e077a9cab2a2b83f9830d755bafb7cc6dfa1d1c8a1ffade840d09e5016376`.
+  It changes only horizon 72 -> 74, replays from q1, and loads the q72 canonical
+  only afterward.  q73 pre-count 794,529 selects index 36/K=655,360, drops
+  139,169 terms and 100,499,996,927 ticks, commits E=2,289,146,735,930,407 and
+  closes 3,668,234 > 3,667,375.  q74 pre-count 726,450 selects the same index,
+  drops 71,090 terms and 44,071,221,987 ticks, commits E=2,289,190,807,152,394
+  and closes the exact tie 4,009,413 = 4,009,413.  Branch
+  `Q73_AND_Q74_SUCCESS_HORIZON_REACHED` has no failure or resource abort.  The
+  ledger has 74 records/history entries and 2,738 rows; records/history SHA-256
+  values are
+  `f765797dad4f6892524fc651a259786dff9c10187a6c634fc088fd3508c1e89f`
+  and `d521cdf189b54254cf3ca3d0e9033b52c90ea6ec91dc571d95a605e520972ff8`.
+  The 773,489-byte canonical SHA-256 is
+  `4421f5973253968167b1c8bd77e024b18450325ea9581ed39dbe975ec8163ec9`.
+- `test_hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q74_screen.py`:
+  56,179-byte static, synthetic and opt-in exact-replay suite with source SHA-256
+  `3a767b45c08e84f25a37e1f25a18226f409b7f59d6d369c76b22d09e188f0ea6`.
+  It closes all five terminal branches and three abort kinds per checkpoint,
+  post-replay-only predecessor custody, raw67/final96 schemas, 11 components/10
+  custody entries, and the exact 74-record/2,738-row canonical; default tests do
+  not replay.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

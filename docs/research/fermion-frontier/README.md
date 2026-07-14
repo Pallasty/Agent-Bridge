@@ -653,18 +653,49 @@ four-gate q72 predecessor state/prefix: the measured threshold is 642,206 and th
 shortfall is 3,230; no candidate row was executed and no exact drop is asserted.
 Together the two current ledgers cover 5,568 candidate rows.
 
-The next minimum routes are concrete but still require contract review.  M should
-append the next standard rung `K=622,592` with a separately pinned direct-v2
-`K622592/C34` wrapper, raise only its candidate/output ceiling and capability,
-and replay freshly through q88; the current q88 canonical remains post-replay
-comparison evidence only.  That rung has 14,599 terms of headroom over the local
-q88 threshold; `K=607,993` remains threshold evidence, not a post-hoc ladder rung.
-D should keep `K=655,360/C37` and all caps fixed, extend only horizon 72 -> 74,
-and locate the next failure or resource boundary in a fresh q1 replay.  Its q72
-canonical is likewise post-replay evidence only, and q73/q74 outcomes remain
-uncommitted.  The q72-only `K=638,976` exclusion must not be extrapolated to a
-changed cadence, prefix or horizon.  These diagnostics still leave certified
-depths at M3/D2 and create no boundary, witness, READY or certificate authority.
+Those follow-on routes are now complete.  M's separately pinned direct-v2
+`K622592/C34` wrapper and manifest have SHA-256 values
+`f4e676da40535903301181cf482119e051066b90921793e34152403b3b74b976` /
+`3c2b66149d524cc63a4d04838b3eec47fb69677466fe1f208e226df92bf0dac3`.
+It appends only `K=622,592` as index 33, raises only the retained-K,
+candidate-count and candidate/output ceilings, and performs a fresh q1--88 replay;
+the old M33 q88 canonical is loaded only afterward.  All 88 checkpoints commit,
+giving 88 records/history entries and 2,992 rows.  q88 reaches 689,242 terms and
+selects index 33/`K=622,592`, dropping 66,650 terms and 33,833,242,742 ticks; E
+becomes 1,700,535,038,508,063 ticks.  The exact ranking boundary is
+`3,434,232 > 3,434,132`, and there is no failure or resource abort.  Records/history
+SHA-256 values are
+`8832c0fd7c61146f2aa3c5e9a3a827972c459a126c2d371b5a5c41bac700c804` /
+`58cd214e13f4c122f710aad62ac0e52ead1aed0fa7d8a7e2498ea6013c7f4726`;
+screen/canonical SHA-256 values are
+`6867dda2d6bd34ab2eed6b31d02a587e16762263a493e9890d0caa40f23a58a4` /
+`0074b1eea5fa574378d5a9fae9e748e7145efaa0c96b622ddf50587a72a2551a`,
+and the canonical is 821,781 bytes.
+
+D keeps `K=655,360/C37` and every cap fixed, extending only horizon 72 -> 74 in a
+fresh q1 replay; the q72 canonical is post-replay evidence only.  q73 reaches
+794,529 terms, drops 139,169 terms and 100,499,996,927 ticks, then commits
+E=2,289,146,735,930,407 with ranking boundary `3,668,234 > 3,667,375`.  q74 reaches
+726,450 terms, drops 71,090 terms and 44,071,221,987 ticks, then commits
+E=2,289,190,807,152,394 at the exact tie `4,009,413 = 4,009,413`.  Both select
+index 36/`K=655,360`.  The terminal branch is
+`Q73_AND_Q74_SUCCESS_HORIZON_REACHED`, with no failure or resource abort; the
+ledger contains 74 records/history entries and 2,738 rows.  Records/history
+SHA-256 values are
+`f765797dad4f6892524fc651a259786dff9c10187a6c634fc088fd3508c1e89f` /
+`d521cdf189b54254cf3ca3d0e9033b52c90ea6ec91dc571d95a605e520972ff8`;
+screen/canonical SHA-256 values are
+`5e2e077a9cab2a2b83f9830d755bafb7cc6dfa1d1c8a1ffade840d09e5016376` /
+`4421f5973253968167b1c8bd77e024b18450325ea9581ed39dbe975ec8163ec9`,
+and the canonical is 773,489 bytes.  The two current ledgers cover 5,730 rows.
+
+The next minimum routes keep each ladder and all caps fixed.  M keeps
+`K=622,592/C34` and changes only horizon 88 -> 90; D keeps `K=655,360/C37` and
+changes only horizon 74 -> 76.  Each must replay freshly from q1, load the current
+canonical only as post-replay evidence, and leave q89/q90 and q75/q76 outcomes
+uncommitted.  `K=607,993` and `K=638,976` remain evidence scoped to their original
+fixed predecessor state/prefix and cannot be extrapolated.  Certified depths stay
+M3/D2; these diagnostics create no boundary, witness, READY or certificate authority.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

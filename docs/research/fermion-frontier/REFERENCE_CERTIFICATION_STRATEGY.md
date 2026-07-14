@@ -959,15 +959,46 @@ SHA 分别为
 state/prefix：实测 threshold 642,206、shortfall 3,230；没有执行 candidate row，也不
 声明 exact drop。两份当前账本合计覆盖 5,568 行。
 
-下一最小判别路线由这些结果驱动，但合同仍须先审计。M 应沿既有标准 ladder append
-`K=622,592`，建立独立 direct-v2 `K622592/C34` wrapper；相对 M33 只把
-candidate/output ceiling 与 retained-K/candidate-count capability 从 606,208/33 提到
-622,592/34，其余 caps 不变，并 fresh replay 至 q88。当前 q88 canonical 仍只能在
-replay 后比较。标准档比局部 minimum 607,993 多 14,599；该 minimum 是 threshold
-evidence，不是事后新增的执行档位。D 应保持 `K=655,360/C37` 与全部 caps 不变，只把
-horizon 72 -> 74，并从 q1 fresh replay 以定位下一 failure/resource boundary；q72
-canonical 仍只作 post-replay evidence，q73/q74 outcome 不得 precommit。不能把 q72 上
-对 `K=638,976` 的局部排除外推到不同 cadence、prefix state 或 later horizon。
+上述后续判别路线现已完成。M 的独立 direct-v2 `K622592/C34` wrapper/manifest SHA
+分别为
+`f4e676da40535903301181cf482119e051066b90921793e34152403b3b74b976` 与
+`3c2b66149d524cc63a4d04838b3eec47fb69677466fe1f208e226df92bf0dac3`。它相对
+M33 只 append `K=622,592` 为 index 33，并只提高 candidate/output 与
+retained-K/candidate-count ceilings；其余 caps 固定。q1--88 fresh replay 先于旧 q88
+canonical 的 post-replay 载入。结果为 88/88 commits、88 个 records/history entries
+和 2,992 行。q88 pre-count 689,242，选择 index 33/`K=622,592`，丢弃 66,650 项、
+drop 33,833,242,742 ticks，commit 到 `1700535038508063/2^64`；ranking boundary 为
+`3434232 > 3434132`，没有 failure 或 resource abort。records/history SHA 分别为
+`8832c0fd7c61146f2aa3c5e9a3a827972c459a126c2d371b5a5c41bac700c804` 与
+`58cd214e13f4c122f710aad62ac0e52ead1aed0fa7d8a7e2498ea6013c7f4726`；screen/canonical
+SHA 分别为
+`6867dda2d6bd34ab2eed6b31d02a587e16762263a493e9890d0caa40f23a58a4` 与
+`0074b1eea5fa574378d5a9fae9e748e7145efaa0c96b622ddf50587a72a2551a`，canonical
+大小为 821,781 bytes。
+
+D 保持 `K=655,360/C37` 与所有 candidate/policy/kernel caps 不变，只把 horizon
+72 -> 74。fresh q1 replay 后才载入 q72 canonical，得到 74/74 commits、74 个
+records/history entries 和 2,738 行。q73 pre-count 794,529，index 36/`K=655,360`
+丢弃 139,169 项、drop 100,499,996,927 ticks，commit 到
+`2289146735930407/2^64`，ranking boundary 为 `3668234 > 3667375`。q74 pre-count
+726,450，同一 index 丢弃 71,090 项、drop 44,071,221,987 ticks，commit 到
+`2289190807152394/2^64`，ranking boundary 为 exact tie
+`4009413 = 4009413`。terminal branch 为
+`Q73_AND_Q74_SUCCESS_HORIZON_REACHED`，没有 failure 或 resource abort。
+records/history SHA 分别为
+`f765797dad4f6892524fc651a259786dff9c10187a6c634fc088fd3508c1e89f` 与
+`d521cdf189b54254cf3ca3d0e9033b52c90ea6ec91dc571d95a605e520972ff8`；screen/canonical
+SHA 分别为
+`5e2e077a9cab2a2b83f9830d755bafb7cc6dfa1d1c8a1ffade840d09e5016376` 与
+`4421f5973253968167b1c8bd77e024b18450325ea9581ed39dbe975ec8163ec9`，canonical
+大小为 773,489 bytes。当前两份账本合计覆盖 5,730 行。
+
+下一最小路线保持 ladder 与全部 caps 固定：M 保持 `K=622,592/C34`，只把 horizon
+88 -> 90；D 保持 `K=655,360/C37`，只把 horizon 74 -> 76。两者都必须从 q1 fresh
+replay，当前 canonical 仅作 post-replay evidence，q89/q90 与 q75/q76 outcomes 均不
+precommit。`K=607,993` 与 `K=638,976` 仍只适用于各自原始 fixed predecessor
+state/prefix，不能外推。认证深度保持 M3/D2，不产生 boundary、witness、READY 或
+certificate authority。
 
 这些 screens 不发布 authority-bearing policy artifact；任何下一 ladder、horizon 与 caps
 仍必须在 replay 前独立 precommit。它们不发布 child boundary/transition/sidecar，不组合
