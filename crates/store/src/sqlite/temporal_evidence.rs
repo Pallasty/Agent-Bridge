@@ -3110,5 +3110,10 @@ impl SqliteStore {
     }
 }
 
+#[cfg(any(test, feature = "temporal-evidence-s4-synthetic"))]
+mod projection_v1;
+#[cfg(any(test, feature = "temporal-evidence-s4-synthetic"))]
+pub use projection_v1::*;
+
 #[cfg(test)]
 mod tests;

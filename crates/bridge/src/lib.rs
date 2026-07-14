@@ -58,6 +58,10 @@ pub mod lswr_snapshot_wrapper_descriptor;
 pub mod lswr_snapshot_wrapper_exposure_dry_run;
 pub mod lswr_snapshot_wrapper_preflight_report;
 pub mod mcp_tools;
+/// Default-off, synthetic-only one-shot adapter; no runtime caller is wired.
+#[cfg(feature = "temporal-evidence-s4-synthetic")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod memory_temporal_evidence_adapter_v1;
 /// Internal raw-envelope resolver; no MCP, transport, or cross-repository API.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod memory_truth;

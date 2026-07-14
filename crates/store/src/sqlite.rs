@@ -7,6 +7,19 @@ use std::path::{Path, PathBuf};
 use tokio_rusqlite::{params, rusqlite, Connection};
 
 mod temporal_evidence;
+#[cfg(feature = "temporal-evidence-s4-synthetic")]
+pub use temporal_evidence::{
+    temporal_truth_project_read_only_synthetic_v1, BoundTemporalTruthProjectionV1,
+    SyntheticTemporalTruthProjectionPermitV1, TemporalTruthAuthorityBasisViewV1,
+    TemporalTruthDispositionReasonKindV1, TemporalTruthDispositionReasonViewV1,
+    TemporalTruthEvidenceDispositionViewV1, TemporalTruthEvidenceProvenanceViewV1,
+    TemporalTruthProjectedClaimViewV1, TemporalTruthProjectionLimitsV1,
+    TemporalTruthProjectionRequestV1, TemporalTruthProjectionV1Error, TemporalTruthRequiredClaimV1,
+    TemporalTruthSnapshotCountsV1, TemporalTruthSourceBindingViewV1, TemporalTruthStateV1,
+    TemporalTruthSuppressionKindV1, TemporalTruthTemporalStateV1, TemporalTruthTierV1,
+    TEMPORAL_TRUTH_PROJECTION_V1_MAPPING, TEMPORAL_TRUTH_PROJECTION_V1_MODE,
+    TEMPORAL_TRUTH_PROJECTION_V1_PROFILE, TEMPORAL_TRUTH_PROJECTION_V1_SCHEMA,
+};
 
 // Local alias matches the `E` parameter that `tokio_rusqlite::Connection::call`
 // expects from the user closure.
