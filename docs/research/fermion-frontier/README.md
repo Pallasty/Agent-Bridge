@@ -549,13 +549,32 @@ The two exact ledgers cover 84x32 plus 70x35 = 5,138 candidate rows.  Both remai
 diagnostic-only and leave certified depths at 3/2.  Every one of the 35 current D
 candidates has now been selected at least once.
 
-The next bounded routes now split again.  M can stay at C32 by replacing
-`K=65,536`, which is infeasible in all 84 attempted rows and never selected, with
-standard `K=589,824`; this preserves the selected/state trajectory but deliberately
-does not claim strict candidate-row-prefix identity.  The new rung covers q84's
-minimum by 3,443; a strict append-only row-prefix route would instead require C33.
-D requires no new capability yet: a same-cap C35 horizon-only screen should replay
-from q1 through aligned q72, using the q70 artifact only as post-replay evidence.
+That split stage is complete.  M's retained-K-only direct-v2 wrapper raises the
+maximum from 524,288 to 589,824 while candidate capacity stays 32.  Its ladder
+removes never-feasible `K=65,536` and appends `K=589,824`.  q1--83 preserve every
+selected K and propagated state, while old indices 1--31 map to new indices 0--30;
+the candidate rows are exact only after this configured-K normalization.  q84 then
+selects new index 31/K=589,824 with drop 142,263,012,225 ticks and
+46,578,773,421 ticks of feasibility margin, reaching 84/84 committed.  Peak/visits
+remain `694,130/96,423,989`; canonical transcript SHA-256 is
+`cf93ebcccde4ff10adee2e600a13ef1c0f979e89fe151fca16d4eae79da2420f`.
+All 32 current M candidates have now been selected at least once.
+
+D changes no candidate, policy or kernel capability.  Its q72 screen replays from
+q1 and uses the q70 screen/transcript only as non-executed post-replay evidence.
+The complete q1--70 records/history/35-row ledgers remain exact, but q71/gates
+280--283 fails at pre-count 761,190 and minimum effective `K=614,584`, 8,376
+above the current maximum; q72 is not attempted.  Peak/visits are
+`761,190/90,141,781`; canonical transcript SHA-256 is
+`f21288cf0c37dc86fedc9ac195f4efe390dcc913640caa7ca79f02e6297d20f8`.
+The two exact ledgers cover 84x32 plus 71x35 = 5,173 candidate rows.  Both remain
+diagnostic-only and leave certified depths at 3/2.
+
+The next bounded routes split once more.  M needs no new capability: a same-cap
+K=589,824/C32 horizon-only screen should replay from q1 through aligned q86, with
+the q84 artifact used only after replay.  D must append standard `K=622,592` to
+form C36 and replay through q72; it covers q71's minimum by 8,008.  Every current
+D35 candidate has been selected, so no trajectory-neutral deletion is available.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

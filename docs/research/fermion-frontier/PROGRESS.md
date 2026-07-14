@@ -620,10 +620,31 @@ boundary, transition, READY component, certified-depth or other authority-bearin
 artifact changes.  All 35 current D candidate indices have now been selected at
 least once.
 
-The next routes split by observable.  M's q84 ledger proves that K=65,536 is
-infeasible in 84/84 rows and never selected.  Replacing that rung with standard
-K=589,824 therefore keeps C32 and preserves every selected K and propagated state,
-while intentionally changing the candidate-row set; the rung covers q84's minimum
-by 3,443.  A strict row-prefix route would require C33 instead.  D has reached q70,
-so its next discriminator is a same-cap K=606,208/C35 horizon-only replay through
-aligned q72, with the q70 artifact serving only as post-replay prefix evidence.
+Those split routes are complete.  M's direct-v2 wrapper changes only retained K
+524,288 -> 589,824 while keeping candidate capacity 32.  Its replacement ladder
+deletes K=65,536 and appends K=589,824.  q1--83 preserve selected-K history,
+propagation and committed state exactly; because old candidate indices 1--31 shift
+to new 0--30, candidate rows are normalized-exact by configured K rather than raw
+row-prefix exact.  q83 still selects K=573,440 at new index 30.  q84 selects new
+index 31/K=589,824 with pre-count 694,130, drop 142,263,012,225 ticks, dropped
+count 104,306 and feasibility margin 46,578,773,421 ticks, reaching 84/84
+committed.  Peak/visits remain 694,130/96,423,989, and the canonical SHA-256 is
+`cf93ebcccde4ff10adee2e600a13ef1c0f979e89fe151fca16d4eae79da2420f`.
+All 32 M candidate indices now occur in selected history.
+
+D's same-cap outer screen changes only horizon 70 -> 72 and replays from q1; the
+q70 screen/transcript are post-replay references and never execution or state
+inputs.  q1--70 records, selected history and all 35 rows remain exact.  q71/gates
+280--283 fails at pre-count 761,190, minimum effective K 614,584 and excess
+8,376, so q72 is not attempted.  Peak/visits are 761,190/90,141,781, and the
+canonical SHA-256 is
+`f21288cf0c37dc86fedc9ac195f4efe390dcc913640caa7ca79f02e6297d20f8`.
+The two ledgers cover 84x32 plus 71x35 = 5,173 rows.  No policy, witness, boundary,
+transition, READY component, certified-depth or other authority-bearing artifact
+changes.
+
+The next M discriminator is same-cap K=589,824/C32 through aligned q86, using the
+q84 artifact only as post-replay evidence.  D needs a direct-v2 K=622,592/C36
+capability wrapper and an append-only replay through q72; that standard rung covers
+q71's minimum by 8,008.  All D35 candidates have been selected, so deletion would
+change the selected/state trajectory.
