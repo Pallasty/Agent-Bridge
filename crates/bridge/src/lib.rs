@@ -62,6 +62,10 @@ pub mod mcp_tools;
 #[cfg(feature = "temporal-evidence-s4-synthetic")]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod memory_temporal_evidence_adapter_v1;
+/// Default-off S5 source-artifact binding; no transport or runtime caller.
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod memory_track_b_candidate_evidence_v1;
 /// Internal raw-envelope resolver; no MCP, transport, or cross-repository API.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod memory_truth;

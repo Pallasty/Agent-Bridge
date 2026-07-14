@@ -15,6 +15,10 @@ linux-native-avatar = ["dep:smithay-client-toolkit", "dep:wayland-client"]
 biocortex-retrieval-shadow = []
 biocortex-retrieval-opt-in = ["biocortex-retrieval-shadow"]
 temporal-evidence-s4-synthetic = ["ab-store/temporal-evidence-s4-synthetic"]
+temporal-evidence-s5-candidate-synthetic = [
+    "temporal-evidence-s4-synthetic",
+    "ab-store/temporal-evidence-s5-candidate-synthetic",
+]
 # Reserved marker for legacy Seed substrate UX. The AB runtime no longer links
 # `ab-seed-bridge`; CLI/MCP surfaces report build-time disabled. Build the
 # standalone `crates/seed-bridge` crate for historical replay experiments.

@@ -81,6 +81,71 @@ fn projection_request(as_of: i64, knowledge_cutoff: i64) -> TemporalTruthProject
     .expect("valid S4 projection request")
 }
 
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+fn candidate_request(
+    as_of: i64,
+    knowledge_cutoff: i64,
+    referent_id: &str,
+    predicate_id: &str,
+) -> TemporalTruthProjectionRequestV1 {
+    TemporalTruthProjectionRequestV1::try_new(
+        as_of,
+        knowledge_cutoff,
+        vec![
+            TemporalTruthRequiredClaimV1::try_new(referent_id, predicate_id)
+                .expect("valid S5 required claim"),
+        ],
+        projection_limits(),
+    )
+    .expect("valid S5 projection request")
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+fn candidate_case_id(scope: &str) -> String {
+    format!(
+        "case_{}",
+        &sha256_hex(format!("case:{scope}").as_bytes())[..32]
+    )
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+async fn candidate_pair(
+    database: &Path,
+    request: TemporalTruthProjectionRequestV1,
+) -> crate::SyntheticTrackBCandidateProjectionPairV1 {
+    crate::project_synthetic_track_b_candidate_source_v1(
+        synthetic_projection_permit_v1(),
+        database,
+        request,
+    )
+    .await
+    .expect("valid inseparable S4 request/projection pair")
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+fn candidate_permit(
+    pair: &crate::SyntheticTrackBCandidateProjectionPairV1,
+    key_byte: u8,
+    nonce_byte: u8,
+    scope: &str,
+) -> crate::SyntheticTrackBCandidateEvidencePermitV1 {
+    crate::synthetic_track_b_candidate_evidence_permit_v1(
+        pair,
+        [key_byte; 32],
+        [key_byte ^ 0xa5; 32],
+        [nonce_byte; 32],
+        format!("trial-{scope}"),
+        sha256_hex(format!("contract:{scope}").as_bytes()),
+        candidate_case_id(scope),
+        format!("request-{scope}"),
+        format!("handle-key-{scope}"),
+        format!("transport-key-{scope}"),
+        100,
+        200,
+    )
+    .expect("valid synthetic S5 permit")
+}
+
 fn policy(
     revision_id: &str,
     lineage_id: &str,
@@ -2126,4 +2191,276 @@ fn temporal_truth_projection_s4_request_rejects_duplicate_claims_and_invalid_win
     let invalid = TemporalTruthProjectionRequestV1::try_new(2, 1, Vec::new(), projection_limits())
         .expect_err("as_of after cutoff must reject");
     assert_eq!(invalid.code(), "truth_projection_v1_invalid_window");
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+#[tokio::test]
+async fn temporal_truth_candidate_binding_s5_is_deterministic_opaque_and_source_bound() {
+    let (directory, database, store) = fresh_store("s5-deterministic-opaque").await;
+    seed_s4_source_time_relationship(&store).await;
+    let request = candidate_request(120, 120, "subject:s4", "claim.status");
+    let first_pair = candidate_pair(&database, request.clone()).await;
+    let second_pair = candidate_pair(&database, request).await;
+    let first_permit = candidate_permit(&first_pair, 0x11, 0x22, "stable");
+    let second_permit = candidate_permit(&second_pair, 0x11, 0x22, "stable");
+    let first = crate::bind_synthetic_track_b_candidate_evidence_v1(first_permit, first_pair, 150)
+        .expect("first S5 candidate binding");
+    let second =
+        crate::bind_synthetic_track_b_candidate_evidence_v1(second_permit, second_pair, 150)
+            .expect("second S5 candidate binding");
+
+    assert_eq!(first.payload_sha256(), second.payload_sha256());
+    assert_eq!(first.hmac_sha256(), second.hmac_sha256());
+    assert_eq!(
+        first.projection_binding_handle(),
+        second.projection_binding_handle()
+    );
+    assert_eq!(
+        first.candidate_evidence_schema_sha256(),
+        crate::TRACK_B_CANDIDATE_EVIDENCE_SCHEMA_SHA256
+    );
+    assert_eq!(
+        first.track_b_truth_referent_schema_sha256(),
+        "5da057e70675cbd259e0d1beb98039d2eee8589c73aa910f92f90cb0374545a8"
+    );
+    assert_eq!(first.claims().len(), 1);
+    let claim = first
+        .claims()
+        .next()
+        .expect("one requested candidate claim");
+    assert_eq!(claim.evidence_count(), claim.evidence_handles().len());
+    assert_eq!(claim.evidence_handles().len(), 1);
+    for (prefix, handle) in [
+        ("clm_", claim.claim_handle()),
+        ("ref_", claim.referent_handle()),
+        ("prd_", claim.predicate_handle()),
+    ] {
+        assert!(handle.starts_with(prefix));
+        assert_eq!(handle.len(), 36);
+        assert!(handle[prefix.len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    }
+    assert!(!claim.value_handles().is_empty());
+    assert!(claim
+        .value_handles()
+        .iter()
+        .all(|handle| handle.starts_with("val_") && handle.len() == 36));
+    assert!(claim
+        .supporting_evidence_handles()
+        .iter()
+        .all(|handle| handle.starts_with("evd_") && handle.len() == 36));
+    assert!(claim
+        .source_binding_handles()
+        .iter()
+        .all(|handle| handle.starts_with("src_") && handle.len() == 36));
+    let debug = format!("{first:?}");
+    for forbidden in [
+        "subject:s4",
+        "claim.status",
+        "value:s4-source-v1",
+        "s4-source-v1",
+        "source:source",
+        "source:supplemental",
+    ] {
+        assert!(!debug.contains(forbidden), "debug leaked {forbidden}");
+    }
+
+    drop(store);
+    remove_test_directory(&directory).await;
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+#[tokio::test]
+async fn temporal_truth_candidate_binding_s5_nonce_changes_every_scope_binding() {
+    let (directory, database, store) = fresh_store("s5-request-scope").await;
+    seed_s4_source_time_relationship(&store).await;
+    let request = candidate_request(120, 120, "subject:s4", "claim.status");
+    let first_pair = candidate_pair(&database, request.clone()).await;
+    let second_pair = candidate_pair(&database, request).await;
+    let first_permit = candidate_permit(&first_pair, 0x31, 0x41, "nonce");
+    let second_permit = candidate_permit(&second_pair, 0x31, 0x42, "nonce");
+    let first =
+        crate::bind_synthetic_track_b_candidate_evidence_v1(first_permit, first_pair, 150).unwrap();
+    let second =
+        crate::bind_synthetic_track_b_candidate_evidence_v1(second_permit, second_pair, 150)
+            .unwrap();
+    assert_ne!(first.request_nonce(), second.request_nonce());
+    assert_ne!(first.payload_sha256(), second.payload_sha256());
+    assert_ne!(first.hmac_sha256(), second.hmac_sha256());
+    assert_ne!(
+        first.projection_binding_handle(),
+        second.projection_binding_handle()
+    );
+    let first_claim = first.claims().next().unwrap();
+    let second_claim = second.claims().next().unwrap();
+    assert_ne!(first_claim.claim_handle(), second_claim.claim_handle());
+    assert_ne!(first_claim.value_handles(), second_claim.value_handles());
+    assert_ne!(
+        first_claim.source_binding_handles(),
+        second_claim.source_binding_handles()
+    );
+
+    drop(store);
+    remove_test_directory(&directory).await;
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+#[tokio::test]
+async fn temporal_truth_candidate_binding_s5_rejects_empty_or_ambient_claim_sets() {
+    let (directory, database, store) = fresh_store("s5-claim-set-boundary").await;
+    seed_s4_source_time_relationship(&store).await;
+
+    let requested_missing = candidate_request(120, 120, "subject:requested", "claim.status");
+    let ambient_pair = candidate_pair(&database, requested_missing).await;
+    assert_eq!(ambient_pair.projection().claims().len(), 2);
+    let permit = candidate_permit(&ambient_pair, 0x51, 0x61, "ambient");
+    let error = crate::bind_synthetic_track_b_candidate_evidence_v1(permit, ambient_pair, 150)
+        .expect_err("ambient S4 claim must terminate S5 export");
+    assert_eq!(error.code(), "track_b_candidate_v1_claim_set_mismatch");
+
+    let empty_request = projection_request(120, 120);
+    let empty_pair = candidate_pair(&database, empty_request).await;
+    let error = crate::synthetic_track_b_candidate_evidence_permit_v1(
+        &empty_pair,
+        [1; 32],
+        [2; 32],
+        [3; 32],
+        "trial-empty",
+        sha256_hex(b"contract:empty"),
+        candidate_case_id("empty"),
+        "request-empty",
+        "handle-key-empty",
+        "transport-key-empty",
+        100,
+        200,
+    )
+    .expect_err("empty request must not receive an S5 permit");
+    assert_eq!(error.code(), "track_b_candidate_v1_empty_required_claims");
+
+    drop(store);
+    remove_test_directory(&directory).await;
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+#[tokio::test]
+async fn temporal_truth_candidate_binding_s5_rejects_same_projection_hash_snapshot_mix() {
+    let (directory, database, store) = fresh_store("s5-snapshot-mix").await;
+    seed_s4_source_time_relationship(&store).await;
+    let request = candidate_request(120, 120, "subject:s4", "claim.status");
+    let baseline = candidate_pair(&database, request.clone()).await;
+    let permit = candidate_permit(&baseline, 0x71, 0x72, "snapshot-mix");
+    append_s4_target_upgrade(&store).await;
+    let after = candidate_pair(&database, request).await;
+    assert_eq!(
+        baseline.projection().projection_sha256(),
+        after.projection().projection_sha256()
+    );
+    assert_ne!(
+        baseline.projection().snapshot_payload_sha256(),
+        after.projection().snapshot_payload_sha256()
+    );
+    assert_ne!(
+        baseline.projection().prepared_input_sha256(),
+        after.projection().prepared_input_sha256()
+    );
+    let error = crate::bind_synthetic_track_b_candidate_evidence_v1(permit, after, 150)
+        .expect_err("permit bound to baseline snapshot must reject post-cutoff mix");
+    assert_eq!(
+        error.code(),
+        "track_b_candidate_v1_projection_mix_and_match"
+    );
+
+    drop(store);
+    remove_test_directory(&directory).await;
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+#[tokio::test]
+async fn temporal_truth_candidate_binding_s5_rejects_request_mix_and_match() {
+    let (directory, database, store) = fresh_store("s5-request-mix").await;
+    seed_s4_source_time_relationship(&store).await;
+    let missing =
+        TemporalTruthRequiredClaimV1::try_new("subject:requested", "claim.status").unwrap();
+    let ambient = TemporalTruthRequiredClaimV1::try_new("subject:s4", "claim.status").unwrap();
+    let first_request = TemporalTruthProjectionRequestV1::try_new(
+        120,
+        120,
+        vec![missing.clone()],
+        projection_limits(),
+    )
+    .unwrap();
+    let second_request = TemporalTruthProjectionRequestV1::try_new(
+        120,
+        120,
+        vec![missing, ambient],
+        projection_limits(),
+    )
+    .unwrap();
+    let first_pair = candidate_pair(&database, first_request).await;
+    let second_pair = candidate_pair(&database, second_request).await;
+    assert_eq!(
+        first_pair.projection().projection_sha256(),
+        second_pair.projection().projection_sha256(),
+        "retrofit request counterexample requires the same visible projection"
+    );
+    assert_ne!(
+        first_pair.projection().prepared_input_sha256(),
+        second_pair.projection().prepared_input_sha256()
+    );
+    let permit = candidate_permit(&first_pair, 0x81, 0x82, "request-mix");
+    let error = crate::bind_synthetic_track_b_candidate_evidence_v1(permit, second_pair, 150)
+        .expect_err("replacement request/projection pair must not reuse a permit");
+    assert_eq!(error.code(), "track_b_candidate_v1_request_mix_and_match");
+
+    drop(store);
+    remove_test_directory(&directory).await;
+}
+
+#[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
+#[tokio::test]
+async fn temporal_truth_candidate_binding_s5_rejects_key_and_ttl_sentinels() {
+    let (directory, database, store) = fresh_store("s5-permit-sentinels").await;
+    let request = candidate_request(0, 0, "subject:permit", "claim.status");
+    let pair = candidate_pair(&database, request).await;
+    let contract = sha256_hex(b"contract:permit");
+    let error = crate::synthetic_track_b_candidate_evidence_permit_v1(
+        &pair,
+        [1; 32],
+        [1; 32],
+        [3; 32],
+        "trial-permit",
+        contract.clone(),
+        candidate_case_id("permit"),
+        "request-permit",
+        "handle-key-permit",
+        "transport-key-permit",
+        100,
+        200,
+    )
+    .expect_err("identical keys must reject");
+    assert_eq!(error.code(), "track_b_candidate_v1_invalid_key_material");
+    let error = crate::synthetic_track_b_candidate_evidence_permit_v1(
+        &pair,
+        [1; 32],
+        [2; 32],
+        [3; 32],
+        "trial-permit",
+        contract,
+        candidate_case_id("permit"),
+        "request-permit",
+        "handle-key-permit",
+        "transport-key-permit",
+        100,
+        100 + 3_600,
+    )
+    .expect_err("TTL equal to sentinel must reject");
+    assert_eq!(error.code(), "track_b_candidate_v1_invalid_time_window");
+    let permit = candidate_permit(&pair, 0x91, 0x92, "expired");
+    let error = crate::bind_synthetic_track_b_candidate_evidence_v1(permit, pair, 200)
+        .expect_err("expiry equality must reject at bind time");
+    assert_eq!(error.code(), "track_b_candidate_v1_expired");
+
+    drop(store);
+    remove_test_directory(&directory).await;
 }
