@@ -1,8 +1,8 @@
 {
-  "schema": "agent_bridge.store.memory_reference_admission_fixture.v0",
+  "schema": "agent_bridge.store.memory_reference_admission_fixture.v1",
   "fixture_only": true,
   "real_capture_authorized": false,
-  "as_of_secs": 1700001000,
+  "as_of_secs": 1700086400,
   "record_timestamp": 1700000000,
   "ttl_boundary_secs": 86400,
   "query": "seed-anchor",
@@ -193,12 +193,12 @@
       "key": "ttl_boundary",
       "kind": "observation",
       "content": "ttl-boundary anchor",
-      "tags": ["as-of"],
+      "tags": ["ttl:1d"],
       "related_keys": [],
       "scope": null,
       "created_at": 1700000000,
       "updated_at": 1700000000,
-      "last_accessed_at": 1700001000,
+      "last_accessed_at": 1700086400,
       "access_count": 0,
       "importance": 0.3,
       "status": "active",
@@ -209,12 +209,12 @@
       "key": "ttl_after_boundary",
       "kind": "observation",
       "content": "ttl-boundary after",
-      "tags": ["as-of"],
+      "tags": ["ttl:2d"],
       "related_keys": [],
       "scope": null,
       "created_at": 1700000000,
       "updated_at": 1700000000,
-      "last_accessed_at": 1699914599,
+      "last_accessed_at": 1699999999,
       "access_count": 0,
       "importance": 0.3,
       "status": "active",
@@ -232,9 +232,14 @@
     {"from_key": "seed_anchor", "to_key": "graph_neighbor_5", "edge_type": "coactivation", "weight": 1.0, "created_at": 1700000000},
     {"from_key": "seed_anchor", "to_key": "graph_neighbor_6", "edge_type": "coactivation", "weight": 1.0, "created_at": 1700000000}
   ],
+  "coactivations": [
+    {"key_a": "seed_anchor", "key_b": "graph_neighbor_3", "count": 100},
+    {"key_a": "graph_neighbor_0", "key_b": "graph_neighbor_1", "count": 1}
+  ],
   "expected": {
     "tie_order": ["tie_a", "tie_b"],
-    "seed_context_keys": ["seed_anchor", "graph_neighbor_0", "graph_neighbor_1", "graph_neighbor_2", "graph_neighbor_3"],
-    "ttl_boundary_keys": ["ttl_boundary", "ttl_after_boundary"]
+    "seed_context_keys": ["seed_anchor", "graph_neighbor_3", "graph_neighbor_0", "graph_neighbor_1", "graph_neighbor_2"],
+    "ttl_before_boundary_keys": ["ttl_boundary", "ttl_after_boundary"],
+    "ttl_at_boundary_keys": ["ttl_after_boundary"]
   }
 }

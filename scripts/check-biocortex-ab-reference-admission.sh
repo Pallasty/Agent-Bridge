@@ -3,8 +3,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel)"
-fixture="$repo_root/scripts/eval/fixtures/biocortex_ab_reference_admission_v0.json"
-expected="$repo_root/scripts/eval/fixtures/biocortex_ab_reference_admission.expected.v0.tsv"
+fixture="$repo_root/scripts/eval/fixtures/biocortex_ab_reference_admission_v1.json"
+expected="$repo_root/scripts/eval/fixtures/biocortex_ab_reference_admission.expected.v1.tsv"
 runner="$repo_root/scripts/run-memory-reference-admission-fixture.sh"
 
 for path in "$fixture" "$expected" "$runner"; do

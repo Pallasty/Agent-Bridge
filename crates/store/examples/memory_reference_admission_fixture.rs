@@ -16,8 +16,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-const SCHEMA: &str = "agent_bridge.store.memory_reference_admission_fixture.v0";
-const SENTINEL_ENV: &str = "AB_REFERENCE_ADMISSION_SENTINEL";
+const SCHEMA: &str = "agent_bridge.store.memory_reference_admission_fixture.v1";
+const SENTINEL_ENVS: [&str; 3] = [
+    "AB_REFERENCE_ADMISSION_SENTINEL",
+    "AGENT_BRIDGE_REFERENCE_ADMISSION_SENTINEL",
+    "RUST_LOG",
+];
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,7 +41,16 @@ struct Fixture {
     exclude_kinds: Vec<String>,
     records: Vec<MemoryRecord>,
     edges: Vec<MemoryEdgeExport>,
+    coactivations: Vec<CoactivationSpec>,
     expected: Expected,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CoactivationSpec {
+    key_a: String,
+    key_b: String,
+    count: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,7 +58,8 @@ struct Fixture {
 struct Expected {
     tie_order: Vec<String>,
     seed_context_keys: Vec<String>,
-    ttl_boundary_keys: Vec<String>,
+    ttl_before_boundary_keys: Vec<String>,
+    ttl_at_boundary_keys: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,8 +73,10 @@ struct SyncEnvelope<'a> {
 struct Observation {
     seed_context: MemorySearchReferenceContext,
     tie_order: Vec<String>,
-    ttl_boundary_order: Vec<String>,
+    ttl_before_boundary_order: Vec<String>,
+    ttl_at_boundary_order: Vec<String>,
     telemetry_unchanged: bool,
+    coactivation_rerank_changed_order: bool,
 }
 
 fn boxed_error(message: impl Into<String>) -> Box<dyn std::error::Error> {
@@ -84,6 +100,15 @@ fn validate_fixture(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>>
     }
     if fixture.ttl_boundary_secs <= 0 {
         return Err(boxed_error("ttl_boundary_secs must be positive"));
+    }
+    if fixture.as_of_secs
+        != fixture
+            .record_timestamp
+            .saturating_add(fixture.ttl_boundary_secs)
+    {
+        return Err(boxed_error(
+            "as_of_secs must equal record_timestamp + ttl_boundary_secs",
+        ));
     }
     if fixture.query.trim().is_empty() {
         return Err(boxed_error("fixture query must be non-empty"));
@@ -133,6 +158,18 @@ fn validate_fixture(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>>
             ));
         }
     }
+    for edge in &fixture.coactivations {
+        if !key_set.contains(&edge.key_a)
+            || !key_set.contains(&edge.key_b)
+            || edge.key_a == edge.key_b
+            || edge.count == 0
+            || edge.count > 1_000
+        {
+            return Err(boxed_error(
+                "coactivation rows must bind distinct present endpoints and count 1..=1000",
+            ));
+        }
+    }
 
     let find = |key: &str| {
         fixture
@@ -143,6 +180,11 @@ fn validate_fixture(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>>
     };
     let ttl_at = find("ttl_boundary")?;
     let ttl_after = find("ttl_after_boundary")?;
+    if ttl_at.tags != ["ttl:1d"] || ttl_after.tags != ["ttl:2d"] {
+        return Err(boxed_error(
+            "TTL controls must bind ttl:1d at the boundary and ttl:2d after it",
+        ));
+    }
     if ttl_at.last_accessed_at != fixture.as_of_secs
         || ttl_after.last_accessed_at
             != fixture
@@ -156,7 +198,8 @@ fn validate_fixture(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>>
         .tie_order
         .iter()
         .chain(fixture.expected.seed_context_keys.iter())
-        .chain(fixture.expected.ttl_boundary_keys.iter())
+        .chain(fixture.expected.ttl_before_boundary_keys.iter())
+        .chain(fixture.expected.ttl_at_boundary_keys.iter())
     {
         if !key_set.contains(key) {
             return Err(boxed_error(format!("expected key {key} is not in records")));
@@ -230,6 +273,17 @@ async fn build_clone(
             "fixture import report is not exact: {report:?}"
         )));
     }
+    let mut coactivation_indices: Vec<usize> = (0..fixture.coactivations.len()).collect();
+    if reverse {
+        coactivation_indices.reverse();
+    }
+    for index in coactivation_indices {
+        let edge = &fixture.coactivations[index];
+        let keys = vec![edge.key_a.clone(), edge.key_b.clone()];
+        for _ in 0..edge.count {
+            store.record_coactivation(&keys, None).await?;
+        }
+    }
     Ok(store)
 }
 
@@ -259,6 +313,7 @@ async fn observe(
         graph_fanout: fixture.graph_fanout,
         max_context_bytes: fixture.max_context_bytes,
         exclude_kinds: fixture.exclude_kinds.clone(),
+        coactivation_rerank: true,
     };
     let seed_context = store
         .memory_search_reference(
@@ -277,7 +332,7 @@ async fn observe(
             fixture.limit,
             fixture.rrf_k,
             fixture.expand_top,
-            options,
+            options.clone(),
         )
         .await?;
     if seed_context != repeated_context {
@@ -300,17 +355,65 @@ async fn observe(
             .memory_search_as_of("tie anchor phrase", &[], fixture.limit, fixture.as_of_secs)
             .await?,
     );
-    let ttl_boundary_order = keys_from_hits(
-        &store
-            .memory_search_as_of("ttl-boundary", &[], fixture.limit, fixture.as_of_secs)
-            .await?,
-    );
+    let mut before_boundary_options = options.clone();
+    before_boundary_options.as_of_secs = fixture.as_of_secs - 1;
+    let ttl_before_boundary_order = store
+        .memory_search_reference(
+            "ttl-boundary",
+            &[],
+            fixture.limit,
+            fixture.rrf_k,
+            fixture.expand_top,
+            before_boundary_options,
+        )
+        .await?
+        .hits
+        .into_iter()
+        .map(|hit| hit.key)
+        .collect();
+    let ttl_at_boundary_order = store
+        .memory_search_reference(
+            "ttl-boundary",
+            &[],
+            fixture.limit,
+            fixture.rrf_k,
+            fixture.expand_top,
+            options.clone(),
+        )
+        .await?
+        .hits
+        .into_iter()
+        .map(|hit| hit.key)
+        .collect();
+    let mut baseline_options = options;
+    baseline_options.coactivation_rerank = false;
+    let baseline_keys: Vec<String> = store
+        .memory_search_reference(
+            &fixture.query,
+            &[],
+            fixture.limit,
+            fixture.rrf_k,
+            fixture.expand_top,
+            baseline_options,
+        )
+        .await?
+        .hits
+        .into_iter()
+        .map(|hit| hit.key)
+        .collect();
+    let seed_keys: Vec<String> = seed_context
+        .hits
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect();
     let after = telemetry(store, "graph_neighbor_0").await?;
     Ok(Observation {
         seed_context,
         tie_order,
-        ttl_boundary_order,
+        ttl_before_boundary_order,
+        ttl_at_boundary_order,
         telemetry_unchanged: before == after,
+        coactivation_rerank_changed_order: seed_keys != baseline_keys,
     })
 }
 
@@ -335,14 +438,25 @@ fn validate_observation(
             observation.tie_order
         )));
     }
-    if observation.ttl_boundary_order != fixture.expected.ttl_boundary_keys {
+    if observation.ttl_before_boundary_order != fixture.expected.ttl_before_boundary_keys {
         return Err(boxed_error(format!(
-            "frozen as-of boundary order drifted: {:?}",
-            observation.ttl_boundary_order
+            "TTL pre-boundary order drifted: {:?}",
+            observation.ttl_before_boundary_order
+        )));
+    }
+    if observation.ttl_at_boundary_order != fixture.expected.ttl_at_boundary_keys {
+        return Err(boxed_error(format!(
+            "TTL at-boundary order drifted: {:?}",
+            observation.ttl_at_boundary_order
         )));
     }
     if !observation.telemetry_unchanged {
         return Err(boxed_error("reference graph read changed access telemetry"));
+    }
+    if !observation.coactivation_rerank_changed_order {
+        return Err(boxed_error(
+            "coactivation control did not exercise a reference order change",
+        ));
     }
     Ok(())
 }
@@ -362,8 +476,12 @@ fn print_receipt(observation: &Observation, fixture: &Fixture, clone_count: usiz
     println!("seed_context_keys\t{}", seed_keys.join(","));
     println!("tie_order\t{}", observation.tie_order.join(","));
     println!(
-        "ttl_boundary_order\t{}",
-        observation.ttl_boundary_order.join(",")
+        "ttl_before_boundary_order\t{}",
+        observation.ttl_before_boundary_order.join(",")
+    );
+    println!(
+        "ttl_at_boundary_order\t{}",
+        observation.ttl_at_boundary_order.join(",")
     );
     println!("graph_fanout\t{}", fixture.graph_fanout);
     println!("excluded_skill\ttrue");
@@ -377,10 +495,16 @@ fn print_receipt(observation: &Observation, fixture: &Fixture, clone_count: usiz
     println!("volatile_fields_in_context\tfalse");
     println!("as_of_replay_equal\ttrue");
     println!("coactivation_order_invariant\ttrue");
+    println!("coactivation_rerank_changed_order\ttrue");
     println!("model_tokenizer_bound\tfalse");
     println!("runtime_influence\tfalse");
     println!("decision\tBLOCKED_FAIL_CLOSED");
-    println!("sentinel_cleared\t{}", std::env::var(SENTINEL_ENV).is_err());
+    println!(
+        "sentinels_cleared\t{}",
+        SENTINEL_ENVS
+            .iter()
+            .all(|name| std::env::var_os(name).is_none())
+    );
 }
 
 #[tokio::main]

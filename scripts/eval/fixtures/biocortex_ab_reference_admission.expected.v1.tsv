@@ -1,11 +1,12 @@
-schema	agent_bridge.store.memory_reference_admission_fixture.v0
+schema	agent_bridge.store.memory_reference_admission_fixture.v1
 fixture_only	true
 real_capture_authorized	false
 clone_count	3
 fresh_clone_projection_equal	true
-seed_context_keys	seed_anchor,graph_neighbor_0,graph_neighbor_1,graph_neighbor_2,graph_neighbor_3
+seed_context_keys	seed_anchor,graph_neighbor_3,graph_neighbor_0,graph_neighbor_1,graph_neighbor_2
 tie_order	tie_a,tie_b
-ttl_boundary_order	ttl_boundary,ttl_after_boundary
+ttl_before_boundary_order	ttl_boundary,ttl_after_boundary
+ttl_at_boundary_order	ttl_after_boundary
 graph_fanout	5
 excluded_skill	true
 access_telemetry_unchanged	true
@@ -15,7 +16,8 @@ context_budget_ok	true
 volatile_fields_in_context	false
 as_of_replay_equal	true
 coactivation_order_invariant	true
+coactivation_rerank_changed_order	true
 model_tokenizer_bound	false
 runtime_influence	false
 decision	BLOCKED_FAIL_CLOSED
-sentinel_cleared	true
+sentinels_cleared	true
