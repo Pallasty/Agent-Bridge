@@ -13991,15 +13991,7 @@ fn work_memory_status_is_terminal(status: &str) -> bool {
 }
 
 fn work_memory_expires_at(record: &MemoryRecord) -> Option<i64> {
-    let ttl_days = record.tags.iter().find_map(|tag| {
-        tag.strip_prefix("ttl:")
-            .and_then(|value| value.strip_suffix('d'))
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|days| *days > 0)
-    })?;
-    let anchor = record.updated_at.max(record.created_at);
-    (anchor > 0)
-        .then(|| anchor.saturating_add(ttl_days.saturating_mul(WORK_MEMORY_SECONDS_PER_DAY)))
+    ab_store::memory_record_ttl_expires_at(record)
 }
 
 fn work_memory_is_live(record: &MemoryRecord, now: i64) -> bool {
@@ -14017,9 +14009,7 @@ fn work_memory_is_live(record: &MemoryRecord, now: i64) -> bool {
 /// (today: `*_apply` rollback-map audit rows). Blast radius = ttl-tagged rows
 /// only — untagged rows are byte-identical.
 fn record_ttl_is_live(record: &MemoryRecord, now: i64) -> bool {
-    work_memory_expires_at(record)
-        .map(|expires_at| expires_at > now)
-        .unwrap_or(true)
+    ab_store::memory_record_ttl_is_live_at(record, now)
 }
 
 fn stable_fnv1a_hex(input: &str) -> String {

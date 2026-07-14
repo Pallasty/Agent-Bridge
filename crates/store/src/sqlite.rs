@@ -2344,7 +2344,7 @@ fn decay_tau_days(kind: &str) -> f64 {
 /// memory used today scores ~1.0×, one used 30d ago ~0.37×, 90d ago ~0.05×.
 /// Then `+0.3*ln(1+access_count)` bumps frequently-touched memories.
 fn memory_score(last_accessed_at: i64, access_count: u64, now: i64, kind: &str) -> f64 {
-    let age_days = ((now - last_accessed_at).max(0) as f64) / 86_400.0;
+    let age_days = (now.saturating_sub(last_accessed_at).max(0) as f64) / 86_400.0;
     let recency = (-age_days / decay_tau_days(kind)).exp();
     let frequency = (1.0 + access_count as f64).ln();
     recency + 0.3 * frequency
@@ -4424,6 +4424,8 @@ impl StateStore for SqliteStore {
                          FROM memories
                          WHERE key = ?1 COLLATE NOCASE
                            AND status = 'active'
+                         ORDER BY (key = ?1 COLLATE BINARY) DESC,
+                                  key COLLATE BINARY
                          LIMIT 1",
                     )?;
                     exact_stmt
@@ -4449,7 +4451,7 @@ impl StateStore for SqliteStore {
                                 superseded_by: row.get::<_, Option<String>>(13)?,
                             })
                         })
-                        .ok()
+                        .optional()?
                 };
                 if let Some(rec) = exact_key_row {
                     let tags_match = tags.is_empty() || tags.iter().any(|t| rec.tags.contains(t));
@@ -4537,14 +4539,18 @@ impl StateStore for SqliteStore {
         let mut graph_scores: HashMap<String, f64> = HashMap::new();
 
         for hit in fts_hits.iter().take(expand_n) {
-            let mut edges = if graph_fanout == usize::MAX {
-                self.memory_neighbors(&hit.record.key)
-                    .await
-                    .unwrap_or_default()
+            let edge_result = if graph_fanout == usize::MAX {
+                self.memory_neighbors(&hit.record.key).await
             } else {
                 self.memory_neighbors_bounded(&hit.record.key, graph_fanout)
                     .await
-                    .unwrap_or_default()
+            };
+            let mut edges = if mutate_graph_reads {
+                // Preserve the legacy best-effort production path. The
+                // reference path below must instead surface every store error.
+                edge_result.unwrap_or_default()
+            } else {
+                edge_result?
             };
             edges.sort_by(|a, b| {
                 b.weight
@@ -4602,7 +4608,11 @@ impl StateStore for SqliteStore {
             } else {
                 match self.memory_peek(key).await {
                     Ok(crate::MemoryPeekResult::Present { record }) => Some(*record),
-                    _ => None,
+                    Ok(
+                        crate::MemoryPeekResult::Missing
+                        | crate::MemoryPeekResult::Tombstoned { .. },
+                    ) => None,
+                    Err(error) => return Err(error),
                 }
             };
             if let Some(rec) = rec {
@@ -4673,6 +4683,13 @@ impl StateStore for SqliteStore {
         });
         merged.truncate(limit as usize);
         Ok(merged)
+    }
+
+    async fn memory_coactivation_among_reference(
+        &self,
+        keys: &[String],
+    ) -> Result<Vec<CoactivationEdge>> {
+        self.coactivation_among(keys).await
     }
 
     async fn list_memories(
@@ -12636,6 +12653,41 @@ mod tests {
             .await
             .is_err());
 
+        for (key, content) in [
+            ("casekey", "lowercase orchard sentinel payload"),
+            ("CaseKey", "uppercase quantum beacon material"),
+        ] {
+            let mut rec = mk_record(key, 1_700_000_000);
+            rec.content = content.into();
+            store.memory_save(&rec).await.expect("save exact key");
+        }
+        let exact = store
+            .memory_search_as_of("CASEKEY", &[], 10, 2_000)
+            .await
+            .expect("case-insensitive exact-key search");
+        assert_eq!(keys(&exact), vec!["CaseKey"]);
+        let binary_exact = store
+            .memory_search_as_of("casekey", &[], 10, 2_000)
+            .await
+            .expect("binary exact-key search");
+        assert_eq!(keys(&binary_exact), vec!["casekey"]);
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET access_count = 'invalid' WHERE key = 'CaseKey'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("corrupt exact-key row");
+        assert!(store
+            .memory_search_as_of("CASEKEY", &[], 10, 2_000)
+            .await
+            .is_err());
+
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
@@ -12660,7 +12712,10 @@ mod tests {
         excluded.kind = "skill".into();
         excluded.content = "reference seed phrase skill catalog".into();
         excluded.importance = 1.0;
-        store.memory_save(&excluded).await.expect("save excluded skill");
+        store
+            .memory_save(&excluded)
+            .await
+            .expect("save excluded skill");
         for idx in 0..5 {
             let key = format!("reference_neighbor_{idx}");
             let mut neighbor = mk_record(&key, 1_700_000_000);
@@ -12697,7 +12752,7 @@ mod tests {
         options.graph_fanout = 2;
         options.max_context_bytes = 16 * 1024;
         let context = store
-            .memory_search_reference("reference seed", &[], 10, 60.0, 1, options)
+            .memory_search_reference("reference seed", &[], 10, 60.0, 1, options.clone())
             .await
             .expect("reference hybrid");
         assert!(context.hits.iter().any(|row| row.key == "seed_reference"));
@@ -12724,6 +12779,177 @@ mod tests {
         assert!(context.context_bytes <= 16 * 1024);
         assert!(!context.context_json.contains("access_count"));
         assert!(!context.context_json.contains("score"));
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET access_count = 'invalid'
+                      WHERE key = 'reference_neighbor_0'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("corrupt graph-only record");
+        assert!(store
+            .memory_search_reference("reference seed", &[], 10, 60.0, 1, options.clone(),)
+            .await
+            .is_err());
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET access_count = 19
+                      WHERE key = 'reference_neighbor_0'",
+                    [],
+                )?;
+                c.execute("DROP TABLE memory_edges", [])?;
+                Ok(())
+            })
+            .await
+            .expect("remove graph table");
+        assert!(store
+            .memory_search_reference("reference seed", &[], 10, 60.0, 1, options)
+            .await
+            .is_err());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reference_search_binds_ttl_and_coactivation_policy() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-reference-policy-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        for (key, suffix) in [
+            ("co_c", "cobalt river lantern meadow"),
+            ("co_a", "amber forest compass valley"),
+            ("co_b", "bronze ocean turbine summit"),
+        ] {
+            let mut record = mk_record(key, 1_700_000_000);
+            record.content = format!("frozen coactivation policy {suffix}");
+            store.memory_save(&record).await.expect("save policy row");
+        }
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "INSERT INTO memory_coactivation
+                        (key_a, key_b, count, first_at, last_at)
+                     VALUES ('co_b', 'co_c', 100, 1700000000, 1700000000)",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed coactivation");
+
+        let mut options = crate::MemorySearchReferenceOptions::at(1_700_000_100);
+        options.graph_fanout = 1;
+        let reranked = store
+            .memory_search_reference(
+                "frozen coactivation policy",
+                &[],
+                3,
+                60.0,
+                3,
+                options.clone(),
+            )
+            .await
+            .expect("coactivation-enabled reference");
+        assert_eq!(
+            reranked
+                .hits
+                .iter()
+                .map(|hit| hit.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["co_b", "co_c", "co_a"]
+        );
+
+        options.coactivation_rerank = false;
+        let baseline = store
+            .memory_search_reference(
+                "frozen coactivation policy",
+                &[],
+                3,
+                60.0,
+                3,
+                options.clone(),
+            )
+            .await
+            .expect("coactivation-disabled reference");
+        assert_eq!(
+            baseline
+                .hits
+                .iter()
+                .map(|hit| hit.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["co_a", "co_b", "co_c"]
+        );
+
+        let mut ttl = mk_record("ttl_boundary", 1_700_000_000);
+        ttl.content = "frozen ttl boundary".into();
+        ttl.tags = vec!["ttl:1d".into()];
+        store.memory_save(&ttl).await.expect("save ttl row");
+        drop_timestamp_guards(&store).await;
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories
+                        SET created_at = 1700000000, updated_at = 1700000000
+                      WHERE key = 'ttl_boundary'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("freeze ttl anchor");
+
+        let mut before_expiry = crate::MemorySearchReferenceOptions::at(1_700_086_399);
+        before_expiry.graph_fanout = 1;
+        assert_eq!(
+            store
+                .memory_search_reference("frozen ttl boundary", &[], 10, 60.0, 1, before_expiry,)
+                .await
+                .expect("ttl before expiry")
+                .hits
+                .len(),
+            1
+        );
+        let mut at_expiry = crate::MemorySearchReferenceOptions::at(1_700_086_400);
+        at_expiry.graph_fanout = 1;
+        assert!(store
+            .memory_search_reference("frozen ttl boundary", &[], 10, 60.0, 1, at_expiry,)
+            .await
+            .expect("ttl at expiry")
+            .hits
+            .is_empty());
+
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute("DROP TABLE memory_coactivation", [])?;
+                Ok(())
+            })
+            .await
+            .expect("remove coactivation table");
+        options.coactivation_rerank = true;
+        assert!(store
+            .memory_search_reference("frozen coactivation policy", &[], 3, 60.0, 3, options,)
+            .await
+            .is_err());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

@@ -1,6 +1,6 @@
 //! Clean, read-only runner for the BioCortex/AB Track B reference surface.
 //!
-//! The runner consumes one JSON request, opens the supplied SQLite snapshot in
+//! The runner consumes one JSON request, opens the supplied SQLite database in
 //! query-only mode, binds one frozen `as_of_secs`, and emits the bounded,
 //! telemetry-free reference projection. It is intentionally a store example,
 //! not an MCP tool and not a production retrieval switch.
@@ -29,6 +29,8 @@ struct Request {
     max_context_bytes: usize,
     #[serde(default = "default_exclude_kinds")]
     exclude_kinds: Vec<String>,
+    #[serde(default = "default_true")]
+    coactivation_rerank: bool,
 }
 
 fn default_limit() -> u32 {
@@ -53,6 +55,10 @@ fn default_context_bytes() -> usize {
 
 fn default_exclude_kinds() -> Vec<String> {
     vec!["skill".to_string()]
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn validate(request: &Request) -> Result<(), String> {
@@ -80,7 +86,11 @@ fn validate(request: &Request) -> Result<(), String> {
     if request.max_context_bytes < 2 || request.max_context_bytes > 16 * 1024 * 1024 {
         return Err("max_context_bytes must be in 2..=16777216".into());
     }
-    if request.exclude_kinds.iter().any(|kind| kind.trim().is_empty()) {
+    if request
+        .exclude_kinds
+        .iter()
+        .any(|kind| kind.trim().is_empty())
+    {
         return Err("exclude_kinds must contain non-empty values".into());
     }
     Ok(())
@@ -100,6 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         graph_fanout: request.graph_fanout,
         max_context_bytes: request.max_context_bytes,
         exclude_kinds: request.exclude_kinds.clone(),
+        coactivation_rerank: request.coactivation_rerank,
     };
     let context = store
         .memory_search_reference(
@@ -114,7 +125,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let payload = serde_json::json!({
         "schema": "agent_bridge.store.memory_search.reference.v0",
         "reference_only": true,
-        "read_only_snapshot": true,
+        "query_only_connection": true,
+        "closed_snapshot_bound": false,
         "context_budget_basis": "UTF8_BYTES_V0",
         "model_tokenizer_bound": false,
         "access_telemetry_in_context": false,
@@ -122,6 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "graph_fanout": request.graph_fanout,
         "max_context_bytes": request.max_context_bytes,
         "exclude_kinds": request.exclude_kinds,
+        "coactivation_rerank": request.coactivation_rerank,
         "context_bytes": context.context_bytes,
         "context_json": context.context_json,
         "hits": context.hits,

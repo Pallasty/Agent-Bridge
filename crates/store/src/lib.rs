@@ -583,6 +583,30 @@ pub const MEMORY_REFERENCE_GRAPH_FANOUT: usize = 64;
 /// model tokens.
 pub const MEMORY_REFERENCE_MAX_CONTEXT_BYTES: usize = 128 * 1024;
 
+const MEMORY_TTL_SECONDS_PER_DAY: i64 = 86_400;
+
+/// Expiry instant for the retrieval-wide `ttl:<N>d` convention. The anchor
+/// and saturating arithmetic intentionally match the MCP retrieval path so a
+/// frozen reference clock cannot observe a different TTL policy.
+pub fn memory_record_ttl_expires_at(record: &MemoryRecord) -> Option<i64> {
+    let ttl_days = record.tags.iter().find_map(|tag| {
+        tag.strip_prefix("ttl:")
+            .and_then(|value| value.strip_suffix('d'))
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|days| *days > 0)
+    })?;
+    let anchor = record.updated_at.max(record.created_at);
+    (anchor > 0).then(|| anchor.saturating_add(ttl_days.saturating_mul(MEMORY_TTL_SECONDS_PER_DAY)))
+}
+
+/// Whether a TTL-tagged record is live at the caller-bound Unix second.
+/// Expiry is exclusive: a record is suppressed exactly at `expires_at`.
+pub fn memory_record_ttl_is_live_at(record: &MemoryRecord, as_of_secs: i64) -> bool {
+    memory_record_ttl_expires_at(record)
+        .map(|expires_at| expires_at > as_of_secs)
+        .unwrap_or(true)
+}
+
 /// Runtime controls for the deterministic, read-only reference search
 /// surface. `as_of_secs` is mandatory so a future runner can bind one clock
 /// value for every paired condition. The regular search APIs do not consume
@@ -593,6 +617,7 @@ pub struct MemorySearchReferenceOptions {
     pub graph_fanout: usize,
     pub max_context_bytes: usize,
     pub exclude_kinds: Vec<String>,
+    pub coactivation_rerank: bool,
 }
 
 impl MemorySearchReferenceOptions {
@@ -602,6 +627,7 @@ impl MemorySearchReferenceOptions {
             graph_fanout: MEMORY_REFERENCE_GRAPH_FANOUT,
             max_context_bytes: MEMORY_REFERENCE_MAX_CONTEXT_BYTES,
             exclude_kinds: vec!["skill".to_string()],
+            coactivation_rerank: true,
         }
     }
 }
@@ -3147,6 +3173,19 @@ pub trait StateStore: Send + Sync {
         ))
     }
 
+    /// Side-effect-free coactivation read for the frozen reference policy.
+    /// The ordinary coactivation API defaults to an empty result for legacy
+    /// backends; a reference run must instead fail when support is absent.
+    async fn memory_coactivation_among_reference(
+        &self,
+        keys: &[String],
+    ) -> Result<Vec<CoactivationEdge>> {
+        let _ = keys;
+        Err(ab_core::Error::Backend(
+            "memory_coactivation_among_reference unsupported by this store backend".into(),
+        ))
+    }
+
     /// Fully bounded reference search: frozen as-of, bounded graph fan-out,
     /// deterministic ordering, and a telemetry-free context projection.
     async fn memory_search_reference(
@@ -3210,11 +3249,35 @@ pub trait StateStore: Send + Sync {
                 false,
             )
             .await?;
+        if options.coactivation_rerank && hits.len() >= 2 {
+            let keys: Vec<String> = hits.iter().map(|hit| hit.record.key.clone()).collect();
+            let edges = self.memory_coactivation_among_reference(&keys).await?;
+            if !edges.is_empty() {
+                let mut per_key = std::collections::BTreeMap::<String, u64>::new();
+                for edge in edges {
+                    let count_a = per_key.entry(edge.key_a).or_insert(0);
+                    *count_a = count_a.saturating_add(edge.count);
+                    let count_b = per_key.entry(edge.key_b).or_insert(0);
+                    *count_b = count_b.saturating_add(edge.count);
+                }
+                for hit in &mut hits {
+                    let count = per_key.get(&hit.record.key).copied().unwrap_or(0);
+                    hit.score *= 1.0 + 0.2 * (1.0 + count as f64).ln();
+                }
+                hits.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.record.key.cmp(&b.record.key))
+                });
+            }
+        }
         hits.retain(|hit| {
             !options
                 .exclude_kinds
                 .iter()
                 .any(|kind| kind == &hit.record.kind)
+                && memory_record_ttl_is_live_at(&hit.record, options.as_of_secs)
         });
         hits.truncate(limit as usize);
         project_memory_search_reference_hits(&hits, options.max_context_bytes)
@@ -4653,6 +4716,23 @@ mod reference_search_projection_tests {
             MEMORY_REFERENCE_MAX_CONTEXT_BYTES
         );
         assert_eq!(options.exclude_kinds, vec!["skill"]);
+        assert!(options.coactivation_rerank);
+    }
+
+    #[test]
+    fn reference_ttl_uses_the_frozen_expiry_boundary() {
+        let mut record = hit("ttl", "bounded").record;
+        record.created_at = 10;
+        record.updated_at = 20;
+        record.tags = vec!["ttl:1d".to_string()];
+        let expires_at = 20 + MEMORY_TTL_SECONDS_PER_DAY;
+
+        assert_eq!(memory_record_ttl_expires_at(&record), Some(expires_at));
+        assert!(memory_record_ttl_is_live_at(&record, expires_at - 1));
+        assert!(!memory_record_ttl_is_live_at(&record, expires_at));
+
+        record.tags = vec!["ttl:not-days".to_string()];
+        assert!(memory_record_ttl_is_live_at(&record, i64::MAX));
     }
 }
 

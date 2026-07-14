@@ -565,13 +565,13 @@ mod tests {
 
     #[test]
     fn hash_dim_matches_default_model() {
-        // Tests run with the default model (no AGENT_BRIDGE_ONNX_MODEL set).
-        // The compiled default is gte-multilingual-base (768-dim) as of the
-        // 2026-06-26 default flip, so the hash backend must match at 768 and
-        // never disagree with vector_dim().
+        // The ONNX-free reference runner intentionally compiles the 384-dim
+        // hash fallback, while the default ONNX build normally selects
+        // 768-dim gte. In either build the fallback must match the active
+        // model contract rather than a feature-specific hard-coded width.
         let v = embed_text_hash("hello world");
         assert_eq!(v.len(), vector_dim());
-        assert_eq!(vector_dim(), 768);
+        assert_eq!(vector_dim(), vector_dim_for_model_name(active_model_name()));
     }
 
     #[test]
