@@ -593,13 +593,45 @@ SHA-256 values are `7ac6c87f3d789ad62540cbc96e81f0a092594b0524eec3f9b05e7ffec212
 `e7ae9abb11a4cc116778c8c373ff1c93131db9c9d36ba886ff6ef2d7b53bd09f`.
 Together the exact ledgers cover `85x32 + 71x36 = 5,276` candidate rows.
 
-The next routes now differ in kind.  M must append standard `K=606,208`, form C33
-and replay through q86; that rung has 13,918 headroom over the measured q85
-minimum, and no selected M32 rung can be removed.  D should keep K622592/C36 and
-separately precommit only a live/digest envelope increase from 786,432 to the
-existing kernel limit 1,048,576.  The exact q72 expansion fits that limit by
-249,297, but no q72 digest, ranking or feasible K is yet known.  These diagnostics
-still leave certified M/D depths at 3/2 and create no boundary or witness authority.
+Those routes are now complete.  M's wrapper realizes direct-v2 K606208/C33,
+raising retained K 524,288 -> 606,208 and capacity 32 -> 33 relative to
+arithmetic-v2.  Against the non-executed M K589824/C32 route predecessor, its
+incremental K change is 589,824 -> 606,208 and it appends `K=606,208` as index 32.
+q1--84 preserve the old propagation/state/history and 32 rows exactly.  q85
+selects the appended row with
+drop 28,686,183,592 ticks and margin 122,423,995,500 ticks.  q86 reaches 654,324
+terms and selects existing index 31/`K=589,824`, with drop 213,158,347,226 ticks
+and margin 13,797,053,946 ticks.  All 86 checkpoints commit; peak/visits are
+`694,130/101,424,121`.  Wrapper/screen/canonical SHA-256 values are
+`447cb116c2ca977cb2711b08e64e5795728907b8c4033bd1eb38211bf63cf558` /
+`86e5148a51cb70d2aab21d770ad2b21928caf6e2818786542b287be7c8d02d27` /
+`fc649a90aa42429d7d746f40bdc7dfe109f1dc6921b46beb8c3396cc3012e875`.
+
+D keeps K622592/C36 and horizon 72, changing only the live/digest policy envelope
+from 786,432 to 1,048,576.  q1--71 remain exact; q72 again reaches 799,279 terms,
+then completes digest/ranking and finds all 36 candidate rows infeasible.  Minimum
+effective K is 642,206, 19,614 over the ceiling, and the maximum candidate still
+exceeds prefix slack by 111,121,545,012 ticks.  This is a policy failure with no
+q72 resource abort or commit: 72 checkpoints are attempted and 71 completed.
+Peak/visits are `799,279/92,869,433`; screen/canonical SHA-256 values are
+`57a68b3086cd2ed2d484d0f835a190dc768b12bbb2b8d6a3c99c86f6ea6bda8d` /
+`4bdc16622a52a57ab6d43da04d77c6c67defdb36c2630a9d51178b65ac1e6ddd`.
+Together the current ledgers cover `86x33 + 72x36 = 5,430` rows.
+
+The next minimum routes are a same-cap M33 horizon extension through q88 and a
+separately pinned D direct-v2 K655360/C37 wrapper.  Relative to K622592/C36, D
+must set `candidate_ladder_added=[655360]` and `candidate_ladder_removed=[]`,
+raise `max_candidate_K` and `max_output_terms_if_successful` to 655,360, and keep
+only the live/digest caps at
+1,048,576.  It must replay freshly from q1 through q72; the current policy
+canonical is post-replay comparison evidence only, never state or a resume input.
+K=655,360 has 13,154 terms of measured headroom.  The intervening standard
+`K=638,976` is
+3,230 too small and is to be recorded by the next precommit as excluded only for
+this fixed four-gate q72 predecessor state/prefix; cadence, prefix-state or a later
+horizon change requires re-evaluation.  All current M33/D36 indices have been
+selected; no old rung is trajectory-neutral.  These diagnostics still leave
+certified M/D depths at 3/2 and create no boundary, witness or READY authority.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

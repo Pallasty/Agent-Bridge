@@ -669,11 +669,47 @@ are `7ac6c87f3d789ad62540cbc96e81f0a092594b0524eec3f9b05e7ffec2124838`,
 and `e7ae9abb11a4cc116778c8c373ff1c93131db9c9d36ba886ff6ef2d7b53bd09f`.
 The two exact ledgers cover 85x32 + 71x36 = 5,276 candidate rows.
 
-The next bounded routes split by failure mode.  M must append standard K=606,208
-and raise candidate capacity 32 -> 33; it covers q85's measured minimum by 13,918,
-and all current M32 indices have already been selected.  D needs no further K
-change yet: a separately precommitted same-K/C36 discriminator should raise only
-the live/digest policy envelope 786,432 -> the existing kernel limit 1,048,576 and
-replay through q72.  The observed 799,279-term expansion fits that kernel limit by
-249,297, but its digest, ranking and K feasibility remain unknown.  Neither route
+Those bounded routes are complete.  M's wrapper realizes direct-v2 K=606,208/C33,
+raising retained K 524,288 -> 606,208 and candidate capacity 32 -> 33 relative to
+arithmetic-v2.  Relative to the non-executed M K589824/C32 route predecessor, the
+incremental K change is 589,824 -> 606,208 and the wrapper appends K=606,208 as
+index 32.  q1--84 preserve propagation, committed state, selected history and the
+old 32 rows exactly.  q85 preserves the measured propagation/ranking and old rows,
+then the appended row drops 67,148 terms and 28,686,183,592 ticks, leaving
+122,423,995,500 ticks of margin.  q86/gates 340--343 reaches 654,324 terms and
+selects existing index 31/K=589,824, dropping 64,500 terms and 213,158,347,226
+ticks with 13,797,053,946 ticks of margin.  All 86 checkpoints commit; peak/visits
+are 694,130/101,424,121.  The wrapper, screen and canonical SHA-256 values are
+`447cb116c2ca977cb2711b08e64e5795728907b8c4033bd1eb38211bf63cf558`,
+`86e5148a51cb70d2aab21d770ad2b21928caf6e2818786542b287be7c8d02d27`
+and `fc649a90aa42429d7d746f40bdc7dfe109f1dc6921b46beb8c3396cc3012e875`.
+
+D keeps K=622,592/C36 and horizon 72, changing only the live/digest policy caps
+786,432 -> 1,048,576.  The frozen resource-abort canonical is post-replay evidence
+only.  q1--71 records/history remain exact; q72/gates 284--287 again produces
+799,279 terms, now completes digest/ranking and evaluates all 36 rows.  Every row
+is infeasible: minimum effective K is 642,206, 19,614 above the ceiling, and the
+maximum candidate's drop still exceeds prefix slack by 111,121,545,012 ticks.
+There is no q72 resource abort, selection or commit; the ledger ends with 72
+attempted and 71 completed checkpoints.  Peak/visits are 799,279/92,869,433.  The
+screen and canonical SHA-256 values are
+`57a68b3086cd2ed2d484d0f835a190dc768b12bbb2b8d6a3c99c86f6ea6bda8d`
+and `4bdc16622a52a57ab6d43da04d77c6c67defdb36c2630a9d51178b65ac1e6ddd`.
+The two current ledgers cover 86x33 + 72x36 = 5,430 candidate rows.
+
+The next minimum discriminators split again.  M should keep K=606,208/C33 and
+extend only horizon 86 -> 88 with a fresh q1 replay; the current canonical remains
+post-replay evidence.  D needs a separately pinned direct-v2 wrapper with effective
+retained K=655,360/C37.  Relative to K622592/C36 it must set
+`candidate_ladder_added=[655360]` and `candidate_ladder_removed=[]`, then raise
+`max_candidate_K` and `max_output_terms_if_successful` from
+622,592 to 655,360, and leave the live/digest caps at 1,048,576.  It must replay
+freshly from q1 through q72; the current policy canonical is loaded only after
+replay as comparison evidence, never as state or a resume input.  K=655,360 has
+13,154 terms of headroom over the measured minimum.  The intervening standard
+K=638,976 is excluded only for this fixed four-gate q72 predecessor state/prefix
+because it is
+3,230 too small; cadence, prefix-state or later-horizon changes require
+re-evaluation.  All current M33 and D36 indices have been selected, so neither
+route can delete an old rung while preserving its trajectory.  Neither route
 changes witness, boundary, transition, READY or certified-depth authority.

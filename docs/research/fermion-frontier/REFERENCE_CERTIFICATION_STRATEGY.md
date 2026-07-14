@@ -902,14 +902,45 @@ peak/visits（含 q72 attempt）为 799,279/92,869,433；wrapper/screen/canonica
 `e7ae9abb11a4cc116778c8c373ff1c93131db9c9d36ba886ff6ef2d7b53bd09f`。两份账本覆盖
 `85x32 + 71x36 = 5,276` 行。
 
-下一阶段仍按 failure mode 分路。M 必须 append `K=606,208` 并形成 C33，再从 q1
-replay 至 q86；该档比 q85 实测 minimum 多 13,918，而且 M32 的所有 index 都曾
-selected，不能删除旧档。D 暂不增加 K：保持 `K=622,592/C36`，以独立 precommit
-只把 live/digest policy envelope 从 786,432 提至既有 kernel limit 1,048,576，再重放
-q72。已观测的 799,279 项比 kernel limit 少 249,297，但 q72 digest、ranking 与 K
-feasibility 均仍未知，不得外推。
+这两条 bounded route 也已完成。M wrapper 实现 direct-v2 `K=606,208/C33`：相对
+arithmetic-v2 把 retained K 524,288 -> 606,208、capacity 32 -> 33；相对不执行的
+M K589824/C32 route predecessor，阶段增量是 K 589,824 -> 606,208，并把
+`K=606,208` append 为 index 32。q1--84 的 propagation、committed state、selected
+history 和旧 32 行 exact；q85 保持旧
+propagation/ranking/rows，新行丢弃 67,148 项、drop 28,686,183,592 ticks，以
+122,423,995,500 ticks margin commit。q86（gates 340--343）产生 654,324 项，选择旧
+index 31/`K=589,824`，丢弃 64,500 项、drop 213,158,347,226 ticks，margin 为
+13,797,053,946 ticks。86/86 全部 commit，总 peak/visits 为 694,130/101,424,121；
+wrapper/screen/canonical SHA 分别为
+`447cb116c2ca977cb2711b08e64e5795728907b8c4033bd1eb38211bf63cf558`、
+`86e5148a51cb70d2aab21d770ad2b21928caf6e2818786542b287be7c8d02d27` 与
+`fc649a90aa42429d7d746f40bdc7dfe109f1dc6921b46beb8c3396cc3012e875`。
 
-这些 screens 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
+D 保持 `K=622,592/C36` 与 horizon 72，只把 live/digest policy caps 从 786,432
+提高到 1,048,576；旧 resource-abort canonical 只作 post-replay evidence。q1--71
+records/history exact；q72（gates 284--287）再次产生 799,279 项，这次完成 digest、
+ranking 与全部 36 行求值。minimum effective K 为 642,206，超 ceiling 19,614；最大
+候选的 drop 仍比 prefix slack 多 111,121,545,012 ticks。结果是 policy failure，
+q72 resource abort/selection/commit 均为空，attempted/completed 为 72/71。总 peak/visits
+为 799,279/92,869,433；screen/canonical SHA 分别为
+`57a68b3086cd2ed2d484d0f835a190dc768b12bbb2b8d6a3c99c86f6ea6bda8d` 与
+`4bdc16622a52a57ab6d43da04d77c6c67defdb36c2630a9d51178b65ac1e6ddd`。当前两份
+账本覆盖 `86x33 + 72x36 = 5,430` 行。
+
+下一最小判别器再次分路。M 保持 `K=606,208/C33`，只把 horizon 86 -> 88，并从 q1
+fresh replay；当前 canonical 仍只能在 replay 后载入。D 需要独立 pin 的 direct-v2
+`K=655,360/C37` wrapper；相对 K622592/C36 固定
+`candidate_ladder_added=[655360]`、`candidate_ladder_removed=[]`，把
+`max_candidate_K` 与 `max_output_terms_if_successful` 从 622,592 提到 655,360，
+live/digest caps 则保持 1,048,576。它必须从 q1 fresh replay 至 q72；当前 policy
+canonical 只能在 replay 后作为 comparison evidence，不能提供 state/resume input。
+`K=655,360` 比实测 minimum 多 13,154。中间标准档 `K=638,976` 少 3,230，只在固定
+four-gate q72 predecessor state/prefix 下排除并由下一 precommit 记录；cadence、prefix
+state 或 later horizon 改变时必须重新评估。M33/D36 的全部 index 都曾 selected，不能
+删除旧档而仍声称 trajectory-preserving。
+
+这些 screens 不发布 authority-bearing policy artifact；diagnostic ladder/caps 仍必须在
+replay 前独立 precommit。它们不发布 child boundary/transition/sidecar，不组合
 product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY
 authority。任何后续正式采用四门 cadence 的路线仍需新的独立 policy、checker、
 same-byte parent custody 和完整认证回放。
