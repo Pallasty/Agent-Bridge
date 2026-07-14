@@ -697,19 +697,51 @@ screen and canonical SHA-256 values are
 and `4bdc16622a52a57ab6d43da04d77c6c67defdb36c2630a9d51178b65ac1e6ddd`.
 The two current ledgers cover 86x33 + 72x36 = 5,430 candidate rows.
 
-The next minimum discriminators split again.  M should keep K=606,208/C33 and
-extend only horizon 86 -> 88 with a fresh q1 replay; the current canonical remains
-post-replay evidence.  D needs a separately pinned direct-v2 wrapper with effective
-retained K=655,360/C37.  Relative to K622592/C36 it must set
-`candidate_ladder_added=[655360]` and `candidate_ladder_removed=[]`, then raise
-`max_candidate_K` and `max_output_terms_if_successful` from
-622,592 to 655,360, and leave the live/digest caps at 1,048,576.  It must replay
-freshly from q1 through q72; the current policy canonical is loaded only after
-replay as comparison evidence, never as state or a resume input.  K=655,360 has
-13,154 terms of headroom over the measured minimum.  The intervening standard
-K=638,976 is excluded only for this fixed four-gate q72 predecessor state/prefix
-because it is
-3,230 too small; cadence, prefix-state or later-horizon changes require
-re-evaluation.  All current M33 and D36 indices have been selected, so neither
-route can delete an old rung while preserving its trajectory.  Neither route
-changes witness, boundary, transition, READY or certified-depth authority.
+Those minimum discriminators are complete.  M keeps K=606,208/C33 and extends
+only horizon 86 -> 88 through its q86 same-byte private parent and a fresh q1
+replay.  q1--86 remain exact; the q86 canonical is loaded only after replay.  The
+result has 88 records, 87 selected-history entries and 2,904 candidate rows.  q87
+(gates 344--347, SHA-256
+`4b60608343a13e9927dd20cd4bb7314e67b1432465e27d186c117935402801e7`)
+reaches 645,618 terms and selects index 32/K=606,208.  It drops 39,410 terms and
+28,631,843,222 ticks, leaves 89,696,616,395 ticks of margin and commits
+E=1,700,501,205,265,321 ticks.  q88 (gates 348--351, SHA-256
+`7f8c6a2dd155412a27369e1fa8402c37127c6eadf12e4fa59ba442d345e8eaf7`)
+reaches 689,242 terms and fails policy: minimum effective K is 607,993, excess
+1,785, while the maximum row drops 218,739,972,624 ticks and exceeds slack by
+24,511,950,557 ticks.  The terminal branch is
+`Q87_SUCCESS_Q88_FAILURE`; no resource abort is emitted.  Attempted/completed are
+88/87 and peak/visits are 694,130/106,375,865.  Screen/canonical SHA-256 values
+are `d158d00275e78b33d0246e86bf9bc7bcaf4eb4f7fa4cb9afce2298e97cb5308d`
+and `f7ca4a1defd38472366c1cfcd112736f34b73e612002cce98a52f79daa5cc1b0`;
+the canonical is 804,599 bytes.
+
+D's separate direct-v2 K=655,360/C37 wrapper and manifest SHA-256 values are
+`2acf8f8329376ab06ad4c079af633d23bcc6a32fa20af654e5c3dbbb32093d54`
+and `62c889baf0676150344f06ccf5d48132e121ade399c77dd1b85727f5002dd6e5`.
+Its fresh q1--72 replay commits 72/72 checkpoints and 2,664 candidate rows.  q72
+reaches 799,279 terms and selects appended index 36/K=655,360, dropping 143,919
+terms and 78,846,106,758 ticks with 43,761,880,334 ticks of margin.  It commits
+E=2,289,046,235,933,480 ticks; peak/visits remain 799,279/92,869,433.
+Screen/canonical SHA-256 values are
+`1d3366d7c3fdc2a1e4a5c58198cc9be7e561af1f2ff8582e324ed5902c760183`
+and `0517461f8695b21b578190cdd9a5da884f301d43c2f80be8093fbfc20cc006ae`;
+the canonical is 751,550 bytes.  K=638,976 is excluded only for the fixed
+four-gate q72 predecessor state/prefix: threshold 642,206, shortfall 3,230, with
+no executed candidate row and no asserted exact drop.
+Together the current ledgers cover 2,904 + 2,664 = 5,568 candidate rows.
+
+The next minimum routes are evidence-driven and still require contract review.
+M should append the next standard rung K=622,592 with a separately pinned
+direct-v2 K622592/C34 wrapper.  Relative to M33 it must add only K=622,592, raise
+the candidate/output ceiling and retained-K/candidate-count capability from
+606,208/33 to 622,592/34, leave every other cap unchanged, and replay freshly
+through q88.  The q88 canonical is post-replay comparison evidence only.  The
+standard rung has 14,599 terms of headroom over the local minimum 607,993; that
+minimum is threshold evidence, not a post-hoc execution candidate.  D should
+keep K=655,360/C37 and all caps fixed, change only horizon 72 -> 74, and use a
+fresh q1 replay to locate the next failure or resource boundary.  Its q72
+canonical remains post-replay evidence, and q73/q74 outcomes are not
+precommitted.  The q72-only K=638,976 exclusion cannot be extrapolated across
+cadence, prefix or horizon changes.  Certified depths remain M3/D2, and there is
+no boundary, witness, READY or certificate authority.

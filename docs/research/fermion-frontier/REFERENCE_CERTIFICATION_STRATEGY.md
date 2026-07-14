@@ -927,23 +927,54 @@ q72 resource abort/selection/commit 均为空，attempted/completed 为 72/71。
 `4bdc16622a52a57ab6d43da04d77c6c67defdb36c2630a9d51178b65ac1e6ddd`。当前两份
 账本覆盖 `86x33 + 72x36 = 5,430` 行。
 
-下一最小判别器再次分路。M 保持 `K=606,208/C33`，只把 horizon 86 -> 88，并从 q1
-fresh replay；当前 canonical 仍只能在 replay 后载入。D 需要独立 pin 的 direct-v2
-`K=655,360/C37` wrapper；相对 K622592/C36 固定
-`candidate_ladder_added=[655360]`、`candidate_ladder_removed=[]`，把
-`max_candidate_K` 与 `max_output_terms_if_successful` 从 622,592 提到 655,360，
-live/digest caps 则保持 1,048,576。它必须从 q1 fresh replay 至 q72；当前 policy
-canonical 只能在 replay 后作为 comparison evidence，不能提供 state/resume input。
-`K=655,360` 比实测 minimum 多 13,154。中间标准档 `K=638,976` 少 3,230，只在固定
-four-gate q72 predecessor state/prefix 下排除并由下一 precommit 记录；cadence、prefix
-state 或 later horizon 改变时必须重新评估。M33/D36 的全部 index 都曾 selected，不能
-删除旧档而仍声称 trajectory-preserving。
+该判别器也已完成。M 保持 `K=606,208/C33`，只把 horizon 86 -> 88；q86 same-byte
+private parent 从 q1 fresh replay，q86 canonical 仅在结果产生后载入，q1--86 exact。
+canonical 有 88 个 records、87 个 selected-history entries 与 2,904 行。q87（gates
+344--347，batch SHA
+`4b60608343a13e9927dd20cd4bb7314e67b1432465e27d186c117935402801e7`）
+pre-count 645,618，选择 index 32/`K=606,208`，丢弃 39,410 项、drop
+28,631,843,222 ticks，以 89,696,616,395 ticks margin commit 到
+`1700501205265321/2^64`。q88（gates 348--351，batch SHA
+`7f8c6a2dd155412a27369e1fa8402c37127c6eadf12e4fa59ba442d345e8eaf7`）
+pre-count 689,242，minimum effective K=607,993，比 ceiling 多 1,785；最大候选行的
+drop 是 218,739,972,624 ticks，比 slack 多 24,511,950,557 ticks。结果分支为
+`Q87_SUCCESS_Q88_FAILURE`，无 resource abort，attempted/completed 为 88/87，总
+peak/visits 为 694,130/106,375,865。screen/canonical SHA 分别为
+`d158d00275e78b33d0246e86bf9bc7bcaf4eb4f7fa4cb9afce2298e97cb5308d` 与
+`f7ca4a1defd38472366c1cfcd112736f34b73e612002cce98a52f79daa5cc1b0`，canonical
+大小为 804,599 bytes。
 
-这些 screens 不发布 authority-bearing policy artifact；diagnostic ladder/caps 仍必须在
-replay 前独立 precommit。它们不发布 child boundary/transition/sidecar，不组合
+D 的独立 direct-v2 `K=655,360/C37` wrapper/manifest SHA 分别为
+`2acf8f8329376ab06ad4c079af633d23bcc6a32fa20af654e5c3dbbb32093d54` 与
+`62c889baf0676150344f06ccf5d48132e121ade399c77dd1b85727f5002dd6e5`。它相对
+K622592/C36 只 append `K=655,360` 并把 retained-K/candidate-count capability 提到
+655,360/37；live/digest caps 保持 1,048,576。fresh q1--72 replay 得到 72/72 commits
+与 2,664 行。q72 pre-count 为 799,279，选择 index 36/`K=655,360`，丢弃 143,919
+项、drop 78,846,106,758 ticks，以 43,761,880,334 ticks margin commit 到
+`2289046235933480/2^64`；总 peak/visits 为 799,279/92,869,433。screen/canonical
+SHA 分别为
+`1d3366d7c3fdc2a1e4a5c58198cc9be7e561af1f2ff8582e324ed5902c760183` 与
+`0517461f8695b21b578190cdd9a5da884f301d43c2f80be8093fbfc20cc006ae`，canonical
+大小为 751,550 bytes。`K=638,976` 的结论严格限于 fixed four-gate q72 predecessor
+state/prefix：实测 threshold 642,206、shortfall 3,230；没有执行 candidate row，也不
+声明 exact drop。两份当前账本合计覆盖 5,568 行。
+
+下一最小判别路线由这些结果驱动，但合同仍须先审计。M 应沿既有标准 ladder append
+`K=622,592`，建立独立 direct-v2 `K622592/C34` wrapper；相对 M33 只把
+candidate/output ceiling 与 retained-K/candidate-count capability 从 606,208/33 提到
+622,592/34，其余 caps 不变，并 fresh replay 至 q88。当前 q88 canonical 仍只能在
+replay 后比较。标准档比局部 minimum 607,993 多 14,599；该 minimum 是 threshold
+evidence，不是事后新增的执行档位。D 应保持 `K=655,360/C37` 与全部 caps 不变，只把
+horizon 72 -> 74，并从 q1 fresh replay 以定位下一 failure/resource boundary；q72
+canonical 仍只作 post-replay evidence，q73/q74 outcome 不得 precommit。不能把 q72 上
+对 `K=638,976` 的局部排除外推到不同 cadence、prefix state 或 later horizon。
+
+这些 screens 不发布 authority-bearing policy artifact；任何下一 ladder、horizon 与 caps
+仍必须在 replay 前独立 precommit。它们不发布 child boundary/transition/sidecar，不组合
 product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY
 authority。任何后续正式采用四门 cadence 的路线仍需新的独立 policy、checker、
-same-byte parent custody 和完整认证回放。
+same-byte parent custody 和完整认证回放；当前不产生 boundary、witness、READY 或
+certificate authority。
 
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全

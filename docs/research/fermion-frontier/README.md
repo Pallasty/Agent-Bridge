@@ -618,20 +618,53 @@ Peak/visits are `799,279/92,869,433`; screen/canonical SHA-256 values are
 `4bdc16622a52a57ab6d43da04d77c6c67defdb36c2630a9d51178b65ac1e6ddd`.
 Together the current ledgers cover `86x33 + 72x36 = 5,430` rows.
 
-The next minimum routes are a same-cap M33 horizon extension through q88 and a
-separately pinned D direct-v2 K655360/C37 wrapper.  Relative to K622592/C36, D
-must set `candidate_ladder_added=[655360]` and `candidate_ladder_removed=[]`,
-raise `max_candidate_K` and `max_output_terms_if_successful` to 655,360, and keep
-only the live/digest caps at
-1,048,576.  It must replay freshly from q1 through q72; the current policy
-canonical is post-replay comparison evidence only, never state or a resume input.
-K=655,360 has 13,154 terms of measured headroom.  The intervening standard
-`K=638,976` is
-3,230 too small and is to be recorded by the next precommit as excluded only for
-this fixed four-gate q72 predecessor state/prefix; cadence, prefix-state or a later
-horizon change requires re-evaluation.  All current M33/D36 indices have been
-selected; no old rung is trajectory-neutral.  These diagnostics still leave
-certified M/D depths at 3/2 and create no boundary, witness or READY authority.
+Those minimum routes are now complete.  M keeps `K=606,208/C33` and extends only
+the horizon 86 -> 88.  Its q86 same-byte private parent replays freshly from q1;
+q1--86 remain exact and the q86 canonical is loaded only afterward.  The ledger
+contains 88 records, 87 selected-history entries and 2,904 candidate rows.  q87
+(gates 344--347, batch SHA-256
+`4b60608343a13e9927dd20cd4bb7314e67b1432465e27d186c117935402801e7`)
+reaches 645,618 terms and selects index 32/`K=606,208`, dropping 39,410 terms and
+28,631,843,222 ticks with 89,696,616,395 ticks of margin; committed E becomes
+1,700,501,205,265,321 ticks.  q88 (gates 348--351, batch SHA-256
+`7f8c6a2dd155412a27369e1fa8402c37127c6eadf12e4fa59ba442d345e8eaf7`)
+reaches 689,242 terms, but the exact minimum effective K is 607,993, 1,785 above
+the ceiling.  The K=606,208 row drops 218,739,972,624 ticks, exceeding its slack by
+24,511,950,557 ticks.  The closed branch is `Q87_SUCCESS_Q88_FAILURE`, with no
+resource abort, 88/87 attempted/completed checkpoints and peak/visits
+`694,130/106,375,865`.  Screen/canonical SHA-256 values are
+`d158d00275e78b33d0246e86bf9bc7bcaf4eb4f7fa4cb9afce2298e97cb5308d` /
+`f7ca4a1defd38472366c1cfcd112736f34b73e612002cce98a52f79daa5cc1b0`;
+the canonical is 804,599 bytes.
+
+D's independently pinned direct-v2 wrapper realizes `K=655,360/C37` with wrapper
+and manifest SHA-256 values
+`2acf8f8329376ab06ad4c079af633d23bcc6a32fa20af654e5c3dbbb32093d54` /
+`62c889baf0676150344f06ccf5d48132e121ade399c77dd1b85727f5002dd6e5`.
+The q1--72 fresh replay produces 72 commits and 2,664 rows.  q72 reaches 799,279
+terms and selects appended index 36/`K=655,360`, dropping 143,919 terms and
+78,846,106,758 ticks with 43,761,880,334 ticks of margin; committed E becomes
+2,289,046,235,933,480 ticks.  Peak/visits are `799,279/92,869,433`.
+Screen/canonical SHA-256 values are
+`1d3366d7c3fdc2a1e4a5c58198cc9be7e561af1f2ff8582e324ed5902c760183` /
+`0517461f8695b21b578190cdd9a5da884f301d43c2f80be8093fbfc20cc006ae`;
+the canonical is 751,550 bytes.  `K=638,976` remains excluded only for the fixed
+four-gate q72 predecessor state/prefix: the measured threshold is 642,206 and the
+shortfall is 3,230; no candidate row was executed and no exact drop is asserted.
+Together the two current ledgers cover 5,568 candidate rows.
+
+The next minimum routes are concrete but still require contract review.  M should
+append the next standard rung `K=622,592` with a separately pinned direct-v2
+`K622592/C34` wrapper, raise only its candidate/output ceiling and capability,
+and replay freshly through q88; the current q88 canonical remains post-replay
+comparison evidence only.  That rung has 14,599 terms of headroom over the local
+q88 threshold; `K=607,993` remains threshold evidence, not a post-hoc ladder rung.
+D should keep `K=655,360/C37` and all caps fixed, extend only horizon 72 -> 74,
+and locate the next failure or resource boundary in a fresh q1 replay.  Its q72
+canonical is likewise post-replay evidence only, and q73/q74 outcomes remain
+uncommitted.  The q72-only `K=638,976` exclusion must not be extrapolated to a
+changed cadence, prefix or horizon.  These diagnostics still leave certified
+depths at M3/D2 and create no boundary, witness, READY or certificate authority.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

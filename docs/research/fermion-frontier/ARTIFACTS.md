@@ -748,6 +748,58 @@ so they are versioned normally and are not added to the preservation-only
   72-record/2,592-row canonical ledger, q72 arithmetic/resource/nested-digest
   anchors, 12 execution components, 11 custody entries and exact raw67-to-final96
   reverse/relabel reconstruction; full replay is opt-in.
+- `hubbard_l8_magnetization_adaptive_k_four_gate_k606208_c33_q88_screen.py`
+  and its `*_transcript.json`: same-cap M33 horizon extension through q88.  Screen
+  source SHA-256 is
+  `d158d00275e78b33d0246e86bf9bc7bcaf4eb4f7fa4cb9afce2298e97cb5308d`.
+  The q86 same-byte private parent performs the fresh replay and its canonical is
+  loaded afterward; q1--86 remain exact.  q87 selects index 32/K=606,208 at
+  pre-count 645,618, dropping 39,410 terms and 28,631,843,222 ticks with
+  89,696,616,395 ticks of margin.  q88 fails at pre-count 689,242 with minimum
+  effective K=607,993, excess 1,785; the maximum row's 218,739,972,624-tick drop
+  exceeds slack by 24,511,950,557 ticks.  The no-abort terminal branch is
+  `Q87_SUCCESS_Q88_FAILURE`; attempted/completed are 88/87 and peak/visits are
+  694,130/106,375,865.  The 804,599-byte canonical has 88 records, 87 history
+  entries and 2,904 rows; its SHA-256 is
+  `f7ca4a1defd38472366c1cfcd112736f34b73e612002cce98a52f79daa5cc1b0`.
+- `test_hubbard_l8_magnetization_adaptive_k_four_gate_k606208_c33_q88_screen.py`:
+  exact q86 parent/canonical/capability pins, replay-before-reference ordering,
+  all five terminal branches, all three q87 and q88 structured resource-abort
+  kinds, closed raw67/final96, success37/failure31, row7 and abort50 schemas,
+  11 components/10 custody entries and the exact 88-record/2,904-row canonical
+  ledger with q87 success and q88 failure anchors; full replay is opt-in.
+- `hubbard_l8_adaptive_k_arithmetic_k655360_c37.py`: fail-closed direct-v2 D
+  capability wrapper with source SHA-256
+  `2acf8f8329376ab06ad4c079af633d23bcc6a32fa20af654e5c3dbbb32093d54`
+  and manifest SHA-256
+  `62c889baf0676150344f06ccf5d48132e121ade399c77dd1b85727f5002dd6e5`.
+  Relative to arithmetic-v2 it changes retained K 524,288 -> 655,360 and candidate
+  capacity 32 -> 37; relative to the D36 route it changes 622,592 -> 655,360 and
+  36 -> 37.  Only K=655,360 is appended, while live/digest limits remain
+  1,048,576; the D36 route is a non-executed reference.
+- `test_hubbard_l8_adaptive_k_arithmetic_k655360_c37.py`: same-byte/fail-closed
+  direct-v2 loading, exact direct/route deltas, provider bindings, 655,360/655,361
+  and C37/C38 boundaries, manifest/layer hashes and strict predecessor pins.
+- `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q72_screen.py`
+  and its `*_transcript.json`: append-only D37 replay through q72.  Screen source
+  SHA-256 is
+  `1d3366d7c3fdc2a1e4a5c58198cc9be7e561af1f2ff8582e324ed5902c760183`.
+  The current D36 policy artifacts are loaded only after a fresh q1 replay.
+  q72 reaches 799,279 terms and selects appended index 36/K=655,360, dropping
+  143,919 terms and 78,846,106,758 ticks with 43,761,880,334 ticks of margin;
+  E becomes 2,289,046,235,933,480 ticks.  The route commits 72/72 checkpoints and
+  2,664 rows with peak/visits 799,279/92,869,433.  The 751,550-byte canonical
+  SHA-256 is
+  `0517461f8695b21b578190cdd9a5da884f301d43c2f80be8093fbfc20cc006ae`.
+  K=638,976 is excluded only for the fixed q72 state/prefix (threshold 642,206,
+  shortfall 3,230); it has no executed row or asserted exact drop.
+- `test_hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q72_screen.py`:
+  exact wrapper/policy/predecessor pins, post-replay-only comparison custody,
+  q1--71 and q72-old-row identity, first-feasible index-36 selection, fail-closed
+  unexpected-resource handling without an abort artifact, closed raw67/final96,
+  success38/failure32 and row7 schemas, 11 components/10 custody entries and the
+  exact 72-record/2,664-row canonical ledger.  No full replay runs in the default
+  suite.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,
