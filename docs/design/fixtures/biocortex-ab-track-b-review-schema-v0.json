@@ -1,0 +1,283 @@
+{
+  "$defs": {
+    "abstentionAssessment": {
+      "maxLength": 12,
+      "minLength": 4,
+      "pattern": "^(fail|not_required|pass)$",
+      "type": "string"
+    },
+    "answerId": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ans_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "answerReview": {
+      "additionalProperties": false,
+      "properties": {
+        "abstention_assessment": {
+          "$ref": "#/$defs/abstentionAssessment"
+        },
+        "answer_id": {
+          "$ref": "#/$defs/answerId"
+        },
+        "claim_scores": {
+          "items": {
+            "$ref": "#/$defs/claimScore"
+          },
+          "maxItems": 64,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "currentness": {
+          "maxLength": 9,
+          "minLength": 4,
+          "pattern": "^(fail|pass|uncertain)$",
+          "type": "string"
+        },
+        "matched_forbidden_assertion_count": {
+          "maximum": 64,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "matched_forbidden_assertion_handles": {
+          "items": {
+            "$ref": "#/$defs/assertionHandle"
+          },
+          "maxItems": 64,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "response_mode": {
+          "$ref": "#/$defs/responseMode"
+        },
+        "unmatched_unsupported_assertion_count": {
+          "maximum": 4096,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "usefulness": {
+          "maximum": 5,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "abstention_assessment",
+        "answer_id",
+        "claim_scores",
+        "currentness",
+        "matched_forbidden_assertion_count",
+        "matched_forbidden_assertion_handles",
+        "response_mode",
+        "unmatched_unsupported_assertion_count",
+        "usefulness"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "assertionHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ast_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "authorizes_scoring": {
+          "const": false
+        },
+        "authorizes_unblinding": {
+          "const": false
+        },
+        "condition_mapping_present": {
+          "const": false
+        },
+        "provider_neutral_record": {
+          "const": true
+        },
+        "raw_private_truth_present": {
+          "const": false
+        },
+        "self_attestation_sufficient": {
+          "const": false
+        }
+      },
+      "required": [
+        "authorizes_scoring",
+        "authorizes_unblinding",
+        "condition_mapping_present",
+        "provider_neutral_record",
+        "raw_private_truth_present",
+        "self_attestation_sufficient"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "case": {
+      "additionalProperties": false,
+      "properties": {
+        "answers": {
+          "items": {
+            "$ref": "#/$defs/answerReview"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "case_id": {
+          "$ref": "#/$defs/caseId"
+        }
+      },
+      "required": [
+        "answers",
+        "case_id"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "caseId": {
+      "maxLength": 37,
+      "minLength": 37,
+      "pattern": "^case_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "claimHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^clm_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "claimScore": {
+      "additionalProperties": false,
+      "properties": {
+        "referent": {
+          "$ref": "#/$defs/referent"
+        },
+        "score": {
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "referent",
+        "score"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "label": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "predicateHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^prd_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "referent": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_handle": {
+          "$ref": "#/$defs/claimHandle"
+        },
+        "predicate_handle": {
+          "$ref": "#/$defs/predicateHandle"
+        },
+        "referent_handle": {
+          "$ref": "#/$defs/referentHandle"
+        }
+      },
+      "required": [
+        "claim_handle",
+        "predicate_handle",
+        "referent_handle"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "referentHandle": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ref_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "responseMode": {
+      "maxLength": 7,
+      "minLength": 6,
+      "pattern": "^(answer|abstain)$",
+      "type": "string"
+    },
+    "sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:review:v0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Provider-neutral populated blind-review object. It is distinct from raw response and provenance receipt artifacts and never authorizes scoring or unblinding.",
+  "properties": {
+    "blind_packet_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/case"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "referent_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "review_instruction_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "reviewer_slot": {
+      "$ref": "#/$defs/label"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_review.v0"
+    },
+    "trial_id": {
+      "$ref": "#/$defs/label"
+    },
+    "truth_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "required": [
+    "blind_packet_sha256",
+    "boundary",
+    "cases",
+    "contract_sha256",
+    "referent_schema_sha256",
+    "review_instruction_sha256",
+    "reviewer_slot",
+    "schema",
+    "trial_id",
+    "truth_manifest_sha256"
+  ],
+  "title": "BioCortex AB Track B review object v0",
+  "type": "object",
+  "unevaluatedProperties": false
+}

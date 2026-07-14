@@ -1,0 +1,152 @@
+{
+  "artifact_bindings": [
+    {
+      "artifact_kind": "blind_map_bijection_checker",
+      "binding_path": "review_and_blinding.map_bijection_checker_sha256",
+      "local_dependencies": [
+        "review_and_blinding.map_schema_sha256",
+        "sampling.sampling_receipt_schema_sha256"
+      ],
+      "provider_neutral": true,
+      "repo_path": "scripts/eval/biocortex_ab_track_b_map_bijection_v0.py",
+      "schema_id": null,
+      "sha256": "45f55cea933ee12df402fbb55d27ea7c6cd08ba8eef9d9868e4e491dd62a2cd2",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    },
+    {
+      "artifact_kind": "review_object_schema",
+      "binding_path": "review_and_blinding.review_schema_sha256",
+      "local_dependencies": [
+        "truth_inputs.referent_schema_sha256"
+      ],
+      "provider_neutral": true,
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-review-schema-v0.json",
+      "schema_id": "urn:agent-bridge:biocortex-ab:track-b:review:v0",
+      "sha256": "2745cd373d4f99cdd4bb3d0bc9d9087966adb3a9d0594749cb1150b90d1e9422",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    },
+    {
+      "artifact_kind": "truth_authority_manifest_schema",
+      "binding_path": "truth_inputs.truth_manifest_schema_sha256",
+      "local_dependencies": [
+        "truth_inputs.referent_schema_sha256"
+      ],
+      "provider_neutral": true,
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-truth-manifest-schema-v0.json",
+      "schema_id": "urn:agent-bridge:biocortex-ab:track-b:truth-manifest:v0",
+      "sha256": "520070d1eb4852fd2a005d63b3d087769b3240902289ff5c44f11c109bd1cde6",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    }
+  ],
+  "baseline_commit": "c8e070de0de2abca764c5060b5fba91a64b6f189",
+  "boundary": {
+    "authority_true_count": 0,
+    "graph_packet_mutated": false,
+    "live_binding_satisfied_count": 0,
+    "map_receipt_created": false,
+    "private_runtime_artifact_emitted": false,
+    "real_run_admitted": false,
+    "runtime_instance_validated": false,
+    "side_effects_unlocked": "NONE",
+    "source_artifact_count": 3
+  },
+  "canonical_serialization": "UTF8_SORTED_KEYS_INDENT_2_LF_FINAL_NEWLINE_NO_NAN_DUPLICATE_KEYS_REJECTED",
+  "completed_public_bindings": [
+    "review_and_blinding.map_bijection_checker_sha256",
+    "review_and_blinding.map_schema_sha256",
+    "review_and_blinding.review_command_schema_sha256",
+    "review_and_blinding.review_schema_sha256",
+    "sampling.sampling_receipt_schema_sha256",
+    "truth_inputs.referent_schema_sha256",
+    "truth_inputs.truth_manifest_schema_sha256"
+  ],
+  "date": "2026-07-14",
+  "decision": "SOURCE_IDENTITY_COMPOSITION_IMPLEMENTED_NOT_LIVE_BOUND",
+  "evidence_sha256": {
+    "crates/bridge/src/memory_truth.rs": "2e46a521332820b07171b425c95004f35a98887c7c49a2d78baf7740f07195a4",
+    "crates/bridge/src/memory_truth_adapter.rs": "c459e96919778c24b0bc699653d8c12b83332e6318b7298deee071a01e90e023",
+    "docs/design/MEMORY_TEMPORAL_EVIDENCE_SUBSTRATE_S2_2026_07_14.md": "dd837929fdd1acf29be4c17ce06f3dacd4ae25f2bb13cf6ed190b84f65098f5b",
+    "docs/design/fixtures/biocortex-ab-track-b-blind-map-schema-v0.json": "ad40df50eec68fa192c79e6699a8d2da2a9c3925a387eaa7427f7e19f996d783",
+    "docs/design/fixtures/biocortex-ab-track-b-review-command-schema-v0.json": "40df0e39f36df01d414487c496cf09b5ffbed89cafc540dc89e6e57bea4466f5",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v0.json": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+    "docs/design/fixtures/biocortex-ab-track-b-truth-referent-schema-v0.json": "5da057e70675cbd259e0d1beb98039d2eee8589c73aa910f92f90cb0374545a8",
+    "scripts/eval/check_biocortex_ab_track_b_foundational_schema_pack.py": "63f6192bfdc20083ce1770f67a4d053ace7d7ac253a8d538bbea38cabcc7bec9",
+    "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph_v0.json": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+    "scripts/eval/fixtures/biocortex_ab_track_b_foundational_schema_pack_v0.json": "fbfbf5738dd81e0afe8dbc45b1e91a35e92382a1913006a9b2e5ded67c077f36",
+    "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json": "764f063fefe0e516547f9bd1e71417242daf292d57e480ae39b73df8bcda341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e",
+    "scripts/eval/fixtures/memory_temporal_evidence_adapter_s3_contract_v0.json": "0efefdc38111bac5f344335be425dc6cf931fa509284833b959e326f7d2e8c2a",
+    "scripts/eval/fixtures/memory_temporal_evidence_substrate_s2_contract_v0.json": "4dc7f459baa6de49755b79578c1ffdd6818c56d7f15916af72b024ef04c793da",
+    "scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json": "da9e190492d74824159bbff18eaeff02a4848921989f4077072f126e1d4e4bcc",
+    "scripts/eval/portfolio_continuity_successor_v3_trial.py": "0b92b1153a77257a49fc847eb37be3e20d687c41067559c22b2ebed72649e003"
+  },
+  "foundational_receipt_sha256": "f5470213cd8b1fe4d63455de12b6591675a88452203c4f01cff1fd89486d35fb",
+  "foundational_source_commit": "d07180200345293f7d603d192eb55b3f7222379d",
+  "graph_sha256": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+  "graph_source_commit": "ba4dbae629398ec16e4f22f4b0ac7f2ce372541f",
+  "identity_binding_required_fields": [
+    "trial_id",
+    "contract_sha256",
+    "sampling_receipt_sha256",
+    "eligible_frame_manifest_sha256",
+    "selected_case_manifest_sha256",
+    "condition_roster_sha256",
+    "capture_sha256",
+    "generation_sha256",
+    "blind_packet_sha256",
+    "answer_blinding_seed_sha256"
+  ],
+  "next_public_frontier": [
+    "reference_condition.context_builder_sha256",
+    "review_and_blinding.review_receipt_schema_sha256",
+    "sampling.sampling_seed_derivation_sha256",
+    "sampling.sampling_selection_algorithm_sha256",
+    "truth_inputs.strict_case_algorithm_sha256"
+  ],
+  "resource_caps": {
+    "max_answer_characters": 12000,
+    "max_cases": 4096,
+    "max_conditions": 64,
+    "max_forbidden_assertions_per_case": 64,
+    "max_forbidden_handles_per_answer": 64,
+    "max_schema_bytes": 1048576,
+    "max_single_artifact_bytes": 33554432,
+    "max_total_answer_bytes": 16777216,
+    "max_total_answers": 262144,
+    "max_total_claim_scores": 1048576,
+    "max_total_input_bytes": 67108864,
+    "max_total_truth_assertions": 1048576
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_identity_composition_pack.v0",
+  "semantics": {
+    "abstention_assessment_truth_table": "ANSWER_ANSWER_NOT_REQUIRED_ABSTAIN_ABSTAIN_PASS_MISMATCH_FAIL",
+    "abstention_currentness": "PASS_FOR_CORRECT_NO_ASSERTION_ABSTENTION",
+    "case_weight_application": "EXACTLY_ONCE_DOWNSTREAM",
+    "claim_gate": "ALL_SCORE_RUBRICS_MUST_SCORE_2",
+    "claim_weight_present": false,
+    "forbidden_count_semantics": "MATCHED_UNIQUE_REGISTERED_ASSERTIONS",
+    "map_checker_grain": "ONE_TRIAL_PRIVATE_MAP",
+    "map_object_api_mode": "SYNTHETIC_ONLY_RAW_FILES_REQUIRE_TEN_EXACT_FILES",
+    "map_validation_authority": "VALIDATION_ONLY_NOT_STAGE_RECEIPT",
+    "preference_field_present": false,
+    "review_grain": "ONE_TRIAL_X_REVIEWER_SLOT",
+    "review_instruction_binding": "CROSS_REVIEW_EQUALITY_ONLY_NO_INSTRUCTION_BYTES",
+    "structural_blocker_scope": "THIS_TRANCHE_LOCAL_NON_EXHAUSTIVE",
+    "truth_manifest_grain": "ONE_TRIAL_PRIVATE_TRUTH_MANIFEST",
+    "truth_root_digest_binding": "3_EXACTLY_RESOLVED_11_FORMAT_ONLY",
+    "truth_time_order": "AS_OF_LE_CUTOFF_LE_CREATED_LT_FIRST_OUTPUT",
+    "unsupported_count_semantics": "UNMATCHED_UNREGISTERED_ASSERTIONS_ONLY"
+  },
+  "structural_blockers": [
+    "LIVE_LEDGER_HAS_NO_MAP_BIJECTION_RECEIPT_BINDING",
+    "LIVE_LEDGER_HAS_NO_TRUTH_KNOWLEDGE_CUTOFF_SCALAR",
+    "LIVE_LEDGER_HAS_NO_TRUTH_MANIFEST_CHECKER_BINDING",
+    "S3_ADAPTER_REMAINS_FAIL_CLOSED",
+    "SOURCE_ARTIFACTS_ARE_NOT_RUNTIME_INSTANCES"
+  ],
+  "synthetic_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_identity_composition_pack_synthetic_v0.json",
+  "synthetic_fixture_sha256": "094a7343543be2a9b32fc996dc3e7006bc9d02f87f8cc9bdd269ef9fb61a341a"
+}
