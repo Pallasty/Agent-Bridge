@@ -880,11 +880,34 @@ minimum effective K 为 614,584，K excess 8,376，因此 q71 fail-stop、q72 �
 `f21288cf0c37dc86fedc9ac195f4efe390dcc913640caa7ca79f02e6297d20f8`。两份账本覆盖
 `84x32 + 71x35 = 5,173` 行，均未触发 live/digest cap。
 
-下一阶段继续按 observable 分路。M 已到达 q84，下一最小判别器保持 K=589,824/C32，
-仅把 horizon 扩到对齐 q86并从 q1 replay；q84 artifact 仍只作 post-replay evidence。
-D 必须把标准 `K=622,592` append 为 index 35，形成 C36并重放至 q72；该档比 q71
-minimum 高 8,008。D35 的全部候选都曾 selected，不能删除旧档而仍宣称 trajectory/
-row-prefix preserving。不得外推 q85/q86 或 q72 的未测结果。
+该下一 split 也已完成。M 保持 `K=589,824/C32`，只把 horizon 84 -> 86；q84
+same-byte private parent 从 q1 replay，q84 canonical 仅在重放后载入。q1--84 records、
+history 与每步 32 行均 exact。q85（gates 336--339）pre-count 为 673,356，prefix slack
+为 151,110,179,092 ticks；最大 K 的 drop 为 184,958,529,526 ticks，因此 minimum
+effective K 为 592,290，超出现有上限 2,466。q85 fail-stop、q86 未尝试，总 peak/visits
+为 694,130/98,908,531。screen/canonical SHA 分别为
+`002cc87d5d1a8f1908a837e8612e3a9d4a4c5ebbf68e41f841ba4a5a639ff878` 与
+`c24a665d543323a0e7f28ac4023fe5ae3d54b39c4e2991cba3e70e9371d0053d`。
+
+D 的 direct-v2 capability 把 retained K 606,208 -> 622,592、capacity 35 -> 36，并只在
+index 35 append 标准 `K=622,592`。q1--70 common state/history 与旧 35 行 exact；q71
+也保留旧 propagation/rows，追加档丢弃 138,598 项、drop 95,847,613,475 ticks，以
+40,105,997,158 ticks margin 成功 commit 到 `2288967389826722/2^64`。q72 propagation
+精确产生 799,279 项，比未变的 786,432 live-term policy cap 多 12,847；中止发生在
+digest、ranking、candidate construction 与 commit 之前。screen 以独立 closed 40-key
+resource-abort ledger 记录实际 traceback state，不伪造 q72 checkpoint record。总
+peak/visits（含 q72 attempt）为 799,279/92,869,433；wrapper/screen/canonical SHA 分别为
+`7ac6c87f3d789ad62540cbc96e81f0a092594b0524eec3f9b05e7ffec2124838`、
+`2e22e1918fbc10cd696d700dbf05e8d99d0c333a1428e9473de6ebbc563488e1` 与
+`e7ae9abb11a4cc116778c8c373ff1c93131db9c9d36ba886ff6ef2d7b53bd09f`。两份账本覆盖
+`85x32 + 71x36 = 5,276` 行。
+
+下一阶段仍按 failure mode 分路。M 必须 append `K=606,208` 并形成 C33，再从 q1
+replay 至 q86；该档比 q85 实测 minimum 多 13,918，而且 M32 的所有 index 都曾
+selected，不能删除旧档。D 暂不增加 K：保持 `K=622,592/C36`，以独立 precommit
+只把 live/digest policy envelope 从 786,432 提至既有 kernel limit 1,048,576，再重放
+q72。已观测的 799,279 项比 kernel limit 少 249,297，但 q72 digest、ranking 与 K
+feasibility 均仍未知，不得外推。
 
 这些 screens 不 precommit policy，不发布 child boundary/transition/sidecar，不组合
 product-formula-to-exact-Hubbard error，也不增加 M/D certified depth 3/2 或 READY

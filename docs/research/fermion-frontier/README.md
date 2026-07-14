@@ -570,11 +570,36 @@ above the current maximum; q72 is not attempted.  Peak/visits are
 The two exact ledgers cover 84x32 plus 71x35 = 5,173 candidate rows.  Both remain
 diagnostic-only and leave certified depths at 3/2.
 
-The next bounded routes split once more.  M needs no new capability: a same-cap
-K=589,824/C32 horizon-only screen should replay from q1 through aligned q86, with
-the q84 artifact used only after replay.  D must append standard `K=622,592` to
-form C36 and replay through q72; it covers q71's minimum by 8,008.  Every current
-D35 candidate has been selected, so no trajectory-neutral deletion is available.
+That bounded split is now complete.  M keeps `K=589,824/C32` and changes only the
+horizon 84 -> 86; the exact q84 screen is its same-byte private parent and the q84
+canonical is post-replay evidence only.  The q1--84 records/history and all 32 rows
+remain exact.  q85/gates 336--339 has pre-count 673,356 and slack
+151,110,179,092 ticks.  The maximum K drops 184,958,529,526 ticks, so q85 needs
+minimum effective `K=592,290`, 2,466 above the ceiling; q86 is not attempted.
+Peak/visits are `694,130/98,908,531`.  Screen/canonical SHA-256 values are
+`002cc87d5d1a8f1908a837e8612e3a9d4a4c5ebbf68e41f841ba4a5a639ff878` /
+`c24a665d543323a0e7f28ac4023fe5ae3d54b39c4e2991cba3e70e9371d0053d`.
+
+D's direct-v2 wrapper raises retained K 606,208 -> 622,592 and candidate capacity
+35 -> 36, then appends `K=622,592` as index 35.  q1--70 common state/history and
+old rows are exact; q71 also preserves the old propagation/35 rows and selects the
+new row with drop 95,847,613,475 ticks, leaving 40,105,997,158 ticks of margin.
+q72 propagation reaches exactly 799,279 terms, 12,847 over the unchanged 786,432
+live policy cap, before digest/ranking/candidate evaluation.  The screen therefore
+emits a separate 40-key resource-abort ledger and no fabricated q72 record.
+Peak/visits including the attempt are `799,279/92,869,433`; wrapper/screen/canonical
+SHA-256 values are `7ac6c87f3d789ad62540cbc96e81f0a092594b0524eec3f9b05e7ffec2124838` /
+`2e22e1918fbc10cd696d700dbf05e8d99d0c333a1428e9473de6ebbc563488e1` /
+`e7ae9abb11a4cc116778c8c373ff1c93131db9c9d36ba886ff6ef2d7b53bd09f`.
+Together the exact ledgers cover `85x32 + 71x36 = 5,276` candidate rows.
+
+The next routes now differ in kind.  M must append standard `K=606,208`, form C33
+and replay through q86; that rung has 13,918 headroom over the measured q85
+minimum, and no selected M32 rung can be removed.  D should keep K622592/C36 and
+separately precommit only a live/digest envelope increase from 786,432 to the
+existing kernel limit 1,048,576.  The exact q72 expansion fits that limit by
+249,297, but no q72 digest, ranking or feasible K is yet known.  These diagnostics
+still leave certified M/D depths at 3/2 and create no boundary or witness authority.
 
 The Majorana implementation audit selects a certificate fork of registered
 `MajoranaPropagation v0.3.0` at `main@b7849cb`, not the inferred paper snapshot,

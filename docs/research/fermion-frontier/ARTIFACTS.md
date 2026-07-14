@@ -664,6 +664,46 @@ so they are versioned normally and are not added to the preservation-only
   closed 65/94/38/32/7/9 schemas, custody/components, digest and cumulative
   resource adversarial checks, atomic authority and complete 71-record/2,485-row
   canonical ledger with an exact q71 failure anchor; full replay is opt-in.
+- `hubbard_l8_adaptive_k_arithmetic_k622592_c36.py`: fail-closed direct-v2 D
+  capability wrapper with source SHA-256
+  `7ac6c87f3d789ad62540cbc96e81f0a092594b0524eec3f9b05e7ffec2124838`
+  and manifest SHA-256
+  `fc82c41b1a1dd82fbb34e205ea347b0ba41b08c5fd2ebed6a599593fe95c1b34`.
+  It changes only retained K 606,208 -> 622,592 and candidate capacity 35 -> 36;
+  the D35 route and M K=589,824/C32 are non-executed references.
+- `test_hubbard_l8_adaptive_k_arithmetic_k622592_c36.py`: same-byte/fail-closed
+  direct-v2 loading, exact direct/route/cross-route deltas, provider bindings,
+  622,592/622,593 and C36/C37 boundaries, manifest/layer hashes and strict pins.
+- `hubbard_l8_magnetization_adaptive_k_four_gate_k589824_c32_q86_screen.py`
+  and its `*_transcript.json`: same-cap M32 horizon extension.  Screen source
+  SHA-256 is
+  `002cc87d5d1a8f1908a837e8612e3a9d4a4c5ebbf68e41f841ba4a5a639ff878`.
+  The q84 artifact is post-replay evidence only; q1--84 records/history and all
+  32 rows remain exact.  q85 fails at pre-count 673,356, minimum effective
+  K=592,290 and excess 2,466, so q86 is absent.  Peak/visits are
+  694,130/98,908,531.  Canonical transcript SHA-256 is
+  `c24a665d543323a0e7f28ac4023fe5ae3d54b39c4e2991cba3e70e9371d0053d`.
+- `test_hubbard_l8_magnetization_adaptive_k_four_gate_k589824_c32_q86_screen.py`:
+  exact q84 parent/route/capability pins, three-branch terminal state machine,
+  closed custody/components and canonical schemas, adversarial type and digest
+  checks, atomic authority and complete 85-record/2,720-row ledger with an exact
+  q85 failure anchor; full replay is opt-in.
+- `hubbard_l8_double_occupancy_adaptive_k_four_gate_k622592_c36_q72_screen.py`
+  and its `*_transcript.json`: D36 append-and-horizon replay.  Screen source
+  SHA-256 is
+  `2e22e1918fbc10cd696d700dbf05e8d99d0c333a1428e9473de6ebbc563488e1`.
+  q1--70 common state/history and old 35 rows remain exact.  q71 selects appended
+  index 35/K=622,592 with 40,105,997,158 ticks of margin.  q72 propagation reaches
+  799,279 terms, 12,847 above the unchanged live-term policy cap, before digest,
+  ranking or candidate evaluation; a separate closed 40-key resource-abort ledger
+  records the stop and q72 has no checkpoint record.  Peak/visits including the
+  attempt are 799,279/92,869,433.  Canonical transcript SHA-256 is
+  `e7ae9abb11a4cc116778c8c373ff1c93131db9c9d36ba886ff6ef2d7b53bd09f`.
+- `test_hubbard_l8_double_occupancy_adaptive_k_four_gate_k622592_c36_q72_screen.py`:
+  exact D35 parent/direct-v2/route pins, four-branch terminal state machine,
+  traceback custody and resource-abort structure checks, closed schemas, atomic
+  authority and complete 71-record/2,556-row canonical ledger with exact q71 and
+  q72-abort anchors; full replay is opt-in.
 - `hubbard_l8_magnetization_interval_step3_checker.py`, contract and template:
   same-byte execute the positive immediate two-step parent and certify only the
   adjacent magnetization `2 -> 3` fixed-K transition.  They bind state-v2 parent,

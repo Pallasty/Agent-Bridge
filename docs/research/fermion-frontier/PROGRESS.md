@@ -643,8 +643,37 @@ The two ledgers cover 84x32 plus 71x35 = 5,173 rows.  No policy, witness, bounda
 transition, READY component, certified-depth or other authority-bearing artifact
 changes.
 
-The next M discriminator is same-cap K=589,824/C32 through aligned q86, using the
-q84 artifact only as post-replay evidence.  D needs a direct-v2 K=622,592/C36
-capability wrapper and an append-only replay through q72; that standard rung covers
-q71's minimum by 8,008.  All D35 candidates have been selected, so deletion would
-change the selected/state trajectory.
+That next split is complete.  M keeps K=589,824/C32 and changes only the horizon
+84 -> 86.  Its exact q84 screen is the same-byte private execution parent, while
+the q84 canonical is loaded only after replay.  q1--84 records, all 32 candidate
+rows per record and selected history remain exact.  q85/gates 336--339 reaches
+pre-count 673,356 with 151,110,179,092 ticks of slack.  K=589,824 would drop
+184,958,529,526 ticks, so the minimum effective K is 592,290, excess 2,466;
+q85 fails and q86 is not attempted.  Peak/visits are 694,130/98,908,531.  The
+screen and canonical SHA-256 values are
+`002cc87d5d1a8f1908a837e8612e3a9d4a4c5ebbf68e41f841ba4a5a639ff878`
+and `c24a665d543323a0e7f28ac4023fe5ae3d54b39c4e2991cba3e70e9371d0053d`.
+
+D adds direct-v2 capability K=622,592/C36 and appends that K as index 35 without
+deleting any selected predecessor rung.  q1--70 common records/history and old 35
+rows remain exact; q71 preserves the old propagation and first 35 rows, then
+selects the appended row.  Its drop is 95,847,613,475 ticks for 138,598 terms,
+leaving 40,105,997,158 ticks of margin and committing
+E=2,288,967,389,826,722 ticks.  q72 propagation produces exactly 799,279 terms,
+12,847 above the unchanged 786,432 live-term policy cap, before digest, ranking,
+candidate construction or commit.  A closed 40-key resource-abort ledger records
+that stop without inventing a q72 checkpoint record.  Peak/visits including the
+attempt are 799,279/92,869,433.  The wrapper, screen and canonical SHA-256 values
+are `7ac6c87f3d789ad62540cbc96e81f0a092594b0524eec3f9b05e7ffec2124838`,
+`2e22e1918fbc10cd696d700dbf05e8d99d0c333a1428e9473de6ebbc563488e1`
+and `e7ae9abb11a4cc116778c8c373ff1c93131db9c9d36ba886ff6ef2d7b53bd09f`.
+The two exact ledgers cover 85x32 + 71x36 = 5,276 candidate rows.
+
+The next bounded routes split by failure mode.  M must append standard K=606,208
+and raise candidate capacity 32 -> 33; it covers q85's measured minimum by 13,918,
+and all current M32 indices have already been selected.  D needs no further K
+change yet: a separately precommitted same-K/C36 discriminator should raise only
+the live/digest policy envelope 786,432 -> the existing kernel limit 1,048,576 and
+replay through q72.  The observed 799,279-term expansion fits that kernel limit by
+249,297, but its digest, ranking and K feasibility remain unknown.  Neither route
+changes witness, boundary, transition, READY or certified-depth authority.
