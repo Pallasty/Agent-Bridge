@@ -1,0 +1,1214 @@
+{
+  "admission": {
+    "capture_allowed": false,
+    "decision": "BLOCKED_FAIL_CLOSED",
+    "real_run_admitted": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "authority": {
+    "agent_bridge_db_write": false,
+    "agent_bridge_retrieval_execution": false,
+    "biocortex_runtime_influence": false,
+    "capture": false,
+    "deployment": false,
+    "generation": false,
+    "production_promotion": false,
+    "real_review": false,
+    "scientific_claim": false,
+    "scoring": false,
+    "unblinding": false
+  },
+  "baseline_commit": "f19ec1a813ceb2d29be0a74a430293d8b998a574",
+  "bindings": [
+    {
+      "binding_evidence": null,
+      "binding_path": "candidate_condition.candidate_context_builder_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "BLOCKED_UNTIL_UPSTREAM_BINDING",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "context_and_result.context_builder_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "context_and_result.exact_tokenizer_code_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "context_and_result.exact_tokenizer_id",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "context_and_result.exact_tokenizer_model_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "context_and_result.max_context_bytes_per_case",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "context_and_result.max_context_tokens_per_case",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "generation.condition_roster_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "generation.execution_profile_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "generation.generator_cli_identity_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "generation.generator_instruction_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "generation.generator_model_identity_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "generation.harness_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.affinity_policy_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.condition_order_seed_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.hardware_guard_policy_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.hardware_profile_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.pre_touch_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.runner_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.timeout_ns",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.total_expected_units",
+      "binding_satisfied": false,
+      "local_fill_rule": "BLOCKED_UNTIL_UPSTREAM_BINDING",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "latency.warmup_query_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "power_and_estimator.bootstrap_or_lcb_seed_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "power_and_estimator.cluster_variance_policy_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "power_and_estimator.paired_method_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "power_and_estimator.pilot_population_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "power_and_estimator.power_analysis_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "power_and_estimator.required_primary_case_count",
+      "binding_satisfied": false,
+      "local_fill_rule": "BLOCKED_UNTIL_UPSTREAM_BINDING",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "power_and_estimator.target_power",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.ambient_inputs.required_effective_environment.AGENT_BRIDGE_MEMORY_CLASS_QUOTA",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.ambient_inputs.required_effective_environment.AGENT_BRIDGE_MEMORY_SEARCH_EXCLUDE_KINDS",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.binary_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.context_builder_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.effective_config_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.fixed_as_of_utc",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.runtime_features_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.snapshot_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "reference_condition.sqlite_runtime_version",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.answer_blinding_seed_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.blind_map_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "POST_GENERATION_PRE_REVIEW",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.blind_packet_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "POST_GENERATION_PRE_REVIEW",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.capture_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "POST_GENERATION_PRE_REVIEW",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.condition_roster_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.generation_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "POST_GENERATION_PRE_REVIEW",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.map_bijection_checker_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.map_schema_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.review_command_schema_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.review_instruction_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.review_provenance_checker_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.review_raw_response_schema_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.review_receipt_schema_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.review_schema_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.reviewer_conflict_and_overlap_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "review_and_blinding.reviewer_roster_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.eligible_frame_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.exclusion_ledger_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.frame_builder_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.frame_window_end_utc",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.frame_window_start_utc",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.inclusion_exclusion_rules_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.pilot_confirmatory_disjointness_checker_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.raw_frame_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.reserve_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.sampling_receipt_schema_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.sampling_receipt_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.sampling_receipt_writer_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.sampling_seed_derivation_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.sampling_seed_entropy_receipt_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.sampling_seed_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.sampling_selection_algorithm_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.selected_case_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.strata_allocation_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "sampling.target_population_definition_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.arm_builder_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "BLOCKED_UNTIL_UPSTREAM_BINDING",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.artifact_directory_scan_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.canonical_package_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.canonical_source_bytes",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.edge_row_count",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.edge_source_bytes",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.memory_row_count",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.memory_source_bytes",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.persistent_artifact_allowlist_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.schema_digest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "runtime_capture",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "storage.serializer_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "truth_inputs.claim_authority_policy_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "truth_inputs.gold_evidence_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "truth_inputs.referent_schema_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "truth_inputs.strict_case_algorithm_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "truth_inputs.truth_as_of_utc",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "owner_policy",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "value"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "truth_inputs.truth_authority_manifest_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "PROHIBITED_LOCAL_SYNTHESIS",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    },
+    {
+      "binding_evidence": null,
+      "binding_path": "truth_inputs.truth_manifest_schema_sha256",
+      "binding_satisfied": false,
+      "local_fill_rule": "EXACT_COMMITTED_ARTIFACT_ONLY",
+      "owner_class": "local_deterministic",
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "value_kind": "sha256"
+    }
+  ],
+  "classification_catalog_sha256": "a0696a1cc3461e96c8ce1b048fd626faf7ccac2203d36c89611b8f09ba33aef3",
+  "contract": {
+    "blocker_count": 12,
+    "contract_id": "biocortex_ab_track_b_real_run_admission_20260713",
+    "current_checker_state": "BLOCKED_BY_EXPECTED_SOURCE_DRIFT",
+    "current_source_binding_drift_count": 3,
+    "current_source_binding_drift_paths": [
+      "crates/bridge/src/mcp_tools.rs",
+      "crates/store/src/lib.rs",
+      "crates/store/src/sqlite.rs"
+    ],
+    "current_source_binding_match_count": 8,
+    "earliest_post_fix_capture_date": "2026-07-17",
+    "path": "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+    "schema": "agent_bridge.biocortex_ab_track_b_real_run_admission.v0",
+    "sha256": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e",
+    "source_binding_count": 11
+  },
+  "coverage": {
+    "admission_binding_complete": false,
+    "ambient_effective_env_unset_count": 2,
+    "classification_mismatch_count": 0,
+    "contract_binding_satisfied_count": 0,
+    "contract_blocking_sentinel_count": 89,
+    "coverage_extra_count": 0,
+    "coverage_missing_count": 0,
+    "declared_stage_obligation_count": 4,
+    "duplicate_binding_count": 0,
+    "inventory_complete": true,
+    "inventory_coverage_scope": "CONTRACT_SENTINELS_PLUS_AMBIENT_ENV_AND_DECLARED_STAGE_OBLIGATIONS",
+    "live_missing_scalar_binding_count": 91,
+    "non_sha_binding_count": 19,
+    "real_binding_evidence_count": 0,
+    "sha256_binding_count": 72
+  },
+  "date": "2026-07-14",
+  "ledger_id": "biocortex_ab_track_b_live_binding_ledger_20260714",
+  "local_evidence": [
+    {
+      "may_satisfy_live_binding": false,
+      "path": "Cargo.lock",
+      "role": "rust_dependency_lock",
+      "sha256": "5ebad772d0d0d48d1414bf02939feeb56ad0aa3e15aa7ee0db6fb4cb46e6c613",
+      "status": "LOCAL_SOURCE_IDENTITY_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/bridge/src/mcp_tools.rs",
+      "role": "current_bridge_reference_surface",
+      "sha256": "65b1cf172217cdde93a80e558fe95d2a69671bb8342bca1f0ed47d0a244b46ce",
+      "status": "LOCAL_SOURCE_IDENTITY_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/bridge/src/memory_truth.rs",
+      "role": "candidate_pure_resolver",
+      "sha256": "2e46a521332820b07171b425c95004f35a98887c7c49a2d78baf7740f07195a4",
+      "status": "STATIC_BLOCKER_EVIDENCE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/bridge/src/memory_truth_adapter.rs",
+      "role": "candidate_adapter_preflight",
+      "sha256": "c459e96919778c24b0bc699653d8c12b83332e6318b7298deee071a01e90e023",
+      "status": "STATIC_BLOCKER_EVIDENCE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/store/examples/memory_reference_admission_fixture.rs",
+      "role": "public_reference_fixture_runner",
+      "sha256": "3ed5c67ca5e4673c9afdf5639a95115399d4e7ce3c6d5774f6513dac76adc016",
+      "status": "PUBLIC_SYNTHETIC_MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/store/examples/memory_reference_s0.rs",
+      "role": "reference_query_only_example",
+      "sha256": "644883e2e55690c99af465dbbd4c788f71aeed8c7c00263b946eb39e7e25d40c",
+      "status": "LOCAL_SOURCE_IDENTITY_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/store/src/lib.rs",
+      "role": "reference_contract_and_projection",
+      "sha256": "08485bbb4e25fa2caba2697b15d818b29440acebd5e6b47a91dff3a41522f5ec",
+      "status": "LOCAL_SOURCE_IDENTITY_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/store/src/sqlite.rs",
+      "role": "reference_sqlite_implementation",
+      "sha256": "aa67b9b910a287e603e2c5fb63f5694536975d561f82c4033eeb1663423df673",
+      "status": "LOCAL_SOURCE_IDENTITY_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/store/src/vector.rs",
+      "role": "reference_vector_tie_break_surface",
+      "sha256": "ac344b2a8cd7f9a20058774eadf977e2892038d1b0d938dca94afe1f84315bb4",
+      "status": "LOCAL_SOURCE_IDENTITY_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "docs/design/MEMORY_PEEK_TRUTH_ADAPTER_PREFLIGHT_V0_2026_07_10.md",
+      "role": "candidate_adapter_design_contract",
+      "sha256": "c457e574fa40c711f70ba3085f114044eae37686911fedfe77a2efa718bf7aaa",
+      "status": "STATIC_BLOCKER_EVIDENCE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "docs/design/TEMPORAL_TRUTH_PROJECTION_V0_2026_07_10.md",
+      "role": "candidate_resolver_design_contract",
+      "sha256": "5d8c4a31fe595606f5033c950b38ba969e3b9642a8e28a067fc5f4165e435481",
+      "status": "STATIC_BLOCKER_EVIDENCE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/check-biocortex-ab-reference-admission.sh",
+      "role": "public_reference_fixture_gate",
+      "sha256": "1c1b4da0c3bfb2f8b7a6a0266c0898a4fe4c60493fd85a8f8b61000c7c391f96",
+      "status": "PUBLIC_SYNTHETIC_MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/check-biocortex-ab-track-b-admission.sh",
+      "role": "frozen_track_b_gate",
+      "sha256": "4cb1c708bbb5bb7c598c5a54467ce4953e8ad83374e7e25706078b4f77f3a94b",
+      "status": "FROZEN_PROTOCOL_BASELINE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/check_biocortex_ab_track_b_admission.py",
+      "role": "frozen_track_b_checker",
+      "sha256": "b09b10243f195299dc226b5d8d2b484ec74f5eecd49bb487296c391f6f193b13",
+      "status": "FROZEN_PROTOCOL_BASELINE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/biocortex_ab_reference_admission.expected.v1.tsv",
+      "role": "public_reference_fixture_receipt",
+      "sha256": "04bfaf10a8bf343ff133b46388ea798ee81e6fd605198d6a48f84ea9236cc32c",
+      "status": "PUBLIC_SYNTHETIC_MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/biocortex_ab_reference_admission_v1.json",
+      "role": "public_reference_fixture",
+      "sha256": "a2d8718e5982b030659f20c69a893ec4d1e39f3b10b01fdd960df0ac55f9af4d",
+      "status": "PUBLIC_SYNTHETIC_MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/biocortex_ab_track_b_admission_synthetic_v0.json",
+      "role": "frozen_track_b_synthetic_arithmetic",
+      "sha256": "3c1f57abb41a92692bc84d019635073b97b32ae3ee3fe231ba3048017a2d0b43",
+      "status": "FROZEN_PROTOCOL_BASELINE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission.expected.v0.tsv",
+      "role": "frozen_track_b_receipt",
+      "sha256": "65fd8262f85bca201f26d0b004621c84e6a6af24318d4cb934eb5b13fe9e8ae8",
+      "status": "FROZEN_PROTOCOL_BASELINE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+      "role": "frozen_track_b_contract",
+      "sha256": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e",
+      "status": "FROZEN_PROTOCOL_BASELINE_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json",
+      "role": "consumed_successor_answer_contract",
+      "sha256": "da9e190492d74824159bbff18eaeff02a4848921989f4077072f126e1d4e4bcc",
+      "status": "CONSUMED_PRECEDENT_MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/portfolio_continuity_ab_trial.py",
+      "role": "consumed_legacy_shared_trial_surface",
+      "sha256": "b6f599e748088e36424bd03e70a5bc3112aeaf728f6679b19297889a98e5b7f3",
+      "status": "CONSUMED_PRECEDENT_MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/portfolio_continuity_successor_v3_trial.py",
+      "role": "consumed_successor_v3_harness",
+      "sha256": "0b92b1153a77257a49fc847eb37be3e20d687c41067559c22b2ebed72649e003",
+      "status": "CONSUMED_PRECEDENT_MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/run-memory-reference-admission-fixture.sh",
+      "role": "public_reference_fixture_clean_runner",
+      "sha256": "bf1bced06920233fa4d1093e080e9f673115035e8b809ee9200f030e7ec4e5af",
+      "status": "PUBLIC_SYNTHETIC_MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/run-memory-reference-s0.sh",
+      "role": "reference_query_only_clean_runner",
+      "sha256": "22cf1ef655635908de16a93d1a398eb2fe7059a5f5008200a0576df56b244d8e",
+      "status": "LOCAL_SOURCE_IDENTITY_ONLY"
+    }
+  ],
+  "local_evidence_catalog_sha256": "9545cf504a4e7be20d1cb5170ecbdef64973a786e6d187b7c8cd6c7fc872d992",
+  "local_fill_policy": {
+    "blocked_until_upstream_binding_paths": [
+      "candidate_condition.candidate_context_builder_sha256",
+      "latency.total_expected_units",
+      "power_and_estimator.required_primary_case_count",
+      "storage.arm_builder_manifest_sha256"
+    ],
+    "exact_committed_artifact_only_paths": [
+      "context_and_result.context_builder_sha256",
+      "context_and_result.exact_tokenizer_code_sha256",
+      "generation.harness_sha256",
+      "latency.runner_sha256",
+      "power_and_estimator.paired_method_sha256",
+      "reference_condition.context_builder_sha256",
+      "review_and_blinding.map_bijection_checker_sha256",
+      "review_and_blinding.map_schema_sha256",
+      "review_and_blinding.review_command_schema_sha256",
+      "review_and_blinding.review_provenance_checker_sha256",
+      "review_and_blinding.review_raw_response_schema_sha256",
+      "review_and_blinding.review_receipt_schema_sha256",
+      "review_and_blinding.review_schema_sha256",
+      "sampling.frame_builder_sha256",
+      "sampling.pilot_confirmatory_disjointness_checker_sha256",
+      "sampling.sampling_receipt_schema_sha256",
+      "sampling.sampling_receipt_writer_sha256",
+      "sampling.sampling_seed_derivation_sha256",
+      "sampling.sampling_selection_algorithm_sha256",
+      "storage.serializer_sha256",
+      "truth_inputs.referent_schema_sha256",
+      "truth_inputs.strict_case_algorithm_sha256",
+      "truth_inputs.truth_manifest_schema_sha256"
+    ],
+    "local_evidence_satisfies_binding_count": 0,
+    "prohibited_local_synthesis_count": 64,
+    "status": "PLANNED_NOT_BOUND"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_live_binding_ledger.v0",
+  "stage_obligations": [
+    {
+      "binding_field_present": false,
+      "obligation": "both_command_request_raw_response_and_receipt_chains",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "both_complete_review_objects",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "contract_scoped_o_excl_score_claim",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "map_bijection_receipt_sha256",
+      "owner_class": "custodian_private",
+      "required_stage": "POST_GENERATION_PRE_REVIEW",
+      "status": "DECLARED_REQUIRED_ARTIFACT_NOT_BINDING_FIELD_BLOCKS"
+    }
+  ],
+  "stages": {
+    "post_generation_pre_review": "NOT_REACHED",
+    "pre_output_admission": "BLOCKED",
+    "pre_unblind": "NOT_REACHED"
+  }
+}
