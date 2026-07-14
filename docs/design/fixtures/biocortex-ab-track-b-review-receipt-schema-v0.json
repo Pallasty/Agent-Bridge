@@ -1,0 +1,323 @@
+{
+  "$defs": {
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "authorizes_scoring": {
+          "const": false
+        },
+        "authorizes_unblinding": {
+          "const": false
+        },
+        "condition_mapping_present": {
+          "const": false
+        },
+        "custody_proof_required": {
+          "const": true
+        },
+        "filesystem_o_excl_proof_required": {
+          "const": true
+        },
+        "private_record": {
+          "const": true
+        },
+        "provider_neutral_record": {
+          "const": true
+        },
+        "raw_response_private": {
+          "const": true
+        },
+        "receipt_schema_acceptance_proves_execution": {
+          "const": false
+        },
+        "score_claim_created": {
+          "const": false
+        },
+        "self_attestation_sufficient": {
+          "const": false
+        },
+        "unblinding_performed": {
+          "const": false
+        }
+      },
+      "required": [
+        "authorizes_scoring",
+        "authorizes_unblinding",
+        "condition_mapping_present",
+        "custody_proof_required",
+        "filesystem_o_excl_proof_required",
+        "private_record",
+        "provider_neutral_record",
+        "raw_response_private",
+        "receipt_schema_acceptance_proves_execution",
+        "score_claim_created",
+        "self_attestation_sufficient",
+        "unblinding_performed"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "byteLength": {
+      "maximum": 16777216,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "label": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "utc": {
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:review-receipt:v0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Provider-neutral private receipt for one zero-retry blind-review invocation. It hash-binds the command, exact request, raw response and populated review, but schema acceptance and self-attested O_EXCL fields never prove execution, custody, scoring authority or unblinding authority.",
+  "properties": {
+    "blind_packet_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "completed_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "created_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "custodian_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "execution_environment_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "execution_trace_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "executor_profile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "exit_code": {
+      "const": 0
+    },
+    "external_fact_access_count": {
+      "const": 0
+    },
+    "invocation_index": {
+      "const": 1
+    },
+    "invocation_nonce_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "mcp_server_count": {
+      "const": 0
+    },
+    "project_context_loaded": {
+      "const": false
+    },
+    "raw_response_byte_length": {
+      "$ref": "#/$defs/byteLength"
+    },
+    "raw_response_equals_review_exact_bytes": {
+      "const": true
+    },
+    "raw_response_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "receipt_writer_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "response_sink_created_exclusively": {
+      "const": true
+    },
+    "response_sink_file_fsync_completed": {
+      "const": true
+    },
+    "response_sink_file_mode": {
+      "const": "0600"
+    },
+    "response_sink_id": {
+      "$ref": "#/$defs/label"
+    },
+    "response_sink_must_not_have_existed": {
+      "const": true
+    },
+    "response_sink_nlink": {
+      "const": 1
+    },
+    "response_sink_parent_directory_fsync_completed": {
+      "const": true
+    },
+    "response_sink_parent_directory_mode": {
+      "const": "0700"
+    },
+    "response_sink_path_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "response_write_mode": {
+      "const": "O_EXCL_SINGLE_FILE"
+    },
+    "retry_count": {
+      "const": 0
+    },
+    "review_byte_length": {
+      "$ref": "#/$defs/byteLength"
+    },
+    "review_command_byte_length": {
+      "$ref": "#/$defs/byteLength"
+    },
+    "review_command_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "review_command_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "review_instruction_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "review_receipt_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "review_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "review_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "reviewer_conflict_and_overlap_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "reviewer_roster_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "reviewer_slot": {
+      "$ref": "#/$defs/label"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_review_receipt.v0"
+    },
+    "session_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "started_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "stderr_byte_length": {
+      "const": 0
+    },
+    "stderr_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "stdin_request_byte_length": {
+      "$ref": "#/$defs/byteLength"
+    },
+    "stdin_request_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "tool_event_count": {
+      "const": 0
+    },
+    "trial_id": {
+      "$ref": "#/$defs/label"
+    },
+    "usage_record_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "working_directory_after_file_count": {
+      "const": 0
+    },
+    "working_directory_after_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "working_directory_before_file_count": {
+      "const": 0
+    },
+    "working_directory_before_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "working_directory_path_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "writer_open_flags": {
+      "const": "O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC"
+    }
+  },
+  "required": [
+    "blind_packet_sha256",
+    "boundary",
+    "completed_at_utc",
+    "contract_sha256",
+    "created_at_utc",
+    "custodian_identity_sha256",
+    "execution_environment_sha256",
+    "execution_trace_sha256",
+    "executor_profile_sha256",
+    "exit_code",
+    "external_fact_access_count",
+    "invocation_index",
+    "invocation_nonce_sha256",
+    "mcp_server_count",
+    "project_context_loaded",
+    "raw_response_byte_length",
+    "raw_response_equals_review_exact_bytes",
+    "raw_response_sha256",
+    "receipt_writer_sha256",
+    "response_sink_created_exclusively",
+    "response_sink_file_fsync_completed",
+    "response_sink_file_mode",
+    "response_sink_id",
+    "response_sink_must_not_have_existed",
+    "response_sink_nlink",
+    "response_sink_parent_directory_fsync_completed",
+    "response_sink_parent_directory_mode",
+    "response_sink_path_sha256",
+    "response_write_mode",
+    "retry_count",
+    "review_byte_length",
+    "review_command_byte_length",
+    "review_command_schema_sha256",
+    "review_command_sha256",
+    "review_instruction_sha256",
+    "review_receipt_schema_sha256",
+    "review_schema_sha256",
+    "review_sha256",
+    "reviewer_conflict_and_overlap_manifest_sha256",
+    "reviewer_roster_sha256",
+    "reviewer_slot",
+    "schema",
+    "session_identity_sha256",
+    "started_at_utc",
+    "stderr_byte_length",
+    "stderr_sha256",
+    "stdin_request_byte_length",
+    "stdin_request_sha256",
+    "tool_event_count",
+    "trial_id",
+    "usage_record_sha256",
+    "working_directory_after_file_count",
+    "working_directory_after_manifest_sha256",
+    "working_directory_before_file_count",
+    "working_directory_before_manifest_sha256",
+    "working_directory_path_sha256",
+    "writer_open_flags"
+  ],
+  "title": "BioCortex AB Track B review receipt v0",
+  "type": "object",
+  "unevaluatedProperties": false
+}

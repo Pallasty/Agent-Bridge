@@ -1,0 +1,224 @@
+{
+  "boundary": {
+    "authorizes_review_execution": false,
+    "authorizes_scoring": false,
+    "authorizes_unblinding": false,
+    "live_binding_satisfied": false,
+    "private_runtime_artifact_emitted": false,
+    "real_run_admitted": false,
+    "side_effects_unlocked": "NONE",
+    "synthetic_only": true
+  },
+  "deterministic_truth_gates": {
+    "blind_packet_sha256": "c129bd9f5266a02896d009dcd67edd7909791a51a03627c4dcf15f7c678d2098",
+    "boundary": {
+      "authorizes_scoring": false,
+      "authorizes_unblinding": false,
+      "condition_mapping_present": false,
+      "provider_neutral_record": true,
+      "source_provenance_verified_by_this_algorithm": false
+    },
+    "contract_sha256": "5ae38eec3605a4efb27a25288e9dcc76d0a982191a0d76eae799a6830ba1edf4",
+    "rows": [
+      {
+        "all_gold_recalled": true,
+        "answer_id": "ans_f111aebabd134f91fcfd30230d819a84",
+        "applicability": "ANSWER_REQUIRED",
+        "authority_exists": true,
+        "case_id": "case_11111111111111111111111111111111",
+        "current_referent_correct": true
+      },
+      {
+        "all_gold_recalled": false,
+        "answer_id": "ans_63300983e82c4b3432b3ec3b3140c05e",
+        "applicability": "ANSWER_REQUIRED",
+        "authority_exists": true,
+        "case_id": "case_11111111111111111111111111111111",
+        "current_referent_correct": true
+      },
+      {
+        "answer_id": "ans_9fabd2e266e1a6cef6eeea6989ff0a95",
+        "applicability": "NOT_APPLICABLE_ABSTENTION",
+        "case_id": "case_22222222222222222222222222222222"
+      },
+      {
+        "answer_id": "ans_5de7c709c1985ac1a364c0879ffcf59d",
+        "applicability": "NOT_APPLICABLE_ABSTENTION",
+        "case_id": "case_22222222222222222222222222222222"
+      }
+    ],
+    "schema": "agent_bridge.biocortex_ab_track_b_strict_case_truth_gate_input.v0",
+    "trial_id": "track_b_identity_synthetic_v0",
+    "truth_manifest_sha256": "70a3b3021b52be2af0726d6bbe076acef10a3ad7fe1b63837ac468f05759f10b"
+  },
+  "expected": {
+    "blind_answer_case_count": 4,
+    "case_count": 2,
+    "receipt_count": 2,
+    "reviewer_count": 2,
+    "reviewer_evaluation_count": 8,
+    "strict_fail_count": 2,
+    "strict_pass_count": 2
+  },
+  "predecessor_identity_fixture": {
+    "path": "scripts/eval/fixtures/biocortex_ab_track_b_identity_composition_pack_synthetic_v0.json",
+    "sha256": "094a7343543be2a9b32fc996dc3e7006bc9d02f87f8cc9bdd269ef9fb61a341a"
+  },
+  "receipt_runs": [
+    {
+      "command_created_at_utc": "2026-07-14T12:02:59Z",
+      "completed_at_utc": "2026-07-14T12:03:10Z",
+      "created_at_utc": "2026-07-14T12:03:11Z",
+      "custodian_identity": {
+        "identity": "synthetic_custodian_alpha",
+        "schema": "agent_bridge.synthetic_custodian_identity.v0"
+      },
+      "execution_environment": {
+        "environment": "empty_ephemeral_synthetic_alpha",
+        "schema": "agent_bridge.synthetic_review_environment.v0"
+      },
+      "execution_trace": {
+        "exit_code": 0,
+        "schema": "agent_bridge.synthetic_review_execution_trace.v0",
+        "tool_events": []
+      },
+      "executor_profile": {
+        "profile": "synthetic_reviewer_alpha",
+        "provider_neutral": true,
+        "schema": "agent_bridge.synthetic_executor_profile.v0"
+      },
+      "invocation_nonce": "synthetic-review-invocation-alpha",
+      "receipt_writer": {
+        "open_flags": "O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC",
+        "schema": "agent_bridge.synthetic_review_receipt_writer.v0",
+        "writer": "synthetic_writer_alpha"
+      },
+      "response_sink_id": "strict_review_response_alpha",
+      "response_sink_path": "/private/synthetic/strict_review_response_alpha",
+      "reviewer_slot": "reviewer_slot_synthetic_1",
+      "session_identity": {
+        "schema": "agent_bridge.synthetic_review_session.v0",
+        "session": "synthetic_session_alpha"
+      },
+      "started_at_utc": "2026-07-14T12:03:00Z",
+      "stdin_request_utf8": "synthetic strict review request for reviewer slot one\n",
+      "usage_record": {
+        "input_tokens": 101,
+        "output_tokens": 41,
+        "schema": "agent_bridge.synthetic_usage_record.v0"
+      },
+      "working_directory_manifest": {
+        "files": [],
+        "schema": "agent_bridge.synthetic_empty_working_directory.v0"
+      },
+      "working_directory_path": "/private/synthetic/workspace_alpha"
+    },
+    {
+      "command_created_at_utc": "2026-07-14T12:03:19Z",
+      "completed_at_utc": "2026-07-14T12:03:30Z",
+      "created_at_utc": "2026-07-14T12:03:31Z",
+      "custodian_identity": {
+        "identity": "synthetic_custodian_beta",
+        "schema": "agent_bridge.synthetic_custodian_identity.v0"
+      },
+      "execution_environment": {
+        "environment": "empty_ephemeral_synthetic_beta",
+        "schema": "agent_bridge.synthetic_review_environment.v0"
+      },
+      "execution_trace": {
+        "exit_code": 0,
+        "schema": "agent_bridge.synthetic_review_execution_trace.v0",
+        "tool_events": []
+      },
+      "executor_profile": {
+        "profile": "synthetic_reviewer_beta",
+        "provider_neutral": true,
+        "schema": "agent_bridge.synthetic_executor_profile.v0"
+      },
+      "invocation_nonce": "synthetic-review-invocation-beta",
+      "receipt_writer": {
+        "open_flags": "O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC",
+        "schema": "agent_bridge.synthetic_review_receipt_writer.v0",
+        "writer": "synthetic_writer_beta"
+      },
+      "response_sink_id": "strict_review_response_beta",
+      "response_sink_path": "/private/synthetic/strict_review_response_beta",
+      "reviewer_slot": "reviewer_slot_synthetic_2",
+      "session_identity": {
+        "schema": "agent_bridge.synthetic_review_session.v0",
+        "session": "synthetic_session_beta"
+      },
+      "started_at_utc": "2026-07-14T12:03:20Z",
+      "stdin_request_utf8": "synthetic strict review request for reviewer slot two\n",
+      "usage_record": {
+        "input_tokens": 103,
+        "output_tokens": 43,
+        "schema": "agent_bridge.synthetic_usage_record.v0"
+      },
+      "working_directory_manifest": {
+        "files": [],
+        "schema": "agent_bridge.synthetic_empty_working_directory.v0"
+      },
+      "working_directory_path": "/private/synthetic/workspace_beta"
+    }
+  ],
+  "reviewer_conflict_and_overlap_manifest": {
+    "rows": [
+      {
+        "conflict_disclosed": true,
+        "reviewer_slot": "reviewer_slot_synthetic_1"
+      },
+      {
+        "conflict_disclosed": true,
+        "reviewer_slot": "reviewer_slot_synthetic_2"
+      }
+    ],
+    "schema": "agent_bridge.synthetic_reviewer_conflict_manifest.v0"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_strict_review_pack_synthetic.v0",
+  "second_review_overrides": [
+    {
+      "answer_id": "ans_f111aebabd134f91fcfd30230d819a84",
+      "case_id": "case_11111111111111111111111111111111",
+      "fields": {
+        "usefulness": 4
+      }
+    },
+    {
+      "answer_id": "ans_63300983e82c4b3432b3ec3b3140c05e",
+      "case_id": "case_11111111111111111111111111111111",
+      "fields": {
+        "claim_scores": [
+          {
+            "referent": {
+              "claim_handle": "clm_11111111111111111111111111111111",
+              "predicate_handle": "prd_11111111111111111111111111111111",
+              "referent_handle": "ref_11111111111111111111111111111111"
+            },
+            "score": 2
+          }
+        ],
+        "currentness": "pass",
+        "matched_forbidden_assertion_count": 0,
+        "matched_forbidden_assertion_handles": [],
+        "usefulness": 4
+      }
+    },
+    {
+      "answer_id": "ans_9fabd2e266e1a6cef6eeea6989ff0a95",
+      "case_id": "case_22222222222222222222222222222222",
+      "fields": {
+        "usefulness": 5
+      }
+    },
+    {
+      "answer_id": "ans_5de7c709c1985ac1a364c0879ffcf59d",
+      "case_id": "case_22222222222222222222222222222222",
+      "fields": {
+        "abstention_assessment": "fail",
+        "response_mode": "answer"
+      }
+    }
+  ],
+  "synthetic_only": true
+}
