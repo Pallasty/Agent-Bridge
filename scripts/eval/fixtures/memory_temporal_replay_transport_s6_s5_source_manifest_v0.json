@@ -1,0 +1,114 @@
+{
+  "artifacts": [
+    {
+      "byte_count": 127326,
+      "git_blob_oid": "fdc05a920dc26df7647a5379b15a9c3de407da6a",
+      "mode": "100644",
+      "path": "Cargo.lock",
+      "sha256": "f169c36a6bb46ff5e550dcc71d058e80033bd23fb0a938aea5d2ec9e4ee9ad2b"
+    },
+    {
+      "byte_count": 3094,
+      "git_blob_oid": "d9c3998efc7db5c1cf380dc5aa92612c6d32fa75",
+      "mode": "100644",
+      "path": "crates/bridge/Cargo.toml",
+      "sha256": "f104b2885a8811d7e7c62a6f4c44fc6b29f10df877477c88d0b0d7551468ee2a"
+    },
+    {
+      "byte_count": 3306,
+      "git_blob_oid": "d175b07dd5eceadb37c8a5b76c3ad84c56122d68",
+      "mode": "100644",
+      "path": "crates/bridge/src/lib.rs",
+      "sha256": "31627925116e72b78f0584a370c8a5f0e6aaafa6e0afd8f948fe8d7f0c1fade5"
+    },
+    {
+      "byte_count": 820,
+      "git_blob_oid": "5cf672743d5c2affb64030f8205ba7485411eb64",
+      "mode": "100644",
+      "path": "crates/bridge/src/memory_track_b_candidate_evidence_v1.rs",
+      "sha256": "4d66cbb3536691143f04260594263ce44a059b2b7d49bb7934cc9666769568e4"
+    },
+    {
+      "byte_count": 975,
+      "git_blob_oid": "c2c9249283fc11612cda22ff7b2256e515a70384",
+      "mode": "100644",
+      "path": "crates/store/Cargo.toml",
+      "sha256": "35047815966fb27e78f46c57b5bb45be62477488049e3b60a6365955330fdcb9"
+    },
+    {
+      "byte_count": 212866,
+      "git_blob_oid": "0d1f1d60fc5509332eb60a4f41c7d9acd3db8f42",
+      "mode": "100644",
+      "path": "crates/store/src/lib.rs",
+      "sha256": "1a11af7df3b78c6823165a9cde55822b40ee8708f257aa661b7dd423fd8feb97"
+    },
+    {
+      "byte_count": 80910,
+      "git_blob_oid": "9bf50d6c42bdea8743d77f35071454b74852e398",
+      "mode": "100644",
+      "path": "crates/store/src/sqlite/temporal_evidence/tests.rs",
+      "sha256": "29f091badbfba4fa244e13356174f69d71b8370cf4523dbd84b8858ff00dedf2"
+    },
+    {
+      "byte_count": 54382,
+      "git_blob_oid": "4fed4d8657e29143096e170c4b7007a7602bb0a4",
+      "mode": "100644",
+      "path": "crates/store/src/temporal_candidate_evidence.rs",
+      "sha256": "5ae6638e05f32dbe9314815a1caddd33620a4ed950fea2aee6f442a27809e9aa"
+    },
+    {
+      "byte_count": 10441,
+      "git_blob_oid": "113a6db5ef626d6c7d1716aebeb2d219b38d5fee",
+      "mode": "100644",
+      "path": "docs/design/MEMORY_TEMPORAL_CANDIDATE_BINDING_S5_2026_07_14.md",
+      "sha256": "5dc2277dc79a3ce8a00c61dc5c0d2341d40533f6cf3c7bfa3ee426a8fb7fecb4"
+    },
+    {
+      "byte_count": 10647,
+      "git_blob_oid": "19ca766623b91b9e45ce1a8941c31d180b425e43",
+      "mode": "100644",
+      "path": "docs/design/fixtures/biocortex-ab-track-b-candidate-evidence-envelope-schema-v0.json",
+      "sha256": "edba8da90abeeda83e33943d9b87f76c0deff9fad34cb314cd27c28b85ed1b77"
+    },
+    {
+      "byte_count": 6553,
+      "git_blob_oid": "517ec48819272e2dbc4751872afb6772968cd404",
+      "mode": "100644",
+      "path": "docs/reports/goal-c-u/2026-07-14-biocortex-ab-track-b-candidate-binding-s5.md",
+      "sha256": "62ec8d361b68f9ced320913fa682e2c13de8970f1e31d04b3cc55812f8ef95e4"
+    },
+    {
+      "byte_count": 5260,
+      "git_blob_oid": "1bbf0bd7062c48274ce1bafd554a11cf62ee9c41",
+      "mode": "100755",
+      "path": "scripts/check-memory-temporal-candidate-binding-s5.sh",
+      "sha256": "b764baa2d30c48a90cd459fc0a7a506c3f1eab0571d43c72084a27b9d908e56b"
+    },
+    {
+      "byte_count": 44823,
+      "git_blob_oid": "2fc16a8192ee8ff5b4681203a59dd3192a65c4b3",
+      "mode": "100644",
+      "path": "scripts/eval/check_memory_temporal_candidate_binding_s5.py",
+      "sha256": "15750ce6a888a1db4513687af89794fdcbe6131c3cef68c8771d43c601b5200e"
+    },
+    {
+      "byte_count": 2761,
+      "git_blob_oid": "fb23a71b0581c5fa53fd981671f849e07f990576",
+      "mode": "100644",
+      "path": "scripts/eval/fixtures/memory_temporal_candidate_binding_s5.expected.v0.tsv",
+      "sha256": "6e31091eddf1e468520440c55ecd781a3c9ab19c9e973a52f06ef510a62a4d72"
+    }
+  ],
+  "boundary": {
+    "build_provenance_attested": false,
+    "current_binary_identity_bound": false,
+    "remote_producer_identity_bound": false,
+    "runtime_source_identity_bound": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "completeness_scope": "exact_s5_feature_commit_14_path_delta",
+  "parent_commit": "486f04fb9a967a9a6cf5272f82f36cc0d7e787ad",
+  "schema": "agent_bridge.memory_temporal_replay_transport_s6_s5_source_manifest.v0",
+  "source_commit": "8739b69fb59fd704dacfe1a44bfc411ed9ebb913",
+  "source_tree": "d4ba782665fac2c55af60e1c0a988a327b3535dd"
+}

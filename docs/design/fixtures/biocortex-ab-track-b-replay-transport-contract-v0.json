@@ -1,0 +1,137 @@
+{
+  "artifact_bindings": {
+    "candidate_evidence_schema_sha256": "edba8da90abeeda83e33943d9b87f76c0deff9fad34cb314cd27c28b85ed1b77",
+    "candidate_exact_payload_profile_sha256": "fe3b66ad1d5711f38e790cf792a0db63bd7879ce9795c07f745ab9127575be23",
+    "foundational_schema_pack_manifest_sha256": "fbfbf5738dd81e0afe8dbc45b1e91a35e92382a1913006a9b2e5ded67c077f36",
+    "identity_composition_manifest_sha256": "c1a6c5a6c83d61f92d35948432b139749d19d5828f68a7fc2473859bba21a7e9",
+    "review_schema_sha256": "2745cd373d4f99cdd4bb3d0bc9d9087966adb3a9d0594749cb1150b90d1e9422",
+    "s5_source_manifest_sha256": "309f2533ef7b78d0c1f252325c0f79ab1300f8f68837a5a75ce7c14d8b011d6a",
+    "truth_manifest_schema_sha256": "520070d1eb4852fd2a005d63b3d087769b3240902289ff5c44f11c109bd1cde6",
+    "truth_referent_schema_sha256": "5da057e70675cbd259e0d1beb98039d2eee8589c73aa910f92f90cb0374545a8"
+  },
+  "authenticated_route_fields_in_order": [
+    "boundary",
+    "candidate_evidence_schema_sha256",
+    "candidate_exact_payload_profile_sha256",
+    "case_id",
+    "contract_sha256",
+    "destination_repository_id",
+    "expires_at_utc",
+    "foundational_schema_pack_manifest_sha256",
+    "handle_key_id",
+    "identity_composition_manifest_sha256",
+    "issued_at_utc",
+    "payload_byte_count",
+    "payload_encoding",
+    "payload_sha256",
+    "projection_binding_handle",
+    "request_id",
+    "request_nonce",
+    "review_schema_sha256",
+    "s5_authentication",
+    "source_commit",
+    "source_manifest_sha256",
+    "source_repository_id",
+    "source_tree",
+    "transport_profile",
+    "trial_id",
+    "truth_manifest_schema_sha256",
+    "truth_referent_schema_sha256"
+  ],
+  "boundary": {
+    "authority_policy_custody_resolved": false,
+    "biocortex_runtime_influence": false,
+    "bridge_runtime_caller_present": false,
+    "candidate_context_builder_bound": false,
+    "capture_provenance_attested": false,
+    "cross_biocortex_opaque_transport_implemented": false,
+    "cross_repository_transport_authorized": false,
+    "destination_receiver_source_bound": false,
+    "durable_nonce_registry_implemented": false,
+    "exact_payload_exporter_implemented": false,
+    "mcp_surface_present": false,
+    "physical_privacy_deletion_resolved": false,
+    "production_profile_active": false,
+    "real_capture_authorized": false,
+    "side_effects_unlocked": "NONE",
+    "source_runtime_identity_bound": false,
+    "state_store_surface_present": false,
+    "track_b_artifact_binding_satisfied": false,
+    "track_b_live_binding_satisfied": false,
+    "truth_manifest_binding_satisfied": false
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "exact_payload_verification_order": [
+    "bounded_outer_decode",
+    "exact_payload_length_and_sha256",
+    "transport_hmac_over_route_and_exact_payload",
+    "s5_hmac_over_exact_payload",
+    "strict_payload_parse_and_canonical_byte_equality",
+    "inner_outer_identity_join",
+    "injected_evaluated_at_ttl_check",
+    "derive_replay_identity",
+    "atomic_consume_once",
+    "release_private_verified_token"
+  ],
+  "outer_packet_fields_in_order": [
+    "authenticated_route",
+    "payload_base64",
+    "schema",
+    "transport_authentication"
+  ],
+  "remaining_gaps": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "replay_contract": {
+    "atomic_operation": "consume_once",
+    "durable_backend_present": false,
+    "expiry_allows_reuse": false,
+    "process_local_synthetic_registry_only": true,
+    "scalar_encoding": "utf8_strings_with_decimal_timestamps",
+    "scope_commitment_fields": [
+      "s5_source_manifest_sha256",
+      "candidate_exact_payload_profile_sha256",
+      "handle_key_id",
+      "trial_id",
+      "contract_sha256",
+      "case_id",
+      "request_id",
+      "projection_binding_handle",
+      "issued_at_utc",
+      "expires_at_utc",
+      "payload_sha256"
+    ],
+    "unique_key_fields": [
+      "s5_transport_key_id",
+      "request_nonce"
+    ]
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_replay_transport_contract.v0",
+  "source_closure": {
+    "artifact_count": 14,
+    "completeness_scope": "exact_s5_feature_commit_14_path_delta",
+    "manifest_path": "scripts/eval/fixtures/memory_temporal_replay_transport_s6_s5_source_manifest_v0.json",
+    "manifest_sha256": "309f2533ef7b78d0c1f252325c0f79ab1300f8f68837a5a75ce7c14d8b011d6a",
+    "source_commit": "8739b69fb59fd704dacfe1a44bfc411ed9ebb913",
+    "source_tree": "d4ba782665fac2c55af60e1c0a988a327b3535dd"
+  },
+  "status": "SYNTHETIC_DETACHED_VERIFIER_CONTRACT_IMPLEMENTED_NOT_TRANSPORT_NOT_DURABLE",
+  "transport_authentication": {
+    "algorithm": "HMAC-SHA-256",
+    "domain": "agent-bridge/track-b/replay-transport/v0",
+    "key_separation_required": true,
+    "message_profile": "u64be_len_domain_domain_u64be_len_channel_key_id_key_id_u64be_len_route_json_route_json_exact_payload_bytes"
+  },
+  "transport_profile": "agent_bridge.biocortex_ab_track_b_replay_transport.v0",
+  "wire": {
+    "authenticated_route_canonicalization": "json_compact_sorted_keys_utf8_v1",
+    "candidate_payload_authentication_is_detached": true,
+    "payload_encoding": "base64_rfc4648_padded_canonical",
+    "transport_contract_preregistered": true,
+    "transport_runtime_implemented": false
+  }
+}
