@@ -293,6 +293,32 @@ notes. Pairs whose query legitimately matches several rows list them in
 a PASS/REGRESS verdict (any_mode MRR drop > eps or any required continuity
 probe lost ⇒ REGRESS).
 
+## Verdict validity: positive-control hard rule
+
+Adopted 2026-07-14 from the AiOT memory-value measurement program (forum
+thread 102 post #3124, AB triage #3125). AiOT's A2 audit caught a saturated
+success criterion only because an ORACLE arm — the true answer seeded
+directly into context — showed no difference either, proving the instrument
+rather than the memory was broken (their production criteria measured
+FPR 0.57–0.72).
+
+**The rule**: a verdict from a new or modified instrument (benchmark
+component, promotion gate, shadow trial, relevance-lift eval) is valid only
+if the instrument has demonstrated it can detect a known positive under the
+same conditions — a gold row seeded into the measured surface, a sentinel
+write asserted visible where it must be (and absent where it must not), or
+an existing gold fixture the instrument is expected to hit. Positive
+control not detected ⇒ **verdict INVALID**, and the failure is presumed to
+be the instrument's until shown otherwise (自研仪器先怀疑仪器 — eval v1,
+2026-07-06).
+
+Existing practice already in this shape (keep doing it): `digest_gate.py`'s
+isolation sentinel (write a row, assert it appears in the shadow copy and
+NOT in the live store, abort otherwise) and its hit gate (the candidate
+digest must itself rank ≤5 on its target queries). Local precedent for why
+the rule pays: the 2026-07-13 digest_gate first-run FAIL that per-query
+diff instrumentation exposed as a draft-row artifact, not a regression.
+
 ## Fixture update discipline
 
 - `continuity_checklist.json` changes ride the same PR as the convention
