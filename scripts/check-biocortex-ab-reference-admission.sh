@@ -13,8 +13,12 @@ for path in "$fixture" "$expected" "$runner"; do
     exit 1
   }
 done
-[[ "$(stat -c '%a' "$runner")" == 755 ]] || {
-  echo "reference admission runner must be executable" >&2
+[[ -x "$runner" ]] || {
+  echo "reference admission runner must be executable in the worktree" >&2
+  exit 1
+}
+[[ "$(git -C "$repo_root" ls-tree HEAD -- "$runner" | awk '{print $1}')" == 100755 ]] || {
+  echo "reference admission runner must be Git-bound as mode 100755" >&2
   exit 1
 }
 
