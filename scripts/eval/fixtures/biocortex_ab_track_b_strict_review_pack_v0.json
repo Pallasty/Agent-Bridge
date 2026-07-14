@@ -1,0 +1,161 @@
+{
+  "artifact_bindings": [
+    {
+      "artifact_kind": "review_receipt_schema",
+      "binding_path": "review_and_blinding.review_receipt_schema_sha256",
+      "local_dependencies": [
+        "review_and_blinding.review_command_schema_sha256",
+        "review_and_blinding.review_schema_sha256"
+      ],
+      "provider_neutral": true,
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-review-receipt-schema-v0.json",
+      "schema_id": "urn:agent-bridge:biocortex-ab:track-b:review-receipt:v0",
+      "sha256": "f8af1331ae134be0f09a5e546b2d67e0db8ebfabb2177dc14a376bac773f463c",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    },
+    {
+      "artifact_kind": "strict_case_pass_algorithm",
+      "binding_path": "truth_inputs.strict_case_algorithm_sha256",
+      "local_dependencies": [
+        "review_and_blinding.review_schema_sha256",
+        "truth_inputs.truth_manifest_schema_sha256"
+      ],
+      "provider_neutral": true,
+      "repo_path": "scripts/eval/biocortex_ab_track_b_strict_case_v0.py",
+      "schema_id": null,
+      "sha256": "816c00eaff6c7e9df6ecca849e8c01ab8dbfe8a80834b37612d89f0a4ffa68b2",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    }
+  ],
+  "baseline_commit": "ddebacba20146a90546db9e4ea4bd2795b9ecc1a",
+  "boundary": {
+    "authority_basis_bytes_verified": false,
+    "authority_true_count": 0,
+    "blind_packet_bytes_verified": false,
+    "currentness_basis_bytes_verified": false,
+    "deterministic_truth_gate_provenance_verified": false,
+    "gold_evidence_bytes_verified": false,
+    "graph_packet_mutated": false,
+    "live_binding_satisfied_count": 0,
+    "o_excl_score_claim_created": false,
+    "private_runtime_artifact_emitted": false,
+    "real_review_receipt_created": false,
+    "real_run_admitted": false,
+    "review_instruction_bytes_verified": false,
+    "reviewer_roster_verified": false,
+    "runtime_instance_validated": false,
+    "scoring_authorized": false,
+    "side_effects_unlocked": "NONE",
+    "source_artifact_count": 2,
+    "unblinding_authorized": false
+  },
+  "canonical_serialization": "UTF8_SORTED_KEYS_INDENT_2_LF_FINAL_NEWLINE_NO_NAN_DUPLICATE_KEYS_REJECTED",
+  "completed_public_bindings": [
+    "review_and_blinding.map_bijection_checker_sha256",
+    "review_and_blinding.map_schema_sha256",
+    "review_and_blinding.review_command_schema_sha256",
+    "review_and_blinding.review_receipt_schema_sha256",
+    "review_and_blinding.review_schema_sha256",
+    "sampling.sampling_receipt_schema_sha256",
+    "truth_inputs.referent_schema_sha256",
+    "truth_inputs.strict_case_algorithm_sha256",
+    "truth_inputs.truth_manifest_schema_sha256"
+  ],
+  "date": "2026-07-14",
+  "decision": "SOURCE_STRICT_REVIEW_IMPLEMENTED_NOT_LIVE_BOUND",
+  "evidence_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-review-command-schema-v0.json": "40df0e39f36df01d414487c496cf09b5ffbed89cafc540dc89e6e57bea4466f5",
+    "docs/design/fixtures/biocortex-ab-track-b-review-schema-v0.json": "2745cd373d4f99cdd4bb3d0bc9d9087966adb3a9d0594749cb1150b90d1e9422",
+    "docs/design/fixtures/biocortex-ab-track-b-truth-manifest-schema-v0.json": "520070d1eb4852fd2a005d63b3d087769b3240902289ff5c44f11c109bd1cde6",
+    "docs/design/fixtures/biocortex-ab-track-b-truth-referent-schema-v0.json": "5da057e70675cbd259e0d1beb98039d2eee8589c73aa910f92f90cb0374545a8",
+    "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph_v0.json": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+    "scripts/eval/fixtures/biocortex_ab_track_b_identity_composition_pack_synthetic_v0.json": "094a7343543be2a9b32fc996dc3e7006bc9d02f87f8cc9bdd269ef9fb61a341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_identity_composition_pack_v0.json": "c1a6c5a6c83d61f92d35948432b139749d19d5828f68a7fc2473859bba21a7e9",
+    "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json": "764f063fefe0e516547f9bd1e71417242daf292d57e480ae39b73df8bcda341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e"
+  },
+  "graph_sha256": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+  "graph_source_commit": "ba4dbae629398ec16e4f22f4b0ac7f2ce372541f",
+  "next_public_frontier": [
+    "reference_condition.context_builder_sha256",
+    "sampling.sampling_seed_derivation_sha256",
+    "sampling.sampling_selection_algorithm_sha256"
+  ],
+  "predecessor_identity_pack_sha256": "c1a6c5a6c83d61f92d35948432b139749d19d5828f68a7fc2473859bba21a7e9",
+  "predecessor_identity_source_commit": "d20b2b856c461f6cf1fc8ce8fa88b6c5e11f5161",
+  "resource_caps": {
+    "max_answers": 262144,
+    "max_cases": 4096,
+    "max_claim_scores_per_answer": 64,
+    "max_forbidden_handles_per_answer": 64,
+    "max_output_bytes": 33554432,
+    "max_receipt_bytes": 1048576,
+    "max_reviewer_evaluations": 524288,
+    "max_schema_bytes": 1048576,
+    "max_single_artifact_bytes": 33554432,
+    "max_total_claim_scores": 1048576,
+    "max_total_input_bytes": 67108864,
+    "max_unmatched_unsupported_assertions_per_answer": 4096
+  },
+  "retained_stage_obligations": [
+    {
+      "binding_field_present": false,
+      "obligation": "both_command_request_raw_response_and_receipt_chains",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "both_complete_review_objects",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "contract_scoped_o_excl_score_claim",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "map_bijection_receipt_sha256",
+      "owner_class": "custodian_private",
+      "required_stage": "POST_GENERATION_PRE_REVIEW",
+      "status": "DECLARED_REQUIRED_ARTIFACT_NOT_BINDING_FIELD_BLOCKS"
+    }
+  ],
+  "schema": "agent_bridge.biocortex_ab_track_b_strict_review_pack.v0",
+  "semantics": {
+    "abstention_gate": "EXPECTED_ABSTAIN_REQUIRES_OBSERVED_ABSTAIN_AND_ABSTENTION_PASS_AND_EMPTY_CLAIM_SCORES_AND_CURRENTNESS_PASS_AND_ZERO_FORBIDDEN_AND_ZERO_UNSUPPORTED_AND_USEFULNESS_GTE_4",
+    "agreement_role": "DIAGNOSTIC_ONLY_NOT_A_GATE_OR_RESCUE",
+    "answer_gate": "EXPECTED_ANSWER_REQUIRES_OBSERVED_ANSWER_AND_NOT_REQUIRED_ABSTENTION_AND_ALL_SCORE_RUBRICS_EQ_2_AND_CURRENTNESS_PASS_AND_ZERO_FORBIDDEN_AND_ZERO_UNSUPPORTED_AND_USEFULNESS_GTE_4",
+    "case_weight_application": "NOT_APPLIED_HERE_APPLY_EXACTLY_ONCE_DOWNSTREAM",
+    "deterministic_answer_gate": "AUTHORITY_EXISTS_AND_ALL_GOLD_RECALLED_AND_CURRENT_REFERENT_CORRECT",
+    "deterministic_gate_input_grain": "ONE_CASE_X_OPAQUE_ANSWER",
+    "deterministic_gate_provenance": "EXPLICIT_INPUT_NOT_VERIFIED_BY_THIS_ALGORITHM",
+    "invalid_or_incomplete_input": "TERMINAL_PROTOCOL_ERROR_NO_PARTIAL_RESULT",
+    "preference_field_present": false,
+    "raw_response_definition": "EXACT_RESPONSE_SINK_BYTES_EQUAL_CANONICAL_POPULATED_REVIEW_BYTES_NOT_CLI_STDOUT_OR_LOG_STREAM",
+    "receipt_grain": "ONE_TRIAL_X_REVIEWER_SLOT_X_SINGLE_INVOCATION",
+    "receipt_validation_authority": "SCHEMA_VALIDATION_ONLY_NOT_CUSTODY_RECEIPT",
+    "reviewer_combination": "LOGICAL_AND_EXACTLY_TWO_DISTINCT_SLOTS_NO_AVERAGING_NO_RESCUE",
+    "sampling_weight_present": false,
+    "strict_case_grain": "ONE_CASE_X_OPAQUE_ANSWER_BEFORE_UNBLIND",
+    "strict_result_authority": "VALIDATION_ONLY_NOT_SCORE_CLAIM",
+    "valid_failing_judgment": "ACCEPTED_INPUT_WITH_STRICT_FALSE"
+  },
+  "structural_blockers": [
+    "DETERMINISTIC_TRUTH_GATE_PRODUCER_AND_PROVENANCE_UNBOUND",
+    "REVIEW_PROVENANCE_CHECKER_UNBOUND",
+    "REVIEW_RAW_RESPONSE_SCHEMA_UNBOUND",
+    "REVIEWER_ROSTER_INSTRUCTION_AND_CONFLICT_MANIFEST_UNBOUND",
+    "SOURCE_ARTIFACTS_ARE_NOT_RUNTIME_INSTANCES"
+  ],
+  "synthetic_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_strict_review_pack_synthetic_v0.json",
+  "synthetic_fixture_sha256": "3a5754d5ed718fb627ba95184650b3bddfae34ae202a2d1fbc52d978ab368583"
+}
