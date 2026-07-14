@@ -1,0 +1,394 @@
+{
+  "schema": "agent_bridge.memory_temporal_evidence_substrate_synthetic.v0",
+  "fixture_only": true,
+  "real_capture_authorized": false,
+  "legacy_rows_qualified": false,
+  "adapter_allowed": false,
+  "projector_invoked": false,
+  "biocortex_runtime_influence": false,
+  "lineages": [
+    {
+      "lineage_id": "employment-current",
+      "referent_id": "employee:alice",
+      "predicate_id": "employment.organization",
+      "created_at": 140,
+      "claim_identity_sha256": "979d67cf537c43a9845b47f25b59b208969c0d1440766405b6f26a4fe9ee9c84"
+    },
+    {
+      "lineage_id": "employment-old",
+      "referent_id": "employee:alice",
+      "predicate_id": "employment.organization",
+      "created_at": 90,
+      "claim_identity_sha256": "979d67cf537c43a9845b47f25b59b208969c0d1440766405b6f26a4fe9ee9c84"
+    },
+    {
+      "lineage_id": "language-current",
+      "referent_id": "employee:alice",
+      "predicate_id": "profile.language",
+      "created_at": 150,
+      "claim_identity_sha256": "93a983527dde9a6da795025bce600f48c6ee711623ecdc480bf64ab901991c39"
+    },
+    {
+      "lineage_id": "language-private",
+      "referent_id": "employee:alice",
+      "predicate_id": "profile.language",
+      "created_at": 80,
+      "claim_identity_sha256": "93a983527dde9a6da795025bce600f48c6ee711623ecdc480bf64ab901991c39"
+    },
+    {
+      "lineage_id": "status-correction",
+      "referent_id": "employee:alice",
+      "predicate_id": "employment.status",
+      "created_at": 190,
+      "claim_identity_sha256": "098f0bc740473673ebc8eaa4870d6044c7f97ec0d434c7f0033ae437dcb666da"
+    },
+    {
+      "lineage_id": "status-late",
+      "referent_id": "employee:alice",
+      "predicate_id": "employment.status",
+      "created_at": 340,
+      "claim_identity_sha256": "098f0bc740473673ebc8eaa4870d6044c7f97ec0d434c7f0033ae437dcb666da"
+    },
+    {
+      "lineage_id": "status-observed",
+      "referent_id": "employee:alice",
+      "predicate_id": "employment.status",
+      "created_at": 125,
+      "claim_identity_sha256": "098f0bc740473673ebc8eaa4870d6044c7f97ec0d434c7f0033ae437dcb666da"
+    },
+    {
+      "lineage_id": "status-peer",
+      "referent_id": "employee:alice",
+      "predicate_id": "employment.status",
+      "created_at": 120,
+      "claim_identity_sha256": "098f0bc740473673ebc8eaa4870d6044c7f97ec0d434c7f0033ae437dcb666da"
+    },
+    {
+      "lineage_id": "status-primary",
+      "referent_id": "employee:alice",
+      "predicate_id": "employment.status",
+      "created_at": 110,
+      "claim_identity_sha256": "098f0bc740473673ebc8eaa4870d6044c7f97ec0d434c7f0033ae437dcb666da"
+    }
+  ],
+  "authority_policies": [
+    {
+      "policy_revision_id": "policy-employment-v1",
+      "policy_lineage_id": "policy-employment",
+      "revision_seq": 1,
+      "recorded_at": 10,
+      "predicate_id": "employment.organization",
+      "source_key": "source:hr-registry",
+      "resolved_truth_tier": "authoritative",
+      "valid_from": 0,
+      "valid_until": null,
+      "status": "active"
+    },
+    {
+      "policy_revision_id": "policy-language-v1",
+      "policy_lineage_id": "policy-language",
+      "revision_seq": 1,
+      "recorded_at": 10,
+      "predicate_id": "profile.language",
+      "source_key": "source:user-profile",
+      "resolved_truth_tier": "verified",
+      "valid_from": 0,
+      "valid_until": null,
+      "status": "active"
+    },
+    {
+      "policy_revision_id": "policy-status-audit-v1",
+      "policy_lineage_id": "policy-status-audit",
+      "revision_seq": 1,
+      "recorded_at": 10,
+      "predicate_id": "employment.status",
+      "source_key": "source:status-audit",
+      "resolved_truth_tier": "verified",
+      "valid_from": 0,
+      "valid_until": null,
+      "status": "active"
+    },
+    {
+      "policy_revision_id": "policy-status-ops-v1",
+      "policy_lineage_id": "policy-status-ops",
+      "revision_seq": 1,
+      "recorded_at": 10,
+      "predicate_id": "employment.status",
+      "source_key": "source:ops-registry",
+      "resolved_truth_tier": "verified",
+      "valid_from": 0,
+      "valid_until": null,
+      "status": "active"
+    },
+    {
+      "policy_revision_id": "policy-status-user-v1",
+      "policy_lineage_id": "policy-status-user",
+      "revision_seq": 1,
+      "recorded_at": 10,
+      "predicate_id": "employment.status",
+      "source_key": "source:user-statement",
+      "resolved_truth_tier": "observed",
+      "valid_from": 0,
+      "valid_until": null,
+      "status": "active"
+    }
+  ],
+  "revisions": [
+    {
+      "evidence_id": "employment-new-v1",
+      "lineage_id": "employment-current",
+      "revision_seq": 1,
+      "value": "company-b",
+      "aliases": ["alice"],
+      "observed_at": 140,
+      "recorded_at": 150,
+      "validity": {"kind": "bounded", "valid_from": 200, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:hr-registry", "provenance_sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+      ],
+      "authority_policy_revision_id": "policy-employment-v1",
+      "resolved_truth_tier": "authoritative"
+    },
+    {
+      "evidence_id": "employment-new-v2",
+      "lineage_id": "employment-current",
+      "revision_seq": 2,
+      "value": "company-b",
+      "aliases": ["alice", "employee-alice"],
+      "observed_at": 170,
+      "recorded_at": 180,
+      "validity": {"kind": "bounded", "valid_from": 200, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:hr-registry", "provenance_sha256": "2222222222222222222222222222222222222222222222222222222222222222"}
+      ],
+      "authority_policy_revision_id": "policy-employment-v1",
+      "resolved_truth_tier": "authoritative"
+    },
+    {
+      "evidence_id": "employment-old-v1",
+      "lineage_id": "employment-old",
+      "revision_seq": 1,
+      "value": "company-a",
+      "aliases": ["alice"],
+      "observed_at": 90,
+      "recorded_at": 100,
+      "validity": {"kind": "bounded", "valid_from": 0, "valid_until": 199},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:hr-registry", "provenance_sha256": "3333333333333333333333333333333333333333333333333333333333333333"}
+      ],
+      "authority_policy_revision_id": "policy-employment-v1",
+      "resolved_truth_tier": "authoritative"
+    },
+    {
+      "evidence_id": "language-current-v1",
+      "lineage_id": "language-current",
+      "revision_seq": 1,
+      "value": "language-b",
+      "aliases": ["alice"],
+      "observed_at": 150,
+      "recorded_at": 160,
+      "validity": {"kind": "timeless", "valid_from": null, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:user-profile", "provenance_sha256": "4444444444444444444444444444444444444444444444444444444444444444"}
+      ],
+      "authority_policy_revision_id": "policy-language-v1",
+      "resolved_truth_tier": "verified"
+    },
+    {
+      "evidence_id": "language-private-v1",
+      "lineage_id": "language-private",
+      "revision_seq": 1,
+      "value": "language-a",
+      "aliases": ["alice"],
+      "observed_at": 80,
+      "recorded_at": 90,
+      "validity": {"kind": "timeless", "valid_from": null, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:user-profile", "provenance_sha256": "5555555555555555555555555555555555555555555555555555555555555555"}
+      ],
+      "authority_policy_revision_id": "policy-language-v1",
+      "resolved_truth_tier": "verified"
+    },
+    {
+      "evidence_id": "status-correction-v1",
+      "lineage_id": "status-correction",
+      "revision_seq": 1,
+      "value": "active",
+      "aliases": ["alice"],
+      "observed_at": 190,
+      "recorded_at": 200,
+      "validity": {"kind": "timeless", "valid_from": null, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:ops-registry", "provenance_sha256": "6666666666666666666666666666666666666666666666666666666666666666"}
+      ],
+      "authority_policy_revision_id": "policy-status-ops-v1",
+      "resolved_truth_tier": "verified"
+    },
+    {
+      "evidence_id": "status-late-v1",
+      "lineage_id": "status-late",
+      "revision_seq": 1,
+      "value": "late-backfill",
+      "aliases": ["alice"],
+      "observed_at": 50,
+      "recorded_at": 350,
+      "validity": {"kind": "timeless", "valid_from": null, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:ops-registry", "provenance_sha256": "7777777777777777777777777777777777777777777777777777777777777777"}
+      ],
+      "authority_policy_revision_id": "policy-status-ops-v1",
+      "resolved_truth_tier": "verified"
+    },
+    {
+      "evidence_id": "status-observed-v1",
+      "lineage_id": "status-observed",
+      "revision_seq": 1,
+      "value": "active",
+      "aliases": ["alice"],
+      "observed_at": 125,
+      "recorded_at": 135,
+      "validity": {"kind": "timeless", "valid_from": null, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:user-statement", "provenance_sha256": "8888888888888888888888888888888888888888888888888888888888888888"}
+      ],
+      "authority_policy_revision_id": "policy-status-user-v1",
+      "resolved_truth_tier": "observed"
+    },
+    {
+      "evidence_id": "status-peer-v1",
+      "lineage_id": "status-peer",
+      "revision_seq": 1,
+      "value": "leave",
+      "aliases": ["alice"],
+      "observed_at": 120,
+      "recorded_at": 130,
+      "validity": {"kind": "timeless", "valid_from": null, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:status-audit", "provenance_sha256": "9999999999999999999999999999999999999999999999999999999999999999"}
+      ],
+      "authority_policy_revision_id": "policy-status-audit-v1",
+      "resolved_truth_tier": "verified"
+    },
+    {
+      "evidence_id": "status-primary-v1",
+      "lineage_id": "status-primary",
+      "revision_seq": 1,
+      "value": "active",
+      "aliases": ["alice"],
+      "observed_at": 110,
+      "recorded_at": 120,
+      "validity": {"kind": "timeless", "valid_from": null, "valid_until": null},
+      "lifecycle": {"state": "active", "effective_from": null},
+      "source_bindings": [
+        {"source_key": "source:ops-registry", "provenance_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+      ],
+      "authority_policy_revision_id": "policy-status-ops-v1",
+      "resolved_truth_tier": "verified"
+    }
+  ],
+  "relationships": [
+    {
+      "declared_evidence_id": "employment-new-v1",
+      "relationship_kind": "supersedes",
+      "target_lineage_id": "employment-old",
+      "effective_from": 200
+    },
+    {
+      "declared_evidence_id": "employment-new-v2",
+      "relationship_kind": "supersedes",
+      "target_lineage_id": "employment-old",
+      "effective_from": 200
+    },
+    {
+      "declared_evidence_id": "language-current-v1",
+      "relationship_kind": "supersedes",
+      "target_lineage_id": "language-private",
+      "effective_from": 180
+    },
+    {
+      "declared_evidence_id": "status-correction-v1",
+      "relationship_kind": "invalidates",
+      "target_lineage_id": "status-peer",
+      "effective_from": 220
+    }
+  ],
+  "tombstones": [
+    {
+      "tombstone_id": "tombstone-language-private-v1",
+      "lineage_id": "language-private",
+      "tombstoned_at": 240,
+      "had_outgoing_governance": false,
+      "attestation_version": "content_free_governance_v0",
+      "attestation_sha256": "333f90beb85fa1a1194bc0872edfd04bca0ec6dbf3b5937e89a3269ab973b337"
+    },
+    {
+      "tombstone_id": "tombstone-status-correction-v1",
+      "lineage_id": "status-correction",
+      "tombstoned_at": 250,
+      "had_outgoing_governance": true,
+      "attestation_version": "content_free_governance_v0",
+      "attestation_sha256": "b8c8076bfce133f7bee2d1c037d28672dc8c43c0c056f3fd2ee34ec409ffa8c3"
+    }
+  ],
+  "snapshot": {
+    "ledger_format_version": 0,
+    "producer_profile": "synthetic_design_fixture_only",
+    "producer_profile_bound": false,
+    "schema_meta_version": "synthetic-unbound",
+    "schema_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "migration_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "transaction": "one_read_transaction",
+    "knowledge_cutoff": 300,
+    "caps": {
+      "max_lineages": 32,
+      "max_policy_revisions": 32,
+      "max_evidence_revisions": 64,
+      "max_relationships": 64,
+      "max_tombstones": 32,
+      "max_payload_bytes": 1048576
+    },
+    "counts": {
+      "lineages": 9,
+      "policy_revisions": 5,
+      "evidence_revisions": 10,
+      "relationships": 4,
+      "tombstones": 2
+    },
+    "truncated": false,
+    "endpoint_closure": true,
+    "tombstone_index_complete": true,
+    "relationship_channels_complete": true,
+    "canonical_order": "binary_utf8_v0",
+    "payload_sha256": "a69fe303e42cf43a644195fa3e7a845e36303034d6014219455485335fbe812d"
+  },
+  "expected": {
+    "two_revision_lineage": "employment-current",
+    "relationship_carry_forward": ["employment-new-v1", "employment-new-v2"],
+    "late_backfill_evidence_id": "status-late-v1",
+    "late_backfill_visible_at_cutoff": false,
+    "same_referent_predicates": [
+      "employment.organization",
+      "employment.status",
+      "profile.language"
+    ],
+    "supersession_source_evidence_id": "employment-new-v2",
+    "supersession_target_lineage_id": "employment-old",
+    "supersession_effective_from": 200,
+    "pre_boundary_target_suppressed": false,
+    "at_boundary_target_suppressed": true,
+    "same_tier_conflict_evidence_ids": ["status-peer-v1", "status-primary-v1"],
+    "lower_tier_evidence_id": "status-observed-v1",
+    "tombstoned_target_pruned": "language-private",
+    "governed_tombstone_lineage": "status-correction",
+    "governed_tombstone_adapter_allowed": false
+  }
+}
