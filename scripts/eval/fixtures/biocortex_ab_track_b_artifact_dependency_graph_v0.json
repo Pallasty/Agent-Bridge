@@ -1,0 +1,898 @@
+{
+  "admission": {
+    "artifact_binding_complete": false,
+    "committed_artifact_count": 0,
+    "decision": "PLANNING_GRAPH_VALIDATED_FAIL_CLOSED",
+    "implementation_ready_count": 0,
+    "live_binding_ready_count": 0,
+    "real_run_admitted": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "authority": {
+    "agent_bridge_db_write": false,
+    "agent_bridge_retrieval_execution": false,
+    "biocortex_runtime_influence": false,
+    "capture": false,
+    "deployment": false,
+    "generation": false,
+    "production_promotion": false,
+    "real_review": false,
+    "scientific_claim": false,
+    "scoring": false,
+    "unblinding": false
+  },
+  "baseline_commit": "3840fc214118f692d37a54e6abdd46ab192080ad",
+  "date": "2026-07-14",
+  "dependency_catalog_sha256": "1b9b6382fa43fc84c1954db31622cc18796ad34ac1e408f8624a330e45a85090",
+  "evidence_catalog": [
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/bridge/src/memory_truth.rs",
+      "reuse_scope": "MECHANISM_ONLY_NOT_BINDING_OR_CONFIRMATORY_DATA",
+      "role": "truth_projection_mechanism",
+      "sha256": "2e46a521332820b07171b425c95004f35a98887c7c49a2d78baf7740f07195a4",
+      "status": "MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/bridge/src/memory_truth_adapter.rs",
+      "reuse_scope": "MECHANISM_ONLY_NOT_BINDING_OR_CONFIRMATORY_DATA",
+      "role": "truth_adapter_mechanism",
+      "sha256": "c459e96919778c24b0bc699653d8c12b83332e6318b7298deee071a01e90e023",
+      "status": "MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "crates/store/examples/memory_reference_admission_fixture.rs",
+      "reuse_scope": "MECHANISM_ONLY_NOT_BINDING_OR_CONFIRMATORY_DATA",
+      "role": "reference_context_and_budget_mechanism",
+      "sha256": "3ed5c67ca5e4673c9afdf5639a95115399d4e7ce3c6d5774f6513dac76adc016",
+      "status": "MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/check_biocortex_ab_track_b_admission.py",
+      "reuse_scope": "PUBLIC_CONTRACT_AND_SYNTHETIC_ARITHMETIC_ONLY",
+      "role": "frozen_contract_semantics_and_synthetic_checks",
+      "sha256": "b09b10243f195299dc226b5d8d2b484ec74f5eecd49bb487296c391f6f193b13",
+      "status": "MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/check_biocortex_ab_track_b_live_binding_ledger.py",
+      "reuse_scope": "DEPENDENCY_ANALYSIS_SOURCE_ONLY",
+      "role": "responsibility_inventory_validator",
+      "sha256": "1a69b841fbdefe5ca10e81e52728dd10ab308049175fc3880e92aa52745f8334",
+      "status": "FROZEN_SOURCE_INPUT"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+      "reuse_scope": "DEPENDENCY_ANALYSIS_SOURCE_ONLY",
+      "role": "exact_artifact_and_external_binding_inventory",
+      "sha256": "764f063fefe0e516547f9bd1e71417242daf292d57e480ae39b73df8bcda341a",
+      "status": "FROZEN_SOURCE_INPUT"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+      "reuse_scope": "DEPENDENCY_ANALYSIS_SOURCE_ONLY",
+      "role": "frozen_public_preregistration",
+      "sha256": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e",
+      "status": "FROZEN_SOURCE_INPUT"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json",
+      "reuse_scope": "MECHANISM_ONLY_NOT_BINDING_OR_CONFIRMATORY_DATA",
+      "role": "consumed_review_contract_mechanism",
+      "sha256": "da9e190492d74824159bbff18eaeff02a4848921989f4077072f126e1d4e4bcc",
+      "status": "MECHANISM_ONLY"
+    },
+    {
+      "may_satisfy_live_binding": false,
+      "path": "scripts/eval/portfolio_continuity_successor_v3_trial.py",
+      "reuse_scope": "MECHANISM_ONLY_NOT_BINDING_OR_CONFIRMATORY_DATA",
+      "role": "consumed_blinding_and_review_mechanism",
+      "sha256": "0b92b1153a77257a49fc847eb37be3e20d687c41067559c22b2ebed72649e003",
+      "status": "MECHANISM_ONLY"
+    }
+  ],
+  "evidence_catalog_sha256": "179e170205eb0dd7604559844f9ca377e1c79d28b85ea27ebcbbfcd2bcaef130",
+  "graph_id": "biocortex_ab_track_b_artifact_dependency_graph_20260714",
+  "nodes": [
+    {
+      "artifact_binding_path": "context_and_result.context_builder_sha256",
+      "artifact_kind": "context_composition_builder",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [
+        {
+          "binding_path": "candidate_condition.candidate_context_builder_sha256",
+          "reason_code": "FINAL_CONTEXT_REQUIRES_ADMITTED_CANDIDATE_BUILDER"
+        }
+      ],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "crates/store/examples/memory_reference_admission_fixture.rs",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "context_and_result.max_context_bytes_per_case",
+          "owner_class": "owner_policy",
+          "reason_code": "FINAL_CONTEXT_BYTE_LIMIT_IS_OWNER_POLICY"
+        },
+        {
+          "binding_path": "context_and_result.max_context_tokens_per_case",
+          "owner_class": "owner_policy",
+          "reason_code": "FINAL_CONTEXT_TOKEN_LIMIT_IS_OWNER_POLICY"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "context_and_result.exact_tokenizer_code_sha256",
+        "reference_condition.context_builder_sha256"
+      ],
+      "primary_readiness_class": "UPSTREAM_RUNTIME_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": [
+        "CANDIDATE_EVIDENCE_SUBSTRATE_INTERFACE_UNREPRESENTED"
+      ]
+    },
+    {
+      "artifact_binding_path": "context_and_result.exact_tokenizer_code_sha256",
+      "artifact_kind": "exact_tokenizer_adapter",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "crates/store/examples/memory_reference_admission_fixture.rs",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "context_and_result.exact_tokenizer_id",
+          "owner_class": "owner_policy",
+          "reason_code": "TOKENIZER_IMPLEMENTATION_SELECTED_BY_OWNER_ID"
+        },
+        {
+          "binding_path": "context_and_result.exact_tokenizer_model_sha256",
+          "owner_class": "runtime_capture",
+          "reason_code": "EXACT_TOKENIZER_TEST_VECTORS_REQUIRE_MODEL_BYTES"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "OWNER_POLICY_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "generation.harness_sha256",
+      "artifact_kind": "generation_harness",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "generation.condition_roster_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "HARNESS_REQUIRES_FROZEN_CONDITION_INTERFACE"
+        },
+        {
+          "binding_path": "generation.execution_profile_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "HARNESS_REQUIRES_FROZEN_EXECUTION_PROFILE"
+        },
+        {
+          "binding_path": "generation.generator_instruction_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "HARNESS_ENVELOPE_REQUIRES_FROZEN_INSTRUCTION"
+        },
+        {
+          "binding_path": "review_and_blinding.condition_roster_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "HARNESS_REQUIRES_MATCHING_BLINDING_CONDITION_ROSTER"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "context_and_result.context_builder_sha256",
+        "review_and_blinding.map_bijection_checker_sha256"
+      ],
+      "primary_readiness_class": "OWNER_POLICY_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "latency.runner_sha256",
+      "artifact_kind": "paired_latency_runner",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "crates/store/examples/memory_reference_admission_fixture.rs",
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "latency.affinity_policy_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "RUNNER_REQUIRES_FROZEN_AFFINITY_POLICY"
+        },
+        {
+          "binding_path": "latency.hardware_guard_policy_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "RUNNER_REQUIRES_FROZEN_HARDWARE_GUARD_POLICY"
+        },
+        {
+          "binding_path": "latency.timeout_ns",
+          "owner_class": "owner_policy",
+          "reason_code": "RUNNER_REQUIRES_FROZEN_TIMEOUT_POLICY"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "context_and_result.context_builder_sha256"
+      ],
+      "primary_readiness_class": "OWNER_POLICY_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "power_and_estimator.paired_method_sha256",
+      "artifact_kind": "paired_case_estimator",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "power_and_estimator.cluster_variance_policy_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "EXACT_LCB_METHOD_REQUIRES_CLUSTER_VARIANCE_POLICY"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "sampling.sampling_receipt_schema_sha256",
+        "truth_inputs.strict_case_algorithm_sha256"
+      ],
+      "primary_readiness_class": "OWNER_POLICY_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "reference_condition.context_builder_sha256",
+      "artifact_kind": "reference_context_builder",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "crates/store/examples/memory_reference_admission_fixture.rs",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "review_and_blinding.map_bijection_checker_sha256",
+      "artifact_kind": "blind_map_bijection_checker",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "review_and_blinding.map_schema_sha256",
+        "sampling.sampling_receipt_schema_sha256"
+      ],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "review_and_blinding.map_schema_sha256",
+      "artifact_kind": "blind_map_schema",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "review_and_blinding.review_command_schema_sha256",
+      "artifact_kind": "review_command_schema",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "review_and_blinding.review_provenance_checker_sha256",
+      "artifact_kind": "review_provenance_checker",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "review_and_blinding.review_instruction_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "PROVENANCE_RULES_REQUIRE_FROZEN_REVIEW_INSTRUCTION"
+        },
+        {
+          "binding_path": "review_and_blinding.reviewer_conflict_and_overlap_manifest_sha256",
+          "owner_class": "custodian_private",
+          "reason_code": "PROVENANCE_RULES_REQUIRE_FRESH_CONFLICT_AND_OVERLAP_PROFILE"
+        },
+        {
+          "binding_path": "review_and_blinding.reviewer_roster_sha256",
+          "owner_class": "custodian_private",
+          "reason_code": "PROVENANCE_RULES_REQUIRE_FRESH_REVIEWER_PROFILES"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "review_and_blinding.map_bijection_checker_sha256",
+        "review_and_blinding.review_raw_response_schema_sha256",
+        "review_and_blinding.review_receipt_schema_sha256"
+      ],
+      "primary_readiness_class": "CUSTODIAN_PRIVATE_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "review_and_blinding.review_raw_response_schema_sha256",
+      "artifact_kind": "review_raw_response_schema",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "review_and_blinding.reviewer_roster_sha256",
+          "owner_class": "custodian_private",
+          "reason_code": "RAW_RESPONSE_BOUNDARY_DEPENDS_ON_FRESH_PROVIDER_PROFILE"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "review_and_blinding.review_command_schema_sha256",
+        "review_and_blinding.review_schema_sha256"
+      ],
+      "primary_readiness_class": "CUSTODIAN_PRIVATE_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "review_and_blinding.review_receipt_schema_sha256",
+      "artifact_kind": "review_receipt_schema",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "review_and_blinding.review_command_schema_sha256",
+        "review_and_blinding.review_schema_sha256"
+      ],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "review_and_blinding.review_schema_sha256",
+      "artifact_kind": "review_object_schema",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/fixtures/portfolio_continuity_successor_v3_answer_contract.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "truth_inputs.referent_schema_sha256"
+      ],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "sampling.frame_builder_sha256",
+      "artifact_kind": "prevalence_frame_builder",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "crates/bridge/src/memory_truth.rs",
+        "crates/bridge/src/memory_truth_adapter.rs",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "sampling.frame_window_end_utc",
+          "owner_class": "owner_policy",
+          "reason_code": "FRAME_BUILDER_REQUIRES_FROZEN_WINDOW_END"
+        },
+        {
+          "binding_path": "sampling.frame_window_start_utc",
+          "owner_class": "owner_policy",
+          "reason_code": "FRAME_BUILDER_REQUIRES_FROZEN_WINDOW_START"
+        },
+        {
+          "binding_path": "sampling.inclusion_exclusion_rules_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "FRAME_BUILDER_REQUIRES_FROZEN_ELIGIBILITY_RULES"
+        },
+        {
+          "binding_path": "sampling.target_population_definition_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "FRAME_BUILDER_REQUIRES_FROZEN_TARGET_POPULATION"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "OWNER_POLICY_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "sampling.pilot_confirmatory_disjointness_checker_sha256",
+      "artifact_kind": "pilot_confirmatory_disjointness_checker",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [
+        {
+          "binding_path": "sampling.inclusion_exclusion_rules_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "DISJOINTNESS_GRAIN_REQUIRES_FROZEN_ELIGIBILITY_RULES"
+        },
+        {
+          "binding_path": "sampling.target_population_definition_sha256",
+          "owner_class": "owner_policy",
+          "reason_code": "DISJOINTNESS_GRAIN_REQUIRES_FROZEN_TARGET_POPULATION"
+        }
+      ],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "sampling.frame_builder_sha256",
+        "sampling.sampling_selection_algorithm_sha256"
+      ],
+      "primary_readiness_class": "OWNER_POLICY_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "sampling.sampling_receipt_schema_sha256",
+      "artifact_kind": "sampling_receipt_schema",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "sampling.sampling_receipt_writer_sha256",
+      "artifact_kind": "sampling_receipt_writer",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "sampling.sampling_receipt_schema_sha256",
+        "sampling.sampling_seed_derivation_sha256",
+        "sampling.sampling_selection_algorithm_sha256"
+      ],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "sampling.sampling_seed_derivation_sha256",
+      "artifact_kind": "sampling_seed_derivation_algorithm",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "sampling.sampling_selection_algorithm_sha256",
+      "artifact_kind": "stratified_hmac_selection_algorithm",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "storage.serializer_sha256",
+      "artifact_kind": "canonical_jsonl_serializer",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "UPSTREAM_RUNTIME_DEPENDENT",
+      "public_authoring_eligible": false,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": [
+        "CANONICAL_MEMORY_EDGE_OBJECT_SCHEMA_UNREPRESENTED"
+      ]
+    },
+    {
+      "artifact_binding_path": "truth_inputs.referent_schema_sha256",
+      "artifact_kind": "current_referent_schema",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "crates/bridge/src/memory_truth.rs",
+        "crates/bridge/src/memory_truth_adapter.rs",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "truth_inputs.strict_case_algorithm_sha256",
+      "artifact_kind": "strict_case_pass_algorithm",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "crates/bridge/src/memory_truth.rs",
+        "scripts/eval/check_biocortex_ab_track_b_admission.py",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+        "scripts/eval/portfolio_continuity_successor_v3_trial.py"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "review_and_blinding.review_schema_sha256",
+        "truth_inputs.truth_manifest_schema_sha256"
+      ],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    },
+    {
+      "artifact_binding_path": "truth_inputs.truth_manifest_schema_sha256",
+      "artifact_kind": "truth_authority_manifest_schema",
+      "binding_evidence": null,
+      "binding_satisfied": false,
+      "blocked_upstream_dependencies": [],
+      "committed_artifact_blob_oid": null,
+      "committed_artifact_repo_path": null,
+      "committed_artifact_sha256": null,
+      "evidence_refs": [
+        "crates/bridge/src/memory_truth.rs",
+        "crates/bridge/src/memory_truth_adapter.rs",
+        "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+        "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+      ],
+      "external_dependencies": [],
+      "implementation_status": "PLANNED_NOT_IMPLEMENTED_OR_BOUND",
+      "local_dependencies": [
+        "truth_inputs.referent_schema_sha256"
+      ],
+      "primary_readiness_class": "INDEPENDENT_PUBLIC",
+      "public_authoring_eligible": true,
+      "required_stage": "PRE_OUTPUT_ADMISSION",
+      "unlocks_side_effect": false,
+      "unrepresented_upstream_dependencies": []
+    }
+  ],
+  "readiness_policy": {
+    "controlling_dependency_precedence": [
+      "BLOCKED_OR_UNREPRESENTED_UPSTREAM",
+      "CUSTODIAN_PRIVATE",
+      "OWNER_POLICY",
+      "RUNTIME_CAPTURE",
+      "NO_BLOCKER"
+    ],
+    "external_dependencies_definition": "DIRECT_SOURCE_FREEZE_SEMANTIC_BLOCKERS_ONLY_NOT_EXECUTION_INSTANCE_CLOSURE",
+    "implementation_ready_definition": "EXACT_ARTIFACT_BYTES_COMMITTED_AND_SOURCE_BOUND_WITH_ALL_LOCAL_DEPENDENCIES_IMPLEMENTED",
+    "initial_public_authoring_frontier_definition": "INDEPENDENT_PUBLIC_NODES_WITH_ZERO_LOCAL_DEPENDENCIES",
+    "live_binding_ready_definition": "IMPLEMENTATION_READY_AND_ALL_LEDGER_BINDINGS_AND_STAGE_OBLIGATIONS_SATISFIED",
+    "public_authoring_eligible_definition": "PRIMARY_CLASS_INDEPENDENT_PUBLIC_AND_ALL_LOCAL_DEPENDENCIES_PUBLIC_AUTHORING_ELIGIBLE"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_artifact_dependency_graph.v0",
+  "scope": {
+    "graph_coverage": "EXACT_23_EXACT_COMMITTED_ARTIFACT_ONLY_LEDGER_PATHS",
+    "old_successor_data_reuse": "PROHIBITED",
+    "old_successor_mechanism_reuse": "ALLOWED_WITH_NEW_SOURCE_ARTIFACTS_AND_TESTS",
+    "prerequisite_scope": "SOURCE_ARTIFACT_IMPLEMENTATION_FREEZE_NOT_FULL_REAL_RUN_INPUT_CLOSURE",
+    "real_run_input_closure_source": "LIVE_BINDING_LEDGER_91_SCALARS_PLUS_4_STAGE_OBLIGATIONS"
+  },
+  "summary": {
+    "artifact_commit_evidence_count": 0,
+    "artifact_count": 23,
+    "blocked_upstream_dependency_edge_count": 1,
+    "custodian_private_dependency_edge_count": 3,
+    "custodian_private_dependent_count": 2,
+    "dag_max_wave": 3,
+    "dag_root_count": 10,
+    "dag_sink_count": 7,
+    "direct_external_dependency_edge_count": 22,
+    "direct_local_dependency_edge_count": 25,
+    "implementation_ready_count": 0,
+    "independent_authoring_wave_count": 3,
+    "independent_authoring_waves": [
+      {
+        "artifact_paths": [
+          "reference_condition.context_builder_sha256",
+          "review_and_blinding.map_schema_sha256",
+          "review_and_blinding.review_command_schema_sha256",
+          "sampling.sampling_receipt_schema_sha256",
+          "sampling.sampling_seed_derivation_sha256",
+          "sampling.sampling_selection_algorithm_sha256",
+          "truth_inputs.referent_schema_sha256"
+        ],
+        "wave": 0
+      },
+      {
+        "artifact_paths": [
+          "review_and_blinding.map_bijection_checker_sha256",
+          "review_and_blinding.review_schema_sha256",
+          "sampling.sampling_receipt_writer_sha256",
+          "truth_inputs.truth_manifest_schema_sha256"
+        ],
+        "wave": 1
+      },
+      {
+        "artifact_paths": [
+          "review_and_blinding.review_receipt_schema_sha256",
+          "truth_inputs.strict_case_algorithm_sha256"
+        ],
+        "wave": 2
+      }
+    ],
+    "independent_public_count": 13,
+    "initial_public_authoring_frontier": [
+      "reference_condition.context_builder_sha256",
+      "review_and_blinding.map_schema_sha256",
+      "review_and_blinding.review_command_schema_sha256",
+      "sampling.sampling_receipt_schema_sha256",
+      "sampling.sampling_seed_derivation_sha256",
+      "sampling.sampling_selection_algorithm_sha256",
+      "truth_inputs.referent_schema_sha256"
+    ],
+    "initial_public_authoring_frontier_count": 7,
+    "live_binding_ready_count": 0,
+    "owner_policy_dependency_edge_count": 18,
+    "owner_policy_dependent_count": 6,
+    "recommended_first_pack": [
+      "review_and_blinding.map_schema_sha256",
+      "review_and_blinding.review_command_schema_sha256",
+      "sampling.sampling_receipt_schema_sha256",
+      "truth_inputs.referent_schema_sha256"
+    ],
+    "recommended_first_pack_count": 4,
+    "runtime_capture_dependency_edge_count": 1,
+    "topological_node_count": 23,
+    "unrepresented_upstream_dependency_edge_count": 2,
+    "upstream_runtime_dependent_count": 2
+  }
+}
