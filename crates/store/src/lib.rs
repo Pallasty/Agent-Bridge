@@ -18,6 +18,19 @@ pub use sqlite::{
     default_db_path, now_secs, semantic_blend_score, semantic_rank_weights, temporal_bonus,
     weight_for_edge_type, SqliteStore,
 };
+#[cfg(feature = "temporal-evidence-s4-synthetic")]
+pub use sqlite::{
+    temporal_truth_project_read_only_synthetic_v1, BoundTemporalTruthProjectionV1,
+    SyntheticTemporalTruthProjectionPermitV1, TemporalTruthAuthorityBasisViewV1,
+    TemporalTruthDispositionReasonKindV1, TemporalTruthDispositionReasonViewV1,
+    TemporalTruthEvidenceDispositionViewV1, TemporalTruthEvidenceProvenanceViewV1,
+    TemporalTruthProjectedClaimViewV1, TemporalTruthProjectionLimitsV1,
+    TemporalTruthProjectionRequestV1, TemporalTruthProjectionV1Error, TemporalTruthRequiredClaimV1,
+    TemporalTruthSnapshotCountsV1, TemporalTruthSourceBindingViewV1, TemporalTruthStateV1,
+    TemporalTruthSuppressionKindV1, TemporalTruthTemporalStateV1, TemporalTruthTierV1,
+    TEMPORAL_TRUTH_PROJECTION_V1_MAPPING, TEMPORAL_TRUTH_PROJECTION_V1_MODE,
+    TEMPORAL_TRUTH_PROJECTION_V1_PROFILE, TEMPORAL_TRUTH_PROJECTION_V1_SCHEMA,
+};
 pub mod vector;
 pub use embedding::{
     default_backend, set_default_backend, EmbeddingBackend, HashBackend, OnnxBackend,

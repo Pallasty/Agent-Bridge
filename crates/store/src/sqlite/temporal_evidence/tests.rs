@@ -66,6 +66,21 @@ fn generous_limits() -> TemporalEvidenceSnapshotLimits {
     limits(128, 128, 256, 256, 128, 2 * 1024 * 1024)
 }
 
+fn projection_limits() -> TemporalTruthProjectionLimitsV1 {
+    TemporalTruthProjectionLimitsV1::try_new(128, 128, 256, 256, 128, 2 * 1024 * 1024)
+        .expect("valid S4 projection limits")
+}
+
+fn projection_request(as_of: i64, knowledge_cutoff: i64) -> TemporalTruthProjectionRequestV1 {
+    TemporalTruthProjectionRequestV1::try_new(
+        as_of,
+        knowledge_cutoff,
+        Vec::new(),
+        projection_limits(),
+    )
+    .expect("valid S4 projection request")
+}
+
 fn policy(
     revision_id: &str,
     lineage_id: &str,
@@ -162,6 +177,104 @@ async fn append_evidence(
         .truth_evidence_append_revision_synthetic(token, input)
         .await
         .expect("append synthetic evidence")
+}
+
+async fn seed_s4_source_time_relationship(store: &SqliteStore) {
+    let token = synthetic_write_token();
+    append_policy(
+        store,
+        &token,
+        policy(
+            "s4-target-policy-v1",
+            "s4-target-policy",
+            10,
+            "claim.status",
+            "source:target",
+            TruthTier::Observed,
+            PolicyStatus::Active,
+        ),
+    )
+    .await;
+    append_policy(
+        store,
+        &token,
+        policy(
+            "s4-source-policy-v1",
+            "s4-source-policy",
+            10,
+            "claim.status",
+            "source:source",
+            TruthTier::Verified,
+            PolicyStatus::Active,
+        ),
+    )
+    .await;
+    append_evidence(
+        store,
+        &token,
+        evidence(
+            "s4-target-v1",
+            "s4-target",
+            "subject:s4",
+            "claim.status",
+            20,
+            90,
+            "s4-target-policy-v1",
+            "source:target",
+            Vec::new(),
+        ),
+    )
+    .await;
+    let mut source = evidence(
+        "s4-source-v1",
+        "s4-source",
+        "subject:s4",
+        "claim.status",
+        20,
+        100,
+        "s4-source-policy-v1",
+        "source:source",
+        vec![relationship(RelationshipKind::Supersedes, "s4-target", 110)],
+    );
+    source.source_bindings.push(EvidenceSourceBinding {
+        source_key: "source:supplemental".to_string(),
+        provenance_sha256: sha256_hex(b"provenance:s4-source-supplemental"),
+    });
+    append_evidence(store, &token, source).await;
+}
+
+async fn append_s4_target_upgrade(store: &SqliteStore) {
+    let token = synthetic_write_token();
+    append_policy(
+        store,
+        &token,
+        policy(
+            "s4-target-policy-v2",
+            "s4-target-policy",
+            150,
+            "claim.status",
+            "source:target",
+            TruthTier::Authoritative,
+            PolicyStatus::Active,
+        ),
+    )
+    .await;
+    append_evidence(
+        store,
+        &token,
+        evidence(
+            "s4-target-v2",
+            "s4-target",
+            "subject:s4",
+            "claim.status",
+            20,
+            200,
+            "s4-target-policy-v2",
+            "source:target",
+            Vec::new(),
+        ),
+    )
+    .await;
 }
 
 async fn rewind_empty_truth_schema_to_v42(store: &SqliteStore, insert_legacy_row: bool) {
@@ -1690,4 +1803,327 @@ async fn truth_evidence_s2_read_only_store_returns_the_exact_snapshot_without_wr
     assert!(write_result.is_err(), "read-only handle performed a write");
     drop(read_only);
     remove_test_directory(&directory).await;
+}
+
+#[tokio::test]
+async fn temporal_truth_projection_s4_empty_ledger_is_deterministic_and_read_only() {
+    let (directory, database, store) = fresh_store("s4-empty-pinned").await;
+    drop(store);
+    let required = TemporalTruthRequiredClaimV1::try_new("subject:empty", "claim.status")
+        .expect("valid required claim");
+    let request =
+        TemporalTruthProjectionRequestV1::try_new(0, 0, vec![required], projection_limits())
+            .expect("valid empty projection request");
+    let first = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &database,
+        request.clone(),
+    )
+    .await
+    .expect("project canonical empty fixture");
+    let second = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &database,
+        request,
+    )
+    .await
+    .expect("repeat canonical empty fixture projection");
+
+    assert_eq!(first.synthetic_fixture_id(), "crate_unit_test_only_v0");
+    assert_eq!(first.snapshot_payload_bytes(), 89);
+    assert_eq!(
+        first.snapshot_payload_sha256(),
+        "7617db2143811b72f1d1059d4b75cafb3c77756af3a3e930010c7241a5172e16"
+    );
+    assert!(first.read_only_attested());
+    assert!(first.query_only_attested());
+    assert!(first.zero_total_changes_attested());
+    assert_eq!(first.snapshot_counts().lineages(), 0);
+    assert_eq!(first.snapshot_counts().evidence_revisions(), 0);
+    let claims: Vec<_> = first.claims().collect();
+    assert_eq!(claims.len(), 1);
+    assert_eq!(claims[0].truth_state(), TemporalTruthStateV1::Unknown);
+    assert_eq!(
+        first.prepared_input_sha256(),
+        second.prepared_input_sha256()
+    );
+    assert_eq!(first.projection_sha256(), second.projection_sha256());
+    assert_eq!(
+        truth_table_counts(&SqliteStore::open_read_only(&database).await.unwrap()).await,
+        [0; 5]
+    );
+
+    remove_test_directory(&directory).await;
+}
+
+#[tokio::test]
+async fn temporal_truth_projection_s4_source_time_authority_survives_later_target_upgrade() {
+    let (directory, database, store) = fresh_store("s4-source-time").await;
+    seed_s4_source_time_relationship(&store).await;
+    append_s4_target_upgrade(&store).await;
+    drop(store);
+
+    let result = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &database,
+        projection_request(250, 250),
+    )
+    .await
+    .expect("source-time authority basis must survive later target upgrade");
+    let bases: Vec<_> = result.authority_bases().collect();
+    assert_eq!(bases.len(), 1);
+    assert_eq!(bases[0].source_evidence_id(), "s4-source-v1");
+    assert_eq!(bases[0].source_recorded_at(), 100);
+    assert_eq!(bases[0].target_evidence_id(), "s4-target-v1");
+    assert_eq!(bases[0].target_recorded_at(), 90);
+    assert_eq!(bases[0].target_revision_seq(), 1);
+    assert_eq!(bases[0].target_truth_tier(), TemporalTruthTierV1::Observed);
+
+    let claim = result.claims().next().expect("projected S4 claim");
+    assert_eq!(claim.truth_state(), TemporalTruthStateV1::Supported);
+    assert_eq!(claim.truth_tier(), Some(TemporalTruthTierV1::Verified));
+    assert_eq!(claim.evidence_ids(), ["s4-source-v1"]);
+    let target_disposition = claim
+        .evidence_dispositions()
+        .find(|disposition| disposition.evidence_id() == "s4-target-v2")
+        .expect("latest target disposition");
+    let suppression = target_disposition
+        .reasons()
+        .find(|reason| reason.suppression_kind().is_some())
+        .expect("auditable suppression reason");
+    assert_eq!(
+        suppression.suppression_kind(),
+        Some(TemporalTruthSuppressionKindV1::Supersedes)
+    );
+    assert_eq!(suppression.source_evidence_id(), Some("s4-source-v1"));
+    assert_eq!(suppression.effective_from(), Some(110));
+
+    let source_provenance = result
+        .evidence_provenance()
+        .find(|entry| entry.evidence_id() == "s4-source-v1")
+        .expect("source provenance entry");
+    let bindings: Vec<_> = source_provenance
+        .source_bindings()
+        .map(|binding| {
+            (
+                binding.source_key().to_string(),
+                binding.provenance_sha256().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(bindings.len(), 2);
+    assert_eq!(bindings[0].0, "source:source");
+    assert_eq!(bindings[1].0, "source:supplemental");
+    assert!(bindings.iter().all(|(_, digest)| digest.len() == 64));
+
+    remove_test_directory(&directory).await;
+}
+
+#[tokio::test]
+async fn temporal_truth_projection_s4_post_cutoff_is_bound_but_not_projected() {
+    let (directory, database, store) = fresh_store("s4-post-cutoff").await;
+    seed_s4_source_time_relationship(&store).await;
+    let baseline = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &database,
+        projection_request(120, 120),
+    )
+    .await
+    .expect("baseline cutoff projection");
+    append_s4_target_upgrade(&store).await;
+    let after = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &database,
+        projection_request(120, 120),
+    )
+    .await
+    .expect("projection with retained post-cutoff revision");
+
+    assert_ne!(
+        baseline.snapshot_payload_sha256(),
+        after.snapshot_payload_sha256()
+    );
+    assert_ne!(
+        baseline.prepared_input_sha256(),
+        after.prepared_input_sha256()
+    );
+    assert_eq!(baseline.projection_sha256(), after.projection_sha256());
+    assert_eq!(baseline.snapshot_counts().evidence_revisions(), 2);
+    assert_eq!(after.snapshot_counts().evidence_revisions(), 3);
+    assert_eq!(
+        baseline.claims().next().unwrap().values(),
+        after.claims().next().unwrap().values()
+    );
+
+    drop(store);
+    remove_test_directory(&directory).await;
+}
+
+#[tokio::test]
+async fn temporal_truth_projection_s4_tombstoned_target_prunes_but_governed_source_rejects() {
+    let token = synthetic_write_token();
+    let (pruned_directory, pruned_database, pruned_store) = fresh_store("s4-tombstone-prune").await;
+    seed_s4_source_time_relationship(&pruned_store).await;
+    let tombstone = pruned_store
+        .truth_evidence_tombstone_lineage_synthetic(
+            &token,
+            NewLineageTombstone {
+                tombstone_id: "s4-target-tombstone-v1".to_string(),
+                lineage_id: "s4-target".to_string(),
+                tombstoned_at: 130,
+            },
+        )
+        .await
+        .expect("tombstone inbound relationship target");
+    assert!(!tombstone.had_outgoing_governance);
+    drop(pruned_store);
+    let pruned = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &pruned_database,
+        projection_request(200, 200),
+    )
+    .await
+    .expect("content-free target tombstone is prunable");
+    assert_eq!(pruned.pruned_inbound_relationships(), 1);
+    assert_eq!(pruned.authority_bases().count(), 0);
+    assert!(pruned
+        .evidence_provenance()
+        .all(|entry| entry.evidence_id() != "s4-target-v1"));
+    assert_eq!(
+        pruned.claims().next().unwrap().evidence_ids(),
+        ["s4-source-v1"]
+    );
+    remove_test_directory(&pruned_directory).await;
+
+    let (blocked_directory, blocked_database, blocked_store) =
+        fresh_store("s4-tombstone-governed").await;
+    seed_s4_source_time_relationship(&blocked_store).await;
+    let tombstone = blocked_store
+        .truth_evidence_tombstone_lineage_synthetic(
+            &token,
+            NewLineageTombstone {
+                tombstone_id: "s4-source-tombstone-v1".to_string(),
+                lineage_id: "s4-source".to_string(),
+                tombstoned_at: 130,
+            },
+        )
+        .await
+        .expect("tombstone governed relationship source");
+    assert!(tombstone.had_outgoing_governance);
+    drop(blocked_store);
+    let error = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &blocked_database,
+        projection_request(200, 200),
+    )
+    .await
+    .expect_err("governed tombstone source must terminate projection");
+    assert_eq!(
+        error.code(),
+        "truth_projection_v1_governed_tombstone_source"
+    );
+    remove_test_directory(&blocked_directory).await;
+}
+
+#[tokio::test]
+async fn temporal_truth_projection_s4_required_claim_order_is_canonical_and_missing_path_is_not_created(
+) {
+    let (directory, database, store) = fresh_store("s4-request-canonical").await;
+    drop(store);
+    let left = TemporalTruthRequiredClaimV1::try_new("subject:a", "claim.status").unwrap();
+    let right = TemporalTruthRequiredClaimV1::try_new("subject:b", "claim.status").unwrap();
+    let first_request = TemporalTruthProjectionRequestV1::try_new(
+        0,
+        0,
+        vec![right.clone(), left.clone()],
+        projection_limits(),
+    )
+    .unwrap();
+    let second_request =
+        TemporalTruthProjectionRequestV1::try_new(0, 0, vec![left, right], projection_limits())
+            .unwrap();
+    let first = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &database,
+        first_request,
+    )
+    .await
+    .unwrap();
+    let second = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &database,
+        second_request,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        first.prepared_input_sha256(),
+        second.prepared_input_sha256()
+    );
+    assert_eq!(first.projection_sha256(), second.projection_sha256());
+    remove_test_directory(&directory).await;
+
+    let (missing_directory, missing_database) = test_path("s4-missing-read-only");
+    let error = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &missing_database,
+        projection_request(0, 0),
+    )
+    .await
+    .expect_err("read-only projection must not create a missing database");
+    assert_eq!(error.code(), "truth_projection_v1_open_read_only");
+    assert!(!missing_database.exists());
+    assert!(!missing_directory.exists());
+}
+
+#[tokio::test]
+async fn temporal_truth_projection_s4_identity_drift_rejects_without_migration() {
+    let (directory, database, store) = fresh_store("s4-identity-drift").await;
+    rewind_empty_truth_schema_to_v42(&store, false).await;
+    drop(store);
+    let error = temporal_truth_project_read_only_synthetic_v1(
+        synthetic_projection_permit_v1(),
+        &database,
+        projection_request(0, 0),
+    )
+    .await
+    .expect_err("read-only v1 must reject v42 rather than migrating it");
+    assert_eq!(error.code(), "truth_projection_v1_sqlite");
+    let connection = tokio_rusqlite::Connection::open_with_flags(
+        &database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .await
+    .expect("reopen drifted database read-only");
+    let version: String = connection
+        .call(|connection| -> RusqliteResult<String> {
+            connection.query_row(
+                "SELECT value FROM schema_meta WHERE key='version'",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .await
+        .expect("read unchanged schema version");
+    assert_eq!(version, "42");
+    remove_test_directory(&directory).await;
+}
+
+#[test]
+fn temporal_truth_projection_s4_request_rejects_duplicate_claims_and_invalid_window() {
+    let claim = TemporalTruthRequiredClaimV1::try_new("subject:a", "claim.status").unwrap();
+    let duplicate = TemporalTruthProjectionRequestV1::try_new(
+        0,
+        0,
+        vec![claim.clone(), claim],
+        projection_limits(),
+    )
+    .expect_err("duplicate required claim must reject");
+    assert_eq!(
+        duplicate.code(),
+        "truth_projection_v1_duplicate_required_claim"
+    );
+    let invalid = TemporalTruthProjectionRequestV1::try_new(2, 1, Vec::new(), projection_limits())
+        .expect_err("as_of after cutoff must reject");
+    assert_eq!(invalid.code(), "truth_projection_v1_invalid_window");
 }
