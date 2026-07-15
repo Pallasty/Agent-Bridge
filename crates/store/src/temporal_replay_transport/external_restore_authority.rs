@@ -36,7 +36,7 @@ const ZERO_COMMITMENT: [u8; 32] = [0; 32];
 
 #[derive(Debug, thiserror::Error)]
 #[error("{code}: {detail}")]
-struct ExternalAuthorityContractV1Error {
+pub(super) struct ExternalAuthorityContractV1Error {
     code: &'static str,
     detail: &'static str,
 }
@@ -48,7 +48,7 @@ impl ExternalAuthorityContractV1Error {
     }
 }
 
-type ContractResult<T> = Result<T, ExternalAuthorityContractV1Error>;
+pub(super) type ContractResult<T> = Result<T, ExternalAuthorityContractV1Error>;
 
 fn contract_error(code: &'static str, detail: &'static str) -> ExternalAuthorityContractV1Error {
     ExternalAuthorityContractV1Error { code, detail }
@@ -265,21 +265,21 @@ impl ExternalKeysetIdentityV1 {
 }
 
 #[derive(Clone)]
-struct ExternalCurrentnessRequestV1 {
-    provider_profile_id: String,
-    authority_namespace_id: String,
-    tenant_id: String,
-    audience: String,
-    operation_id: [u8; 32],
-    challenge: [u8; 32],
-    expected_epoch: u64,
-    expected_epoch_record_sha256: [u8; 32],
-    registry_generation_id: [u8; 32],
-    receiver_identity_sha256: [u8; 32],
-    build_identity_sha256: [u8; 32],
-    allowlist_sha256: [u8; 32],
-    keyset_identity_sha256: [u8; 32],
-    trust_policy_sha256: [u8; 32],
+pub(super) struct ExternalCurrentnessRequestV1 {
+    pub(super) provider_profile_id: String,
+    pub(super) authority_namespace_id: String,
+    pub(super) tenant_id: String,
+    pub(super) audience: String,
+    pub(super) operation_id: [u8; 32],
+    pub(super) challenge: [u8; 32],
+    pub(super) expected_epoch: u64,
+    pub(super) expected_epoch_record_sha256: [u8; 32],
+    pub(super) registry_generation_id: [u8; 32],
+    pub(super) receiver_identity_sha256: [u8; 32],
+    pub(super) build_identity_sha256: [u8; 32],
+    pub(super) allowlist_sha256: [u8; 32],
+    pub(super) keyset_identity_sha256: [u8; 32],
+    pub(super) trust_policy_sha256: [u8; 32],
 }
 
 impl fmt::Debug for ExternalCurrentnessRequestV1 {
@@ -324,10 +324,10 @@ fn validate_request(request: &ExternalCurrentnessRequestV1) -> ContractResult<()
     Ok(())
 }
 
-fn request_digest(request: &ExternalCurrentnessRequestV1) -> ContractResult<[u8; 32]> {
+pub(super) fn request_message(request: &ExternalCurrentnessRequestV1) -> ContractResult<Vec<u8>> {
     validate_request(request)?;
     let epoch = request.expected_epoch.to_be_bytes();
-    Ok(framed_digest(
+    Ok(framed_message(
         REQUEST_DOMAIN,
         &[
             POLICY_ID.as_bytes(),
@@ -351,8 +351,12 @@ fn request_digest(request: &ExternalCurrentnessRequestV1) -> ContractResult<[u8;
     ))
 }
 
+pub(super) fn request_digest(request: &ExternalCurrentnessRequestV1) -> ContractResult<[u8; 32]> {
+    Ok(sha256_bytes(&request_message(request)?))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExternalAuthorityStateV1 {
+pub(super) enum ExternalAuthorityStateV1 {
     Active,
     Fencing,
     Pending,
@@ -373,26 +377,26 @@ impl ExternalAuthorityStateV1 {
 }
 
 #[derive(Clone)]
-struct SignedExternalCurrentnessDecisionV1 {
-    request_sha256: [u8; 32],
-    state: ExternalAuthorityStateV1,
-    provider_cluster_id: String,
-    provider_incarnation: [u8; 32],
-    leader_term: u64,
-    committed_revision: u64,
-    authority_sequence: u64,
-    active_epoch: u64,
-    active_epoch_record_sha256: [u8; 32],
-    active_registry_generation_id: [u8; 32],
-    active_keyset_identity_sha256: [u8; 32],
-    revocation_checkpoint_sha256: [u8; 32],
-    revoked_through_epoch: u64,
-    provider_custody_claim_sha256: [u8; 32],
-    provider_old_key_use_denied_claim_sha256: [u8; 32],
-    decision_id: [u8; 32],
-    signer_key_id: String,
-    signer_key_version: u64,
-    ed25519_signature: [u8; 64],
+pub(super) struct SignedExternalCurrentnessDecisionV1 {
+    pub(super) request_sha256: [u8; 32],
+    pub(super) state: ExternalAuthorityStateV1,
+    pub(super) provider_cluster_id: String,
+    pub(super) provider_incarnation: [u8; 32],
+    pub(super) leader_term: u64,
+    pub(super) committed_revision: u64,
+    pub(super) authority_sequence: u64,
+    pub(super) active_epoch: u64,
+    pub(super) active_epoch_record_sha256: [u8; 32],
+    pub(super) active_registry_generation_id: [u8; 32],
+    pub(super) active_keyset_identity_sha256: [u8; 32],
+    pub(super) revocation_checkpoint_sha256: [u8; 32],
+    pub(super) revoked_through_epoch: u64,
+    pub(super) provider_custody_claim_sha256: [u8; 32],
+    pub(super) provider_old_key_use_denied_claim_sha256: [u8; 32],
+    pub(super) decision_id: [u8; 32],
+    pub(super) signer_key_id: String,
+    pub(super) signer_key_version: u64,
+    pub(super) ed25519_signature: [u8; 64],
 }
 
 impl fmt::Debug for SignedExternalCurrentnessDecisionV1 {
@@ -441,10 +445,27 @@ fn decision_message(decision: &SignedExternalCurrentnessDecisionV1) -> Vec<u8> {
     )
 }
 
+fn validate_decision_labels(decision: &SignedExternalCurrentnessDecisionV1) -> ContractResult<()> {
+    if !valid_label(&decision.provider_cluster_id) || !valid_label(&decision.signer_key_id) {
+        return Err(contract_error(
+            "track_b_external_authority_v1_decision_label",
+            "decision provider and signer labels must be canonical and at most 128 bytes",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validated_decision_message(
+    decision: &SignedExternalCurrentnessDecisionV1,
+) -> ContractResult<Vec<u8>> {
+    validate_decision_labels(decision)?;
+    Ok(decision_message(decision))
+}
+
 /// All trust-anchor material is expected to be owner-pinned out of band. The
 /// only constructor in S9 is test-only, so repository contents cannot create a
 /// production authority permit.
-struct ExternalAuthorityTrustPermitV1 {
+pub(super) struct ExternalAuthorityTrustPermitV1 {
     provider_profile_id: String,
     authority_namespace_id: String,
     tenant_id: String,
@@ -457,6 +478,48 @@ struct ExternalAuthorityTrustPermitV1 {
     minimum_leader_term: u64,
     minimum_committed_revision: u64,
     ed25519_public_key: [u8; 32],
+}
+
+impl ExternalAuthorityTrustPermitV1 {
+    pub(super) fn signer_key_id(&self) -> &str {
+        &self.signer_key_id
+    }
+
+    pub(super) fn ed25519_public_key(&self) -> [u8; 32] {
+        self.ed25519_public_key
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn test_only_new(
+        provider_profile_id: impl Into<String>,
+        authority_namespace_id: impl Into<String>,
+        tenant_id: impl Into<String>,
+        audience: impl Into<String>,
+        provider_cluster_id: impl Into<String>,
+        provider_incarnation: [u8; 32],
+        signer_key_id: impl Into<String>,
+        signer_key_version: u64,
+        trust_policy_sha256: [u8; 32],
+        minimum_leader_term: u64,
+        minimum_committed_revision: u64,
+        ed25519_public_key: [u8; 32],
+    ) -> Self {
+        Self {
+            provider_profile_id: provider_profile_id.into(),
+            authority_namespace_id: authority_namespace_id.into(),
+            tenant_id: tenant_id.into(),
+            audience: audience.into(),
+            provider_cluster_id: provider_cluster_id.into(),
+            provider_incarnation,
+            signer_key_id: signer_key_id.into(),
+            signer_key_version,
+            trust_policy_sha256,
+            minimum_leader_term,
+            minimum_committed_revision,
+            ed25519_public_key,
+        }
+    }
 }
 
 impl fmt::Debug for ExternalAuthorityTrustPermitV1 {
@@ -582,6 +645,62 @@ struct VerifiedExternalCurrentnessV1 {
     committed_revision: u64,
 }
 
+/// Historical authentication of exact S9 bytes. Unlike
+/// `VerifiedExternalCurrentnessV1`, this value says nothing about currentness at
+/// the time a later caller uses it and cannot be converted into an admission
+/// capability.
+#[must_use]
+pub(super) struct VerifiedExternalCurrentnessDecisionV1 {
+    request_sha256: [u8; 32],
+    decision_sha256: [u8; 32],
+    decision_id: [u8; 32],
+    authority_sequence: u64,
+    committed_revision: u64,
+    active_epoch: u64,
+    registry_generation_id: [u8; 32],
+}
+
+impl VerifiedExternalCurrentnessDecisionV1 {
+    pub(super) fn request_sha256(&self) -> [u8; 32] {
+        self.request_sha256
+    }
+
+    pub(super) fn decision_sha256(&self) -> [u8; 32] {
+        self.decision_sha256
+    }
+
+    pub(super) fn decision_id(&self) -> [u8; 32] {
+        self.decision_id
+    }
+
+    pub(super) fn authority_sequence(&self) -> u64 {
+        self.authority_sequence
+    }
+
+    pub(super) fn committed_revision(&self) -> u64 {
+        self.committed_revision
+    }
+
+    pub(super) fn active_epoch(&self) -> u64 {
+        self.active_epoch
+    }
+
+    pub(super) fn registry_generation_id(&self) -> [u8; 32] {
+        self.registry_generation_id
+    }
+}
+
+impl fmt::Debug for VerifiedExternalCurrentnessDecisionV1 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VerifiedExternalCurrentnessDecisionV1")
+            .field("scope", &"[HISTORICAL_SIGNATURE_ONLY_NOT_CURRENTNESS]")
+            .field("authority_sequence", &self.authority_sequence)
+            .field("committed_revision", &self.committed_revision)
+            .finish_non_exhaustive()
+    }
+}
+
 impl fmt::Debug for VerifiedExternalCurrentnessV1 {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -621,7 +740,7 @@ fn verify_external_currentness_v1<P: ExternalCurrentnessProviderV1>(
     permit: &ExternalAuthorityTrustPermitV1,
 ) -> ContractResult<VerifiedExternalCurrentnessV1> {
     validate_permit(permit)?;
-    let expected_request_sha256 = request_digest(request)?;
+    request_digest(request)?;
     if request.provider_profile_id != permit.provider_profile_id
         || request.authority_namespace_id != permit.authority_namespace_id
         || request.tenant_id != permit.tenant_id
@@ -633,7 +752,6 @@ fn verify_external_currentness_v1<P: ExternalCurrentnessProviderV1>(
             "request scope does not match the owner-pinned permit",
         ));
     }
-
     let decision = provider.request_currentness(request).map_err(|failure| {
         let detail = match failure {
             ExternalProviderFailureV1::Timeout => "external provider timed out",
@@ -650,6 +768,37 @@ fn verify_external_currentness_v1<P: ExternalCurrentnessProviderV1>(
         contract_error("track_b_external_authority_v1_provider_failure", detail)
     })?;
 
+    let verified = verify_external_currentness_decision_v1(request, permit, &decision)?;
+    Ok(VerifiedExternalCurrentnessV1 {
+        request_sha256: verified.request_sha256,
+        decision_sha256: verified.decision_sha256,
+        authority_sequence: verified.authority_sequence,
+        committed_revision: verified.committed_revision,
+    })
+}
+
+/// Pure verifier for already-carried exact S9 bytes. It performs no provider
+/// call, retry, lookup, clock read, cache access, persistence, or consumption.
+/// Its output is historical authentication only.
+pub(super) fn verify_external_currentness_decision_v1(
+    request: &ExternalCurrentnessRequestV1,
+    permit: &ExternalAuthorityTrustPermitV1,
+    decision: &SignedExternalCurrentnessDecisionV1,
+) -> ContractResult<VerifiedExternalCurrentnessDecisionV1> {
+    validate_permit(permit)?;
+    let expected_request_sha256 = request_digest(request)?;
+    if request.provider_profile_id != permit.provider_profile_id
+        || request.authority_namespace_id != permit.authority_namespace_id
+        || request.tenant_id != permit.tenant_id
+        || request.audience != permit.audience
+        || request.trust_policy_sha256 != permit.trust_policy_sha256
+    {
+        return Err(contract_error(
+            "track_b_external_authority_v1_trust_scope",
+            "request scope does not match the owner-pinned permit",
+        ));
+    }
+
     if decision.request_sha256 != expected_request_sha256 {
         return Err(contract_error(
             "track_b_external_authority_v1_request_binding",
@@ -657,7 +806,7 @@ fn verify_external_currentness_v1<P: ExternalCurrentnessProviderV1>(
         ));
     }
 
-    let message = decision_message(&decision);
+    let message = validated_decision_message(decision)?;
     UnparsedPublicKey::new(&ED25519, permit.ed25519_public_key)
         .verify(&message, &decision.ed25519_signature)
         .map_err(|_| {
@@ -721,11 +870,14 @@ fn verify_external_currentness_v1<P: ExternalCurrentnessProviderV1>(
         ));
     }
 
-    Ok(VerifiedExternalCurrentnessV1 {
+    Ok(VerifiedExternalCurrentnessDecisionV1 {
         request_sha256: expected_request_sha256,
         decision_sha256: sha256_bytes(&message),
+        decision_id: decision.decision_id,
         authority_sequence: decision.authority_sequence,
         committed_revision: decision.committed_revision,
+        active_epoch: decision.active_epoch,
+        registry_generation_id: decision.active_registry_generation_id,
     })
 }
 
@@ -1398,6 +1550,27 @@ mod tests {
         let mut permit = permit_for(&identity(), RFC8032_PUBLIC_KEY, 42);
         permit.provider_incarnation = ZERO_COMMITMENT;
         assert!(validate_permit(&permit).is_err());
+    }
+
+    #[test]
+    fn s9_oversized_decision_label_rejects_before_message_allocation() {
+        let request = request();
+        let permit = permit_for(&identity(), RFC8032_PUBLIC_KEY, 42);
+        let mut decision = sign_decision(
+            &RFC8032_SEED,
+            &identity(),
+            &request,
+            ExternalAuthorityStateV1::Active,
+            1,
+            42,
+        );
+        decision.provider_cluster_id = "a".repeat(129);
+        assert_eq!(
+            verify_external_currentness_decision_v1(&request, &permit, &decision)
+                .unwrap_err()
+                .code(),
+            "track_b_external_authority_v1_decision_label"
+        );
     }
 
     #[test]

@@ -44,7 +44,7 @@ const S10_CONTRACT_SHA256: [u8; 32] = [
 
 #[derive(Debug, thiserror::Error)]
 #[error("{code}: {detail}")]
-struct AtomicAuthorityOperationV1Error {
+pub(super) struct AtomicAuthorityOperationV1Error {
     code: &'static str,
     detail: &'static str,
 }
@@ -56,7 +56,7 @@ impl AtomicAuthorityOperationV1Error {
     }
 }
 
-type OperationResult<T> = Result<T, AtomicAuthorityOperationV1Error>;
+pub(super) type OperationResult<T> = Result<T, AtomicAuthorityOperationV1Error>;
 
 fn operation_error(code: &'static str, detail: &'static str) -> AtomicAuthorityOperationV1Error {
     AtomicAuthorityOperationV1Error { code, detail }
@@ -104,23 +104,23 @@ fn framed_digest(domain: &[u8], fields: &[&[u8]]) -> [u8; 32] {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-struct AtomicAuthorityOperationRequestV1 {
-    provider_profile_id: String,
-    authority_namespace_id: String,
-    tenant_id: String,
-    audience: String,
-    provider_cluster_id: String,
-    provider_incarnation: [u8; 32],
-    journal_generation_id: [u8; 32],
-    operation_id: [u8; 32],
-    original_challenge: [u8; 32],
-    original_request_sha256: [u8; 32],
-    concrete_replay_identity_sha256: [u8; 32],
-    authority_snapshot_sha256: [u8; 32],
-    canonical_decision_sha256: [u8; 32],
-    trust_policy_sha256: [u8; 32],
-    signer_key_id: String,
-    signer_key_version: u64,
+pub(super) struct AtomicAuthorityOperationRequestV1 {
+    pub(super) provider_profile_id: String,
+    pub(super) authority_namespace_id: String,
+    pub(super) tenant_id: String,
+    pub(super) audience: String,
+    pub(super) provider_cluster_id: String,
+    pub(super) provider_incarnation: [u8; 32],
+    pub(super) journal_generation_id: [u8; 32],
+    pub(super) operation_id: [u8; 32],
+    pub(super) original_challenge: [u8; 32],
+    pub(super) original_request_sha256: [u8; 32],
+    pub(super) concrete_replay_identity_sha256: [u8; 32],
+    pub(super) authority_snapshot_sha256: [u8; 32],
+    pub(super) canonical_decision_sha256: [u8; 32],
+    pub(super) trust_policy_sha256: [u8; 32],
+    pub(super) signer_key_id: String,
+    pub(super) signer_key_version: u64,
 }
 
 impl fmt::Debug for AtomicAuthorityOperationRequestV1 {
@@ -168,7 +168,9 @@ fn validate_request(request: &AtomicAuthorityOperationRequestV1) -> OperationRes
     Ok(())
 }
 
-fn request_digest(request: &AtomicAuthorityOperationRequestV1) -> OperationResult<[u8; 32]> {
+pub(super) fn request_digest(
+    request: &AtomicAuthorityOperationRequestV1,
+) -> OperationResult<[u8; 32]> {
     validate_request(request)?;
     let signer_key_version = request.signer_key_version.to_be_bytes();
     Ok(framed_digest(
@@ -200,7 +202,7 @@ fn request_digest(request: &AtomicAuthorityOperationRequestV1) -> OperationResul
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AtomicAuthorityOperationPersistentStateV1 {
+pub(super) enum AtomicAuthorityOperationPersistentStateV1 {
     DecisionCommittedUnsigned,
     SignedCommitted,
 }
@@ -215,7 +217,7 @@ impl AtomicAuthorityOperationPersistentStateV1 {
 }
 
 #[derive(Clone)]
-struct AtomicAuthorityOperationTrustPermitV1 {
+pub(super) struct AtomicAuthorityOperationTrustPermitV1 {
     provider_profile_id: String,
     authority_namespace_id: String,
     tenant_id: String,
@@ -229,6 +231,50 @@ struct AtomicAuthorityOperationTrustPermitV1 {
     minimum_leader_term: u64,
     minimum_operation_committed_revision: u64,
     ed25519_public_key: [u8; 32],
+}
+
+impl AtomicAuthorityOperationTrustPermitV1 {
+    pub(super) fn signer_key_id(&self) -> &str {
+        &self.signer_key_id
+    }
+
+    pub(super) fn ed25519_public_key(&self) -> [u8; 32] {
+        self.ed25519_public_key
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn test_only_new(
+        provider_profile_id: impl Into<String>,
+        authority_namespace_id: impl Into<String>,
+        tenant_id: impl Into<String>,
+        audience: impl Into<String>,
+        provider_cluster_id: impl Into<String>,
+        provider_incarnation: [u8; 32],
+        journal_generation_id: [u8; 32],
+        signer_key_id: impl Into<String>,
+        signer_key_version: u64,
+        trust_policy_sha256: [u8; 32],
+        minimum_leader_term: u64,
+        minimum_operation_committed_revision: u64,
+        ed25519_public_key: [u8; 32],
+    ) -> Self {
+        Self {
+            provider_profile_id: provider_profile_id.into(),
+            authority_namespace_id: authority_namespace_id.into(),
+            tenant_id: tenant_id.into(),
+            audience: audience.into(),
+            provider_cluster_id: provider_cluster_id.into(),
+            provider_incarnation,
+            journal_generation_id,
+            signer_key_id: signer_key_id.into(),
+            signer_key_version,
+            trust_policy_sha256,
+            minimum_leader_term,
+            minimum_operation_committed_revision,
+            ed25519_public_key,
+        }
+    }
 }
 
 impl fmt::Debug for AtomicAuthorityOperationTrustPermitV1 {
@@ -263,7 +309,7 @@ fn validate_permit(permit: &AtomicAuthorityOperationTrustPermitV1) -> OperationR
     Ok(())
 }
 
-fn prepared_record_digest(
+pub(super) fn prepared_record_digest(
     request_sha256: &[u8; 32],
     leader_term: u64,
     operation_committed_revision: u64,
@@ -287,7 +333,7 @@ fn prepared_record_digest(
     )
 }
 
-fn sign_job_id(
+pub(super) fn sign_job_id(
     prepared_record_sha256: &[u8; 32],
     signer_key_id: &str,
     signer_key_version: u64,
@@ -304,14 +350,17 @@ fn sign_job_id(
     )
 }
 
-fn stable_result_id(prepared_record_sha256: &[u8; 32], sign_job_id: &[u8; 32]) -> [u8; 32] {
+pub(super) fn stable_result_id(
+    prepared_record_sha256: &[u8; 32],
+    sign_job_id: &[u8; 32],
+) -> [u8; 32] {
     framed_digest(
         STABLE_RESULT_DOMAIN,
         &[POLICY_ID.as_bytes(), prepared_record_sha256, sign_job_id],
     )
 }
 
-fn decision_message(
+pub(super) fn decision_message(
     request: &AtomicAuthorityOperationRequestV1,
     request_sha256: &[u8; 32],
     leader_term: u64,
@@ -361,7 +410,7 @@ fn decision_message(
 /// This value is deliberately not part of the Ed25519 message and is not an
 /// authenticated database-persistence receipt. It exists only to make local
 /// sequence-model drift visible in tests.
-fn synthetic_l2_record_digest(
+pub(super) fn synthetic_l2_record_digest(
     stable_result_id: &[u8; 32],
     decision_message_sha256: &[u8; 32],
     signature: &[u8; 64],
@@ -384,26 +433,26 @@ fn synthetic_l2_record_digest(
 }
 
 #[derive(Clone)]
-struct SignedCommittedAuthorityOperationV1 {
-    request_sha256: [u8; 32],
-    state: AtomicAuthorityOperationPersistentStateV1,
-    provider_cluster_id: String,
-    provider_incarnation: [u8; 32],
-    journal_generation_id: [u8; 32],
-    leader_term: u64,
-    operation_committed_revision: u64,
-    record_sequence: u64,
-    prepared_record_sha256: [u8; 32],
-    sign_job_id: [u8; 32],
-    stable_result_id: [u8; 32],
-    decision_message_sha256: [u8; 32],
-    signer_key_id: String,
-    signer_key_version: u64,
+pub(super) struct SignedCommittedAuthorityOperationV1 {
+    pub(super) request_sha256: [u8; 32],
+    pub(super) state: AtomicAuthorityOperationPersistentStateV1,
+    pub(super) provider_cluster_id: String,
+    pub(super) provider_incarnation: [u8; 32],
+    pub(super) journal_generation_id: [u8; 32],
+    pub(super) leader_term: u64,
+    pub(super) operation_committed_revision: u64,
+    pub(super) record_sequence: u64,
+    pub(super) prepared_record_sha256: [u8; 32],
+    pub(super) sign_job_id: [u8; 32],
+    pub(super) stable_result_id: [u8; 32],
+    pub(super) decision_message_sha256: [u8; 32],
+    pub(super) signer_key_id: String,
+    pub(super) signer_key_version: u64,
     /// Unauthenticated metadata assigned by the synthetic journal at L2.
-    synthetic_l2_revision: u64,
-    ed25519_signature: [u8; 64],
+    pub(super) synthetic_l2_revision: u64,
+    pub(super) ed25519_signature: [u8; 64],
     /// Public checksum, not an authenticated persistence receipt.
-    synthetic_l2_record_sha256: [u8; 32],
+    pub(super) synthetic_l2_record_sha256: [u8; 32],
 }
 
 impl fmt::Debug for SignedCommittedAuthorityOperationV1 {
@@ -417,11 +466,29 @@ impl fmt::Debug for SignedCommittedAuthorityOperationV1 {
 }
 
 #[must_use]
-struct VerifiedAtomicAuthorityOperationObservationV1 {
+pub(super) struct VerifiedAtomicAuthorityOperationObservationV1 {
     stable_result_id: [u8; 32],
     decision_message_sha256: [u8; 32],
     operation_committed_revision: u64,
     record_sequence: u64,
+}
+
+impl VerifiedAtomicAuthorityOperationObservationV1 {
+    pub(super) fn stable_result_id(&self) -> [u8; 32] {
+        self.stable_result_id
+    }
+
+    pub(super) fn decision_message_sha256(&self) -> [u8; 32] {
+        self.decision_message_sha256
+    }
+
+    pub(super) fn operation_committed_revision(&self) -> u64 {
+        self.operation_committed_revision
+    }
+
+    pub(super) fn record_sequence(&self) -> u64 {
+        self.record_sequence
+    }
 }
 
 impl fmt::Debug for VerifiedAtomicAuthorityOperationObservationV1 {
@@ -437,10 +504,11 @@ impl fmt::Debug for VerifiedAtomicAuthorityOperationObservationV1 {
     }
 }
 
-fn verify_signed_committed_operation_v1(
+fn verify_signed_committed_operation_core_v1(
     request: &AtomicAuthorityOperationRequestV1,
     permit: &AtomicAuthorityOperationTrustPermitV1,
     record: &SignedCommittedAuthorityOperationV1,
+    enforce_synthetic_l2_sequence: bool,
 ) -> OperationResult<VerifiedAtomicAuthorityOperationObservationV1> {
     validate_request(request)?;
     validate_permit(permit)?;
@@ -479,11 +547,16 @@ fn verify_signed_committed_operation_v1(
         || record.operation_committed_revision < permit.minimum_operation_committed_revision
         || record.operation_committed_revision == 0
         || record.record_sequence == 0
-        || record.synthetic_l2_revision <= record.operation_committed_revision
+        || (enforce_synthetic_l2_sequence
+            && record.synthetic_l2_revision <= record.operation_committed_revision)
     {
         return Err(operation_error(
             "track_b_atomic_authority_operation_v1_monotonic_floor",
-            "provider term, L1 revision, sequence, and later L2 revision must be monotonic",
+            if enforce_synthetic_l2_sequence {
+                "provider term, L1 revision, sequence, and later L2 revision must be monotonic"
+            } else {
+                "provider term, authenticated L1 revision, and sequence must satisfy pinned floors"
+            },
         ));
     }
     let expected_prepared = prepared_record_digest(
@@ -531,8 +604,33 @@ fn verify_signed_committed_operation_v1(
                 "exact-version signature does not authenticate frozen decision bytes",
             )
         })?;
-    // This only checks internal checksum consistency. L2 revision and row
-    // persistence are not authenticated by the L1 Ed25519 signature.
+    Ok(VerifiedAtomicAuthorityOperationObservationV1 {
+        stable_result_id: record.stable_result_id,
+        decision_message_sha256: record.decision_message_sha256,
+        operation_committed_revision: record.operation_committed_revision,
+        record_sequence: record.record_sequence,
+    })
+}
+
+/// Verify only the authenticated L1 decision. The unsigned synthetic L2
+/// revision and checksum are intentionally neither read nor trusted here.
+pub(super) fn verify_signed_committed_operation_l1_v1(
+    request: &AtomicAuthorityOperationRequestV1,
+    permit: &AtomicAuthorityOperationTrustPermitV1,
+    record: &SignedCommittedAuthorityOperationV1,
+) -> OperationResult<VerifiedAtomicAuthorityOperationObservationV1> {
+    verify_signed_committed_operation_core_v1(request, permit, record, false)
+}
+
+fn verify_signed_committed_operation_v1(
+    request: &AtomicAuthorityOperationRequestV1,
+    permit: &AtomicAuthorityOperationTrustPermitV1,
+    record: &SignedCommittedAuthorityOperationV1,
+) -> OperationResult<VerifiedAtomicAuthorityOperationObservationV1> {
+    let verified = verify_signed_committed_operation_core_v1(request, permit, record, true)?;
+    // This checks only internal synthetic-row consistency. The L2 revision and
+    // checksum are not authenticated by the L1 Ed25519 signature and must not
+    // be consumed by S12 historical proof construction.
     let expected_l2_record = synthetic_l2_record_digest(
         &record.stable_result_id,
         &record.decision_message_sha256,
@@ -545,12 +643,7 @@ fn verify_signed_committed_operation_v1(
             "synthetic L2 checksum does not match its unauthenticated row metadata",
         ));
     }
-    Ok(VerifiedAtomicAuthorityOperationObservationV1 {
-        stable_result_id: record.stable_result_id,
-        decision_message_sha256: record.decision_message_sha256,
-        operation_committed_revision: record.operation_committed_revision,
-        record_sequence: record.record_sequence,
-    })
+    Ok(verified)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
