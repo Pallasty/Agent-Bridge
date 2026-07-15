@@ -1,0 +1,137 @@
+{
+  "boundary": {
+    "biocortex_runtime_influence": false,
+    "bridge_feature_forwarding_present": false,
+    "bridge_runtime_caller_present": false,
+    "cross_repository_transport_authorized": false,
+    "external_durable_journal_present": false,
+    "external_owner_trust_anchor_present": false,
+    "network_client_present": false,
+    "production_constructor_present": false,
+    "production_provider_adapter_present": false,
+    "recovered_currentness_token_present": false,
+    "state_store_surface_present": false,
+    "successor_payload_admitted": false
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "dependency": {
+    "default_enabled": false,
+    "depends_on_feature": "temporal-evidence-s9-external-authority-provider-synthetic",
+    "feature": "temporal-evidence-s10-operation-recovery-synthetic"
+  },
+  "failure_semantics": {
+    "conflict_returns_observation": false,
+    "indeterminate_returns_observation": false,
+    "invalid_signature_returns_observation": false,
+    "malformed_response_returns_observation": false,
+    "not_found_resubmits_currentness": false,
+    "not_found_returns_observation": false,
+    "pending_returns_observation": false,
+    "provider_failure_uses_local_fallback": false,
+    "query_binding_mismatch_returns_observation": false,
+    "timeout_or_unavailable_returns_observation": false
+  },
+  "implementation": {
+    "module_path": "crates/store/src/temporal_replay_transport/external_operation_recovery.rs",
+    "module_visibility": "private_child_of_private_s6_module",
+    "network_or_transport": false,
+    "production_lookup_implementation": false,
+    "recovery_permit_constructor_scope": "cfg_test_only",
+    "signed_response_verification": "exact_framed_ed25519",
+    "state_store_integration": false,
+    "synthetic_journal_scope": "SHARED_PROCESS_MEMORY_SEQUENCE_MODEL_NOT_DURABILITY_EVIDENCE"
+  },
+  "known_vector": {
+    "ed25519_public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+    "ed25519_signature": "fb02e9df3a801dacd0d0dd8c24ad2c13636d90cf436c082046a40265b8a58e55862a2df3dfcba8af079a39366a75911bcd359420cf4b63a1d2141248596b5e0a",
+    "observed_journal_revision": 43,
+    "operation_committed_revision": 43,
+    "query_sha256": "df2aeb766e996f83eb24bf1cef78f421f62c8a3691cf0bd41f0277a0ffda1f3d",
+    "receipt_message_sha256": "1fb08add6ebbd5102e665190ccc721ef9bda30d02450da53f0561f9bf5c71a70",
+    "result_id": "d19074118d00b340d6f2fab11eb56b4995fbd3861aa546a3a61b34eacf7314ca",
+    "stored_s9_decision_sha256": "2424242424242424242424242424242424242424242424242424242424242424",
+    "stored_s9_request_sha256": "2323232323232323232323232323232323232323232323232323232323232323"
+  },
+  "negative_evidence": {
+    "adapter_reconstruction_with_shared_journal_proves_external_durability": false,
+    "external_journal_linearizability_proved": false,
+    "journal_loss_distinguishes_not_executed_from_rollback": false,
+    "journal_loss_returns_observation": false,
+    "lookup_closes_provider_failure_ambiguity": false,
+    "lookup_is_admission_or_currentness": false,
+    "post_lookup_revocation_can_recall_observation": false,
+    "production_adapter_lookup_side_effect_freedom_proved": false,
+    "same_epoch_restore_detected": false,
+    "synthetic_signature_proves_owner_trust": false
+  },
+  "operational_gap_codes": [
+    "CURRENTNESS_CHALLENGE_UNIQUENESS_UNATTESTED",
+    "EXPECTED_EPOCH_CURRENTNESS_EXTERNAL_CUSTODY_UNATTESTED",
+    "INSTANT_REVOCATION_UNAVAILABLE_WITH_LOCAL_CONSUME",
+    "OLD_EPOCH_KEY_DESTRUCTION_UNATTESTED",
+    "SAME_EPOCH_RESTORE_DETECTION_UNAVAILABLE",
+    "DURABLE_CHALLENGE_UNIQUENESS_UNAVAILABLE",
+    "EXTERNAL_AUTHORITY_PROVIDER_UNIMPLEMENTED",
+    "EXTERNAL_KEY_CUSTODIAN_UNIMPLEMENTED",
+    "OWNER_PINNED_TRUST_ANCHOR_UNAVAILABLE",
+    "PROVIDER_CLOCK_AND_FRESHNESS_UNATTESTED",
+    "PROVIDER_FAILURE_RESULT_AMBIGUITY_UNRESOLVED",
+    "PROVIDER_KEY_ROTATION_AND_REVOCATION_UNATTESTED",
+    "PROVIDER_LINEARIZABILITY_UNATTESTED",
+    "PROVIDER_SPLIT_BRAIN_FENCING_UNATTESTED",
+    "PROVIDER_STATE_ROLLBACK_UNATTESTED",
+    "RECOVERY_JOURNAL_EXTERNAL_DURABILITY_UNATTESTED",
+    "RECOVERY_LOOKUP_LINEARIZABILITY_UNATTESTED",
+    "RECOVERY_OPERATION_SUBMISSION_ATOMICITY_UNIMPLEMENTED",
+    "RECOVERY_OBSERVATION_TO_S9_REVERIFICATION_UNIMPLEMENTED"
+  ],
+  "predecessor": {
+    "s9_contract_sha256": "d537b80ce0d2bbb3c4d01a988a9685432672078eae07d0b976b1268a27526fc4",
+    "s9_feature_commit": "846ea7c92490dcd35a8a2f2aa15c99c7c87f40dc",
+    "s9_integration_commit": "2e828d7b86444770c3ef3cd40ac17f26cac6fb0e",
+    "s9_source_sha256": "dd92c2b064c1a4c1e5a4119777f1b5bf21a46d0fc9cb77656845f05e48655d9b",
+    "s9_successor_gate_sha256": "2181254b1e66444445734edb2f7dab70a85c0be5316d449f7152559d7e6428e5"
+  },
+  "protocol": {
+    "admission_token_returned": false,
+    "allowed_outcomes": [
+      "COMMITTED",
+      "NOT_FOUND",
+      "PENDING",
+      "CONFLICT",
+      "INDETERMINATE"
+    ],
+    "committed_output": "PRIVATE_RECOVERY_OBSERVATION_NOT_ADMISSION",
+    "exact_lookup_key": "OPERATION_ID_PLUS_S9_REQUEST_SHA256",
+    "lookup_can_submit_or_mutate": false,
+    "lookup_profile": "LOOKUP_ONLY_IDEMPOTENT_NO_SUBMIT_NO_RETRY_NO_CACHE_NO_WALL_CLOCK",
+    "not_found_requires_new_admission_attempt": true,
+    "repeated_exact_lookup_must_be_read_only": true,
+    "s9_currentness_retried": false
+  },
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "schema": "agent_bridge.memory_temporal_external_operation_recovery_contract_s10.v0",
+  "status": "LOOKUP_ONLY_OPERATION_RECOVERY_PROTOCOL_PREREGISTERED_SYNTHETIC_JOURNAL_NO_PROVIDER_NO_OWNER_TRUST_ANCHOR_NOT_AUTHORIZED_NOT_TRANSPORT",
+  "test_matrix": {
+    "adapter_reconstruction_shared_journal_sequence_model": true,
+    "all_non_committed_outcomes_fail_closed": true,
+    "all_provider_failures_no_fallback": true,
+    "committed_exact_result_private_non_admission_observation": true,
+    "deterministic_ed25519_known_answer": true,
+    "exact_repeat_lookup_read_only_and_stable": true,
+    "journal_loss_ambiguity_negative_evidence": true,
+    "lookup_never_submits_or_retries_currentness": true,
+    "operation_request_conflict_fail_closed": true,
+    "post_lookup_revocation_recall_negative_evidence": true,
+    "query_field_tamper_rejection": true,
+    "receipt_field_and_signature_tamper_rejection": true,
+    "trust_pin_signer_and_provider_identity_rejection": true,
+    "zero_clock_cache_network_serializable_token_or_production_constructor": true
+  }
+}
