@@ -17,6 +17,9 @@ use std::fmt;
 #[cfg(feature = "temporal-evidence-s7-durable-replay-synthetic")]
 mod durable_replay_registry;
 
+#[cfg(feature = "temporal-evidence-s8-restore-bound-key-epoch-synthetic")]
+mod restore_bound_key_epoch;
+
 const S5_SOURCE_MANIFEST_SHA256: &str =
     "309f2533ef7b78d0c1f252325c0f79ab1300f8f68837a5a75ce7c14d8b011d6a";
 const S5_SOURCE_COMMIT: &str = "8739b69fb59fd704dacfe1a44bfc411ed9ebb913";

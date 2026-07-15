@@ -11,6 +11,7 @@ temporal-evidence-s4-synthetic = []
 temporal-evidence-s5-candidate-synthetic = ["temporal-evidence-s4-synthetic", "dep:ring"]
 temporal-evidence-s6-detached-verifier-synthetic = ["temporal-evidence-s5-candidate-synthetic"]
 temporal-evidence-s7-durable-replay-synthetic = ["temporal-evidence-s6-detached-verifier-synthetic"]
+temporal-evidence-s8-restore-bound-key-epoch-synthetic = ["temporal-evidence-s7-durable-replay-synthetic"]
 
 [dependencies]
 ab-core.workspace = true
