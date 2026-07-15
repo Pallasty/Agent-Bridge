@@ -964,6 +964,42 @@ so they are versioned normally and are not added to the preservation-only
   Authority is resource feasibility for this one Float64 prefix only; no
   truncation-accuracy, remaining-R100, exact-Hubbard, reference or READY claim
   is made.
+- `majorana_certificate_p3_fixture.json`, `majorana_certificate_p3_policy.json`,
+  `majorana_certificate_p3_precommit_contract.json`,
+  `majorana_certificate_p3/majorana_p3_runner.jl`,
+  `majorana_certificate_p3_checker.py`, `majorana_certificate_p3_contract.json`,
+  `majorana_certificate_p3_certificate.json` and the two P3 test modules:
+  result-unpinned and post-replay local-defect/expectation closure for the same
+  fixed P2 L8 first fused mapped step.  Precommit
+  `5c1d009165716e6b8a935cad57c556a7ba966bbf` separates the 27-file outer source
+  custody from the exact six-file runner stage.  Two cgroup-limited fresh
+  replays unshared both network and PID namespaces and used only that stage,
+  the pinned Julia/depot, private `/proc` and `/dev`, writable `/scratch`, and
+  exactly 18 read-only ELF/glibc/C.UTF-8 custody files.  Their byte-identical
+  transcript SHA-256 is
+  `f102a1aab1bfc4f05b38d98df6371cf1aee2c3087a9960ba1b2c346b6c6dba43`;
+  witness and environment-manifest SHA-256 values are
+  `6b4354b7f26db198427a74cfc7eac08c1895fda8d397918a9733fe7e32e8d7f5`
+  and `07860c1eac760479a92059c00dd573f5de571bc13928e6bcde6cd31d22470d3f`.
+  The integer `2^-128` ledger has 979,480 product, 118,208 merge and 328,956
+  drop events, with total `296986546391593866116533250955376` ticks
+  (`8.72765018884e-7`), strictly below `1/400000`.  The 42,704-term final state
+  has exact Neel center
+  `604040239256614101433905/604462909807314587353088` and declared interval
+  `[21252757972972667064323158507908464249/21267647932558653966460912964485513216,
+  21252795096290966013556423074564833671/21267647932558653966460912964485513216]`.
+  Result-contract/certificate SHA-256 values are
+  `1b795f11e76fca543028ce6b82d26b76711598efee61da12de0177a9d577af33`
+  and `cd861b06721ea945d312c60dac309dd5d350848f3daec42d8eab5892f92ea1bc`.
+  P3 precommit/result tests pass 49/49, the focused JW plus Majorana
+  P0/P1/P2/P3 closure passes 205/205, and complete frontier discovery passes
+  1,345 tests with 26 conditional skips.
+  Authority is limited to the exact-untruncated product-formula operator and
+  checkerboard-Neel expectation enclosure for this one prefix.  Global
+  coefficientwise intervals, the remaining 99 steps, double occupancy,
+  product-formula-to-exact-Hubbard error, physical reference and READY are
+  excluded.  The next artifact should be a separately precommitted adjacent
+  second-step telescoping child, not an extrapolation of this one-step bound.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is

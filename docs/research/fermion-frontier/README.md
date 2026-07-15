@@ -794,6 +794,41 @@ coefficient/truncation bounds around this same prefix.  The current M/D v2
 policies have likewise been exhausted by their formal maximum-K screens; any
 larger ladder or different method requires a new result-unpinned precommit.
 
+`MAJORANA-P3-S0` has now closed that same-prefix accuracy question, without
+expanding the horizon.  Result-unpinned precommit
+`5c1d009165716e6b8a935cad57c556a7ba966bbf` staged only the six runner inputs;
+the outer checker separately closed the 27-file source set plus its precommit
+contract.  Each of two fresh cgroup-v2 replays used an unshared network and PID
+namespace, a private `/proc` and `/dev`, one writable `/scratch`, and exactly 18
+read-only loader/glibc/C.UTF-8 custody files.  The byte-identical transcript
+SHA-256 is `f102a1aab1bfc4f05b38d98df6371cf1aee2c3087a9960ba1b2c346b6c6dba43`;
+the independently reconstructed witness SHA-256 is
+`6b4354b7f26db198427a74cfc7eac08c1895fda8d397918a9733fe7e32e8d7f5`.
+
+The integer `2^-128` ledger contains 979,480 product, 118,208 merge and
+328,956 drop-defect events.  Their respective tick totals are
+`115422645562996270045296`, `90064161277934613561344` and
+`296986546186107059275602367348736`; the authoritative total is
+`296986546391593866116533250955376 / 2^128`, approximately
+`8.72765018884e-7`, strictly below the frozen `1/400000` allocation.  The
+42,704-term retained state gives exact checkerboard-Neel center
+`604040239256614101433905/604462909807314587353088` and declared interval
+`[21252757972972667064323158507908464249/21267647932558653966460912964485513216,
+21252795096290966013556423074564833671/21267647932558653966460912964485513216]`.
+The P3 precommit/result suites pass 49/49, the focused JW plus Majorana
+P0/P1/P2/P3 closure passes 205/205, and complete frontier discovery passes
+1,345 tests with 26 conditional skips.
+
+Its status is only
+`VERIFIED_MAJORANA_P3_L8_STAGGERED_MAGNETIZATION_ONE_FUSED_STEP_LOCAL_DEFECT_AND_TRUNCATION_OPERATOR_AND_NEEL_EXPECTATION_BOUND_SUBCERTIFICATE`.
+It certifies the exact-untruncated product-formula prefix around the executed
+Float64 threshold path, not a global coefficientwise interval state.  It does
+not certify the remaining 99 mapped steps, product-formula-to-exact-Hubbard
+error, double occupancy, physical-reference qualification or READY.  The next
+Majorana unit should be a new result-unpinned adjacent-step child that reruns and
+composes the telescoping ledger through mapped step 2 under fresh resource caps;
+product-formula error must remain a separate independently bounded budget.
+
 These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
 grouping-screen, fixed-generic-bound no-go, observable-Taylor-step and
 double-occupancy-cluster no-go, shared two-step L8 intervals, the
@@ -840,7 +875,8 @@ retained in `claim-status.jsonl`.
   formal result contract/subcertificate and phase-aware result tests,
   Majorana P1 L2/L3 exact-action/cadence oracle and formal result closure,
   Majorana P2 L8 one-fused-step bounded-resource runner, policy, formal result
-  closure and result tests,
+  closure and result tests, Majorana P3 same-prefix outward local-defect and
+  checkerboard-Neel enclosure runner/checker/formal result closure,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,

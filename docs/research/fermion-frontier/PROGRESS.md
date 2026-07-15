@@ -984,3 +984,75 @@ physical-reference qualification and READY all remain unassessed.  The next
 scientific unit must therefore add outward coefficient enclosures and a
 truncation-only error ledger for this same frozen prefix before any longer
 horizon is considered.
+
+## Majorana P3 one-prefix local-defect and Neel-enclosure subcertificate
+
+`MAJORANA-P3-S0` has completed the accuracy layer that P2 deliberately left
+open, for exactly the same L8 staggered-magnetization first fused mapped step.
+Its result-unpinned precommit is
+`5c1d009165716e6b8a935cad57c556a7ba966bbf`, directly parented by the finalized
+P2 result commit.  The Julia runner saw only six staged files and never saw P2
+or P3 result artifacts.  The outer lifecycle independently closed 27 source
+files plus the precommit contract, the pinned Julia/depot custody and an exact
+18-file host replay-environment manifest: one ELF loader, five glibc ABI files
+and twelve C.UTF-8 locale files.  All environment inputs were captured and
+mounted read-only; `/scratch` was the sole writable host-backed bind, `/proc`
+and `/dev` were private kernel mounts, and both network and PID namespaces were
+unshared.
+
+Two fresh cgroup-v2/systemd executions under the inherited 4-GiB/300-s caps
+produced byte-identical 2,530,705-byte transcripts with SHA-256
+`f102a1aab1bfc4f05b38d98df6371cf1aee2c3087a9960ba1b2c346b6c6dba43`.
+The canonical witness SHA-256 is
+`6b4354b7f26db198427a74cfc7eac08c1895fda8d397918a9733fe7e32e8d7f5`,
+and the accuracy-ledger SHA-256 is
+`19774d946e85f04fbe1d3f97d85d62644adb9ff3e253546ead1e1ddd31abddd3`.
+The independent Python checker uses exact rational order-7 trigonometric
+enclosures and integer IEEE-754 binary64 round-to-nearest-ties-to-even; it
+replayed all 1,152 constituents, 768 boundaries, every product/merge/drop row
+and every final Fock element.  It also reproduced P2's transition, boundary,
+stage and final-state digests as post-replay conformance evidence.
+
+The accuracy ledger records 489,740 anticommuting actions and 1,426,644 charged
+accuracy events:
+
+- 979,480 product-defect events and `115422645562996270045296` ticks;
+- 118,208 merge-defect events and `90064161277934613561344` ticks;
+- 328,956 executed drop-defect events and
+  `296986546186107059275602367348736` ticks.
+
+The total is `296986546391593866116533250955376` ticks on the `2^128` grid,
+or exactly
+`18561659149474616632283328184711/21267647932558653966460912964485513216`
+(`8.72765018884e-7` diagnostically).  Exact cross multiplication places it
+strictly below `1/400000 = 2.5e-6`; it uses about 34.91% of that one-prefix
+allocation.  Of 328,956 threshold drops, 3,714 were exact binary64 zeros.  The
+retained state has 42,704 terms and exact checkerboard-Neel center
+`604040239256614101433905/604462909807314587353088`.  Widening the center by
+the authoritative total produces
+`[21252757972972667064323158507908464249/21267647932558653966460912964485513216,
+21252795096290966013556423074564833671/21267647932558653966460912964485513216]`,
+approximately `[0.999299877465, 0.999301622995]`.
+
+The lifecycle-aware P3 precommit/result suites pass all 49 tests, the focused
+JW plus Majorana P0/P1/P2/P3 closure passes all 205 tests, and complete
+`fermion-frontier` discovery passes 1,345 tests with 26 conditional skips.
+The frozen checker also accepts the materialized result through its full
+package reconstruction and independent oracle path.
+
+The terminal branch is `BOUND_WITHIN_PREFIX_ALLOCATION`, with maximum status
+`VERIFIED_MAJORANA_P3_L8_STAGGERED_MAGNETIZATION_ONE_FUSED_STEP_LOCAL_DEFECT_AND_TRUNCATION_OPERATOR_AND_NEEL_EXPECTATION_BOUND_SUBCERTIFICATE`.
+This is one exact product-formula prefix and one observable/state only.  It does
+not claim a global coefficientwise interval state, equality of the executed and
+exact-arithmetic drop sets, the raw 1,280-constituent path, double occupancy,
+the remaining 99 mapped steps, product-formula-to-exact-Hubbard error, a
+physical reference or READY.
+
+The recommended P4 unit is an adjacent step-1-to-step-2 child under a new
+result-unpinned policy: freshly rerun both mapped steps, carry the P3 operator
+error through the exact-unitary telescoping recurrence, charge all new local
+defects/drops, and freeze new term/event/time/memory caps before replay.  A
+successful second step may seed a checkpoint ladder toward 100 steps, but the
+current one-step ratio must not be linearly extrapolated as a certificate.
+Product-formula-to-exact-Hubbard error remains a separate proof obligation to
+compose only after the mapped-step campaign is independently closed.

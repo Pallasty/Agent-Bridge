@@ -1128,6 +1128,69 @@ PF-to-exact、physical reference 与 READY 均未评估。下一子阶段应固�
 加入 outward coefficient enclosure 与可独立复算的 truncation-only error ledger；在它闭合前
 不扩展到完整 R100。
 
+`MAJORANA-P3-S0` 现已严格关闭上述同一 prefix 的 accuracy 子问题。result-unpinned
+precommit `5c1d009165716e6b8a935cad57c556a7ba966bbf` 以最终 P2 result commit 为直接父节点；
+外层 checker 托管 27 个 source files 加 precommit contract，而 Julia runner 只挂载 6 个
+允许输入，不可见 P2/P3 result artifacts。两次 fresh replay 均在 cgroup v2 的 4 GiB/300 s
+上限内运行，network/PID namespace 同时 unshare，`/proc`、`/dev` 为 private kernel mounts，
+唯一 writable host-backed bind 是 `/scratch`。启动环境只额外挂载 policy 冻结的 18 个
+read-only regular files（ELF loader、5 个 glibc ABI、12 个 C.UTF-8 locale files），其
+pre/post manifest 完全一致。两个 2,530,705-byte stdout 的 SHA 均为
+`f102a1aab1bfc4f05b38d98df6371cf1aee2c3087a9960ba1b2c346b6c6dba43`；独立 Python
+integer-RNE/Fraction oracle 复算后的 witness SHA 为
+`6b4354b7f26db198427a74cfc7eac08c1895fda8d397918a9733fe7e32e8d7f5`。
+
+P3 对 schedule 中精确有理角使用 order-7 Taylor point 加 next-term remainder，再在
+`2^-128` grid 上 outward quantize；每个 actual binary64 product、merge collision 和 strict
+threshold drop 都以 exact dyadic 解释并逐行向上取整。账本含 489,740 个 anticommuting
+actions、979,480 个 product events、118,208 个 merge events、328,956 个 drop events；三类
+ticks 分别为
+
+`115422645562996270045296`,
+`90064161277934613561344`,
+`296986546186107059275602367348736`。
+
+因此 authoritative total 为
+`296986546391593866116533250955376/2^128`
+`=18561659149474616632283328184711/21267647932558653966460912964485513216`
+（小数诊断约 `8.72765018884e-7`）。exact cross multiplication 给出
+`total_ticks * 400000 < 2^128`，即只使用 one-prefix `1/400000` allocation 的约 34.91%。
+这不是把 Taylor widening 再重复相加；每个 local upper 已吸收自身 outward widening，后续
+exact unitary conjugation 通过 operator-norm invariance 不放大已有误差。
+
+最终 42,704-term actual state 在独立 checkerboard-Neel Fock oracle 上的 authoritative exact
+dyadic center 为
+`604040239256614101433905/604462909807314587353088`。center grid enclosure 加减上述 total
+得到
+
+`[21252757972972667064323158507908464249/21267647932558653966460912964485513216,`
+` 21252795096290966013556423074564833671/21267647932558653966460912964485513216]`,
+
+约为 `[0.999299877465, 0.999301622995]`。Float64 reduction `3feffa45912362b7` 仅为诊断；
+exact dyadic center 与声明区间才有 authority。P3 还逐项重现 P2 transition/boundary/stage、
+final term 与 Neel diagnostic digests，因此 P2 只作为 post-replay conformance evidence，
+没有成为 Julia 的 accuracy 输入。
+
+P3 precommit/result 测试 49/49 通过，JW 与 Majorana P0/P1/P2/P3 focused closure
+205/205 通过，全部 `fermion-frontier` discovery 共 1,345 项通过，26 项按环境
+条件跳过。物化后 result 也由冻结 checker 经完整 package reconstruction 与
+independent oracle 重新验证。
+
+最高状态为
+`VERIFIED_MAJORANA_P3_L8_STAGGERED_MAGNETIZATION_ONE_FUSED_STEP_LOCAL_DEFECT_AND_TRUNCATION_OPERATOR_AND_NEEL_EXPECTATION_BOUND_SUBCERTIFICATE`。
+它认证的是同一 fused product-formula 的**第一步 exact-untruncated prefix operator**及该 Neel
+expectation enclosure；不认证 global coefficientwise interval state、exact-arithmetic 与
+executed drop-set 等同性、raw 1,280 path、double occupancy、其余 99 步、PF-to-exact Hubbard
+error、physical reference 或 READY。特别地，`8.72765e-7 * 100` 只能是设计启发，不能作为
+R100 证书。
+
+下一建议阶段是新的 result-unpinned `P4` adjacent-step child：同一 fresh process 从初态重跑
+step 1 并继续 step 2，继承 P3 operator-error upper，通过 exact-unitary telescoping 加上第二步
+全部 product/merge/drop local uppers，同时预先冻结 term/event/time/memory caps 和失败分支。
+只有 step 2 闭合后才设计 checkpoint ladder 扩到 100 步；PF-to-exact Hubbard error 必须由
+另一独立 proof budget 认证，再与 mapped-step operator bound 组合。双占据 observable 也需要
+自己的传播/误差路线。三者未闭合前，P3 不进入 physical-reference 或 READY gate。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
@@ -1157,10 +1220,12 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
    per-boundary dropped-L1 ledger 与 directed rational intervals；P1 又闭合了固定 L2/L3
    全 occupation candidate-action、L2 dense entries、local/global observables 与 sorted-wrapper
    cadence matrix；P2 已在 cgroup v2 hard caps 下完成固定 L8 staggered-magnetization 首个
-   fused mapped step，并只取得该 prefix 的 Float64 resource-feasibility authority。下一步必须
-   另行预提交 P2b/P3 accuracy policy，在相同 prefix 上加入 outward coefficient enclosure、
-   truncation-only error recurrence 与独立 oracle。不得从 P2 推导其余 R100、exact-Hubbard
-   reference 或 READY，也不能覆盖现有 Python one-step checker 的 authority。
+   fused mapped step；P3 又以 exact-rational trig enclosure、integer binary64 RNE 和完整
+   product/merge/drop ledger 关闭同一 prefix 的 operator/Neel outward bound，并严格通过
+   `1/400000` 单步 allocation。下一步必须另行预提交 P4 adjacent-step policy，从初态 fresh
+   重跑并组合第二步 telescoping error；不得把 P3 单步 bound 线性外推为其余 R100，也不得
+   从它推导 PF-to-exact Hubbard reference 或 READY。现有 Python one-step checker 与 double
+   occupancy 路线的 authority 均不被覆盖。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
    当前 fixed-K 磁化量 step 4 与 double occupancy step 3 都必须另发资源/sidecar v2；
    v2 至少需审计 K=262,144、single-expansion 446,188 与 visits 337,691,387 这一诊断点，
