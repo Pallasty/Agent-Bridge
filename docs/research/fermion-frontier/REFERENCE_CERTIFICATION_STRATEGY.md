@@ -1184,12 +1184,37 @@ executed drop-set 等同性、raw 1,280 path、double occupancy、其余 99 步�
 error、physical reference 或 READY。特别地，`8.72765e-7 * 100` 只能是设计启发，不能作为
 R100 证书。
 
-下一建议阶段是新的 result-unpinned `P4` adjacent-step child：同一 fresh process 从初态重跑
-step 1 并继续 step 2，继承 P3 operator-error upper，通过 exact-unitary telescoping 加上第二步
-全部 product/merge/drop local uppers，同时预先冻结 term/event/time/memory caps 和失败分支。
-只有 step 2 闭合后才设计 checkpoint ladder 扩到 100 步；PF-to-exact Hubbard error 必须由
-另一独立 proof budget 认证，再与 mapped-step operator bound 组合。双占据 observable 也需要
-自己的传播/误差路线。三者未闭合前，P3 不进入 physical-reference 或 READY gate。
+P4 S0v2 已执行上述 adjacent-step child。新的 result-unpinned precommit 为
+`c6c2614186a8315775fa477e025195741c36d582`；较早的 signed-zero v1 replay 严格
+fail closed，没有生成 authority。S0v2 在同一 fresh process 中从初态重跑 step 1 再执行
+step 2；fresh step 1 只作 fieldwise conformance，telescoping 账本只继承一次 P3 upper，
+不重复 charge、requantize 或 outward widen parent error。
+
+在 `2^-128` grid 上，step-2 product、merge、drop 三项 local upper 分别为
+
+`148110706480666299015145`,
+`145718728421478199062528`,
+`4432692192952477384756578989637632` ticks。
+
+因此 step-2 local total 为 `4432692193246306819658723487715305` ticks，诊断小数约
+`1.3026511580e-5`，是冻结 `1/400000` allocation 的 `5.2106` 倍；其中 drop upper 占
+`99.9999999934%`。继承 P3 parent 一次后的 two-step cumulative total 为
+`4729678739637900685775256738670681` ticks，诊断小数约 `1.3899276599e-5`，是冻结
+`1/200000` cumulative allocation 的 `2.7799` 倍。最终 actual thresholded state 保留
+72,808 terms，其 exact checkerboard-Neel center 为
+`301388136752758141215773/302231454903657293676544`。
+
+terminal branch 为 `TWO_STEP_CUMULATIVE_BOUND_EXCEEDS_ALLOCATION`，最高状态为
+`VERIFIED_MAJORANA_P4_L8_TWO_STEP_CUMULATIVE_ERROR_BOUND_EXCEEDS_ALLOCATION_SUBCERTIFICATE`。
+这是对固定 binary64 `2^-34` threshold 加 additive L1 drop accounting 的 bounded no-go，
+不是 actual simulation error 的 no-go；它也不认证其余 98 mapped steps、PF-to-exact Hubbard
+error、double occupancy、physical reference 或 READY。
+
+下一阶段不直接推进第三步，而应另发 result-unpinned threshold-hardening child：优先在正式
+replay 前预提交 `2^-36`/`2^-37` design probe，或把 fixed-amplitude threshold 改为
+budget-constrained drop rule，并重新冻结 term/event/time/memory caps 与失败分支。只有该路线
+恢复 allocation slack 后，才重新评估 checkpoint ladder；PF-to-exact Hubbard error 和双占据
+observable 仍各自需要独立 proof budget/传播路线。
 
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
@@ -1222,10 +1247,12 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
    cadence matrix；P2 已在 cgroup v2 hard caps 下完成固定 L8 staggered-magnetization 首个
    fused mapped step；P3 又以 exact-rational trig enclosure、integer binary64 RNE 和完整
    product/merge/drop ledger 关闭同一 prefix 的 operator/Neel outward bound，并严格通过
-   `1/400000` 单步 allocation。下一步必须另行预提交 P4 adjacent-step policy，从初态 fresh
-   重跑并组合第二步 telescoping error；不得把 P3 单步 bound 线性外推为其余 R100，也不得
-   从它推导 PF-to-exact Hubbard reference 或 READY。现有 Python one-step checker 与 double
-   occupancy 路线的 authority 均不被覆盖。
+   `1/400000` 单步 allocation；P4 S0v2 已从初态 fresh 重跑并组合第二步 telescoping error，
+   其固定 `2^-34` threshold + additive L1 drop upper 以
+   `TWO_STEP_CUMULATIVE_BOUND_EXCEEDS_ALLOCATION` 闭合。下一步必须另行预提交
+   threshold-hardening child，比较 `2^-36`/`2^-37` 或 budget-constrained drop，而不是直接
+   推进第三步；不得从 P4 推导其余 R98、PF-to-exact Hubbard reference 或 READY。现有 Python
+   one-step checker 与 double occupancy 路线的 authority 均不被覆盖。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
    当前 fixed-K 磁化量 step 4 与 double occupancy step 3 都必须另发资源/sidecar v2；
    v2 至少需审计 K=262,144、single-expansion 446,188 与 visits 337,691,387 这一诊断点，

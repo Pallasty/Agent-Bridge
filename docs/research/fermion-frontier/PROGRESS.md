@@ -1048,11 +1048,38 @@ exact-arithmetic drop sets, the raw 1,280-constituent path, double occupancy,
 the remaining 99 mapped steps, product-formula-to-exact-Hubbard error, a
 physical reference or READY.
 
-The recommended P4 unit is an adjacent step-1-to-step-2 child under a new
-result-unpinned policy: freshly rerun both mapped steps, carry the P3 operator
-error through the exact-unitary telescoping recurrence, charge all new local
-defects/drops, and freeze new term/event/time/memory caps before replay.  A
-successful second step may seed a checkpoint ladder toward 100 steps, but the
-current one-step ratio must not be linearly extrapolated as a certificate.
-Product-formula-to-exact-Hubbard error remains a separate proof obligation to
-compose only after the mapped-step campaign is independently closed.
+## Majorana P4 adjacent-step cumulative-allocation subcertificate
+
+P4 S0v2 executed the planned adjacent step-1-to-step-2 child under
+result-unpinned precommit `c6c2614186a8315775fa477e025195741c36d582`.  The
+earlier signed-zero v1 replay failed closed and materialized no authority.  In
+each fresh S0v2 process, step 1 was rerun as conformance evidence before step 2;
+the telescoping ledger inherits the P3 operator-error upper exactly once and
+does not charge or outward-round the freshly reproduced parent a second time.
+
+On the `2^-128` integer grid, the step-2 product, merge and executed-drop
+components are `148110706480666299015145`, `145718728421478199062528` and
+`4432692192952477384756578989637632` ticks.  Their local total is
+`4432692193246306819658723487715305` ticks, approximately
+`1.3026511580e-5`: `5.2106` times the frozen `1/400000` step allocation.  The
+drop upper accounts for `99.9999999934%` of this increment.  Adding the P3
+parent once produces cumulative two-step error
+`4729678739637900685775256738670681` ticks, approximately
+`1.3899276599e-5`, which is `2.7799` times the frozen `1/200000` cumulative
+allocation.  The final retained state contains 72,808 terms and has exact
+checkerboard-Neel center
+`301388136752758141215773/302231454903657293676544`.
+
+The terminal branch is `TWO_STEP_CUMULATIVE_BOUND_EXCEEDS_ALLOCATION`, with
+maximum status
+`VERIFIED_MAJORANA_P4_L8_TWO_STEP_CUMULATIVE_ERROR_BOUND_EXCEEDS_ALLOCATION_SUBCERTIFICATE`.
+This is a bounded no-go for the fixed binary64 `2^-34` threshold plus additive
+L1 drop accounting.  It is not an actual-simulation-error no-go and does not
+certify the remaining 98 mapped steps, product-formula-to-exact-Hubbard error,
+double occupancy, physical-reference qualification or READY.
+
+The next unit should be a separately precommitted, result-unpinned
+threshold-hardening child that evaluates a `2^-36`/`2^-37` design probe or a
+budget-constrained drop rule under fresh term/event/time/memory caps.  A direct
+third-step extension is not the next priority.  Product-formula-to-exact-
+Hubbard error remains an independent proof budget.

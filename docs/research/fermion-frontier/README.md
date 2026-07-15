@@ -824,10 +824,36 @@ Its status is only
 It certifies the exact-untruncated product-formula prefix around the executed
 Float64 threshold path, not a global coefficientwise interval state.  It does
 not certify the remaining 99 mapped steps, product-formula-to-exact-Hubbard
-error, double occupancy, physical-reference qualification or READY.  The next
-Majorana unit should be a new result-unpinned adjacent-step child that reruns and
-composes the telescoping ledger through mapped step 2 under fresh resource caps;
-product-formula error must remain a separate independently bounded budget.
+error, double occupancy, physical-reference qualification or READY.
+
+P4 S0v2 has now executed the adjacent-step handoff under result-unpinned
+precommit `c6c2614186a8315775fa477e025195741c36d582`.  The earlier signed-zero
+v1 replay failed closed and conferred no authority.  The fresh two-step replay
+inherits the P3 error exactly once, then charges the step-2 product, merge and
+drop ledgers.  Those step-2 components are respectively
+`148110706480666299015145`, `145718728421478199062528` and
+`4432692192952477384756578989637632` ticks on the `2^-128` grid, for local
+increment `4432692193246306819658723487715305` (approximately
+`1.3026511580e-5`, or `5.2106` times the frozen `1/400000` allocation).  The
+drop component supplies `99.9999999934%` of that local upper.
+
+Adding the P3 parent once gives cumulative two-step error
+`4729678739637900685775256738670681 / 2^128`, approximately
+`1.3899276599e-5` and `2.7799` times the frozen `1/200000` allocation.  The
+72,808-term executed state has exact checkerboard-Neel center
+`301388136752758141215773/302231454903657293676544`.  The terminal branch is
+`TWO_STEP_CUMULATIVE_BOUND_EXCEEDS_ALLOCATION`, with status
+`VERIFIED_MAJORANA_P4_L8_TWO_STEP_CUMULATIVE_ERROR_BOUND_EXCEEDS_ALLOCATION_SUBCERTIFICATE`.
+This is a bounded no-go for the fixed `2^-34` threshold plus additive L1 drop
+accounting, not a no-go for the actual simulation error.  It does not certify
+the remaining 98 mapped steps, product-formula-to-exact-Hubbard error, double
+occupancy, physical-reference qualification or READY.
+
+The next Majorana unit should therefore be a new result-unpinned
+threshold-hardening child: precommit a `2^-36`/`2^-37` design probe or a
+budget-constrained drop rule, together with fresh resource caps, before any
+formal replay.  A direct third-step extension is not the next priority, and
+product-formula error remains a separate independently bounded budget.
 
 These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
 grouping-screen, fixed-generic-bound no-go, observable-Taylor-step and
@@ -876,7 +902,8 @@ retained in `claim-status.jsonl`.
   Majorana P1 L2/L3 exact-action/cadence oracle and formal result closure,
   Majorana P2 L8 one-fused-step bounded-resource runner, policy, formal result
   closure and result tests, Majorana P3 same-prefix outward local-defect and
-  checkerboard-Neel enclosure runner/checker/formal result closure,
+  checkerboard-Neel enclosure runner/checker/formal result closure, Majorana P4
+  adjacent-two-step cumulative-allocation closure and threshold-hardening handoff,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,

@@ -998,8 +998,42 @@ so they are versioned normally and are not added to the preservation-only
   checkerboard-Neel expectation enclosure for this one prefix.  Global
   coefficientwise intervals, the remaining 99 steps, double occupancy,
   product-formula-to-exact-Hubbard error, physical reference and READY are
-  excluded.  The next artifact should be a separately precommitted adjacent
-  second-step telescoping child, not an extrapolation of this one-step bound.
+  excluded.  The P4 artifact below executes the separately precommitted
+  adjacent-step handoff rather than extrapolating this one-step bound.
+- `majorana_certificate_p4_fixture.json`, `majorana_certificate_p4_policy.json`,
+  `majorana_certificate_p4_precommit_contract.json`,
+  `majorana_certificate_p4/majorana_p4_runner.jl`,
+  `majorana_certificate_p4_checker.py`, `majorana_certificate_p4_contract.json`,
+  `majorana_certificate_p4_certificate.json` and the P4 precommit/result test
+  modules:
+  result-unpinned adjacent-step replay and post-replay cumulative-allocation
+  closure under precommit `c6c2614186a8315775fa477e025195741c36d582`.  The
+  earlier signed-zero v1 replay failed closed and has no authority.  S0v2
+  materialized result SHA-256
+  `7d71cf5f71f8efc15f5cb4b9f1cac27f23d3a6ef05ab6925cc2e54772fa3be60`
+  and certificate SHA-256
+  `70aa96ff57cf2021099f79786d8f3f14a5d23f0459023603d65f475a463563a0`;
+  its raw and composed witness SHA-256 values are respectively
+  `869504938d4081d15fbd62e1353026141ebe41bef019c8a49ff79aebc515c493`
+  and `b42b1ec0555f8dad15d35fd0f8ef0d35755175b91b3fec9a6e2970bfc406442a`.
+  S0v2
+  inherits the P3 upper once, then records step-2 product, merge and drop totals
+  of `148110706480666299015145`, `145718728421478199062528` and
+  `4432692192952477384756578989637632` ticks.  The resulting local total is
+  `4432692193246306819658723487715305` ticks (`1.3026511580e-5`, `5.2106`
+  times `1/400000`); `99.9999999934%` comes from the drop upper.  The cumulative
+  two-step total is `4729678739637900685775256738670681` ticks
+  (`1.3899276599e-5`, `2.7799` times `1/200000`).  The 72,808-term state has
+  exact Neel center
+  `301388136752758141215773/302231454903657293676544`.  Terminal branch and
+  status are `TWO_STEP_CUMULATIVE_BOUND_EXCEEDS_ALLOCATION` and
+  `VERIFIED_MAJORANA_P4_L8_TWO_STEP_CUMULATIVE_ERROR_BOUND_EXCEEDS_ALLOCATION_SUBCERTIFICATE`.
+  This is only a bounded no-go for fixed `2^-34` thresholding with additive L1
+  drop accounting: actual simulation error, the remaining 98 steps,
+  product-formula-to-exact-Hubbard error, double occupancy, physical reference
+  and READY remain uncertified.  The next artifact should be a new
+  result-unpinned threshold-hardening child for a `2^-36`/`2^-37` design probe
+  or budget-constrained drop rule, not a direct third-step child.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is
