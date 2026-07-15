@@ -1,0 +1,185 @@
+{
+  "artifact_bindings": [
+    {
+      "artifact_kind": "reference_context_builder",
+      "binding_path": "reference_condition.context_builder_sha256",
+      "local_dependencies": [],
+      "provider_neutral": true,
+      "repo_path": "scripts/eval/biocortex_ab_track_b_reference_context_builder_v0.py",
+      "schema_id": null,
+      "sha256": "c37ac35cb349170b6830fb900de642bfc9572111b351bb031244c0485e282227",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    },
+    {
+      "artifact_kind": "sampling_seed_derivation_algorithm",
+      "binding_path": "sampling.sampling_seed_derivation_sha256",
+      "local_dependencies": [],
+      "provider_neutral": true,
+      "repo_path": "scripts/eval/biocortex_ab_track_b_sampling_seed_derivation_v0.py",
+      "schema_id": null,
+      "sha256": "4f51781ff707e89b4c09adffeafbdaacd75c7e1571d1a86e45d336aace888a3f",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    },
+    {
+      "artifact_kind": "stratified_hmac_selection_algorithm",
+      "binding_path": "sampling.sampling_selection_algorithm_sha256",
+      "local_dependencies": [],
+      "provider_neutral": true,
+      "repo_path": "scripts/eval/biocortex_ab_track_b_sampling_selection_v0.py",
+      "schema_id": null,
+      "sha256": "e327faf2ad73718dc33f68fdb66a89abf0ac84fbbf8d828ff79fa0e8b75772ec",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    }
+  ],
+  "baseline_commit": "d4e4093d9b273bc36ed2fb4c373e15dcd8467a55",
+  "boundary": {
+    "anti_shopping_order_verified": false,
+    "condition_ids_or_mapping_emitted": false,
+    "context_and_result_builder_bound": false,
+    "eligible_frame_bytes_verified": false,
+    "entropy_custody_verified": false,
+    "frame_o_excl_receipt_created": false,
+    "graph_packet_mutated": false,
+    "live_binding_satisfied_count": 0,
+    "opaque_answer_ids_emitted": false,
+    "private_runtime_artifact_emitted": false,
+    "real_run_admitted": false,
+    "reviewer_packet_created": false,
+    "reviewer_visible_sampling_weights_emitted": false,
+    "runtime_context_receipt_created": false,
+    "runtime_instance_validated": false,
+    "sampling_receipt_created": false,
+    "sampling_seed_secrecy_claimed": false,
+    "scoring_authorized": false,
+    "side_effects_unlocked": "NONE",
+    "source_artifact_count": 3,
+    "unblinding_authorized": false
+  },
+  "canonical_serialization": "UTF8_SORTED_KEYS_INDENT_2_LF_FINAL_NEWLINE_NO_NAN_DUPLICATE_KEYS_REJECTED",
+  "completed_public_bindings": [
+    "reference_condition.context_builder_sha256",
+    "review_and_blinding.map_bijection_checker_sha256",
+    "review_and_blinding.map_schema_sha256",
+    "review_and_blinding.review_command_schema_sha256",
+    "review_and_blinding.review_receipt_schema_sha256",
+    "review_and_blinding.review_schema_sha256",
+    "sampling.sampling_receipt_schema_sha256",
+    "sampling.sampling_seed_derivation_sha256",
+    "sampling.sampling_selection_algorithm_sha256",
+    "truth_inputs.referent_schema_sha256",
+    "truth_inputs.strict_case_algorithm_sha256",
+    "truth_inputs.truth_manifest_schema_sha256"
+  ],
+  "date": "2026-07-14",
+  "decision": "SOURCE_CONTEXT_AND_SAMPLING_DETERMINISM_IMPLEMENTED_NOT_LIVE_BOUND",
+  "evidence_sha256": {
+    "crates/store/examples/memory_reference_admission_fixture.rs": "3ed5c67ca5e4673c9afdf5639a95115399d4e7ce3c6d5774f6513dac76adc016",
+    "crates/store/src/lib.rs": "4e357d77d35d82c7fe6ac8de5b1870af7296cf10c72cf57ff684e49625a0638b",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v0.json": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+    "scripts/eval/fixtures/biocortex_ab_reference_admission.expected.v1.tsv": "04bfaf10a8bf343ff133b46388ea798ee81e6fd605198d6a48f84ea9236cc32c",
+    "scripts/eval/fixtures/biocortex_ab_reference_admission_v1.json": "a2d8718e5982b030659f20c69a893ec4d1e39f3b10b01fdd960df0ac55f9af4d",
+    "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph_v0.json": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+    "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json": "764f063fefe0e516547f9bd1e71417242daf292d57e480ae39b73df8bcda341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e",
+    "scripts/eval/fixtures/biocortex_ab_track_b_strict_review_pack_v0.json": "24abcd9eb33eb9f999df2a0f791ea3c6167f766c95268f4f5f29497b771bfc61"
+  },
+  "graph_sha256": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+  "graph_source_commit": "ba4dbae629398ec16e4f22f4b0ac7f2ce372541f",
+  "next_public_frontier": [
+    "sampling.sampling_receipt_writer_sha256"
+  ],
+  "predecessor_strict_review_pack_sha256": "24abcd9eb33eb9f999df2a0f791ea3c6167f766c95268f4f5f29497b771bfc61",
+  "predecessor_strict_review_source_commit": "78c72f3af29c6043afdc92e15a71d2b6b36d0205",
+  "resource_caps": {
+    "max_cases": 4096,
+    "max_context_bytes": 16777216,
+    "max_metadata_items_per_hit": 1024,
+    "max_output_bytes": 33554432,
+    "max_reference_hits": 40,
+    "max_reference_input_utf8_bytes": 33554432,
+    "max_single_artifact_bytes": 33554432,
+    "max_strata": 256,
+    "max_total_input_bytes": 67108864
+  },
+  "retained_admission_blockers": [
+    "REFERENCE_FROZEN_CLOCK_UNAVAILABLE",
+    "REFERENCE_CLEAN_ENV_HARNESS_UNIMPLEMENTED",
+    "REFERENCE_DETERMINISTIC_TIE_BREAK_UNPROVED",
+    "REFERENCE_HARD_CONTEXT_BUDGET_UNSET",
+    "REFERENCE_RUNTIME_BINARY_AND_SNAPSHOT_UNSET",
+    "CANDIDATE_STORE_ADAPTER_BLOCKED_DATA_MODEL",
+    "PREVALENCE_FRAME_SAMPLING_AND_POWER_UNSET",
+    "TRUTH_AS_OF_AND_AUTHORITY_MANIFEST_UNSET",
+    "FRESH_REVIEWER_AND_BLIND_MAP_BINDINGS_UNSET",
+    "LATENCY_HARDWARE_TOKENIZER_AND_ORDER_UNSET",
+    "CANONICAL_SOURCE_AND_STORAGE_MANIFEST_UNSET",
+    "POST_FIX_CAPTURE_DATE_NOT_REACHED_IN_THIS_PREREG"
+  ],
+  "retained_stage_obligations": [
+    {
+      "binding_field_present": false,
+      "obligation": "both_command_request_raw_response_and_receipt_chains",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "both_complete_review_objects",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "contract_scoped_o_excl_score_claim",
+      "owner_class": "custodian_private",
+      "required_stage": "PRE_UNBLIND",
+      "status": "DECLARED_SYMBOL_NOT_BINDING_FIELD_BLOCKS"
+    },
+    {
+      "binding_field_present": false,
+      "obligation": "map_bijection_receipt_sha256",
+      "owner_class": "custodian_private",
+      "required_stage": "POST_GENERATION_PRE_REVIEW",
+      "status": "DECLARED_REQUIRED_ARTIFACT_NOT_BINDING_FIELD_BLOCKS"
+    }
+  ],
+  "schema": "agent_bridge.biocortex_ab_track_b_context_sampling_determinism_pack.v0",
+  "semantics": {
+    "context_budget_rule": "COMPLETE_PAGE_OR_TERMINAL_ERROR_NEVER_TRUNCATE",
+    "context_grain": "ONE_CASE_X_COMPLETE_RANKED_REFERENCE_PAGE",
+    "context_projection": "RUST_S0_ACCEPTED_DOMAIN_FIELD_ORDER_COMPACT_UTF8_SORT_AND_DEDUP_TAGS_AND_RELATED_KEYS",
+    "context_runtime_config": "LATER_HASH_BOUND_INPUT_NOT_SELECTED_BY_SOURCE_ALGORITHM",
+    "context_telemetry": "ACCESS_COUNT_LAST_ACCESSED_IMPORTANCE_SCORE_AND_COSINE_FORBIDDEN",
+    "seed_anti_shopping": "NOT_PROVEN_BY_PURE_ALGORITHM_REQUIRES_FRAME_O_EXCL_AND_EXTERNAL_ENTROPY_CUSTODY_RECEIPTS",
+    "seed_derivation": "SHA256_EXACT_FIVE_PART_NUL_SEPARATED_MESSAGE",
+    "seed_domain": "agent-bridge/track-b/sample/v1",
+    "seed_public_output": "PUBLICLY_RECOMPUTABLE_FROM_FROZEN_COMMITMENTS_NO_SECRECY_CLAIM_DIRECT_BYTES_NOT_SERIALIZED",
+    "seed_selection_separation": "DISTINCT_PRIMITIVE_AND_MESSAGE_ARITY_SHARED_PUBLIC_SAMPLING_DOMAIN",
+    "selection_collision_rule": "FULL_WIDTH_HMAC_COLLISION_IS_TERMINAL",
+    "selection_commitment": "COMPLETE_RESULT_ENVELOPE_EXCEPT_SELF_CANONICAL_PRETTY_SHA256",
+    "selection_order": "PER_STRATUM_HMAC_SHA256_ASCENDING_NO_MODULO_REDUCTION",
+    "selection_projection": "SELECTED_CASE_ID_ORDER_RESERVE_STRATUM_THEN_HMAC_RANK_ORDER",
+    "selection_weight": "REDUCED_N_H_DIV_n_h_REPORTED_NOT_APPLIED_APPLY_EXACTLY_ONCE_AT_CASE_GRAIN",
+    "synthetic_fixture_authority": "KNOWN_ANSWER_VALIDATION_ONLY_NOT_REAL_FRAME_ENTROPY_CONTEXT_OR_RECEIPT"
+  },
+  "structural_blockers": [
+    "DETERMINISTIC_TRUTH_GATE_PRODUCER_AND_PROVENANCE_UNBOUND",
+    "ELIGIBLE_FRAME_AND_STRATA_MANIFEST_SCHEMAS_UNBOUND",
+    "EXTERNAL_ENTROPY_CUSTODY_AND_ANTI_SHOPPING_ORDER_UNBOUND",
+    "NON_CIRCULAR_CONTRACT_DIGEST_PROFILE_UNBOUND",
+    "REFERENCE_RUNTIME_CONFIG_SNAPSHOT_CLOCK_AND_BUDGET_UNBOUND",
+    "REVIEW_PROVENANCE_CHECKER_UNBOUND",
+    "REVIEW_RAW_RESPONSE_SCHEMA_UNBOUND",
+    "REVIEWER_ROSTER_INSTRUCTION_AND_CONFLICT_MANIFEST_UNBOUND",
+    "SAMPLING_RECEIPT_OMITS_SAMPLING_SEED_COMMITMENT",
+    "SAMPLING_RECEIPT_WRITER_UNBOUND",
+    "SOURCE_ARTIFACTS_ARE_NOT_RUNTIME_INSTANCES"
+  ],
+  "synthetic_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_context_sampling_determinism_pack_synthetic_v0.json",
+  "synthetic_fixture_sha256": "5d31766048a9d5c6f61ee60c79dd00fba3ca9993017eb5c5fedb7d6bd31cb3ca"
+}

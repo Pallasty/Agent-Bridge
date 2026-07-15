@@ -1,0 +1,257 @@
+{
+  "boundary": {
+    "condition_output_authorized": false,
+    "contains_private_blind_map": false,
+    "contains_real_entropy": false,
+    "contains_real_frame": false,
+    "live_binding_satisfied": false,
+    "runtime_context_authorized": false,
+    "sampling_receipt_created": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "fixture_only": true,
+  "real_runtime_authorized": false,
+  "reference": {
+    "case_id": "case_ffffffffffffffffffffffffffffffff",
+    "expected": {
+      "context_bytes": 550,
+      "context_json": "[{\"rank\":1,\"key\":\"memory_alpha\",\"kind\":\"decision\",\"content\":\"第一条：确定性上下文\",\"tags\":[\"context\",\"track-b\"],\"related_keys\":[\"memory_beta\"],\"scope\":\"project:/synthetic\",\"created_at\":10,\"updated_at\":11,\"status\":\"active\",\"trigger_pattern\":\"context sampling\",\"superseded_by\":null},{\"rank\":2,\"key\":\"memory_beta\",\"kind\":\"lesson\",\"content\":\"第二条：β 与 emoji 🧠\",\"tags\":[\"alpha\",\"zeta\"],\"related_keys\":[\"memory_a\",\"memory_z\"],\"scope\":null,\"created_at\":20,\"updated_at\":21,\"status\":\"active\",\"trigger_pattern\":null,\"superseded_by\":null}]",
+      "context_sha256": "1c04feac310f4ba34bf2a09937607b3a4b9ce2f48c05dbe726576112fc366535",
+      "hit_count": 2,
+      "input_utf8_bytes": 205,
+      "ordered_keys": [
+        "memory_alpha",
+        "memory_beta"
+      ]
+    },
+    "hits": [
+      {
+        "content": "第二条：β 与 emoji 🧠",
+        "created_at": 20,
+        "key": "memory_beta",
+        "kind": "lesson",
+        "rank": 2,
+        "related_keys": [
+          "memory_z",
+          "memory_a",
+          "memory_a"
+        ],
+        "scope": null,
+        "status": "active",
+        "superseded_by": null,
+        "tags": [
+          "zeta",
+          "alpha",
+          "alpha"
+        ],
+        "trigger_pattern": null,
+        "updated_at": 21
+      },
+      {
+        "content": "第一条：确定性上下文",
+        "created_at": 10,
+        "key": "memory_alpha",
+        "kind": "decision",
+        "rank": 1,
+        "related_keys": [
+          "memory_beta"
+        ],
+        "scope": "project:/synthetic",
+        "status": "active",
+        "superseded_by": null,
+        "tags": [
+          "track-b",
+          "context"
+        ],
+        "trigger_pattern": "context sampling",
+        "updated_at": 11
+      }
+    ],
+    "max_context_bytes": 8192
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_context_sampling_determinism_pack_synthetic.v0",
+  "seed": {
+    "expected_public_result": {
+      "anti_shopping_order_verified": false,
+      "condition_output_authorized": false,
+      "contract_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "derived_seed_bytes": 32,
+      "derived_seed_directly_serialized": false,
+      "derived_seed_publicly_recomputable": true,
+      "eligible_frame_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "entropy_custody_verified": false,
+      "external_entropy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "o_excl_sampling_receipt_created": false,
+      "raw_entropy_consumed": false,
+      "sampling_seed_sha256": "514beea012f7e8f7bf347a620b61d2b0c54859c624540b638631b307b6f3b1e0",
+      "schema": "agent_bridge.biocortex_ab_track_b_sampling_seed_result.v0",
+      "seed_derivation_domain": "agent-bridge/track-b/sample/v1",
+      "seed_derivation_message_profile": "domain_utf8_NUL_contract_sha256_ascii_NUL_trial_id_utf8_NUL_eligible_frame_sha256_ascii_NUL_external_entropy_sha256_ascii",
+      "seed_secrecy_claimed": false,
+      "status": "SOURCE_DERIVATION_ONLY_NOT_ENTROPY_OR_TIMING_RECEIPT",
+      "trial_id": "public_synthetic_track_b_context_sampling_v0"
+    },
+    "expected_seed_hex": "b8e8cf172aed49b9ccb6cd87da59d4f83847537190bd0501baee8bb12365b69b",
+    "request": {
+      "contract_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "eligible_frame_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "external_entropy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "schema": "agent_bridge.biocortex_ab_track_b_sampling_seed_request.v0",
+      "trial_id": "public_synthetic_track_b_context_sampling_v0"
+    },
+    "synthetic_seed_disclosure_allowed": true
+  },
+  "selection": {
+    "expected_result": {
+      "case_inclusion_probabilities": [
+        {
+          "case_id": "case_00000000000000000000000000000002",
+          "denominator": 3,
+          "numerator": 2
+        },
+        {
+          "case_id": "case_00000000000000000000000000000003",
+          "denominator": 3,
+          "numerator": 2
+        },
+        {
+          "case_id": "case_00000000000000000000000000000006",
+          "denominator": 3,
+          "numerator": 1
+        }
+      ],
+      "case_sampling_weights": [
+        {
+          "case_id": "case_00000000000000000000000000000002",
+          "denominator": 2,
+          "numerator": 3
+        },
+        {
+          "case_id": "case_00000000000000000000000000000003",
+          "denominator": 2,
+          "numerator": 3
+        },
+        {
+          "case_id": "case_00000000000000000000000000000006",
+          "denominator": 1,
+          "numerator": 3
+        }
+      ],
+      "condition_output_authorized": false,
+      "eligible_frame_bytes_verified": false,
+      "eligible_frame_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "full_width_hmac_ordering": true,
+      "input_order_invariant": true,
+      "modulo_reduction_used": false,
+      "reserve_cases": [
+        {
+          "case_id": "case_00000000000000000000000000000001",
+          "reserve_rank": 1,
+          "stratum": "alpha"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000004",
+          "reserve_rank": 1,
+          "stratum": "beta"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000005",
+          "reserve_rank": 2,
+          "stratum": "beta"
+        }
+      ],
+      "sampling_receipt_created": false,
+      "sampling_seed_sha256": "514beea012f7e8f7bf347a620b61d2b0c54859c624540b638631b307b6f3b1e0",
+      "sampling_selection_domain": "agent-bridge/track-b/sample/v1",
+      "sampling_selection_message": "domain_utf8_NUL_frame_sha256_ascii_NUL_stratum_utf8_NUL_case_id_utf8",
+      "schema": "agent_bridge.biocortex_ab_track_b_sampling_selection_result.v0",
+      "selected_cases": [
+        {
+          "case_id": "case_00000000000000000000000000000002",
+          "stratum": "alpha"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000003",
+          "stratum": "alpha"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000006",
+          "stratum": "beta"
+        }
+      ],
+      "selection_commitment_sha256": "7f781f5500db2f8072a2e33e92808753972954c6a45c220d2f8396dd9a9e3bfa",
+      "status": "SOURCE_SELECTION_ONLY_NOT_FRAME_OR_SAMPLING_RECEIPT",
+      "strata": [
+        {
+          "case_weight": {
+            "denominator": 2,
+            "numerator": 3
+          },
+          "inclusion_probability": {
+            "denominator": 3,
+            "numerator": 2
+          },
+          "population_size": 3,
+          "reserve_size": 1,
+          "sample_size": 2,
+          "stratum": "alpha"
+        },
+        {
+          "case_weight": {
+            "denominator": 1,
+            "numerator": 3
+          },
+          "inclusion_probability": {
+            "denominator": 3,
+            "numerator": 1
+          },
+          "population_size": 3,
+          "reserve_size": 2,
+          "sample_size": 1,
+          "stratum": "beta"
+        }
+      ],
+      "weights_applied": false
+    },
+    "request": {
+      "cases": [
+        {
+          "case_id": "case_00000000000000000000000000000006",
+          "stratum": "beta"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000002",
+          "stratum": "alpha"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000005",
+          "stratum": "beta"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000001",
+          "stratum": "alpha"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000004",
+          "stratum": "beta"
+        },
+        {
+          "case_id": "case_00000000000000000000000000000003",
+          "stratum": "alpha"
+        }
+      ],
+      "eligible_frame_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "schema": "agent_bridge.biocortex_ab_track_b_sampling_selection_request.v0",
+      "strata_allocations": [
+        {
+          "sample_size": 1,
+          "stratum": "beta"
+        },
+        {
+          "sample_size": 2,
+          "stratum": "alpha"
+        }
+      ]
+    }
+  }
+}
