@@ -1075,6 +1075,34 @@ oracle 逐字段复算后的 witness SHA 为
 Hubbard error、physical reference、complex/vector/GPU/multithread path 或 READY；因此它
 关闭的是 P0 custody/kernel conformance，而不是本节所需的最终 bounded reference。
 
+`MAJORANA-P1-S0` 现已进一步关闭 L2/L3 的跨语言 action/cadence 前置条件。其
+result-unpinned precommit 为
+`0b3e766814442c1f4186335b50d19f78c043e527`，固定 2x2/3x3 square-OBC、全部
+spin-resolved hopping/onsite generators、逐 site `Sz` 以及 staggered magnetization / double
+occupancy，共 62 个 operator instances、11,538,944 个 operator-ket action columns。独立
+Python exact-CAR 路线不导入 Julia 实现；Julia 路线调用 pinned upstream constructors 与
+`overlapwithfock`。L2 的 1,179,648 个 bra-ket entries（含结构零）均由 upstream 实际调用；
+L3 实际执行的是 11,534,336 个 term-derived support candidate actions，support 外零只由
+Majorana flip algebra 推出，并未冒充逐项 dense 执行。
+
+R=2、T=1 的固定 Strang occurrence matrix 含 180 composite、412 constituent、284
+truncate boundaries。证书 wrapper 以 unsigned mask 排序真实调用 upstream
+apply/merge/truncate，并用 zero-angle identity sentinel 与 callback 绑定每次 truncate；native
+unsorted `Dict` order 明确为 `NOT_ASSESSED`。onsite identity phase 由 constructor identity
+coefficient、physical multiplier 与 event duration 逐 occurrence 推导，L2/L3 分别为
+`exp(-i*8)` / `exp(-i*18)`，但这只是 fixture convention check，不是 exact dynamics。
+
+两个 fresh、Git-object-staged、read-only、network-isolated Julia replay 给出相同 transcript
+SHA `8b0b1cc063adf5914c78cfbb2a88721c9623ec90a47dab087ea21c124c3badb7`；独立
+oracle witness SHA 为
+`12b01c0aa89d71107f9acc5e4866f0b2998a84783aa1e255c9f462ac2a13b7f5`，完整可重构
+replay-package SHA 为
+`e1161b9cb6c49144f56ea5fe4c1963beeb1a7974d18ea01c02a1f264ff37cff2`。最高状态仅为
+`VERIFIED_MAJORANA_P1_L2_L3_HUBBARD_SPARSE_ACTION_AND_CADENCE_CONFORMANCE_SUBCERTIFICATE`；
+它不覆盖 native unsorted execution、L3 support 外逐项执行、任意 lattice/circuit/formula、
+L8 full propagation、PF-to-exact error、exact evolution、physical reference 或 READY。P0/P1/JW
+专项联合回归为 113/113；frontier 全目录为 1,253 tests 全通过、26 expected skips。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
@@ -1101,10 +1129,12 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
    cancellation-aware 方法仍作为平行数学路线。
 3. Majorana P0 已在 `main@b7849cb`、Julia 1.11.9 与 PauliPropagation v0.7.3 上闭合
    runtime/source custody、deterministic composite sort、deduplicate-before-threshold、
-   per-boundary dropped-L1 ledger 与 directed rational intervals。下一步是另行预提交 P1：
-   扩展 L2/L3 全 occupation/observable cross-language ED/JW oracle、hopping/非 hopping
-   cadence matrix 与 adversarial mutation；P1 通过前不启动或解释 L8 pilot。该路线仍不能
-   覆盖现有 Python one-step checker 的 authority。
+   per-boundary dropped-L1 ledger 与 directed rational intervals；P1 又闭合了固定 L2/L3
+   全 occupation candidate-action、L2 dense entries、local/global observables 与 sorted-wrapper
+   cadence matrix。下一步必须另行预提交 P2 resource-feasibility policy：只选择一个 frozen
+   observable 与 sharply bounded propagation prefix，预先固定 term/time/RSS caps、ledger 和
+   success/failure/indeterminate 分支。P2 设计或 pilot 均不得从 P1 推导 L8 full propagation、
+   exact-Hubbard reference 或 READY，也不能覆盖现有 Python one-step checker 的 authority。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
    当前 fixed-K 磁化量 step 4 与 double occupancy step 3 都必须另发资源/sidecar v2；
    v2 至少需审计 K=262,144、single-expansion 446,188 与 visits 337,691,387 这一诊断点，

@@ -868,6 +868,61 @@ Authority is intentionally limited to the frozen small fixture and status
 `VERIFIED_MAJORANA_P0_DETERMINISTIC_INTERVAL_LEDGER_CONFORMANCE_SUBCERTIFICATE`.
 L8 propagation, 1,152-gate/R=100 execution, product-formula-to-exact-Hubbard
 error, physical-reference qualification, complex/vector/GPU/multithread paths,
-M4/D-route authority and READY remain unassessed.  The next Majorana stage must
-therefore be a separately precommitted P1 cross-language L2/L3 oracle and cadence
-matrix before any bounded L8 pilot is considered.
+M4/D-route authority and READY remain unassessed.  The separately precommitted
+P1 cross-language L2/L3 oracle and cadence matrix described below now closes the
+next implementation-conformance prerequisite; it does not retroactively expand
+P0 authority.
+
+## Majorana P1 L2/L3 action and cadence conformance subcertificate
+
+`MAJORANA-P1-S0` has completed the cross-language bridge between the P0 kernel
+fixture and any future bounded propagation pilot.  Its result-unpinned input
+commit is `0b3e766814442c1f4186335b50d19f78c043e527`, directly parented by the
+P0 result commit.  The frozen workload is the spinful square-OBC Hubbard model
+on L2 (2x2) and L3 (3x3), with all spin-resolved hopping and onsite generators,
+every local `Sz`, and normalized staggered-magnetization and double-occupancy
+observables: 62 fixed operator instances and 11,538,944 operator-ket action
+columns in total.
+
+The independent Python route derives exact occupation-basis CAR actions without
+importing the Julia implementation.  The pinned Julia route uses upstream
+MajoranaPropagation constructors and `overlapwithfock`.  For L2, upstream was
+called for every one of the 1,179,648 bra-ket entries, including structural
+zeros.  For L3, all 11,534,336 operator-ket candidate actions at term-derived
+Majorana flip support were executed; entries outside that support are algebraic
+zeros and were deliberately not represented as individually executed dense
+checks.  This distinction is part of the certificate scope.
+
+The fixed two-step Strang matrix contains 180 composite occurrences, 412
+constituent occurrences and 284 truncation boundaries.  A deterministic
+certificate wrapper actually applies constituents in unsigned-mask order and
+calls the upstream apply/merge/truncate cache operations on a zero-angle identity
+sentinel; a custom callback binds every real truncation call.  Native unsorted
+upstream `Dict` iteration order remains unassessed.  The omitted onsite identity
+phase is derived per occurrence and totals `exp(-i*8)` on L2 and `exp(-i*18)` on
+L3 as a fixture convention, not as an exact-dynamics result.
+
+Formal replay reconstructed the ten-file staging closure from committed Git
+blobs, mounted inputs read-only, disabled the network and ran two fresh Julia
+processes.  Both transcript SHA-256 values are
+`8b0b1cc063adf5914c78cfbb2a88721c9623ec90a47dab087ea21c124c3badb7`;
+the independently regenerated canonical witness SHA-256 is
+`12b01c0aa89d71107f9acc5e4866f0b2998a84783aa1e255c9f462ac2a13b7f5`.
+The staging manifest/tree SHA-256 values are
+`510a8bfe09c140ac94418c21186326d43967632a9ec07b91bfb7c1386f01b393` /
+`8dbf0db16f0566bb90c6511b2e6a23741db1899e919d2fea05e638cc4580d61b`,
+and the fully reconstructible replay-package SHA-256 is
+`e1161b9cb6c49144f56ea5fe4c1963beeb1a7974d18ea01c02a1f264ff37cff2`.
+The focused P0/P1/JW closure passed 113 tests; the complete frontier directory
+regression passed 1,253 tests with 26 expected skips in 1,810.316 seconds.
+
+The maximum authority is
+`VERIFIED_MAJORANA_P1_L2_L3_HUBBARD_SPARSE_ACTION_AND_CADENCE_CONFORMANCE_SUBCERTIFICATE`.
+It excludes native unsorted execution order, individually executed L3
+outside-support entries, arbitrary constructors/circuits/formulas, L8 full
+propagation, product-formula-to-exact-Hubbard error, exact time evolution,
+physical-reference qualification and READY.  The next Majorana unit should be a
+new result-unpinned P2 resource-feasibility policy for a sharply bounded
+propagation prefix, with one frozen observable, hard term/time/RSS caps and
+explicit success/failure/indeterminate branches; no L8 scientific result should
+be inferred from P1 alone.
