@@ -1,0 +1,82 @@
+{
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_pre_execution_observation.v0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audit_scope": {
+      "const": "REPOSITORY_AND_CURRENT_PROCESS_HOST_VISIBILITY_NON_SECRET_AUDIT"
+    },
+    "credentials_accessed": {
+      "const": false
+    },
+    "execution_evidence_sha256": {
+      "const": null
+    },
+    "experiment_executed": {
+      "const": false
+    },
+    "external_organization_state_observed": {
+      "const": false
+    },
+    "future_state_automatically_reaudited": {
+      "const": false
+    },
+    "observed_at_utc": {
+      "const": "2026-07-15T18:00:00Z"
+    },
+    "official_sources_refetched_before_execution": {
+      "const": false
+    },
+    "paid_resources_provisioned": {
+      "const": false
+    },
+    "provider_resources_bound": {
+      "const": false
+    },
+    "run_rows": {
+      "maxItems": 0,
+      "minItems": 0,
+      "type": "array"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_pre_execution_observation.v0"
+    },
+    "side_effects_unlocked": {
+      "const": "NONE"
+    },
+    "track_case_counts": {
+      "additionalProperties": false,
+      "properties": {
+        "MANAGED_SPANNER_CLOUD_KMS": {
+          "const": 16
+        },
+        "SELF_HOSTED_ETCD_OPENBAO": {
+          "const": 18
+        }
+      },
+      "required": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "audit_scope",
+    "credentials_accessed",
+    "execution_evidence_sha256",
+    "experiment_executed",
+    "external_organization_state_observed",
+    "future_state_automatically_reaudited",
+    "observed_at_utc",
+    "official_sources_refetched_before_execution",
+    "paid_resources_provisioned",
+    "provider_resources_bound",
+    "run_rows",
+    "schema",
+    "side_effects_unlocked",
+    "track_case_counts"
+  ],
+  "title": "BioCortex Track B reference-provider fault-injection pre-execution observation v0",
+  "type": "object"
+}

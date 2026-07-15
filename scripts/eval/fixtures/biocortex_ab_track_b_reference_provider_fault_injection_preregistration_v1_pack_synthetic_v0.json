@@ -1,0 +1,19 @@
+{
+  "audit_scope": "REPOSITORY_AND_CURRENT_PROCESS_HOST_VISIBILITY_NON_SECRET_AUDIT",
+  "credentials_accessed": false,
+  "execution_evidence_sha256": null,
+  "experiment_executed": false,
+  "external_organization_state_observed": false,
+  "future_state_automatically_reaudited": false,
+  "observed_at_utc": "2026-07-15T18:00:00Z",
+  "official_sources_refetched_before_execution": false,
+  "paid_resources_provisioned": false,
+  "provider_resources_bound": false,
+  "run_rows": [],
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_pre_execution_observation.v0",
+  "side_effects_unlocked": "NONE",
+  "track_case_counts": {
+    "MANAGED_SPANNER_CLOUD_KMS": 16,
+    "SELF_HOSTED_ETCD_OPENBAO": 18
+  }
+}

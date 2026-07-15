@@ -1,0 +1,130 @@
+{
+  "baseline_commit": "3ca858bd6f0097dd0f7f928e7acb4aef030a47a2",
+  "boundary": {
+    "condition_output_authorized": false,
+    "cost_authority_bound": false,
+    "credentials_accessed": false,
+    "experiment_executed": false,
+    "live_generator_in_scope": false,
+    "live_output_permit_defined": false,
+    "paid_resources_provisioned": false,
+    "production_adapter_in_scope": false,
+    "provider_called": false,
+    "receipt_is_output_permit": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "data_quality": {
+    "assignment_balance": "PLAN_SPECIFIED_EXECUTION_NOT_EVALUATED",
+    "completeness": "PLAN_PASS_EXECUTION_NOT_EVALUATED",
+    "consistency": "PLAN_PASS_EXECUTION_NOT_EVALUATED",
+    "execution_rows": 0,
+    "exposure_order": "PLAN_SPECIFIED_EXECUTION_NOT_EVALUATED",
+    "integrity": "PLAN_PASS_EXECUTION_NOT_EVALUATED",
+    "intended_use": "PREREGISTRATION_ONLY_NOT_PROVIDER_OR_READINESS_INFERENCE",
+    "referential_integrity": "PLAN_PASS_EXECUTION_NOT_EVALUATED",
+    "timeliness": "REFETCH_REQUIRED_BEFORE_EXECUTION",
+    "uniqueness": "PLAN_PASS_EXECUTION_NOT_EVALUATED",
+    "validity": "PLAN_PASS_EXECUTION_NOT_EVALUATED"
+  },
+  "date": "2026-07-15",
+  "decision": "PREREGISTRATION_PASS_EXECUTION_BLOCKED_NO_AUTHORITY_OR_RUN_EVIDENCE",
+  "evidence_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-external-atomic-live-output-boundary-design-receipt-schema-v1.json": "cbb68b0c55e5504bfc6417280978d18c5228c353b1147a3d05b847edc2d3b99c",
+    "docs/design/fixtures/biocortex-ab-track-b-external-atomic-live-output-execution-boundary-contract-v1.json": "9688c4df6ce4a8cf84539a400b488f2c108da606ab2a9eb22e459376bd525046",
+    "docs/design/fixtures/biocortex-ab-track-b-production-provider-prerequisite-observation-source-profile-schema-v1.json": "5a4d7d0f817de1a4fbf307508bd1d775bec31e683a2487440befedcfa0e1b342",
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-experiment-contract-v1.json": "632dbf1d8202d94d6aef70d8b20c04050e647679da973d81afbe13d68344ad22",
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-pre-execution-observation-schema-v1.json": "28272f4aa3336be1d3239e33573065c5ecd746a16bc97c7710b0ae9a6c5b77b5",
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-preregistration-receipt-schema-v1.json": "02968490ff213aca8a1f2ac6d766d7711caedd4b9c1ff030caf206cc2c3fb21e",
+    "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-external-atomic-live-output-boundary-v1-pack.md": "1987c5d89b859179715cdd940c63b18563c59d9b6bcaeb0fac642b4ca47563fe",
+    "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-reference-provider-fault-injection-preregistration-v1-pack.md": "6f6bbdf6c71ccb1a4eba916be90aa4f35a72548c9e3faf08980727625ba147c1",
+    "scripts/check-biocortex-ab-track-b-external-atomic-live-output-boundary-v1-pack.sh": "8b5f6a19da7054dbc7a9d5c05326c80c2d50c07ed83965ee782c6e833c98083e",
+    "scripts/eval/biocortex_ab_track_b_external_atomic_live_output_boundary_v1.py": "0eb1d6830c8594c4d265440b7fb4bff0ecb507916f59c4057a24eba6fc90cac4",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1.py": "1644a95f21144b28335ca107638245fcc605add4b0ba438dafb50fab6e65a1e0",
+    "scripts/eval/check_biocortex_ab_track_b_external_atomic_live_output_boundary_v1_pack.py": "491af79c141317536b141ff1eb4b93df322bd38bc840f1d15061e68e317fa0a8",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack.py": "874f5f5ac44e4a481f99fd7c23755067c2dba9d848df5ad5a43cb5f26ba422f8",
+    "scripts/eval/fixtures/biocortex_ab_track_b_external_atomic_live_output_boundary_v1_pack.expected.v0.tsv": "f5798073ff1c78a38f20a41723df2aac4bf3ef1b104792c1b8533bc275b93093",
+    "scripts/eval/fixtures/biocortex_ab_track_b_external_atomic_live_output_boundary_v1_pack_synthetic_v0.json": "7ed9352834de04729188d931ebce7b28d01c709b22e78f074d80248dac9a23f2",
+    "scripts/eval/fixtures/biocortex_ab_track_b_external_atomic_live_output_boundary_v1_pack_v0.json": "b2c101068f237912f79aef6e975a0336d46845d86070ab307945420c3c9e1e96",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack.expected.v0.tsv": "11e7e716d799966d1d29d00ee6368260b97f3814ae99c7fceed2fbfd31837f14",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack_synthetic_v0.json": "efdc62c03295e22faa38001d232eed469fb1d723e0b92e059913237eab2e0d79"
+  },
+  "known_limitations": [
+    "AUDIT_SCOPE_IS_REPOSITORY_AND_CURRENT_PROCESS_HOST_VISIBILITY_ONLY",
+    "EXTERNAL_ORGANIZATION_STATE_WAS_NOT_OBSERVED",
+    "NO_EXPERIMENT_RUN_ROW_PROVIDER_RESPONSE_OR_FAULT_EVENT_EXISTS",
+    "PLANNED_RUN_ROWS_ARE_NOT_EXECUTED_SAMPLES_OR_READINESS_EVIDENCE",
+    "NO_CREDENTIAL_RESOURCE_COST_OR_LAB_START_AUTHORITY_IS_BOUND",
+    "NO_PROVIDER_GENERATOR_PHYSICAL_SINK_OR_LIVE_OUTPUT_OPERATION_WAS_CALLED",
+    "OFFICIAL_URLS_AND_RETRIEVAL_DATE_ARE_RECORDED_BUT_PAGE_CONTENT_IS_NOT_PACKET_ATTESTED",
+    "DIRECT_DOCUMENTATION_CLAIMS_DO_NOT_PROVE_TARGET_ACCOUNT_CLUSTER_KEY_OR_RUNTIME_STATE",
+    "FIVE_HUNDRED_FORTY_SIX_NEGATIVES_ARE_STRUCTURAL_OR_FROZEN_SEMANTIC_MUTATIONS_NOT_PROVIDER_SECURITY_CRYPTOGRAPHIC_OR_FAULT_TESTS",
+    "MANAGED_AND_SELF_HOSTED_TRACKS_ANSWER_DIFFERENT_QUESTIONS_AND_CANNOT_CERTIFY_OR_RANK_ONE_ANOTHER",
+    "NO_COMMON_TRANSACTION_ACROSS_DATABASE_SIGNER_AND_PHYSICAL_SINK_IS_CLAIMED",
+    "ONE_DURABLE_RECEIPT_DOES_NOT_PROVE_ONE_SIGNATURE_RPC_OR_ONE_SIGNATURE_CREATION",
+    "PREPARED_MARKER_BEFORE_PROVIDER_CALL_CAN_CAUSE_CONSERVATIVE_QUARANTINE_WITHOUT_PROVIDER_PROCESSING",
+    "TIMEOUT_EOF_SEAL_OR_DISCONNECT_DOES_NOT_PROVE_SIGNING_DID_NOT_OCCUR",
+    "ETCD_REVISION_BUMP_DOES_NOT_RESTORE_LOST_WRITES_OR_REPLACE_AN_INDEPENDENT_MONOTONIC_WITNESS",
+    "OPENBAO_NODE_SEAL_IS_NOT_SERVICE_WIDE_UNAVAILABILITY_UNDER_HIGH_AVAILABILITY",
+    "SDK_CLIENT_IMAGE_TOPOLOGY_RESOURCE_CAP_AND_PROVIDER_PROFILE_BINDINGS_REMAIN_UNBOUND",
+    "PRE_EXECUTION_SCHEMA_ACCEPTS_ZERO_ROWS_AND_RUNTIME_ROW_VALIDATION_IS_DEFERRED_TO_THE_OFFLINE_HARNESS_UNIT",
+    "EXECUTION_COMPLETENESS_DUPLICATION_BALANCE_EXPOSURE_TIMING_AND_OUTCOME_VALIDITY_ARE_NOT_EVALUATED_WITH_ZERO_RUN_ROWS",
+    "HOST_TOOLCHAIN_BYTES_AND_EXTERNAL_DOCUMENT_CONTENT_ARE_NOT_PACKET_ATTESTED"
+  ],
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_HARNESS_V1_OFFLINE_DOUBLE_IMPLEMENTATION",
+  "packet": {
+    "modes": {
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-experiment-contract-v1.json": "100644",
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-pre-execution-observation-schema-v1.json": "100644",
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-preregistration-receipt-schema-v1.json": "100644",
+      "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-reference-provider-fault-injection-preregistration-v1-pack.md": "100644",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-preregistration-v1-pack.sh": "100755",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1.py": "100644",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack.py": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack.expected.v0.tsv": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack_synthetic_v0.json": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack_v0.json": "100644"
+    },
+    "paths": [
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-preregistration-receipt-schema-v1.json",
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-pre-execution-observation-schema-v1.json",
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-experiment-contract-v1.json",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1.py",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack.py",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack_synthetic_v0.json",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack.expected.v0.tsv",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack_v0.json",
+      "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-reference-provider-fault-injection-preregistration-v1-pack.md",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-preregistration-v1-pack.sh"
+    ]
+  },
+  "predecessor": {
+    "integration_commit": "3ca858bd6f0097dd0f7f928e7acb4aef030a47a2",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_external_atomic_live_output_boundary_v1_pack_v0.json",
+    "source_commit": "3054ffe692e2e8f4edf22bda86fcbe4c9e1077d2"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack_manifest.v0",
+  "status": "REFERENCE_PROVIDER_FAULT_INJECTION_EXPERIMENT_V1_PREREGISTERED_NO_PROVIDER_INVOCATION_NO_PERMIT",
+  "test_oracle": {
+    "directed_structural_and_frozen_semantic_negative_tests": 546,
+    "invariants": 34,
+    "managed_cases": 16,
+    "official_source_claims": 16,
+    "planned_run_rows": 1020,
+    "repetitions_per_case": 30,
+    "schema_documents": 2,
+    "self_hosted_cases": 18,
+    "tracks": 2
+  },
+  "tracks": {
+    "MANAGED_SPANNER_CLOUD_KMS": {
+      "case_count": 16,
+      "claim_ceiling": "CLIENT_CONFORMANCE_AND_MANAGED_SERVICE_SEMANTICS_ONLY",
+      "execution_status": "NOT_EXECUTED"
+    },
+    "SELF_HOSTED_ETCD_OPENBAO": {
+      "case_count": 18,
+      "claim_ceiling": "OWNED_LAB_ADVERSARIAL_BEHAVIOR_ONLY",
+      "execution_status": "NOT_EXECUTED"
+    }
+  }
+}
