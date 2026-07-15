@@ -26,6 +26,9 @@ mod external_restore_authority;
 #[cfg(feature = "temporal-evidence-s10-operation-recovery-synthetic")]
 mod external_operation_recovery;
 
+#[cfg(feature = "temporal-evidence-s11-atomic-authority-operation-synthetic")]
+mod external_authority_operation_state_machine;
+
 const S5_SOURCE_MANIFEST_SHA256: &str =
     "309f2533ef7b78d0c1f252325c0f79ab1300f8f68837a5a75ce7c14d8b011d6a";
 const S5_SOURCE_COMMIT: &str = "8739b69fb59fd704dacfe1a44bfc411ed9ebb913";

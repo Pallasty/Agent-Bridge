@@ -14,6 +14,7 @@ temporal-evidence-s7-durable-replay-synthetic = ["temporal-evidence-s6-detached-
 temporal-evidence-s8-restore-bound-key-epoch-synthetic = ["temporal-evidence-s7-durable-replay-synthetic"]
 temporal-evidence-s9-external-authority-provider-synthetic = ["temporal-evidence-s8-restore-bound-key-epoch-synthetic"]
 temporal-evidence-s10-operation-recovery-synthetic = ["temporal-evidence-s9-external-authority-provider-synthetic"]
+temporal-evidence-s11-atomic-authority-operation-synthetic = ["temporal-evidence-s10-operation-recovery-synthetic"]
 
 [dependencies]
 ab-core.workspace = true
