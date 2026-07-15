@@ -37,7 +37,7 @@ const S9_CONTRACT_SHA256: [u8; 32] = [
 
 #[derive(Debug, thiserror::Error)]
 #[error("{code}: {detail}")]
-struct ExternalOperationRecoveryV1Error {
+pub(super) struct ExternalOperationRecoveryV1Error {
     code: &'static str,
     detail: &'static str,
 }
@@ -49,7 +49,7 @@ impl ExternalOperationRecoveryV1Error {
     }
 }
 
-type RecoveryResult<T> = Result<T, ExternalOperationRecoveryV1Error>;
+pub(super) type RecoveryResult<T> = Result<T, ExternalOperationRecoveryV1Error>;
 
 fn recovery_error(code: &'static str, detail: &'static str) -> ExternalOperationRecoveryV1Error {
     ExternalOperationRecoveryV1Error { code, detail }
@@ -97,19 +97,19 @@ fn framed_digest(domain: &[u8], fields: &[&[u8]]) -> [u8; 32] {
 }
 
 #[derive(Clone)]
-struct ExternalOperationRecoveryQueryV1 {
-    provider_profile_id: String,
-    authority_namespace_id: String,
-    tenant_id: String,
-    audience: String,
-    provider_cluster_id: String,
-    provider_incarnation: [u8; 32],
-    lookup_query_id: [u8; 32],
-    lookup_challenge: [u8; 32],
-    original_operation_id: [u8; 32],
-    original_challenge: [u8; 32],
-    original_request_sha256: [u8; 32],
-    trust_policy_sha256: [u8; 32],
+pub(super) struct ExternalOperationRecoveryQueryV1 {
+    pub(super) provider_profile_id: String,
+    pub(super) authority_namespace_id: String,
+    pub(super) tenant_id: String,
+    pub(super) audience: String,
+    pub(super) provider_cluster_id: String,
+    pub(super) provider_incarnation: [u8; 32],
+    pub(super) lookup_query_id: [u8; 32],
+    pub(super) lookup_challenge: [u8; 32],
+    pub(super) original_operation_id: [u8; 32],
+    pub(super) original_challenge: [u8; 32],
+    pub(super) original_request_sha256: [u8; 32],
+    pub(super) trust_policy_sha256: [u8; 32],
 }
 
 impl fmt::Debug for ExternalOperationRecoveryQueryV1 {
@@ -153,7 +153,9 @@ fn validate_query(query: &ExternalOperationRecoveryQueryV1) -> RecoveryResult<()
     Ok(())
 }
 
-fn lookup_query_digest(query: &ExternalOperationRecoveryQueryV1) -> RecoveryResult<[u8; 32]> {
+pub(super) fn lookup_query_digest(
+    query: &ExternalOperationRecoveryQueryV1,
+) -> RecoveryResult<[u8; 32]> {
     validate_query(query)?;
     Ok(framed_digest(
         LOOKUP_QUERY_DOMAIN,
@@ -179,7 +181,7 @@ fn lookup_query_digest(query: &ExternalOperationRecoveryQueryV1) -> RecoveryResu
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExternalOperationRecoveryStateV1 {
+pub(super) enum ExternalOperationRecoveryStateV1 {
     Committed,
     NotFound,
     Pending,
@@ -200,24 +202,24 @@ impl ExternalOperationRecoveryStateV1 {
 }
 
 #[derive(Clone)]
-struct SignedExternalOperationRecoveryObservationV1 {
-    lookup_query_sha256: [u8; 32],
-    state: ExternalOperationRecoveryStateV1,
-    original_operation_id: [u8; 32],
-    original_challenge: [u8; 32],
-    original_request_sha256: [u8; 32],
-    provider_cluster_id: String,
-    provider_incarnation: [u8; 32],
-    leader_term: u64,
-    operation_committed_revision: u64,
-    observed_journal_revision: u64,
-    journal_generation_id: [u8; 32],
-    journal_record_sequence: u64,
-    original_decision_sha256: [u8; 32],
-    result_id: [u8; 32],
-    signer_key_id: String,
-    signer_key_version: u64,
-    ed25519_signature: [u8; 64],
+pub(super) struct SignedExternalOperationRecoveryObservationV1 {
+    pub(super) lookup_query_sha256: [u8; 32],
+    pub(super) state: ExternalOperationRecoveryStateV1,
+    pub(super) original_operation_id: [u8; 32],
+    pub(super) original_challenge: [u8; 32],
+    pub(super) original_request_sha256: [u8; 32],
+    pub(super) provider_cluster_id: String,
+    pub(super) provider_incarnation: [u8; 32],
+    pub(super) leader_term: u64,
+    pub(super) operation_committed_revision: u64,
+    pub(super) observed_journal_revision: u64,
+    pub(super) journal_generation_id: [u8; 32],
+    pub(super) journal_record_sequence: u64,
+    pub(super) original_decision_sha256: [u8; 32],
+    pub(super) result_id: [u8; 32],
+    pub(super) signer_key_id: String,
+    pub(super) signer_key_version: u64,
+    pub(super) ed25519_signature: [u8; 64],
 }
 
 impl fmt::Debug for SignedExternalOperationRecoveryObservationV1 {
@@ -230,7 +232,9 @@ impl fmt::Debug for SignedExternalOperationRecoveryObservationV1 {
     }
 }
 
-fn observation_message(observation: &SignedExternalOperationRecoveryObservationV1) -> Vec<u8> {
+pub(super) fn observation_message(
+    observation: &SignedExternalOperationRecoveryObservationV1,
+) -> Vec<u8> {
     let leader_term = observation.leader_term.to_be_bytes();
     let operation_committed_revision = observation.operation_committed_revision.to_be_bytes();
     let observed_journal_revision = observation.observed_journal_revision.to_be_bytes();
@@ -263,7 +267,7 @@ fn observation_message(observation: &SignedExternalOperationRecoveryObservationV
     )
 }
 
-fn result_id(
+pub(super) fn result_id(
     query: &ExternalOperationRecoveryQueryV1,
     operation_committed_revision: u64,
     journal_generation_id: &[u8; 32],
@@ -290,7 +294,7 @@ fn result_id(
 
 /// All trust material must eventually be selected and delivered by the owner.
 /// S10 has no production constructor; tests alone construct this shape.
-struct ExternalOperationRecoveryTrustPermitV1 {
+pub(super) struct ExternalOperationRecoveryTrustPermitV1 {
     provider_profile_id: String,
     authority_namespace_id: String,
     tenant_id: String,
@@ -304,6 +308,42 @@ struct ExternalOperationRecoveryTrustPermitV1 {
     minimum_observed_journal_revision: u64,
     expected_journal_generation_id: [u8; 32],
     ed25519_public_key: [u8; 32],
+}
+
+impl ExternalOperationRecoveryTrustPermitV1 {
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn test_only_new(
+        provider_profile_id: impl Into<String>,
+        authority_namespace_id: impl Into<String>,
+        tenant_id: impl Into<String>,
+        audience: impl Into<String>,
+        provider_cluster_id: impl Into<String>,
+        provider_incarnation: [u8; 32],
+        signer_key_id: impl Into<String>,
+        signer_key_version: u64,
+        trust_policy_sha256: [u8; 32],
+        minimum_leader_term: u64,
+        minimum_observed_journal_revision: u64,
+        expected_journal_generation_id: [u8; 32],
+        ed25519_public_key: [u8; 32],
+    ) -> Self {
+        Self {
+            provider_profile_id: provider_profile_id.into(),
+            authority_namespace_id: authority_namespace_id.into(),
+            tenant_id: tenant_id.into(),
+            audience: audience.into(),
+            provider_cluster_id: provider_cluster_id.into(),
+            provider_incarnation,
+            signer_key_id: signer_key_id.into(),
+            signer_key_version,
+            trust_policy_sha256,
+            minimum_leader_term,
+            minimum_observed_journal_revision,
+            expected_journal_generation_id,
+            ed25519_public_key,
+        }
+    }
 }
 
 impl fmt::Debug for ExternalOperationRecoveryTrustPermitV1 {
@@ -380,15 +420,104 @@ trait ExternalOperationRecoveryProviderV1: recovery_provider_seal::Sealed {
 /// Private proof that one synthetic lookup observation was authenticated and
 /// exactly bound. It is deliberately not an admission/currentness capability.
 #[must_use]
-struct VerifiedExternalOperationRecoveryObservationV1 {
+pub(super) struct VerifiedExternalOperationRecoveryObservationV1 {
+    provider_profile_id: String,
+    authority_namespace_id: String,
+    tenant_id: String,
+    audience: String,
+    provider_cluster_id: String,
+    provider_incarnation: [u8; 32],
+    trust_policy_sha256: [u8; 32],
+    original_operation_id: [u8; 32],
+    original_challenge: [u8; 32],
+    original_request_sha256: [u8; 32],
     lookup_query_sha256: [u8; 32],
     observation_sha256: [u8; 32],
     original_decision_sha256: [u8; 32],
     result_id: [u8; 32],
+    leader_term: u64,
     operation_committed_revision: u64,
     observed_journal_revision: u64,
     journal_generation_id: [u8; 32],
     journal_record_sequence: u64,
+}
+
+impl VerifiedExternalOperationRecoveryObservationV1 {
+    pub(super) fn provider_profile_id(&self) -> &str {
+        &self.provider_profile_id
+    }
+
+    pub(super) fn authority_namespace_id(&self) -> &str {
+        &self.authority_namespace_id
+    }
+
+    pub(super) fn tenant_id(&self) -> &str {
+        &self.tenant_id
+    }
+
+    pub(super) fn audience(&self) -> &str {
+        &self.audience
+    }
+
+    pub(super) fn provider_cluster_id(&self) -> &str {
+        &self.provider_cluster_id
+    }
+
+    pub(super) fn provider_incarnation(&self) -> [u8; 32] {
+        self.provider_incarnation
+    }
+
+    pub(super) fn trust_policy_sha256(&self) -> [u8; 32] {
+        self.trust_policy_sha256
+    }
+
+    pub(super) fn original_operation_id(&self) -> [u8; 32] {
+        self.original_operation_id
+    }
+
+    pub(super) fn original_challenge(&self) -> [u8; 32] {
+        self.original_challenge
+    }
+
+    pub(super) fn original_request_sha256(&self) -> [u8; 32] {
+        self.original_request_sha256
+    }
+
+    pub(super) fn lookup_query_sha256(&self) -> [u8; 32] {
+        self.lookup_query_sha256
+    }
+
+    pub(super) fn observation_sha256(&self) -> [u8; 32] {
+        self.observation_sha256
+    }
+
+    pub(super) fn original_decision_sha256(&self) -> [u8; 32] {
+        self.original_decision_sha256
+    }
+
+    pub(super) fn result_id(&self) -> [u8; 32] {
+        self.result_id
+    }
+
+    pub(super) fn leader_term(&self) -> u64 {
+        self.leader_term
+    }
+
+    pub(super) fn operation_committed_revision(&self) -> u64 {
+        self.operation_committed_revision
+    }
+
+    pub(super) fn observed_journal_revision(&self) -> u64 {
+        self.observed_journal_revision
+    }
+
+    pub(super) fn journal_generation_id(&self) -> [u8; 32] {
+        self.journal_generation_id
+    }
+
+    pub(super) fn journal_record_sequence(&self) -> u64 {
+        self.journal_record_sequence
+    }
 }
 
 impl fmt::Debug for VerifiedExternalOperationRecoveryObservationV1 {
@@ -412,7 +541,7 @@ fn verify_external_operation_recovery_v1<P: ExternalOperationRecoveryProviderV1>
     permit: &ExternalOperationRecoveryTrustPermitV1,
 ) -> RecoveryResult<VerifiedExternalOperationRecoveryObservationV1> {
     validate_permit(permit)?;
-    let expected_lookup_query_sha256 = lookup_query_digest(query)?;
+    lookup_query_digest(query)?;
     if query.provider_profile_id != permit.provider_profile_id
         || query.authority_namespace_id != permit.authority_namespace_id
         || query.tenant_id != permit.tenant_id
@@ -446,8 +575,34 @@ fn verify_external_operation_recovery_v1<P: ExternalOperationRecoveryProviderV1>
         )
     })?;
 
-    validate_observation_labels(&observation)?;
-    let message = observation_message(&observation);
+    verify_external_operation_recovery_observation_v1(query, permit, &observation)
+}
+
+/// Pure verification of a previously carried S10 lookup observation. It does
+/// not call the recovery provider and returns only non-admission evidence.
+pub(super) fn verify_external_operation_recovery_observation_v1(
+    query: &ExternalOperationRecoveryQueryV1,
+    permit: &ExternalOperationRecoveryTrustPermitV1,
+    observation: &SignedExternalOperationRecoveryObservationV1,
+) -> RecoveryResult<VerifiedExternalOperationRecoveryObservationV1> {
+    validate_permit(permit)?;
+    let expected_lookup_query_sha256 = lookup_query_digest(query)?;
+    if query.provider_profile_id != permit.provider_profile_id
+        || query.authority_namespace_id != permit.authority_namespace_id
+        || query.tenant_id != permit.tenant_id
+        || query.audience != permit.audience
+        || query.provider_cluster_id != permit.provider_cluster_id
+        || query.provider_incarnation != permit.provider_incarnation
+        || query.trust_policy_sha256 != permit.trust_policy_sha256
+    {
+        return Err(recovery_error(
+            "track_b_external_operation_recovery_v1_trust_scope",
+            "lookup query scope does not match the owner-pinned permit",
+        ));
+    }
+
+    validate_observation_labels(observation)?;
+    let message = observation_message(observation);
     UnparsedPublicKey::new(&ED25519, permit.ed25519_public_key)
         .verify(&message, &observation.ed25519_signature)
         .map_err(|_| {
@@ -517,10 +672,21 @@ fn verify_external_operation_recovery_v1<P: ExternalOperationRecoveryProviderV1>
     }
 
     Ok(VerifiedExternalOperationRecoveryObservationV1 {
+        provider_profile_id: query.provider_profile_id.clone(),
+        authority_namespace_id: query.authority_namespace_id.clone(),
+        tenant_id: query.tenant_id.clone(),
+        audience: query.audience.clone(),
+        provider_cluster_id: query.provider_cluster_id.clone(),
+        provider_incarnation: query.provider_incarnation,
+        trust_policy_sha256: query.trust_policy_sha256,
+        original_operation_id: query.original_operation_id,
+        original_challenge: query.original_challenge,
+        original_request_sha256: query.original_request_sha256,
         lookup_query_sha256: expected_lookup_query_sha256,
         observation_sha256: sha256_bytes(&message),
         original_decision_sha256: observation.original_decision_sha256,
         result_id: observation.result_id,
+        leader_term: observation.leader_term,
         operation_committed_revision: observation.operation_committed_revision,
         observed_journal_revision: observation.observed_journal_revision,
         journal_generation_id: observation.journal_generation_id,

@@ -1,0 +1,89 @@
+{
+  "admission": {
+    "bridge_or_state_store_enabled": false,
+    "currentness_token_issued": false,
+    "owner_approval_receipt": null,
+    "production_authorized": false,
+    "successor_payload_admitted": false,
+    "transport_enabled": false
+  },
+  "authorization_semantics": {
+    "historical_chain_is_admission_capability": false,
+    "historical_s9_active_means_current_at_use": false,
+    "s10_verified_projection_proves_external_durability": false,
+    "s11_l1_signature_proves_l2_persistence": false,
+    "synthetic_test_keys_are_owner_approval": false
+  },
+  "boundary": {
+    "currentness_and_consume_atomic": false,
+    "external_carrier_available": false,
+    "owner_pinned_production_permits_available": false,
+    "provider_linearizability_attested": false,
+    "provider_rollback_or_split_brain_protected": false,
+    "runtime_recovered_bytes_available": false
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "operational_gap_codes": [
+    "CURRENTNESS_CHALLENGE_UNIQUENESS_UNATTESTED",
+    "EXPECTED_EPOCH_CURRENTNESS_EXTERNAL_CUSTODY_UNATTESTED",
+    "INSTANT_REVOCATION_UNAVAILABLE_WITH_LOCAL_CONSUME",
+    "OLD_EPOCH_KEY_DESTRUCTION_UNATTESTED",
+    "SAME_EPOCH_RESTORE_DETECTION_UNAVAILABLE",
+    "DURABLE_CHALLENGE_UNIQUENESS_UNAVAILABLE",
+    "EXTERNAL_AUTHORITY_PROVIDER_UNIMPLEMENTED",
+    "EXTERNAL_KEY_CUSTODIAN_UNIMPLEMENTED",
+    "OWNER_PINNED_TRUST_ANCHOR_UNAVAILABLE",
+    "PROVIDER_CLOCK_AND_FRESHNESS_UNATTESTED",
+    "PROVIDER_FAILURE_RESULT_AMBIGUITY_UNRESOLVED",
+    "PROVIDER_KEY_ROTATION_AND_REVOCATION_UNATTESTED",
+    "PROVIDER_LINEARIZABILITY_UNATTESTED",
+    "PROVIDER_SPLIT_BRAIN_FENCING_UNATTESTED",
+    "PROVIDER_STATE_ROLLBACK_UNATTESTED",
+    "RECOVERY_JOURNAL_EXTERNAL_DURABILITY_UNATTESTED",
+    "RECOVERY_LOOKUP_LINEARIZABILITY_UNATTESTED",
+    "RECOVERY_OPERATION_SUBMISSION_ATOMICITY_UNIMPLEMENTED",
+    "RECOVERED_S9_DECISION_EXTERNAL_CARRIER_UNIMPLEMENTED",
+    "RECOVERED_S9_DECISION_BYTES_AVAILABILITY_UNATTESTED",
+    "RECOVERED_S9_RAW_DECISION_EXTERNAL_DURABILITY_UNATTESTED",
+    "RECOVERED_S10_VERIFIED_PROJECTION_RUNTIME_DELIVERY_UNIMPLEMENTED",
+    "RECOVERED_S9_DECISION_HISTORICAL_ONLY_NOT_CURRENT_AT_USE",
+    "ATOMIC_AUTHORITY_OPERATION_EXTERNAL_DATABASE_UNIMPLEMENTED",
+    "DATABASE_KMS_CROSS_SERVICE_ATOMICITY_UNATTESTED",
+    "KMS_EXACTLY_ONCE_SIGNING_UNPROVED",
+    "EXACT_VERSION_SIGNING_CUSTODY_UNATTESTED",
+    "OPERATION_OUTBOX_EXTERNAL_DURABILITY_UNATTESTED",
+    "SIGNATURE_PERSISTENCE_EXTERNAL_DURABILITY_UNATTESTED",
+    "SIGNER_NON_EQUIVOCATION_UNATTESTED",
+    "CURRENTNESS_AT_DOWNSTREAM_USE_UNATTESTED"
+  ],
+  "predecessor": {
+    "baseline_merge_commit": "8daa44ee5406b700c59b57b0e44514421bc2f0ad",
+    "s11_contract_sha256": "eaca1280836bb31a3e1d0ce11173c6e34dbddf24a19e270af21d579428327db2",
+    "s11_feature_commit": "efe75d17a59704a4efa8e062dea9474375e600dd"
+  },
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "required_successor_identity": {
+    "admission_receipt": null,
+    "external_carrier_and_durable_exact_s9_envelope": true,
+    "external_currentness_and_consume_atomicity": true,
+    "owner_pinned_production_permits": true,
+    "provider_rollback_split_brain_and_rotation_evidence": true,
+    "runtime_s10_verified_projection_delivery": true
+  },
+  "reverification_preregistration": {
+    "canonical_raw_s9_bytes_required": true,
+    "historical_chain_known_answer_frozen": true,
+    "s10_verified_projection_required": true,
+    "s11_l1_only_reverified": true,
+    "s9_detached_verifier_shared": true,
+    "synthetic_gap_closure_only": true
+  },
+  "schema": "agent_bridge.memory_temporal_successor_admission_gate_s12.v0",
+  "status": "RECOVERED_S9_DECISION_PURE_REVERIFICATION_PREREGISTERED_SYNTHETIC_DUAL_SIGNATURE_HISTORICAL_ONLY_NO_CURRENTNESS_RETRY_NO_ADMISSION_NO_PROVIDER_NO_OWNER_TRUST_ANCHOR_NOT_AUTHORIZED_NOT_TRANSPORT"
+}
