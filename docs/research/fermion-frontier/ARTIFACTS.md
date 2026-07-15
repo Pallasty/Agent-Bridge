@@ -1059,6 +1059,46 @@ so they are versioned normally and are not added to the preservation-only
   select candidates or enter the formal runner.  The formal P5 child must run
   both frozen candidates independently and inherit only P3 `E1` once after
   full step-1 conformance.
+- `majorana_certificate_p5_fixture.json`, `majorana_certificate_p5_policy.json`,
+  `majorana_certificate_p5_precommit_contract.json`,
+  `majorana_certificate_p5/majorana_p5_runner.jl`,
+  `majorana_certificate_p5_checker.py`, `majorana_certificate_p5_contract.json`,
+  `majorana_certificate_p5_certificate.json`, `test_majorana_certificate_p5.py`
+  and the post-replay `test_majorana_certificate_p5_result.py` companion:
+  result-unpinned and post-replay formal S0 closure for fixed P3 `2^-34` step 1
+  followed by conditional step-2 candidates `2^-36` and `2^-37`.  Precommit
+  `85173e5982f526258563fc00e326d7f3f39b0a7a` has precommit-contract SHA-256
+  `ad5980e74370a732456a1729665702fcaab4751d322145c0ea9775b329f06b01`.
+  Checker, runner, fixture and policy SHA-256 values are respectively
+  `b60cc0ab58316630f5fb15532c0d70c5dabaea1828fef19a2f570dae8f9f26d7`,
+  `3f91ae3a6886c930cd482a13809cad5e772b8c5db0188bfa6dcbf3a7067721ea`,
+  `fd8b46c8761f548d615042b24f8ec85b32891e4f42dbafdd9bd70d58379a8afb`
+  and `5fb96c16dcae4cdef807491a65ccddb051e9451d0dc7d652f2971b1d0323185e`.
+  Four fresh isolated processes, two per candidate, produced byte-identical
+  stdout within each pair.  Raw K36/K37 witness SHA-256 values are
+  `d7e176ec1ca6963ad85605bc8d7142ec5ec21f5db568b9bd3a24fa5e4a8f6ee7`
+  and `484de796a2b47572db9b8f4dbc6130c3172d55a976973fb8e5c9131124edc901`;
+  canonical composed-witness SHA-256 is
+  `de70c1ac987906f6e800e7207bbc6fb9a07d8219002ba1c25ac51d2669139d7f`.
+  Both candidates fail the strict local `1/400000` allocation; K37 alone is
+  within the conditional cumulative `1/200000` allocation, so neither passes
+  both required comparisons.  Terminal branch and status are
+  `NO_CANDIDATE_WITHIN_BOTH_ALLOCATIONS_AFTER_ALL_CANDIDATES_COMPLETE` and
+  `VERIFIED_MAJORANA_P5_L8_CONDITIONAL_STEP2_K36_K37_ERROR_BOUNDS_NO_SELECTION_SUBCERTIFICATE`.
+  Result-contract and certificate SHA-256 values are
+  `8177c2ebe24ef9da5d796ea61fac1ea035b9d1460d9708df0271edd988bd6c32`
+  and `e99e6d5b9f4f037132d337c203ac5baf4527065f3a2ba2ee2f27565ab935c516`.
+  The 9,335,545-byte formal replay package remains non-committable evidence at
+  `/tmp/majorana-p5-formal-replay-85173e59.json`, with SHA-256
+  `d58edc020c6611ac90c060007dea8fe96f28c9038381182ace4f632fc29331b3`;
+  the committed result contract retains the witness and reconstructible replay
+  summary, so the `/tmp` package must not enter the repository.  The exact-result
+  test SHA-256 is
+  `7c349309dfb50679fe80300d02c41b5834ecf5372dbdc72d2e1f841ddf17b779`.
+  Authority is limited to these two fixed
+  conditional candidates after the conformed P3 prefix; uniform rethresholding,
+  budget-constrained drop, the remaining 98 steps, exact-Hubbard error, double
+  occupancy, physical reference and READY remain excluded.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is

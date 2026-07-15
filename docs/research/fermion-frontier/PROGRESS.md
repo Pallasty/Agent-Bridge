@@ -1116,3 +1116,50 @@ cannot rank candidates or enter a formal runner.  The next unit is a distinct
 result-unpinned P5 formal precommit that runs each frozen candidate in its own
 fresh process, reproduces the common P3 step-1 prefix, and only then evaluates
 `E12(candidate) = E1_P3 + E2_local(candidate)` under an independent checker.
+
+## Majorana P5 conditional step-2 threshold comparison subcertificate
+
+P5 S0 has now completed that result-blind formal comparison under precommit
+`85173e5982f526258563fc00e326d7f3f39b0a7a`.  An earlier formal attempt exposed
+an inherited 8-MiB stdout-parser cap as too small for the expanded persisted P5
+comparison container.  That attempt produced no scientific authority.  A
+separate persisted-container cap was then derived result-blind as four frozen
+processes times the already frozen 16-MiB per-process stdout cap (64 MiB),
+without relaxing the P3 8-MiB stdout limit.  Under the new result-unpinned
+precommit all four fresh processes (two each for K36 and K37) were replayed
+from scratch.
+The reconstructible replay-package SHA-256 is
+`d58edc020c6611ac90c060007dea8fe96f28c9038381182ace4f632fc29331b3`,
+and the independently reconstructed canonical witness SHA-256 is
+`de70c1ac987906f6e800e7207bbc6fb9a07d8219002ba1c25ac51d2669139d7f`.
+
+On the `2^-128` integer grid, K36's step-2 local increment is
+`2070126857976823014693699325755484` ticks, above the strict `1/400000`
+budget maximum `850705917302346158658436518579420`.  Adding the P3 parent
+exactly once gives `2367113404368416880810232576710860` ticks, also above the
+strict `1/200000` cumulative maximum
+`1701411834604692317316873037158841`.  K36 therefore fails both required
+comparisons.
+
+K37 reduces the local increment to
+`1113735321208794997599598935941569` ticks, but this still exceeds the same
+local maximum.  Its cumulative two-step bound is
+`1410721867600388863716132186896945` ticks, which does pass the cumulative
+allocation with `290689967004303453600740850261896` ticks of strict integer
+slack.  The frozen selector requires both the local and cumulative comparisons,
+so K37 is not eligible despite its cumulative pass.  The terminal branch is
+`NO_CANDIDATE_WITHIN_BOTH_ALLOCATIONS_AFTER_ALL_CANDIDATES_COMPLETE`, with
+status
+`VERIFIED_MAJORANA_P5_L8_CONDITIONAL_STEP2_K36_K37_ERROR_BOUNDS_NO_SELECTION_SUBCERTIFICATE`.
+
+The decisive obstruction is now the step-2 local increment, not the two-step
+cumulative budget by itself.  Continuing to tighten one uniform threshold has
+diminishing returns while sharply increasing the retained-state and replay
+resource envelope.  The next route should therefore prioritize a separately
+precommitted budget-constrained/adaptive drop rule, or a new proof that revises
+the telescoping allocation obligation before reconsidering K37; the present
+certificate cannot waive its failed local comparison.  Authority remains
+limited to the fixed L8 P3 `2^-34` first step followed by one conditional K36
+or K37 second step.  This is not a full-simulation no-go, does not assess the
+remaining 98 mapped steps or product-formula-to-exact-Hubbard error, and does
+not establish physical-reference qualification or READY.
