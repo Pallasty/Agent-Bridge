@@ -1,0 +1,82 @@
+{
+  "admission": {
+    "admitted": false,
+    "admission_artifact_must_be_external_to_packet": true,
+    "authority_decision_receipt": null,
+    "authority_policy_custodian_receipt": null,
+    "build_attestation": null,
+    "capture_authorization_receipt": null,
+    "capture_provenance_receipt": null,
+    "deletion_mechanism_receipt": null,
+    "destination_receiver_identity": null,
+    "external_currentness_provider_receipt": null,
+    "externally_pinned_allowlist_receipt": null,
+    "key_custody_receipts": null,
+    "old_key_destruction_receipt": null,
+    "producer_runtime_identity": null,
+    "revocation_state_receipt": null
+  },
+  "authorization_semantics": {
+    "challenge_bound_synthetic_hmac_is_not_external_authority": true,
+    "controlled_restore_protocol_does_not_authorize_transport": true,
+    "context_sampling_pack_is_compatibility_not_authority": true,
+    "outer_route_cannot_raise_inner_authority": true,
+    "repository_owner_research_permission_is_not_key_custody_attestation": true,
+    "self_reported_packet_booleans_are_not_authority": true
+  },
+  "boundary": {
+    "biocortex_runtime_influence": false,
+    "bridge_runtime_caller_present": false,
+    "cross_repository_transport_authorized": false,
+    "external_anti_rollback_anchor_present": false,
+    "external_currentness_provider_present": false,
+    "live_binding_satisfied": false,
+    "production_profile_active": false,
+    "same_epoch_rollback_protected": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "controlled_restore_preregistration": {
+    "contract_sha256": "039ec8237afa9b2ea3340918a2924f78f89223abbd4034d41c6d82a2e1519573",
+    "old_epoch_rejection_is_conditional": true,
+    "online_authority_is_synthetic_test_only": true,
+    "same_epoch_restore_detection": false,
+    "three_key_role_binding": true
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "operational_gap_codes": [
+    "CURRENTNESS_CHALLENGE_UNIQUENESS_UNATTESTED",
+    "EXPECTED_EPOCH_CURRENTNESS_EXTERNAL_CUSTODY_UNATTESTED",
+    "INSTANT_REVOCATION_UNAVAILABLE_WITH_LOCAL_CONSUME",
+    "OLD_EPOCH_KEY_DESTRUCTION_UNATTESTED",
+    "SAME_EPOCH_RESTORE_DETECTION_UNAVAILABLE"
+  ],
+  "predecessor": {
+    "base_commit": "7819e61f5468bb84061e6cbe111c327f63dc63bf",
+    "context_sampling_pack_sha256": "06f54d4079e09d7728effd242d9dbf0e35f4d050e0d7a9f6a5fc9a8202b9445f",
+    "s7_durable_contract_sha256": "8e4f895089f3085725988b50001ab77ec909b86b1dd203e304cc6b4a143a4c8c",
+    "s7_feature_commit": "21d16c64c00ca1ba66b6833cc018e2796e76b5ef",
+    "s7_successor_gate_sha256": "dec28c4a79e7573f0a296af43e5c03a68f61b8c13ddaef4384e19aa441500546"
+  },
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "required_successor_identity": {
+    "candidate_id_must_change": true,
+    "exact_schema_digest_required": true,
+    "independent_authentication_domain_required": true,
+    "independent_payload_profile_required": true,
+    "new_schema_id_required": true,
+    "new_version_required": true,
+    "successor_candidate_id": null,
+    "successor_payload_profile_sha256": null,
+    "successor_schema_id": null,
+    "successor_schema_sha256": null,
+    "successor_transport_domain": null
+  },
+  "schema": "agent_bridge.memory_temporal_successor_admission_gate_s8.v0",
+  "status": "NOT_ADMITTED"
+}

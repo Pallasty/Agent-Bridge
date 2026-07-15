@@ -357,6 +357,15 @@ impl std::fmt::Debug for SyntheticDurableReplayRegistryV1 {
     }
 }
 
+impl SyntheticDurableReplayRegistryV1 {
+    /// Private identity observation for the S8 admission wrapper. This does
+    /// not expose a constructor or make the generation an anti-rollback
+    /// anchor; S8 still requires an independently current authority record.
+    pub(super) fn generation_id_for_restore_epoch(&self) -> [u8; 32] {
+        self.registry_generation_id
+    }
+}
+
 impl replay_registry_seal::Sealed for SyntheticDurableReplayRegistryV1 {}
 
 impl CandidateReplayRegistryV1 for SyntheticDurableReplayRegistryV1 {
