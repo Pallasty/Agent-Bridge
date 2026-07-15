@@ -153,11 +153,8 @@ fn validate_query(query: &ExternalOperationRecoveryQueryV1) -> RecoveryResult<()
     Ok(())
 }
 
-pub(super) fn lookup_query_digest(
-    query: &ExternalOperationRecoveryQueryV1,
-) -> RecoveryResult<[u8; 32]> {
-    validate_query(query)?;
-    Ok(framed_digest(
+fn lookup_query_message(query: &ExternalOperationRecoveryQueryV1) -> Vec<u8> {
+    framed_message(
         LOOKUP_QUERY_DOMAIN,
         &[
             POLICY_ID.as_bytes(),
@@ -177,7 +174,24 @@ pub(super) fn lookup_query_digest(
             &query.original_request_sha256,
             &query.trust_policy_sha256,
         ],
-    ))
+    )
+}
+
+/// Canonically frame one S10 lookup query only after every attacker-controlled
+/// variable-length label and fixed commitment has passed validation. S14 uses
+/// this fallible seam to require byte-for-byte equality after strict decoding;
+/// the raw framer remains private to this module.
+pub(super) fn validated_lookup_query_message(
+    query: &ExternalOperationRecoveryQueryV1,
+) -> RecoveryResult<Vec<u8>> {
+    validate_query(query)?;
+    Ok(lookup_query_message(query))
+}
+
+pub(super) fn lookup_query_digest(
+    query: &ExternalOperationRecoveryQueryV1,
+) -> RecoveryResult<[u8; 32]> {
+    Ok(sha256_bytes(&validated_lookup_query_message(query)?))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

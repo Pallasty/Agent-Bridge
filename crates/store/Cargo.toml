@@ -17,6 +17,7 @@ temporal-evidence-s10-operation-recovery-synthetic = ["temporal-evidence-s9-exte
 temporal-evidence-s11-atomic-authority-operation-synthetic = ["temporal-evidence-s10-operation-recovery-synthetic"]
 temporal-evidence-s12-recovered-s9-decision-reverification-synthetic = ["temporal-evidence-s11-atomic-authority-operation-synthetic"]
 temporal-evidence-s13-recovered-envelope-delivery-synthetic = ["temporal-evidence-s12-recovered-s9-decision-reverification-synthetic"]
+temporal-evidence-s14-recovered-envelope-source-synthetic = ["temporal-evidence-s13-recovered-envelope-delivery-synthetic"]
 
 [dependencies]
 ab-core.workspace = true
