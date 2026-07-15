@@ -1,0 +1,213 @@
+{
+  "$defs": {
+    "caseId": {
+      "maxLength": 37,
+      "minLength": 37,
+      "pattern": "^case_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "label": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "positiveInteger": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "probability": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "$ref": "#/$defs/caseId"
+        },
+        "denominator": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "numerator": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      },
+      "required": [
+        "case_id",
+        "denominator",
+        "numerator"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "utc": {
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    },
+    "weight": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "$ref": "#/$defs/caseId"
+        },
+        "denominator": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "numerator": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      },
+      "required": [
+        "case_id",
+        "denominator",
+        "numerator"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:sampling-receipt:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Source-candidate pre-output sampling receipt. Schema acceptance binds the derived seed and complete selection commitment but does not prove O_EXCL execution, fsync durability, entropy unpredictability, custody, global timing, or condition-output authorization.",
+  "properties": {
+    "anti_shopping_order_verified": {
+      "const": false
+    },
+    "case_inclusion_probabilities": {
+      "items": {
+        "$ref": "#/$defs/probability"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "case_sampling_weights": {
+      "items": {
+        "$ref": "#/$defs/weight"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "condition_output_authorized": {
+      "const": false
+    },
+    "contract_digest_profile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "created_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "eligible_frame_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "external_entropy_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "frame_o_excl_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "pre_output_timing_verified": {
+      "const": false
+    },
+    "receipt_precedes_first_condition_output": {
+      "const": true,
+      "description": "Protocol assertion requiring independent custody and output-guard verification; schema validation alone is not proof."
+    },
+    "receipt_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "receipt_writer_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "reserve_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_seed_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 of the 32 derived seed bytes; the raw seed bytes are not serialized."
+    },
+    "sampling_selection_algorithm_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_selection_domain": {
+      "const": "agent-bridge/track-b/sample/v1"
+    },
+    "sampling_selection_message": {
+      "const": "domain_utf8_NUL_frame_sha256_ascii_NUL_stratum_utf8_NUL_case_id_utf8"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_sampling_receipt.v1"
+    },
+    "seed_derivation_domain": {
+      "const": "agent-bridge/track-b/sample/v1"
+    },
+    "seed_derivation_message_profile": {
+      "const": "domain_utf8_NUL_contract_sha256_ascii_NUL_trial_id_utf8_NUL_eligible_frame_sha256_ascii_NUL_external_entropy_sha256_ascii"
+    },
+    "seed_derivation_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "seed_entropy_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "selected_case_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "selection_commitment_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "Commitment to the complete selection result envelope except this commitment field itself."
+    },
+    "strata_allocation_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "trial_id": {
+      "$ref": "#/$defs/label"
+    }
+  },
+  "required": [
+    "anti_shopping_order_verified",
+    "case_inclusion_probabilities",
+    "case_sampling_weights",
+    "condition_output_authorized",
+    "contract_digest_profile_sha256",
+    "contract_sha256",
+    "created_at_utc",
+    "eligible_frame_manifest_sha256",
+    "external_entropy_sha256",
+    "frame_o_excl_receipt_sha256",
+    "pre_output_timing_verified",
+    "receipt_precedes_first_condition_output",
+    "receipt_schema_sha256",
+    "receipt_writer_sha256",
+    "reserve_manifest_sha256",
+    "sampling_seed_sha256",
+    "sampling_selection_algorithm_sha256",
+    "sampling_selection_domain",
+    "sampling_selection_message",
+    "schema",
+    "seed_derivation_domain",
+    "seed_derivation_message_profile",
+    "seed_derivation_sha256",
+    "seed_entropy_receipt_sha256",
+    "selected_case_manifest_sha256",
+    "selection_commitment_sha256",
+    "strata_allocation_manifest_sha256",
+    "trial_id"
+  ],
+  "title": "BioCortex AB Track B sampling receipt v1",
+  "type": "object",
+  "unevaluatedProperties": false
+}

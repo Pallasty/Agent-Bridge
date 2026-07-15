@@ -1,0 +1,319 @@
+{
+  "artifact_bindings": [
+    {
+      "artifact_kind": "sampling_receipt_schema",
+      "binding_path": "sampling.sampling_receipt_schema_sha256",
+      "binding_path_count_delta": 0,
+      "graph_local_dependencies": [],
+      "provider_neutral": true,
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v1.json",
+      "schema_id": "urn:agent-bridge:biocortex-ab:track-b:sampling-receipt:v1",
+      "sha256": "e418b58246eaf183b5624c7eb12299caeea933c83a07584faa915651b3cd48d4",
+      "source_candidate_history": [
+        {
+          "repo_path": "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v0.json",
+          "schema_id": "urn:agent-bridge:biocortex-ab:track-b:sampling-receipt:v0",
+          "sha256": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+          "status": "FROZEN_HISTORICAL_SOURCE_CANDIDATE_RETAINED_UNCHANGED",
+          "version": 0
+        },
+        {
+          "repo_path": "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v1.json",
+          "schema_id": "urn:agent-bridge:biocortex-ab:track-b:sampling-receipt:v1",
+          "sha256": "e418b58246eaf183b5624c7eb12299caeea933c83a07584faa915651b3cd48d4",
+          "status": "APPEND_ONLY_SUCCESSOR_SOURCE_CANDIDATE_NOT_LIVE_BOUND",
+          "version": 1
+        }
+      ],
+      "source_status": "SAME_BINDING_APPEND_ONLY_V1_SUPERSEDES_V0_NOT_LIVE_BOUND",
+      "supersession_rule": "ONE_GRAPH_BINDING_PATH_NEW_SOURCE_VERSION_PRIOR_BYTES_AND_HISTORY_RETAINED",
+      "unlocks_side_effect": false
+    },
+    {
+      "artifact_kind": "sampling_receipt_writer",
+      "binding_path": "sampling.sampling_receipt_writer_sha256",
+      "graph_local_dependencies": [
+        "sampling.sampling_receipt_schema_sha256",
+        "sampling.sampling_seed_derivation_sha256",
+        "sampling.sampling_selection_algorithm_sha256"
+      ],
+      "independent_public_source_candidate_ordinal": 13,
+      "provider_neutral": true,
+      "repo_path": "scripts/eval/biocortex_ab_track_b_sampling_receipt_writer_v0.py",
+      "schema_id": null,
+      "sha256": "a8642d2b524183e060eb2f2c16d3a4bba4bca43c8e18b8524bc14738d4f6d975",
+      "source_status": "SOURCE_ARTIFACT_IMPLEMENTED_NOT_LIVE_BOUND_NOT_RUNTIME_PROVENANCE",
+      "supporting_dependencies": [
+        "docs/design/fixtures/biocortex-ab-track-b-sampling-contract-digest-profile-v0.json"
+      ],
+      "unlocks_side_effect": false
+    }
+  ],
+  "baseline_commit": "7819e61f5468bb84061e6cbe111c327f63dc63bf",
+  "boundary": {
+    "anti_shopping_order_verified": false,
+    "capture_allowed": false,
+    "capture_created": false,
+    "condition_output_authorized": false,
+    "condition_output_created": false,
+    "contract_instance_created": false,
+    "custodian_post_write_receipt_created": false,
+    "external_custody_verified": false,
+    "frame_or_entropy_custody_receipt_created": false,
+    "graph_packet_mutated": false,
+    "live_binding_satisfied_count": 0,
+    "new_public_binding_path_count": 1,
+    "pre_output_timing_verified": false,
+    "private_runtime_artifact_emitted": false,
+    "public_source_candidate_count": 13,
+    "public_source_candidate_total": 13,
+    "real_run_admitted": false,
+    "review_authorized": false,
+    "review_packet_created": false,
+    "runtime_provenance_verified": false,
+    "sampling_receipt_real_created": false,
+    "scoring_authorized": false,
+    "side_effects_unlocked": "NONE",
+    "source_profile_count": 1,
+    "source_schema_supersession_count": 1,
+    "source_writer_count": 1,
+    "strata_allocation_pre_entropy_verified": false,
+    "synthetic_fixture_only": true,
+    "trusted_clock_verified": false,
+    "unblinding_authorized": false
+  },
+  "canonical_serialization": "UTF8_SORTED_KEYS_INDENT_2_LF_FINAL_NEWLINE_NO_NAN_DUPLICATE_KEYS_REJECTED",
+  "completed_public_bindings": [
+    "reference_condition.context_builder_sha256",
+    "review_and_blinding.map_bijection_checker_sha256",
+    "review_and_blinding.map_schema_sha256",
+    "review_and_blinding.review_command_schema_sha256",
+    "review_and_blinding.review_receipt_schema_sha256",
+    "review_and_blinding.review_schema_sha256",
+    "sampling.sampling_receipt_schema_sha256",
+    "sampling.sampling_receipt_writer_sha256",
+    "sampling.sampling_seed_derivation_sha256",
+    "sampling.sampling_selection_algorithm_sha256",
+    "truth_inputs.referent_schema_sha256",
+    "truth_inputs.strict_case_algorithm_sha256",
+    "truth_inputs.truth_manifest_schema_sha256"
+  ],
+  "data_quality_contract": {
+    "grains": [
+      {
+        "grain": "ONE_CANONICAL_CONTRACT_CORE_PER_TRIAL_ID",
+        "key": "trial_id",
+        "surface": "contract_core"
+      },
+      {
+        "grain": "ONE_ELIGIBLE_FRAME_ROW_PER_OPAQUE_CASE_ID",
+        "key": "case_id",
+        "surface": "eligible_frame"
+      },
+      {
+        "grain": "ONE_ALLOCATION_ROW_PER_STRATUM",
+        "key": "stratum",
+        "surface": "strata_allocation"
+      },
+      {
+        "grain": "ONE_EXTERNAL_ENTROPY_COMMITMENT_PER_TRIAL_SAMPLING_EVENT",
+        "key": "trial_id_x_contract_sha256_x_eligible_frame_manifest_sha256",
+        "surface": "external_entropy"
+      },
+      {
+        "grain": "ONE_DERIVATION_PER_CONTRACT_TRIAL_FRAME_ENTROPY_TUPLE",
+        "key": "contract_sha256_x_trial_id_x_eligible_frame_manifest_sha256_x_external_entropy_sha256",
+        "surface": "sampling_seed"
+      },
+      {
+        "grain": "ONE_SELECTED_ROW_PER_SELECTED_CASE_ID",
+        "key": "case_id",
+        "surface": "selected_manifest"
+      },
+      {
+        "grain": "ONE_RESERVE_ROW_PER_UNSELECTED_CASE_ID",
+        "key": "case_id",
+        "surface": "reserve_manifest"
+      },
+      {
+        "grain": "ONE_PROBABILITY_ROW_PER_SELECTED_CASE_ID",
+        "key": "case_id",
+        "surface": "case_inclusion_probabilities"
+      },
+      {
+        "grain": "ONE_WEIGHT_ROW_PER_SELECTED_CASE_ID",
+        "key": "case_id",
+        "surface": "case_sampling_weights"
+      },
+      {
+        "grain": "ONE_COMPLETE_ENVELOPE_PER_SEED_FRAME_ALLOCATION_TUPLE",
+        "key": "sampling_seed_sha256_x_eligible_frame_manifest_sha256_x_strata_allocation_manifest_sha256",
+        "surface": "complete_selection"
+      },
+      {
+        "grain": "ONE_EXCLUSIVE_CREATE_PER_CUSTODY_DIRECTORY_AND_SAMPLING_EVENT",
+        "key": "custody_directory_identity_x_trial_id_x_contract_sha256_x_eligible_frame_manifest_sha256_x_strata_allocation_manifest_sha256_x_external_entropy_sha256",
+        "surface": "sampling_receipt"
+      },
+      {
+        "grain": "ONE_RETURN_VALUE_PER_EXCLUSIVE_CREATION_ATTEMPT",
+        "key": "caller_owned_directory_fd_x_sampling_receipt_sha256",
+        "surface": "same_process_write_observation"
+      }
+    ],
+    "join_rules": [
+      "CONTRACT_CORE_CANONICAL_SHA256_EQUALS_RECEIPT_CONTRACT_SHA256",
+      "FRAME_POLICY_HASHES_EQUAL_CONTRACT_CORE_POLICY_HASHES",
+      "ALLOCATION_FRAME_HASH_EQUALS_EXACT_CANONICAL_ELIGIBLE_FRAME_HASH",
+      "ALLOCATION_POLICY_HASH_EQUALS_CONTRACT_CORE_POLICY_HASH",
+      "SEED_DERIVATION_AND_SELECTION_SEED_COMMITMENTS_EQUAL",
+      "SELECTION_FRAME_HASH_EQUALS_EXACT_CANONICAL_ELIGIBLE_FRAME_HASH",
+      "SELECTED_AND_RESERVE_MANIFESTS_EQUAL_RECOMPUTED_SELECTION",
+      "SELECTED_AND_RESERVE_CASE_IDS_ARE_DISJOINT_AND_PARTITION_FRAME_EXACTLY",
+      "SELECTED_PROBABILITY_AND_WEIGHT_CASE_IDS_HAVE_EXACT_ORDERED_ONE_TO_ONE_EQUALITY",
+      "PROBABILITY_IS_REDUCED_n_h_DIV_N_h_AT_CASE_GRAIN",
+      "WEIGHT_IS_REDUCED_N_h_DIV_n_h_AT_CASE_GRAIN",
+      "SELECTION_COMMITMENT_COVERS_COMPLETE_ENVELOPE_EXCEPT_SELF",
+      "MISSING_EXTRA_DUPLICATE_OR_MANY_TO_MANY_JOIN_ROWS_ARE_TERMINAL"
+    ]
+  },
+  "date": "2026-07-14",
+  "decision": "SOURCE_SAMPLING_RECEIPT_WRITER_IMPLEMENTED_NOT_LIVE_BOUND",
+  "evidence_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-blind-map-schema-v0.json": "ad40df50eec68fa192c79e6699a8d2da2a9c3925a387eaa7427f7e19f996d783",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v0.json": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+    "scripts/check-biocortex-ab-track-b-context-sampling-determinism-pack.sh": "0423047259ab6eb5d70f092fb9611bdf5deb027216bacc6ca9abd4b64ee9a024",
+    "scripts/eval/biocortex_ab_track_b_map_bijection_v0.py": "45f55cea933ee12df402fbb55d27ea7c6cd08ba8eef9d9868e4e491dd62a2cd2",
+    "scripts/eval/biocortex_ab_track_b_sampling_seed_derivation_v0.py": "4f51781ff707e89b4c09adffeafbdaacd75c7e1571d1a86e45d336aace888a3f",
+    "scripts/eval/biocortex_ab_track_b_sampling_selection_v0.py": "e327faf2ad73718dc33f68fdb66a89abf0ac84fbbf8d828ff79fa0e8b75772ec",
+    "scripts/eval/check_biocortex_ab_track_b_admission.py": "b09b10243f195299dc226b5d8d2b484ec74f5eecd49bb487296c391f6f193b13",
+    "scripts/eval/check_biocortex_ab_track_b_context_sampling_determinism_pack.py": "852a51f713626a760ab1d89b5449785a6611f057e37de49dcd4f308053fe619a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph_v0.json": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+    "scripts/eval/fixtures/biocortex_ab_track_b_context_sampling_determinism_pack.expected.v0.tsv": "5f3983ec8cfac3c740a8fc2fc7f1181d747854ddd514038302dfca753d25114f",
+    "scripts/eval/fixtures/biocortex_ab_track_b_context_sampling_determinism_pack_synthetic_v0.json": "5d31766048a9d5c6f61ee60c79dd00fba3ca9993017eb5c5fedb7d6bd31cb3ca",
+    "scripts/eval/fixtures/biocortex_ab_track_b_context_sampling_determinism_pack_v0.json": "06f54d4079e09d7728effd242d9dbf0e35f4d050e0d7a9f6a5fc9a8202b9445f",
+    "scripts/eval/fixtures/biocortex_ab_track_b_foundational_schema_pack_v0.json": "fbfbf5738dd81e0afe8dbc45b1e91a35e92382a1913006a9b2e5ded67c077f36",
+    "scripts/eval/fixtures/biocortex_ab_track_b_identity_composition_pack_v0.json": "c1a6c5a6c83d61f92d35948432b139749d19d5828f68a7fc2473859bba21a7e9",
+    "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json": "764f063fefe0e516547f9bd1e71417242daf292d57e480ae39b73df8bcda341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e"
+  },
+  "immutable_evidence_not_mutated": [
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v0.json",
+    "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph_v0.json",
+    "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json",
+    "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json"
+  ],
+  "next_public_frontier": [],
+  "predecessor": {
+    "integrated_baseline_commit": "7819e61f5468bb84061e6cbe111c327f63dc63bf",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_context_sampling_determinism_pack_v0.json",
+    "manifest_sha256": "06f54d4079e09d7728effd242d9dbf0e35f4d050e0d7a9f6a5fc9a8202b9445f",
+    "source_commit": "753c32c223ba04cc1b19fdf244a7036e8cfac3bf"
+  },
+  "predecessor_context_sampling_pack_sha256": "06f54d4079e09d7728effd242d9dbf0e35f4d050e0d7a9f6a5fc9a8202b9445f",
+  "predecessor_context_sampling_source_commit": "753c32c223ba04cc1b19fdf244a7036e8cfac3bf",
+  "resource_caps": {
+    "max_cases": 4096,
+    "max_contract_core_bytes": 1048576,
+    "max_json_depth": 32,
+    "max_receipt_bytes": 8388608,
+    "max_safe_integer": 9007199254740991,
+    "max_single_artifact_bytes": 8388608,
+    "max_strata": 256,
+    "max_total_input_bytes": 16777216
+  },
+  "retained_blockers": [
+    "ACTIVE_ADMISSION_STILL_PINS_RECEIPT_V0",
+    "MAP_BIJECTION_STILL_PINS_RECEIPT_V0",
+    "FRAME_AND_ENTROPY_CUSTODY_SCHEMAS_UNBOUND",
+    "OUTPUT_ADMISSION_GUARD_UNBOUND",
+    "PYTHON_RUNTIME_AND_STDLIB_BINARY_PROVENANCE_UNBOUND",
+    "SOURCE_WRITER_NOT_RUNTIME_PROVENANCE",
+    "STRATA_ALLOCATION_PRE_ENTROPY_CUSTODY_UNBOUND",
+    "V1_RECEIPT_SCHEMA_NOT_LIVE_BOUND",
+    "SAMPLING_RECEIPT_WRITER_NOT_LIVE_BOUND",
+    "CONTRACT_DIGEST_PROFILE_NOT_LIVE_BOUND",
+    "CONTRACT_OWNER_POLICY_BINDINGS_UNSET",
+    "EXTERNAL_ENTROPY_ANTI_SHOPPING_CUSTODY_UNPROVEN",
+    "CUSTODIAN_POST_WRITE_RECEIPT_UNBOUND",
+    "TRUSTED_CLOCK_UNBOUND",
+    "DETERMINISTIC_TRUTH_GATE_PRODUCER_AND_PROVENANCE_UNBOUND",
+    "ELIGIBLE_FRAME_AND_STRATA_MANIFEST_SCHEMAS_UNBOUND",
+    "REFERENCE_RUNTIME_CONFIG_SNAPSHOT_CLOCK_AND_BUDGET_UNBOUND",
+    "REVIEW_PROVENANCE_CHECKER_UNBOUND",
+    "REVIEW_RAW_RESPONSE_SCHEMA_UNBOUND",
+    "REVIEWER_ROSTER_INSTRUCTION_AND_CONFLICT_MANIFEST_UNBOUND",
+    "SOURCE_ARTIFACTS_ARE_NOT_RUNTIME_INSTANCES"
+  ],
+  "schema": "agent_bridge.biocortex_ab_track_b_sampling_receipt_writer_pack.v0",
+  "schema_revision": {
+    "binding_path": "sampling.sampling_receipt_schema_sha256",
+    "compatibility": "V0_REJECTED_BY_WRITER_V0",
+    "predecessor_sha256": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+    "revision_rule": "APPEND_ONLY_SUPERSESSION_SAME_BINDING_PATH_NO_GRAPH_NODE_ADDED",
+    "successor_sha256": "e418b58246eaf183b5624c7eb12299caeea933c83a07584faa915651b3cd48d4"
+  },
+  "semantics": {
+    "allocation_timing_boundary": "STRATA_ALLOCATION_MUST_BE_FROZEN_BEFORE_EXTERNAL_ENTROPY_BUT_SOURCE_WRITER_DOES_NOT_VERIFY_CUSTODY_ORDER",
+    "contract_digest": "SHA256_EXACT_CANONICAL_PRE_SEED_CONTRACT_CORE_ALLOWLIST",
+    "contract_digest_cycle_boundary": "DYNAMIC_FRAME_ENTROPY_SEED_SELECTION_OUTPUT_REVIEW_SCORE_AND_UNBLIND_FIELDS_FORBIDDEN",
+    "dependency_import_boundary": "EXACT_SEED_AND_SELECTION_BYTES_EXECUTED_WITH_CONTROLLED_IMPORT_ALLOWLIST_AND_WRITER_BOUND_HMAC_SHA256_PRIMITIVE",
+    "public_source_coverage": "PREDECESSOR_12_PLUS_WRITER_1_EQUALS_13_OF_13_SCHEMA_SUPERSESSION_AND_PROFILE_DO_NOT_ADD_GRAPH_BINDINGS",
+    "receipt_authority": "CONDITION_OUTPUT_AUTHORIZED_FALSE_SOURCE_SCHEMA_ACCEPTANCE_IS_NOT_EXECUTION_OR_GUARD_PROOF",
+    "sampling_receipt_v0_status": "FROZEN_UNCHANGED_INSUFFICIENT_FOR_SEED_AND_COMPLETE_SELECTION_BINDING",
+    "sampling_receipt_v1_status": "APPEND_ONLY_SUCCESSOR_SOURCE_CANDIDATE_SAME_GRAPH_BINDING_NOT_LIVE_BOUND",
+    "v0_fail_closed": {
+      "active_admission_migrated_to_v1": false,
+      "active_map_bijection_migrated_to_v1": false,
+      "v0_accepted_by_v1_writer": false,
+      "v0_additional_properties_allowed": false,
+      "v0_mutated": false,
+      "v0_requires_sampling_seed_sha256": false,
+      "v0_requires_selection_commitment_sha256": false,
+      "v1_writer_emits_schema": "agent_bridge.biocortex_ab_track_b_sampling_receipt.v1"
+    },
+    "write_protocol": {
+      "condition_output_authorized": false,
+      "create_file_mode_octal": "0600",
+      "directory_requirements": "CALLER_OPEN_DIRECTORY_FD_CURRENT_EUID_EXACT_MODE_0700",
+      "evidence_scope": "SAME_PROCESS_OBSERVATION_NOT_INDEPENDENT_CUSTODY_ATTESTATION",
+      "final_file_mode_octal": "0400",
+      "immutable_receipt_contains_post_write_claim": false,
+      "leaf_name": "sampling-receipt.json",
+      "required_later_evidence": "CAUSALLY_LATER_INDEPENDENT_CUSTODIAN_RECEIPT",
+      "same_process_observation_proves": [
+        "EXCLUSIVE_CREATE_RETURNED_SUCCESS",
+        "FILE_FSYNC_RETURNED_SUCCESS",
+        "READ_ONLY_0400_SEAL_FSYNC_RETURNED_SUCCESS",
+        "PARENT_DIRECTORY_FSYNC_RETURNED_SUCCESS",
+        "IMMEDIATE_REREAD_IDENTITY_AND_BYTES_MATCHED"
+      ],
+      "same_process_observation_proves_not": [
+        "INDEPENDENT_CUSTODY",
+        "TRUSTED_CLOCK",
+        "ENTROPY_UNPREDICTABILITY_OR_ANTI_SHOPPING_ORDER",
+        "DURABILITY_ACROSS_ALL_FILESYSTEM_KERNEL_CONTROLLER_OR_HARDWARE_FAILURES",
+        "SAME_EUID_CHMOD_OR_POST_WRITE_MUTATION_PREVENTION",
+        "HOST_PYTHON_AND_STDLIB_BINARY_PROVENANCE",
+        "LIVE_RUNTIME_SOURCE_PROVENANCE",
+        "FIRST_CONDITION_OUTPUT_GUARD_ENFORCEMENT"
+      ],
+      "write_flags_profile": "O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC",
+      "write_order": "CREATE_0600_WRITE_CONTENT_FSYNC_FCHMOD_0400_SEAL_FSYNC_CLOSE_PARENT_DIRECTORY_FSYNC_EXACT_REREAD_THEN_RETURN_OBSERVATION"
+    }
+  },
+  "supporting_artifacts": [
+    {
+      "artifact_kind": "sampling_contract_digest_profile",
+      "binding_path": null,
+      "graph_node_created": false,
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-sampling-contract-digest-profile-v0.json",
+      "schema_id": "agent_bridge.biocortex_ab_track_b_sampling_contract_digest_profile.v0",
+      "sha256": "a8972ad5e75b30634931fee84f08226e2660413b45cf9dfea948089d61160243",
+      "source_status": "SUPPORTING_SOURCE_PROFILE_NOT_LIVE_BOUND",
+      "unlocks_side_effect": false
+    }
+  ],
+  "synthetic_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_sampling_receipt_writer_pack_synthetic_v0.json",
+  "synthetic_fixture_sha256": "79bdb87f5fdaeb72423ff12002f4cf9a0deca2e9cd9b86e820321357a0641b8a"
+}
