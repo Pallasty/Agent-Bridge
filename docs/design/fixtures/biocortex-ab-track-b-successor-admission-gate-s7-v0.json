@@ -1,0 +1,81 @@
+{
+  "admission": {
+    "admitted": false,
+    "admission_artifact_must_be_external_to_packet": true,
+    "authority_decision_receipt": null,
+    "authority_policy_custodian_receipt": null,
+    "build_attestation": null,
+    "capture_authorization_receipt": null,
+    "capture_provenance_receipt": null,
+    "deletion_mechanism_receipt": null,
+    "destination_receiver_identity": null,
+    "externally_pinned_allowlist_receipt": null,
+    "key_custody_receipts": null,
+    "producer_runtime_identity": null,
+    "revocation_state_receipt": null
+  },
+  "authorization_semantics": {
+    "durable_replay_does_not_authorize_transport": true,
+    "outer_route_cannot_raise_inner_authority": true,
+    "repository_owner_research_permission_is_not_key_custody_attestation": true,
+    "self_reported_packet_booleans_are_not_authority": true,
+    "sibling_review_artifacts_are_not_transport_authority": true
+  },
+  "boundary": {
+    "biocortex_runtime_influence": false,
+    "bridge_runtime_caller_present": false,
+    "candidate_context_builder_present": false,
+    "cross_repository_transport_authorized": false,
+    "live_binding_satisfied": false,
+    "production_profile_active": false,
+    "side_effects_unlocked": "NONE",
+    "truth_manifest_builder_present": false
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "predecessor": {
+    "candidate_exact_payload_profile_sha256": "fe3b66ad1d5711f38e790cf792a0db63bd7879ce9795c07f745ab9127575be23",
+    "candidate_schema_id": "agent_bridge.track_b.candidate_evidence_envelope.v0",
+    "protected_boundary": {
+      "biocortex_runtime_influence": false,
+      "cross_repository_transport_authorized": false,
+      "live_binding_satisfied": false,
+      "side_effects_unlocked": "NONE"
+    },
+    "s6_feature_commit": "b3a77aecea68edae4544929c747305634967f8af",
+    "transport_contract_sha256": "4b54057fe78fd5eb760c89b86e3018003e4cf0a1b354ca720007927e7b005e74"
+  },
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "required_successor_identity": {
+    "candidate_id_must_change": true,
+    "exact_schema_digest_required": true,
+    "independent_authentication_domain_required": true,
+    "independent_payload_profile_required": true,
+    "new_schema_id_required": true,
+    "new_version_required": true,
+    "successor_candidate_id": null,
+    "successor_payload_profile_sha256": null,
+    "successor_schema_id": null,
+    "successor_schema_sha256": null,
+    "successor_transport_domain": null
+  },
+  "review_compatibility": {
+    "strict_review_pack_sha256": "24abcd9eb33eb9f999df2a0f791ea3c6167f766c95268f4f5f29497b771bfc61",
+    "strict_review_receipt_schema_sha256": "f8af1331ae134be0f09a5e546b2d67e0db8ebfabb2177dc14a376bac773f463c",
+    "compatibility_is_not_live_binding": true
+  },
+  "schema": "agent_bridge.memory_temporal_successor_admission_gate_s7.v0",
+  "status": "NOT_ADMITTED",
+  "version_and_replay_policy": {
+    "cross_version_nonce_reuse_forbidden": true,
+    "key_id_reassignment_forbidden": true,
+    "predecessor_false_boundary_cannot_be_reinterpreted": true,
+    "replay_identity_encoding_remains_exact_until_separate_review": "framed_sha256_s5_transport_key_id_ascii_then_lowercase_hex_request_nonce_ascii",
+    "replay_identity_sha256_known_vector": "7c21a79214624b4c1c259d38aeff4b228d4df0071d180be249b78a5c47e1e8a5"
+  }
+}

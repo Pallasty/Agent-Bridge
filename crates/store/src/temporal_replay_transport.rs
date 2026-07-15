@@ -14,6 +14,9 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
 
+#[cfg(feature = "temporal-evidence-s7-durable-replay-synthetic")]
+mod durable_replay_registry;
+
 const S5_SOURCE_MANIFEST_SHA256: &str =
     "309f2533ef7b78d0c1f252325c0f79ab1300f8f68837a5a75ce7c14d8b011d6a";
 const S5_SOURCE_COMMIT: &str = "8739b69fb59fd704dacfe1a44bfc411ed9ebb913";
@@ -785,7 +788,10 @@ pub(crate) fn verify_synthetic_detached_candidate_v1<R: CandidateReplayRegistryV
     let source_manifest_sha256 = permit.source_manifest.manifest_sha256.clone();
 
     // All validation and allocations are complete before the sole atomic
-    // replay operation. No fallible work follows a successful consumption.
+    // replay operation. The only post-consume check compares fixed-size receipt
+    // commitments. A mismatch fails closed without releasing the private token;
+    // the nonce may remain burned, which is safer than accepting an ambiguous
+    // registry result.
     let replay_receipt = registry.consume_once(ReplayConsumeRequestV1 {
         consumed_at_utc: evaluated_at_utc,
         expires_at_utc: payload.expires_at_utc,
@@ -793,12 +799,44 @@ pub(crate) fn verify_synthetic_detached_candidate_v1<R: CandidateReplayRegistryV
         replay_key_sha256,
         scope_sha256,
     })?;
+    if replay_receipt.replay_key_sha256 != replay_key_sha256
+        || replay_receipt.scope_sha256 != scope_sha256
+    {
+        return Err(verifier_error(
+            "track_b_detached_v1_registry_indeterminate",
+            "replay registry receipt did not match the consumed request commitments",
+        ));
+    }
     Ok(VerifiedDetachedCandidateV1 {
         exact_payload,
         payload_sha256,
         replay_receipt,
         source_manifest_sha256,
     })
+}
+
+#[cfg(feature = "temporal-evidence-s7-durable-replay-synthetic")]
+fn verify_synthetic_detached_candidate_durable_v1(
+    permit: SyntheticDetachedVerificationPermitV1,
+    authentication: DetachedCandidateAuthenticationV1,
+    exact_payload: Box<[u8]>,
+    registry: &durable_replay_registry::SyntheticDurableReplayRegistryV1,
+    evaluated_at_utc: i64,
+) -> VerifierResult<VerifiedDetachedCandidateV1> {
+    let verified = verify_synthetic_detached_candidate_v1(
+        permit,
+        authentication,
+        exact_payload,
+        registry,
+        evaluated_at_utc,
+    )?;
+    if !verified.replay_receipt.durable {
+        return Err(verifier_error(
+            "track_b_detached_v1_registry_indeterminate",
+            "S7 durable verification received a non-durable replay receipt",
+        ));
+    }
+    Ok(verified)
 }
 
 #[cfg(test)]
@@ -880,7 +918,7 @@ mod tests {
         }
     }
 
-    fn sample_payload(trial_id: &str) -> CandidatePayloadWire {
+    pub(super) fn sample_payload(trial_id: &str) -> CandidatePayloadWire {
         CandidatePayloadWire {
             boundary: false_boundary(),
             candidate_evidence_schema_sha256: crate::TRACK_B_CANDIDATE_EVIDENCE_SCHEMA_SHA256
@@ -936,7 +974,7 @@ mod tests {
         }
     }
 
-    fn permit(payload: &CandidatePayloadWire) -> SyntheticDetachedVerificationPermitV1 {
+    pub(super) fn permit(payload: &CandidatePayloadWire) -> SyntheticDetachedVerificationPermitV1 {
         synthetic_detached_verification_permit_v1(
             synthetic_source_manifest_token_v1(),
             KEY,
@@ -964,11 +1002,11 @@ mod tests {
         .expect("well-formed detached authentication")
     }
 
-    fn authentication(exact_payload: &[u8]) -> DetachedCandidateAuthenticationV1 {
+    pub(super) fn authentication(exact_payload: &[u8]) -> DetachedCandidateAuthenticationV1 {
         authentication_with_profile(exact_payload, &KEY, KEY_ID, AUTHENTICATION_DOMAIN)
     }
 
-    fn canonical(payload: &CandidatePayloadWire) -> Box<[u8]> {
+    pub(super) fn canonical(payload: &CandidatePayloadWire) -> Box<[u8]> {
         serde_json::to_vec(payload)
             .expect("serialize synthetic candidate")
             .into_boxed_slice()
@@ -1204,5 +1242,41 @@ mod tests {
             verify_s5_source_manifest_v1(b"not-the-frozen-manifest".to_vec().into_boxed_slice())
                 .expect_err("arbitrary manifest bytes cannot mint the source token");
         assert_eq!(error.code(), "track_b_detached_v1_source_manifest_mismatch");
+    }
+
+    #[cfg(feature = "temporal-evidence-s7-durable-replay-synthetic")]
+    struct SyntheticMismatchedReceiptRegistryV1;
+
+    #[cfg(feature = "temporal-evidence-s7-durable-replay-synthetic")]
+    impl replay_registry_seal::Sealed for SyntheticMismatchedReceiptRegistryV1 {}
+
+    #[cfg(feature = "temporal-evidence-s7-durable-replay-synthetic")]
+    impl CandidateReplayRegistryV1 for SyntheticMismatchedReceiptRegistryV1 {
+        fn consume_once(
+            &self,
+            request: ReplayConsumeRequestV1,
+        ) -> VerifierResult<ReplayConsumeReceiptV1> {
+            Ok(ReplayConsumeReceiptV1 {
+                durable: true,
+                replay_key_sha256: [0xff; 32],
+                scope_sha256: request.scope_sha256,
+            })
+        }
+    }
+
+    #[cfg(feature = "temporal-evidence-s7-durable-replay-synthetic")]
+    #[test]
+    fn temporal_truth_replay_transport_s7_rejects_mismatched_registry_receipt() {
+        let payload = sample_payload("trial-s7-mismatched-receipt");
+        let exact = canonical(&payload);
+        let error = verify_synthetic_detached_candidate_v1(
+            permit(&payload),
+            authentication(&exact),
+            exact,
+            &SyntheticMismatchedReceiptRegistryV1,
+            150,
+        )
+        .expect_err("a registry cannot substitute replay receipt identity");
+        assert_eq!(error.code(), "track_b_detached_v1_registry_indeterminate");
     }
 }
