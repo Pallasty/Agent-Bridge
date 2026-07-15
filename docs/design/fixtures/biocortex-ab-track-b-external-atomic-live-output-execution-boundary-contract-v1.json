@@ -1,0 +1,1934 @@
+{
+  "authority_grain": {
+    "authority_decision_payload_contract": {
+      "canonicalization": "RFC8785_COMPATIBLE_RESTRICTED_CANONICAL_JSON_PROFILE_V1",
+      "closed": true,
+      "digest_field": "AUTHORITY_DECISION_SHA256",
+      "digest_rule": "LOWER_HEX_SHA256_OF_EXACT_CANONICAL_AUTHORITY_DECISION_PAYLOAD_BYTES",
+      "excluded_result_fields": [
+        "AUTHORITY_DECISION_SHA256",
+        "SIGNATURE_RECEIPT_SHA256"
+      ],
+      "field_names": [
+        "OPERATION_ID",
+        "REQUEST_ENVELOPE_SHA256",
+        "PROVIDER_INCARNATION",
+        "ACTUAL_AUTHORITY_EPOCH",
+        "ACTUAL_LEADER_TERM",
+        "ACTUAL_COMMITTED_REVISION",
+        "RECORD_SEQUENCE",
+        "AUTHORITY_STATE",
+        "CURRENTNESS_DECISION_SHA256",
+        "ANTI_ROLLBACK_WITNESS_SHA256",
+        "LOGICAL_SINK_RESERVATION_RECEIPT_SHA256",
+        "LOGICAL_SINK_FENCE",
+        "ACTUAL_SINK_IDENTITY_SHA256",
+        "ACTUAL_SIGNER_KEY_VERSION"
+      ],
+      "field_profiles": [
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "OPERATION_ID",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "DETERMINISTIC_REQUEST_DERIVATION",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "REQUEST_ENVELOPE_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "DETERMINISTIC_REQUEST_DERIVATION",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "PROVIDER_INCARNATION",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "ACTUAL_AUTHORITY_EPOCH",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "ACTUAL_LEADER_TERM",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "ACTUAL_COMMITTED_REVISION",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "RECORD_SEQUENCE",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "enum": [
+            "START_COMMITTED",
+            "GENERATOR_START_COMMITTED",
+            "STREAM_OBSERVED",
+            "SEALED_OBSERVED",
+            "BURNED_EMPTY",
+            "PARTIAL_QUARANTINED",
+            "AMBIGUOUS_QUARANTINED"
+          ],
+          "max_length": 64,
+          "min_length": 1,
+          "name": "AUTHORITY_STATE",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "CURRENTNESS_DECISION_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "ANTI_ROLLBACK_WITNESS_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "LOGICAL_SINK_RESERVATION_RECEIPT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "LOGICAL_SINK_FENCE",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "ACTUAL_SINK_IDENTITY_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "ACTUAL_SIGNER_KEY_VERSION",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        }
+      ],
+      "known_answer_test": {
+        "payload": {
+          "ACTUAL_AUTHORITY_EPOCH": "1",
+          "ACTUAL_COMMITTED_REVISION": "3",
+          "ACTUAL_LEADER_TERM": "2",
+          "ACTUAL_SIGNER_KEY_VERSION": "7",
+          "ACTUAL_SINK_IDENTITY_SHA256": "0606060606060606060606060606060606060606060606060606060606060606",
+          "ANTI_ROLLBACK_WITNESS_SHA256": "0404040404040404040404040404040404040404040404040404040404040404",
+          "AUTHORITY_STATE": "AMBIGUOUS_QUARANTINED",
+          "CURRENTNESS_DECISION_SHA256": "0303030303030303030303030303030303030303030303030303030303030303",
+          "LOGICAL_SINK_FENCE": "6",
+          "LOGICAL_SINK_RESERVATION_RECEIPT_SHA256": "0505050505050505050505050505050505050505050505050505050505050505",
+          "OPERATION_ID": "0101010101010101010101010101010101010101010101010101010101010101",
+          "PROVIDER_INCARNATION": "provider-incarnation-1",
+          "RECORD_SEQUENCE": "4",
+          "REQUEST_ENVELOPE_SHA256": "0202020202020202020202020202020202020202020202020202020202020202"
+        },
+        "payload_canonical_bytes": 890,
+        "payload_sha256": "1a615a23b60b56c63acfc3fcccec8841b70fa5989b609e5fa1a18fd014387db3"
+      },
+      "max_canonical_bytes": 65536,
+      "request_envelope_resolution_rule": "RESOLVE_EXACT_CLOSED_REQUEST_ENVELOPE_BY_REQUEST_ENVELOPE_SHA256_RECOMPUTE_DIGEST_AND_VALIDATE_ALL_48_FIELDS",
+      "result_projection_rule": "FINAL_RESULT_ENVELOPE_EXCLUDING_AUTHORITY_DECISION_SHA256_AND_SIGNATURE_RECEIPT_SHA256_HAS_EXACTLY_THE_14_PAYLOAD_FIELDS_AND_EVERY_VALUE_IS_BYTE_EQUAL_TO_THE_SIGNED_PAYLOAD_VALUE"
+    },
+    "granularity": "ONE_INVOCATION_SLOT_ONE_OPERATION_ONE_LOGICAL_AND_PHYSICAL_SINK_ONE_EXECUTOR_SESSION",
+    "operation_id_derivation": {
+      "canonicalization": "RFC8785_COMPATIBLE_RESTRICTED_CANONICAL_JSON_PROFILE_V1",
+      "domain_tag": "agent-bridge/biocortex-ab/track-b/live-output-operation/v1",
+      "framing": "UINT32_BE_DOMAIN_LENGTH_DOMAIN_BYTES_UINT64_BE_REQUEST_LENGTH_REQUEST_BYTES",
+      "hash": "SHA256",
+      "input_bindings": [
+        "PROTOCOL_ID",
+        "AUTHORITY_NAMESPACE_ID",
+        "TENANT_ID",
+        "AUDIENCE",
+        "OWNER_TRIAL_ID",
+        "OWNER_TRIAL_REGISTRATION_RECEIPT_SHA256",
+        "SAMPLING_ATTEMPT_NAMESPACE_SHA256",
+        "SAMPLING_RECEIPT_SHA256",
+        "SAMPLING_CLAIM_RECEIPT_SHA256",
+        "SAMPLING_TERMINAL_OUTCOME_RECEIPT_SHA256",
+        "GENERATION_PLAN_SHA256",
+        "LOCAL_GUARD_VALIDATION_RECEIPT_SHA256",
+        "LOCAL_GUARD_SOURCE_SHA256",
+        "LOCAL_GUARD_RECEIPT_SCHEMA_SHA256",
+        "GENERATION_SESSION_SHA256",
+        "INVOCATION_SLOT",
+        "FIRST_OUTPUT_UNIT_SHA256",
+        "CASE_ID",
+        "OPAQUE_CONDITION_ID",
+        "PROMPT_CONTEXT_SHA256",
+        "GENERATOR_BUILD_SHA256",
+        "MODEL_SNAPSHOT_SHA256",
+        "TOKENIZER_SHA256",
+        "DECODING_PROFILE_SHA256",
+        "SINK_PROVIDER_ID",
+        "SINK_NAMESPACE_ID",
+        "SINK_SLOT_ID",
+        "SINK_IDENTITY_COMMITMENT_SHA256",
+        "EXECUTOR_SESSION_ID",
+        "EXECUTOR_BUILD_SHA256",
+        "EXECUTOR_RUNTIME_ATTESTATION_SHA256",
+        "CHANNEL_BINDING_SHA256",
+        "OWNER_TRUST_POLICY_SHA256",
+        "CUSTODIAN_TRUST_POLICY_SHA256",
+        "PROVIDER_PROFILE_ID",
+        "PROVIDER_CLUSTER_ID",
+        "EXPECTED_PROVIDER_INCARNATION",
+        "EXPECTED_AUTHORITY_EPOCH",
+        "MIN_LEADER_TERM",
+        "MIN_COMMITTED_REVISION",
+        "CHALLENGE",
+        "CONCRETE_REPLAY_IDENTITY_SHA256",
+        "SIGNER_KMS_RESOURCE_ID",
+        "SIGNER_KEY_VERSION",
+        "SIGNER_PUBLIC_KEY_SHA256",
+        "CURRENTNESS_REQUIREMENT_SHA256",
+        "ANTI_ROLLBACK_WITNESS_REQUIREMENT_SHA256",
+        "LOGICAL_SINK_FENCE_REQUIREMENT_SHA256"
+      ],
+      "operation_id_is_excluded_from_its_own_inputs": true,
+      "output_encoding": "LOWER_HEX_64"
+    },
+    "request_envelope": {
+      "closed": true,
+      "fields": [
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "PROTOCOL_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "AUTHORITY_NAMESPACE_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "TENANT_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "AUDIENCE",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "OWNER_TRIAL_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "OWNER_TRIAL_REGISTRATION_RECEIPT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "SAMPLING_ATTEMPT_NAMESPACE_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "SAMPLING_RECEIPT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "SAMPLING_CLAIM_RECEIPT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "SAMPLING_TERMINAL_OUTCOME_RECEIPT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "GENERATION_PLAN_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "LOCAL_GUARD_VALIDATION_RECEIPT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "LOCAL_GUARD_SOURCE_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "LOCAL_GUARD_RECEIPT_SCHEMA_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "GENERATION_SESSION_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "INVOCATION_SLOT",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "FIRST_OUTPUT_UNIT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "CASE_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "OPAQUE_CONDITION_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "PROMPT_CONTEXT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "GENERATOR_BUILD_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "MODEL_SNAPSHOT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "TOKENIZER_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "DECODING_PROFILE_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "SINK_PROVIDER_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "SINK_NAMESPACE_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "SINK_SLOT_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "SINK_IDENTITY_COMMITMENT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "EXECUTOR_SESSION_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "EXECUTOR_BUILD_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "EXECUTOR_RUNTIME_ATTESTATION_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "CHANNEL_BINDING_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "OWNER_TRUST_POLICY_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "CUSTODIAN_TRUST_POLICY_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "PROVIDER_PROFILE_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "PROVIDER_CLUSTER_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "EXPECTED_PROVIDER_INCARNATION",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "EXPECTED_AUTHORITY_EPOCH",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "MIN_LEADER_TERM",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "MIN_COMMITTED_REVISION",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "CHALLENGE",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "CONCRETE_REPLAY_IDENTITY_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 512,
+          "min_length": 1,
+          "name": "SIGNER_KMS_RESOURCE_ID",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,512}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "SIGNER_KEY_VERSION",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "SIGNER_PUBLIC_KEY_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "CURRENTNESS_REQUIREMENT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "ANTI_ROLLBACK_WITNESS_REQUIREMENT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "LOGICAL_SINK_FENCE_REQUIREMENT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "CALLER_PRECOMMITTED_INPUT_OR_INDEPENDENT_PIN",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        }
+      ],
+      "max_canonical_bytes": 65536
+    },
+    "result_envelope": {
+      "closed": true,
+      "fields": [
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "OPERATION_ID",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "DETERMINISTIC_REQUEST_DERIVATION",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "REQUEST_ENVELOPE_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "DETERMINISTIC_REQUEST_DERIVATION",
+          "stage": "BEFORE_EXTERNAL_LINEARIZATION",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "max_length": 192,
+          "min_length": 1,
+          "name": "PROVIDER_INCARNATION",
+          "pattern": "^[^\\u0000-\\u001f\\u007f]{1,192}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "ACTUAL_AUTHORITY_EPOCH",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "ACTUAL_LEADER_TERM",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "ACTUAL_COMMITTED_REVISION",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "RECORD_SEQUENCE",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "UTF8_NFC_BYTE_EXACT",
+          "encoding": "UTF8_NFC_TOKEN",
+          "enum": [
+            "START_COMMITTED",
+            "GENERATOR_START_COMMITTED",
+            "STREAM_OBSERVED",
+            "SEALED_OBSERVED",
+            "BURNED_EMPTY",
+            "PARTIAL_QUARANTINED",
+            "AMBIGUOUS_QUARANTINED"
+          ],
+          "max_length": 64,
+          "min_length": 1,
+          "name": "AUTHORITY_STATE",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "AUTHORITY_DECISION_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "CURRENTNESS_DECISION_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "ANTI_ROLLBACK_WITNESS_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "LOGICAL_SINK_RESERVATION_RECEIPT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "LOGICAL_SINK_FENCE",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "ACTUAL_SINK_IDENTITY_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "ARBITRARY_PRECISION_UNSIGNED_INTEGER",
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "ACTUAL_SIGNER_KEY_VERSION",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        },
+        {
+          "comparison_semantics": "BYTE_EXACT",
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "SIGNATURE_RECEIPT_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "source": "EXTERNAL_AUTHORITY_COMMITTED_RESULT",
+          "stage": "AT_LINEARIZATION_OR_SIGNED_OUTBOX",
+          "type": "string"
+        }
+      ],
+      "max_canonical_bytes": 65536
+    },
+    "result_request_constraints": [
+      {
+        "result_field": "OPERATION_ID",
+        "rule": "EQUAL_LOWER_HEX_SHA256_OF_LENGTH_PREFIXED_DOMAIN_AND_EXACT_CANONICAL_REQUEST_ENVELOPE_BYTES"
+      },
+      {
+        "result_field": "REQUEST_ENVELOPE_SHA256",
+        "rule": "EQUAL_SHA256_OF_EXACT_CANONICAL_REQUEST_ENVELOPE_BYTES"
+      },
+      {
+        "result_field": "PROVIDER_INCARNATION",
+        "rule": "EQUAL_EXPECTED_PROVIDER_INCARNATION"
+      },
+      {
+        "result_field": "ACTUAL_AUTHORITY_EPOCH",
+        "rule": "EQUAL_EXPECTED_AUTHORITY_EPOCH"
+      },
+      {
+        "result_field": "ACTUAL_LEADER_TERM",
+        "rule": "GREATER_THAN_OR_EQUAL_MIN_LEADER_TERM"
+      },
+      {
+        "result_field": "ACTUAL_COMMITTED_REVISION",
+        "rule": "GREATER_THAN_OR_EQUAL_MIN_COMMITTED_REVISION"
+      },
+      {
+        "result_field": "ACTUAL_SIGNER_KEY_VERSION",
+        "rule": "EQUAL_REQUEST_SIGNER_KEY_VERSION_AND_EXPLICITLY_NONZERO"
+      },
+      {
+        "result_field": "SIGNATURE_RECEIPT_SHA256",
+        "rule": "RESOLVE_EXACT_IMMUTABLE_RECEIPT_BY_HASH_RECONSTRUCT_FROZEN_MESSAGE_AND_VERIFY_RECEIPT_SIGNATURE_AGAINST_REQUEST_PINS"
+      },
+      {
+        "result_field": "ACTUAL_SINK_IDENTITY_SHA256",
+        "rule": "EQUAL_REQUEST_SINK_IDENTITY_COMMITMENT_SHA256"
+      }
+    ],
+    "session_wide_bearer_authority_allowed": false,
+    "signature_receipt_contract": {
+      "canonicalization": "RFC8785_COMPATIBLE_RESTRICTED_CANONICAL_JSON_PROFILE_V1",
+      "closed": true,
+      "duplicate_key_policy": "REJECT_BEFORE_CANONICALIZATION",
+      "fields": [
+        {
+          "const": "ED25519",
+          "name": "ALGORITHM",
+          "type": "string"
+        },
+        {
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "SIGNED_MESSAGE_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "decoded_bytes": 64,
+          "encoding": "BASE64URL_NOPAD",
+          "max_length": 86,
+          "min_length": 86,
+          "name": "SIGNATURE_BYTES_BASE64URL_NOPAD",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "type": "string"
+        },
+        {
+          "max_length": 512,
+          "min_length": 1,
+          "name": "KMS_RESOURCE_ID",
+          "type": "string"
+        },
+        {
+          "encoding": "CANONICAL_UNSIGNED_DECIMAL_ASCII",
+          "max_length": 20,
+          "min_length": 1,
+          "name": "KEY_VERSION",
+          "pattern": "^[1-9][0-9]*$",
+          "type": "string"
+        },
+        {
+          "encoding": "LOWER_HEX",
+          "max_length": 64,
+          "min_length": 64,
+          "name": "PUBLIC_KEY_SHA256",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "max_length": 512,
+          "min_length": 1,
+          "name": "KMS_RESPONSE_NAME",
+          "type": "string"
+        },
+        {
+          "const": true,
+          "name": "VERIFIED_DATA_CRC32C",
+          "type": "boolean"
+        },
+        {
+          "const": true,
+          "name": "SIGNATURE_CRC32C_VALIDATED",
+          "type": "boolean"
+        },
+        {
+          "enum": [
+            "SOFTWARE",
+            "HSM",
+            "EXTERNAL"
+          ],
+          "name": "PROTECTION_LEVEL",
+          "type": "string"
+        }
+      ],
+      "key_binding": {
+        "key_version_rule": "KEY_VERSION_BYTE_EQUALS_REQUEST_SIGNER_KEY_VERSION_BYTE_EQUALS_AUTHORITY_DECISION_ACTUAL_SIGNER_KEY_VERSION_BYTE_EQUALS_FINAL_CANONICAL_VERSION_COMPONENT_OF_KMS_RESOURCE_ID",
+        "kms_resource_id_semantics": "EXACT_VERSIONED_SIGNER_RESOURCE_ID",
+        "kms_resource_rule": "KMS_RESOURCE_ID_BYTE_EQUALS_REQUEST_SIGNER_KMS_RESOURCE_ID",
+        "kms_response_name_rule": "KMS_RESPONSE_NAME_BYTE_EQUALS_KMS_RESOURCE_ID",
+        "public_key_material_encoding": "RAW_32_BYTE_RFC8032_ED25519_VERIFICATION_KEY",
+        "public_key_provider_decode_rule": "STRICT_PEM_TO_DER_SUBJECTPUBLICKEYINFO_ED25519_OID_1_3_101_112_ABSENT_PARAMETERS_EXTRACT_EXACT_32_BYTE_SUBJECTPUBLICKEY",
+        "public_key_sha256_rule": "PUBLIC_KEY_SHA256_EQUALS_LOWER_HEX_SHA256_OF_EXACT_RAW_32_BYTE_RFC8032_ED25519_VERIFICATION_KEY"
+      },
+      "max_canonical_bytes": 65536,
+      "message_derivation": {
+        "closed": true,
+        "domain_tag": "agent-bridge/biocortex-ab/track-b/external-atomic-live-output/authority-decision-signature/v1",
+        "domain_tag_bytes": 93,
+        "domain_tag_encoding": "US_ASCII_BYTE_EXACT",
+        "expected_message_bytes": 137,
+        "framing": "UINT32_BE_DOMAIN_LENGTH_DOMAIN_BYTES_UINT64_BE_PAYLOAD_LENGTH_PAYLOAD_BYTES",
+        "known_answer_test": {
+          "authority_decision_sha256": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "message_hex": "0000005d6167656e742d6272696467652f62696f636f727465782d61622f747261636b2d622f65787465726e616c2d61746f6d69632d6c6976652d6f75747075742f617574686f726974792d6465636973696f6e2d7369676e61747572652f76310000000000000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "message_sha256": "f5dcb16eec00a302bf56c9cc681b5c09d598589c4c3e9ab2413b68c21f16982d"
+        },
+        "payload_decoding": "STRICT_LOWER_HEX_DECODE_TO_EXACT_32_RAW_BYTES",
+        "payload_field": "AUTHORITY_DECISION_SHA256",
+        "payload_field_encoding": "CANONICAL_LOWER_HEX_64",
+        "signature_scheme": "ED25519_PURE_RFC8032_NO_CONTEXT_NO_PREHASH",
+        "signer_input_mode": "EXACT_FRAMED_MESSAGE_BYTES_AS_DATA_NOT_PROVIDER_DIGEST"
+      },
+      "receipt_hash_rule": "SIGNATURE_RECEIPT_SHA256_EQUALS_LOWER_HEX_SHA256_OF_EXACT_CANONICAL_RECEIPT_BYTES",
+      "verification_rules": [
+        "ALGORITHM_EQUALS_ED25519",
+        "RESOLVE_EXACT_CLOSED_AUTHORITY_DECISION_PAYLOAD_BY_RESULT_AUTHORITY_DECISION_SHA256_AND_VALIDATE_ALL_FIELDS",
+        "RECONSTRUCT_EXACT_MESSAGE_FROM_FROZEN_DOMAIN_FRAMING_AND_RAW_32_BYTE_AUTHORITY_DECISION_DIGEST",
+        "SIGNED_MESSAGE_SHA256_EQUALS_SHA256_OF_EXACT_RECONSTRUCTED_MESSAGE_BYTES",
+        "KMS_SIGN_REQUEST_USES_EXACT_MESSAGE_AS_DATA_NOT_PROVIDER_DIGEST",
+        "SIGNATURE_BYTES_DECODE_TO_EXACTLY_64_BYTES_AND_PURE_ED25519_VERIFY_OVER_EXACT_RECONSTRUCTED_MESSAGE",
+        "SIGNATURE_BYTES_REENCODE_TO_IDENTICAL_CANONICAL_BASE64URL_NOPAD",
+        "KMS_RESOURCE_ID_BYTE_EQUALS_REQUEST_SIGNER_KMS_RESOURCE_ID_AND_IS_EXACT_VERSIONED_RESOURCE",
+        "KEY_VERSION_BYTE_EQUALS_REQUEST_SIGNER_KEY_VERSION_AND_AUTHORITY_DECISION_ACTUAL_SIGNER_KEY_VERSION_AND_FINAL_RESOURCE_VERSION_COMPONENT_AND_IS_NONZERO",
+        "PUBLIC_KEY_SHA256_EQUALS_REQUEST_PIN_AND_SHA256_OF_EXACT_RAW_32_BYTE_RFC8032_KEY",
+        "KMS_RESPONSE_NAME_BYTE_EQUALS_KMS_RESOURCE_ID",
+        "VERIFIED_DATA_CRC32C_AND_SIGNATURE_CRC32C_VALIDATED_ARE_TRUE",
+        "HSM_CLAIM_REQUIRES_PROTECTION_LEVEL_EQUALS_HSM"
+      ]
+    }
+  },
+  "crash_protocol": [
+    {
+      "capability_reissue_allowed": false,
+      "cut": "BEFORE_AUTHORIZE_CONSUME_AND_RESERVE_LOGICAL_SINK",
+      "durable_pre_state": "(ABSENT,ABSENT,ABSENT)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(ABSENT,ABSENT,ABSENT)",
+          "required_next_state": "(ABSENT,ABSENT,ABSENT)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "NO_TRANSITION"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "AUTHORITY_TRANSACTION_COMMIT_ACK_LOST_OR_TIMEOUT",
+      "durable_pre_state": "(UNKNOWN,ABSENT_OR_EMPTY,ABSENT_OR_OPEN)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(ABSENT,ABSENT,ABSENT)",
+          "required_next_state": "(ABSENT_NO_RESUBMISSION,ABSENT,ABSENT)"
+        },
+        {
+          "lookup_outcome": "(START_COMMITTED,ABSENT_OR_EMPTY,ABSENT_OR_OPEN)",
+          "required_next_state": "(BURNED_EMPTY,EMPTY,TERMINAL_AUTHORITY_FENCED)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "CAS_EXPECTED_START_COMMITTED_TO_BURNED_EMPTY_IF_PRESENT_THEN_INSTALL_OR_CONFIRM_TERMINAL_SINK_FENCE"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "START_COMMITTED_BEFORE_CAPABILITY_DELIVERY",
+      "durable_pre_state": "(START_COMMITTED,ABSENT_OR_EMPTY,ABSENT_OR_OPEN)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(START_COMMITTED,ABSENT_OR_EMPTY,ABSENT_OR_OPEN)",
+          "required_next_state": "(BURNED_EMPTY,EMPTY,TERMINAL_AUTHORITY_FENCED)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "CAS_EXPECTED_START_COMMITTED_TO_BURNED_EMPTY_THEN_INSTALL_OR_CONFIRM_TERMINAL_SINK_FENCE"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "CAPABILITY_DELIVERED_BEFORE_GENERATOR_START_COMMIT",
+      "durable_pre_state": "(START_COMMITTED,ABSENT_OR_EMPTY,ABSENT_OR_OPEN)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(START_COMMITTED,ABSENT_OR_EMPTY,ABSENT_OR_OPEN)",
+          "required_next_state": "(BURNED_EMPTY,EMPTY,TERMINAL_AUTHORITY_FENCED)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "CAS_EXPECTED_START_COMMITTED_TO_BURNED_EMPTY_THEN_INSTALL_OR_CONFIRM_TERMINAL_SINK_FENCE"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "GENERATOR_START_COMMITTED_OR_REQUEST_SENT_BEFORE_FIRST_BYTE",
+      "durable_pre_state": "(GENERATOR_START_COMMITTED,EMPTY_OR_FIRST_BYTE_COMMITTED_OR_STREAMING,OPEN)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(GENERATOR_START_COMMITTED,EMPTY,OPEN)",
+          "required_next_state": "(AMBIGUOUS_QUARANTINED,EMPTY,TERMINAL_AUTHORITY_FENCED)"
+        },
+        {
+          "lookup_outcome": "(GENERATOR_START_COMMITTED,FIRST_BYTE_COMMITTED_OR_STREAMING,OPEN)",
+          "required_next_state": "(PARTIAL_QUARANTINED,UNCHANGED,TERMINAL_AUTHORITY_FENCED)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "CAS_EXACT_AUTHORITY_PRE_STATE_TO_REQUIRED_TERMINAL_THEN_INSTALL_OR_CONFIRM_TERMINAL_SINK_FENCE_AND_POST_FENCE_REREAD"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "FIRST_BYTE_DURABLE_ACK_LOST",
+      "durable_pre_state": "(GENERATOR_START_COMMITTED,EMPTY_OR_FIRST_BYTE_COMMITTED_OR_STREAMING,OPEN)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(GENERATOR_START_COMMITTED,EMPTY,OPEN)",
+          "required_next_state": "(AMBIGUOUS_QUARANTINED,EMPTY,TERMINAL_AUTHORITY_FENCED)"
+        },
+        {
+          "lookup_outcome": "(GENERATOR_START_COMMITTED,FIRST_BYTE_COMMITTED_OR_STREAMING,OPEN)",
+          "required_next_state": "(PARTIAL_QUARANTINED,UNCHANGED,TERMINAL_AUTHORITY_FENCED)"
+        },
+        {
+          "lookup_outcome": "(STREAM_OBSERVED,FIRST_BYTE_COMMITTED_OR_STREAMING,OPEN)",
+          "required_next_state": "(PARTIAL_QUARANTINED,UNCHANGED,TERMINAL_AUTHORITY_FENCED)"
+        },
+        {
+          "lookup_outcome": "(STREAM_OBSERVED,SEALED,OPEN)",
+          "required_next_state": "(SEALED_OBSERVED,SEALED,TERMINAL_AUTHORITY_FENCED)"
+        },
+        {
+          "lookup_outcome": "(AMBIGUOUS_QUARANTINED,FIRST_BYTE_COMMITTED,OPEN_OR_TERMINAL_AUTHORITY_FENCED)",
+          "required_next_state": "(PRESERVE_AMBIGUOUS_QUARANTINED,FENCE_POST_FENCE_REREAD_THEN_READ_ONLY_PERMANENTLY_INVISIBLE)"
+        },
+        {
+          "lookup_outcome": "(UNKNOWN,UNKNOWN,UNKNOWN)",
+          "required_next_state": "(NO_TRANSITION_REPEAT_STRONG_READ_BOTH_DOMAINS)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "STRONG_READ_BOTH_DOMAINS_APPLY_EXACT_AUTHORITY_CAS_IF_KNOWN_THEN_INSTALL_OR_CONFIRM_TERMINAL_SINK_FENCE_AND_POST_FENCE_REREAD"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "STREAMING_BEFORE_SEAL",
+      "durable_pre_state": "(STREAM_OBSERVED,FIRST_BYTE_COMMITTED_OR_STREAMING_OR_SEALED,OPEN)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(STREAM_OBSERVED,FIRST_BYTE_COMMITTED_OR_STREAMING,OPEN)",
+          "required_next_state": "(PARTIAL_QUARANTINED,UNCHANGED,TERMINAL_AUTHORITY_FENCED)"
+        },
+        {
+          "lookup_outcome": "(STREAM_OBSERVED,SEALED,OPEN)",
+          "required_next_state": "(SEALED_OBSERVED,SEALED,TERMINAL_AUTHORITY_FENCED)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "STRONG_READ_BOTH_DOMAINS_APPLY_EXACT_AUTHORITY_CAS_THEN_INSTALL_OR_CONFIRM_TERMINAL_SINK_FENCE_AND_POST_FENCE_REREAD"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "SEALED_PHYSICAL_SINK_COMMIT_ACK_LOST",
+      "durable_pre_state": "(STREAM_OBSERVED,FIRST_BYTE_COMMITTED_OR_STREAMING_OR_SEALED,OPEN)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(STREAM_OBSERVED,FIRST_BYTE_COMMITTED_OR_STREAMING,OPEN)",
+          "required_next_state": "(PARTIAL_QUARANTINED,UNCHANGED,TERMINAL_AUTHORITY_FENCED)"
+        },
+        {
+          "lookup_outcome": "(STREAM_OBSERVED,SEALED,OPEN)",
+          "required_next_state": "(SEALED_OBSERVED,SEALED,TERMINAL_AUTHORITY_FENCED)"
+        },
+        {
+          "lookup_outcome": "(SEALED_OBSERVED,SEALED,OPEN_OR_TERMINAL_AUTHORITY_FENCED)",
+          "required_next_state": "(PRESERVE_SEALED_OBSERVED,FENCE_POST_FENCE_REREAD_THEN_READ_ONLY_POST_MAP_GATE_ONLY)"
+        },
+        {
+          "lookup_outcome": "(PARTIAL_QUARANTINED,SEALED,OPEN_OR_TERMINAL_AUTHORITY_FENCED)",
+          "required_next_state": "(PRESERVE_PARTIAL_QUARANTINED,FENCE_POST_FENCE_REREAD_THEN_READ_ONLY_PERMANENTLY_INVISIBLE)"
+        },
+        {
+          "lookup_outcome": "(UNKNOWN,UNKNOWN,UNKNOWN)",
+          "required_next_state": "(NO_TRANSITION_REPEAT_STRONG_READ_BOTH_DOMAINS)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "STRONG_READ_BOTH_DOMAINS_APPLY_OR_PRESERVE_EXACT_TERMINAL_AUTHORITY_THEN_INSTALL_OR_CONFIRM_TERMINAL_SINK_FENCE_AND_POST_FENCE_REREAD"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "TERMINAL_PHYSICAL_SINK_FENCE_COMMIT_ACK_LOST_OR_TIMEOUT",
+      "durable_pre_state": "(EXACT_TERMINAL_AUTHORITY_STATE,ANY_SINK_STATE_OR_ABSENT,UNKNOWN_FENCE_COMMIT)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(EXACT_TERMINAL_AUTHORITY_STATE,ANY_SINK_STATE_OR_ABSENT,ABSENT_OR_OPEN)",
+          "required_next_state": "(RETRY_ONLY_IDENTICAL_TERMINAL_FENCE_CAS_NO_OUTPUT_WRITE)"
+        },
+        {
+          "lookup_outcome": "(EXACT_TERMINAL_AUTHORITY_STATE,ANY_SINK_STATE,TERMINAL_AUTHORITY_FENCED_WITH_IDENTICAL_BINDINGS)",
+          "required_next_state": "(POST_FENCE_STRONG_REREAD_AND_APPLY_CLOSED_TERMINAL_VECTOR)"
+        },
+        {
+          "lookup_outcome": "(EXACT_TERMINAL_AUTHORITY_STATE,ANY_SINK_STATE,CONFLICTING_FENCE_BINDINGS)",
+          "required_next_state": "(PRESERVE_AUTHORITY_APPLY_INCIDENT_OVERLAY_BLOCK_VISIBILITY)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "STRONG_REREAD_FENCE_AND_RETRY_ONLY_IDENTICAL_SAME_RECORD_FENCE_CAS_IF_OPEN"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "PROVIDER_OR_SINK_SNAPSHOT_ROLLBACK_OR_SPLIT_BRAIN",
+      "durable_pre_state": "(ANY_AUTHORITY_STATE,ANY_SINK_STATE_OR_ABSENT,ANY_FENCE_STATE_OR_ABSENT)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "IRREVERSIBLE_PROVIDER_OR_SINK_TRUST_INCIDENT_QUARANTINE_SEPARATE_FROM_ABSORBING_AUTHORITY_OPERATION_STATE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(UNTRUSTED_OR_CONFLICTING_AUTHORITY,ANY_SINK_STATE_OR_ABSENT,ANY_FENCE_STATE_OR_ABSENT)",
+          "required_next_state": "(PRESERVE_AUTHORITY_STATE,PRESERVE_SINK_AND_FENCE,BLOCK_VISIBILITY)"
+        },
+        {
+          "lookup_outcome": "(ANY_AUTHORITY_STATE,UNTRUSTED_OR_CONFLICTING_SINK_OR_FENCE)",
+          "required_next_state": "(PRESERVE_AUTHORITY_STATE,PRESERVE_SINK_AND_FENCE,BLOCK_VISIBILITY)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "APPLY_IRREVERSIBLE_INCIDENT_OVERLAY_WITHOUT_REWRITING_AUTHORITY_STATE"
+    },
+    {
+      "capability_reissue_allowed": false,
+      "cut": "TERMINAL_RECEIPT_DELIVERY_LOST",
+      "durable_pre_state": "(ANY_TERMINAL_AUTHORITY_STATE,ANY_SINK_STATE_OR_ABSENT,ABSENT_OR_OPEN_OR_TERMINAL_AUTHORITY_FENCED)",
+      "generator_reinvoke_allowed": false,
+      "incident_quarantine_overlay": "NONE",
+      "on_transition_conflict": "STRONG_REREAD_AND_APPLY_NEW_STATE_MAPPING_NEVER_OVERWRITE",
+      "outcome_to_next_state": [
+        {
+          "lookup_outcome": "(EXACT_TERMINAL_AUTHORITY_STATE,ANY_SINK_STATE_OR_ABSENT,ABSENT_OR_OPEN_OR_TERMINAL_AUTHORITY_FENCED)",
+          "required_next_state": "(PRESERVE_AUTHORITY_INSTALL_OR_CONFIRM_FENCE_POST_FENCE_REREAD_APPLY_CLOSED_VECTOR)"
+        }
+      ],
+      "reviewer_visibility_allowed": false,
+      "transition_operation": "NO_AUTHORITY_REWRITE_INSTALL_OR_CONFIRM_TERMINAL_SINK_FENCE_AND_APPLY_CLOSED_VECTOR"
+    }
+  ],
+  "date": "2026-07-15",
+  "decision": "DESIGN_CONTRACT_PASS_BLOCKED_FAIL_CLOSED_PRODUCTION_PREREQUISITES_UNBOUND_OR_UNVERIFIED",
+  "design_boundary": {
+    "bridge_runtime_caller_added": false,
+    "condition_output_authorized": false,
+    "generator_invoked": false,
+    "live_output_capability_emitted": false,
+    "live_output_permit_defined": false,
+    "network_or_provider_call_present": false,
+    "production_constructor_added": false,
+    "side_effects_unlocked": "NONE",
+    "state_store_surface_added": false
+  },
+  "invariants": [
+    "LOCAL_GUARD_RECEIPT_IS_BOUND_NON_AUTHORIZING_EVIDENCE_AND_NEVER_OUTPUT_AUTHORITY",
+    "S9_TOKEN_S10_OBSERVATION_S11_RECORD_AND_S12_HISTORY_ARE_NEVER_LIVE_PERMITS",
+    "AUTHORIZE_CONSUME_AND_RESERVE_LOGICAL_SINK_IS_ONE_AUTHORITY_DATABASE_LINEARIZATION_POINT",
+    "NO_DATABASE_KMS_OR_PHYSICAL_OUTPUT_SINK_COMMON_TRANSACTION_IS_CLAIMED",
+    "START_COMMITTED_NEVER_RETURNS_TO_ABSENT",
+    "TERMINAL_AUTHORITY_STATE_IS_ABSORBING_DOMINATES_EVERY_LATER_SINK_STATE_AND_INCIDENT_QUARANTINE_IS_A_SEPARATE_IRREVERSIBLE_OVERLAY",
+    "COMMIT_ACK_AMBIGUITY_NEVER_CAUSES_AUTOMATIC_RESUBMISSION",
+    "CAPABILITY_IS_PRIVATE_NON_SERIALIZABLE_SESSION_BOUND_AND_SINGLE_USE",
+    "CAPABILITY_IS_NEVER_REISSUED_AFTER_ACK_LOSS_OR_PROCESS_RESTART",
+    "GENERATOR_REQUIRES_DURABLE_GENERATOR_START_COMMIT_AND_GUARD_CALLBACK",
+    "GENERATOR_HAS_NO_OUTPUT_PATH_CREDENTIAL_OR_SIDE_CHANNEL_OUTSIDE_GUARD_CALLBACK",
+    "EVERY_FIRST_BYTE_APPEND_AND_SEAL_SINK_CAS_ATOMICALLY_REQUIRES_THE_OPERATION_BOUND_TERMINAL_FENCE_TO_BE_OPEN",
+    "EVERY_SAME_DOMAIN_PERSISTENT_TRANSITION_IS_EXACT_PRE_STATE_LINEARIZABLE_CAS_AND_CONFLICT_REQUIRES_STRONG_REREAD_WITHOUT_OVERWRITE",
+    "CROSS_DOMAIN_PROGRESS_AND_TERMINAL_FENCING_HAVE_SEPARATE_AUTHORITY_AND_PHYSICAL_SINK_LINEARIZATION_POINTS_AND_CROSS_DOMAIN_OBSERVATIONS_ARE_NONATOMIC_GUARDS_NEVER_CAS_PRECONDITIONS_OR_GLOBAL_CAS",
+    "TERMINAL_RECOVERY_STRONG_READS_AUTHORITY_INSTALLS_OR_CONFIRMS_THE_SINK_LOCAL_TERMINAL_FENCE_AND_STRONG_REREADS_SINK_AT_OR_AFTER_FENCE_REVISION_BEFORE_CLOSED_VECTOR_CLASSIFICATION",
+    "BURNED_PARTIAL_OR_AMBIGUOUS_TERMINAL_AUTHORITY_MAKES_ALL_PRESENT_AND_LATER_SINK_BYTES_PERMANENTLY_REVIEWER_INVISIBLE_AND_NEVER_REGENERATED",
+    "SEALED_OUTPUT_REMAINS_REVIEWER_INVISIBLE_UNTIL_POST_GENERATION_MAP_GATE",
+    "KMS_PURE_ED25519_SIGNATURE_AUTHENTICATES_THE_FROZEN_DOMAIN_SEPARATED_RAW_DIGEST_MESSAGE_AND_NEVER_MINTS_CAPABILITY",
+    "LOCAL_CLOCK_LOCAL_DATABASE_AND_CALLER_HASHES_ARE_NOT_ANTI_ROLLBACK_PROOF",
+    "OUT_OF_BAND_OWNER_AND_CUSTODIAN_TRUST_PINS_ARE_INDEPENDENT_AND_REQUIRED"
+  ],
+  "predecessors": {
+    "current_baseline_commit": "1de35708f92beaae35bfb4b16ab25292f343cfd1",
+    "first_condition_output_guard_integration_commit": "dee25a3832aef0ab6e18af0b0082162006a5e593",
+    "first_condition_output_guard_source_commit": "9763e987abbd0091b45abaf8db3af871eea482b8",
+    "recovered_s9_reverification_integration_commit": "f4ff82721caa3537e1e0ba2d7682017e09427858",
+    "recovered_s9_reverification_source_commit": "611a10fb4133e6aa58ef76b6d02744b3a90fe09c"
+  },
+  "production_prerequisites": [
+    {
+      "code": "PRODUCTION_PROVIDER_IDENTITY_AND_DEPLOYMENT",
+      "evidence_class": "EXTERNAL_DEPLOYMENT_ATTESTATION"
+    },
+    {
+      "code": "OUT_OF_BAND_OWNER_TRUST_ROOT",
+      "evidence_class": "INDEPENDENT_OWNER_TRUST_HANDOFF"
+    },
+    {
+      "code": "OUT_OF_BAND_CUSTODIAN_TRUST_ROOT",
+      "evidence_class": "INDEPENDENT_CUSTODIAN_TRUST_HANDOFF"
+    },
+    {
+      "code": "EXTERNAL_LINEARIZABLE_AUTHORIZE_CONSUME_AND_RESERVE_LOGICAL_SINK",
+      "evidence_class": "AUTHORITY_DATABASE_TRANSACTION_RECEIPT"
+    },
+    {
+      "code": "DURABLE_UNIQUE_OPERATION_CHALLENGE_AND_REPLAY_CONSUME",
+      "evidence_class": "EXTERNAL_UNIQUENESS_RECEIPT"
+    },
+    {
+      "code": "CURRENTNESS_REVOCATION_EPOCH_TERM_REVISION_AT_USE",
+      "evidence_class": "SIGNED_CURRENTNESS_RECEIPT"
+    },
+    {
+      "code": "ROLLBACK_INDEPENDENT_MONOTONIC_WITNESS",
+      "evidence_class": "INDEPENDENT_MONOTONIC_CHECKPOINT"
+    },
+    {
+      "code": "SPLIT_BRAIN_FENCING_AND_PROVIDER_NON_EQUIVOCATION",
+      "evidence_class": "INDEPENDENT_SELF_HOSTED_FAULT_EVIDENCE"
+    },
+    {
+      "code": "PRIVATE_UNFORGEABLE_SINGLE_USE_SESSION_CAPABILITY",
+      "evidence_class": "RUNTIME_AND_PROTOCOL_ATTESTATION"
+    },
+    {
+      "code": "NON_BYPASSABLE_GENERATOR_ENTRYPOINT",
+      "evidence_class": "RUNTIME_ISOLATION_ATTESTATION"
+    },
+    {
+      "code": "GUARD_OWNED_IMMUTABLE_OUTPUT_SINK",
+      "evidence_class": "SINK_OWNERSHIP_ATTESTATION"
+    },
+    {
+      "code": "FIRST_BYTE_FENCE_AND_PHYSICAL_SINK_DURABILITY",
+      "evidence_class": "PHYSICAL_SINK_LINEARIZATION_RECEIPT"
+    },
+    {
+      "code": "NO_STDOUT_LOG_TRACE_CALLBACK_SUBPROCESS_OR_DIRECT_MODEL_BYPASS",
+      "evidence_class": "SIDE_CHANNEL_RED_TEAM_EVIDENCE"
+    },
+    {
+      "code": "CRASH_RECOVERY_WITHOUT_CAPABILITY_REISSUE_OR_REGENERATION",
+      "evidence_class": "OPERATIONAL_CRASH_MATRIX_EVIDENCE"
+    },
+    {
+      "code": "QUERYABLE_EXACT_IMMUTABLE_OUTPUT_IDENTITY",
+      "evidence_class": "DURABLE_SINK_RECEIPT"
+    },
+    {
+      "code": "LOADED_CODE_EXECUTOR_MODEL_AND_SINK_ATTESTATION",
+      "evidence_class": "RUNTIME_MEASUREMENT_ATTESTATION"
+    },
+    {
+      "code": "CREDENTIAL_CUSTODY_ROTATION_REVOCATION_AND_EMERGENCY_STOP",
+      "evidence_class": "CUSTODIAN_OPERATING_EVIDENCE"
+    },
+    {
+      "code": "AUDIT_LOG_NON_DISCLOSURE_DURABILITY_AND_ACCESS_CONTROL",
+      "evidence_class": "AUDIT_SYSTEM_ATTESTATION"
+    }
+  ],
+  "provider_reference_research": [
+    {
+      "candidate": "GOOGLE_CLOUD_SPANNER_PLUS_CLOUD_KMS_OR_HSM",
+      "candidate_role": "MANAGED_SEMANTICS_AND_CLIENT_CONFORMANCE_REFERENCE_ONLY",
+      "positive_basis": "SPANNER_READ_WRITE_TRANSACTIONS_WITH_EXPLICIT_DEFAULT_SERIALIZABLE_ISOLATION_OFFER_EXTERNAL_CONSISTENCY_AND_CLOUD_KMS_SUPPORTS_EXACT_CRYPTOKEYVERSION_ED25519_SIGNING_WITH_INTEGRITY_FIELDS",
+      "remaining_gap": "NO_DATABASE_KMS_OR_PHYSICAL_SINK_COMMON_TRANSACTION_NO_OWNER_OR_CUSTODIAN_PIN_NO_LIVE_DEPLOYMENT_AND_AUTOMATIC_TRANSACTION_RETRY_FORBIDS_EXTERNAL_SIDE_EFFECTS_IN_TRANSACTION_CLOSURE_WHILE_OPTIONAL_REPEATABLE_READ_MUST_BE_REJECTED_FOR_THIS_PROTOCOL",
+      "retrieved_on": "2026-07-15",
+      "sources": [
+        "https://docs.cloud.google.com/spanner/docs/transactions",
+        "https://docs.cloud.google.com/spanner/docs/true-time-external-consistency",
+        "https://docs.cloud.google.com/kms/docs/algorithms",
+        "https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys.cryptoKeyVersions/asymmetricSign",
+        "https://docs.cloud.google.com/kms/docs/data-integrity-guidelines"
+      ]
+    },
+    {
+      "candidate": "ETCD_PLUS_OPENBAO_TRANSIT",
+      "candidate_role": "SELF_HOSTED_ADVERSARIAL_FAULT_INJECTION_REFERENCE_ONLY",
+      "positive_basis": "ETCD_KV_OPERATIONS_ARE_STRICTLY_SERIALIZABLE_WITH_LINEARIZABLE_READS_BY_DEFAULT_AND_OPENBAO_TRANSIT_SUPPORTS_ED25519_AND_EXPLICIT_NONZERO_KEY_VERSION_SIGNING",
+      "remaining_gap": "SEPARATE_ATOMIC_AND_ROLLBACK_DOMAINS_EXPLICIT_STALE_ETCD_READS_REMAIN_POSSIBLE_OPENBAO_KEY_VERSION_ZERO_MEANS_LATEST_NO_PHYSICAL_SINK_ATOMICITY_NO_OWNER_OR_CUSTODIAN_PIN_NO_LIVE_DEPLOYMENT",
+      "retrieved_on": "2026-07-15",
+      "sources": [
+        "https://etcd.io/docs/v3.6/learning/api_guarantees/",
+        "https://etcd.io/docs/v3.6/op-guide/recovery/",
+        "https://openbao.org/docs/secrets/transit/",
+        "https://openbao.org/api-docs/secret/transit/"
+      ]
+    }
+  ],
+  "schema": "agent_bridge.biocortex_ab_track_b_external_atomic_live_output_execution_boundary_contract.v1",
+  "state_machine": {
+    "authority_persistent_states": [
+      "START_COMMITTED",
+      "GENERATOR_START_COMMITTED",
+      "STREAM_OBSERVED",
+      "SEALED_OBSERVED",
+      "BURNED_EMPTY",
+      "PARTIAL_QUARANTINED",
+      "AMBIGUOUS_QUARANTINED"
+    ],
+    "authority_terminal_states": [
+      "SEALED_OBSERVED",
+      "BURNED_EMPTY",
+      "PARTIAL_QUARANTINED",
+      "AMBIGUOUS_QUARANTINED"
+    ],
+    "incident_quarantine_overlay": "IRREVERSIBLE_PROVIDER_OR_SINK_TRUST_INCIDENT_QUARANTINE_SEPARATE_FROM_ABSORBING_AUTHORITY_OPERATION_STATE",
+    "physical_sink_persistent_states": [
+      "EMPTY",
+      "FIRST_BYTE_COMMITTED",
+      "STREAMING",
+      "SEALED"
+    ],
+    "physical_sink_terminal_fence": {
+      "absent_record_semantics": "ABSENT_HAS_NO_OUTPUT_AND_NO_FENCE_AND_MAY_ONLY_BE_CREATED_BY_THE_EXACT_BOUND_INITIALIZATION_OR_TERMINAL_FENCE_SAME_RECORD_CAS",
+      "authority_and_sink_fence_share_transaction": false,
+      "authority_terminal_receipt_is_prior_strong_read_external_precondition": true,
+      "binding_fields": [
+        "OPERATION_ID",
+        "SINK_SLOT_ID",
+        "LOGICAL_SINK_FENCE",
+        "AUTHORITY_STATE",
+        "AUTHORITY_DECISION_SHA256",
+        "RECORD_SEQUENCE"
+      ],
+      "closed": true,
+      "fence_ack_loss_resolution": "STRONG_REREAD_FENCE_RETRY_ONLY_IF_OPEN_ACCEPT_IDENTICAL_FENCED_RECEIPT_REJECT_CONFLICT",
+      "fenced_is_absorbing_for_operation": true,
+      "global_cas_claimed": false,
+      "initial_fence_state": "OPEN",
+      "initialization_operation": "INITIALIZE_PHYSICAL_SINK_RECORD_FOR_EXACT_RESERVED_OPERATION_AND_SLOT",
+      "late_writer_rule": "A_WRITE_CAS_ON_THE_SAME_RECORD_REVISION_EITHER_LINEARIZES_BEFORE_THE_FENCE_AND_IS_VISIBLE_TO_THE_POST_FENCE_STRONG_READ_OR_LINEARIZES_AFTER_THE_FENCE_AND_FAILS",
+      "mutating_operations_requiring_open_fence_in_same_sink_linearization": [
+        "ACCEPT_FIRST_BYTE_WITH_EXACT_FENCE_EXECUTOR_AND_CHUNK_INDEX",
+        "APPEND_NEXT_CHUNK_WITH_EXACT_FENCE_AND_INDEX",
+        "SEAL_EXACT_OUTPUT_ONCE"
+      ],
+      "post_fence_confirmation": "STRONG_REREAD_SINK_STATE_AT_REVISION_GREATER_THAN_OR_EQUAL_TO_FENCE_LINEARIZATION_REVISION",
+      "record_atomicity": "ONE_OPERATION_AND_SLOT_PHYSICAL_SINK_RECORD_REVISION_ATOMICALLY_CONTAINS_OPERATION_ID_SINK_SLOT_ID_LOGICAL_SINK_FENCE_TERMINAL_FENCE_STATE_OUTPUT_STATE_NEXT_CHUNK_INDEX_EXECUTOR_BINDING_AND_SEALED_IDENTITY",
+      "terminal_fence_absent_record_operation": "CREATE_TERMINAL_AUTHORITY_FENCED_EMPTY_RECORD_FOR_EXACT_ABSENT_OPERATION_AND_SLOT",
+      "terminal_fence_absent_record_result": "CREATE_BOUND_EMPTY_TERMINAL_AUTHORITY_FENCED_RECORD_WITH_NO_OUTPUT_BYTES",
+      "terminal_fence_existing_record_operation": "INSTALL_TERMINAL_AUTHORITY_FENCE_FOR_EXACT_EXISTING_OPERATION_AND_SLOT",
+      "unfence_allowed": false
+    },
+    "physical_sink_terminal_fence_states": [
+      "OPEN",
+      "TERMINAL_AUTHORITY_FENCED"
+    ],
+    "recovery_lookup_grain": "STRONG_AUTHORITY_STATE_PHYSICAL_SINK_OUTPUT_STATE_AND_TERMINAL_FENCE_STATE_VECTOR",
+    "terminal_authority_dominance": {
+      "authority_rewrite_after_terminal_allowed": false,
+      "new_sink_mutation_authorization_after_terminal_allowed": false,
+      "quarantine_or_burn_visibility": "PERMANENTLY_FORBIDDEN_EVEN_IF_SINK_LATER_SEALS",
+      "recovery_sequence": [
+        "STRONG_READ_AUTHORITY",
+        "IF_NONTERMINAL_APPLY_EXACT_RECOVERY_AUTHORITY_CAS_IF_TERMINAL_PRESERVE",
+        "ON_TERMINAL_READ_BLOCK_VISIBILITY_AND_NEVER_REWRITE",
+        "INSTALL_OR_CONFIRM_SINK_LOCAL_TERMINAL_AUTHORITY_FENCE",
+        "ON_FENCE_ACK_LOSS_STRONG_REREAD_AND_REPEAT_ONLY_IDENTICAL_FENCE_CAS_UNTIL_DURABLE",
+        "STRONG_REREAD_SINK_AT_OR_AFTER_FENCE_LINEARIZATION_REVISION",
+        "APPLY_CLOSED_TERMINAL_AUTHORITY_SINK_VECTOR"
+      ],
+      "reviewer_visibility_blocked_immediately_on_terminal_read": true,
+      "sealed_success_visibility": "ONLY_EXACT_SEALED_OBSERVED_X_SEALED_VECTOR_AFTER_SEPARATE_POST_GENERATION_MAP_GATE"
+    },
+    "terminal_authority_sink_vectors": [
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "SEALED_OBSERVED",
+        "classification": "TERMINAL_SINK_INCONSISTENCY",
+        "incident_overlay_required": true,
+        "physical_sink_state": "EMPTY",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "SEALED_OBSERVED",
+        "classification": "TERMINAL_SINK_INCONSISTENCY",
+        "incident_overlay_required": true,
+        "physical_sink_state": "FIRST_BYTE_COMMITTED",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "SEALED_OBSERVED",
+        "classification": "TERMINAL_SINK_INCONSISTENCY",
+        "incident_overlay_required": true,
+        "physical_sink_state": "STREAMING",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "SEALED_OBSERVED",
+        "classification": "SUCCESS_SEALED_CANDIDATE",
+        "incident_overlay_required": false,
+        "physical_sink_state": "SEALED",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "POST_GENERATION_MAP_GATE_ONLY",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "BURNED_EMPTY",
+        "classification": "BURNED_EMPTY_FINAL",
+        "incident_overlay_required": false,
+        "physical_sink_state": "EMPTY",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "BURNED_EMPTY",
+        "classification": "UNEXPECTED_LATE_SINK_BYTES",
+        "incident_overlay_required": true,
+        "physical_sink_state": "FIRST_BYTE_COMMITTED",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "BURNED_EMPTY",
+        "classification": "UNEXPECTED_LATE_SINK_BYTES",
+        "incident_overlay_required": true,
+        "physical_sink_state": "STREAMING",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "BURNED_EMPTY",
+        "classification": "UNEXPECTED_LATE_SINK_BYTES",
+        "incident_overlay_required": true,
+        "physical_sink_state": "SEALED",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "PARTIAL_QUARANTINED",
+        "classification": "TERMINAL_SINK_INCONSISTENCY",
+        "incident_overlay_required": true,
+        "physical_sink_state": "EMPTY",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "PARTIAL_QUARANTINED",
+        "classification": "PARTIAL_TERMINAL_DOMINATES_LATE_SINK_PROGRESS",
+        "incident_overlay_required": false,
+        "physical_sink_state": "FIRST_BYTE_COMMITTED",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "PARTIAL_QUARANTINED",
+        "classification": "PARTIAL_TERMINAL_DOMINATES_LATE_SINK_PROGRESS",
+        "incident_overlay_required": false,
+        "physical_sink_state": "STREAMING",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "PARTIAL_QUARANTINED",
+        "classification": "PARTIAL_TERMINAL_DOMINATES_LATE_SINK_PROGRESS",
+        "incident_overlay_required": false,
+        "physical_sink_state": "SEALED",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "AMBIGUOUS_QUARANTINED",
+        "classification": "AMBIGUOUS_TERMINAL_DOMINATES_PRESENT_OR_LATE_SINK_PROGRESS",
+        "incident_overlay_required": false,
+        "physical_sink_state": "EMPTY",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "AMBIGUOUS_QUARANTINED",
+        "classification": "AMBIGUOUS_TERMINAL_DOMINATES_PRESENT_OR_LATE_SINK_PROGRESS",
+        "incident_overlay_required": false,
+        "physical_sink_state": "FIRST_BYTE_COMMITTED",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "AMBIGUOUS_QUARANTINED",
+        "classification": "AMBIGUOUS_TERMINAL_DOMINATES_PRESENT_OR_LATE_SINK_PROGRESS",
+        "incident_overlay_required": false,
+        "physical_sink_state": "STREAMING",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      },
+      {
+        "authority_action": "PRESERVE_ABSORBING_TERMINAL",
+        "authority_state": "AMBIGUOUS_QUARANTINED",
+        "classification": "AMBIGUOUS_TERMINAL_DOMINATES_PRESENT_OR_LATE_SINK_PROGRESS",
+        "incident_overlay_required": false,
+        "physical_sink_state": "SEALED",
+        "required_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "reviewer_visibility": "PERMANENTLY_FORBIDDEN",
+        "sink_action": "READ_ONLY_AFTER_FENCE"
+      }
+    ],
+    "transitions": [
+      {
+        "atomic_precondition": "AUTHORITY_ABSENT_AND_LOGICAL_SINK_SLOT_UNRESERVED",
+        "atomic_precondition_scope": "AUTHORITY_DATABASE_ONLY",
+        "cross_domain_observation_nonatomic": "PHYSICAL_SINK_NOT_ACCESSED_INSIDE_AUTHORITY_TRANSACTION",
+        "domain": "AUTHORITY_DATABASE",
+        "linearization": "ONE_AUTHORITY_DATABASE_TRANSACTION",
+        "next_authority_state": "START_COMMITTED",
+        "next_sink_fence_state": "UNCHANGED",
+        "next_sink_state": "UNCHANGED",
+        "operation": "AUTHORIZE_CONSUME_AND_RESERVE_LOGICAL_SINK"
+      },
+      {
+        "atomic_precondition": "SINK_RECORD_IS_ABSENT_FOR_EXACT_OPERATION_AND_SLOT",
+        "atomic_precondition_scope": "PHYSICAL_SINK_RECORD_ONLY",
+        "cross_domain_observation_nonatomic": "VERIFIED_SIGNED_AUTHORITY_DECISION_PAYLOAD_STATE_EQUALS_START_COMMITTED_AND_LOGICAL_SLOT_IS_RESERVED_NONATOMIC",
+        "domain": "PHYSICAL_SINK",
+        "linearization": "EXACT_ABSENT_PHYSICAL_SINK_RECORD_CAS_CREATE",
+        "next_authority_state": "UNCHANGED",
+        "next_sink_fence_state": "OPEN",
+        "next_sink_state": "EMPTY",
+        "operation": "INITIALIZE_PHYSICAL_SINK_RECORD_FOR_EXACT_RESERVED_OPERATION_AND_SLOT"
+      },
+      {
+        "atomic_precondition": "AUTHORITY_STATE_EQUALS_START_COMMITTED",
+        "atomic_precondition_scope": "AUTHORITY_DATABASE_ONLY",
+        "cross_domain_observation_nonatomic": "PRIOR_STRONG_SINK_OBSERVATION_EQUALS_OPEN_EMPTY_NONATOMIC",
+        "domain": "AUTHORITY_DATABASE",
+        "linearization": "EXACT_PRE_STATE_AUTHORITY_CAS",
+        "next_authority_state": "GENERATOR_START_COMMITTED",
+        "next_sink_fence_state": "UNCHANGED",
+        "next_sink_state": "UNCHANGED",
+        "operation": "COMMIT_GENERATOR_START_AND_CONSUME_PRIVATE_CAPABILITY"
+      },
+      {
+        "atomic_precondition": "AUTHORITY_STATE_EQUALS_START_COMMITTED",
+        "atomic_precondition_scope": "AUTHORITY_DATABASE_ONLY",
+        "cross_domain_observation_nonatomic": "PROOF_OF_NO_GENERATOR_START_AND_NO_SINK_WRITE_NONATOMIC",
+        "domain": "AUTHORITY_DATABASE",
+        "linearization": "EXACT_PRE_STATE_AUTHORITY_CAS",
+        "next_authority_state": "BURNED_EMPTY",
+        "next_sink_fence_state": "UNCHANGED",
+        "next_sink_state": "UNCHANGED",
+        "operation": "ABORT_PROVED_NO_GENERATOR_START"
+      },
+      {
+        "atomic_precondition": "SINK_RECORD_MATCHES_OPERATION_LOGICAL_FENCE_OPEN_EMPTY_EXECUTOR_AND_CHUNK_ZERO",
+        "atomic_precondition_scope": "PHYSICAL_SINK_RECORD_ONLY",
+        "cross_domain_observation_nonatomic": "VERIFIED_SIGNED_AUTHORITY_DECISION_PAYLOAD_STATE_EQUALS_GENERATOR_START_COMMITTED_NONATOMIC",
+        "domain": "PHYSICAL_SINK",
+        "linearization": "EXACT_PRE_STATE_PHYSICAL_SINK_CAS",
+        "next_authority_state": "UNCHANGED",
+        "next_sink_fence_state": "OPEN",
+        "next_sink_state": "FIRST_BYTE_COMMITTED",
+        "operation": "ACCEPT_FIRST_BYTE_WITH_EXACT_FENCE_EXECUTOR_AND_CHUNK_INDEX"
+      },
+      {
+        "atomic_precondition": "AUTHORITY_STATE_EQUALS_GENERATOR_START_COMMITTED",
+        "atomic_precondition_scope": "AUTHORITY_DATABASE_ONLY",
+        "cross_domain_observation_nonatomic": "STRONG_SINK_READ_EQUALS_OPEN_FIRST_BYTE_COMMITTED_OR_STREAMING_WITH_EXACT_RECEIPT_NONATOMIC",
+        "domain": "AUTHORITY_DATABASE",
+        "linearization": "SEPARATE_AUTHORITY_CAS_AFTER_STRONG_PHYSICAL_SINK_READ",
+        "next_authority_state": "STREAM_OBSERVED",
+        "next_sink_fence_state": "UNCHANGED",
+        "next_sink_state": "UNCHANGED",
+        "operation": "OBSERVE_DURABLE_FIRST_BYTE_OR_STREAMING_RECEIPT"
+      },
+      {
+        "atomic_precondition": "SINK_RECORD_MATCHES_OPERATION_LOGICAL_FENCE_OPEN_FIRST_BYTE_OR_STREAMING_EXECUTOR_AND_NEXT_CHUNK_INDEX",
+        "atomic_precondition_scope": "PHYSICAL_SINK_RECORD_ONLY",
+        "cross_domain_observation_nonatomic": "VERIFIED_SIGNED_AUTHORITY_DECISION_PAYLOAD_STATE_EQUALS_GENERATOR_START_COMMITTED_OR_STREAM_OBSERVED_NONATOMIC",
+        "domain": "PHYSICAL_SINK",
+        "linearization": "EXACT_PRE_STATE_PHYSICAL_SINK_CAS",
+        "next_authority_state": "UNCHANGED",
+        "next_sink_fence_state": "OPEN",
+        "next_sink_state": "STREAMING",
+        "operation": "APPEND_NEXT_CHUNK_WITH_EXACT_FENCE_AND_INDEX"
+      },
+      {
+        "atomic_precondition": "SINK_RECORD_MATCHES_OPERATION_LOGICAL_FENCE_OPEN_FIRST_BYTE_OR_STREAMING_EXECUTOR_AND_FINAL_INDEX",
+        "atomic_precondition_scope": "PHYSICAL_SINK_RECORD_ONLY",
+        "cross_domain_observation_nonatomic": "VERIFIED_SIGNED_AUTHORITY_DECISION_PAYLOAD_STATE_EQUALS_STREAM_OBSERVED_NONATOMIC",
+        "domain": "PHYSICAL_SINK",
+        "linearization": "EXACT_PRE_STATE_PHYSICAL_SINK_CAS",
+        "next_authority_state": "UNCHANGED",
+        "next_sink_fence_state": "OPEN",
+        "next_sink_state": "SEALED",
+        "operation": "SEAL_EXACT_OUTPUT_ONCE"
+      },
+      {
+        "atomic_precondition": "AUTHORITY_STATE_EQUALS_STREAM_OBSERVED",
+        "atomic_precondition_scope": "AUTHORITY_DATABASE_ONLY",
+        "cross_domain_observation_nonatomic": "STRONG_SINK_READ_EQUALS_OPEN_OR_TERMINAL_AUTHORITY_FENCED_SEALED_WITH_EXACT_IMMUTABLE_RECEIPT_NONATOMIC",
+        "domain": "AUTHORITY_DATABASE",
+        "linearization": "SEPARATE_AUTHORITY_CAS_AFTER_STRONG_PHYSICAL_SINK_READ",
+        "next_authority_state": "SEALED_OBSERVED",
+        "next_sink_fence_state": "UNCHANGED",
+        "next_sink_state": "UNCHANGED",
+        "operation": "OBSERVE_EXACT_IMMUTABLE_SEALED_OUTPUT_RECEIPT"
+      },
+      {
+        "atomic_precondition": "SINK_RECORD_IS_ABSENT_FOR_EXACT_OPERATION_AND_SLOT",
+        "atomic_precondition_scope": "PHYSICAL_SINK_RECORD_ONLY",
+        "cross_domain_observation_nonatomic": "VERIFIED_SIGNED_AUTHORITY_DECISION_PAYLOAD_HAS_TERMINAL_STATE_AND_EXACT_BINDINGS_NONATOMIC",
+        "domain": "PHYSICAL_SINK",
+        "linearization": "EXACT_ABSENT_PHYSICAL_SINK_RECORD_CAS_CREATE",
+        "next_authority_state": "UNCHANGED",
+        "next_sink_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "next_sink_state": "EMPTY",
+        "operation": "CREATE_TERMINAL_AUTHORITY_FENCED_EMPTY_RECORD_FOR_EXACT_ABSENT_OPERATION_AND_SLOT"
+      },
+      {
+        "atomic_precondition": "SINK_RECORD_MATCHES_OPERATION_LOGICAL_FENCE_OPEN_AND_ANY_OUTPUT_STATE",
+        "atomic_precondition_scope": "PHYSICAL_SINK_RECORD_ONLY",
+        "cross_domain_observation_nonatomic": "VERIFIED_SIGNED_AUTHORITY_DECISION_PAYLOAD_HAS_TERMINAL_STATE_AND_EXACT_BINDINGS_NONATOMIC",
+        "domain": "PHYSICAL_SINK",
+        "linearization": "EXACT_PRE_STATE_PHYSICAL_SINK_RECORD_CAS",
+        "next_authority_state": "UNCHANGED",
+        "next_sink_fence_state": "TERMINAL_AUTHORITY_FENCED",
+        "next_sink_state": "UNCHANGED",
+        "operation": "INSTALL_TERMINAL_AUTHORITY_FENCE_FOR_EXACT_EXISTING_OPERATION_AND_SLOT"
+      },
+      {
+        "atomic_precondition": "AUTHORITY_STATE_EQUALS_GENERATOR_START_COMMITTED",
+        "atomic_precondition_scope": "AUTHORITY_DATABASE_ONLY",
+        "cross_domain_observation_nonatomic": "PRIOR_STRONG_SINK_READ_EQUALS_EMPTY_OR_UNKNOWN_NONATOMIC",
+        "domain": "AUTHORITY_DATABASE",
+        "linearization": "EXACT_PRE_STATE_AUTHORITY_CAS",
+        "next_authority_state": "AMBIGUOUS_QUARANTINED",
+        "next_sink_fence_state": "UNCHANGED",
+        "next_sink_state": "UNCHANGED",
+        "operation": "QUARANTINE_AMBIGUOUS_GENERATOR_START"
+      },
+      {
+        "atomic_precondition": "AUTHORITY_STATE_EQUALS_GENERATOR_START_COMMITTED_OR_STREAM_OBSERVED",
+        "atomic_precondition_scope": "AUTHORITY_DATABASE_ONLY",
+        "cross_domain_observation_nonatomic": "PRIOR_STRONG_SINK_READ_EQUALS_FIRST_BYTE_STREAMING_OR_UNVERIFIED_SEALED_NONATOMIC",
+        "domain": "AUTHORITY_DATABASE",
+        "linearization": "EXACT_PRE_STATE_AUTHORITY_CAS",
+        "next_authority_state": "PARTIAL_QUARANTINED",
+        "next_sink_fence_state": "UNCHANGED",
+        "next_sink_state": "UNCHANGED",
+        "operation": "QUARANTINE_PARTIAL_WITHOUT_REGENERATION"
+      }
+    ],
+    "volatile_non_persistent_states": [
+      "PRIVATE_CAPABILITY_IN_PROCESS",
+      "GUARD_CALLBACK_INVOCATION_IN_FLIGHT"
+    ]
+  },
+  "status": "EXTERNAL_ATOMIC_LIVE_OUTPUT_EXECUTION_BOUNDARY_V1_PREREGISTERED_NO_LIVE_OUTPUT_PERMIT",
+  "version": 1
+}
