@@ -1,0 +1,224 @@
+{
+  "$defs": {
+    "answerId": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^ans_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "assignment": {
+      "additionalProperties": false,
+      "properties": {
+        "answer_id": {
+          "$ref": "#/$defs/answerId"
+        },
+        "condition_id": {
+          "$ref": "#/$defs/conditionId"
+        }
+      },
+      "required": [
+        "answer_id",
+        "condition_id"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "condition_output_authorized": {
+          "const": false
+        },
+        "cross_version_identity_reuse_allowed": {
+          "const": false
+        },
+        "mapping_private": {
+          "const": true
+        },
+        "reviewer_must_not_read_before_review": {
+          "const": true
+        },
+        "single_use_trial_specific": {
+          "const": true
+        },
+        "unblinding_allowed": {
+          "const": false
+        }
+      },
+      "required": [
+        "condition_output_authorized",
+        "cross_version_identity_reuse_allowed",
+        "mapping_private",
+        "reviewer_must_not_read_before_review",
+        "single_use_trial_specific",
+        "unblinding_allowed"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "case": {
+      "additionalProperties": false,
+      "properties": {
+        "assignments": {
+          "items": {
+            "$ref": "#/$defs/assignment"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "case_id": {
+          "$ref": "#/$defs/caseId"
+        }
+      },
+      "required": [
+        "assignments",
+        "case_id"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "caseId": {
+      "maxLength": 37,
+      "minLength": 37,
+      "pattern": "^case_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "conditionId": {
+      "maxLength": 37,
+      "minLength": 37,
+      "pattern": "^cond_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "label": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "sha256": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "utc": {
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:blind-map:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Private single-use Track B successor answer-to-condition map. The v1 shape binds the exact sampling-receipt v1 schema, writer, derived seed commitment, complete selection commitment, and non-circular contract digest profile. Validation is not condition-output authority.",
+  "properties": {
+    "answer_blinding_seed_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "blind_packet_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "capture_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "cases": {
+      "items": {
+        "$ref": "#/$defs/case"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "condition_roster_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "contract_digest_profile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "created_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "eligible_frame_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "generation_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "identity_derivation_domain": {
+      "const": "agent-bridge/track-b/blind-map/v2"
+    },
+    "sampling_attempt_namespace_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "Stable trial-level attempt identity over the v1 domain and trial ID only. Contract core, eligible frame, strata allocation, and external entropy are deliberately excluded so changing any of them cannot create a fresh attempt."
+    },
+    "sampling_event_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "Exact pre-entropy event identity over contract core, trial, eligible frame, and strata allocation; external entropy is deliberately excluded. A custodian must bind at most one exact policy, contract core, frame, allocation, and event tuple to each owner-issued sampling-attempt namespace."
+    },
+    "sampling_receipt_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_receipt_write_request_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_receipt_writer_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_seed_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_blind_map.v1"
+    },
+    "selected_case_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "selection_commitment_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "trial_id": {
+      "$ref": "#/$defs/label"
+    }
+  },
+  "required": [
+    "answer_blinding_seed_sha256",
+    "blind_packet_sha256",
+    "boundary",
+    "capture_sha256",
+    "cases",
+    "condition_roster_sha256",
+    "contract_digest_profile_sha256",
+    "contract_sha256",
+    "created_at_utc",
+    "eligible_frame_manifest_sha256",
+    "generation_sha256",
+    "identity_derivation_domain",
+    "sampling_attempt_namespace_sha256",
+    "sampling_receipt_schema_sha256",
+    "sampling_receipt_sha256",
+    "sampling_receipt_writer_sha256",
+    "sampling_receipt_write_request_sha256",
+    "sampling_event_sha256",
+    "sampling_seed_sha256",
+    "schema",
+    "selected_case_manifest_sha256",
+    "selection_commitment_sha256",
+    "trial_id"
+  ],
+  "title": "BioCortex AB Track B blind map v1",
+  "type": "object",
+  "unevaluatedProperties": false
+}

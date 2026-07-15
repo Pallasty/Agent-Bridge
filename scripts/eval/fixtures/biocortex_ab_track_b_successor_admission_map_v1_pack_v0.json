@@ -1,0 +1,130 @@
+{
+  "artifact_bindings": [
+    {
+      "artifact_kind": "successor_real_run_admission_policy",
+      "graph_binding_path": null,
+      "repo_path": "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v1.json",
+      "schema_id": "agent_bridge.biocortex_ab_track_b_real_run_admission_policy.v1",
+      "sha256": "2847ebd368c4a0b557f95b2c91f72b69e31126cf3623ed29320b4154537e3dbe",
+      "status": "SOURCE_POLICY_AVAILABLE_NOT_LIVE_BOUND"
+    },
+    {
+      "artifact_kind": "successor_admission_policy_checker",
+      "graph_binding_path": null,
+      "repo_path": "scripts/eval/check_biocortex_ab_track_b_admission_v1.py",
+      "schema_id": null,
+      "sha256": "8d493f3452589fe1cfd9ece27388c3222a28bac47ca6298cab66c6c3ed52db24",
+      "status": "SOURCE_VALIDATOR_AVAILABLE_NOT_RUNTIME_PROVENANCE"
+    },
+    {
+      "artifact_kind": "blind_map_schema_successor",
+      "graph_binding_path": "review_and_blinding.map_schema_sha256",
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-blind-map-schema-v1.json",
+      "schema_id": "urn:agent-bridge:biocortex-ab:track-b:blind-map:v1",
+      "sha256": "475f5c518df83049808e0a118f50ef83026b8c8202bebfd4439dfb9c416fd724",
+      "status": "APPEND_ONLY_V1_SOURCE_SUPERSESSION_NOT_LIVE_BOUND"
+    },
+    {
+      "artifact_kind": "map_bijection_checker_successor",
+      "graph_binding_path": "review_and_blinding.map_bijection_checker_sha256",
+      "repo_path": "scripts/eval/biocortex_ab_track_b_map_bijection_v1.py",
+      "schema_id": "agent_bridge.biocortex_ab_track_b_map_bijection_validation_result.v1",
+      "sha256": "92926f3e01910501e20a7d5f8f9b0cab79e28ca38ae2717966b8b6977fa89e58",
+      "status": "APPEND_ONLY_V1_SOURCE_SUPERSESSION_NOT_LIVE_BOUND"
+    }
+  ],
+  "baseline_commit": "2e828d7b86444770c3ef3cd40ac17f26cac6fb0e",
+  "boundary": {
+    "anti_shopping_order_verified": false,
+    "capture_allowed": false,
+    "condition_output_authorized": false,
+    "frozen_graph_mutated": false,
+    "frozen_ledger_mutated": false,
+    "historical_v0_bytes_mutated": false,
+    "live_binding_satisfied_count": 0,
+    "new_graph_binding_path_count": 0,
+    "pre_output_timing_verified": false,
+    "private_runtime_artifact_emitted": false,
+    "real_run_admitted": false,
+    "replay_consumption_verified": false,
+    "review_authorized": false,
+    "scoring_authorized": false,
+    "side_effects_unlocked": "NONE",
+    "synthetic_fixture_only": true,
+    "unblinding_authorized": false
+  },
+  "canonical_serialization": "UTF8_SORTED_KEYS_INDENT_2_LF_FINAL_NEWLINE_NO_NAN_DUPLICATE_KEYS_REJECTED",
+  "data_quality_contract": {
+    "grains": {
+      "blind_map_assignment": "protocol_version_x_trial_id_x_case_id_x_opaque_answer_id",
+      "contract_core": "protocol_version_x_trial_id",
+      "owner_trial_registration": "global_track_b_trial_registry_x_trial_id",
+      "sampling_attempt_namespace": "protocol_version_x_trial_id",
+      "sampling_event": "protocol_version_x_trial_id_x_contract_core_sha256_x_eligible_frame_manifest_sha256_x_strata_allocation_manifest_sha256",
+      "selected_case": "protocol_version_x_trial_id_x_case_id"
+    },
+    "join_rules": [
+      "EXACT_ORDERED_SELECTED_PROBABILITY_WEIGHT_CASE_ID_EQUALITY",
+      "EXACT_SELECTED_TO_FRAME_CASE_AND_STRATUM_EQUALITY",
+      "EXACT_RECEIPT_SELECTED_MAP_SEED_AND_SELECTION_COMMITMENT_EQUALITY",
+      "EXACT_CONTRACT_CORE_SHA256_NO_ADMISSION_PACKET_ALIAS",
+      "EXACT_OWNER_GLOBAL_TRIAL_REGISTRATION_TO_PROTOCOL_ATTEMPT_NAMESPACE",
+      "EXACT_SAMPLING_ATTEMPT_NAMESPACE_TO_ONE_POLICY_CONTRACT_CORE_FRAME_ALLOCATION_AND_EVENT",
+      "NO_CROSS_VERSION_FALLBACK_ALIAS_OR_MANY_TO_MANY_JOIN"
+    ]
+  },
+  "date": "2026-07-14",
+  "decision": "SUCCESSOR_V1_SOURCE_COMPATIBILITY_PASS_REAL_RUN_NOT_ADMITTED",
+  "evidence_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-blind-map-schema-v0.json": "ad40df50eec68fa192c79e6699a8d2da2a9c3925a387eaa7427f7e19f996d783",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-contract-digest-profile-v0.json": "a8972ad5e75b30634931fee84f08226e2660413b45cf9dfea948089d61160243",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v0.json": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v1.json": "e418b58246eaf183b5624c7eb12299caeea933c83a07584faa915651b3cd48d4",
+    "scripts/check-biocortex-ab-track-b-sampling-receipt-writer-pack.sh": "62006c057f8304733227402d105d8b37d033ad7253e7c4433fa58433196992d3",
+    "scripts/eval/biocortex_ab_track_b_map_bijection_v0.py": "45f55cea933ee12df402fbb55d27ea7c6cd08ba8eef9d9868e4e491dd62a2cd2",
+    "scripts/eval/biocortex_ab_track_b_sampling_receipt_writer_v0.py": "a8642d2b524183e060eb2f2c16d3a4bba4bca43c8e18b8524bc14738d4f6d975",
+    "scripts/eval/biocortex_ab_track_b_sampling_seed_derivation_v0.py": "4f51781ff707e89b4c09adffeafbdaacd75c7e1571d1a86e45d336aace888a3f",
+    "scripts/eval/biocortex_ab_track_b_sampling_selection_v0.py": "e327faf2ad73718dc33f68fdb66a89abf0ac84fbbf8d828ff79fa0e8b75772ec",
+    "scripts/eval/check_biocortex_ab_track_b_admission.py": "b09b10243f195299dc226b5d8d2b484ec74f5eecd49bb487296c391f6f193b13",
+    "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph_v0.json": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+    "scripts/eval/fixtures/biocortex_ab_track_b_identity_composition_pack_synthetic_v0.json": "094a7343543be2a9b32fc996dc3e7006bc9d02f87f8cc9bdd269ef9fb61a341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json": "764f063fefe0e516547f9bd1e71417242daf292d57e480ae39b73df8bcda341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e",
+    "scripts/eval/fixtures/biocortex_ab_track_b_sampling_receipt_writer_pack_synthetic_v0.json": "79bdb87f5fdaeb72423ff12002f4cf9a0deca2e9cd9b86e820321357a0641b8a"
+  },
+  "next_unit": "INDEPENDENT_CUSTODIAN_SAMPLING_ATTEMPT_CLAIM_AND_WRITE_OUTCOME_RECEIPT",
+  "predecessor": {
+    "integrated_commit": "be106a88688dd2df5257b4692a41c908988cdad8",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_sampling_receipt_writer_pack_v0.json",
+    "manifest_sha256": "3fb4e59754c9c52b6c0ebb642dccdd6ccb7f9282fca6bfb83a4fd001e76437e9",
+    "source_commit": "d72dcbba17a6744c6a8784c83e88fef6d74399cc"
+  },
+  "retained_blockers": [
+    "ADMISSION_POLICY_NOT_LIVE_BOUND",
+    "CONTRACT_CORE_INSTANCE_NOT_FROZEN",
+    "FRAME_STRATA_AND_ENTROPY_CUSTODY_UNATTESTED",
+    "SAMPLING_ATTEMPT_NAMESPACE_GLOBAL_SINGLE_USE_UNENFORCED",
+    "SAMPLING_WRITE_OUTCOME_CUSTODIAN_RECEIPT_UNBOUND",
+    "TRUSTED_CLOCK_AND_PRE_OUTPUT_ORDER_UNATTESTED",
+    "ANTI_SHOPPING_ORDER_UNATTESTED",
+    "FIRST_CONDITION_OUTPUT_GUARD_UNBOUND",
+    "MAP_V1_NOT_LIVE_BOUND",
+    "MAP_CONSUMPTION_SINGLE_USE_UNENFORCED",
+    "RUNTIME_SOURCE_AND_BINARY_PROVENANCE_UNBOUND",
+    "OWNER_POLICY_BINDINGS_UNSET"
+  ],
+  "schema": "agent_bridge.biocortex_ab_track_b_successor_admission_map_v1_pack_manifest.v0",
+  "synthetic_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_successor_admission_map_v1_pack_synthetic_v0.json",
+  "synthetic_fixture_sha256": "a95a0052a6abfa93ea58f7f913429b8aad4c368cb91a5a54ad98d36fc58470a8",
+  "version_tuple": {
+    "blind_map_instance_schema": "agent_bridge.biocortex_ab_track_b_blind_map.v1",
+    "contract_core_schema": "agent_bridge.biocortex_ab_track_b_sampling_contract_core.v0",
+    "identity_derivation_domain": "agent-bridge/track-b/blind-map/v2",
+    "map_request_schema": "agent_bridge.biocortex_ab_track_b_map_bijection_request.v1",
+    "map_result_schema": "agent_bridge.biocortex_ab_track_b_map_bijection_validation_result.v1",
+    "receipt_instance_schema": "agent_bridge.biocortex_ab_track_b_sampling_receipt.v1",
+    "sampling_attempt_namespace_domain": "agent-bridge/track-b/sampling-attempt-namespace/v1",
+    "selected_manifest_schema": "agent_bridge.biocortex_ab_track_b_selected_case_manifest_source_profile.v0",
+    "v0_fallback_allowed": false
+  }
+}
