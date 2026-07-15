@@ -1,0 +1,63 @@
+{
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_offline_schedule_entry.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assignment_before_candidate_start": {
+      "const": true
+    },
+    "assignment_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "block_position": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "case_id": {
+      "pattern": "^[MS][0-9]{2}$",
+      "type": "string"
+    },
+    "configuration_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "injection_armed_before_candidate_start": {
+      "const": true
+    },
+    "namespace_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "repetition_index": {
+      "maximum": 30,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "simulation_run_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "track_id": {
+      "enum": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "assignment_before_candidate_start",
+    "assignment_sha256",
+    "block_position",
+    "case_id",
+    "configuration_sha256",
+    "injection_armed_before_candidate_start",
+    "namespace_id",
+    "repetition_index",
+    "simulation_run_id",
+    "track_id"
+  ],
+  "title": "BioCortex Track B reference-provider fault-injection offline schedule entry v1",
+  "type": "object"
+}

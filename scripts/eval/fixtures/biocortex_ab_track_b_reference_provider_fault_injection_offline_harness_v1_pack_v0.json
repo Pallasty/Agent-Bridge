@@ -1,0 +1,114 @@
+{
+  "boundary": {
+    "condition_output_authorized": false,
+    "cost_authority_bound": false,
+    "credentials_accessed": false,
+    "experiment_executed": false,
+    "live_generator_in_scope": false,
+    "live_output_permit_defined": false,
+    "paid_resources_provisioned": false,
+    "production_adapter_in_scope": false,
+    "provider_called": false,
+    "receipt_is_output_permit": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "data_quality": {
+    "assignment_balance": "PASS_30_OFFLINE_BLOCKS_PER_TRACK",
+    "post_outcome_exclusions": 0,
+    "provenance": "PASS_PLANNED_LOCUS_SEPARATE_FROM_ACTUAL_OFFLINE_ORIGIN",
+    "provider_experiment_completeness": "NOT_EVALUATED_ZERO_EXPERIMENT_ROWS",
+    "run_key_uniqueness": "PASS_OFFLINE_NAMESPACE_ONLY",
+    "schedule_completeness": "PASS_1020_OFFLINE_ROWS_ONLY",
+    "variant_balance": "PASS_FROZEN_MODULO_RULES"
+  },
+  "date": "2026-07-15",
+  "decision": "OFFLINE_HARNESS_PASS_PROVIDER_EXPERIMENT_REMAINS_BLOCKED",
+  "evidence_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-experiment-contract-v1.json": "632dbf1d8202d94d6aef70d8b20c04050e647679da973d81afbe13d68344ad22",
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-harness-suite-receipt-schema-v1.json": "711c85ce5d9c5eb13d5c39b65f684bb1d00cc9722ae03852b93a8352abbf2671",
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-run-row-schema-v1.json": "a60b16cab0c1a3ac8314f4f4df19fae2cff59aa1a10e67fe446305dd70cb0ee1",
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-schedule-entry-schema-v1.json": "135238e4f20ac6a5712606dc2b94aefaa9d6b54ec9dece234ac8f43381caa35b",
+    "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-reference-provider-fault-injection-offline-harness-v1-pack.md": "abedab430bb3d1b28bf508735f164569ae5878285324b35f28df13be3d5b6bf1",
+    "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-reference-provider-fault-injection-preregistration-v1-pack.md": "6f6bbdf6c71ccb1a4eba916be90aa4f35a72548c9e3faf08980727625ba147c1",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_harness_v1.py": "ed55297995d1f49d2b4f5b9c6116c4f5fd69ae5e2be0ea2658aae6b2ed7e0976",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1.py": "1644a95f21144b28335ca107638245fcc605add4b0ba438dafb50fab6e65a1e0",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack.py": "e05841c731dafcf9118e61937fa7f68a3810debb904124c590d07af1ced1f348",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack.py": "874f5f5ac44e4a481f99fd7c23755067c2dba9d848df5ad5a43cb5f26ba422f8",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack.expected.v0.tsv": "9c4a2f7ff0de15e5e37fd2d8b0292e8870eaa505102af04fa16c78c1eec50541",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack_synthetic_v0.json": "fd993935d9847f2a75b665cc77d078946cf2c0bd2d24adbd43c2a50d1dbd6a85",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack_v0.json": "4f15f205539796213ee6f7d0694b7c6bcaf69dae6014b1d084d66228b96486df"
+  },
+  "known_limitations": [
+    "OFFLINE_ROWS_ARE_NOT_PROVIDER_EXPERIMENT_ROWS",
+    "SIX_HUNDRED_MODEL_SCENARIOS_ARE_NOT_MANAGED_SERVICE_OR_OWNED_LAB_OBSERVATIONS",
+    "FOUR_HUNDRED_TWENTY_CLIENT_OBSERVATIONS_DO_NOT_PROVE_PROVIDER_PROCESSING",
+    "ZERO_MANAGED_SERVICE_OBSERVATIONS_EXIST",
+    "ZERO_OWNED_LAB_OBSERVATIONS_EXIST",
+    "ZERO_PROVIDER_EVIDENCE_ROWS_EXIST",
+    "FIXED_TEST_ED25519_MATERIAL_IS_NOT_PRODUCTION_KEY_HANDLING",
+    "PURE_PROTOCOL_DOUBLES_DO_NOT_MODEL_PROVIDER_NETWORK_STORAGE_SCHEDULER_OR_HA_IMPLEMENTATIONS",
+    "ONE_SIMULATED_CALL_OR_RECEIPT_DOES_NOT_PROVE_ONE_PROVIDER_RPC_OR_SIGNATURE_CREATION",
+    "S12_BRANCH_INTERPRETATION_REQUIRES_FORMALIZATION_IN_THE_FUTURE_RUNNER_CONTRACT",
+    "NO_CREDENTIAL_RESOURCE_COST_OR_LAB_AUTHORITY_IS_BOUND",
+    "NO_OUTPUT_PERMIT_PRODUCTION_READINESS_OR_CROSS_TRACK_RANKING_IS_AVAILABLE"
+  ],
+  "logical_baseline_commit": "0be03cfdbee77f0bc29559e0795fa3ec77f07357",
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_AUTHORITY_AND_ADAPTER_CONTRACT",
+  "packet": {
+    "modes": {
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-harness-suite-receipt-schema-v1.json": "100644",
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-run-row-schema-v1.json": "100644",
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-schedule-entry-schema-v1.json": "100644",
+      "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-reference-provider-fault-injection-offline-harness-v1-pack.md": "100644",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-offline-harness-v1-pack.sh": "100755",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_harness_v1.py": "100644",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack.py": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack.expected.v0.tsv": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack_synthetic_v0.json": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack_v0.json": "100644"
+    },
+    "paths": [
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-schedule-entry-schema-v1.json",
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-run-row-schema-v1.json",
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-offline-harness-suite-receipt-schema-v1.json",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_harness_v1.py",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack.py",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack_synthetic_v0.json",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack.expected.v0.tsv",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack_v0.json",
+      "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-reference-provider-fault-injection-offline-harness-v1-pack.md",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-offline-harness-v1-pack.sh"
+    ]
+  },
+  "predecessor": {
+    "integration_commit": "0be03cfdbee77f0bc29559e0795fa3ec77f07357",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_preregistration_v1_pack_v0.json",
+    "source_commit": "8640a7ef39319befbbb265376c26dec03910db25"
+  },
+  "results": {
+    "configuration_sha256": "fd993935d9847f2a75b665cc77d078946cf2c0bd2d24adbd43c2a50d1dbd6a85",
+    "experimental_run_rows": 0,
+    "managed_service_observation_rows": 0,
+    "offline_rows_sha256": "e4458abb43b7de6d8fb40809e679393198b29c2303ba9824bae414455d6b305e",
+    "owned_lab_observation_rows": 0,
+    "planned_experiment_rows_satisfied": 0,
+    "provider_evidence_rows": 0,
+    "schedule_sha256": "37e00bb606b09760d0280e240afbbc2585412c7080a5bf909a130edf305d70b3"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack_manifest.v0",
+  "status": "REFERENCE_PROVIDER_FAULT_INJECTION_OFFLINE_HARNESS_V1_IMPLEMENTED_SYNTHETIC_ONLY_NO_PROVIDER_INVOCATION",
+  "test_oracle": {
+    "cases": 34,
+    "client_conformance_observation_rows": 420,
+    "directed_negative_tests": 384,
+    "model_scenario_rows": 600,
+    "offline_synthetic_rows": 1020,
+    "repetitions_per_case": 30,
+    "schema_documents": 3,
+    "tracks": 2
+  },
+  "tracks": {
+    "MANAGED_SPANNER_CLOUD_KMS": "NOT_EVALUATED_INCOMPLETE_MANAGED_SERVICE_EVIDENCE_LOCUS",
+    "SELF_HOSTED_ETCD_OPENBAO": "NOT_EVALUATED_INCOMPLETE_OWNED_LAB_EVIDENCE_LOCUS"
+  }
+}

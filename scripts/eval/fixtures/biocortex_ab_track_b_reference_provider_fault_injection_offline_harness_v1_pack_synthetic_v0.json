@@ -1,0 +1,48 @@
+{
+  "boundary": {
+    "condition_output_authorized": false,
+    "cost_authority_bound": false,
+    "credentials_accessed": false,
+    "experiment_executed": false,
+    "live_generator_in_scope": false,
+    "live_output_permit_defined": false,
+    "paid_resources_provisioned": false,
+    "production_adapter_in_scope": false,
+    "provider_called": false,
+    "receipt_is_output_permit": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "deterministic_seed": "d0812a6a1d545a8fe1d3d0349e3c21e6381a269fbbbac86bc9aefb4076d76084",
+  "mode": "OFFLINE_DETERMINISTIC_DOUBLE_ONLY",
+  "profiles": {
+    "managed": {
+      "algorithm": "EC_SIGN_ED25519",
+      "database_kind": "IN_MEMORY_SPANNER_PROTOCOL_DOUBLE",
+      "effective_isolation": "SERIALIZABLE",
+      "exact_key_version_resource": "projects/offline-double/locations/global/keyRings/track-b/cryptoKeys/reference/cryptoKeyVersions/7",
+      "hidden_provider_retries": false,
+      "key_state": "ENABLED",
+      "key_version": 7,
+      "kms_kind": "IN_PROCESS_CLOUD_KMS_PROTOCOL_DOUBLE",
+      "protection_level": "HSM",
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "self_hosted": {
+      "authority_kind": "IN_MEMORY_ETCD_PROTOCOL_DOUBLE",
+      "batch": false,
+      "context": null,
+      "derived": false,
+      "hidden_provider_retries": false,
+      "key_version": 2,
+      "leased_authority_keys": false,
+      "linearizable_reads": true,
+      "nested_transactions": false,
+      "prehashed": false,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "transit_kind": "IN_PROCESS_OPENBAO_TRANSIT_PROTOCOL_DOUBLE",
+      "witness_actor_domain": "OUTSIDE_ETCD_SNAPSHOT_AND_RESTORE_DOUBLE",
+      "witness_kind": "IN_MEMORY_EXTERNAL_LINEARIZABLE_CAS_DOUBLE"
+    }
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_configuration.v1"
+}
