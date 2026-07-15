@@ -1099,6 +1099,35 @@ so they are versioned normally and are not added to the preservation-only
   conditional candidates after the conformed P3 prefix; uniform rethresholding,
   budget-constrained drop, the remaining 98 steps, exact-Hubbard error, double
   occupancy, physical reference and READY remain excluded.
+- `majorana_certificate_p6_design_probe.py`,
+  `majorana_certificate_p6_design_probe/majorana_p6_adaptive_drop_resource_probe.jl`,
+  `majorana_certificate_p6_design_probe_fixture.json`,
+  `majorana_certificate_p6_design_probe_policy.json`,
+  `majorana_certificate_p6_design_probe_report.json` and their preprobe/result
+  tests: non-authoritative D0 resource-envelope closure for the full-domain
+  adaptive-drop candidate `E768-MAX-LAZY37-V1`.  The result-blind preprobe
+  commit is `2483450e9ae93402a5315dae21b142d08742e783`; report SHA-256 is
+  `7c591111ee99b18bf2ccaca2d8157e93a19a3db49b6a680c01b0be13f570fc56`,
+  policy SHA-256 is
+  `6a8b9c1c2584cbe8998643e0644f35896d54fe57444eff795a93a83987fa87ab`,
+  fixture file/canonical SHA-256 values are
+  `2e5254b7a98cf4b0ba08c5674215d78a59a78ddf0b0e27460b7cf82ac7be3b6e`
+  and `9b02421b53ef407531b95e1f9d4f48f29642f88962be297789ecbc88792755ba`,
+  and staging-manifest SHA-256 is
+  `f15196a28aaeeb2535d719f533dd4cb5f6c17f51e184450fa7a02f547358788f`.
+  The nonselectable control exactly reproduces the frozen P5 K37 aggregate
+  resource projection; the adaptive path completes 768 selection boundaries
+  with 284,847 final terms, 426,811,185 total P2 visits and 160,531,288 total
+  selection-work units.  The derived future S0 envelope uses 1,048,576 term
+  caps, 536,870,912 cap-scan/propagation caps, 1,073,741,824 total-P2/combined
+  caps, 536,870,912 total-selection-work, 2 GiB memory, zero swap, 1,800
+  seconds and 4,096 stderr bytes.  The exact-result test SHA-256 is
+  `60991ae7decb46de8028f0527b48e3a52acd1d312c88f74f381b1a1a1bb94c8d`.
+  Report and witnesses have `scientific_authority=NONE`; they contain no
+  scientific defect ledger, allocation result, term/drop stream, observable
+  result or candidate certificate and cannot enter the formal S0 runner.  S0
+  must be separately result-unpinned, schema-cap its scientific output, run two
+  fresh byte-identical replays and reconstruct them independently.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is

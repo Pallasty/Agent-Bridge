@@ -1163,3 +1163,56 @@ limited to the fixed L8 P3 `2^-34` first step followed by one conditional K36
 or K37 second step.  This is not a full-simulation no-go, does not assess the
 remaining 98 mapped steps or product-formula-to-exact-Hubbard error, and does
 not establish physical-reference qualification or READY.
+
+## Majorana P6 D0 full-domain adaptive-drop resource envelope
+
+P6 D0 now closes the resource question for the next budget-constrained route
+without opening its scientific result.  The single formal candidate
+`E768-MAX-LAZY37-V1` freezes a causal 768-boundary prefix schedule and ranks the
+complete postmerge domain by exact point cost, absolute binary64 bits and
+unsigned mask.  Strict K37 membership is only a lazy initial segment: a fully
+consumed tier 1 with positive remainder must rescan and rank every affordable
+nonpool row.  The `P5-K37-RESOURCE-CONTROL` path is nonselectable and preserves
+the original threshold callback.
+
+The result-blind preprobe was committed at
+`2483450e9ae93402a5315dae21b142d08742e783`.  The canonical D0 report has
+SHA-256
+`7c591111ee99b18bf2ccaca2d8157e93a19a3db49b6a680c01b0be13f570fc56`.
+The control exactly reproduced the frozen P5 K37 resource projection with zero
+adaptive-selection work.  The adaptive candidate then completed all 768
+selection boundaries from a fresh O0 process, with no deterministic cap,
+timeout or OOM, and reproduced the same P3 step-1 resource projection.
+
+For the adaptive step 2, peak premerge/postmerge/final term counts were
+307,507/303,027/284,847.  Total P2 visits were 426,811,185 and combined P2 plus
+accuracy events were 445,136,171.  Aggregate selection work comprised
+114,104,682 ranking-scan visits, 20,263,438 sort inputs, 21,954,876 exact
+row-cost evaluations and 4,208,292 selected-membership insertions, for
+160,531,288 total work units and a 303,027-term peak ranking buffer.  Diagnostic
+maximum RSS was 892,140 KiB; wall-clock time was 14:33.41.
+
+The precommitted two-times/next-power-of-two rule establishes one future S0 cap
+set: 1,048,576 for current/boundary/final/premerge terms; 536,870,912 for each
+cap-scan and propagation counter; 268,435,456 truncation visits; 1,073,741,824
+for total P2 and combined events; and
+67,108,864/16,777,216/33,554,432/4,194,304/16,777,216 for
+accuracy/anticommuting/product/merge/drop events.  Selection scan/sort/cost-
+evaluation/insertion caps are
+268,435,456/67,108,864/67,108,864/16,777,216, with a 1,048,576 ranking-buffer
+cap and 536,870,912 total-selection-work cap.  Formal host caps are 2 GiB,
+zero swap, 1,800 seconds and 4,096 stderr bytes.  The runtime cap reaches the
+policy's fixed ceiling and cannot be relaxed in place.
+
+This report remains `scientific_authority=NONE` and `certificate_eligible=false`.
+It exposes no defect ticks, prefix budget or slack, allocation comparison,
+term/drop stream, coefficient or mask, Neel observable, winner or certificate;
+the resource observations cannot select or certify the candidate.  The next
+unit must therefore be a direct-child, result-unpinned S0 precommit that freezes
+these common caps, separately derives scientific-stdout and persisted-container
+caps from schema rather than D0 output, restores the formal namespace custody,
+and requires two fresh byte-identical replays plus independent reconstruction.
+The D0 report and policy bytes must not enter the S0 runner.  Any S0 timeout is
+`INDETERMINATE`, not permission to expand the 1,800-second cap.  The remaining
+98 mapped steps, product-formula-to-exact-Hubbard error, double occupancy,
+physical-reference qualification and READY all remain outside P6 D0 authority.

@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import random
 import re
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -165,13 +166,23 @@ class MajoranaP6DesignProbeTests(unittest.TestCase):
             report["observations"], self.policy,
         )
 
-    def test_policy_fixture_and_report_absence_are_valid(self) -> None:
+    def test_policy_fixture_and_historical_report_absence_are_valid(self) -> None:
         validated = P6.validate_policy(
-            self.policy, require_report_absent=True,
+            self.policy, require_report_absent=False,
         )
         self.assertEqual(validated["policy_id"], P6.POLICY_ID)
-        self.assertFalse((BASE / P6.REPORT_NAME).exists())
         self.assertEqual(self.fixture["fixture_id"], P6.FIXTURE_ID)
+        for relative in P6.RESULT_ARTIFACTS:
+            artifact = (
+                "2483450e9ae93402a5315dae21b142d08742e783:"
+                "docs/research/fermion-frontier/" + relative
+            )
+            process = subprocess.run(
+                ["git", "cat-file", "-e", artifact], cwd=BASE,
+                check=False, capture_output=True,
+            )
+            with self.subTest(relative=relative):
+                self.assertNotEqual(process.returncode, 0)
 
     def test_single_candidate_and_control_are_frozen(self) -> None:
         design = self.policy["candidate_design"]
@@ -726,6 +737,9 @@ class MajoranaP6DesignProbeTests(unittest.TestCase):
                     depot.mkdir()
                     output = root / P6.REPORT_NAME
                     with (
+                        mock.patch.object(
+                            P6, "validate_policy", return_value=self.policy,
+                        ),
                         mock.patch.object(P6, "_validate_preprobe_commit"),
                         mock.patch.object(
                             P6, "file_sha256",
