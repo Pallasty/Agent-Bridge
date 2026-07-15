@@ -1,0 +1,189 @@
+{
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_preregistration_receipt.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "condition_output_authorized": {
+          "const": false
+        },
+        "cost_authority_bound": {
+          "const": false
+        },
+        "credentials_accessed": {
+          "const": false
+        },
+        "experiment_executed": {
+          "const": false
+        },
+        "live_generator_in_scope": {
+          "const": false
+        },
+        "live_output_permit_defined": {
+          "const": false
+        },
+        "paid_resources_provisioned": {
+          "const": false
+        },
+        "production_adapter_in_scope": {
+          "const": false
+        },
+        "provider_called": {
+          "const": false
+        },
+        "receipt_is_output_permit": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      },
+      "required": [
+        "condition_output_authorized",
+        "cost_authority_bound",
+        "credentials_accessed",
+        "experiment_executed",
+        "live_generator_in_scope",
+        "live_output_permit_defined",
+        "paid_resources_provisioned",
+        "production_adapter_in_scope",
+        "provider_called",
+        "receipt_is_output_permit",
+        "side_effects_unlocked"
+      ],
+      "type": "object"
+    },
+    "contract_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "data_quality": {
+      "additionalProperties": false,
+      "properties": {
+        "completeness": {
+          "const": "PLAN_PASS_EXECUTION_NOT_EVALUATED"
+        },
+        "consistency": {
+          "const": "PLAN_PASS_EXECUTION_NOT_EVALUATED"
+        },
+        "execution_rows": {
+          "const": 0
+        },
+        "integrity": {
+          "const": "PLAN_PASS_EXECUTION_NOT_EVALUATED"
+        },
+        "referential_integrity": {
+          "const": "PLAN_PASS_EXECUTION_NOT_EVALUATED"
+        },
+        "timeliness": {
+          "const": "REFETCH_REQUIRED_BEFORE_EXECUTION"
+        },
+        "uniqueness": {
+          "const": "PLAN_PASS_EXECUTION_NOT_EVALUATED"
+        },
+        "validity": {
+          "const": "PLAN_PASS_EXECUTION_NOT_EVALUATED"
+        }
+      },
+      "required": [
+        "completeness",
+        "consistency",
+        "execution_rows",
+        "integrity",
+        "referential_integrity",
+        "timeliness",
+        "uniqueness",
+        "validity"
+      ],
+      "type": "object"
+    },
+    "date": {
+      "const": "2026-07-15"
+    },
+    "decision": {
+      "const": "PREREGISTRATION_PASS_EXECUTION_BLOCKED_NO_AUTHORITY_OR_RUN_EVIDENCE"
+    },
+    "experiment_counts": {
+      "additionalProperties": false,
+      "properties": {
+        "invariants": {
+          "const": 34
+        },
+        "managed_cases": {
+          "const": 16
+        },
+        "official_source_claims": {
+          "const": 16
+        },
+        "planned_run_rows": {
+          "const": 1020
+        },
+        "repetitions_per_case": {
+          "const": 30
+        },
+        "self_hosted_cases": {
+          "const": 18
+        },
+        "tracks": {
+          "const": 2
+        }
+      },
+      "required": [
+        "invariants",
+        "managed_cases",
+        "official_source_claims",
+        "planned_run_rows",
+        "repetitions_per_case",
+        "self_hosted_cases",
+        "tracks"
+      ],
+      "type": "object"
+    },
+    "next_unit": {
+      "const": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_HARNESS_V1_OFFLINE_DOUBLE_IMPLEMENTATION"
+    },
+    "observation_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_preregistration_receipt.v1"
+    },
+    "status": {
+      "const": "REFERENCE_PROVIDER_FAULT_INJECTION_EXPERIMENT_V1_PREREGISTERED_NO_PROVIDER_INVOCATION_NO_PERMIT"
+    },
+    "track_results": {
+      "additionalProperties": false,
+      "properties": {
+        "MANAGED_SPANNER_CLOUD_KMS": {
+          "const": "PREREGISTERED_NOT_EXECUTED"
+        },
+        "SELF_HOSTED_ETCD_OPENBAO": {
+          "const": "PREREGISTERED_NOT_EXECUTED"
+        }
+      },
+      "required": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "boundary",
+    "contract_sha256",
+    "data_quality",
+    "date",
+    "decision",
+    "experiment_counts",
+    "next_unit",
+    "observation_sha256",
+    "schema",
+    "status",
+    "track_results"
+  ],
+  "title": "BioCortex Track B reference-provider fault-injection preregistration receipt v1",
+  "type": "object"
+}
