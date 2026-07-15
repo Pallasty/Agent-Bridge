@@ -201,7 +201,10 @@
    "primaries": [
     "ab_memory_evolution_direction_20260710"
    ],
-   "note": "HONEST LIMIT: near-2-gold — the PPR Gate A/B/C spec lives inside the direction decision; the test is distinguishing it from the rejected centrality-prior. Do not inflate."
+   "note": "HONEST LIMIT: near-2-gold — the PPR Gate A/B/C spec lives inside the direction decision; the test is distinguishing it from the rejected centrality-prior. Do not inflate. answer_vehicle declared 2026-07-15: covered by PRE-EXISTING digest (batch-3 selector skip: already in top-3 for target queries; no new row authored).",
+   "answer_vehicle": [
+    "digest_ab_disproven_graph_gnn_retrieval_routes_20260712"
+   ]
   },
   {
    "id": "S12",
@@ -216,7 +219,10 @@
    "primaries": [
     "memory_zones_public_pool_design_20260706"
    ],
-   "note": "four-zone / public-experience-pool design triad."
+   "note": "four-zone / public-experience-pool design triad. answer_vehicle declared 2026-07-15: digest-author batch:2026-07-15 (gate PASS: hit sem#1, non-regression +0.000).",
+   "answer_vehicle": [
+    "digest_memory_four_zones_public_pool_design_20260710"
+   ]
   },
   {
    "id": "S13",
@@ -231,7 +237,10 @@
    "primaries": [
     "outcome_retrieval_outcome_apply_pr69_20260703"
    ],
-   "note": "learning-loop status (why cold + next step)."
+   "note": "learning-loop status (why cold + next step). answer_vehicle declared 2026-07-15: digest-author batch:2026-07-15 (gate PASS: hit sem#1, non-regression +0.000).",
+   "answer_vehicle": [
+    "digest_retrieval_outcome_apply_status_and_next_steps_20260714"
+   ]
   }
  ],
  "dropped": [
