@@ -1,0 +1,140 @@
+{
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:owner-trial-registration-receipt:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "admission_policy_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "authority_scope": {
+      "const": "LOCAL_CRASH_ATOMIC_REGISTRATION_ONLY_NOT_EXTERNAL_GLOBAL_ANTI_ROLLBACK"
+    },
+    "condition_output_authorized": {
+      "const": false
+    },
+    "contract_core_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "cross_protocol_trial_id_reuse_forbidden": {
+      "const": true
+    },
+    "custodian_authority_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "custodian_id": {
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "custodian_instance_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "custodian_sequence": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "custodian_source_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "custodian_store_schema_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "eligible_frame_manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "external_global_single_use_verified": {
+      "const": false
+    },
+    "external_owner_trust_verified": {
+      "const": false
+    },
+    "global_trial_key_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "local_registry_trial_id_consumed": {
+      "const": true
+    },
+    "owner_authorization_receipt_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "owner_freeze_receipt_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "owner_trust_policy_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "protocol_version": {
+      "const": 1
+    },
+    "receipt_schema_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "registered_at_utc": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    },
+    "sampling_attempt_namespace_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "sampling_event_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_owner_trial_registration_receipt.v1"
+    },
+    "strata_allocation_manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "trial_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "admission_policy_sha256",
+    "authority_scope",
+    "condition_output_authorized",
+    "contract_core_sha256",
+    "cross_protocol_trial_id_reuse_forbidden",
+    "custodian_authority_sha256",
+    "custodian_id",
+    "custodian_instance_sha256",
+    "custodian_sequence",
+    "custodian_source_sha256",
+    "custodian_store_schema_sha256",
+    "eligible_frame_manifest_sha256",
+    "external_global_single_use_verified",
+    "external_owner_trust_verified",
+    "global_trial_key_sha256",
+    "local_registry_trial_id_consumed",
+    "owner_authorization_receipt_sha256",
+    "owner_freeze_receipt_sha256",
+    "owner_trust_policy_sha256",
+    "protocol_version",
+    "receipt_schema_sha256",
+    "registered_at_utc",
+    "sampling_attempt_namespace_sha256",
+    "sampling_event_sha256",
+    "schema",
+    "strata_allocation_manifest_sha256",
+    "trial_id"
+  ],
+  "title": "BioCortex Track B owner trial registration receipt v1",
+  "type": "object"
+}

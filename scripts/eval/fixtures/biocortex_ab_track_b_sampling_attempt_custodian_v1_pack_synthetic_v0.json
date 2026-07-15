@@ -1,0 +1,59 @@
+{
+  "abort": {
+    "abort_reason_code": "SYNTHETIC_PROCESS_DEATH_RECONCILIATION",
+    "failure_evidence_sha256": "19e3d15496426b5c658d58d9effc7be557c5c0f31d2ecaff4bd9957b2ab8f0bd",
+    "finalized_at_utc": "2026-07-14T12:00:20Z",
+    "write_state": "PROCESS_DEATH_RECONCILIATION"
+  },
+  "boundary": {
+    "condition_output_authorized": false,
+    "external_anti_rollback_anchor_present": false,
+    "external_global_single_use_verified": false,
+    "external_owner_trust_verified": false,
+    "fixture_only": true,
+    "live_binding_satisfied_count": 0,
+    "real_run_admitted": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "claim": {
+    "claimed_at_utc": "2026-07-14T12:00:10Z"
+  },
+  "custodian_config": {
+    "admission_policy_sha256": "2847ebd368c4a0b557f95b2c91f72b69e31126cf3623ed29320b4154537e3dbe",
+    "custodian_authority_sha256": "5b83156571787234eace58dc00b8574a83fed7406dc693e12de7e3e42a363fe5",
+    "custodian_id": "synthetic_track_b_custodian_v1",
+    "custodian_instance_sha256": "2be160b539c5bfa7c8f04292ffff8eea9dc8afddb04c86e087afb6333a685983",
+    "owner_trust_policy_sha256": "3621ca9a8e9ae9091d52b0b06a1c58424cba19ed4747ca20c760d6fa9af4d8bc",
+    "registry_generation_sha256": "3e004e0dad4b01eedec8fafa45b5e3a6e357f655896b04abdd2e831ecabbb04e",
+    "sampling_receipt_schema_sha256": "e418b58246eaf183b5624c7eb12299caeea933c83a07584faa915651b3cd48d4",
+    "sampling_receipt_writer_sha256": "a8642d2b524183e060eb2f2c16d3a4bba4bca43c8e18b8524bc14738d4f6d975"
+  },
+  "expected": {
+    "abort_terminal_count": 1,
+    "concurrent_claim_loser_count": 5,
+    "concurrent_claim_winner_count": 1,
+    "crash_boundary_count": 6,
+    "filesystem_schema_rejection_count": 13,
+    "known_local_snapshot_rollback_attack_reproduced": true,
+    "ledger_event_count_after_success": 3,
+    "minimum_directed_mutations_rejected": 64,
+    "normal_terminal_outcome": "SUCCESS",
+    "owner_registration_count": 1,
+    "protocol_version": 1,
+    "success_terminal_count": 1,
+    "unexpected_exception_cleanup_count": 1
+  },
+  "owner_registration": {
+    "owner_authorization_receipt_sha256": "d9bd41c31b7d81620969df2ff956b908fc6e07e807c71f44e860a435a461d583",
+    "owner_freeze_receipt_sha256": "68294d3d0ee862dec74ff95a98e0b9a5307021fd10cf59d534eed0ef8ed2689d",
+    "registered_at_utc": "2026-07-14T12:00:00Z"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_sampling_attempt_custodian_v1_pack_synthetic.v0",
+  "source_successor_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_successor_admission_map_v1_pack_synthetic_v0.json",
+  "source_successor_fixture_sha256": "a95a0052a6abfa93ea58f7f913429b8aad4c368cb91a5a54ad98d36fc58470a8",
+  "success": {
+    "finalized_at_utc": "2026-07-14T12:00:20Z"
+  },
+  "synthetic_only": true,
+  "trial_id": "public_synthetic_track_b_successor_map_v1"
+}
