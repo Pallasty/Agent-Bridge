@@ -1,0 +1,112 @@
+{
+  "boundary": {
+    "anti_rollback_anchor_present": false,
+    "bridge_feature_forwarding_present": false,
+    "bridge_runtime_caller_present": false,
+    "cross_repository_transport_authorized": false,
+    "default_path_present": false,
+    "multi_host_consensus_present": false,
+    "public_constructor_present": false,
+    "state_store_surface_present": false,
+    "successor_payload_admitted": false
+  },
+  "commit_semantics": {
+    "commit_error": "INDETERMINATE_NO_TOKEN",
+    "conflict_classification_in_same_transaction": true,
+    "exact_replay": "REJECT_REPLAY",
+    "insert_statement": "INSERT_TARGETED_ON_CONFLICT_REPLAY_KEY_DO_NOTHING",
+    "scope_collision": "REJECT_SCOPE_COLLISION",
+    "success_condition": "COMMIT_CONFIRMED_AND_RECEIPT_IDENTITY_MATCHED",
+    "transaction_behavior": "IMMEDIATE"
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "feature": "temporal-evidence-s7-durable-replay-synthetic",
+  "implementation": {
+    "constructor_scope": "cfg_test_only",
+    "module_path": "crates/store/src/temporal_replay_transport/durable_replay_registry.rs",
+    "module_visibility": "private_child_of_private_s6_module",
+    "normal_open_mode": "READ_WRITE_NO_CREATE_NOFOLLOW",
+    "provisioning_mode": "EXPLICIT_CREATE_NEW",
+    "receiver_or_transport": false
+  },
+  "privacy_profile": {
+    "digest_commitments_are_not_anonymization": true,
+    "raw_case_id_stored": false,
+    "raw_key_id_stored": false,
+    "raw_nonce_stored": false,
+    "raw_payload_stored": false,
+    "raw_request_id_stored": false,
+    "raw_route_stored": false,
+    "raw_trial_id_stored": false,
+    "retention": "PERMANENT_NO_EXPIRY_GC",
+    "stored_commitment_bytes_per_tombstone": 96
+  },
+  "receipt_profile": {
+    "durable_must_be_true_for_s7_wrapper": true,
+    "replay_key_must_equal_request": true,
+    "scope_must_equal_request": true,
+    "substitution_result": "INDETERMINATE_NO_TOKEN"
+  },
+  "schema": "agent_bridge.memory_temporal_durable_replay_contract_s7.v0",
+  "storage_profile": {
+    "application_id_decimal": 1094865463,
+    "busy_timeout_milliseconds": 1500,
+    "database_role": "DEDICATED_LOCAL_REPLAY_SIDECAR",
+    "foreign_keys": true,
+    "journal_mode": "DELETE",
+    "locking_mode": "NORMAL",
+    "main_state_db_modified": false,
+    "query_only": false,
+    "read_uncommitted": false,
+    "registry_generation_id_bytes": 32,
+    "registry_generation_must_be_externally_pinned": true,
+    "schema_manifest_sha256": "686c22c3f4f3f696113a88a6d72bb292635a55020e00144ea2ef02f7eae35466",
+    "synchronous": "EXTRA",
+    "synchronous_pragma_value": 3,
+    "trusted_schema": false,
+    "unix_file_mode": "0600",
+    "user_version": 1
+  },
+  "table_profile": {
+    "metadata_columns": [
+      "singleton:INTEGER:PRIMARY_KEY",
+      "registry_generation_id:BLOB:32"
+    ],
+    "schema_features": [
+      "STRICT",
+      "WITHOUT_ROWID",
+      "NO_UPDATE_TRIGGER",
+      "NO_DELETE_TRIGGER",
+      "IMMUTABLE_METADATA_TRIGGERS"
+    ],
+    "tombstone_columns": [
+      "replay_key_sha256:BLOB:32:PRIMARY_KEY",
+      "scope_sha256:BLOB:32",
+      "payload_sha256:BLOB:32"
+    ]
+  },
+  "test_matrix": {
+    "busy_writer_fail_closed": true,
+    "commit_result_loss": true,
+    "expiry_does_not_release_nonce": true,
+    "full_verifier_durable_wrapper": true,
+    "independent_connection_race": true,
+    "insert_only_triggers": true,
+    "missing_or_foreign_db": true,
+    "mixed_scope_race": true,
+    "real_process_race": true,
+    "receipt_substitution": true,
+    "restart": true,
+    "schema_and_permission_drift": true,
+    "sigkill_after_commit": true,
+    "sigkill_before_commit": true
+  },
+  "unresolved_limits": [
+    "NO_ASYNC_OR_RUNTIME_RECEIVER",
+    "NO_OLD_BACKUP_ROLLBACK_DETECTION",
+    "NO_FILE_CLONE_OR_FORK_DETECTION",
+    "NO_MULTI_HOST_OR_NETWORK_FILESYSTEM_GUARANTEE",
+    "NO_HARDWARE_POWER_LOSS_CLAIM",
+    "NO_PHYSICAL_PRIVACY_DELETION_RESOLUTION"
+  ]
+}
