@@ -32,6 +32,16 @@ because its historical manifest intentionally binds the pre-S12 S9 source
 bytes. The modified S9/S10/S11 glue is instead bound and checked by the S12
 checker, exact delta gate, and predecessor/S12 Rust regressions.
 
+The same gate also has an integrated mode. It requires an ordinary two-parent
+merge whose second parent is the exact S12 source commit and whose first parent
+contains the first-condition-output guard integration. It preserves all nine
+guard packet blobs, permits only the three preregistered S9/S10/S11 glue hash
+transitions, and replays the unchanged guard gate in a temporary clean
+first-parent worktree. The old guard gate is deliberately not weakened to
+accept successor glue bytes in the current tree. The merge tree must then pass
+the S12 oracle and the complete Rust regression matrix before the integrated
+marker is emitted.
+
 ## Artifact binding
 
 - `crates/store/Cargo.toml`: `40bbcc10effa7137a5c0b08d2b89c70285b4b1503b441c732398b803d01e96dc`
@@ -43,6 +53,6 @@ checker, exact delta gate, and predecessor/S12 Rust regressions.
 - `docs/design/MEMORY_TEMPORAL_RECOVERED_S9_DECISION_REVERIFICATION_S12_2026_07_15.md`: `28ccebca75bb016e741df8ff471c522bcd2ec5b6513a530164073f1c0ec1142f`
 - `docs/design/fixtures/biocortex-ab-track-b-recovered-s9-decision-reverification-s12-v0.json`: `4efa9dc533cfca6c98473ae20cf8fc983292362e92b669575a81e80e189b1303`
 - `docs/design/fixtures/biocortex-ab-track-b-successor-admission-gate-s12-v0.json`: `7a580c64ae736a3dd8257af8fd2a81a027ecfe4cbf85fb3205bd25b6a25d9eb6`
-- `scripts/check-memory-temporal-recovered-s9-decision-reverification-s12.sh`: `9c4e978ced643ff1f5d24a6106e76d83edc788c3440e48891ea30da2c4b3e524`
+- `scripts/check-memory-temporal-recovered-s9-decision-reverification-s12.sh`: `df9d0d6a358262773dbed9a2d5ca8d0ba375476542399c2a829b39367afa42d5`
 - `scripts/eval/check_memory_temporal_recovered_s9_decision_reverification_s12.py`: `d580feaad194579961b380dcbea5aca4eb95101b3ce76beac793a248b3ea4dd2`
 - `scripts/eval/fixtures/memory_temporal_recovered_s9_decision_reverification_s12.expected.v0.tsv`: `d85e72929f6bffec02c728a458821081fc0358fa86881e40ebf4ec8c2b3fb3f1`
