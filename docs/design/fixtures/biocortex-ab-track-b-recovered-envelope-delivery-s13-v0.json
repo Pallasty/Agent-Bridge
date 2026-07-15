@@ -1,0 +1,124 @@
+{
+  "boundary": {
+    "bridge_or_state_store_caller": false,
+    "byte_only_decoder": false,
+    "external_durable_source": false,
+    "process_local_only": true,
+    "provider_network_clock_cache_or_retry": false,
+    "runtime_adapter": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "carrier": {
+    "canonical_decision_message_required": true,
+    "canonical_request_message_required": true,
+    "canonical_signature_bytes_required": 64,
+    "cloneable": false,
+    "max_combined_bytes": 131072,
+    "max_decision_message_bytes": 65536,
+    "max_request_message_bytes": 65536,
+    "owns_typed_values_and_raw_bytes": true,
+    "serializable": false,
+    "structural_input_is_authenticated": false,
+    "typed_raw_byte_equality_required": true
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "dependency": {
+    "feature": "temporal-evidence-s13-recovered-envelope-delivery-synthetic",
+    "feature_default_enabled": false,
+    "requires_feature": "temporal-evidence-s12-recovered-s9-decision-reverification-synthetic",
+    "s12_historical_chain_unchanged": true,
+    "s12_verifier_visibility_widened": false
+  },
+  "envelope_digest": {
+    "binds_contracts": [
+      "S9",
+      "S10",
+      "S11",
+      "S12"
+    ],
+    "binds_exact_decision_message": true,
+    "binds_exact_request_message": true,
+    "binds_exact_signature": true,
+    "binds_schema_and_profile": true,
+    "domain": "agent-bridge/track-b/recovered-envelope-delivery/envelope-digest/v1",
+    "is_authentication": false,
+    "known_sha256": "5d74c7a300abe503b9a79c796394faa23de0c64f22fb80902294fa0654ee15d9"
+  },
+  "framing_hardening": {
+    "label_max_bytes": 128,
+    "s10_raw_observation_framer_private": true,
+    "s10_validated_framer_fallible": true,
+    "s11_raw_decision_framer_private": true,
+    "s11_raw_sign_job_framer_private": true,
+    "s11_validated_framers_fallible": true,
+    "validation_before_variable_length_framing": true
+  },
+  "handoff": {
+    "consumes_self": true,
+    "cross_process_capability": false,
+    "global_exactly_once": false,
+    "owns_typed_signed_s10_material": true,
+    "projection_reconstructible_from_scalars": false,
+    "projection_serialized_or_persisted": false,
+    "reverification_of_same_typed_signed_input_possible": true,
+    "s10_projection_lexical_only": true,
+    "s10_reverified_locally": true
+  },
+  "known_vector": {
+    "historical_chain_sha256": "afb8aa4945f0e491937f75233c621d52f1bcc1307e6d497352fd9d0fc79b7204",
+    "s9_decision_message_sha256": "e35d9917772887d0ffdbd17f8c8781d93e42e79250483139d400ea46392daab1",
+    "s9_request_sha256": "01d433a73bee905b5d65556b9ba4165716a87cf6142f61ef4147198e390077f1",
+    "s10_observation_sha256": "22e256669c2be1b4ebfe49a20157be7fd76c4156a685b920eda30894222c219f"
+  },
+  "negative_evidence": {
+    "currentness_at_use_proved": false,
+    "durability_proved": false,
+    "external_owner_trust_anchor_present": false,
+    "feature_flag_is_security_boundary": false,
+    "historical_observation_is_admission": false,
+    "local_ownership_is_global_replay_fence": false,
+    "s11_l2_persistence_proved": false
+  },
+  "operational_gap_codes": [
+    "RECOVERED_S9_DECISION_EXTERNAL_CARRIER_UNIMPLEMENTED",
+    "RECOVERED_S9_DECISION_BYTES_AVAILABILITY_UNATTESTED",
+    "RECOVERED_S9_RAW_DECISION_EXTERNAL_DURABILITY_UNATTESTED",
+    "RECOVERED_S9_BYTE_ONLY_DECODER_UNIMPLEMENTED",
+    "RECOVERED_ENVELOPE_CAPTURE_PROVENANCE_UNATTESTED",
+    "RECOVERED_S10_VERIFIED_PROJECTION_RUNTIME_DELIVERY_UNIMPLEMENTED",
+    "RECOVERED_HANDOFF_PROCESS_RESTART_UNAVAILABLE",
+    "RECOVERED_HANDOFF_NOT_GLOBAL_REPLAY_FENCE",
+    "RECOVERED_S9_DECISION_HISTORICAL_ONLY_NOT_CURRENT_AT_USE",
+    "OWNER_PINNED_TRUST_ANCHOR_UNAVAILABLE",
+    "PROVIDER_LINEARIZABILITY_UNATTESTED",
+    "PROVIDER_SPLIT_BRAIN_FENCING_UNATTESTED",
+    "PROVIDER_STATE_ROLLBACK_UNATTESTED",
+    "ATOMIC_AUTHORITY_OPERATION_EXTERNAL_DATABASE_UNIMPLEMENTED",
+    "DATABASE_KMS_CROSS_SERVICE_ATOMICITY_UNATTESTED",
+    "CURRENTNESS_AT_DOWNSTREAM_USE_UNATTESTED"
+  ],
+  "policy": "agent-bridge/track-b/recovered-envelope-delivery/v1",
+  "profile": "OWNED_EXACT_S9_ENVELOPE_PLUS_LEXICAL_VERIFIED_S10_PROJECTION_HISTORICAL_ONLY",
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "schema": "agent_bridge.memory_temporal_recovered_envelope_delivery_s13.v0",
+  "status": "RECOVERED_S9_ENVELOPE_LOCAL_HANDOFF_PREREGISTERED_SYNTHETIC_OWNED_ONE_SHOT_IN_PROCESS_HISTORICAL_ONLY_NO_DURABLE_SOURCE_NO_RUNTIME_TRANSPORT_NO_CURRENTNESS_NO_ADMISSION",
+  "test_matrix": {
+    "aggregate_bound_reject": true,
+    "canonical_append_and_truncate_reject": true,
+    "debug_redacts_bytes_and_identity": true,
+    "empty_and_component_bound_reject": true,
+    "known_answer_envelope_and_historical_chain": true,
+    "noncommitted_s10_reject": true,
+    "repeated_delivery_is_not_global_replay_fence": true,
+    "s10_signature_and_permit_tamper_reject": true,
+    "s11_l2_metadata_unread": true,
+    "signature_length_and_equality_reject": true,
+    "typed_raw_mismatch_reject": true
+  }
+}

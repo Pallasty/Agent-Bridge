@@ -1,0 +1,74 @@
+{
+  "admission": {
+    "bridge_or_state_store_enabled": false,
+    "currentness_token_issued": false,
+    "owner_approval_receipt": null,
+    "production_authorized": false,
+    "successor_payload_admitted": false,
+    "transport_enabled": false
+  },
+  "authorization_semantics": {
+    "carrier_constructor_is_trust_constructor": false,
+    "envelope_digest_is_authentication": false,
+    "feature_flag_is_authorization": false,
+    "historical_chain_is_admission_capability": false,
+    "local_consumption_is_global_exactly_once": false,
+    "process_local_projection_is_cross_process_capability": false,
+    "s10_local_reverification_proves_external_durability": false
+  },
+  "boundary": {
+    "byte_only_decoder_available": false,
+    "currentness_and_consume_atomic": false,
+    "external_carrier_available": false,
+    "external_durable_source_available": false,
+    "owner_pinned_production_permits_available": false,
+    "runtime_recovered_bytes_available": false,
+    "runtime_s10_delivery_available": false
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "local_preregistration": {
+    "complete_s9_structural_envelope_owned": true,
+    "exact_signature_separately_bound": true,
+    "handoff_consumes_self": true,
+    "typed_signed_s10_reverified_locally": true,
+    "s10_projection_lexical_only": true,
+    "s12_historical_output_only": true,
+    "validated_framing_surfaces_only": true
+  },
+  "operational_gap_codes": [
+    "RECOVERED_S9_DECISION_EXTERNAL_CARRIER_UNIMPLEMENTED",
+    "RECOVERED_S9_DECISION_BYTES_AVAILABILITY_UNATTESTED",
+    "RECOVERED_S9_RAW_DECISION_EXTERNAL_DURABILITY_UNATTESTED",
+    "RECOVERED_S9_BYTE_ONLY_DECODER_UNIMPLEMENTED",
+    "RECOVERED_ENVELOPE_CAPTURE_PROVENANCE_UNATTESTED",
+    "RECOVERED_S10_VERIFIED_PROJECTION_RUNTIME_DELIVERY_UNIMPLEMENTED",
+    "RECOVERED_HANDOFF_PROCESS_RESTART_UNAVAILABLE",
+    "RECOVERED_HANDOFF_NOT_GLOBAL_REPLAY_FENCE",
+    "RECOVERED_S9_DECISION_HISTORICAL_ONLY_NOT_CURRENT_AT_USE",
+    "OWNER_PINNED_TRUST_ANCHOR_UNAVAILABLE",
+    "PROVIDER_LINEARIZABILITY_UNATTESTED",
+    "PROVIDER_SPLIT_BRAIN_FENCING_UNATTESTED",
+    "PROVIDER_STATE_ROLLBACK_UNATTESTED",
+    "ATOMIC_AUTHORITY_OPERATION_EXTERNAL_DATABASE_UNIMPLEMENTED",
+    "DATABASE_KMS_CROSS_SERVICE_ATOMICITY_UNATTESTED",
+    "CURRENTNESS_AT_DOWNSTREAM_USE_UNATTESTED"
+  ],
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "required_successor_identity": {
+    "admission_receipt": null,
+    "external_durable_exact_s9_envelope": true,
+    "external_currentness_and_consume_atomicity": true,
+    "owner_pinned_production_permits": true,
+    "provider_rollback_split_brain_and_rotation_evidence": true,
+    "runtime_strict_decoder_and_capture_provenance": true,
+    "runtime_s10_raw_evidence_delivery_and_local_reverification": true
+  },
+  "schema": "agent_bridge.memory_temporal_successor_admission_gate_s13.v0",
+  "status": "RECOVERED_S9_ENVELOPE_LOCAL_HANDOFF_PREREGISTERED_SYNTHETIC_OWNED_ONE_SHOT_IN_PROCESS_HISTORICAL_ONLY_NO_DURABLE_SOURCE_NO_RUNTIME_TRANSPORT_NO_CURRENTNESS_NO_ADMISSION"
+}

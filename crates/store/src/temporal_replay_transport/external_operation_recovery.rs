@@ -232,9 +232,7 @@ impl fmt::Debug for SignedExternalOperationRecoveryObservationV1 {
     }
 }
 
-pub(super) fn observation_message(
-    observation: &SignedExternalOperationRecoveryObservationV1,
-) -> Vec<u8> {
+fn observation_message(observation: &SignedExternalOperationRecoveryObservationV1) -> Vec<u8> {
     let leader_term = observation.leader_term.to_be_bytes();
     let operation_committed_revision = observation.operation_committed_revision.to_be_bytes();
     let observed_journal_revision = observation.observed_journal_revision.to_be_bytes();
@@ -265,6 +263,17 @@ pub(super) fn observation_message(
             &signer_key_version,
         ],
     )
+}
+
+/// Canonically frame one S10 observation only after every attacker-controlled
+/// variable-length label has passed the protocol's 128-byte bound. Keeping the
+/// raw framer private prevents sibling modules from allocating directly from
+/// an unvalidated carried observation.
+pub(super) fn validated_observation_message(
+    observation: &SignedExternalOperationRecoveryObservationV1,
+) -> RecoveryResult<Vec<u8>> {
+    validate_observation_labels(observation)?;
+    Ok(observation_message(observation))
 }
 
 pub(super) fn result_id(
@@ -601,8 +610,7 @@ pub(super) fn verify_external_operation_recovery_observation_v1(
         ));
     }
 
-    validate_observation_labels(observation)?;
-    let message = observation_message(observation);
+    let message = validated_observation_message(observation)?;
     UnparsedPublicKey::new(&ED25519, permit.ed25519_public_key)
         .verify(&message, &observation.ed25519_signature)
         .map_err(|_| {
@@ -834,7 +842,10 @@ mod tests {
             ed25519_signature: [0; 64],
         };
         observation.ed25519_signature = key_pair(seed)
-            .sign(&observation_message(&observation))
+            .sign(
+                &validated_observation_message(&observation)
+                    .expect("synthetic observation labels are canonical"),
+            )
             .as_ref()
             .try_into()
             .expect("Ed25519 signature is 64 bytes");
@@ -845,6 +856,9 @@ mod tests {
         observation: &mut SignedExternalOperationRecoveryObservationV1,
         seed: &[u8; 32],
     ) {
+        // This test-only helper deliberately signs malformed-label fixtures so
+        // the production validated seam can prove that it rejects them before
+        // framing. The raw framer is private to this module.
         observation.ed25519_signature = key_pair(seed)
             .sign(&observation_message(observation))
             .as_ref()
@@ -1031,12 +1045,40 @@ mod tests {
             "df2aeb766e996f83eb24bf1cef78f421f62c8a3691cf0bd41f0277a0ffda1f3d"
         );
         assert_eq!(
-            hex(&sha256_bytes(&observation_message(&observation))),
+            hex(&sha256_bytes(
+                &validated_observation_message(&observation).unwrap()
+            )),
             "1fb08add6ebbd5102e665190ccc721ef9bda30d02450da53f0561f9bf5c71a70"
         );
         assert_eq!(
             hex(&observation.ed25519_signature),
             "fb02e9df3a801dacd0d0dd8c24ad2c13636d90cf436c082046a40265b8a58e55862a2df3dfcba8af079a39366a75911bcd359420cf4b63a1d2141248596b5e0a"
+        );
+    }
+
+    #[test]
+    fn s10_validated_observation_framer_bounds_labels_before_allocation() {
+        let mut boundary = committed_observation();
+        boundary.provider_cluster_id = "a".repeat(128);
+        boundary.signer_key_id = "b".repeat(128);
+        assert!(!validated_observation_message(&boundary).unwrap().is_empty());
+
+        let mut oversized_provider = boundary.clone();
+        oversized_provider.provider_cluster_id = "a".repeat(129);
+        assert_eq!(
+            validated_observation_message(&oversized_provider)
+                .unwrap_err()
+                .code(),
+            "track_b_external_operation_recovery_v1_response_label"
+        );
+
+        let mut oversized_signer = boundary;
+        oversized_signer.signer_key_id = "b".repeat(129);
+        assert_eq!(
+            validated_observation_message(&oversized_signer)
+                .unwrap_err()
+                .code(),
+            "track_b_external_operation_recovery_v1_response_label"
         );
     }
 
@@ -1100,7 +1142,10 @@ mod tests {
         assert_eq!(first.result_id, second.result_id);
         assert_eq!(first.observed_journal_revision, 43);
         assert_eq!(second.observed_journal_revision, 44);
-        assert_ne!(observation_message(&first), observation_message(&second));
+        assert_ne!(
+            validated_observation_message(&first).unwrap(),
+            validated_observation_message(&second).unwrap()
+        );
         let first_evidence = verify_external_operation_recovery_v1(
             &static_provider(first),
             &query(),
@@ -1389,7 +1434,10 @@ mod tests {
             let reconstructed = SyntheticLookupOnlyProviderV1::new(Arc::clone(&journal));
             reconstructed.lookup_operation(&query()).unwrap()
         };
-        assert_eq!(observation_message(&first), observation_message(&second));
+        assert_eq!(
+            validated_observation_message(&first).unwrap(),
+            validated_observation_message(&second).unwrap()
+        );
         assert_eq!(first.ed25519_signature, second.ed25519_signature);
         let _evidence = verify_external_operation_recovery_v1(
             &static_provider(second),
