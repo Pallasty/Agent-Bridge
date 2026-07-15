@@ -1,0 +1,121 @@
+{
+  "artifact_bindings": [
+    {
+      "artifact_kind": "pre_output_generation_plan_schema",
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-pre-output-generation-plan-schema-v1.json",
+      "sha256": "8b1f4889a4c8f56f2dca69e29e9220eea7b5e51ee6d3944d469bd52e1b5e2409",
+      "status": "LOCAL_SOURCE_SCHEMA_NOT_LIVE"
+    },
+    {
+      "artifact_kind": "local_guard_validation_receipt_schema",
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-local-guard-validation-receipt-schema-v1.json",
+      "sha256": "34826789b8dcc274d7c8591a64e622598f7f55d294f0e7e7946aa8698fc8c3da",
+      "status": "LOCAL_SOURCE_SCHEMA_NOT_PERMIT"
+    },
+    {
+      "artifact_kind": "first_condition_output_guard_source",
+      "repo_path": "scripts/eval/biocortex_ab_track_b_first_condition_output_guard_v1.py",
+      "sha256": "6edf446550b4f10158f938aee6a4583ed0380a580a59c972c12d0fc18f131411",
+      "status": "LOCAL_VALIDATOR_NOT_OUTPUT_AUTHORITY"
+    }
+  ],
+  "baseline_commit": "8daa44ee5406b700c59b57b0e44514421bc2f0ad",
+  "boundary": {
+    "all_generator_paths_guarded": false,
+    "authorizing_consumption_performed": false,
+    "caller_prior_output_absence_verified": false,
+    "condition_output_authorized": false,
+    "external_anti_rollback_anchor_present": false,
+    "external_authority_linearizability_verified": false,
+    "external_authority_provider_present": false,
+    "external_global_single_use_verified": false,
+    "external_owner_trust_verified": false,
+    "frozen_admission_v1_mutated": false,
+    "frozen_graph_mutated": false,
+    "frozen_ledger_mutated": false,
+    "live_binding_satisfied_count": 0,
+    "live_output_capability_emitted": false,
+    "local_validation_receipt_replayable": true,
+    "non_bypassable_output_path_verified": false,
+    "real_run_admitted": false,
+    "receipt_is_output_permit": false,
+    "side_effects_unlocked": "NONE",
+    "synthetic_fixture_only": true,
+    "trusted_pre_output_order_verified": false
+  },
+  "canonical_serialization": "UTF8_SORTED_KEYS_INDENT_2_LF_FINAL_NEWLINE_NO_NAN_DUPLICATE_KEYS_REJECTED",
+  "data_quality_contract": {
+    "causal_order": [
+      "TERMINAL_SUCCESS_SAMPLING_RECEIPT_PRECEDES_GENERATION_PLAN",
+      "GENERATION_PLAN_AND_FIRST_SLOT_PRECEDE_ANY_CONDITION_OUTPUT",
+      "FINAL_GENERATION_BLIND_PACKET_AND_BLIND_MAP_ARE_POST_OUTPUT_ARTIFACTS",
+      "POST_GENERATION_MAP_CONSUMPTION_IS_A_SEPARATE_FUTURE_GATE"
+    ],
+    "grain": "protocol_x_owner_trial_x_sampling_attempt_namespace_x_generation_session_x_output_slot",
+    "join_rules": [
+      "READ_TERMINAL_SUCCESS_FROM_THE_PINNED_CUSTODIAN_STORE_NOT_CALLER_RECEIPT_OBJECTS",
+      "REPLAY_EXACT_SAMPLING_WRITE_REQUEST_WITH_THE_HASH_PINNED_WRITER",
+      "JOIN_POLICY_CORE_FRAME_ALLOCATION_NAMESPACE_EVENT_REGISTRATION_CLAIM_OUTCOME_SELECTION_AND_ROSTER",
+      "DERIVE_COMPLETE_SELECTED_CASE_X_CONDITION_GENERATION_ORDER_FROM_THE_PRIVATE_ANSWER_SEED",
+      "BIND_THE_EXACT_FIRST_OUTPUT_UNIT_AND_UNIQUE_OUTPUT_SINK_COMMITMENT",
+      "REJECT_POST_GENERATION_HASHES_FROM_THE_PRE_OUTPUT_PLAN",
+      "LOCAL_TIMESTAMP_ORDER_IS_NOT_TRUSTED_CAUSAL_OR_CLOCK_PROOF"
+    ]
+  },
+  "date": "2026-07-15",
+  "decision": "SOURCE_PROFILE_PASS_BLOCKED_FAIL_CLOSED_EXTERNAL_ATOMIC_AUTHORITY_AND_NON_BYPASSABLE_OUTPUT_PATH_UNBOUND",
+  "evidence_sha256": {
+    "crates/store/src/temporal_replay_transport/external_authority_operation_state_machine.rs": "ffe01c13aadec867921ffd23f39f3ecc5d443bc44d30654f7fcd0be10e04793c",
+    "docs/design/fixtures/biocortex-ab-track-b-atomic-authority-operation-s11-v0.json": "eaca1280836bb31a3e1d0ce11173c6e34dbddf24a19e270af21d579428327db2",
+    "docs/design/fixtures/biocortex-ab-track-b-local-guard-validation-receipt-schema-v1.json": "34826789b8dcc274d7c8591a64e622598f7f55d294f0e7e7946aa8698fc8c3da",
+    "docs/design/fixtures/biocortex-ab-track-b-pre-output-generation-plan-schema-v1.json": "8b1f4889a4c8f56f2dca69e29e9220eea7b5e51ee6d3944d469bd52e1b5e2409",
+    "docs/design/fixtures/biocortex-ab-track-b-successor-admission-gate-s11-v0.json": "2d932c2b82fa41478ad42630bc9bae60467088027d046e7c14bed6a776d69cac",
+    "docs/reports/goal-c-u/2026-07-14-biocortex-ab-track-b-atomic-authority-operation-s11.md": "18fb6b85348298cdd2ff6f96cce82d44ab2b6aa8c7541b28005a8d3671a7cd47",
+    "docs/reports/goal-c-u/2026-07-14-biocortex-track-b-sampling-attempt-custodian-v1-pack.md": "af279ef80ee78000f2db1186de5415fbd9da77495981cbd27ea628cdd23ababd",
+    "scripts/check-biocortex-ab-track-b-sampling-attempt-custodian-v1-pack.sh": "f68974739e94a8794c96208d5978c52e411ba6388bac61b50f6009f3d7db419d",
+    "scripts/check-memory-temporal-atomic-authority-operation-s11.sh": "5a72d05ef7eaf3687c53cc2ac8e1cd1908e87b2d8fcc31b87567afb2beabb11a",
+    "scripts/eval/biocortex_ab_track_b_first_condition_output_guard_v1.py": "6edf446550b4f10158f938aee6a4583ed0380a580a59c972c12d0fc18f131411",
+    "scripts/eval/biocortex_ab_track_b_sampling_attempt_custodian_v1.py": "29c410adef0c5d2b9b312e6417d507395bcb6d808140e8502eeb63211078c71b",
+    "scripts/eval/check_biocortex_ab_track_b_first_condition_output_guard_v1_pack.py": "e156255d5dd136e35672c429201beda3ebd2e57e57cc672adf7c20a69bdb3f4a",
+    "scripts/eval/check_biocortex_ab_track_b_sampling_attempt_custodian_v1_pack.py": "64ffc875a532a7ff0c76bfb5fbe947e3d6d8c7254f044793c9d5bfd0325f6848",
+    "scripts/eval/check_memory_temporal_atomic_authority_operation_s11.py": "bb92bad4648d865a3cf72b6c00c4f6bfaad07b6f3a3e0ece48e938c85c1b45a7",
+    "scripts/eval/fixtures/biocortex_ab_track_b_first_condition_output_guard_v1_pack.expected.v0.tsv": "96e1d5910f02c3777e7274657e906be7a8265d876a0692904827a81d2899368c",
+    "scripts/eval/fixtures/biocortex_ab_track_b_first_condition_output_guard_v1_pack_synthetic_v0.json": "35b382fe5227809c6c06c97a496d4b2664b5632cf230701a167e87ff410d7cb7",
+    "scripts/eval/fixtures/biocortex_ab_track_b_sampling_attempt_custodian_v1_pack.expected.v0.tsv": "434c88d7ad50f9be6460b48c8a40b2cb19aaeb3043df8d7d53b194d150a359e9",
+    "scripts/eval/fixtures/biocortex_ab_track_b_sampling_attempt_custodian_v1_pack_v0.json": "40c601c5f7ab45beb6cd497e6a1a274f2071c057fd1870c57b99c1d6fa7182c7",
+    "scripts/eval/fixtures/memory_temporal_atomic_authority_operation_s11.expected.v0.tsv": "f60e553cb8da0f76f0d6de61c22f7018538825e7b6d47ef8cb471e84f632f903"
+  },
+  "known_limitations": {
+    "external_authority_evidence_accepted_by_this_source_profile": false,
+    "final_generation_or_blind_map_can_exist_pre_output": false,
+    "local_timestamp_order_is_trusted_clock_proof": false,
+    "local_validation_prevents_an_untrusted_caller_from_generating_earlier": false,
+    "local_validation_receipt_is_intentionally_replayable": true,
+    "local_validator_controls_all_generator_and_output_paths": false,
+    "on_disk_source_hash_is_loaded_code_attestation": false,
+    "s11_synthetic_state_is_live_external_authority": false
+  },
+  "next_unit": "EXTERNAL_ATOMIC_LIVE_OUTPUT_EXECUTION_BOUNDARY_V1_DESIGN_AND_PROVIDER_PREREQUISITES",
+  "predecessors": {
+    "atomic_authority_s11_integration_commit": "8daa44ee5406b700c59b57b0e44514421bc2f0ad",
+    "sampling_attempt_custodian_integration_commit": "895898abf34806532b574f971149315ae6679e95",
+    "sampling_attempt_custodian_source_commit": "ea69e8082a57c9b5b20f5cd20d79dc8aaa72cfc6"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_first_condition_output_guard_v1_pack_manifest.v0",
+  "status": "LOCAL_PRE_OUTPUT_TUPLE_VALIDATION_ONLY_NO_LIVE_OUTPUT_PERMIT",
+  "synthetic_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_first_condition_output_guard_v1_pack_synthetic_v0.json",
+  "synthetic_fixture_sha256": "35b382fe5227809c6c06c97a496d4b2664b5632cf230701a167e87ff410d7cb7",
+  "test_oracle": {
+    "abort_and_missing_outcome_mutation_count": 2,
+    "artifact_bytes_mutation_count": 3,
+    "canonical_and_schema_mutation_count": 7,
+    "causal_authority_mutation_count": 9,
+    "cross_world_tuple_mutation_count": 20,
+    "directed_mutation_count": 47,
+    "generation_unit_count": 6,
+    "plan_and_order_mutation_count": 6,
+    "preexisting_output_canary_preserved": true,
+    "preoccupied_module_state_preserved": true,
+    "replay_returns_identical_blocked_receipt": true
+  }
+}

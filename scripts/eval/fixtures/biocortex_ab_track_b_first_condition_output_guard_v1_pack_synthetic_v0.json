@@ -1,0 +1,18 @@
+{
+  "answer_blinding_seed_source": "SUCCESSOR_ADMISSION_MAP_V1_SYNTHETIC_FIXTURE_PRIVATE_SEED",
+  "commitments": {
+    "decoding_profile_sha256": "94524412702935de9a1295bf9507ce9d014ae94d1b24a558c04fa7a9db23a580",
+    "generation_session_sha256": "27a45d3f649682ea8fdc51eadc0dbf63790587cf53b3f3b6fc3dc54049c334e6",
+    "generator_build_sha256": "b7552c9eedf415549f6b288bd1a33abac9124376d59af5a33d498e1dc07d015c",
+    "model_snapshot_sha256": "472e1385eeca881bf35379c8b800e76824f3e6b32b0a373f4a4dfcc9f6ec78fa",
+    "tokenizer_sha256": "0ad55ffcef68ce5facbd17b7044046f9dd93c4e65453a7a04f8a7fd41ec48d97"
+  },
+  "evaluated_at_utc": "2026-07-14T12:00:40Z",
+  "plan_created_at_utc": "2026-07-14T12:00:30Z",
+  "preexisting_output_canary_content_hex": "7756911e2a20e1a13b0b7eacbf9f8129a69c74dd338e7bea2b7922d96212bbc1",
+  "protocol_version": 1,
+  "schema": "agent_bridge.biocortex_ab_track_b_first_condition_output_guard_v1_pack_synthetic.v0",
+  "source_custodian_fixture_sha256": "6dd66c46f60023b6b5bc301b800153c001503e2d6f449330d4a971da2bd78f29",
+  "source_successor_fixture_sha256": "a95a0052a6abfa93ea58f7f913429b8aad4c368cb91a5a54ad98d36fc58470a8",
+  "trial_id": "public_synthetic_track_b_successor_map_v1"
+}

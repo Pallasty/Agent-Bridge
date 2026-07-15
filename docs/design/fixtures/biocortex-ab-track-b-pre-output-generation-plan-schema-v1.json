@@ -1,0 +1,186 @@
+{
+  "$defs": {
+    "caseId": {
+      "maxLength": 37,
+      "minLength": 37,
+      "pattern": "^case_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "conditionId": {
+      "maxLength": 37,
+      "minLength": 37,
+      "pattern": "^cond_[0-9a-f]{32}$",
+      "type": "string"
+    },
+    "label": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "safeInteger": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "sha256": {
+      "description": "Lowercase SHA-256 digest; the validator additionally rejects the all-zero digest.",
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "unit": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "$ref": "#/$defs/caseId"
+        },
+        "condition_id": {
+          "$ref": "#/$defs/conditionId"
+        },
+        "decoding_profile_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "generator_build_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "invocation_index": {
+          "$ref": "#/$defs/safeInteger"
+        },
+        "model_snapshot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "output_sink_commitment_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "prompt_context_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "tokenizer_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "case_id",
+        "condition_id",
+        "decoding_profile_sha256",
+        "generator_build_sha256",
+        "invocation_index",
+        "model_snapshot_sha256",
+        "output_sink_commitment_sha256",
+        "prompt_context_sha256",
+        "tokenizer_sha256"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "utc": {
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:pre-output-generation-plan:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Closed pre-output Track B generation plan. It binds the first and subsequent opaque condition slots before generation and deliberately has no answer, output, capture, final generation-manifest, or blind-map fields.",
+  "properties": {
+    "admission_policy_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "answer_blinding_seed_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "condition_roster_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "contract_core_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "eligible_frame_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "generation_session_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "owner_trial_registration_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "plan_created_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "protocol_version": {
+      "const": 1
+    },
+    "sampling_attempt_namespace_claim_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_attempt_namespace_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_event_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_write_outcome_custodian_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sampling_write_request_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_pre_output_generation_plan.v1"
+    },
+    "selected_case_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "selection_commitment_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "strata_allocation_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "trial_id": {
+      "$ref": "#/$defs/label"
+    },
+    "units": {
+      "items": {
+        "$ref": "#/$defs/unit"
+      },
+      "maxItems": 262144,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "admission_policy_sha256",
+    "answer_blinding_seed_sha256",
+    "condition_roster_sha256",
+    "contract_core_sha256",
+    "eligible_frame_manifest_sha256",
+    "generation_session_sha256",
+    "owner_trial_registration_receipt_sha256",
+    "plan_created_at_utc",
+    "protocol_version",
+    "sampling_attempt_namespace_claim_receipt_sha256",
+    "sampling_attempt_namespace_sha256",
+    "sampling_event_sha256",
+    "sampling_receipt_sha256",
+    "sampling_write_outcome_custodian_receipt_sha256",
+    "sampling_write_request_sha256",
+    "schema",
+    "selected_case_manifest_sha256",
+    "selection_commitment_sha256",
+    "strata_allocation_manifest_sha256",
+    "trial_id",
+    "units"
+  ],
+  "title": "BioCortex AB Track B pre-output generation plan v1",
+  "type": "object",
+  "unevaluatedProperties": false
+}
