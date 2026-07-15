@@ -1,0 +1,32 @@
+{
+  "answer_blinding_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "boundary": {
+    "anti_shopping_order_verified": false,
+    "condition_output_authorized": false,
+    "contains_private_runtime_material": false,
+    "fixture_only": true,
+    "live_binding_satisfied": false,
+    "pre_output_timing_verified": false,
+    "real_run_authorized": false,
+    "replay_consumption_verified": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "condition_keys": [
+    "candidate",
+    "reference"
+  ],
+  "expected": {
+    "answer_count": 6,
+    "case_count": 3,
+    "condition_count": 2,
+    "identity_binding_count": 18,
+    "minimum_map_mutations_rejected": 36,
+    "protocol_time_order_consistent": true
+  },
+  "map_created_at_utc": "2026-07-14T12:01:00Z",
+  "schema": "agent_bridge.biocortex_ab_track_b_successor_admission_map_v1_pack_synthetic.v0",
+  "source_writer_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_sampling_receipt_writer_pack_synthetic_v0.json",
+  "source_writer_fixture_sha256": "79bdb87f5fdaeb72423ff12002f4cf9a0deca2e9cd9b86e820321357a0641b8a",
+  "synthetic_only": true,
+  "trial_id": "public_synthetic_track_b_successor_map_v1"
+}

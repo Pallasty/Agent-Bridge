@@ -1,0 +1,209 @@
+{
+  "authority": {
+    "capture": false,
+    "condition_output": false,
+    "generation": false,
+    "real_run": false,
+    "review": false,
+    "scientific_claim": false,
+    "scoring": false,
+    "unblinding": false
+  },
+  "baseline_commit": "2e828d7b86444770c3ef3cd40ac17f26cac6fb0e",
+  "blockers": [
+    "ADMISSION_POLICY_NOT_LIVE_BOUND",
+    "CONTRACT_CORE_INSTANCE_NOT_FROZEN",
+    "FRAME_STRATA_AND_ENTROPY_CUSTODY_UNATTESTED",
+    "SAMPLING_ATTEMPT_NAMESPACE_GLOBAL_SINGLE_USE_UNENFORCED",
+    "SAMPLING_WRITE_OUTCOME_CUSTODIAN_RECEIPT_UNBOUND",
+    "TRUSTED_CLOCK_AND_PRE_OUTPUT_ORDER_UNATTESTED",
+    "ANTI_SHOPPING_ORDER_UNATTESTED",
+    "FIRST_CONDITION_OUTPUT_GUARD_UNBOUND",
+    "MAP_V1_NOT_LIVE_BOUND",
+    "MAP_CONSUMPTION_SINGLE_USE_UNENFORCED",
+    "RUNTIME_SOURCE_AND_BINARY_PROVENANCE_UNBOUND",
+    "OWNER_POLICY_BINDINGS_UNSET",
+    "FROZEN_GRAPH_LEDGER_AND_ADMISSION_V0_REMAIN_NON_ADMITTING"
+  ],
+  "contract_id": "biocortex_ab_track_b_real_run_admission_policy_20260714_v1",
+  "contract_identity": {
+    "admission_policy_sha256_binding_required": true,
+    "contract_core_schema": "agent_bridge.biocortex_ab_track_b_sampling_contract_core.v0",
+    "contract_digest_profile_path": "docs/design/fixtures/biocortex-ab-track-b-sampling-contract-digest-profile-v0.json",
+    "contract_digest_profile_sha256": "a8972ad5e75b30634931fee84f08226e2660413b45cf9dfea948089d61160243",
+    "contract_sha256_semantics": "SHA256_OF_EXACT_CANONICAL_SAMPLING_CONTRACT_CORE_BYTES_NOT_ADMISSION_PACKET_BYTES",
+    "dynamic_runtime_state_inside_contract_core": false,
+    "policy_to_core_binding_direction": "CONTRACT_CORE_ADMISSION_POLICY_SHA256_EQUALS_EXACT_POLICY_BYTES",
+    "transitive_policy_cycle_check_required_before_live_binding": true
+  },
+  "data_quality": {
+    "exact_grains": {
+      "blind_map_assignment": "protocol_version_x_trial_id_x_case_id_x_opaque_answer_id",
+      "contract_core": "protocol_version_x_trial_id",
+      "owner_trial_registration": "global_track_b_trial_registry_x_trial_id",
+      "sampling_attempt_namespace": "protocol_version_x_trial_id",
+      "sampling_event": "protocol_version_x_trial_id_x_contract_core_sha256_x_eligible_frame_manifest_sha256_x_strata_allocation_manifest_sha256",
+      "selected_case": "protocol_version_x_trial_id_x_case_id"
+    },
+    "join_rules": [
+      "CONTRACT_CORE_SHA256_ONE_TO_ONE_ACROSS_RECEIPT_SELECTED_MAP_AND_DOWNSTREAM_ARTIFACTS",
+      "SELECTED_PROBABILITY_WEIGHT_ROWS_EXACT_ORDERED_ONE_TO_ONE_BY_CASE_ID",
+      "SELECTED_CASE_STRATUM_EQUALS_ELIGIBLE_FRAME_STRATUM",
+      "SAMPLING_SEED_AND_SELECTION_COMMITMENT_EQUAL_ACROSS_RECEIPT_SELECTED_AND_MAP",
+      "OWNER_GLOBAL_TRIAL_REGISTRATION_ONE_TO_ONE_WITH_PROTOCOL_ATTEMPT_NAMESPACE",
+      "SAMPLING_ATTEMPT_NAMESPACE_ONE_TO_ONE_WITH_EXACT_POLICY_CONTRACT_CORE_FRAME_ALLOCATION_AND_EVENT",
+      "NO_MANY_TO_MANY_OR_CROSS_VERSION_JOIN",
+      "MISSING_EXTRA_DUPLICATE_OR_ALIAS_KEYS_FAIL_CLOSED"
+    ]
+  },
+  "date": "2026-07-14",
+  "decision": "SUCCESSOR_V1_SOURCE_INTERFACE_AVAILABLE_REAL_RUN_NOT_ADMITTED",
+  "dynamic_state": {
+    "admission_attempt_id": null,
+    "condition_output_guard_receipt_sha256": null,
+    "contract_core_sha256": null,
+    "map_bijection_receipt_sha256": null,
+    "map_consumption_receipt_sha256": null,
+    "owner_trial_registration_receipt_sha256": null,
+    "sampling_attempt_namespace_claim_receipt_sha256": null,
+    "sampling_receipt_sha256": null,
+    "sampling_write_outcome_custodian_receipt_sha256": null,
+    "schema": "agent_bridge.biocortex_ab_track_b_real_run_admission_state.v1",
+    "status": "NO_RUNTIME_INSTANCE_SOURCE_TEMPLATE_ONLY",
+    "trusted_clock_receipt_sha256": null
+  },
+  "live_binding": {
+    "active_v0_admission_mutated": false,
+    "condition_output_authorized": false,
+    "frozen_graph_mutated": false,
+    "frozen_ledger_mutated": false,
+    "graph_source_candidate_count": 13,
+    "graph_source_candidate_total": 13,
+    "live_binding_satisfied_count": 0,
+    "new_graph_binding_path_count": 0,
+    "real_run_admitted": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "map_interface": {
+    "accepted_blind_map_schema": "agent_bridge.biocortex_ab_track_b_blind_map.v1",
+    "accepted_receipt_schema": "agent_bridge.biocortex_ab_track_b_sampling_receipt.v1",
+    "accepted_selected_manifest_schema": "agent_bridge.biocortex_ab_track_b_selected_case_manifest_source_profile.v0",
+    "blind_map_schema_path": "docs/design/fixtures/biocortex-ab-track-b-blind-map-schema-v1.json",
+    "blind_map_schema_sha256": "475f5c518df83049808e0a118f50ef83026b8c8202bebfd4439dfb9c416fd724",
+    "checker_path": "scripts/eval/biocortex_ab_track_b_map_bijection_v1.py",
+    "checker_sha256": "92926f3e01910501e20a7d5f8f9b0cab79e28ca38ae2717966b8b6977fa89e58",
+    "condition_output_authority_from_map_validation": false,
+    "cross_version_fallback_allowed": false,
+    "identity_derivation_domain": "agent-bridge/track-b/blind-map/v2",
+    "request_schema": "agent_bridge.biocortex_ab_track_b_map_bijection_request.v1",
+    "result_schema": "agent_bridge.biocortex_ab_track_b_map_bijection_validation_result.v1",
+    "v0_map_or_receipt_accepted": false
+  },
+  "protocol_migration": {
+    "automatic_upcast_or_downcast": false,
+    "cross_version_artifact_join_allowed": false,
+    "cross_version_trial_identity_reuse_allowed": false,
+    "current_protocol_version": 1,
+    "default_protocol_when_missing": null,
+    "historical_v0": {
+      "admission_checker_path": "scripts/eval/check_biocortex_ab_track_b_admission.py",
+      "admission_checker_sha256": "b09b10243f195299dc226b5d8d2b484ec74f5eecd49bb487296c391f6f193b13",
+      "admission_contract_path": "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json",
+      "admission_contract_sha256": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e",
+      "blind_map_schema_sha256": "ad40df50eec68fa192c79e6699a8d2da2a9c3925a387eaa7427f7e19f996d783",
+      "frozen_replay_commit": "59869af57f2a0b24647f3b47d7bea93839bfbefe",
+      "historical_validation_only": true,
+      "map_checker_sha256": "45f55cea933ee12df402fbb55d27ea7c6cd08ba8eef9d9868e4e491dd62a2cd2",
+      "receipt_schema_sha256": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+      "side_effects_unlocked": "NONE"
+    },
+    "new_trials_require_v1": true,
+    "routing_key": "EXACT_REQUEST_SCHEMA_THEN_EXACT_ARTIFACT_VERSION_TUPLE_NO_ALIAS",
+    "validation_failure_fallback_allowed": false
+  },
+  "sampling_interface": {
+    "anti_shopping_order_verified": false,
+    "condition_output_authorized": false,
+    "contract_digest_profile_sha256": "a8972ad5e75b30634931fee84f08226e2660413b45cf9dfea948089d61160243",
+    "pre_output_timing_verified": false,
+    "receipt_instance_schema": "agent_bridge.biocortex_ab_track_b_sampling_receipt.v1",
+    "receipt_schema_path": "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v1.json",
+    "receipt_schema_sha256": "e418b58246eaf183b5624c7eb12299caeea933c83a07584faa915651b3cd48d4",
+    "receipt_writer_path": "scripts/eval/biocortex_ab_track_b_sampling_receipt_writer_v0.py",
+    "receipt_writer_sha256": "a8642d2b524183e060eb2f2c16d3a4bba4bca43c8e18b8524bc14738d4f6d975",
+    "required_receipt_bindings": [
+      "anti_shopping_order_verified",
+      "case_inclusion_probabilities",
+      "case_sampling_weights",
+      "condition_output_authorized",
+      "contract_digest_profile_sha256",
+      "contract_sha256",
+      "created_at_utc",
+      "eligible_frame_manifest_sha256",
+      "external_entropy_sha256",
+      "frame_o_excl_receipt_sha256",
+      "pre_output_timing_verified",
+      "receipt_precedes_first_condition_output",
+      "receipt_schema_sha256",
+      "receipt_writer_sha256",
+      "reserve_manifest_sha256",
+      "sampling_seed_sha256",
+      "sampling_selection_algorithm_sha256",
+      "sampling_selection_domain",
+      "sampling_selection_message",
+      "schema",
+      "seed_derivation_domain",
+      "seed_derivation_message_profile",
+      "seed_derivation_sha256",
+      "seed_entropy_receipt_sha256",
+      "selected_case_manifest_sha256",
+      "selection_commitment_sha256",
+      "strata_allocation_manifest_sha256",
+      "trial_id"
+    ],
+    "sampling_seed_derivation_sha256": "4f51781ff707e89b4c09adffeafbdaacd75c7e1571d1a86e45d336aace888a3f",
+    "sampling_selection_algorithm_sha256": "e327faf2ad73718dc33f68fdb66a89abf0ac84fbbf8d828ff79fa0e8b75772ec",
+    "selected_manifest_schema": "agent_bridge.biocortex_ab_track_b_selected_case_manifest_source_profile.v0"
+  },
+  "sampling_single_use": {
+    "abort_is_terminal_for_same_attempt_namespace": true,
+    "attempt_namespace_excludes_contract_core_frame_allocation_and_external_entropy": true,
+    "contract_core_frame_or_allocation_change_within_attempt_namespace_forbidden": true,
+    "event_identity_excludes_external_entropy": true,
+    "global_single_use_verified": false,
+    "new_attempt_requires_new_trial_and_owner_refreeze": true,
+    "one_exact_policy_contract_core_frame_allocation_and_event_per_attempt_namespace_required": true,
+    "owner_issued_globally_unique_trial_id_required_before_claim": true,
+    "sampling_attempt_namespace_domain": "agent-bridge/track-b/sampling-attempt-namespace/v1",
+    "sampling_attempt_namespace_message": "domain_utf8_NUL_trial_id_utf8",
+    "sampling_event_domain": "agent-bridge/track-b/sampling-event/v1",
+    "sampling_event_message": "domain_utf8_NUL_contract_core_sha256_ascii_NUL_trial_id_utf8_NUL_eligible_frame_sha256_ascii_NUL_strata_allocation_sha256_ascii"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_real_run_admission_policy.v1",
+  "stages": {
+    "post_generation_map_validation": {
+      "side_effects_unlocked": "NONE",
+      "status": "SOURCE_VALIDATOR_AVAILABLE_NOT_LIVE_BOUND"
+    },
+    "pre_output_admission": {
+      "required_missing_evidence": [
+        "owner_trial_registration_receipt_sha256",
+        "sampling_attempt_namespace_claim_receipt_sha256",
+        "sampling_write_outcome_custodian_receipt_sha256",
+        "trusted_clock_receipt_sha256",
+        "condition_output_guard_receipt_sha256"
+      ],
+      "side_effects_unlocked": "NONE",
+      "status": "BLOCKED_FAIL_CLOSED"
+    },
+    "pre_review": {
+      "required_missing_evidence": [
+        "map_bijection_receipt_sha256",
+        "map_consumption_receipt_sha256"
+      ],
+      "side_effects_unlocked": "NONE",
+      "status": "BLOCKED_FAIL_CLOSED"
+    }
+  },
+  "status": "BLOCKED_FAIL_CLOSED_SOURCE_COMPATIBILITY_ONLY"
+}
