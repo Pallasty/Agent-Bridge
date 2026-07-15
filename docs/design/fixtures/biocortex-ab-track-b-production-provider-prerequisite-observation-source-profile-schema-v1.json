@@ -1,0 +1,482 @@
+{
+  "$defs": {
+    "utc": {
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    }
+  },
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:production-provider-prerequisite-observation-source-profile:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Closed source-profile snapshot. Every prerequisite remains unbound or unverified inside a qualified repository and current-process/host non-secret audit scope; it makes no claim about external organization state or complete host visibility and does not automatically re-audit future state.",
+  "properties": {
+    "absence_claim_scope_qualified": {
+      "const": true
+    },
+    "audit_scope": {
+      "const": "REPOSITORY_AND_CURRENT_PROCESS_HOST_VISIBILITY_NON_SECRET_AUDIT"
+    },
+    "external_organization_state_observed": {
+      "const": false
+    },
+    "host_visibility_complete": {
+      "const": false
+    },
+    "inventory": {
+      "additionalProperties": false,
+      "properties": {
+        "authority_provider_binding_receipts_observed": {
+          "const": 0
+        },
+        "guard_runtime_binding_receipts_observed": {
+          "const": 0
+        },
+        "kms_signer_binding_receipts_observed": {
+          "const": 0
+        },
+        "method": {
+          "const": "REPOSITORY_PATH_AND_IMPORT_SEARCH_PLUS_CURRENT_PROCESS_NON_SECRET_NAME_ONLY_INSPECTION"
+        },
+        "non_bypassable_sink_binding_receipts_observed": {
+          "const": 0
+        },
+        "production_credential_binding_receipts_observed": {
+          "const": 0
+        }
+      },
+      "required": [
+        "authority_provider_binding_receipts_observed",
+        "guard_runtime_binding_receipts_observed",
+        "kms_signer_binding_receipts_observed",
+        "method",
+        "non_bypassable_sink_binding_receipts_observed",
+        "production_credential_binding_receipts_observed"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "observed_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "predecessor_integration_commit": {
+      "const": "1de35708f92beaae35bfb4b16ab25292f343cfd1"
+    },
+    "prerequisite_evidence": {
+      "items": false,
+      "maxItems": 18,
+      "minItems": 18,
+      "prefixItems": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "PRODUCTION_PROVIDER_IDENTITY_AND_DEPLOYMENT"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "OUT_OF_BAND_OWNER_TRUST_ROOT"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "OUT_OF_BAND_CUSTODIAN_TRUST_ROOT"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "EXTERNAL_LINEARIZABLE_AUTHORIZE_CONSUME_AND_RESERVE_LOGICAL_SINK"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "DURABLE_UNIQUE_OPERATION_CHALLENGE_AND_REPLAY_CONSUME"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "CURRENTNESS_REVOCATION_EPOCH_TERM_REVISION_AT_USE"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "ROLLBACK_INDEPENDENT_MONOTONIC_WITNESS"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "SPLIT_BRAIN_FENCING_AND_PROVIDER_NON_EQUIVOCATION"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "PRIVATE_UNFORGEABLE_SINGLE_USE_SESSION_CAPABILITY"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "NON_BYPASSABLE_GENERATOR_ENTRYPOINT"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "GUARD_OWNED_IMMUTABLE_OUTPUT_SINK"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "FIRST_BYTE_FENCE_AND_PHYSICAL_SINK_DURABILITY"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "NO_STDOUT_LOG_TRACE_CALLBACK_SUBPROCESS_OR_DIRECT_MODEL_BYPASS"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "CRASH_RECOVERY_WITHOUT_CAPABILITY_REISSUE_OR_REGENERATION"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "QUERYABLE_EXACT_IMMUTABLE_OUTPUT_IDENTITY"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "LOADED_CODE_EXECUTOR_MODEL_AND_SINK_ATTESTATION"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "CREDENTIAL_CUSTODY_ROTATION_REVOCATION_AND_EMERGENCY_STOP"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_receipt_sha256": {
+              "const": null
+            },
+            "prerequisite_code": {
+              "const": "AUDIT_LOG_NON_DISCLOSURE_DURABILITY_AND_ACCESS_CONTROL"
+            },
+            "verified": {
+              "const": false
+            }
+          },
+          "required": [
+            "evidence_receipt_sha256",
+            "prerequisite_code",
+            "verified"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        }
+      ],
+      "type": "array"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_production_provider_prerequisite_observation_source_profile.v1"
+    },
+    "secret_values_inspected_or_recorded": {
+      "const": false
+    },
+    "side_effects_unlocked": {
+      "const": "NONE"
+    },
+    "source_profile": {
+      "const": "PRODUCTION_PREREQUISITES_UNBOUND_OR_UNVERIFIED_IN_QUALIFIED_REPOSITORY_AND_CURRENT_PROCESS_HOST_SCOPE"
+    }
+  },
+  "required": [
+    "absence_claim_scope_qualified",
+    "audit_scope",
+    "external_organization_state_observed",
+    "host_visibility_complete",
+    "inventory",
+    "observed_at_utc",
+    "predecessor_integration_commit",
+    "prerequisite_evidence",
+    "schema",
+    "secret_values_inspected_or_recorded",
+    "side_effects_unlocked",
+    "source_profile"
+  ],
+  "title": "BioCortex AB Track B production-provider prerequisite source-profile observation v1",
+  "type": "object",
+  "unevaluatedProperties": false
+}

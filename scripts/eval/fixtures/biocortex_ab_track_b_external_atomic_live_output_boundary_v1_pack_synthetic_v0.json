@@ -1,0 +1,112 @@
+{
+  "absence_claim_scope_qualified": true,
+  "audit_scope": "REPOSITORY_AND_CURRENT_PROCESS_HOST_VISIBILITY_NON_SECRET_AUDIT",
+  "external_organization_state_observed": false,
+  "host_visibility_complete": false,
+  "inventory": {
+    "authority_provider_binding_receipts_observed": 0,
+    "guard_runtime_binding_receipts_observed": 0,
+    "kms_signer_binding_receipts_observed": 0,
+    "method": "REPOSITORY_PATH_AND_IMPORT_SEARCH_PLUS_CURRENT_PROCESS_NON_SECRET_NAME_ONLY_INSPECTION",
+    "non_bypassable_sink_binding_receipts_observed": 0,
+    "production_credential_binding_receipts_observed": 0
+  },
+  "observed_at_utc": "2026-07-15T15:00:00Z",
+  "predecessor_integration_commit": "1de35708f92beaae35bfb4b16ab25292f343cfd1",
+  "prerequisite_evidence": [
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "PRODUCTION_PROVIDER_IDENTITY_AND_DEPLOYMENT",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "OUT_OF_BAND_OWNER_TRUST_ROOT",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "OUT_OF_BAND_CUSTODIAN_TRUST_ROOT",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "EXTERNAL_LINEARIZABLE_AUTHORIZE_CONSUME_AND_RESERVE_LOGICAL_SINK",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "DURABLE_UNIQUE_OPERATION_CHALLENGE_AND_REPLAY_CONSUME",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "CURRENTNESS_REVOCATION_EPOCH_TERM_REVISION_AT_USE",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "ROLLBACK_INDEPENDENT_MONOTONIC_WITNESS",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "SPLIT_BRAIN_FENCING_AND_PROVIDER_NON_EQUIVOCATION",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "PRIVATE_UNFORGEABLE_SINGLE_USE_SESSION_CAPABILITY",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "NON_BYPASSABLE_GENERATOR_ENTRYPOINT",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "GUARD_OWNED_IMMUTABLE_OUTPUT_SINK",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "FIRST_BYTE_FENCE_AND_PHYSICAL_SINK_DURABILITY",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "NO_STDOUT_LOG_TRACE_CALLBACK_SUBPROCESS_OR_DIRECT_MODEL_BYPASS",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "CRASH_RECOVERY_WITHOUT_CAPABILITY_REISSUE_OR_REGENERATION",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "QUERYABLE_EXACT_IMMUTABLE_OUTPUT_IDENTITY",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "LOADED_CODE_EXECUTOR_MODEL_AND_SINK_ATTESTATION",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "CREDENTIAL_CUSTODY_ROTATION_REVOCATION_AND_EMERGENCY_STOP",
+      "verified": false
+    },
+    {
+      "evidence_receipt_sha256": null,
+      "prerequisite_code": "AUDIT_LOG_NON_DISCLOSURE_DURABILITY_AND_ACCESS_CONTROL",
+      "verified": false
+    }
+  ],
+  "schema": "agent_bridge.biocortex_ab_track_b_production_provider_prerequisite_observation_source_profile.v1",
+  "secret_values_inspected_or_recorded": false,
+  "side_effects_unlocked": "NONE",
+  "source_profile": "PRODUCTION_PREREQUISITES_UNBOUND_OR_UNVERIFIED_IN_QUALIFIED_REPOSITORY_AND_CURRENT_PROCESS_HOST_SCOPE"
+}
