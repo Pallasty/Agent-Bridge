@@ -21,6 +21,12 @@
 #   ./scripts/systemd/install.sh --no-daemons  # skip the 3 always-on daemons
 #                                              # (for headless / sibling sessions
 #                                              #  that don't want auto-start)
+#   ./scripts/systemd/install.sh --replica     # replica node: enable ONLY the
+#                                              # sync timer; disable the three
+#                                              # store-mutating consolidator
+#                                              # timers (decay/distill/digest).
+#                                              # One consolidator per mesh —
+#                                              # see docs/NEW-NODE-RUNBOOK.md
 
 set -euo pipefail
 
@@ -57,16 +63,32 @@ DAEMON_SERVICES=(
 DRY=0
 RUN_ONCE=0
 NO_DAEMONS=0
+REPLICA=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run)    DRY=1 ;;
     --once)       RUN_ONCE=1 ;;
     --no-daemons) NO_DAEMONS=1 ;;
+    --replica)    REPLICA=1 ;;
     -h|--help)
       sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
+
+CONSOLIDATOR_TIMERS=(
+  agent-bridge-memory-decay-unused.timer
+  agent-bridge-distill.timer
+  agent-bridge-digest.timer
+)
+
+if [[ $REPLICA -eq 1 ]]; then
+  if [[ $RUN_ONCE -eq 1 ]]; then
+    echo "--replica and --once conflict: --once runs the decay pass, a consolidator-only job" >&2
+    exit 2
+  fi
+  TIMERS=(agent-bridge-sync.timer)
+fi
 
 run() {
   if [[ $DRY -eq 1 ]]; then
@@ -88,6 +110,13 @@ for unit in "${UNITS[@]}"; do
 done
 
 run systemctl --user daemon-reload
+if [[ $REPLICA -eq 1 ]]; then
+  # Role correction: a prior full install may have enabled these. One
+  # consolidator per mesh — docs/NEW-NODE-RUNBOOK.md stage 4.
+  for t in "${CONSOLIDATOR_TIMERS[@]}"; do
+    run systemctl --user disable --now "$t" || true
+  done
+fi
 for t in "${TIMERS[@]}"; do
   run systemctl --user enable --now "$t"
 done
