@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -30,13 +31,23 @@ class MajoranaP5DesignProbeTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.policy = P5.load_json(BASE / P5.POLICY_NAME)
 
-    def test_preprobe_policy_is_valid_and_result_absent(self) -> None:
-        validated = P5.validate_policy(self.policy, require_report_absent=True)
+    def test_preprobe_policy_is_valid_and_result_was_absent_at_preprobe_commit(self) -> None:
+        validated = P5.validate_policy(self.policy, require_report_absent=False)
         self.assertEqual(
             validated["policy_id"],
             "MAJORANA-P5-CONDITIONAL-STEP2-THRESHOLD-D0-V1",
         )
-        self.assertFalse((BASE / P5.REPORT_NAME).exists())
+        path_at_preprobe = (
+            "f65ceb94494d71a2de1cd6057405a583fa388f82:"
+            "docs/research/fermion-frontier/" + P5.REPORT_NAME
+        )
+        process = subprocess.run(
+            ["git", "cat-file", "-e", path_at_preprobe],
+            cwd=BASE,
+            check=False,
+            capture_output=True,
+        )
+        self.assertNotEqual(process.returncode, 0)
 
     def test_candidate_set_is_frozen_before_resource_observation(self) -> None:
         design = self.policy["candidate_design"]

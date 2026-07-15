@@ -1034,6 +1034,31 @@ so they are versioned normally and are not added to the preservation-only
   and READY remain uncertified.  The next artifact should be a new
   result-unpinned threshold-hardening child for a `2^-36`/`2^-37` design probe
   or budget-constrained drop rule, not a direct third-step child.
+- `majorana_certificate_p5_design_probe.py`,
+  `majorana_certificate_p5_design_probe/majorana_p5_threshold_resource_probe.jl`,
+  `majorana_certificate_p5_design_probe_policy.json`,
+  `majorana_certificate_p5_design_probe_report.json` and their preprobe/result
+  tests:
+  non-authoritative resource-envelope closure for conditional step-2 threshold
+  hardening.  The result-blind preprobe commit is
+  `f65ceb94494d71a2de1cd6057405a583fa388f82`; report SHA-256 is
+  `602c4eddea30c20ddb793e2641b1e8b55e4767a62366b946892a19c3802dffc5`,
+  policy SHA-256 is
+  `e47ad24291f217b0b5d54ba6aa120c479d522bd23c74faf41b5bde6da2413aa2`,
+  and staging-manifest SHA-256 is
+  `8146322aab025311be873daaf58a61fa0e6ad5123d68182894a1706c40d2eeab`.
+  The strict `2^-34` resource control exactly reproduces P4.  Conditional
+  step-2 `2^-36` and `2^-37` both complete under 3 GiB/600 s without a
+  deterministic cap.  Their step-2 final term counts are 174,280 and 241,120,
+  total P2 visits are 279,133,312 and 372,980,288, and diagnostic maximum RSS
+  values are 731,012 and 734,516 KiB.  The precommitted two-times/next-power-of-
+  two rule yields one common formal cap set, including 524,288 term caps,
+  536,870,912 scan/propagation visits and 1,073,741,824 total P2 visits.
+  This report deliberately contains no defect ticks, allocation result,
+  term/drop digest or Neel result and has `scientific_authority=NONE`; it cannot
+  select candidates or enter the formal runner.  The formal P5 child must run
+  both frozen candidates independently and inherit only P3 `E1` once after
+  full step-1 conformance.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is

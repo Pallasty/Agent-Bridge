@@ -1083,3 +1083,36 @@ threshold-hardening child that evaluates a `2^-36`/`2^-37` design probe or a
 budget-constrained drop rule under fresh term/event/time/memory caps.  A direct
 third-step extension is not the next priority.  Product-formula-to-exact-
 Hubbard error remains an independent proof budget.
+
+## Majorana P5 D0 conditional step-2 threshold resource envelope
+
+P5 D0 narrowed the next question before opening any new scientific result:
+step 1 remains the certified strict `2^-34` P3 path, while the formal candidate
+set is frozen to strict step-2 thresholds `2^-36` and `2^-37`.  The `2^-34`
+step-2 path is a resource-control candidate only.  A budget-constrained drop
+algorithm is intentionally deferred to a separate child so that this unit
+changes one execution rule at a time.
+
+The non-authoritative probe was committed first at
+`f65ceb94494d71a2de1cd6057405a583fa388f82`.  Its report SHA-256 is
+`602c4eddea30c20ddb793e2641b1e8b55e4767a62366b946892a19c3802dffc5`.
+The control exactly reproduced the published P4 resource projection.  Both
+formal candidates then completed without a deterministic cap, timeout or OOM.
+For `2^-36`, the step-2 peak premerge/postmerge/final counts were
+186,102/183,704/174,280, total P2 visits were 279,133,312, and observed maximum
+RSS was 731,012 KiB.  For `2^-37`, the corresponding values were
+257,558/253,710/241,120, 372,980,288 and 734,516 KiB.  Wall-clock diagnostics
+were 5:06.94 and 6:43.56 respectively.
+
+Applying the precommitted common-cap rule gives term/premerge/final caps of
+524,288; cap-scan and propagation visit caps of 536,870,912; truncation visits
+268,435,456; total P2 visits 1,073,741,824; anticommuting/product/merge/drop
+event caps 16,777,216/33,554,432/4,194,304/8,388,608; and accuracy/combined
+caps 33,554,432/1,073,741,824.  The same caps must cover both candidates.
+
+D0 has status `scientific_authority=NONE`: it contains no defect ticks,
+allocation decision, term/drop digest, Neel center or expectation interval and
+cannot rank candidates or enter a formal runner.  The next unit is a distinct
+result-unpinned P5 formal precommit that runs each frozen candidate in its own
+fresh process, reproduces the common P3 step-1 prefix, and only then evaluates
+`E12(candidate) = E1_P3 + E2_local(candidate)` under an independent checker.
