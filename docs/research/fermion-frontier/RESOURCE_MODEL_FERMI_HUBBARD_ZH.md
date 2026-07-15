@@ -854,6 +854,18 @@ paper snapshot `1a39fbf`；后者早于 documented splitting-sign fix `46b696b`�
 sort，并补 directed coefficient intervals。当前 `truncate!` 虽然在 merge/dedup 后运行，
 但不返回 dropped terms/reasons/`L1`，所以论文参数 convergence 仍只能作 diagnostic。
 
+这条执行路线现已依次闭合 P0 kernel/custody、P1 L2/L3 exact-action/cadence 和 P2 固定
+L8 首步 resource feasibility。P2 从 lifecycle-safe result-unpinned precommit
+`65d0fe7778322b2bb83aabf65e7c12e989d73671` 在两个 fresh、read-only、禁网并受 cgroup v2
+4-GiB/300-s hard limits 的 Julia 进程中，实际完成 staggered magnetization 的第一个 fused
+mapped step：512 composites、1,152 constituents、768 boundaries，峰值 postmerge 43,848，
+最终 42,704 terms，总 charged visits 40,259,148；两个 transcript SHA 均为
+`cf18113b82fd0348d2ae271630e59a67a1e9d73b3e09010f612cf89dbe09d0f5`。其最高状态只证明
+该单一 Float64 threshold prefix 的资源可行性；累计丢弃量和 expectation 均是 diagnostic，
+不构成 truncation/PF-to-exact error、完整 R100、physical reference 或 READY。下一步应在
+完全相同的 prefix 上补 outward coefficient 与 truncation-only error ledger，再决定是否扩展
+horizon。
+
 ### 8.3 L=2 双观测量 screening pilot
 
 新增 [fermi_hubbard_l2_pilot.py](fermi_hubbard_l2_pilot.py) 后，已经可以在无

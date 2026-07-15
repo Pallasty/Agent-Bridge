@@ -926,3 +926,61 @@ new result-unpinned P2 resource-feasibility policy for a sharply bounded
 propagation prefix, with one frozen observable, hard term/time/RSS caps and
 explicit success/failure/indeterminate branches; no L8 scientific result should
 be inferred from P1 alone.
+
+## Majorana P2 L8 one-step bounded-prefix resource-feasibility subcertificate
+
+`MAJORANA-P2-S0` has now executed the first complete L8 prefix that P1 only
+prepared.  Its lifecycle-safe result-unpinned precommit is
+`65d0fe7778322b2bb83aabf65e7c12e989d73671`, directly parented by the P1 result
+commit.  The frozen workload is the normalized staggered magnetization on the
+8x8 square-OBC checkerboard Neel state, evolved through one fused mapped Strang
+step at `U/t=8`, `T=1`, `R=100`.  The nine Heisenberg stages are
+`H1,H2,HU,H3,H4,H3,HU,H2,H1`; their deterministic schedule contains 512
+composites, 1,152 unsigned-`UInt256`-sorted constituents and 768 real
+truncation boundaries.  Hopping truncates after the complete two-constituent
+composite, onsite after every constituent, and the strict threshold is the
+exactly representable binary64 value `2^-34`.
+
+The earlier candidate precommit `0965cf6b...` was superseded before any result
+commit after final-state discovery exposed two tests that checked result-file
+absence only in the live worktree.  The lifecycle-safe sibling instead checks
+live absence before replay and the bound precommit Git tree after result
+materialization.  Repeating the complete formal replay preserved the exact
+witness and transcript hashes below; only custody hashes that include the
+corrected test bytes changed.
+
+Each formal replay was reconstructed from the frozen Git-object allowlist, ran
+in a fresh read-only/network-unshared environment, and was enclosed by a cgroup
+v2 user-systemd scope with `MemoryMax=4 GiB` and `RuntimeMaxSec=300s`.  Both
+fresh Julia processes reached `PREFIX_COMPLETED_UNDER_CAPS` and produced the
+same transcript SHA-256,
+`cf18113b82fd0348d2ae271630e59a67a1e9d73b3e09010f612cf89dbe09d0f5`.
+The independently reconstructed canonical witness SHA-256 is
+`ca382cd7cd8dd01dfcf7ea540809b32f89a5c512ce71484e76ed7e409cb7ae03`;
+the replay-package, staging-manifest and staging-tree SHA-256 values are
+`ada3465adcc9983e1f323778e3a826746986d6d272cdd19552b69e3bc6aa5325`,
+`81bc3689d038ed3bf7d5828fa52230106f81bef8d62dc9542036213d58bafaf0`
+and `4e25ac066969b1623e82b149098e216127154207d6c1ac7a3dbc55534b960453`.
+
+The observed execution had peak premerge/postmerge counts 44,222/43,848 and
+finished with 42,704 retained terms.  It charged 15,113,342 cap-scan visits,
+15,113,342 upstream propagation visits, 9,989,760 truncation-scan visits and
+42,704 final-evaluation visits, for 40,259,148 total; all are below the frozen
+`2^25`, `2^25`, `2^24` and `2^26` caps.  It recorded 489,740
+anticommuting splits and 328,956 threshold-dropped records.  The final term
+digest is `067f02a72d50f8061c746896d9eb02e3b60f7e5d6b42f21f0191b8e5887a9c9e`.
+The lifecycle-aware P2 precommit/result suite passed all 43 tests, the focused
+P0/P1/P2/JW closure passed all 156 tests, and complete frontier discovery passed
+1,296 tests with 26 expected skips in 1,842.621 seconds.
+
+The maximum status is
+`VERIFIED_MAJORANA_P2_L8_STAGGERED_MAGNETIZATION_ONE_STEP_BOUNDED_PREFIX_RESOURCE_FEASIBILITY_SUBCERTIFICATE`.
+It proves execution resource feasibility for this one fused Float64 threshold
+path only.  The accumulated dropped-absolute-sum and final Neel expectation are
+diagnostics, not certified coefficient or truncation-error bounds.  The raw
+1,280-constituent threshold path, double occupancy, the remaining 99 steps,
+equality to the Python top-L1 route, product-formula-to-exact-Hubbard error,
+physical-reference qualification and READY all remain unassessed.  The next
+scientific unit must therefore add outward coefficient enclosures and a
+truncation-only error ledger for this same frozen prefix before any longer
+horizon is considered.

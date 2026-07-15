@@ -768,9 +768,31 @@ This is only
 `VERIFIED_MAJORANA_P0_DETERMINISTIC_INTERVAL_LEDGER_CONFORMANCE_SUBCERTIFICATE`.
 It does not execute L8, compose product-formula error to exact Hubbard dynamics,
 qualify a physical reference, increase M/D depth or create READY authority.  The
-current M/D v2 policies have likewise been exhausted by their formal maximum-K
-screens; any larger ladder, L8 Majorana workload or different method requires a new
-result-unpinned precommit.
+P1 bridge subsequently verified the fixed L2/L3 exact-CAR versus pinned-upstream
+action and sorted-wrapper cadence matrix.  Its precommit is
+`0b3e766814442c1f4186335b50d19f78c043e527`, its two transcript SHA-256 values
+are `8b0b1cc0...adb7`, and its witness SHA-256 is `12b01c0a...7f5`; this remains
+an implementation-conformance result rather than an L8 propagation result.
+
+`MAJORANA-P2-S0` now closes the next resource question.  From lifecycle-safe
+result-unpinned precommit `65d0fe7778322b2bb83aabf65e7c12e989d73671`, two fresh
+Git-object-staged, read-only, network-unshared Julia executions each ran inside
+cgroup v2 `MemoryMax=4 GiB` / `RuntimeMaxSec=300s` and completed the fixed L8
+staggered-magnetization first fused mapped step.  The schedule has 512 composites,
+1,152 constituents and 768 boundaries; peak postmerge size was 43,848, final
+retained size 42,704 and total charged visits 40,259,148.  Both transcript
+SHA-256 values are `cf18113b...d0f5`; canonical witness SHA-256 is
+`ca382cd7...e03`.  The focused P0/P1/P2/JW closure passes 156/156 and complete
+frontier discovery passes 1,296 tests with 26 expected skips.
+
+This P2 status is only
+`VERIFIED_MAJORANA_P2_L8_STAGGERED_MAGNETIZATION_ONE_STEP_BOUNDED_PREFIX_RESOURCE_FEASIBILITY_SUBCERTIFICATE`.
+It does not certify Float64 coefficient accuracy, the threshold-dropped error,
+the raw path, double occupancy, the remaining 99 steps, product-formula error,
+physical reference or READY.  The next Majorana result must first place outward
+coefficient/truncation bounds around this same prefix.  The current M/D v2
+policies have likewise been exhausted by their formal maximum-K screens; any
+larger ladder or different method requires a new result-unpinned precommit.
 
 These campaign, reference, proof-kernel, mapping, checkpoint, commutator,
 grouping-screen, fixed-generic-bound no-go, observable-Taylor-step and
@@ -816,6 +838,9 @@ retained in `claim-status.jsonl`.
   four canonical boundary sidecars,
   source/runtime-pinned Majorana P0 Julia project, result-unpinned policy/checker,
   formal result contract/subcertificate and phase-aware result tests,
+  Majorana P1 L2/L3 exact-action/cadence oracle and formal result closure,
+  Majorana P2 L8 one-fused-step bounded-resource runner, policy, formal result
+  closure and result tests,
   source snapshot and snapshot notes,
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,

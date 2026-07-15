@@ -1103,6 +1103,31 @@ replay-package SHA 为
 L8 full propagation、PF-to-exact error、exact evolution、physical reference 或 READY。P0/P1/JW
 专项联合回归为 113/113；frontier 全目录为 1,253 tests 全通过、26 expected skips。
 
+`MAJORANA-P2-S0` 已把这一前置条件推进到固定 L8 首步的实际资源执行。lifecycle-safe
+result-unpinned precommit `65d0fe7778322b2bb83aabf65e7c12e989d73671` 冻结 normalized
+staggered magnetization、8x8 square OBC checkerboard Neel state、`U/t=8,T=1,R=100` 的
+第一个 fused mapped Strang step，以及 `H1,H2,HU,H3,H4,H3,HU,H2,H1` 九阶段顺序。证书
+runner 实际执行 512 composites、1,152 个 unsigned-`UInt256` 排序 constituents 和 768 个
+真实 threshold boundaries；strict cutoff 为 binary64 中精确可表示的 `2^-34`。
+
+两条 fresh Git-object-staged、read-only、network-unshared replay 均受 cgroup v2
+`MemoryMax=4 GiB` / `RuntimeMaxSec=300s` 约束，并达到
+`PREFIX_COMPLETED_UNDER_CAPS`。相同 transcript SHA 为
+`cf18113b82fd0348d2ae271630e59a67a1e9d73b3e09010f612cf89dbe09d0f5`，独立
+canonical witness SHA 为
+`ca382cd7cd8dd01dfcf7ea540809b32f89a5c512ce71484e76ed7e409cb7ae03`。执行峰值
+premerge/postmerge 为 44,222/43,848，最终保留 42,704 terms；cap scan、upstream
+propagation、threshold scan 与 final evaluation 合计 40,259,148 charged visits，低于预先
+冻结的 `2^26` 总 cap。
+
+最高 authority 仅为
+`VERIFIED_MAJORANA_P2_L8_STAGGERED_MAGNETIZATION_ONE_STEP_BOUNDED_PREFIX_RESOURCE_FEASIBILITY_SUBCERTIFICATE`。
+Float64 dropped-absolute-sum 和 Neel expectation 只是诊断，不是 outward error bound；raw
+1,280-constituent threshold path、double occupancy、其余 99 步、Python top-L1 路线等同性、
+PF-to-exact、physical reference 与 READY 均未评估。下一子阶段应固定同一个 P2 prefix，
+加入 outward coefficient enclosure 与可独立复算的 truncation-only error ledger；在它闭合前
+不扩展到完整 R100。
+
 普通 light-cone 不能替代这一步。对二阶 chromatic formula，`chi=5`、`Upsilon=2`、
 `R=100` 给出 `(chi-1) R Upsilon+3=803` 层，而 L8 OBC 物理格点直径仅 14，已经完全
 饱和；此外已发表 theorem 按 qubit Pauli support 陈述，JW 竖向 hopping 是长字符串，若
@@ -1131,10 +1156,11 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
    runtime/source custody、deterministic composite sort、deduplicate-before-threshold、
    per-boundary dropped-L1 ledger 与 directed rational intervals；P1 又闭合了固定 L2/L3
    全 occupation candidate-action、L2 dense entries、local/global observables 与 sorted-wrapper
-   cadence matrix。下一步必须另行预提交 P2 resource-feasibility policy：只选择一个 frozen
-   observable 与 sharply bounded propagation prefix，预先固定 term/time/RSS caps、ledger 和
-   success/failure/indeterminate 分支。P2 设计或 pilot 均不得从 P1 推导 L8 full propagation、
-   exact-Hubbard reference 或 READY，也不能覆盖现有 Python one-step checker 的 authority。
+   cadence matrix；P2 已在 cgroup v2 hard caps 下完成固定 L8 staggered-magnetization 首个
+   fused mapped step，并只取得该 prefix 的 Float64 resource-feasibility authority。下一步必须
+   另行预提交 P2b/P3 accuracy policy，在相同 prefix 上加入 outward coefficient enclosure、
+   truncation-only error recurrence 与独立 oracle。不得从 P2 推导其余 R100、exact-Hubbard
+   reference 或 READY，也不能覆盖现有 Python one-step checker 的 authority。
 4. 以 machine-checked `total_abs_bound` 达到 campaign reference allocation 为停止条件；
    当前 fixed-K 磁化量 step 4 与 double occupancy step 3 都必须另发资源/sidecar v2；
    v2 至少需审计 K=262,144、single-expansion 446,188 与 visits 337,691,387 这一诊断点，

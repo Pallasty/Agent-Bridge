@@ -932,6 +932,38 @@ so they are versioned normally and are not added to the preservation-only
   and one frozen two-site composite fixture only.  L8, exact-Hubbard/reference
   composition and READY are explicitly excluded.  Majorana-specific tests pass
   34/34; complete discovery passes 1,208 tests with 26 expected skips.
+- `majorana_certificate_p1_fixture.json`, `majorana_certificate_p1_policy.json`,
+  `majorana_certificate_p1_precommit_contract.json`,
+  `majorana_certificate_p1_runner.jl`, `majorana_certificate_p1_checker.py`,
+  `majorana_certificate_p1_contract.json`,
+  `majorana_certificate_p1_certificate.json` and the two P1 test modules:
+  result-unpinned L2/L3 exact-CAR versus pinned-upstream action/cadence bridge.
+  Precommit `0b3e766814442c1f4186335b50d19f78c043e527` covers 62 fixed operator
+  instances, 11,538,944 operator-ket action columns and a 180-composite / 412-
+  constituent / 284-boundary two-step schedule.  Both fresh replay transcripts
+  have SHA-256 `8b0b1cc063adf5914c78cfbb2a88721c9623ec90a47dab087ea21c124c3badb7`;
+  witness SHA-256 is
+  `12b01c0aa89d71107f9acc5e4866f0b2998a84783aa1e255c9f462ac2a13b7f5`.
+- `majorana_certificate_p2_fixture.json`, `majorana_certificate_p2_policy.json`,
+  `majorana_certificate_p2_precommit_contract.json`,
+  `majorana_certificate_p2/majorana_p2_runner.jl`,
+  `majorana_certificate_p2_checker.py`, `majorana_certificate_p2_contract.json`,
+  `majorana_certificate_p2_certificate.json` and the two P2 test modules:
+  result-unpinned and post-replay closures for the fixed L8 staggered-
+  magnetization first fused mapped step.  Lifecycle-safe precommit
+  `65d0fe7778322b2bb83aabf65e7c12e989d73671` freezes 512 composites, 1,152
+  constituents, 768 cadence boundaries, strict binary64 `2^-34` truncation,
+  deterministic term/visit caps and per-replay cgroup v2 4-GiB/300-s limits.
+  Both fresh transcripts have SHA-256
+  `cf18113b82fd0348d2ae271630e59a67a1e9d73b3e09010f612cf89dbe09d0f5`;
+  witness SHA-256 is
+  `ca382cd7cd8dd01dfcf7ea540809b32f89a5c512ce71484e76ed7e409cb7ae03`.
+  The execution finishes with 42,704 terms after 40,259,148 charged visits.
+  P2 precommit/result tests pass 43/43, the focused P0/P1/P2/JW closure passes
+  156/156, and complete discovery passes 1,296 tests with 26 expected skips.
+  Authority is resource feasibility for this one Float64 prefix only; no
+  truncation-accuracy, remaining-R100, exact-Hubbard, reference or READY claim
+  is made.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is
