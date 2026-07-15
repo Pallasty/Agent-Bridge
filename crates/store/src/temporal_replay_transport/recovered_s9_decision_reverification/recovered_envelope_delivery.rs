@@ -39,6 +39,9 @@ const S12_CONTRACT_SHA256: [u8; 32] = [
     0x32, 0x92, 0x36, 0x2e, 0x92, 0xb6, 0x69, 0x57, 0x5a, 0x81, 0xe8, 0x0e, 0x18, 0x9b, 0x13, 0x03,
 ];
 
+#[cfg(feature = "temporal-evidence-s14-recovered-envelope-source-synthetic")]
+mod recovered_envelope_source;
+
 #[derive(Debug, thiserror::Error)]
 #[error("{code}: {detail}")]
 struct RecoveredEnvelopeDeliveryV1Error {
