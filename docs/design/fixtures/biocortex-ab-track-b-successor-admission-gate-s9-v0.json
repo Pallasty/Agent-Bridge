@@ -1,0 +1,103 @@
+{
+  "admission": {
+    "admitted": false,
+    "admission_artifact_must_be_external_to_packet": true,
+    "authority_decision_receipt": null,
+    "authority_policy_custodian_receipt": null,
+    "build_attestation": null,
+    "capture_authorization_receipt": null,
+    "capture_provenance_receipt": null,
+    "deletion_mechanism_receipt": null,
+    "destination_receiver_identity": null,
+    "durable_challenge_uniqueness_receipt": null,
+    "external_currentness_provider_receipt": null,
+    "external_key_custodian_receipt": null,
+    "externally_pinned_allowlist_receipt": null,
+    "key_custody_receipts": null,
+    "old_key_destruction_receipt": null,
+    "owner_pinned_provider_trust_anchor": null,
+    "producer_runtime_identity": null,
+    "provider_linearizability_receipt": null,
+    "provider_rollback_protection_receipt": null,
+    "provider_split_brain_fencing_receipt": null,
+    "revocation_state_receipt": null
+  },
+  "authorization_semantics": {
+    "ed25519_signature_is_not_externality_or_custody_attestation": true,
+    "owner_pin_must_be_external_to_signed_response": true,
+    "provider_contract_does_not_authorize_transport": true,
+    "repository_owner_research_permission_is_not_provider_trust_or_key_custody_attestation": true,
+    "signed_commitment_is_not_kms_destruction_receipt": true,
+    "synthetic_test_key_is_not_owner_pinned_production_trust": true
+  },
+  "boundary": {
+    "biocortex_runtime_influence": false,
+    "bridge_runtime_caller_present": false,
+    "cross_repository_transport_authorized": false,
+    "external_anti_rollback_anchor_present": false,
+    "external_currentness_provider_present": false,
+    "external_key_custodian_present": false,
+    "external_owner_trust_anchor_present": false,
+    "live_binding_satisfied": false,
+    "production_profile_active": false,
+    "same_epoch_rollback_protected": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "external_authority_preregistration": {
+    "contract_sha256": "d537b80ce0d2bbb3c4d01a988a9685432672078eae07d0b976b1268a27526fc4",
+    "contract_status": "PROVIDER_NEUTRAL_ED25519_CURRENTNESS_AND_CUSTODY_CONTRACT_PREREGISTERED_NO_PROVIDER_NO_OWNER_TRUST_ANCHOR_NOT_AUTHORIZED_NOT_TRANSPORT",
+    "currentness_profile": "ONE_ATTEMPT_NO_CACHE_NO_WALL_CLOCK",
+    "external_currentness_provider_interface_frozen": true,
+    "external_key_custodian_interface_frozen": true,
+    "opaque_immutable_key_references_only": true,
+    "production_provider_present": false,
+    "raw_key_returned": false,
+    "synthetic_provider_is_production_evidence": false
+  },
+  "operational_gap_codes": [
+    "CURRENTNESS_CHALLENGE_UNIQUENESS_UNATTESTED",
+    "EXPECTED_EPOCH_CURRENTNESS_EXTERNAL_CUSTODY_UNATTESTED",
+    "INSTANT_REVOCATION_UNAVAILABLE_WITH_LOCAL_CONSUME",
+    "OLD_EPOCH_KEY_DESTRUCTION_UNATTESTED",
+    "SAME_EPOCH_RESTORE_DETECTION_UNAVAILABLE",
+    "DURABLE_CHALLENGE_UNIQUENESS_UNAVAILABLE",
+    "EXTERNAL_AUTHORITY_PROVIDER_UNIMPLEMENTED",
+    "EXTERNAL_KEY_CUSTODIAN_UNIMPLEMENTED",
+    "OWNER_PINNED_TRUST_ANCHOR_UNAVAILABLE",
+    "PROVIDER_CLOCK_AND_FRESHNESS_UNATTESTED",
+    "PROVIDER_FAILURE_RESULT_AMBIGUITY_UNRESOLVED",
+    "PROVIDER_KEY_ROTATION_AND_REVOCATION_UNATTESTED",
+    "PROVIDER_LINEARIZABILITY_UNATTESTED",
+    "PROVIDER_SPLIT_BRAIN_FENCING_UNATTESTED",
+    "PROVIDER_STATE_ROLLBACK_UNATTESTED"
+  ],
+  "predecessor": {
+    "base_commit": "ad3500c831228b1f0e7e1ff2330c515aa997fa7b",
+    "s8_contract_sha256": "039ec8237afa9b2ea3340918a2924f78f89223abbd4034d41c6d82a2e1519573",
+    "s8_feature_commit": "1b303902a91e841bb52bd2fe4807e84320bbb852",
+    "s8_successor_gate_sha256": "c01e686d104392269d57c39a9a240b203016639c65f379f992e74d30248c5817"
+  },
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "required_successor_identity": {
+    "candidate_id_must_change": true,
+    "exact_schema_digest_required": true,
+    "independent_authentication_domain_required": true,
+    "independent_payload_profile_required": true,
+    "new_schema_id_required": true,
+    "new_version_required": true,
+    "successor_candidate_id": null,
+    "successor_payload_profile_sha256": null,
+    "successor_schema_id": null,
+    "successor_schema_sha256": null,
+    "successor_transport_domain": null
+  },
+  "schema": "agent_bridge.memory_temporal_successor_admission_gate_s9.v0",
+  "status": "NOT_ADMITTED"
+}
