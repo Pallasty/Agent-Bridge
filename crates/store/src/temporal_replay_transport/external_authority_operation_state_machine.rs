@@ -333,7 +333,7 @@ pub(super) fn prepared_record_digest(
     )
 }
 
-pub(super) fn sign_job_id(
+fn sign_job_id(
     prepared_record_sha256: &[u8; 32],
     signer_key_id: &str,
     signer_key_version: u64,
@@ -350,6 +350,27 @@ pub(super) fn sign_job_id(
     )
 }
 
+/// Derive a sign-job identity only after the variable-length signer label and
+/// exact key version have passed canonical validation. The raw framer remains
+/// private so sibling modules cannot allocate from an unbounded signer label.
+pub(super) fn validated_sign_job_id(
+    prepared_record_sha256: &[u8; 32],
+    signer_key_id: &str,
+    signer_key_version: u64,
+) -> OperationResult<[u8; 32]> {
+    if !valid_label(signer_key_id) || signer_key_version == 0 {
+        return Err(operation_error(
+            "track_b_atomic_authority_operation_v1_sign_job_signer",
+            "sign-job signer label and exact key version must be canonical",
+        ));
+    }
+    Ok(sign_job_id(
+        prepared_record_sha256,
+        signer_key_id,
+        signer_key_version,
+    ))
+}
+
 pub(super) fn stable_result_id(
     prepared_record_sha256: &[u8; 32],
     sign_job_id: &[u8; 32],
@@ -360,7 +381,7 @@ pub(super) fn stable_result_id(
     )
 }
 
-pub(super) fn decision_message(
+fn decision_message(
     request: &AtomicAuthorityOperationRequestV1,
     request_sha256: &[u8; 32],
     leader_term: u64,
@@ -403,6 +424,33 @@ pub(super) fn decision_message(
             &request.trust_policy_sha256,
         ],
     )
+}
+
+/// Canonically frame the S11 decision only after every request label has
+/// passed its 128-byte bound and the immutable request commitments have been
+/// validated. The raw framer is intentionally module-private.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn validated_decision_message(
+    request: &AtomicAuthorityOperationRequestV1,
+    request_sha256: &[u8; 32],
+    leader_term: u64,
+    operation_committed_revision: u64,
+    record_sequence: u64,
+    prepared_record_sha256: &[u8; 32],
+    sign_job_id: &[u8; 32],
+    stable_result_id: &[u8; 32],
+) -> OperationResult<Vec<u8>> {
+    validate_request(request)?;
+    Ok(decision_message(
+        request,
+        request_sha256,
+        leader_term,
+        operation_committed_revision,
+        record_sequence,
+        prepared_record_sha256,
+        sign_job_id,
+        stable_result_id,
+    ))
 }
 
 /// A deterministic checksum of the synthetic journal's L2 row.
@@ -565,11 +613,11 @@ fn verify_signed_committed_operation_core_v1(
         record.operation_committed_revision,
         record.record_sequence,
     );
-    let expected_sign_job = sign_job_id(
+    let expected_sign_job = validated_sign_job_id(
         &expected_prepared,
         &record.signer_key_id,
         record.signer_key_version,
-    );
+    )?;
     let expected_stable_result = stable_result_id(&expected_prepared, &expected_sign_job);
     if record.prepared_record_sha256 != expected_prepared
         || record.sign_job_id != expected_sign_job
@@ -580,7 +628,7 @@ fn verify_signed_committed_operation_core_v1(
             "L1 prepared record, sign job, or stable result identity drifted",
         ));
     }
-    let message = decision_message(
+    let message = validated_decision_message(
         request,
         &record.request_sha256,
         record.leader_term,
@@ -589,7 +637,7 @@ fn verify_signed_committed_operation_core_v1(
         &record.prepared_record_sha256,
         &record.sign_job_id,
         &record.stable_result_id,
-    );
+    )?;
     if record.decision_message_sha256 != sha256_bytes(&message) {
         return Err(operation_error(
             "track_b_atomic_authority_operation_v1_message_binding",
@@ -989,13 +1037,13 @@ mod tests {
                 record.operation_committed_revision,
                 record.record_sequence,
             );
-            let expected_job = sign_job_id(
+            let expected_job = validated_sign_job_id(
                 &expected_prepared,
                 &record.request.signer_key_id,
                 record.request.signer_key_version,
-            );
+            )?;
             let expected_stable = stable_result_id(&expected_prepared, &expected_job);
-            let expected_message = decision_message(
+            let expected_message = validated_decision_message(
                 &record.request,
                 &expected_request,
                 record.leader_term,
@@ -1004,7 +1052,7 @@ mod tests {
                 &expected_prepared,
                 &expected_job,
                 &expected_stable,
-            );
+            )?;
             if record.request_sha256 != expected_request
                 || record.prepared_record_sha256 != expected_prepared
                 || record.sign_job_id != expected_job
@@ -1125,13 +1173,13 @@ mod tests {
                 staged.revision,
                 sequence,
             );
-            let job = sign_job_id(
+            let job = validated_sign_job_id(
                 &prepared,
                 &request.signer_key_id,
                 request.signer_key_version,
-            );
+            )?;
             let stable = stable_result_id(&prepared, &job);
-            let message = decision_message(
+            let message = validated_decision_message(
                 request,
                 &request_sha256,
                 staged.leader_term,
@@ -1140,7 +1188,7 @@ mod tests {
                 &prepared,
                 &job,
                 &stable,
-            );
+            )?;
             staged
                 .challenges
                 .insert(request.original_challenge, request.operation_id);
@@ -1557,6 +1605,66 @@ mod tests {
         assert_eq!(
             hex(&signed.synthetic_l2_record_sha256),
             "cc44eae74a55863acf469fa941478a35f086a085d44435e0472a991b1136020c"
+        );
+    }
+
+    #[test]
+    fn s11_validated_framers_bound_labels_before_allocation() {
+        let mut boundary = request();
+        boundary.provider_cluster_id = "a".repeat(128);
+        boundary.signer_key_id = "b".repeat(128);
+        let request_sha256 = request_digest(&boundary).unwrap();
+        let prepared = prepared_record_digest(&request_sha256, 7, 43, 10);
+        let job = validated_sign_job_id(
+            &prepared,
+            &boundary.signer_key_id,
+            boundary.signer_key_version,
+        )
+        .unwrap();
+        let stable = stable_result_id(&prepared, &job);
+        assert!(!validated_decision_message(
+            &boundary,
+            &request_sha256,
+            7,
+            43,
+            10,
+            &prepared,
+            &job,
+            &stable,
+        )
+        .unwrap()
+        .is_empty());
+
+        let mut oversized_provider = boundary.clone();
+        oversized_provider.provider_cluster_id = "a".repeat(129);
+        assert_eq!(
+            validated_decision_message(
+                &oversized_provider,
+                &request_sha256,
+                7,
+                43,
+                10,
+                &prepared,
+                &job,
+                &stable,
+            )
+            .unwrap_err()
+            .code(),
+            "track_b_atomic_authority_operation_v1_request_scope"
+        );
+
+        let oversized_signer = "b".repeat(129);
+        assert_eq!(
+            validated_sign_job_id(&prepared, &oversized_signer, 3)
+                .unwrap_err()
+                .code(),
+            "track_b_atomic_authority_operation_v1_sign_job_signer"
+        );
+        assert_eq!(
+            validated_sign_job_id(&prepared, "authority-signer", 0)
+                .unwrap_err()
+                .code(),
+            "track_b_atomic_authority_operation_v1_sign_job_signer"
         );
     }
 

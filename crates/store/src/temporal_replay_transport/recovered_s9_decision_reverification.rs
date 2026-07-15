@@ -412,15 +412,18 @@ fn verify_recovered_s9_decision_v1(
     })
 }
 
+#[cfg(feature = "temporal-evidence-s13-recovered-envelope-delivery-synthetic")]
+mod recovered_envelope_delivery;
+
 #[cfg(test)]
 mod tests {
     use super::super::external_authority_operation_state_machine::{
-        decision_message as s11_decision_message, prepared_record_digest, request_digest,
-        sign_job_id, stable_result_id, synthetic_l2_record_digest,
-        AtomicAuthorityOperationPersistentStateV1,
+        prepared_record_digest, request_digest, stable_result_id, synthetic_l2_record_digest,
+        validated_decision_message as s11_decision_message,
+        validated_sign_job_id as s11_sign_job_id, AtomicAuthorityOperationPersistentStateV1,
     };
     use super::super::external_operation_recovery::{
-        lookup_query_digest, observation_message, result_id,
+        lookup_query_digest, result_id, validated_observation_message,
         verify_external_operation_recovery_observation_v1, ExternalOperationRecoveryQueryV1,
         ExternalOperationRecoveryStateV1, ExternalOperationRecoveryTrustPermitV1,
         SignedExternalOperationRecoveryObservationV1,
@@ -581,10 +584,25 @@ mod tests {
         fixture.s9_decision_bytes = s9_decision_message(&fixture.s9_decision);
     }
 
-    fn verified_s10(
+    pub(super) struct S10InputFixture {
+        pub(super) query: ExternalOperationRecoveryQueryV1,
+        pub(super) observation: SignedExternalOperationRecoveryObservationV1,
+        pub(super) permit: ExternalOperationRecoveryTrustPermitV1,
+    }
+
+    pub(super) fn resign_s10(observation: &mut SignedExternalOperationRecoveryObservationV1) {
+        observation.ed25519_signature = [0; 64];
+        observation.ed25519_signature = key_pair(&S10_SEED)
+            .sign(&validated_observation_message(observation).unwrap())
+            .as_ref()
+            .try_into()
+            .unwrap();
+    }
+
+    pub(super) fn s10_inputs(
         request: &ExternalCurrentnessRequestV1,
         decision: &SignedExternalCurrentnessDecisionV1,
-    ) -> VerifiedExternalOperationRecoveryObservationV1 {
+    ) -> S10InputFixture {
         let query = ExternalOperationRecoveryQueryV1 {
             provider_profile_id: request.provider_profile_id.clone(),
             authority_namespace_id: request.authority_namespace_id.clone(),
@@ -619,11 +637,7 @@ mod tests {
             signer_key_version: 4,
             ed25519_signature: [0; 64],
         };
-        observation.ed25519_signature = key_pair(&S10_SEED)
-            .sign(&observation_message(&observation))
-            .as_ref()
-            .try_into()
-            .unwrap();
+        resign_s10(&mut observation);
         let permit = ExternalOperationRecoveryTrustPermitV1::test_only_new(
             request.provider_profile_id.clone(),
             request.authority_namespace_id.clone(),
@@ -639,7 +653,24 @@ mod tests {
             repeated(0x72),
             public_key(&S10_SEED),
         );
-        verify_external_operation_recovery_observation_v1(&query, &permit, &observation).unwrap()
+        S10InputFixture {
+            query,
+            observation,
+            permit,
+        }
+    }
+
+    fn verified_s10(
+        request: &ExternalCurrentnessRequestV1,
+        decision: &SignedExternalCurrentnessDecisionV1,
+    ) -> VerifiedExternalOperationRecoveryObservationV1 {
+        let input = s10_inputs(request, decision);
+        verify_external_operation_recovery_observation_v1(
+            &input.query,
+            &input.permit,
+            &input.observation,
+        )
+        .unwrap()
     }
 
     fn s11_permit_with(
@@ -684,11 +715,12 @@ mod tests {
             fixture.s11_record.operation_committed_revision,
             fixture.s11_record.record_sequence,
         );
-        let sign_job_id = sign_job_id(
+        let sign_job_id = s11_sign_job_id(
             &prepared_record_sha256,
             &fixture.s11_request.signer_key_id,
             fixture.s11_request.signer_key_version,
-        );
+        )
+        .unwrap();
         let stable_result_id = stable_result_id(&prepared_record_sha256, &sign_job_id);
         let message = s11_decision_message(
             &fixture.s11_request,
@@ -699,7 +731,8 @@ mod tests {
             &prepared_record_sha256,
             &sign_job_id,
             &stable_result_id,
-        );
+        )
+        .unwrap();
         let signature: [u8; 64] = key_pair(seed).sign(&message).as_ref().try_into().unwrap();
         fixture.s11_record.request_sha256 = request_sha256;
         fixture.s11_record.state = AtomicAuthorityOperationPersistentStateV1::SignedCommitted;
@@ -725,16 +758,16 @@ mod tests {
         rebuild_s11_record_with_seed(fixture, &S11_SEED);
     }
 
-    struct Fixture {
-        s9_request: ExternalCurrentnessRequestV1,
-        s9_request_bytes: Vec<u8>,
-        s9_decision: SignedExternalCurrentnessDecisionV1,
-        s9_decision_bytes: Vec<u8>,
-        s9_permit: ExternalAuthorityTrustPermitV1,
-        s10_verified: VerifiedExternalOperationRecoveryObservationV1,
-        s11_request: AtomicAuthorityOperationRequestV1,
-        s11_permit: AtomicAuthorityOperationTrustPermitV1,
-        s11_record: SignedCommittedAuthorityOperationV1,
+    pub(super) struct Fixture {
+        pub(super) s9_request: ExternalCurrentnessRequestV1,
+        pub(super) s9_request_bytes: Vec<u8>,
+        pub(super) s9_decision: SignedExternalCurrentnessDecisionV1,
+        pub(super) s9_decision_bytes: Vec<u8>,
+        pub(super) s9_permit: ExternalAuthorityTrustPermitV1,
+        pub(super) s10_verified: VerifiedExternalOperationRecoveryObservationV1,
+        pub(super) s11_request: AtomicAuthorityOperationRequestV1,
+        pub(super) s11_permit: AtomicAuthorityOperationTrustPermitV1,
+        pub(super) s11_record: SignedCommittedAuthorityOperationV1,
     }
 
     impl Fixture {
@@ -755,7 +788,7 @@ mod tests {
         }
     }
 
-    fn fixture() -> Fixture {
+    pub(super) fn fixture() -> Fixture {
         let s9_request = s9_request();
         let s9_request_bytes = s9_request_message(&s9_request).unwrap();
         let s9_decision = signed_s9_decision(&s9_request);
