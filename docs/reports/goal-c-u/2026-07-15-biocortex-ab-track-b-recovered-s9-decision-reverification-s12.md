@@ -42,7 +42,32 @@ accept successor glue bytes in the current tree. The merge tree must then pass
 the S12 oracle and the complete Rust regression matrix before the integrated
 marker is emitted.
 
+The append-only descendant repair preserves both original modes and adds a
+strict historical-descendant mode for later repository commits. That mode is
+available only when `1de35708f92beaae35bfb4b16ab25292f343cfd1` is an ancestor
+of the current `HEAD`. It pins the exact parent lists and tree IDs of the S12
+baseline (`8daa44ee`), first-condition guard integration (`dee25a38`), original
+source/integration path (`a9e179de` / `c70cebc0`), dual-mode source/integration
+path (`611a10fb` / `f4ff8272`), and reconciled integration (`1de35708`). The
+reconciled and dual-mode integration trees must be byte-identical.
+
+Historical-descendant verification creates a clean detached worktree at
+`f4ff8272` and replays that commit's original integrated S12 gate. It requires
+the exact integrated marker, source commit, integration commit, and `PASS`
+receipt from the replay before checking the frozen S12 oracle and the complete
+Rust regression matrix against the current tip. The historical and current
+runs execute serially with one Cargo job, incremental compilation disabled,
+debug information disabled, and a shared private temporary target directory.
+Recursive replay, replace refs, grafts, and shallow history are rejected. This
+repairs verification reachability only; it does not change S12 runtime code or
+broaden the authorization boundary.
+
 ## Artifact binding
+
+The non-gate entries below remain the frozen S12 source bindings. In
+historical-descendant mode, the archived `611a10fb` report independently checks
+its original gate binding, while the gate entry below binds the current
+descendant-capable verifier.
 
 - `crates/store/Cargo.toml`: `40bbcc10effa7137a5c0b08d2b89c70285b4b1503b441c732398b803d01e96dc`
 - `crates/store/src/temporal_replay_transport.rs`: `f47f6ca04f347cc8b8c2d5f44308906f953ad78656fc27cfc141873a5c8f7f91`
@@ -53,6 +78,6 @@ marker is emitted.
 - `docs/design/MEMORY_TEMPORAL_RECOVERED_S9_DECISION_REVERIFICATION_S12_2026_07_15.md`: `28ccebca75bb016e741df8ff471c522bcd2ec5b6513a530164073f1c0ec1142f`
 - `docs/design/fixtures/biocortex-ab-track-b-recovered-s9-decision-reverification-s12-v0.json`: `4efa9dc533cfca6c98473ae20cf8fc983292362e92b669575a81e80e189b1303`
 - `docs/design/fixtures/biocortex-ab-track-b-successor-admission-gate-s12-v0.json`: `7a580c64ae736a3dd8257af8fd2a81a027ecfe4cbf85fb3205bd25b6a25d9eb6`
-- `scripts/check-memory-temporal-recovered-s9-decision-reverification-s12.sh`: `df9d0d6a358262773dbed9a2d5ca8d0ba375476542399c2a829b39367afa42d5`
+- `scripts/check-memory-temporal-recovered-s9-decision-reverification-s12.sh`: `247df29dfebff22a86d052f9e956ef2cdc4c1be6f285bc352205fa5b6f50b6bc`
 - `scripts/eval/check_memory_temporal_recovered_s9_decision_reverification_s12.py`: `d580feaad194579961b380dcbea5aca4eb95101b3ce76beac793a248b3ea4dd2`
 - `scripts/eval/fixtures/memory_temporal_recovered_s9_decision_reverification_s12.expected.v0.tsv`: `d85e72929f6bffec02c728a458821081fc0358fa86881e40ebf4ec8c2b3fb3f1`
