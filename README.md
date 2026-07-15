@@ -162,6 +162,16 @@ to agents in-loop — when an agent describes a task ("audit a Helm chart",
 matching pre-written skills with their lint status and install command,
 instead of writing instructions from scratch.
 
+> **Scope note (measured 2026-07):** for frontier-model agents, imported
+> tutorial-style skills are mostly redundant — their content is already
+> in the model's weights (51 indexed community skills drew zero reads in
+> 90 days on this deployment). Treat the indexer as a **triage surface**:
+> extract the *delta* a skill carries over what the model already knows
+> (house-specific procedures, sharp edges, private preferences) into
+> regular memory rows, and let the tutorial body stay upstream. Recipes
+> whose intended audience is a *smaller* peer model remain worth keeping
+> whole — skill value anchors to the weakest consumer, not the strongest.
+
 ### Wrapper for env injection (optional)
 
 Some MCP clients (Antigravity Claude, certain IDE integrations) silently
@@ -490,6 +500,32 @@ context full         └─► session_lifecycle_step(precompact) → curate + f
      ▼
 Session end     ──► ab-session-end-hook compacts stale + syncs to git
 ```
+
+### Nightly consolidation & learning loop
+
+The session loop above is only the fast half. Three user-level systemd
+timers (`scripts/systemd/`, installed by `scripts/systemd/install.sh`)
+run the slow, write-side half every night:
+
+| Timer | What it does |
+|-------|--------------|
+| `memory-decay-unused` (03:42) | Read-recency importance decay + graph hygiene — rows nobody reads lose retrieval rank; protected classes are exempt |
+| `distill` (04:30) | `agent-bridge dream distill` — an LLM drafts de-sensitized `pub_*` lesson candidates from verified private rows |
+| `digest` (05:00) | `agent-bridge dream digest` — an LLM authors consolidated `digest` rows that answer synthesis-class queries in one row, citing every source key inline from a bounded manifest |
+
+Both `dream` pipelines are **propose-only**: drafts land as `*_draft`
+rows and never touch the live retrieval surface until they pass an
+offline eval gate (the candidate must rank in the top-5 for its target
+queries on a shadow copy of the store, with no set-recall regression)
+and are explicitly promoted. Structural anti-fabrication: a draft is
+rejected at authoring time if it cites any key outside the manifest it
+was shown.
+
+A retrieval learning loop closes separately: surfaced→used telemetry
+accumulates per-row outcomes, and a daily apply pass converts them into
+bounded importance/valence adjustments. The internal regression
+benchmark gating all of this lives in `scripts/eval/` — see its README
+for the components and the verdict-validity (positive-control) rules.
 
 ### Tuning `session_curate` (Pass-2 implicit extraction)
 
@@ -963,6 +999,10 @@ MCP **`capabilities`** reports `terminal.capabilities` (`TerminalCapabilities`),
 | P1-E | MCP stdio server (~296 tools, profile-gated) | ✅ |
 | P1-F | Cross-session memory (FTS5 + graph edges + scopes) | ✅ |
 | P1-G | PreCompact curator hook + `agent-bridge setup` | ✅ |
+| P2-A | Internal regression benchmark (`scripts/eval/`: retrieval / continuity / synthesis / governance lint, baseline-diff verdicts) | ✅ |
+| P2-B | Nightly write-side consolidation (`dream distill` / `dream digest` — propose-only LLM drafts, eval-gated promotion) | ✅ |
+| P2-C | Retrieval learning loop (surfaced→used telemetry → daily bounded valence/importance apply) | ✅ |
+| P2-D | Cross-agent forum + presence, orphan-process reaper, interactive PTY steer | ✅ |
 
 ## Contributing
 
