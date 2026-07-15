@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "fixture_id": "MAJORANA-P6-E768-MAX-LAZY37-D0-V1",
+  "required_direct_parent_commit": "39100195cfd04bb4de086f127e8a75da0a7548ce",
+  "scientific_authority": "NONE",
+  "certificate_eligible": false,
+  "design_disclosure": {
+    "classification": "P5_INFORMED_P6_RESULT_UNPINNED",
+    "allowed_parent_facts": [
+      "P5_completed_with_no_selected_candidate",
+      "P5_fixed_threshold_candidates_had_a_local_allocation_obstruction",
+      "P5_K37_non_authoritative_resource_projection",
+      "the_frozen_768_boundary_cadence",
+      "campaign_allocations_and_grid_constants"
+    ],
+    "forbidden_design_inputs": [
+      "P5_K36_or_K37_exact_scientific_ticks",
+      "P5_K36_or_K37_exact_local_gap_or_cumulative_slack",
+      "P5_drop_rows_masks_coefficients_or_digests",
+      "P5_terminal_Neel_center_or_interval",
+      "P5_raw_witness_result_contract_or_certificate_bytes"
+    ],
+    "budget_formula_depends_only_on_campaign_constants": true,
+    "lazy_split_does_not_change_the_full_domain_scientific_rule": true
+  },
+  "candidate_design": {
+    "probe_order": [
+      "P5_K37_RESOURCE_CONTROL",
+      "E768_MAX_LAZY37_V1"
+    ],
+    "formal_candidates": [
+      "E768_MAX_LAZY37_V1"
+    ],
+    "control_candidate": "P5_K37_RESOURCE_CONTROL",
+    "step1_threshold_exponent": 34,
+    "control_step2_threshold_exponent": 37,
+    "control_step2_threshold_Float64_bits_hex": "3da0000000000000",
+    "formal_candidate_is_frozen_before_any_probe_output": true,
+    "control_helper_returns_a_noop_sentinel_and_preserves_the_original_strict_K37_callback": true,
+    "control_selection_resource_counters_are_all_zero": true,
+    "formal_threshold_argument_only_validates_the_2^-37_lazy_anchor_bits": true,
+    "formal_threshold_argument_cannot_create_a_hard_scientific_eligibility_gate": true,
+    "each_mode_runs_from_O0_in_a_fresh_process": true,
+    "step1_and_step2_are_same_process_without_checkpoint_or_serialization": true,
+    "candidate_state_is_not_shared": true
+  },
+  "full_domain_adaptive_rule": {
+    "grid_denominator": "340282366920938463463374607431768211456",
+    "local_allocation_denominator": 400000,
+    "maximum_strictly_legal_local_ticks": "850705917302346158658436518579420",
+    "boundary_count": 768,
+    "raw_boundary_indices": "0_through_767",
+    "released_prefix_number_q": "raw_boundary_index_plus_one_in_1_through_768",
+    "prefix_target_formula": "floor(((raw_boundary_index+1) * maximum_strictly_legal_local_ticks) / 768)",
+    "available_ticks_formula": "max(0,prefix_target_ticks_minus_cumulative_product_ticks_minus_cumulative_merge_ticks_minus_cumulative_previous_drop_ticks)",
+    "postmerge_snapshot_precedes_any_drop": true,
+    "ranking_key": [
+      "exact_point_abs_ticks",
+      "sign_cleared_binary64_magnitude_bits",
+      "unsigned_majorana_mask"
+    ],
+    "selection_rule": "longest_sorted_prefix_whose_rowwise_tick_sum_is_at_most_available_ticks",
+    "exact_fit_is_selected": true,
+    "stop_at_first_unaffordable_positive_cost_row_without_skipping": true,
+    "zero_cost_rows_are_selected_at_zero_available_ticks": true,
+    "unused_prefix_budget_carries_forward_implicitly": true,
+    "future_prefix_budget_cannot_be_borrowed": true,
+    "drop_ticks_are_never_refunded_after_merge_cancellation_or_reappearance": true,
+    "product_merge_and_drop_share_one_local_prefix_ledger": true,
+    "final_local_allocation_is_recomputed_by_the_formal_outer_checker": true,
+    "does_not_claim_global_optimality_across_future_boundaries": true
+  },
+  "exact_lazy_implementation": {
+    "split_threshold_exponent": 37,
+    "split_threshold_Float64_bits_hex": "3da0000000000000",
+    "tier1_predicate": "sign_cleared_magnitude_bits_strictly_less_than_split_threshold_bits",
+    "tier1_is_a_provable_initial_segment_of_the_full_ranking": true,
+    "one_lightweight_full_identity_and_coefficient_bits_snapshot_may_be_materialized_but_only_tier_rows_enter_rank_buffers": true,
+    "if_budget_is_exhausted_inside_tier1_stop_without_tier2": true,
+    "if_tier1_is_fully_selected_with_positive_remainder_rescan_the_same_unmodified_snapshot": true,
+    "tier2_collects_every_outside_row_whose_exact_cost_is_at_most_the_current_remainder": true,
+    "tier2_uses_the_same_full_ranking_key_and_prefix_rule": true,
+    "hard_K37_eligibility_gate_is_forbidden": true,
+    "callback_only_tests_precomputed_membership": true,
+    "callback_iteration_order_cannot_consume_budget": true,
+    "callback_revalidates_selected_coefficient_bits": true,
+    "prepare_helper_reads_but_never_mutates_the_live_merged_main_and_authoritative_ticks": true,
+    "all_deletions_are_performed_only_by_the_existing_truncate_callback": true,
+    "the_existing_drop_ledger_is_the_only_authoritative_drop_charge": true,
+    "existing_drop_ledger_recomputes_and_must_equal_the_selection_cost": true
+  },
+  "required_base_fixture_sha256": {
+    "P2": "252fa0c4ed26db5581bcd9ff0101d18d858faf6d31fb9b6cdcaa821bf318e82a",
+    "P3": "a478b783ae4005f7ef79572a4b34eee72299da262e439bdc35eca13496bdc236",
+    "P4": "b020b6bcc0ed56010af9ed3b1836469c084b9244a9303a8101cf7657adb79964",
+    "P5": "fd8b46c8761f548d615042b24f8ec85b32891e4f42dbafdd9bd70d58379a8afb"
+  },
+  "deterministic_step2_probe_caps": {
+    "maximum_step2_accuracy_charged_events": 134217728,
+    "maximum_step2_anticommuting_events": 33554432,
+    "maximum_step2_boundary_retained_terms": 1048576,
+    "maximum_step2_cap_scan_term_visits": 1073741824,
+    "maximum_step2_current_terms_before_constituent": 1048576,
+    "maximum_step2_drop_defect_events": 16777216,
+    "maximum_step2_final_retained_terms": 1048576,
+    "maximum_step2_merge_defect_events": 8388608,
+    "maximum_step2_premerge_terms": 1048576,
+    "maximum_step2_product_defect_events": 67108864,
+    "maximum_step2_propagation_term_visits": 1073741824,
+    "maximum_step2_total_P2_charged_term_visits": 2147483648,
+    "maximum_step2_total_P2_plus_accuracy_charged_events": 2147483648,
+    "maximum_step2_truncation_term_visits": 536870912
+  },
+  "deterministic_selection_probe_caps": {
+    "maximum_ranking_scan_term_visits": 1073741824,
+    "maximum_sort_input_items": 268435456,
+    "maximum_tick_evaluations": 268435456,
+    "maximum_selected_membership_insertions": 16777216,
+    "maximum_peak_ranking_buffer_terms": 1048576,
+    "maximum_total_selection_work_units": 2147483648
+  },
+  "selection_resource_accounting": {
+    "total_selection_work_units_formula": "ranking_scan_term_visits_plus_sort_input_items_plus_tick_evaluations_plus_selected_membership_insertions",
+    "ranking_scan_term_visits_increment": "one_for_each_snapshot_row_examined_by_either_lazy_scan",
+    "sort_input_items_increment": "buffer_length_charged_once_immediately_before_each_sort",
+    "tick_evaluations_increment": "one_immediately_before_each_exact_point_abs_tick_evaluation_used_by_selection",
+    "selected_membership_insertions_increment": "one_immediately_before_each_selected_mask_and_coefficient_bits_insertion",
+    "peak_ranking_buffer_terms": "maximum_of_lightweight_full_snapshot_row_count_and_each_materialized_tier_rank_buffer_length_before_sort",
+    "live_selected_membership_peak_is_bounded_by_the_step2_postmerge_term_cap_and_cleared_after_each_boundary": true,
+    "each_component_and_the_combined_total_are_checked_before_the_corresponding_operation": true,
+    "control_candidate_has_zero_selection_work": true,
+    "tier1_and_tier2_counts_are_exported_only_as_one_aggregate": true
+  },
+  "outward_arithmetic": {
+    "maximum_BigInt_bit_length": 2048,
+    "row_cost": "ceil(2^128_times_abs_exact_binary64_coefficient)",
+    "all_budget_schedule_and_comparisons_use_BigInt": true,
+    "Float64_is_used_only_by_the_frozen_propagation_path": true,
+    "rounding_mode": "binary64_round_to_nearest_ties_to_even"
+  },
+  "scope": {
+    "fixed_L8_P3_step1_then_one_P6_adaptive_step2_only": true,
+    "resource_observation_only": true,
+    "scientific_error_or_allocation_authority": "NOT_CLAIMED",
+    "checkerboard_Neel_expectation": "NOT_EXPORTED_OR_ASSESSED_BY_D0",
+    "remaining_98_mapped_steps_or_full_R100": "NOT_ASSESSED",
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "double_occupancy": "NOT_ASSESSED",
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  }
+}
