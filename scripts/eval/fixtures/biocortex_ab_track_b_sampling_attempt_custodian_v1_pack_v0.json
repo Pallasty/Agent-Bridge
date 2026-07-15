@@ -1,0 +1,150 @@
+{
+  "artifact_bindings": [
+    {
+      "artifact_kind": "owner_trial_registration_receipt_schema",
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-owner-trial-registration-receipt-schema-v1.json",
+      "sha256": "98f6e2c539758c147d9c0d5050c88123f38e975539914e7e926421df10ac9eea",
+      "status": "LOCAL_REFERENCE_SCHEMA_NOT_LIVE"
+    },
+    {
+      "artifact_kind": "sampling_attempt_claim_receipt_schema",
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-sampling-attempt-claim-receipt-schema-v1.json",
+      "sha256": "baa08930421ca6c5a1e1e4835ad95e027b147592d3765371d0028956b96d1eb4",
+      "status": "LOCAL_REFERENCE_SCHEMA_NOT_LIVE"
+    },
+    {
+      "artifact_kind": "sampling_write_outcome_receipt_schema",
+      "repo_path": "docs/design/fixtures/biocortex-ab-track-b-sampling-write-outcome-custodian-receipt-schema-v1.json",
+      "sha256": "93d9b7ebda7f0fd6c24b1a1d0823866128db4885afe7f507b1ae8f6da7e4cb7d",
+      "status": "LOCAL_REFERENCE_SCHEMA_NOT_LIVE"
+    },
+    {
+      "artifact_kind": "sampling_attempt_custodian_source",
+      "repo_path": "scripts/eval/biocortex_ab_track_b_sampling_attempt_custodian_v1.py",
+      "sha256": "29c410adef0c5d2b9b312e6417d507395bcb6d808140e8502eeb63211078c71b",
+      "status": "LOCAL_REFERENCE_IMPLEMENTATION_NOT_LIVE"
+    }
+  ],
+  "baseline_commit": "c3a4ddce9ede20acf0cc90ef5d8c7e9c343d2245",
+  "boundary": {
+    "condition_output_authorized": false,
+    "external_anti_rollback_anchor_present": false,
+    "external_global_single_use_verified": false,
+    "external_owner_trust_verified": false,
+    "frozen_admission_v1_mutated": false,
+    "frozen_graph_mutated": false,
+    "frozen_ledger_mutated": false,
+    "live_binding_satisfied_count": 0,
+    "real_owner_registration_created": false,
+    "real_run_admitted": false,
+    "side_effects_unlocked": "NONE",
+    "synthetic_fixture_only": true
+  },
+  "canonical_serialization": "UTF8_SORTED_KEYS_INDENT_2_LF_FINAL_NEWLINE_NO_NAN_DUPLICATE_KEYS_REJECTED",
+  "data_quality_contract": {
+    "grains": {
+      "attempt_claim": "local_custodian_instance_x_sampling_attempt_namespace",
+      "ledger_event": "local_custodian_instance_x_monotonic_sequence",
+      "owner_trial_registration": "local_registry_generation_x_trial_id",
+      "terminal_outcome": "local_custodian_instance_x_sampling_attempt_namespace"
+    },
+    "join_rules": [
+      "REGISTRATION_BINDS_EXACT_POLICY_CORE_FRAME_ALLOCATION_NAMESPACE_AND_EVENT",
+      "CLAIM_EXACTLY_CONSUMES_ONE_REGISTRATION_AND_THE_SAME_FULL_TUPLE",
+      "OUTCOME_EXACTLY_CONSUMES_ONE_CLAIM_AND_THE_SAME_FULL_TUPLE",
+      "TRIAL_ID_PRIMARY_KEY_IS_NOT_PROTOCOL_SCOPED_WITHIN_THE_LOCAL_STORE",
+      "EXTERNAL_GLOBAL_TRIAL_UNIQUENESS_IS_NOT_VERIFIED",
+      "ONE_CLAIM_AND_ONE_TERMINAL_OUTCOME_PER_ATTEMPT_NAMESPACE",
+      "SUCCESS_WRITE_REQUEST_REPLAY_RECEIPT_REREAD_AND_OBSERVATION_HASH_ARE_CUSTODIAN_DERIVED",
+      "NO_UPDATE_DELETE_EXPIRY_GC_ALIAS_OR_MANY_TO_MANY_JOIN"
+    ]
+  },
+  "date": "2026-07-14",
+  "decision": "LOCAL_CRASH_ATOMIC_CUSTODIAN_SOURCE_PROFILE_PASS_EXTERNAL_GLOBAL_SINGLE_USE_NOT_ADMITTED",
+  "evidence_sha256": {
+    "crates/store/src/temporal_replay_transport/durable_replay_registry.rs": "10f3d1041e594f46b00ebf3db9800c6eb5adc44330978d11e4814ec5cf0c711d",
+    "crates/store/src/temporal_replay_transport/external_restore_authority.rs": "dd92c2b064c1a4c1e5a4119777f1b5bf21a46d0fc9cb77656845f05e48655d9b",
+    "docs/design/fixtures/biocortex-ab-track-b-blind-map-schema-v0.json": "ad40df50eec68fa192c79e6699a8d2da2a9c3925a387eaa7427f7e19f996d783",
+    "docs/design/fixtures/biocortex-ab-track-b-blind-map-schema-v1.json": "475f5c518df83049808e0a118f50ef83026b8c8202bebfd4439dfb9c416fd724",
+    "docs/design/fixtures/biocortex-ab-track-b-durable-replay-contract-s7-v0.json": "8e4f895089f3085725988b50001ab77ec909b86b1dd203e304cc6b4a143a4c8c",
+    "docs/design/fixtures/biocortex-ab-track-b-external-authority-provider-s9-v0.json": "d537b80ce0d2bbb3c4d01a988a9685432672078eae07d0b976b1268a27526fc4",
+    "docs/design/fixtures/biocortex-ab-track-b-owner-trial-registration-receipt-schema-v1.json": "98f6e2c539758c147d9c0d5050c88123f38e975539914e7e926421df10ac9eea",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-attempt-claim-receipt-schema-v1.json": "baa08930421ca6c5a1e1e4835ad95e027b147592d3765371d0028956b96d1eb4",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-contract-digest-profile-v0.json": "a8972ad5e75b30634931fee84f08226e2660413b45cf9dfea948089d61160243",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v0.json": "9e73afee2f6366a241b155680b4f77341adeb7c4e341ab91b8d4b1499b5aacbd",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-receipt-schema-v1.json": "e418b58246eaf183b5624c7eb12299caeea933c83a07584faa915651b3cd48d4",
+    "docs/design/fixtures/biocortex-ab-track-b-sampling-write-outcome-custodian-receipt-schema-v1.json": "93d9b7ebda7f0fd6c24b1a1d0823866128db4885afe7f507b1ae8f6da7e4cb7d",
+    "docs/reports/goal-c-u/2026-07-14-biocortex-ab-track-b-durable-replay-s7.md": "6eed08f1fdced5d27c887925ced0bb1be819bf8219ea0beb14a76794405d0079",
+    "docs/reports/goal-c-u/2026-07-14-biocortex-ab-track-b-external-authority-provider-s9.md": "79a3cc6b810a586334785154f255c3b672fc2f9a0a9279a6dcce0ee07411526e",
+    "docs/reports/goal-c-u/2026-07-14-biocortex-track-b-successor-admission-map-v1-pack.md": "948a7691cef64ecc3363e6f4d41d3a3441bff964ce278eca5054588b37193f57",
+    "scripts/check-biocortex-ab-track-b-sampling-receipt-writer-pack.sh": "62006c057f8304733227402d105d8b37d033ad7253e7c4433fa58433196992d3",
+    "scripts/check-biocortex-ab-track-b-successor-admission-map-v1-pack.sh": "27ce17812af0a7296253e36a2f082f3461027b68cde77a6e50ff519a311dea55",
+    "scripts/eval/biocortex_ab_track_b_map_bijection_v0.py": "45f55cea933ee12df402fbb55d27ea7c6cd08ba8eef9d9868e4e491dd62a2cd2",
+    "scripts/eval/biocortex_ab_track_b_map_bijection_v1.py": "92926f3e01910501e20a7d5f8f9b0cab79e28ca38ae2717966b8b6977fa89e58",
+    "scripts/eval/biocortex_ab_track_b_sampling_attempt_custodian_v1.py": "29c410adef0c5d2b9b312e6417d507395bcb6d808140e8502eeb63211078c71b",
+    "scripts/eval/biocortex_ab_track_b_sampling_receipt_writer_v0.py": "a8642d2b524183e060eb2f2c16d3a4bba4bca43c8e18b8524bc14738d4f6d975",
+    "scripts/eval/biocortex_ab_track_b_sampling_seed_derivation_v0.py": "4f51781ff707e89b4c09adffeafbdaacd75c7e1571d1a86e45d336aace888a3f",
+    "scripts/eval/biocortex_ab_track_b_sampling_selection_v0.py": "e327faf2ad73718dc33f68fdb66a89abf0ac84fbbf8d828ff79fa0e8b75772ec",
+    "scripts/eval/check_biocortex_ab_track_b_admission.py": "b09b10243f195299dc226b5d8d2b484ec74f5eecd49bb487296c391f6f193b13",
+    "scripts/eval/check_biocortex_ab_track_b_admission_v1.py": "8d493f3452589fe1cfd9ece27388c3222a28bac47ca6298cab66c6c3ed52db24",
+    "scripts/eval/check_biocortex_ab_track_b_sampling_attempt_custodian_v1_pack.py": "64ffc875a532a7ff0c76bfb5fbe947e3d6d8c7254f044793c9d5bfd0325f6848",
+    "scripts/eval/check_biocortex_ab_track_b_successor_admission_map_v1_pack.py": "8011699aac4c897095785330ececf0802b8ccadc9a4226ceb9770aa609e4bab2",
+    "scripts/eval/fixtures/biocortex_ab_track_b_artifact_dependency_graph_v0.json": "8f618659cb90cc311ef79aafa3fc536bacc3f428f82291998174a0e374d993af",
+    "scripts/eval/fixtures/biocortex_ab_track_b_identity_composition_pack_synthetic_v0.json": "094a7343543be2a9b32fc996dc3e7006bc9d02f87f8cc9bdd269ef9fb61a341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_live_binding_ledger_v0.json": "764f063fefe0e516547f9bd1e71417242daf292d57e480ae39b73df8bcda341a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v0.json": "1508c0c990ccf9ce26fa0eb524194bb587816cc78d4546236c8d9c00dd3b306e",
+    "scripts/eval/fixtures/biocortex_ab_track_b_real_run_admission_v1.json": "2847ebd368c4a0b557f95b2c91f72b69e31126cf3623ed29320b4154537e3dbe",
+    "scripts/eval/fixtures/biocortex_ab_track_b_sampling_attempt_custodian_v1_pack_synthetic_v0.json": "6dd66c46f60023b6b5bc301b800153c001503e2d6f449330d4a971da2bd78f29",
+    "scripts/eval/fixtures/biocortex_ab_track_b_sampling_receipt_writer_pack_synthetic_v0.json": "79bdb87f5fdaeb72423ff12002f4cf9a0deca2e9cd9b86e820321357a0641b8a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_successor_admission_map_v1_pack.expected.v0.tsv": "e5dc9aad75adf5deeb114fdb568547d2cb3d4bcd4e975174799b4be47a4422e0",
+    "scripts/eval/fixtures/biocortex_ab_track_b_successor_admission_map_v1_pack_synthetic_v0.json": "a95a0052a6abfa93ea58f7f913429b8aad4c368cb91a5a54ad98d36fc58470a8",
+    "scripts/eval/fixtures/biocortex_ab_track_b_successor_admission_map_v1_pack_v0.json": "7cf7b5ea2a4f93d85616c57604ae7d06fe707f77d37546681e13fcc5744e3fb6"
+  },
+  "known_limitation": {
+    "dedicated_custodian_euid_required": true,
+    "local_snapshot_rollback_attack_expected_to_reproduce": true,
+    "local_sqlite_is_external_linearizable_custodian": false,
+    "old_snapshot_restore_detected_without_external_anchor": false,
+    "on_disk_source_hash_is_not_loaded_code_attestation": true,
+    "production_claim_requires_external_owner_trust_and_anti_rollback": true,
+    "same_euid_untrusted_processes_excluded_from_local_profile": true
+  },
+  "next_unit": "FIRST_CONDITION_OUTPUT_GUARD_V1_SOURCE_PACK_WITH_EXTERNAL_AUTHORITY_STILL_REQUIRED",
+  "predecessor": {
+    "integration_commit": "c3a4ddce9ede20acf0cc90ef5d8c7e9c343d2245",
+    "manifest_sha256": "7cf7b5ea2a4f93d85616c57604ae7d06fe707f77d37546681e13fcc5744e3fb6",
+    "source_commit": "3be9eac471a4340915bb127ea5208f3331ced79f"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_sampling_attempt_custodian_v1_pack_manifest.v0",
+  "self_test_expected_sha256": "cfc787d3d40c12826a5b103316bfa96eff2e5f523fc1435dab2647aec0435165",
+  "sqlite_profile": {
+    "application_id": 1094861617,
+    "foreign_keys": true,
+    "journal_mode": "DELETE",
+    "locking_mode": "NORMAL",
+    "pathname_rebinding_rejected_before_return": true,
+    "read_uncommitted": false,
+    "runtime_create_allowed": false,
+    "sqlite_connection_inode_binding_verified": true,
+    "synchronous": "EXTRA",
+    "trusted_schema": false,
+    "user_version": 1
+  },
+  "state_machine": {
+    "claim_is_required_before_terminal_outcome": true,
+    "claim_precedes_external_entropy_and_sampling_write_attested": false,
+    "claimed_namespace_released_on_failure": false,
+    "exactly_one_terminal_outcome_per_claim": true,
+    "retry_after_terminal_abort_allowed": false,
+    "states": [
+      "ABSENT",
+      "REGISTERED",
+      "CLAIMED",
+      "TERMINAL_SUCCESS",
+      "TERMINAL_ABORT"
+    ],
+    "updates_deletes_expiry_and_gc_allowed": false
+  },
+  "synthetic_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_sampling_attempt_custodian_v1_pack_synthetic_v0.json",
+  "synthetic_fixture_sha256": "6dd66c46f60023b6b5bc301b800153c001503e2d6f449330d4a971da2bd78f29"
+}

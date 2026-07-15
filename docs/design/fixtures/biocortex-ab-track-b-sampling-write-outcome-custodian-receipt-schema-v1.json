@@ -1,0 +1,263 @@
+{
+  "$id": "urn:agent-bridge:biocortex-ab:track-b:sampling-write-outcome-custodian-receipt:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "abort_reason_code": {
+          "type": "null"
+        },
+        "external_entropy_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "failure_evidence_sha256": {
+          "type": "null"
+        },
+        "outcome": {
+          "const": "SUCCESS"
+        },
+        "sampling_receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sampling_write_observation_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "sampling_write_request_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "write_state": {
+          "const": "COMPLETE_DURABLE_OBSERVED"
+        }
+      }
+    },
+    {
+      "properties": {
+        "abort_reason_code": {
+          "pattern": "^[A-Z][A-Z0-9_]{0,127}$",
+          "type": "string"
+        },
+        "failure_evidence_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "outcome": {
+          "const": "TERMINAL_ABORT"
+        },
+        "sampling_receipt_sha256": {
+          "type": "null"
+        },
+        "sampling_write_observation_sha256": {
+          "type": "null"
+        },
+        "write_state": {
+          "enum": [
+            "NOT_STARTED",
+            "PARTIAL_OR_AMBIGUOUS",
+            "PROCESS_DEATH_RECONCILIATION",
+            "TIMEOUT_WORKER_FENCED"
+          ]
+        }
+      }
+    }
+  ],
+  "properties": {
+    "abort_reason_code": {
+      "pattern": "^[A-Z][A-Z0-9_]{0,127}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "admission_policy_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "authority_scope": {
+      "const": "LOCAL_CRASH_ATOMIC_TERMINAL_OUTCOME_ONLY_NOT_OUTPUT_AUTHORITY"
+    },
+    "condition_output_authorized": {
+      "const": false
+    },
+    "contract_core_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "custodian_authority_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "custodian_id": {
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "custodian_instance_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "custodian_sequence": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "custodian_source_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "custodian_store_schema_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "custody_target_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "eligible_frame_manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "external_entropy_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "external_global_single_use_verified": {
+      "const": false
+    },
+    "failure_evidence_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finalized_at_utc": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    },
+    "first_condition_output_guard_required": {
+      "const": true
+    },
+    "outcome": {
+      "enum": [
+        "SUCCESS",
+        "TERMINAL_ABORT"
+      ]
+    },
+    "owner_trial_registration_receipt_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "protocol_version": {
+      "const": 1
+    },
+    "receipt_schema_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "same_namespace_sampling_retry_forbidden": {
+      "const": true
+    },
+    "sampling_attempt_namespace_claim_receipt_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "sampling_attempt_namespace_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "sampling_event_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "sampling_receipt_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sampling_write_observation_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sampling_write_request_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_sampling_write_outcome_custodian_receipt.v1"
+    },
+    "strata_allocation_manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "terminal": {
+      "const": true
+    },
+    "trial_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$",
+      "type": "string"
+    },
+    "write_state": {
+      "enum": [
+        "COMPLETE_DURABLE_OBSERVED",
+        "NOT_STARTED",
+        "PARTIAL_OR_AMBIGUOUS",
+        "PROCESS_DEATH_RECONCILIATION",
+        "TIMEOUT_WORKER_FENCED"
+      ]
+    }
+  },
+  "required": [
+    "abort_reason_code",
+    "admission_policy_sha256",
+    "authority_scope",
+    "condition_output_authorized",
+    "contract_core_sha256",
+    "custodian_authority_sha256",
+    "custodian_id",
+    "custodian_instance_sha256",
+    "custodian_sequence",
+    "custodian_source_sha256",
+    "custodian_store_schema_sha256",
+    "custody_target_sha256",
+    "eligible_frame_manifest_sha256",
+    "external_entropy_sha256",
+    "external_global_single_use_verified",
+    "failure_evidence_sha256",
+    "finalized_at_utc",
+    "first_condition_output_guard_required",
+    "outcome",
+    "owner_trial_registration_receipt_sha256",
+    "protocol_version",
+    "receipt_schema_sha256",
+    "same_namespace_sampling_retry_forbidden",
+    "sampling_attempt_namespace_claim_receipt_sha256",
+    "sampling_attempt_namespace_sha256",
+    "sampling_event_sha256",
+    "sampling_receipt_sha256",
+    "sampling_write_observation_sha256",
+    "sampling_write_request_sha256",
+    "schema",
+    "strata_allocation_manifest_sha256",
+    "terminal",
+    "trial_id",
+    "write_state"
+  ],
+  "title": "BioCortex Track B sampling write outcome custodian receipt v1",
+  "type": "object"
+}
