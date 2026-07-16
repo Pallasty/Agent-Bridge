@@ -1216,3 +1216,61 @@ The D0 report and policy bytes must not enter the S0 runner.  Any S0 timeout is
 `INDETERMINATE`, not permission to expand the 1,800-second cap.  The remaining
 98 mapped steps, product-formula-to-exact-Hubbard error, double occupancy,
 physical-reference qualification and READY all remain outside P6 D0 authority.
+
+## Majorana P6 adaptive-drop two-step allocation subcertificate
+
+P6 S0 has now completed the separately frozen formal replay under result-unpinned
+precommit `e9c3b2ee9c095d0be6f834fa5f49ede9ec035e75`.  The sole candidate was
+`E768-MAX-LAZY37-V1`: the certified P3 `2^-34` first step followed by a causal
+768-boundary full-domain adaptive drop for step 2.  Two fresh isolated Julia
+processes both completed before any outer reconstruction, and their stdout
+transcripts were byte-identical with SHA-256
+`bcd72c0291cb98a674cfc2185d711c0a33ea4948c42d630e55d5dd3407d68341`.
+The reconstructible replay-package SHA-256 is
+`256fba0bcbfbc967717b602773d29e8135e36032dcb2737bab15c467fdc9c8c8`;
+raw and independently reconstructed canonical witness SHA-256 values are
+`33d4c30f00fae1797cbf266dcdf9eb6e5af4f60868c6bf6a2a081a44ce3c65e9`
+and `73c988137eba4e180ebe98101dd93a06d62f8a9a055ad9db1cf5d94bc77e9d25`.
+
+On the `2^-128` integer grid, the step-2 product, merge and adaptive-drop
+components are `148897211350102647194854`, `144697018805603317475573` and
+`850704722871123727134215450394624` ticks.  Their local total is
+`850704723164717957289921415065051` ticks, strictly below the frozen
+`1/400000` maximum `850705917302346158658436518579420` by
+`1194137628201368515103514369` ticks.  This uses approximately
+`99.9998596298%` of the local allocation, so the positive result has very thin
+local headroom.  Adding the P3 parent exactly once gives cumulative two-step
+error `1147691269556311823406454666020427` ticks, below the strict `1/200000`
+maximum `1701411834604692317316873037158841` by
+`553720565048380493910418371138414` ticks.
+
+The adaptive step records 18,324,986 accuracy events and 160,531,288 selection
+work units, including 114,104,682 ranking-scan visits and 4,208,292 selected
+insertions.  Its final state retains 284,847 terms with term-stream SHA-256
+`9bd44992823cc6f8cf731f84954840d4927a972fb6a78c1583c3d8c0983a7c51`.
+The exact checkerboard-Neel center is
+`1205552546560279108145133/1208925819614629174706176`; the declared interval
+is
+`[339331727275257038734971019115129616821/340282366920938463463374607431768211456,
+339334022657796151358617832024461657675/340282366920938463463374607431768211456]`.
+
+The terminal branch is `CANDIDATE_QUALIFIED`, with maximum status
+`VERIFIED_MAJORANA_P6_L8_E768_MAX_LAZY37_LOCAL_AND_CUMULATIVE_ERROR_BOUNDS_WITHIN_ALLOCATIONS_SUBCERTIFICATE`.
+This is the first positive second-step child on this route after P4 and P5, but
+its authority remains limited to the fixed L8 P3 first step, this one adaptive
+second step, their additive operator-error enclosure and the checkerboard-Neel
+observable.  It does not certify step 3 or the remaining 98 mapped steps,
+product-formula-to-exact-Hubbard error, double occupancy, a physical reference,
+global optimality of the causal selector or READY.
+
+Because the local scientific budget is almost saturated and the D0-derived
+formal runtime cap is already at the policy's 1,800-second ceiling, the next
+unit should not
+directly claim an adjacent third-step certificate.  It should first be a
+separately precommitted, scientific-result-blind P7 D0 design/resource probe
+that reproduces the P6 two-step prefix, freezes the step-3 allocation rule and
+measures whether an adjacent third mapped step with its adaptive boundaries can
+complete under unchanged host caps.  A cap or timeout must remain
+`INDETERMINATE`; any algorithmic or proof-
+allocation change belongs to a separate candidate rather than an in-place P6
+relaxation.

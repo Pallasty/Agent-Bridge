@@ -1128,6 +1128,50 @@ so they are versioned normally and are not added to the preservation-only
   result or candidate certificate and cannot enter the formal S0 runner.  S0
   must be separately result-unpinned, schema-cap its scientific output, run two
   fresh byte-identical replays and reconstruct them independently.
+- `majorana_certificate_p6_fixture.json`, `majorana_certificate_p6_policy.json`,
+  `majorana_certificate_p6_precommit_contract.json`,
+  `majorana_certificate_p6/majorana_p6_runner.jl`,
+  `majorana_certificate_p6_checker.py`, `majorana_certificate_p6_contract.json`,
+  `majorana_certificate_p6_certificate.json`, `test_majorana_certificate_p6.py`
+  and the post-replay `test_majorana_certificate_p6_result.py` companion:
+  result-unpinned and post-replay formal S0 closure for the sole
+  `E768-MAX-LAZY37-V1` adaptive step-2 candidate after the certified P3 prefix.
+  Precommit `e9c3b2ee9c095d0be6f834fa5f49ede9ec035e75` has precommit-contract
+  SHA-256
+  `4837c0411ea2392f07340b689e5faf4f04516cf1acb5a0336db1a2b1366c244f`.
+  Checker, runner, fixture and policy file SHA-256 values are respectively
+  `5db54434427079c6201c9006f4597ba6e557335577a38ed7230800e101c00b57`,
+  `b63143c066d3d258594e27ee4062632632030e9962a0fcd127fcd5000ff9cc1c`,
+  `fb381c613d675551d33680484a88870020a494e4a356dafd9fd869714c9d475d`
+  and `942dc400a0df39541b083eb4de0e7d16bbc3b975b025a6ac3b6b3911efc8dd47`.
+  Two fresh isolated processes produced the same transcript SHA-256
+  `bcd72c0291cb98a674cfc2185d711c0a33ea4948c42d630e55d5dd3407d68341`.
+  Raw and independently reconstructed canonical witness SHA-256 values are
+  `33d4c30f00fae1797cbf266dcdf9eb6e5af4f60868c6bf6a2a081a44ce3c65e9`
+  and `73c988137eba4e180ebe98101dd93a06d62f8a9a055ad9db1cf5d94bc77e9d25`.
+  The step-2 local error is
+  `850704723164717957289921415065051` `2^-128` ticks, strictly below the
+  `1/400000` maximum by `1194137628201368515103514369` ticks; the inherited-
+  once two-step error is `1147691269556311823406454666020427` ticks, below the
+  `1/200000` maximum by `553720565048380493910418371138414` ticks.  The
+  candidate therefore reaches terminal branch `CANDIDATE_QUALIFIED` and status
+  `VERIFIED_MAJORANA_P6_L8_E768_MAX_LAZY37_LOCAL_AND_CUMULATIVE_ERROR_BOUNDS_WITHIN_ALLOCATIONS_SUBCERTIFICATE`.
+  The final state has 284,847 retained terms and term-stream SHA-256
+  `9bd44992823cc6f8cf731f84954840d4927a972fb6a78c1583c3d8c0983a7c51`;
+  the adaptive selection charges 160,531,288 work units.
+  Result-contract and certificate SHA-256 values are
+  `dfe4f6194a0ec6c2f4597c164e30959289e85adc3f31c21cbf899c47494f90ce`
+  and `4d5eac4084b97021d85995be44d4b829a6281e4a6cf1f0566fd4a9e3319df357`.
+  The 4,686,380-byte formal replay package remains non-committable evidence at
+  `/tmp/majorana-p6-s0-replay-package.json`, with SHA-256
+  `256fba0bcbfbc967717b602773d29e8135e36032dcb2737bab15c467fdc9c8c8`;
+  the committed contract retains its witness and reconstructible package
+  summary.  The exact-result test SHA-256 is
+  `b2e386a676fbcb56872f048e7ff3ef9beb43379f2b66994169c6db190d68776a`.
+  Authority is limited to this fixed two-step operator and
+  checkerboard-Neel enclosure.  Step 3 and the remaining 98 steps, exact-
+  Hubbard error, double occupancy, physical reference, selector global
+  optimality and READY remain excluded.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is
