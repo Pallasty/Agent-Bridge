@@ -39,6 +39,12 @@ for absolute_tool in "${rust_toolchain_bin}/cargo" "${rust_toolchain_bin}/rustfm
 done
 
 cd "$(/usr/bin/dirname "${BASH_SOURCE[0]}")/.."
+repo_root="$(builtin pwd -P)"
+[[ "${repo_root}" == /* && "${repo_root}" != "*" && "${repo_root}" != *$'\n'* \
+  && -d "${repo_root}" && ! -L "${repo_root}" ]] || {
+  printf 'Reference-provider runner authority and adapter contract v1 gate failed: repository root is not an exact canonical directory\n' >&2
+  exit 1
+}
 
 baseline_commit="b15a48d17fb30b0990bf26210978f2a4f78f54cc"
 predecessor_source_commit="27fd73aa36ac897fb817398eca3a191181d8fb5d"
@@ -102,8 +108,11 @@ fail() {
 git_clean() {
   /usr/bin/git --no-pager --no-replace-objects -c core.fsmonitor=false \
     -c core.attributesFile=/dev/null -c core.commitGraph=false \
-    -c core.hooksPath=/dev/null "$@"
+    -c core.hooksPath=/dev/null -c safe.directory="${repo_root}" "$@"
 }
+
+[[ "$(git_clean config --get-all safe.directory)" == "${repo_root}" ]] \
+  || fail "Git trust scope is not the exact repository root"
 
 head_oid="$(git_clean rev-parse HEAD)" || fail "cannot resolve HEAD"
 replace_refs="$(git_clean for-each-ref --format='%(refname)' refs/replace)" \
@@ -118,8 +127,14 @@ common_dir="$(git_clean rev-parse --path-format=absolute --git-common-dir)" \
   || fail "cannot resolve Git common directory"
 [[ -d "${common_dir}" && ! -L "${common_dir}" ]] \
   || fail "Git common directory is missing or a symlink"
-[[ "$(/usr/bin/stat -c '%u' "${common_dir}")" == "${EUID}" ]] \
-  || fail "Git common directory owner drift"
+git_dir="$(git_clean rev-parse --path-format=absolute --git-dir)" \
+  || fail "cannot resolve Git directory"
+[[ -d "${git_dir}" && ! -L "${git_dir}" ]] \
+  || fail "Git directory is missing or a symlink"
+case "${git_dir}" in
+  "${common_dir}"|"${common_dir}"/worktrees/*) ;;
+  *) fail "Git directory is outside the exact common-directory lineage" ;;
+esac
 [[ ! -e "${common_dir}/info/grafts" && ! -L "${common_dir}/info/grafts" ]] \
   || fail "legacy Git graft metadata is present"
 [[ ! -e "${common_dir}/info/attributes" \
@@ -185,7 +200,7 @@ else
   fail "HEAD is neither the exact source shape nor an ordinary two-parent integration"
 fi
 
-project_parent="$(/usr/bin/dirname "$(/usr/bin/dirname "${common_dir}")")"
+project_parent="$(/usr/bin/dirname "${repo_root}")"
 tmp_base="${project_parent}/.ab-gate-tmp"
 [[ ! -L "${tmp_base}" ]] || fail "gate temp base is a symlink"
 if [[ ! -e "${tmp_base}" ]]; then
@@ -231,16 +246,25 @@ git_clean diff-tree --no-commit-id --name-status -r "${baseline_commit}" "${sour
   || fail "source commit is not the exact ten-path all-add delta"
 
 if [[ "${mode}" == integrated ]]; then
+  : >"${tmp}/expected-integrated-delta"
   for path in "${packet_paths[@]}"; do
     first_parent_entry="$(git_clean ls-tree "${first_parent}" -- "${path}")" \
       || fail "cannot inspect integrated first-parent path: ${path}"
-    [[ -z "${first_parent_entry}" ]] \
-      || fail "integrated first parent already contains packet path: ${path}"
+    source_entry="$(git_clean ls-tree "${source_commit}" -- "${path}")" \
+      || fail "cannot inspect integrated source path: ${path}"
+    if [[ "${path}" == "${gate_path}" ]]; then
+      [[ -n "${first_parent_entry}" && "${first_parent_entry}" != "${source_entry}" ]] \
+        || fail "integrated first parent lacks the distinct predecessor gate"
+      printf 'M\t%s\n' "${path}" >"${tmp}/expected-integrated-delta"
+    else
+      [[ "${first_parent_entry}" == "${source_entry}" ]] \
+        || fail "integrated first parent packet identity drift: ${path}"
+    fi
   done
   git_clean diff-tree --no-commit-id --name-status -r "${first_parent}" "${head_oid}" \
     | LC_ALL=C /usr/bin/sort >"${tmp}/integrated-delta"
-  /usr/bin/cmp -s "${tmp}/expected-delta" "${tmp}/integrated-delta" \
-    || fail "integrated first-parent delta is not the exact packet"
+  /usr/bin/cmp -s "${tmp}/expected-integrated-delta" "${tmp}/integrated-delta" \
+    || fail "integrated first-parent delta is not the exact gate maintenance change"
 fi
 
 reject_symlink_components() {
