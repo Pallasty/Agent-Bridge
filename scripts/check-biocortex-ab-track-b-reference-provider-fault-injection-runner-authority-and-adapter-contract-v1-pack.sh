@@ -26,11 +26,31 @@ export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 export GIT_CONFIG_SYSTEM=/dev/null
 
-for absolute_tool in "${rust_toolchain_bin}/cargo" "${rust_toolchain_bin}/rustfmt" \
-  /usr/bin/awk /usr/bin/bash /usr/bin/cat /usr/bin/chmod /usr/bin/cmp \
-  /usr/bin/dirname /usr/bin/env /usr/bin/find /usr/bin/git /usr/bin/grep \
-  /usr/bin/mkdir /usr/bin/mktemp /usr/bin/python3 /usr/bin/rm \
-  /usr/bin/sha256sum /usr/bin/sort /usr/bin/stat /usr/bin/tar; do
+fail() {
+  printf 'Reference-provider runner authority and adapter contract v1 gate failed: %s\n' "$*" >&2
+  exit 1
+}
+
+validation_tier="${1:-full-replay}"
+[[ "$#" -le 1 ]] || fail "expected at most one validation tier"
+case "${validation_tier}" in
+  fast|full-replay) ;;
+  *) fail "unknown validation tier: ${validation_tier}" ;;
+esac
+
+required_tools=(
+  /usr/bin/awk /usr/bin/bash /usr/bin/cat /usr/bin/chmod /usr/bin/cmp
+  /usr/bin/dirname /usr/bin/env /usr/bin/find /usr/bin/git /usr/bin/grep
+  /usr/bin/mkdir /usr/bin/mktemp /usr/bin/python3 /usr/bin/rm /usr/bin/rmdir
+  /usr/bin/sha256sum /usr/bin/sort /usr/bin/stat /usr/bin/tar
+)
+if [[ "${validation_tier}" == full-replay ]]; then
+  required_tools+=(
+    "${rust_toolchain_bin}/cargo" "${rust_toolchain_bin}/rustfmt"
+    /usr/bin/findmnt
+  )
+fi
+for absolute_tool in "${required_tools[@]}"; do
   [[ -x "${absolute_tool}" ]] || {
     printf 'Reference-provider runner authority and adapter contract v1 gate missing host tool: %s\n' \
       "${absolute_tool}" >&2
@@ -96,14 +116,14 @@ report_bound_paths=(
   "${predecessor_paths[@]}"
 )
 
-frozen_manifest_sha256="cefb64a0ac444c537833b6bbb8aed0819840d762c7e27d809248ab17ff24a482"
+frozen_manifest_sha256="ff7cae32c8f19df080e40724ff353126c57caad1e23d957e467d490519738b12"
 frozen_purpose_checker_sha256="c8f2258f9f8bac956958d6ebd011790814b6df3bad7f72213dd8241add7b4605"
 frozen_expected_result_sha256="948842558a2be55a10660305758db5532ae89ec8b3340338c989befb26d5ce4b"
-
-fail() {
-  printf 'Reference-provider runner authority and adapter contract v1 gate failed: %s\n' "$*" >&2
-  exit 1
-}
+frozen_baseline_tree="bc960015b06236c5f52c90dbbd9da4664c464b3e"
+frozen_baseline_parents="b2dd4706bd34155a1edd6d6472ee0b32a3bb232b 27fd73aa36ac897fb817398eca3a191181d8fb5d"
+predecessor_expected_result="scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_v1_pack.expected.v0.tsv"
+frozen_predecessor_expected_result_sha256="9c4a2f7ff0de15e5e37fd2d8b0292e8870eaa505102af04fa16c78c1eec50541"
+frozen_predecessor_replay_receipt_sha256="2882d134d9f8645877314bcf1a75b0e900e1c7ae41c49485fd75e6c3028e22e2"
 
 git_clean() {
   /usr/bin/git --no-pager --no-replace-objects -c core.fsmonitor=false \
@@ -123,6 +143,14 @@ shallow_state="$(git_clean rev-parse --is-shallow-repository)" \
   || fail "cannot resolve shallow-repository state"
 [[ "${shallow_state}" == false ]] \
   || fail "shallow history is not admissible"
+[[ "$(git_clean cat-file -t "${baseline_commit}")" == commit ]] \
+  || fail "predecessor baseline is not an available commit"
+[[ "$(git_clean show -s --format='%T' "${baseline_commit}")" \
+  == "${frozen_baseline_tree}" ]] \
+  || fail "predecessor baseline tree drift"
+[[ "$(git_clean show -s --format='%P' "${baseline_commit}")" \
+  == "${frozen_baseline_parents}" ]] \
+  || fail "predecessor baseline parent topology drift"
 common_dir="$(git_clean rev-parse --path-format=absolute --git-common-dir)" \
   || fail "cannot resolve Git common directory"
 [[ -d "${common_dir}" && ! -L "${common_dir}" ]] \
@@ -200,7 +228,29 @@ else
   fail "HEAD is neither the exact source shape nor an ordinary two-parent integration"
 fi
 
-project_parent="$(/usr/bin/dirname "${repo_root}")"
+full_replay_scratch_root=""
+if [[ "${validation_tier}" == full-replay ]]; then
+  full_replay_scratch_root="/home/pallasting/.cache/agent-bridge-gates"
+  [[ ! -L "${full_replay_scratch_root}" ]] \
+    || fail "full-replay scratch root is a symlink"
+  if [[ ! -e "${full_replay_scratch_root}" ]]; then
+    /usr/bin/mkdir -m 0700 "${full_replay_scratch_root}"
+  fi
+  [[ -d "${full_replay_scratch_root}" \
+    && ! -L "${full_replay_scratch_root}" ]] \
+    || fail "full-replay scratch root is invalid"
+  [[ "$(/usr/bin/stat -c '%u' "${full_replay_scratch_root}")" == "${EUID}" \
+    && "$(/usr/bin/stat -c '%a' "${full_replay_scratch_root}")" == 700 ]] \
+    || fail "full-replay scratch root owner or mode drift"
+  full_replay_scratch_fs="$(
+    /usr/bin/findmnt -T "${full_replay_scratch_root}" -n -o FSTYPE
+  )" || fail "cannot resolve full-replay scratch filesystem"
+  [[ "${full_replay_scratch_fs}" != tmpfs ]] \
+    || fail "full-replay scratch root must not use tmpfs"
+  project_parent="${full_replay_scratch_root}"
+else
+  project_parent="$(/usr/bin/dirname "${repo_root}")"
+fi
 tmp_base="${project_parent}/.ab-gate-tmp"
 [[ ! -L "${tmp_base}" ]] || fail "gate temp base is a symlink"
 if [[ ! -e "${tmp_base}" ]]; then
@@ -220,10 +270,15 @@ tmp="$(/usr/bin/mktemp -d "${tmp_base}/provider-runner-contract-v1.XXXXXX")"
 cleanup() {
   /usr/bin/chmod -R u+w "${tmp}" 2>/dev/null || true
   /usr/bin/rm -rf "${tmp}" 2>/dev/null || true
+  /usr/bin/rmdir "${tmp_base}" 2>/dev/null || true
+  if [[ -n "${full_replay_scratch_root}" ]]; then
+    /usr/bin/rmdir "${full_replay_scratch_root}" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 /usr/bin/mkdir -m 0700 "${tmp}/home" "${tmp}/child-tmp" \
-  "${tmp}/source-archive" "${tmp}/head-archive" "${tmp}/baseline-cargo-target"
+  "${tmp}/source-archive" "${tmp}/head-archive" \
+  "${tmp}/baseline-cargo-target"
 
 /usr/bin/cat >"${tmp}/expected-paths" <<'EOF'
 docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-authority-receipt-schema-v1.json
@@ -252,19 +307,25 @@ if [[ "${mode}" == integrated ]]; then
       || fail "cannot inspect integrated first-parent path: ${path}"
     source_entry="$(git_clean ls-tree "${source_commit}" -- "${path}")" \
       || fail "cannot inspect integrated source path: ${path}"
-    if [[ "${path}" == "${gate_path}" ]]; then
-      [[ -n "${first_parent_entry}" && "${first_parent_entry}" != "${source_entry}" ]] \
-        || fail "integrated first parent lacks the distinct predecessor gate"
-      printf 'M\t%s\n' "${path}" >"${tmp}/expected-integrated-delta"
-    else
-      [[ "${first_parent_entry}" == "${source_entry}" ]] \
-        || fail "integrated first parent packet identity drift: ${path}"
-    fi
+    case "${path}" in
+      "${manifest}"|"${report}"|"${gate_path}")
+        [[ -n "${first_parent_entry}" \
+          && "${first_parent_entry}" != "${source_entry}" ]] \
+          || fail "integrated first parent lacks distinct maintenance input: ${path}"
+        printf 'M\t%s\n' "${path}" >>"${tmp}/expected-integrated-delta"
+        ;;
+      *)
+        [[ "${first_parent_entry}" == "${source_entry}" ]] \
+          || fail "integrated first parent packet identity drift: ${path}"
+        ;;
+    esac
   done
+  LC_ALL=C /usr/bin/sort -o "${tmp}/expected-integrated-delta" \
+    "${tmp}/expected-integrated-delta"
   git_clean diff-tree --no-commit-id --name-status -r "${first_parent}" "${head_oid}" \
     | LC_ALL=C /usr/bin/sort >"${tmp}/integrated-delta"
   /usr/bin/cmp -s "${tmp}/expected-integrated-delta" "${tmp}/integrated-delta" \
-    || fail "integrated first-parent delta is not the exact gate maintenance change"
+    || fail "integrated first-parent delta is not the exact manifest-report-gate maintenance change"
 fi
 
 reject_symlink_components() {
@@ -392,85 +453,115 @@ done
   "${tmp}/actual-report-bindings" \
   || fail "report Artifact binding section is not the exact ordered catalog"
 
-predecessor_repo="${tmp}/predecessor-repo"
-if ! git_clean clone --no-local --no-checkout --no-tags --single-branch -- \
-  . "${predecessor_repo}" \
-  >"${tmp}/predecessor-clone.stdout" 2>"${tmp}/predecessor-clone.stderr"; then
-  /usr/bin/cat "${tmp}/predecessor-clone.stderr" >&2
-  fail "cannot create isolated predecessor repository"
-fi
-if ! git_clean -C "${predecessor_repo}" checkout --detach "${baseline_commit}" \
-  >"${tmp}/predecessor-checkout.stdout" 2>"${tmp}/predecessor-checkout.stderr"; then
-  /usr/bin/cat "${tmp}/predecessor-checkout.stderr" >&2
-  fail "cannot check out predecessor baseline in isolated repository"
-fi
-isolated_head_oid="$(git_clean -C "${predecessor_repo}" rev-parse HEAD)" \
-  || fail "cannot resolve isolated predecessor HEAD"
-[[ "${isolated_head_oid}" == "${baseline_commit}" ]] \
-  || fail "isolated predecessor baseline HEAD drift"
-predecessor_status_before="$(
-  git_clean -C "${predecessor_repo}" status --porcelain=v1 --untracked-files=all
-)" || fail "cannot inspect predecessor baseline status before replay"
-[[ -z "${predecessor_status_before}" ]] \
-  || fail "predecessor baseline dirty before replay"
 read -r predecessor_gate_mode predecessor_gate_type predecessor_gate_object \
   predecessor_gate_indexed \
-  < <(git_clean -C "${predecessor_repo}" ls-tree \
-    "${baseline_commit}" -- "${predecessor_gate}") \
+  < <(git_clean ls-tree "${baseline_commit}" -- "${predecessor_gate}") \
   || fail "cannot resolve predecessor gate object"
 [[ "${predecessor_gate_mode}" == 100755 \
   && "${predecessor_gate_type}" == blob \
   && "${predecessor_gate_indexed}" == "${predecessor_gate}" ]] \
   || fail "predecessor gate identity or mode drift"
-/usr/bin/cmp -s "${predecessor_repo}/${predecessor_gate}" \
-  <(git_clean -C "${predecessor_repo}" cat-file blob "${predecessor_gate_object}") \
-  || fail "executable predecessor gate bytes differ from baseline blob"
-git_clean -C "${predecessor_repo}" worktree list --porcelain \
-  >"${tmp}/worktrees-before-predecessor"
-predecessor_gate_tmp_base="${tmp}/.ab-gate-tmp"
-[[ ! -e "${predecessor_gate_tmp_base}" && ! -L "${predecessor_gate_tmp_base}" ]] \
-  || fail "isolated predecessor gate temp base exists before replay"
-if ! (
-  cd "${predecessor_repo}"
-  TMPDIR="${tmp}/child-tmp" CARGO_TARGET_DIR="${tmp}/baseline-cargo-target" \
-    PYTHONDONTWRITEBYTECODE=1 "${predecessor_gate}"
-) >"${tmp}/predecessor-gate.stdout" 2>"${tmp}/predecessor-gate.stderr"; then
-  /usr/bin/cat "${tmp}/predecessor-gate.stderr" >&2
-  fail "predecessor integration gate replay failed"
-fi
-git_clean -C "${predecessor_repo}" worktree list --porcelain \
-  >"${tmp}/worktrees-after-predecessor"
-/usr/bin/cmp -s "${tmp}/worktrees-before-predecessor" \
-  "${tmp}/worktrees-after-predecessor" \
-  || fail "predecessor replay changed isolated worktree registrations"
-if [[ -e "${predecessor_gate_tmp_base}" \
-  || -L "${predecessor_gate_tmp_base}" ]]; then
-  [[ -d "${predecessor_gate_tmp_base}" \
+read -r predecessor_result_mode predecessor_result_type \
+  predecessor_result_object predecessor_result_indexed \
+  < <(git_clean ls-tree "${baseline_commit}" -- "${predecessor_expected_result}") \
+  || fail "cannot resolve frozen predecessor result object"
+[[ "${predecessor_result_mode}" == 100644 \
+  && "${predecessor_result_type}" == blob \
+  && "${predecessor_result_indexed}" == "${predecessor_expected_result}" ]] \
+  || fail "frozen predecessor result identity or mode drift"
+git_clean cat-file blob "${predecessor_result_object}" \
+  >"${tmp}/expected-predecessor-replay.stdout"
+[[ "$(/usr/bin/sha256sum "${tmp}/expected-predecessor-replay.stdout" \
+  | /usr/bin/awk '{print $1}')" == "${frozen_predecessor_expected_result_sha256}" ]] \
+  || fail "frozen predecessor expected result SHA-256 drift"
+/usr/bin/cat >>"${tmp}/expected-predecessor-replay.stdout" <<EOF
+integration_gate	VALID_INTEGRATED_BIOCORTEX_AB_TRACK_B_REFERENCE_PROVIDER_FAULT_INJECTION_OFFLINE_HARNESS_V1_PACK
+gate	PASS
+mode	integrated
+source_commit	${predecessor_source_commit}
+head	${baseline_commit}
+EOF
+predecessor_replay_receipt_sha256="$(
+  /usr/bin/sha256sum "${tmp}/expected-predecessor-replay.stdout" \
+    | /usr/bin/awk '{print $1}'
+)"
+[[ "${predecessor_replay_receipt_sha256}" \
+  == "${frozen_predecessor_replay_receipt_sha256}" ]] \
+  || fail "frozen predecessor replay receipt SHA-256 drift"
+
+predecessor_full_replay=false
+if [[ "${validation_tier}" == full-replay ]]; then
+  predecessor_repo="${tmp}/predecessor-repo"
+  if ! git_clean clone --no-local --no-checkout --no-tags --single-branch -- \
+    . "${predecessor_repo}" \
+    >"${tmp}/predecessor-clone.stdout" 2>"${tmp}/predecessor-clone.stderr"; then
+    /usr/bin/cat "${tmp}/predecessor-clone.stderr" >&2
+    fail "cannot create isolated predecessor repository"
+  fi
+  if ! git_clean -C "${predecessor_repo}" checkout --detach "${baseline_commit}" \
+    >"${tmp}/predecessor-checkout.stdout" 2>"${tmp}/predecessor-checkout.stderr"; then
+    /usr/bin/cat "${tmp}/predecessor-checkout.stderr" >&2
+    fail "cannot check out predecessor baseline in isolated repository"
+  fi
+  isolated_head_oid="$(git_clean -C "${predecessor_repo}" rev-parse HEAD)" \
+    || fail "cannot resolve isolated predecessor HEAD"
+  [[ "${isolated_head_oid}" == "${baseline_commit}" ]] \
+    || fail "isolated predecessor baseline HEAD drift"
+  predecessor_status_before="$(
+    git_clean -C "${predecessor_repo}" status --porcelain=v1 --untracked-files=all
+  )" || fail "cannot inspect predecessor baseline status before replay"
+  [[ -z "${predecessor_status_before}" ]] \
+    || fail "predecessor baseline dirty before replay"
+  /usr/bin/cmp -s "${predecessor_repo}/${predecessor_gate}" \
+    <(git_clean -C "${predecessor_repo}" cat-file blob "${predecessor_gate_object}") \
+    || fail "executable predecessor gate bytes differ from baseline blob"
+  git_clean -C "${predecessor_repo}" worktree list --porcelain \
+    >"${tmp}/worktrees-before-predecessor"
+  predecessor_gate_tmp_base="${tmp}/.ab-gate-tmp"
+  [[ ! -e "${predecessor_gate_tmp_base}" \
     && ! -L "${predecessor_gate_tmp_base}" ]] \
-    || fail "isolated predecessor gate temp base is invalid after replay"
-  [[ "$(/usr/bin/stat -c '%u' "${predecessor_gate_tmp_base}")" == "${EUID}" \
-    && "$(/usr/bin/stat -c '%a' "${predecessor_gate_tmp_base}")" == 700 ]] \
-    || fail "isolated predecessor gate temp base owner or mode drift"
-  predecessor_temp_residue="$(
-    /usr/bin/find "${predecessor_gate_tmp_base}" -mindepth 1 -print -quit
-  )" || fail "cannot inspect isolated predecessor gate temp residue"
-  [[ -z "${predecessor_temp_residue}" ]] \
-    || fail "predecessor replay left isolated gate temp residue"
+    || fail "isolated predecessor gate temp base exists before replay"
+  if ! (
+    cd "${predecessor_repo}"
+    TMPDIR="${tmp}/child-tmp" \
+      CARGO_TARGET_DIR="${tmp}/baseline-cargo-target" \
+      PYTHONDONTWRITEBYTECODE=1 "${predecessor_gate}"
+  ) >"${tmp}/predecessor-gate.stdout" 2>"${tmp}/predecessor-gate.stderr"; then
+    /usr/bin/cat "${tmp}/predecessor-gate.stderr" >&2
+    fail "predecessor integration gate replay failed"
+  fi
+  /usr/bin/cmp -s "${tmp}/expected-predecessor-replay.stdout" \
+    "${tmp}/predecessor-gate.stdout" \
+    || fail "predecessor replay receipt differs from frozen expected bytes"
+  [[ "$(/usr/bin/sha256sum "${tmp}/predecessor-gate.stdout" \
+    | /usr/bin/awk '{print $1}')" == "${predecessor_replay_receipt_sha256}" ]] \
+    || fail "predecessor replay receipt SHA-256 mismatch"
+  git_clean -C "${predecessor_repo}" worktree list --porcelain \
+    >"${tmp}/worktrees-after-predecessor"
+  /usr/bin/cmp -s "${tmp}/worktrees-before-predecessor" \
+    "${tmp}/worktrees-after-predecessor" \
+    || fail "predecessor replay changed isolated worktree registrations"
+  if [[ -e "${predecessor_gate_tmp_base}" \
+    || -L "${predecessor_gate_tmp_base}" ]]; then
+    [[ -d "${predecessor_gate_tmp_base}" \
+      && ! -L "${predecessor_gate_tmp_base}" ]] \
+      || fail "isolated predecessor gate temp base is invalid after replay"
+    [[ "$(/usr/bin/stat -c '%u' "${predecessor_gate_tmp_base}")" == "${EUID}" \
+      && "$(/usr/bin/stat -c '%a' "${predecessor_gate_tmp_base}")" == 700 ]] \
+      || fail "isolated predecessor gate temp base owner or mode drift"
+    predecessor_temp_residue="$(
+      /usr/bin/find "${predecessor_gate_tmp_base}" -mindepth 1 -print -quit
+    )" || fail "cannot inspect isolated predecessor gate temp residue"
+    [[ -z "${predecessor_temp_residue}" ]] \
+      || fail "predecessor replay left isolated gate temp residue"
+  fi
+  predecessor_status_after="$(
+    git_clean -C "${predecessor_repo}" status --porcelain=v1 --untracked-files=all
+  )" || fail "cannot inspect predecessor baseline status after replay"
+  [[ -z "${predecessor_status_after}" ]] \
+    || fail "predecessor replay dirtied worktree"
+  predecessor_full_replay=true
 fi
-for expected_line in \
-  $'integration_gate\tVALID_INTEGRATED_BIOCORTEX_AB_TRACK_B_REFERENCE_PROVIDER_FAULT_INJECTION_OFFLINE_HARNESS_V1_PACK' \
-  $'gate\tPASS' \
-  $'mode\tintegrated' \
-  $'source_commit\t'"${predecessor_source_commit}" \
-  $'head\t'"${baseline_commit}"; do
-  [[ "$(/usr/bin/grep -Fxc -- "${expected_line}" "${tmp}/predecessor-gate.stdout")" == 1 ]] \
-    || fail "predecessor output lacks exact-once binding: ${expected_line}"
-done
-predecessor_status_after="$(
-  git_clean -C "${predecessor_repo}" status --porcelain=v1 --untracked-files=all
-)" || fail "cannot inspect predecessor baseline status after replay"
-[[ -z "${predecessor_status_after}" ]] \
-  || fail "predecessor replay dirtied worktree"
 
 git_clean diff --check "${baseline_commit}" "${source_commit}"
 final_head_oid="$(git_clean rev-parse HEAD)" || fail "cannot resolve final HEAD"
@@ -487,15 +578,38 @@ source_result="$(/usr/bin/cat "${tmp}/source-0-normal.tsv")"
   || fail "cannot remove gate temp tree"
 [[ ! -e "${tmp}" && ! -L "${tmp}" ]] \
   || fail "gate temp tree survived removal"
+/usr/bin/rmdir "${tmp_base}" 2>/dev/null || true
+if [[ -n "${full_replay_scratch_root}" ]]; then
+  /usr/bin/rmdir "${full_replay_scratch_root}" 2>/dev/null || true
+fi
 trap - EXIT
 
 printf '%s\n' "${source_result}"
-if [[ "${mode}" == integrated ]]; then
-  printf 'integration_gate\tVALID_INTEGRATED_BIOCORTEX_AB_TRACK_B_REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_AUTHORITY_AND_ADAPTER_CONTRACT_V1_PACK\n'
+if [[ "${validation_tier}" == full-replay ]]; then
+  if [[ "${mode}" == integrated ]]; then
+    printf 'integration_gate\tVALID_INTEGRATED_BIOCORTEX_AB_TRACK_B_REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_AUTHORITY_AND_ADAPTER_CONTRACT_V1_PACK\n'
+  else
+    printf 'source_gate\tVALID_SOURCE_BIOCORTEX_AB_TRACK_B_REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_AUTHORITY_AND_ADAPTER_CONTRACT_V1_PACK\n'
+  fi
+  printf 'gate\tPASS\n'
 else
-  printf 'source_gate\tVALID_SOURCE_BIOCORTEX_AB_TRACK_B_REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_AUTHORITY_AND_ADAPTER_CONTRACT_V1_PACK\n'
+  printf 'gate\tFAST_PASS_NON_RELEASE_CONTENT_IDENTITY_ONLY\n'
 fi
-printf 'gate\tPASS\n'
 printf 'mode\t%s\n' "${mode}"
 printf 'source_commit\t%s\n' "${source_commit}"
 printf 'head\t%s\n' "${head_oid}"
+printf 'predecessor_replay_receipt_sha256\t%s\n' \
+  "${predecessor_replay_receipt_sha256}"
+printf 'predecessor_full_replay\t%s\n' "${predecessor_full_replay}"
+printf 'runtime_authority\tfalse\n'
+if [[ "${validation_tier}" == fast ]]; then
+  printf 'validation_tier\tFAST_CONTENT_IDENTITY_AND_FROZEN_RECEIPT\n'
+  printf 'periodic_full_replay_required\ttrue\n'
+  printf 'release_evidence\tfalse\n'
+  printf 'fast_gate\tVALID_FAST_CONTENT_IDENTITY_AND_FROZEN_RECEIPT\n'
+else
+  printf 'validation_tier\tPERIODIC_FULL_FROZEN_CHAIN_REPLAY\n'
+  printf 'periodic_full_replay_required\tfalse\n'
+  printf 'release_evidence\ttrue\n'
+  printf 'full_replay_gate\tVALID_PERIODIC_FULL_FROZEN_CHAIN_REPLAY\n'
+fi

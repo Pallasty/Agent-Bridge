@@ -210,6 +210,27 @@ that nested replay leaves no worktree registration or gate-temp entry behind;
 it is not a defense against a concurrently hostile writer who already controls
 that shared repository metadata.
 
+### Validation tiers
+
+The gate has two explicit validation tiers with different claims:
+
+- `fast` verifies exact Git topology, packet blob and mode identity, all ten
+  frozen predecessor artifacts, report bindings, six deterministic checker
+  runs in integrated mode, 392 directed negative tests, and the exact frozen
+  predecessor replay-receipt bytes. It does not execute the predecessor gate,
+  is not release evidence, and always reports that periodic full replay remains
+  required.
+- `full-replay` performs every fast-tier check and then replays the predecessor
+  integration gate in an isolated repository. The actual predecessor stdout
+  must be byte-identical to the frozen receipt. Its scratch tree, including all
+  Cargo targets, lives on local ext4 rather than tmpfs. Omitting the tier keeps
+  this full-replay behavior for backward compatibility.
+
+Neither tier grants runtime authority, provider access, credentials, an output
+permit, or scientific evidence. Cargo compilation artifacts are never treated
+as receipts; the full tier reruns the frozen tests even when the host toolchain
+already has unrelated build caches.
+
 ## Next unit
 
 The next bounded unit is
