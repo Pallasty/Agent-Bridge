@@ -1,0 +1,712 @@
+{
+  "$defs": {
+    "assertions": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_precedes_candidate_start": {
+          "const": true
+        },
+        "classification_has_case_or_model_scope": {
+          "const": true
+        },
+        "exact_case_binding": {
+          "const": true
+        },
+        "fault_controller_trigger_cardinality": {
+          "const": true
+        },
+        "fresh_namespace": {
+          "const": true
+        },
+        "global_invariant_union_applied": {
+          "const": true
+        },
+        "injection_armed_prestart": {
+          "const": true
+        },
+        "no_condition_output": {
+          "const": true
+        },
+        "no_credentials": {
+          "const": true
+        },
+        "no_cross_track_certification": {
+          "const": true
+        },
+        "no_output_permit": {
+          "const": true
+        },
+        "no_paid_resources": {
+          "const": true
+        },
+        "no_real_provider_io": {
+          "const": true
+        },
+        "planned_and_actual_evidence_origins_separated": {
+          "const": true
+        },
+        "prepared_before_simulated_sign": {
+          "const": true
+        },
+        "provider_evidence_absent": {
+          "const": true
+        },
+        "receipt_not_provider_processing_proof": {
+          "const": true
+        },
+        "restart_no_resign_from_consumed_or_ambiguous": {
+          "const": true
+        },
+        "simulation_not_provider_evidence": {
+          "const": true
+        },
+        "single_consumption_attempt": {
+          "const": true
+        },
+        "terminal_ambiguity_closed": {
+          "const": true
+        }
+      },
+      "required": [
+        "assignment_precedes_candidate_start",
+        "classification_has_case_or_model_scope",
+        "exact_case_binding",
+        "fault_controller_trigger_cardinality",
+        "fresh_namespace",
+        "global_invariant_union_applied",
+        "injection_armed_prestart",
+        "no_condition_output",
+        "no_credentials",
+        "no_cross_track_certification",
+        "no_output_permit",
+        "no_paid_resources",
+        "no_real_provider_io",
+        "planned_and_actual_evidence_origins_separated",
+        "prepared_before_simulated_sign",
+        "provider_evidence_absent",
+        "receipt_not_provider_processing_proof",
+        "restart_no_resign_from_consumed_or_ambiguous",
+        "simulation_not_provider_evidence",
+        "single_consumption_attempt",
+        "terminal_ambiguity_closed"
+      ],
+      "type": "object"
+    },
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "condition_output_authorized": {
+          "const": false
+        },
+        "cost_authority_bound": {
+          "const": false
+        },
+        "credentials_accessed": {
+          "const": false
+        },
+        "experiment_executed": {
+          "const": false
+        },
+        "live_generator_in_scope": {
+          "const": false
+        },
+        "live_output_permit_defined": {
+          "const": false
+        },
+        "paid_resources_provisioned": {
+          "const": false
+        },
+        "production_adapter_in_scope": {
+          "const": false
+        },
+        "provider_called": {
+          "const": false
+        },
+        "receipt_is_output_permit": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      },
+      "required": [
+        "condition_output_authorized",
+        "cost_authority_bound",
+        "credentials_accessed",
+        "experiment_executed",
+        "live_generator_in_scope",
+        "live_output_permit_defined",
+        "paid_resources_provisioned",
+        "production_adapter_in_scope",
+        "provider_called",
+        "receipt_is_output_permit",
+        "side_effects_unlocked"
+      ],
+      "type": "object"
+    },
+    "case": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_evidence_origin": {
+          "enum": [
+            "OFFLINE_CLIENT_CONFORMANCE_DOUBLE",
+            "OFFLINE_MODEL_SCENARIO"
+          ],
+          "type": "string"
+        },
+        "family": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "injection_cut": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "injection_variant": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "planned_evidence_locus": {
+          "enum": [
+            "CLIENT_CONFORMANCE_DOUBLE",
+            "MANAGED_SERVICE_WITH_CLIENT_FAULT_PROXY",
+            "SELF_HOSTED_ADVERSARIAL_LAB"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "actual_evidence_origin",
+        "family",
+        "injection_cut",
+        "injection_variant",
+        "planned_evidence_locus"
+      ],
+      "type": "object"
+    },
+    "event": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "details",
+        "name",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "effective_isolation": {
+          "type": "string"
+        },
+        "emitted_outputs": {
+          "const": 0
+        },
+        "message_bytes": {
+          "const": 137
+        },
+        "message_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "post_state_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "pre_state_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "provider_evidence_sha256": {
+          "type": "null"
+        },
+        "public_key_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "real_provider_calls": {
+          "const": 0
+        },
+        "request_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "requested_isolation": {
+          "type": "string"
+        },
+        "requested_key_version": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "response_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "restarts": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "semantic_tokens": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "simulated_application_calls": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "simulated_processing_events": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "simulator_trace_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "test_signature_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "validated_key_version": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "effective_isolation",
+        "emitted_outputs",
+        "message_bytes",
+        "message_sha256",
+        "post_state_sha256",
+        "pre_state_sha256",
+        "provider_evidence_sha256",
+        "public_key_sha256",
+        "real_provider_calls",
+        "request_sha256",
+        "requested_isolation",
+        "requested_key_version",
+        "response_sha256",
+        "restarts",
+        "semantic_tokens",
+        "simulated_application_calls",
+        "simulated_processing_events",
+        "simulator_trace_sha256",
+        "test_signature_sha256",
+        "validated_key_version"
+      ],
+      "type": "object"
+    },
+    "schedule": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_before_candidate_start": {
+          "const": true
+        },
+        "assignment_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "block_position": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "case_id": {
+          "pattern": "^[MS][0-9]{2}$",
+          "type": "string"
+        },
+        "configuration_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "injection_armed_before_candidate_start": {
+          "const": true
+        },
+        "namespace_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "repetition_index": {
+          "maximum": 30,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "simulation_run_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "track_id": {
+          "enum": [
+            "MANAGED_SPANNER_CLOUD_KMS",
+            "SELF_HOSTED_ETCD_OPENBAO"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignment_before_candidate_start",
+        "assignment_sha256",
+        "block_position",
+        "case_id",
+        "configuration_sha256",
+        "injection_armed_before_candidate_start",
+        "namespace_id",
+        "repetition_index",
+        "simulation_run_id",
+        "track_id"
+      ],
+      "type": "object"
+    },
+    "state": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "string"
+        },
+        "attempt_consumed": {
+          "type": "boolean"
+        },
+        "authority": {
+          "type": "string"
+        },
+        "cache": {
+          "type": "string"
+        },
+        "call_binding_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "challenge_consumptions": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "database_attempts": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "durable_operation_record_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "durable_operation_revision": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "emitted_outputs": {
+          "const": 0
+        },
+        "logical_sink_reservations": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outbox": {
+          "type": "string"
+        },
+        "prepared_attempt_sequence": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prepared_key_version": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prepared_message_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "prepared_operation_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "prepared_public_key_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "prepared_record_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "prepared_request_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "processed_response_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "receipt": {
+          "type": "string"
+        },
+        "receipt_binding_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "restarts": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "restore": {
+          "type": "string"
+        },
+        "restore_cluster_id": {
+          "type": "string"
+        },
+        "restore_incarnation_id": {
+          "type": "string"
+        },
+        "restore_revision_floor": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "simulated_application_calls": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "simulated_processing_events": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_fence": {
+          "type": "string"
+        },
+        "validated_response_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "validation_binding_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "watch": {
+          "type": "string"
+        },
+        "witness_generation": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "witness_record_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt",
+        "attempt_consumed",
+        "authority",
+        "cache",
+        "call_binding_sha256",
+        "challenge_consumptions",
+        "database_attempts",
+        "durable_operation_record_sha256",
+        "durable_operation_revision",
+        "emitted_outputs",
+        "logical_sink_reservations",
+        "outbox",
+        "prepared_attempt_sequence",
+        "prepared_key_version",
+        "prepared_message_sha256",
+        "prepared_operation_id",
+        "prepared_public_key_sha256",
+        "prepared_record_sha256",
+        "prepared_request_sha256",
+        "processed_response_sha256",
+        "receipt",
+        "receipt_binding_sha256",
+        "restarts",
+        "restore",
+        "restore_cluster_id",
+        "restore_incarnation_id",
+        "restore_revision_floor",
+        "simulated_application_calls",
+        "simulated_processing_events",
+        "terminal_fence",
+        "validated_response_sha256",
+        "validation_binding_sha256",
+        "watch",
+        "witness_generation",
+        "witness_record_sha256"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_run_row.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assertions": {
+      "$ref": "#/$defs/assertions"
+    },
+    "boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "branch_invariant_ids": {
+      "items": {
+        "pattern": "^[MSX][0-9]{2}$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "case": {
+      "$ref": "#/$defs/case"
+    },
+    "case_classification": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "claim_ceiling": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "classification_scope": {
+      "enum": [
+        "CLIENT_CONFORMANCE_DOUBLE_ONLY",
+        "MODEL_SCENARIO_ONLY",
+        "NOT_EVALUABLE_RETAINED"
+      ],
+      "type": "string"
+    },
+    "contract_sha256": {
+      "const": "632dbf1d8202d94d6aef70d8b20c04050e647679da973d81afbe13d68344ad22"
+    },
+    "counts_toward_experiment": {
+      "const": false
+    },
+    "counts_toward_harness_conformance": {
+      "type": "boolean"
+    },
+    "effective_invariant_ids": {
+      "items": {
+        "pattern": "^[MSX][0-9]{2}$",
+        "type": "string"
+      },
+      "minItems": 8,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "event_trace": {
+      "items": {
+        "$ref": "#/$defs/event"
+      },
+      "minItems": 4,
+      "type": "array"
+    },
+    "evidence": {
+      "$ref": "#/$defs/evidence"
+    },
+    "evidence_class": {
+      "enum": [
+        "OFFLINE_CLIENT_CONFORMANCE_OBSERVATION_NOT_PROVIDER_OR_LAB_EVIDENCE",
+        "OFFLINE_MODEL_SCENARIO_ONLY_NOT_OBSERVATION"
+      ],
+      "type": "string"
+    },
+    "experimental_run_row": {
+      "const": false
+    },
+    "explicit_invariant_ids": {
+      "items": {
+        "pattern": "^[MSX][0-9]{2}$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "forbidden_claims": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "harness_mode": {
+      "const": "OFFLINE_DETERMINISTIC_DOUBLE_ONLY"
+    },
+    "oracle_classification_allowed": {
+      "type": "boolean"
+    },
+    "retained": {
+      "const": true
+    },
+    "row_kind": {
+      "enum": [
+        "CLIENT_CONFORMANCE_OBSERVATION",
+        "MODEL_SCENARIO"
+      ],
+      "type": "string"
+    },
+    "row_outcome": {
+      "enum": [
+        "OFFLINE_BOUNDARY_BREACH_ABORT_RETAINED",
+        "OFFLINE_CLIENT_CONFORMANCE_COMPLETED",
+        "OFFLINE_INFRASTRUCTURE_FAILURE_RETAINED",
+        "OFFLINE_MODEL_SCENARIO_COMPLETED"
+      ],
+      "type": "string"
+    },
+    "schedule": {
+      "$ref": "#/$defs/schedule"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_run_row.v1"
+    },
+    "simulated_classification": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    }
+  },
+  "required": [
+    "assertions",
+    "boundary",
+    "branch_invariant_ids",
+    "case",
+    "case_classification",
+    "claim_ceiling",
+    "classification_scope",
+    "contract_sha256",
+    "counts_toward_experiment",
+    "counts_toward_harness_conformance",
+    "effective_invariant_ids",
+    "evidence",
+    "evidence_class",
+    "event_trace",
+    "experimental_run_row",
+    "explicit_invariant_ids",
+    "forbidden_claims",
+    "harness_mode",
+    "oracle_classification_allowed",
+    "retained",
+    "row_kind",
+    "row_outcome",
+    "schedule",
+    "schema",
+    "simulated_classification",
+    "state"
+  ],
+  "title": "BioCortex Track B reference-provider fault-injection offline run row v1",
+  "type": "object"
+}

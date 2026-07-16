@@ -1,0 +1,258 @@
+{
+  "$defs": {
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "condition_output_authorized": {
+          "const": false
+        },
+        "cost_authority_bound": {
+          "const": false
+        },
+        "credentials_accessed": {
+          "const": false
+        },
+        "experiment_executed": {
+          "const": false
+        },
+        "live_generator_in_scope": {
+          "const": false
+        },
+        "live_output_permit_defined": {
+          "const": false
+        },
+        "paid_resources_provisioned": {
+          "const": false
+        },
+        "production_adapter_in_scope": {
+          "const": false
+        },
+        "provider_called": {
+          "const": false
+        },
+        "receipt_is_output_permit": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      },
+      "required": [
+        "condition_output_authorized",
+        "cost_authority_bound",
+        "credentials_accessed",
+        "experiment_executed",
+        "live_generator_in_scope",
+        "live_output_permit_defined",
+        "paid_resources_provisioned",
+        "production_adapter_in_scope",
+        "provider_called",
+        "receipt_is_output_permit",
+        "side_effects_unlocked"
+      ],
+      "type": "object"
+    },
+    "counts": {
+      "additionalProperties": false,
+      "properties": {
+        "cases": {
+          "const": 34
+        },
+        "client_conformance_observation_rows": {
+          "const": 420
+        },
+        "experimental_run_rows": {
+          "const": 0
+        },
+        "managed_service_observation_rows": {
+          "const": 0
+        },
+        "model_scenario_rows": {
+          "const": 600
+        },
+        "offline_synthetic_rows": {
+          "const": 1020
+        },
+        "owned_lab_observation_rows": {
+          "const": 0
+        },
+        "planned_experiment_rows_satisfied": {
+          "const": 0
+        },
+        "provider_evidence_rows": {
+          "const": 0
+        },
+        "repetitions_per_case": {
+          "const": 30
+        },
+        "tracks": {
+          "const": 2
+        }
+      },
+      "required": [
+        "cases",
+        "client_conformance_observation_rows",
+        "experimental_run_rows",
+        "managed_service_observation_rows",
+        "model_scenario_rows",
+        "offline_synthetic_rows",
+        "owned_lab_observation_rows",
+        "planned_experiment_rows_satisfied",
+        "provider_evidence_rows",
+        "repetitions_per_case",
+        "tracks"
+      ],
+      "type": "object"
+    },
+    "data_quality": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_balance": {
+          "const": "PASS_30_OFFLINE_BLOCKS_PER_TRACK"
+        },
+        "post_outcome_exclusions": {
+          "const": 0
+        },
+        "provenance": {
+          "const": "PASS_PLANNED_LOCUS_SEPARATE_FROM_ACTUAL_OFFLINE_ORIGIN"
+        },
+        "provider_experiment_completeness": {
+          "const": "NOT_EVALUATED_ZERO_EXPERIMENT_ROWS"
+        },
+        "run_key_uniqueness": {
+          "const": "PASS_OFFLINE_NAMESPACE_ONLY"
+        },
+        "schedule_completeness": {
+          "const": "PASS_1020_OFFLINE_ROWS_ONLY"
+        },
+        "variant_balance": {
+          "const": "PASS_FROZEN_MODULO_RULES"
+        }
+      },
+      "required": [
+        "assignment_balance",
+        "post_outcome_exclusions",
+        "provenance",
+        "provider_experiment_completeness",
+        "run_key_uniqueness",
+        "schedule_completeness",
+        "variant_balance"
+      ],
+      "type": "object"
+    },
+    "track_results": {
+      "additionalProperties": false,
+      "properties": {
+        "MANAGED_SPANNER_CLOUD_KMS": {
+          "const": "NOT_EVALUATED_INCOMPLETE_MANAGED_SERVICE_EVIDENCE_LOCUS"
+        },
+        "SELF_HOSTED_ETCD_OPENBAO": {
+          "const": "NOT_EVALUATED_INCOMPLETE_OWNED_LAB_EVIDENCE_LOCUS"
+        }
+      },
+      "required": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_suite_receipt.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "classification_counts": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "object"
+    },
+    "configuration_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "contract_interpretations": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 5,
+      "type": "array"
+    },
+    "contract_sha256": {
+      "const": "632dbf1d8202d94d6aef70d8b20c04050e647679da973d81afbe13d68344ad22"
+    },
+    "counts": {
+      "$ref": "#/$defs/counts"
+    },
+    "data_quality": {
+      "$ref": "#/$defs/data_quality"
+    },
+    "decision": {
+      "const": "OFFLINE_HARNESS_PASS_PROVIDER_EXPERIMENT_REMAINS_BLOCKED"
+    },
+    "harness_mode": {
+      "const": "OFFLINE_DETERMINISTIC_DOUBLE_ONLY"
+    },
+    "known_limitations": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 6,
+      "type": "array"
+    },
+    "next_unit": {
+      "const": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_AUTHORITY_AND_ADAPTER_CONTRACT"
+    },
+    "offline_rows_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schedule_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_offline_harness_suite_receipt.v1"
+    },
+    "status": {
+      "const": "REFERENCE_PROVIDER_FAULT_INJECTION_OFFLINE_HARNESS_V1_IMPLEMENTED_SYNTHETIC_ONLY_NO_PROVIDER_INVOCATION"
+    },
+    "track_results": {
+      "$ref": "#/$defs/track_results"
+    },
+    "variant_counts": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "boundary",
+    "classification_counts",
+    "configuration_sha256",
+    "contract_interpretations",
+    "contract_sha256",
+    "counts",
+    "data_quality",
+    "decision",
+    "harness_mode",
+    "known_limitations",
+    "next_unit",
+    "offline_rows_sha256",
+    "schedule_sha256",
+    "schema",
+    "status",
+    "track_results",
+    "variant_counts"
+  ],
+  "title": "BioCortex Track B reference-provider fault-injection offline harness suite receipt v1",
+  "type": "object"
+}
