@@ -1,0 +1,93 @@
+{
+  "admission": {
+    "bridge_or_state_store_enabled": false,
+    "currentness_token_issued": false,
+    "owner_approval_receipt": null,
+    "production_authorized": false,
+    "successor_payload_admitted": false,
+    "transport_enabled": false
+  },
+  "authorization_semantics": {
+    "completion_receipt_is_authenticated_durability_evidence": false,
+    "exact_lookup_is_owner_authorized_runtime_object_selection": false,
+    "feature_flag_is_authorization": false,
+    "historical_source_chain_is_admission_capability": false,
+    "one_shot_adapter_is_global_replay_fence": false,
+    "runtime_shaped_kernel_is_concrete_runtime_deployment": false,
+    "source_signer_key_independence_enforced_or_attested": false,
+    "source_revision_is_currentness": false
+  },
+  "boundary": {
+    "capture_provenance_runtime_attested": false,
+    "concrete_runtime_bounded_source_adapter_available": false,
+    "currentness_and_consume_atomic": false,
+    "external_durable_source_runtime_available": false,
+    "owner_pinned_production_source_permit_available": false,
+    "provider_rollback_and_split_brain_proved": false,
+    "runtime_recovered_bytes_available": false,
+    "runtime_s10_delivery_available": false,
+    "runtime_shaped_bounded_adapter_kernel_preregistered": true
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "local_preregistration": {
+    "exact_request_frozen_before_open": true,
+    "fixed_buffer_and_step_budget": true,
+    "private_sealed_one_shot_transport": true,
+    "raw_bytes_only_into_unchanged_s14_sink": true,
+    "s14_strict_decode_and_local_reverification_unchanged": true,
+    "untrusted_completion_cross_checks_local_length_and_digest": true
+  },
+  "next_preregistered_stage": {
+    "external_provider_observations_count_as_zero": true,
+    "identity": "S16_DURABILITY_FAULT_MODEL_AGAINST_FROZEN_S15_STATE_SURFACE",
+    "must_cover_ack_and_commit_uncertainty": true,
+    "must_cover_crash_restart_each_state_cut": true,
+    "must_cover_partial_torn_and_manifest_ordering": true,
+    "must_cover_rollback_equivocation_split_brain_and_witness_loss": true,
+    "simulated_rows_are_not_durability_evidence": true
+  },
+  "operational_gap_codes": [
+    "RECOVERED_S9_DECISION_EXTERNAL_RUNTIME_CARRIER_UNIMPLEMENTED",
+    "RECOVERED_S9_DECISION_BYTES_AVAILABILITY_UNATTESTED",
+    "RECOVERED_S9_RAW_DECISION_EXTERNAL_DURABILITY_UNATTESTED",
+    "RECOVERED_ENVELOPE_EXTERNAL_DURABLE_SOURCE_RUNTIME_UNIMPLEMENTED",
+    "RECOVERED_ENVELOPE_CONCRETE_RUNTIME_TRANSPORT_UNIMPLEMENTED",
+    "RECOVERED_ENVELOPE_CAPTURE_PROVENANCE_RUNTIME_UNATTESTED",
+    "RECOVERED_ENVELOPE_CAPTURE_SIGNER_CUSTODY_UNATTESTED",
+    "RECOVERED_ENVELOPE_CAPTURE_SIGNER_ROLE_SEPARATION_UNATTESTED",
+    "RECOVERED_ENVELOPE_EXACT_LOOKUP_OWNER_AUTHORIZATION_UNATTESTED",
+    "RECOVERED_ENVELOPE_SOURCE_ROLLBACK_AND_EQUIVOCATION_UNATTESTED",
+    "RECOVERED_S10_RAW_EVIDENCE_RUNTIME_DELIVERY_UNIMPLEMENTED",
+    "RECOVERED_HANDOFF_PROCESS_RESTART_UNAVAILABLE",
+    "RECOVERED_HANDOFF_NOT_GLOBAL_REPLAY_FENCE",
+    "RECOVERED_S9_DECISION_HISTORICAL_ONLY_NOT_CURRENT_AT_USE",
+    "OWNER_PINNED_TRUST_ANCHOR_UNAVAILABLE",
+    "PROVIDER_LINEARIZABILITY_UNATTESTED",
+    "PROVIDER_SPLIT_BRAIN_FENCING_UNATTESTED",
+    "PROVIDER_STATE_ROLLBACK_UNATTESTED",
+    "ATOMIC_AUTHORITY_OPERATION_EXTERNAL_DATABASE_UNIMPLEMENTED",
+    "DATABASE_KMS_CROSS_SERVICE_ATOMICITY_UNATTESTED",
+    "CURRENTNESS_AT_DOWNSTREAM_USE_UNATTESTED"
+  ],
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "required_production_successor_identity": {
+    "admission_receipt": null,
+    "crash_restart_external_durability_evidence": true,
+    "currentness_and_consume_atomicity": true,
+    "owner_authorized_exact_object_selection": true,
+    "owner_pinned_production_source_and_authority_permits": true,
+    "provider_and_source_rollback_split_brain_evidence": true,
+    "runtime_capture_attestation_and_signer_custody": true,
+    "runtime_capture_signer_role_separation_evidence": true,
+    "runtime_concrete_bounded_exact_source_adapter": true,
+    "runtime_s10_delivery_and_local_reverification": true
+  },
+  "schema": "agent_bridge.memory_temporal_successor_admission_gate_s15.v0",
+  "status": "RECOVERED_ENVELOPE_BOUNDED_RUNTIME_ADAPTER_KERNEL_PREREGISTERED_SYNTHETIC_ONE_SHOT_EXACT_READ_FIXED_BUFFER_HISTORICAL_ONLY_NO_CONCRETE_TRANSPORT_NO_DURABILITY_PROOF_NO_CURRENTNESS_NO_ADMISSION"
+}

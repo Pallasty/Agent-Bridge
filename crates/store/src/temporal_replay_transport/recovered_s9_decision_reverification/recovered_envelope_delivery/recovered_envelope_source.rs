@@ -64,6 +64,9 @@ const S13_CONTRACT_SHA256: [u8; 32] = [
     0xb7, 0xee, 0xd1, 0xd8, 0xb9, 0xd6, 0xe4, 0xb3, 0xd2, 0xe7, 0x74, 0x85, 0x20, 0x74, 0xb6, 0xa6,
 ];
 
+#[cfg(feature = "temporal-evidence-s15-recovered-envelope-bounded-runtime-adapter-synthetic")]
+mod bounded_runtime_adapter;
+
 #[derive(Debug, thiserror::Error)]
 #[error("{code}: {detail}")]
 struct RecoveredEnvelopeSourceV1Error {
@@ -1773,6 +1776,21 @@ mod tests {
             &fixture.base.s11_record,
         );
         (result, source.reads.get())
+    }
+
+    #[cfg(feature = "temporal-evidence-s15-recovered-envelope-bounded-runtime-adapter-synthetic")]
+    pub(super) fn s15_fixture_parts() -> (
+        Vec<u8>,
+        ExactRecoveredEnvelopeLookupV1,
+        ExternalRecoveredEnvelopeSourceTrustPermitV1,
+        Fixture,
+        ExternalOperationRecoveryTrustPermitV1,
+    ) {
+        let fixture = source_fixture();
+        let (record, _, _) = fixture.record.materialize();
+        let lookup = lookup_for(&fixture.record.claim, sha256_bytes(&record));
+        let permit = source_permit_for(&fixture.record.claim);
+        (record, lookup, permit, fixture.base, fixture.s10_permit)
     }
 
     #[test]
