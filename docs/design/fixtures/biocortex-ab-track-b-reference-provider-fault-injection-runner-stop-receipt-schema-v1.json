@@ -1,0 +1,1403 @@
+{
+  "$defs": {
+    "cleanup": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup_capability_commitment_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cleanup_completed_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/utc"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleanup_receipt_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleanup_status": {
+          "enum": [
+            "NOT_STARTED",
+            "REDUCTIVE_IN_PROGRESS",
+            "REDUCTIVE_COMPLETE",
+            "FAILED_QUARANTINED"
+          ],
+          "type": "string"
+        },
+        "egress_isolated": {
+          "type": "boolean"
+        },
+        "egress_isolation_receipt_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource_frozen": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cleanup_capability_commitment_sha256",
+        "cleanup_completed_at_utc",
+        "cleanup_receipt_sha256",
+        "cleanup_status",
+        "egress_isolated",
+        "egress_isolation_receipt_sha256",
+        "resource_frozen"
+      ],
+      "type": "object"
+    },
+    "cost": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_cost_minor_units": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cost_authority_receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        },
+        "remaining_authorized_minor_units": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "actual_cost_minor_units",
+        "cost_authority_receipt_sha256",
+        "currency",
+        "remaining_authorized_minor_units"
+      ],
+      "type": "object"
+    },
+    "credential_stop": {
+      "additionalProperties": false,
+      "properties": {
+        "active_lease_commitments_after_stop": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revoke_confirmed": {
+          "type": "boolean"
+        },
+        "revoke_receipt_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revoke_requested": {
+          "type": "boolean"
+        },
+        "revoke_status": {
+          "enum": [
+            "NOT_REQUESTED",
+            "PENDING",
+            "REVOKED",
+            "FAILED_QUARANTINED"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "active_lease_commitments_after_stop",
+        "revoke_confirmed",
+        "revoke_receipt_sha256",
+        "revoke_requested",
+        "revoke_status"
+      ],
+      "type": "object"
+    },
+    "durable_state": {
+      "additionalProperties": false,
+      "properties": {
+        "authority_currentness_receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "call_state_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "control_ledger_revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "operation_record_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "prepared_state_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "authority_currentness_receipt_sha256",
+        "call_state_sha256",
+        "control_ledger_revision",
+        "operation_record_sha256",
+        "prepared_state_sha256"
+      ],
+      "type": "object"
+    },
+    "fault_stop": {
+      "additionalProperties": false,
+      "properties": {
+        "disarm_confirmed": {
+          "type": "boolean"
+        },
+        "disarm_receipt_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disarm_requested": {
+          "type": "boolean"
+        },
+        "disarm_status": {
+          "enum": [
+            "NOT_REQUESTED",
+            "PENDING",
+            "DISARMED",
+            "FAILED_QUARANTINED"
+          ],
+          "type": "string"
+        },
+        "fault_controller_state_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "disarm_confirmed",
+        "disarm_receipt_sha256",
+        "disarm_requested",
+        "disarm_status",
+        "fault_controller_state_sha256"
+      ],
+      "type": "object"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "utc": {
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$",
+      "type": "string"
+    }
+  },
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_stop_receipt.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "track_id": {
+            "const": "MANAGED_SPANNER_CLOUD_KMS"
+          }
+        },
+        "required": [
+          "track_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "case_id": {
+            "pattern": "^M[0-9]{2}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "track_id": {
+            "const": "SELF_HOSTED_ETCD_OPENBAO"
+          }
+        },
+        "required": [
+          "track_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "case_id": {
+            "pattern": "^S[0-9]{2}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_status": {
+                "const": "REDUCTIVE_COMPLETE"
+              }
+            },
+            "required": [
+              "cleanup_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_completed_at_utc": {
+                "$ref": "#/$defs/utc"
+              },
+              "cleanup_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "egress_isolated": {
+                "const": true
+              },
+              "egress_isolation_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "resource_frozen": {
+                "const": true
+              }
+            },
+            "required": [
+              "cleanup_completed_at_utc",
+              "cleanup_receipt_sha256",
+              "egress_isolated",
+              "egress_isolation_receipt_sha256",
+              "resource_frozen"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "revoke_confirmed": {
+                "const": true
+              }
+            },
+            "required": [
+              "revoke_confirmed"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "active_lease_commitments_after_stop": {
+                "const": 0
+              },
+              "revoke_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "revoke_requested": {
+                "const": true
+              }
+            },
+            "required": [
+              "active_lease_commitments_after_stop",
+              "revoke_receipt_sha256",
+              "revoke_requested"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_confirmed": {
+                "const": true
+              }
+            },
+            "required": [
+              "disarm_confirmed"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "disarm_requested": {
+                "const": true
+              }
+            },
+            "required": [
+              "disarm_receipt_sha256",
+              "disarm_requested"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "unresolved_ambiguity_ids": {
+            "minItems": 1
+          }
+        },
+        "required": [
+          "unresolved_ambiguity_ids"
+        ]
+      },
+      "then": {
+        "properties": {
+          "manual_escalation_required": {
+            "const": true
+          },
+          "stop_lifecycle_state": {
+            "const": "STOP_FAILED_QUARANTINED"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "control_plane_failure_ids": {
+            "minItems": 1
+          }
+        },
+        "required": [
+          "control_plane_failure_ids"
+        ]
+      },
+      "then": {
+        "properties": {
+          "manual_escalation_required": {
+            "const": true
+          },
+          "stop_lifecycle_state": {
+            "const": "STOP_FAILED_QUARANTINED"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "properties": {
+              "cleanup": {
+                "properties": {
+                  "cleanup_status": {
+                    "const": "FAILED_QUARANTINED"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "credential": {
+                "properties": {
+                  "revoke_status": {
+                    "const": "FAILED_QUARANTINED"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "fault": {
+                "properties": {
+                  "disarm_status": {
+                    "const": "FAILED_QUARANTINED"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "control_plane_failure_ids": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_status": {
+                "const": "FAILED_QUARANTINED"
+              }
+            },
+            "required": [
+              "cleanup_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "manual_escalation_required": {
+            "const": true
+          },
+          "stop_lifecycle_state": {
+            "const": "STOP_FAILED_QUARANTINED"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_status": {
+                "enum": [
+                  "NOT_STARTED",
+                  "REDUCTIVE_IN_PROGRESS"
+                ]
+              }
+            },
+            "required": [
+              "cleanup_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_completed_at_utc": {
+                "type": "null"
+              },
+              "cleanup_receipt_sha256": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "cleanup_completed_at_utc",
+              "cleanup_receipt_sha256"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_status": {
+                "const": "FAILED_QUARANTINED"
+              }
+            },
+            "required": [
+              "cleanup_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_completed_at_utc": {
+                "$ref": "#/$defs/utc"
+              },
+              "cleanup_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "egress_isolated": {
+                "const": true
+              },
+              "egress_isolation_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "resource_frozen": {
+                "const": true
+              }
+            }
+          },
+          "manual_escalation_required": {
+            "const": true
+          },
+          "stop_lifecycle_state": {
+            "const": "STOP_FAILED_QUARANTINED"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "revoke_status": {
+                "const": "NOT_REQUESTED"
+              }
+            },
+            "required": [
+              "revoke_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "revoke_confirmed": {
+                "const": false
+              },
+              "revoke_receipt_sha256": {
+                "type": "null"
+              },
+              "revoke_requested": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "revoke_status": {
+                "const": "PENDING"
+              }
+            },
+            "required": [
+              "revoke_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "revoke_confirmed": {
+                "const": false
+              },
+              "revoke_receipt_sha256": {
+                "type": "null"
+              },
+              "revoke_requested": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "revoke_status": {
+                "const": "REVOKED"
+              }
+            },
+            "required": [
+              "revoke_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "active_lease_commitments_after_stop": {
+                "const": 0
+              },
+              "revoke_confirmed": {
+                "const": true
+              },
+              "revoke_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "revoke_requested": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "revoke_status": {
+                "const": "FAILED_QUARANTINED"
+              }
+            },
+            "required": [
+              "revoke_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "credential": {
+            "properties": {
+              "revoke_confirmed": {
+                "const": false
+              },
+              "revoke_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "revoke_requested": {
+                "const": true
+              }
+            }
+          },
+          "manual_escalation_required": {
+            "const": true
+          },
+          "stop_lifecycle_state": {
+            "const": "STOP_FAILED_QUARANTINED"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_status": {
+                "const": "NOT_REQUESTED"
+              }
+            },
+            "required": [
+              "disarm_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_confirmed": {
+                "const": false
+              },
+              "disarm_receipt_sha256": {
+                "type": "null"
+              },
+              "disarm_requested": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_status": {
+                "const": "PENDING"
+              }
+            },
+            "required": [
+              "disarm_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_confirmed": {
+                "const": false
+              },
+              "disarm_receipt_sha256": {
+                "type": "null"
+              },
+              "disarm_requested": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_status": {
+                "const": "DISARMED"
+              }
+            },
+            "required": [
+              "disarm_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_confirmed": {
+                "const": true
+              },
+              "disarm_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "disarm_requested": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_status": {
+                "const": "FAILED_QUARANTINED"
+              }
+            },
+            "required": [
+              "disarm_status"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "fault": {
+            "properties": {
+              "disarm_confirmed": {
+                "const": false
+              },
+              "disarm_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "disarm_requested": {
+                "const": true
+              }
+            }
+          },
+          "manual_escalation_required": {
+            "const": true
+          },
+          "stop_lifecycle_state": {
+            "const": "STOP_FAILED_QUARANTINED"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_status": {
+                "const": "REDUCTIVE_COMPLETE"
+              }
+            },
+            "required": [
+              "cleanup_status"
+            ]
+          },
+          "control_plane_failure_ids": {
+            "maxItems": 0
+          },
+          "credential": {
+            "properties": {
+              "revoke_status": {
+                "const": "REVOKED"
+              }
+            },
+            "required": [
+              "revoke_status"
+            ]
+          },
+          "fault": {
+            "properties": {
+              "disarm_status": {
+                "const": "DISARMED"
+              }
+            },
+            "required": [
+              "disarm_status"
+            ]
+          },
+          "unresolved_ambiguity_ids": {
+            "maxItems": 0
+          }
+        },
+        "required": [
+          "cleanup",
+          "control_plane_failure_ids",
+          "credential",
+          "fault",
+          "unresolved_ambiguity_ids"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stop_lifecycle_state": {
+            "const": "STOP_ABSORBING_COMPLETE"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stop_lifecycle_state": {
+            "const": "STOP_ABSORBING_COMPLETE"
+          }
+        },
+        "required": [
+          "stop_lifecycle_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_status": {
+                "const": "REDUCTIVE_COMPLETE"
+              }
+            }
+          },
+          "control_plane_failure_ids": {
+            "maxItems": 0
+          },
+          "credential": {
+            "properties": {
+              "revoke_status": {
+                "const": "REVOKED"
+              }
+            }
+          },
+          "fault": {
+            "properties": {
+              "disarm_status": {
+                "const": "DISARMED"
+              }
+            }
+          },
+          "manual_escalation_required": {
+            "const": false
+          },
+          "stop_completed_at_utc": {
+            "$ref": "#/$defs/utc"
+          },
+          "unresolved_ambiguity_ids": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stop_lifecycle_state": {
+            "enum": [
+              "STOP_REQUESTED",
+              "STOP_FENCING",
+              "STOP_FAILED_QUARANTINED"
+            ]
+          }
+        },
+        "required": [
+          "stop_lifecycle_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stop_completed_at_utc": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stop_lifecycle_state": {
+            "const": "STOP_FAILED_QUARANTINED"
+          }
+        },
+        "required": [
+          "stop_lifecycle_state"
+        ]
+      },
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "cleanup": {
+                "properties": {
+                  "cleanup_status": {
+                    "const": "FAILED_QUARANTINED"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "credential": {
+                "properties": {
+                  "revoke_status": {
+                    "const": "FAILED_QUARANTINED"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "fault": {
+                "properties": {
+                  "disarm_status": {
+                    "const": "FAILED_QUARANTINED"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "unresolved_ambiguity_ids": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "unresolved_ambiguity_ids"
+            ]
+          },
+          {
+            "properties": {
+              "control_plane_failure_ids": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "control_plane_failure_ids"
+            ]
+          }
+        ],
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "cleanup_status": {
+                "enum": [
+                  "REDUCTIVE_COMPLETE",
+                  "FAILED_QUARANTINED"
+                ]
+              }
+            }
+          },
+          "credential": {
+            "properties": {
+              "revoke_status": {
+                "enum": [
+                  "REVOKED",
+                  "FAILED_QUARANTINED"
+                ]
+              }
+            }
+          },
+          "fault": {
+            "properties": {
+              "disarm_status": {
+                "enum": [
+                  "DISARMED",
+                  "FAILED_QUARANTINED"
+                ]
+              }
+            }
+          },
+          "manual_escalation_required": {
+            "const": true
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "adapter_build_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "adapter_set_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "application_calls": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "assignment_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "authority_bundle_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "authority_phase": {
+      "enum": [
+        "PREFLIGHT_OBSERVATION_GRANT",
+        "EXPERIMENT_EXECUTION_GRANT"
+      ],
+      "type": "string"
+    },
+    "authority_revocation_epoch": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "automatic_rerun_allowed": {
+      "const": false
+    },
+    "capability_fence_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "capability_invalidated": {
+      "const": true
+    },
+    "case_id": {
+      "pattern": "^[MS][0-9]{2}$",
+      "type": "string"
+    },
+    "cleanup": {
+      "$ref": "#/$defs/cleanup"
+    },
+    "cleanup_policy_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "configuration_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "continuation_allowed": {
+      "const": false
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "control_plane_failure_ids": {
+      "items": {
+        "$ref": "#/$defs/sha256"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "cost": {
+      "$ref": "#/$defs/cost"
+    },
+    "cost_scope_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "credential": {
+      "$ref": "#/$defs/credential_stop"
+    },
+    "credential_scope_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "current_retained_row_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "durable_state": {
+      "$ref": "#/$defs/durable_state"
+    },
+    "evidence_bundle_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "evidence_preserved": {
+      "const": true
+    },
+    "fault": {
+      "$ref": "#/$defs/fault_stop"
+    },
+    "field_level_intersection_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "last_completed_row_sha256": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "manual_escalation_required": {
+      "type": "boolean"
+    },
+    "namespace_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "new_calls_blocked": {
+      "const": true
+    },
+    "offline_harness_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "profile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "receipt_is_execution_authority": {
+      "const": false
+    },
+    "receipt_is_output_permit": {
+      "const": false
+    },
+    "repetition_index": {
+      "maximum": 30,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "resource_scope_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "retained_row_preserved": {
+      "const": true
+    },
+    "retention_policy_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "retention_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "runner_build_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schedule_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_stop_receipt.v1"
+    },
+    "signature_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "simulation_run_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "stop_completed_at_utc": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/utc"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stop_control_plane_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "stop_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "stop_lifecycle_state": {
+      "enum": [
+        "STOP_REQUESTED",
+        "STOP_FENCING",
+        "STOP_ABSORBING_COMPLETE",
+        "STOP_FAILED_QUARANTINED"
+      ],
+      "type": "string"
+    },
+    "stop_reason": {
+      "enum": [
+        "AUTHORITY_EXPIRED",
+        "AUTHORITY_CURRENTNESS_FAILURE",
+        "AUTHORITY_REVOKED",
+        "BOUNDARY_BREACH",
+        "BUILD_OR_PROFILE_DRIFT",
+        "CONFIGURATION_OR_SCHEDULE_DRIFT",
+        "CREDENTIAL_LEASE_OR_SCOPE_BREACH",
+        "COST_OR_RESOURCE_SCOPE_EXCEEDED",
+        "CROSS_NAMESPACE_EFFECT",
+        "EVIDENCE_PERSIST_FAILURE",
+        "EVIDENCE_SINK_UNAVAILABLE",
+        "EXTRA_OR_UNKNOWN_WIRE_ATTEMPT",
+        "FAULT_MISFIRE",
+        "MULTIPLE_FAULT_TRIGGER",
+        "OPERATOR_STOP",
+        "OUTPUT_OR_PERMIT_ATTEMPT",
+        "RESOURCE_SCOPE_DRIFT",
+        "SECRET_EXPOSURE",
+        "UNKNOWN_PROVIDER_CALL",
+        "UNRESOLVED_AMBIGUITY",
+        "WITNESS_CURRENTNESS_FAILURE"
+      ],
+      "type": "string"
+    },
+    "stop_requested_at_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "stop_trigger": {
+      "enum": [
+        "AUTHORITY_EXPIRED_REVOKED_OR_CURRENTNESS_FAILED",
+        "PROFILE_CONFIGURATION_SCHEDULE_RUNNER_ADAPTER_ADAPTER_SET_ASSIGNMENT_OR_RESOURCE_DRIFT",
+        "CREDENTIAL_LEASE_OR_COST_SCOPE_BREACH",
+        "EXTRA_WIRE_ATTEMPT_OR_HIDDEN_RETRY",
+        "FAULT_MISFIRE_MULTIPLE_TRIGGER_OR_CROSS_NAMESPACE_EFFECT",
+        "EVIDENCE_WRITE_FAILURE_OR_SECRET_EXPOSURE",
+        "WITNESS_UNAVAILABLE_STALE_FORKED_CONFLICTING_OR_NOT_INDEPENDENT",
+        "UNKNOWN_PROVIDER_CALL_OR_UNCLOSED_AMBIGUITY",
+        "OUTPUT_PERMIT_CONDITION_OUTPUT_OR_OTHER_BOUNDARY_BREACH",
+        "OWNER_CUSTODIAN_OR_EMERGENCY_OPERATOR_STOP"
+      ],
+      "type": "string"
+    },
+    "stop_trigger_role": {
+      "enum": [
+        "OWNER",
+        "CUSTODIAN",
+        "EMERGENCY_OPERATOR",
+        "SYSTEM_BOUNDARY",
+        "SYSTEM_EXPIRY_OR_REVOCATION"
+      ],
+      "type": "string"
+    },
+    "suite_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "track_id": {
+      "enum": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ],
+      "type": "string"
+    },
+    "unresolved_ambiguity_ids": {
+      "items": {
+        "$ref": "#/$defs/sha256"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "wire_attempts": {
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "adapter_build_sha256",
+    "adapter_set_manifest_sha256",
+    "application_calls",
+    "authority_bundle_sha256",
+    "authority_phase",
+    "authority_revocation_epoch",
+    "automatic_rerun_allowed",
+    "assignment_sha256",
+    "capability_invalidated",
+    "capability_fence_receipt_sha256",
+    "case_id",
+    "cleanup",
+    "cleanup_policy_sha256",
+    "continuation_allowed",
+    "configuration_sha256",
+    "control_plane_failure_ids",
+    "contract_sha256",
+    "cost_scope_sha256",
+    "cost",
+    "credential",
+    "credential_scope_sha256",
+    "current_retained_row_sha256",
+    "durable_state",
+    "evidence_bundle_sha256",
+    "evidence_preserved",
+    "fault",
+    "field_level_intersection_sha256",
+    "last_completed_row_sha256",
+    "manual_escalation_required",
+    "namespace_id",
+    "new_calls_blocked",
+    "offline_harness_manifest_sha256",
+    "profile_sha256",
+    "receipt_is_execution_authority",
+    "receipt_is_output_permit",
+    "repetition_index",
+    "retained_row_preserved",
+    "retention_receipt_sha256",
+    "retention_policy_sha256",
+    "resource_scope_sha256",
+    "runner_build_sha256",
+    "schedule_sha256",
+    "schema",
+    "simulation_run_id",
+    "signature_receipt_sha256",
+    "stop_completed_at_utc",
+    "stop_id",
+    "stop_lifecycle_state",
+    "stop_reason",
+    "stop_requested_at_utc",
+    "stop_trigger_role",
+    "stop_trigger",
+    "stop_control_plane_manifest_sha256",
+    "suite_id",
+    "track_id",
+    "unresolved_ambiguity_ids",
+    "wire_attempts"
+  ],
+  "title": "BioCortex Track B reference-provider fault-injection runner stop receipt v1",
+  "type": "object"
+}

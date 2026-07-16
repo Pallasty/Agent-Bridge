@@ -1,0 +1,842 @@
+{
+  "$defs": {
+    "authority_intersection": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_build_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "adapter_set_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "assignment_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cleanup_policy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "configuration_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contract_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cost_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "credential_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "effective_allowed_case_ids": {
+          "items": {
+            "$ref": "#/$defs/case_id"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "effective_allowed_operations": {
+          "items": {
+            "$ref": "#/$defs/caps"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "effective_allowed_repetition_indices": {
+          "items": {
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "field_level_intersection_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "namespace_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "nonempty_exact_intersection": {
+          "const": true
+        },
+        "offline_harness_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "phase": {
+          "enum": [
+            "PREFLIGHT_OBSERVATION_GRANT",
+            "EXPERIMENT_EXECUTION_GRANT"
+          ],
+          "type": "string"
+        },
+        "profile_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "resource_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "retention_policy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "revocation_epoch": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "runner_build_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "schedule_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulation_run_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "stop_control_plane_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "suite_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "track_id": {
+          "$ref": "#/$defs/track_id"
+        }
+      },
+      "required": [
+        "adapter_build_sha256",
+        "adapter_set_manifest_sha256",
+        "assignment_sha256",
+        "cleanup_policy_sha256",
+        "configuration_sha256",
+        "contract_sha256",
+        "cost_scope_sha256",
+        "credential_scope_sha256",
+        "effective_allowed_case_ids",
+        "effective_allowed_operations",
+        "effective_allowed_repetition_indices",
+        "field_level_intersection_sha256",
+        "nonempty_exact_intersection",
+        "offline_harness_manifest_sha256",
+        "phase",
+        "profile_sha256",
+        "resource_scope_sha256",
+        "revocation_epoch",
+        "retention_policy_sha256",
+        "simulation_run_id",
+        "namespace_id",
+        "runner_build_sha256",
+        "schedule_sha256",
+        "suite_id",
+        "stop_control_plane_manifest_sha256",
+        "track_id"
+      ],
+      "type": "object"
+    },
+    "caps": {
+      "pattern": "^[A-Z][A-Z0-9_]{2,127}$",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[MS][0-9]{2}$",
+      "type": "string"
+    },
+    "cost_authority_receipt": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scope_receipt"
+        },
+        {
+          "properties": {
+            "artifact_type": {
+              "const": "COST_AUTHORITY_RECEIPT"
+            }
+          },
+          "required": [
+            "artifact_type"
+          ]
+        }
+      ]
+    },
+    "currentness": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at_utc": {
+          "$ref": "#/$defs/utc"
+        },
+        "cost_budget_reserved": {
+          "const": true
+        },
+        "credential_lease_current": {
+          "const": true
+        },
+        "profile_current": {
+          "const": true
+        },
+        "resource_budget_reserved": {
+          "const": true
+        },
+        "revocation_epoch": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "row_currentness_receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "trusted_time_receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "checked_at_utc",
+        "cost_budget_reserved",
+        "credential_lease_current",
+        "profile_current",
+        "resource_budget_reserved",
+        "revocation_epoch",
+        "row_currentness_receipt_sha256",
+        "trusted_time_receipt_sha256"
+      ],
+      "type": "object"
+    },
+    "custodian_credential_receipt": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scope_receipt"
+        },
+        {
+          "properties": {
+            "artifact_type": {
+              "const": "CUSTODIAN_CREDENTIAL_RECEIPT"
+            }
+          },
+          "required": [
+            "artifact_type"
+          ]
+        }
+      ]
+    },
+    "emergency_stop_authority_receipt": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scope_receipt"
+        },
+        {
+          "properties": {
+            "artifact_type": {
+              "const": "EMERGENCY_STOP_AUTHORITY_RECEIPT"
+            }
+          },
+          "required": [
+            "artifact_type"
+          ]
+        }
+      ]
+    },
+    "execution_capability_commitment": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_build_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "adapter_set_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "assignment_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "capability_commitment_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "case_id": {
+          "$ref": "#/$defs/case_id"
+        },
+        "channel_binding_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cleanup_policy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "configuration_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contract_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "control_ledger_record_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cost_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "credential_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "effective_allowed_operations": {
+          "items": {
+            "$ref": "#/$defs/caps"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "field_level_intersection_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "namespace_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "offline_harness_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "phase": {
+          "enum": [
+            "PREFLIGHT_OBSERVATION_GRANT",
+            "EXPERIMENT_EXECUTION_GRANT"
+          ],
+          "type": "string"
+        },
+        "private_capability_bytes_serialized": {
+          "const": false
+        },
+        "profile_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repetition_index": {
+          "maximum": 30,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "resource_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "retention_policy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "revocation_epoch": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "runner_build_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "schedule_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulation_run_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "single_consume": {
+          "const": true
+        },
+        "single_executor_session": {
+          "const": true
+        },
+        "single_run": {
+          "const": true
+        },
+        "state": {
+          "enum": [
+            "UNUSED",
+            "START_COMMITTED",
+            "STOP_FENCED"
+          ],
+          "type": "string"
+        },
+        "stop_control_plane_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "suite_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "track_id": {
+          "$ref": "#/$defs/track_id"
+        }
+      },
+      "required": [
+        "adapter_build_sha256",
+        "adapter_set_manifest_sha256",
+        "assignment_sha256",
+        "capability_commitment_sha256",
+        "case_id",
+        "channel_binding_sha256",
+        "control_ledger_record_sha256",
+        "configuration_sha256",
+        "contract_sha256",
+        "cost_scope_sha256",
+        "credential_scope_sha256",
+        "cleanup_policy_sha256",
+        "effective_allowed_operations",
+        "field_level_intersection_sha256",
+        "offline_harness_manifest_sha256",
+        "private_capability_bytes_serialized",
+        "repetition_index",
+        "phase",
+        "profile_sha256",
+        "resource_scope_sha256",
+        "retention_policy_sha256",
+        "revocation_epoch",
+        "simulation_run_id",
+        "namespace_id",
+        "runner_build_sha256",
+        "schedule_sha256",
+        "single_consume",
+        "single_executor_session",
+        "single_run",
+        "state",
+        "suite_id",
+        "stop_control_plane_manifest_sha256",
+        "track_id"
+      ],
+      "type": "object"
+    },
+    "owner_scope_receipt": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scope_receipt"
+        },
+        {
+          "properties": {
+            "artifact_type": {
+              "const": "OWNER_SCOPE_RECEIPT"
+            }
+          },
+          "required": [
+            "artifact_type"
+          ]
+        }
+      ]
+    },
+    "resource_authority_receipt": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scope_receipt"
+        },
+        {
+          "properties": {
+            "artifact_type": {
+              "const": "RESOURCE_AUTHORITY_RECEIPT"
+            }
+          },
+          "required": [
+            "artifact_type"
+          ]
+        }
+      ]
+    },
+    "scope_receipt": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_build_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "adapter_set_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "allowed_case_ids": {
+          "items": {
+            "$ref": "#/$defs/case_id"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "allowed_operations": {
+          "items": {
+            "$ref": "#/$defs/caps"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "allowed_repetition_indices": {
+          "items": {
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "artifact_type": {
+          "enum": [
+            "OWNER_SCOPE_RECEIPT",
+            "CUSTODIAN_CREDENTIAL_RECEIPT",
+            "RESOURCE_AUTHORITY_RECEIPT",
+            "COST_AUTHORITY_RECEIPT",
+            "EMERGENCY_STOP_AUTHORITY_RECEIPT"
+          ],
+          "type": "string"
+        },
+        "assignment_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authority_principal_id_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authorization_request_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonical_payload_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cleanup_policy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "configuration_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contract_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cost_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "credential_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "expires_at_utc": {
+          "$ref": "#/$defs/utc"
+        },
+        "forbidden_operations": {
+          "items": {
+            "$ref": "#/$defs/caps"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "issued_at_utc": {
+          "$ref": "#/$defs/utc"
+        },
+        "namespace_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "nonce_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "not_before_utc": {
+          "$ref": "#/$defs/utc"
+        },
+        "offline_harness_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "phase": {
+          "enum": [
+            "PREFLIGHT_OBSERVATION_GRANT",
+            "EXPERIMENT_EXECUTION_GRANT"
+          ],
+          "type": "string"
+        },
+        "profile_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "receipt_is_output_permit": {
+          "const": false
+        },
+        "resource_scope_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "retention_policy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "revocation_epoch": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "runner_build_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "schedule_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "signature_receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulation_run_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "stop_control_plane_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "suite_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "track_id": {
+          "$ref": "#/$defs/track_id"
+        },
+        "trust_policy_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "adapter_build_sha256",
+        "adapter_set_manifest_sha256",
+        "allowed_case_ids",
+        "allowed_operations",
+        "allowed_repetition_indices",
+        "artifact_type",
+        "assignment_sha256",
+        "authority_principal_id_sha256",
+        "authorization_request_sha256",
+        "canonical_payload_sha256",
+        "cleanup_policy_sha256",
+        "configuration_sha256",
+        "contract_sha256",
+        "cost_scope_sha256",
+        "credential_scope_sha256",
+        "expires_at_utc",
+        "forbidden_operations",
+        "issued_at_utc",
+        "nonce_sha256",
+        "not_before_utc",
+        "offline_harness_manifest_sha256",
+        "phase",
+        "profile_sha256",
+        "receipt_id",
+        "receipt_is_output_permit",
+        "resource_scope_sha256",
+        "retention_policy_sha256",
+        "revocation_epoch",
+        "runner_build_sha256",
+        "simulation_run_id",
+        "namespace_id",
+        "schedule_sha256",
+        "signature_receipt_sha256",
+        "track_id",
+        "suite_id",
+        "stop_control_plane_manifest_sha256",
+        "trust_policy_sha256"
+      ],
+      "type": "object"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "track_id": {
+      "enum": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ],
+      "type": "string"
+    },
+    "utc": {
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$",
+      "type": "string"
+    }
+  },
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_authority_bundle.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "EXPERIMENT_EXECUTION_GRANT"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "authority_intersection": {
+            "properties": {
+              "effective_allowed_case_ids": {
+                "maxItems": 1
+              },
+              "effective_allowed_repetition_indices": {
+                "maxItems": 1
+              }
+            },
+            "required": [
+              "effective_allowed_case_ids",
+              "effective_allowed_repetition_indices"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "adapter_build_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "adapter_set_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "assignment_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "authority_intersection": {
+      "$ref": "#/$defs/authority_intersection"
+    },
+    "bundle_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "case_id": {
+      "$ref": "#/$defs/case_id"
+    },
+    "cleanup_policy_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "condition_output_authorized": {
+      "const": false
+    },
+    "configuration_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "cost_authority_receipt": {
+      "$ref": "#/$defs/cost_authority_receipt"
+    },
+    "cost_scope_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "credential_scope_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "currentness": {
+      "$ref": "#/$defs/currentness"
+    },
+    "custodian_credential_receipt": {
+      "$ref": "#/$defs/custodian_credential_receipt"
+    },
+    "effective_allowed_operations": {
+      "items": {
+        "$ref": "#/$defs/caps"
+      },
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "emergency_stop_authority_receipt": {
+      "$ref": "#/$defs/emergency_stop_authority_receipt"
+    },
+    "execution_capability_commitment": {
+      "$ref": "#/$defs/execution_capability_commitment"
+    },
+    "field_level_intersection_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "namespace_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "offline_harness_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "owner_scope_receipt": {
+      "$ref": "#/$defs/owner_scope_receipt"
+    },
+    "phase": {
+      "enum": [
+        "PREFLIGHT_OBSERVATION_GRANT",
+        "EXPERIMENT_EXECUTION_GRANT"
+      ],
+      "type": "string"
+    },
+    "profile_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "public_bundle_is_bearer_capability": {
+      "const": false
+    },
+    "receipt_is_output_permit": {
+      "const": false
+    },
+    "repetition_index": {
+      "maximum": 30,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "resource_authority_receipt": {
+      "$ref": "#/$defs/resource_authority_receipt"
+    },
+    "resource_scope_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "retention_policy_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "revocation_epoch": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "runner_build_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schedule_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_authority_bundle.v1"
+    },
+    "simulation_run_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "stop_control_plane_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "suite_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "track_id": {
+      "$ref": "#/$defs/track_id"
+    }
+  },
+  "required": [
+    "adapter_build_sha256",
+    "adapter_set_manifest_sha256",
+    "assignment_sha256",
+    "authority_intersection",
+    "bundle_id",
+    "case_id",
+    "cleanup_policy_sha256",
+    "condition_output_authorized",
+    "cost_authority_receipt",
+    "configuration_sha256",
+    "contract_sha256",
+    "cost_scope_sha256",
+    "currentness",
+    "custodian_credential_receipt",
+    "credential_scope_sha256",
+    "emergency_stop_authority_receipt",
+    "execution_capability_commitment",
+    "effective_allowed_operations",
+    "field_level_intersection_sha256",
+    "namespace_id",
+    "owner_scope_receipt",
+    "offline_harness_manifest_sha256",
+    "phase",
+    "profile_sha256",
+    "public_bundle_is_bearer_capability",
+    "receipt_is_output_permit",
+    "repetition_index",
+    "resource_authority_receipt",
+    "resource_scope_sha256",
+    "retention_policy_sha256",
+    "revocation_epoch",
+    "runner_build_sha256",
+    "schedule_sha256",
+    "schema",
+    "simulation_run_id",
+    "suite_id",
+    "stop_control_plane_manifest_sha256",
+    "track_id"
+  ],
+  "title": "BioCortex Track B reference-provider fault-injection runner authority bundle v1",
+  "type": "object"
+}
