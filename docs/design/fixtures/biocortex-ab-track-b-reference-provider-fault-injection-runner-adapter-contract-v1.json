@@ -1,0 +1,1036 @@
+{
+  "acceptance_policy": {
+    "adapter_classification_forbidden": true,
+    "all_assigned_rows_retained": true,
+    "authority_scope_must_be_exact_subset": true,
+    "cross_track_capability_reuse_forbidden": true,
+    "hidden_signer_retries_forbidden": true,
+    "post_outcome_exclusion_forbidden": true,
+    "provider_processing_inference_forbidden": true,
+    "runtime_result_requires_all_thirty_rows_per_case": true,
+    "track_comparison_allowed": false
+  },
+  "adapter_interfaces": {
+    "client_conformance_route": {
+      "adapter_id": "OFFLINE_CLIENT_CONFORMANCE_DOUBLE",
+      "case_count": 14,
+      "provider_adapter_allowed": false,
+      "provider_called": false,
+      "row_count": 420
+    },
+    "managed": {
+      "adapter_count": 4,
+      "adapters": [
+        {
+          "adapter_id": "SPANNER_AUTHORITY_ADAPTER",
+          "allowed_operations": [
+            "RUN_EXPLICIT_SERIALIZABLE_AUTHORITY_TRANSACTION",
+            "STRONG_READ_EXACT_OPERATION_KEY",
+            "CAS_ABSENT_TO_TERMINAL_FENCE",
+            "PERSIST_PREPARED_ATTEMPT",
+            "PERSIST_VALIDATED_RECEIPT",
+            "QUARANTINE_ATTEMPT"
+          ],
+          "credential_class": "MANAGED_SPANNER_DATA_PLANE",
+          "evidence_returns": [
+            "REQUESTED_AND_EFFECTIVE_ISOLATION",
+            "CLOSURE_ATTEMPT_RECEIPTS",
+            "EXACT_RECORD_AND_REVISION",
+            "TOP_LEVEL_COMMIT_OR_UNKNOWN_RECEIPT"
+          ],
+          "forbidden_operations": [
+            "EXTERNAL_SIDE_EFFECT_INSIDE_RETRYABLE_CLOSURE",
+            "NON_SERIALIZABLE_AUTHORITY_TRANSACTION"
+          ],
+          "retry_rule": "DATABASE_CLOSURE_RETRIES_OBSERVED_WITH_STABLE_INPUTS"
+        },
+        {
+          "adapter_id": "CLOUD_KMS_SIGNER_ADAPTER",
+          "allowed_operations": [
+            "SIGN_EXACT_137_RAW_BYTES_WITH_EXACT_VERSION",
+            "RETURN_OPERATION_SPECIFIC_RESPONSE_EVIDENCE"
+          ],
+          "credential_class": "MANAGED_KMS_SIGN",
+          "evidence_returns": [
+            "APPLICATION_CALL_RECEIPT",
+            "REQUEST_AND_RESPONSE_SHA256",
+            "VERSION_PROTECTION_CRC_AND_VERIFICATION_FIELDS"
+          ],
+          "forbidden_operations": [
+            "DIGEST_ARM_SIGNING",
+            "IMPLICIT_OR_PARENT_KEY_VERSION",
+            "HIDDEN_TRANSPORT_RETRY"
+          ],
+          "retry_rule": "ZERO_HIDDEN_SIGNER_RETRIES"
+        },
+        {
+          "adapter_id": "MANAGED_FAULT_PROXY_ADAPTER",
+          "allowed_operations": [
+            "ARM_EXACT_ASSIGNED_CUT",
+            "TRIGGER_ONCE_FOR_EXACT_RUN_TRAFFIC",
+            "RECORD_WIRE_ATTEMPTS_WITHOUT_PROCESSING_CLAIM"
+          ],
+          "credential_class": "MANAGED_FAULT_PROXY_CONTROL",
+          "evidence_returns": [
+            "ARM_RECEIPT",
+            "TRIGGER_RECEIPT",
+            "CAUSAL_BINDING_SHA256",
+            "WIRE_ATTEMPT_INDEX"
+          ],
+          "forbidden_operations": [
+            "CROSS_NAMESPACE_FAULT",
+            "MULTIPLE_TRIGGER",
+            "PROVIDER_PROCESSING_INFERENCE"
+          ],
+          "retry_rule": "NOT_APPLICABLE",
+          "stop_capability_may_authorize_experiment": false,
+          "stop_only_credential_class": "STOP_FAULT_DISARM_EGRESS_CONTROL",
+          "stop_only_evidence_returns": [
+            "DISARM_RECEIPT",
+            "EGRESS_ISOLATION_RECEIPT"
+          ],
+          "stop_only_operations": [
+            "DISARM_EXACT_ASSIGNED_CUT",
+            "ISOLATE_EXACT_ASSIGNED_RUN_EGRESS"
+          ]
+        },
+        {
+          "adapter_id": "MANAGED_EVIDENCE_COLLECTOR_ADAPTER",
+          "allowed_operations": [
+            "COLLECT_ALLOWLISTED_NON_SECRET_FIELDS",
+            "HASH_IMMUTABLE_RAW_EVIDENCE_INDEX",
+            "RETURN_OBSERVATIONS_ONLY"
+          ],
+          "credential_class": "MANAGED_EVIDENCE_READ_ONLY",
+          "evidence_returns": [
+            "PROVIDER_PROFILE_SHA256",
+            "RAW_EVIDENCE_INDEX_SHA256",
+            "SAFE_EVENT_TRACE_SHA256"
+          ],
+          "forbidden_operations": [
+            "CASE_CLASSIFICATION",
+            "CREDENTIAL_MATERIAL_CAPTURE",
+            "OUTPUT_AUTHORIZATION"
+          ],
+          "retry_rule": "READ_ONLY_COLLECTION_IS_SEPARATELY_ACCOUNTED"
+        }
+      ],
+      "composition_rule": "FOUR_SEPARATE_LEAST_PRIVILEGE_INTERFACES_NO_SHARED_OMNIPOTENT_ADAPTER"
+    },
+    "self_hosted": {
+      "adapter_count": 5,
+      "adapters": [
+        {
+          "adapter_id": "ETCD_AUTHORITY_ADAPTER",
+          "allowed_operations": [
+            "LINEARIZABLE_EXACT_READ",
+            "NON_NESTED_NONLEASED_EXACT_KEY_CAS",
+            "CAS_ABSENT_TO_TERMINAL_FENCE",
+            "PERSIST_PREPARED_ATTEMPT",
+            "PERSIST_VALIDATED_RECEIPT",
+            "QUARANTINE_ATTEMPT"
+          ],
+          "credential_class": "SELF_HOSTED_ETCD_DATA_PLANE",
+          "evidence_returns": [
+            "SERIALIZABLE_FALSE_REQUEST_FIELD",
+            "TOP_LEVEL_TRANSACTION_REVISION",
+            "EXACT_RECORD_MOD_REVISION_AND_CAS_RECEIPT"
+          ],
+          "forbidden_operations": [
+            "SERIALIZABLE_STALE_AUTHORITY_READ",
+            "NESTED_TRANSACTION",
+            "LEASED_AUTHORITY_KEY"
+          ],
+          "retry_rule": "UNKNOWN_MUTATION_REQUIRES_EXACT_LOOKUP_OR_TERMINAL_FENCE"
+        },
+        {
+          "adapter_id": "OPENBAO_TRANSIT_ADAPTER",
+          "allowed_operations": [
+            "SIGN_SINGLE_NONBATCH_CONTEXT_FREE_EXACT_137_BYTE_INPUT",
+            "RETURN_VERSIONED_SIGNATURE_OBSERVATION"
+          ],
+          "credential_class": "SELF_HOSTED_TRANSIT_SIGN",
+          "evidence_returns": [
+            "APPLICATION_CALL_RECEIPT",
+            "REQUEST_RESPONSE_AND_VERSION_BINDINGS",
+            "ROUTE_AND_REQUEST_IDENTITIES"
+          ],
+          "forbidden_operations": [
+            "IMPLICIT_LATEST_VERSION",
+            "DERIVED_BATCH_CONTEXT_OR_PREHASH_MODE",
+            "HIDDEN_TRANSPORT_RETRY"
+          ],
+          "retry_rule": "ZERO_HIDDEN_SIGNER_RETRIES"
+        },
+        {
+          "adapter_id": "EXTERNAL_RESTORE_WITNESS_ADAPTER",
+          "allowed_operations": [
+            "CURRENT_LINEARIZABLE_READ",
+            "COMPARE_EXACT_PREVIOUS_HASH_AND_GENERATION_THEN_PUT"
+          ],
+          "credential_class": "SELF_HOSTED_EXTERNAL_WITNESS",
+          "evidence_returns": [
+            "FIFTEEN_FIELD_WITNESS_RECORD",
+            "WITNESS_KEY_HASH_GENERATION_AND_CAS_RECEIPT"
+          ],
+          "forbidden_operations": [
+            "SHARED_RESTORE_ACTOR_CREDENTIAL",
+            "WITNESS_INSIDE_ETCD_SNAPSHOT_OR_RESTORE_DOMAIN"
+          ],
+          "retry_rule": "CONFLICT_OR_UNAVAILABILITY_INCIDENT_QUARANTINES"
+        },
+        {
+          "adapter_id": "LAB_FAULT_CONTROLLER_ADAPTER",
+          "allowed_operations": [
+            "ARM_EXACT_ASSIGNED_LAB_CUT",
+            "TRIGGER_ONCE_INSIDE_EXACT_RUN_NAMESPACE",
+            "RECORD_TOPOLOGY_AND_CAUSAL_BINDING"
+          ],
+          "credential_class": "SELF_HOSTED_LAB_FAULT_CONTROL",
+          "evidence_returns": [
+            "ARM_RECEIPT",
+            "TRIGGER_RECEIPT",
+            "TOPOLOGY_SHA256",
+            "CAUSAL_BINDING_SHA256"
+          ],
+          "forbidden_operations": [
+            "CROSS_RUN_OR_CROSS_TRACK_FAULT",
+            "MULTIPLE_TRIGGER",
+            "UNSCOPED_RESTORE_OR_SEAL_ACTION"
+          ],
+          "retry_rule": "NOT_APPLICABLE",
+          "stop_capability_may_authorize_experiment": false,
+          "stop_only_credential_class": "STOP_FAULT_DISARM_EGRESS_CONTROL",
+          "stop_only_evidence_returns": [
+            "DISARM_RECEIPT",
+            "EGRESS_ISOLATION_RECEIPT"
+          ],
+          "stop_only_operations": [
+            "DISARM_EXACT_ASSIGNED_CUT",
+            "ISOLATE_EXACT_ASSIGNED_RUN_EGRESS"
+          ]
+        },
+        {
+          "adapter_id": "SELF_HOSTED_EVIDENCE_COLLECTOR_ADAPTER",
+          "allowed_operations": [
+            "COLLECT_ALLOWLISTED_NON_SECRET_FIELDS",
+            "HASH_IMMUTABLE_LAB_EVIDENCE_INDEX",
+            "CORRELATE_ROUTE_EXECUTOR_AUDIT_AND_WIRE_IDENTITIES",
+            "RETURN_OBSERVATIONS_ONLY"
+          ],
+          "credential_class": "SELF_HOSTED_EVIDENCE_READ_ONLY",
+          "evidence_returns": [
+            "PROVIDER_PROFILE_SHA256",
+            "RAW_EVIDENCE_INDEX_SHA256",
+            "SAFE_EVENT_TRACE_SHA256"
+          ],
+          "forbidden_operations": [
+            "CASE_CLASSIFICATION",
+            "CREDENTIAL_MATERIAL_CAPTURE",
+            "OUTPUT_AUTHORIZATION"
+          ],
+          "retry_rule": "READ_ONLY_COLLECTION_IS_SEPARATELY_ACCOUNTED"
+        }
+      ],
+      "composition_rule": "FIVE_SEPARATE_LEAST_PRIVILEGE_INTERFACES_NO_SHARED_OMNIPOTENT_ADAPTER"
+    }
+  },
+  "authority_integrity": {
+    "artifact_role_map": {
+      "COST_AUTHORITY_RECEIPT": "COST_CONTROLLER",
+      "CUSTODIAN_CREDENTIAL_RECEIPT": "CUSTODIAN",
+      "EMERGENCY_STOP_AUTHORITY_RECEIPT": "EMERGENCY_STOP_CONTROLLER",
+      "OWNER_SCOPE_RECEIPT": "OWNER",
+      "RESOURCE_AUTHORITY_RECEIPT": "RESOURCE_CONTROLLER"
+    },
+    "assignment_lineage_rule": "RECOMPUTE_THE_FROZEN_PREDECESSOR_OFFLINE_HARNESS_V1_ASSIGNMENT_BLOCK_HASH_SIMULATION_RUN_ID_AND_NAMESPACE_ID_AND_REQUIRE_CASE_REPETITION_CONFIGURATION_TRACK_AND_BLOCK_MEMBERSHIP_TO_MATCH_THE_EXACT_SCHEDULE_ENTRY",
+    "assignment_sha256_rule": "SHA256_OF_AB_CANONICAL_JSON_V1_OBJECT_WITH_DOMAIN_SCHEDULE_DOMAIN_TRACK_ID_REPETITION_INDEX_ORDERED_CASE_IDS_CONFIGURATION_SHA256_AND_FROZEN_PREDECESSOR_CONTRACT_SHA256",
+    "authorization_request_sha256_preimage": "FRAMED_SHA256_OF_AUTHORIZATION_REQUEST_DOMAIN_UTF8_AND_AB_CANONICAL_JSON_V1_REQUEST_BYTES_WITH_EXACT_TRACK_PHASE_SUITE_RUN_NAMESPACE_ASSIGNMENT_SCOPE_BINDINGS_PRINCIPAL_AND_NONCE",
+    "bundle_id_preimage": "FRAMED_SHA256_OF_AUTHORITY_BUNDLE_ID_DOMAIN_UTF8_AND_AB_CANONICAL_JSON_V1_COMPLETE_BUNDLE_BYTES_WITH_BUNDLE_ID_OMITTED",
+    "canonicalization": "AB_CANONICAL_JSON_V1_UTF8_SORTED_KEYS_INDENT_2_COLON_SPACE_TRAILING_NEWLINE_ENSURE_ASCII_FALSE_REJECT_DUPLICATE_KEYS_AND_NONFINITE_NUMBERS",
+    "capability_commitment_binding_fields": [
+      "TRACK_ID",
+      "PHASE",
+      "SUITE_ID",
+      "SIMULATION_RUN_ID",
+      "NAMESPACE_ID",
+      "ASSIGNMENT_SHA256",
+      "CASE_ID",
+      "REPETITION_INDEX",
+      "CONTRACT_SHA256",
+      "RESOURCE_SCOPE_SHA256",
+      "CREDENTIAL_SCOPE_SHA256",
+      "COST_SCOPE_SHA256",
+      "RETENTION_POLICY_SHA256",
+      "CLEANUP_POLICY_SHA256",
+      "FIELD_LEVEL_INTERSECTION_SHA256",
+      "EFFECTIVE_ALLOWED_OPERATIONS",
+      "REVOCATION_EPOCH",
+      "OFFLINE_HARNESS_MANIFEST_SHA256",
+      "PROFILE_SHA256",
+      "CONFIGURATION_SHA256",
+      "SCHEDULE_SHA256",
+      "RUNNER_BUILD_SHA256",
+      "ADAPTER_BUILD_SHA256",
+      "ADAPTER_SET_MANIFEST_SHA256",
+      "STOP_CONTROL_PLANE_MANIFEST_SHA256",
+      "CHANNEL_BINDING_SHA256",
+      "CONTROL_LEDGER_RECORD_SHA256",
+      "SINGLE_CONSUME_TRUE",
+      "SINGLE_EXECUTOR_SESSION_TRUE",
+      "SINGLE_RUN_TRUE"
+    ],
+    "capability_commitment_preimage": "FRAMED_SHA256_OF_PRIVATE_CAPABILITY_DOMAIN_UTF8_EXACTLY_32_RANDOM_PRIVATE_CAPABILITY_BYTES_AND_AB_CANONICAL_JSON_V1_BYTES_OF_THE_EXACT_CAPABILITY_COMMITMENT_BINDING_FIELDS; PRIVATE_BYTES_NEVER_SERIALIZED",
+    "channel_binding_sha256_preimage": "FRAMED_SHA256_OF_CHANNEL_BINDING_DOMAIN_UTF8_AND_AB_CANONICAL_JSON_V1_EXECUTOR_SESSION_PROCESS_CHANNEL_EXPORTER_TRACK_PHASE_SUITE_RUN_NAMESPACE_AND_ASSIGNMENT_BINDINGS",
+    "control_ledger_record_sha256_preimage": "FRAMED_SHA256_OF_CONTROL_LEDGER_DOMAIN_UTF8_AND_AB_CANONICAL_JSON_V1_DURABLE_SINGLE_USE_CAS_RECORD_WITH_CAPABILITY_COMMITMENT_STATE_REVISION_TRACK_PHASE_SUITE_RUN_NAMESPACE_ASSIGNMENT_AND_STOP_FENCE_BINDINGS",
+    "domain_constants": {
+      "authority_bundle_id": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/authority-bundle-id",
+      "authority_intersection": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/authority-intersection",
+      "authorization_request": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/authorization-request",
+      "channel_binding": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/channel-binding",
+      "control_ledger": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/control-ledger",
+      "namespace": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/v1/namespace",
+      "private_capability": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/private-capability",
+      "run": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/v1/run",
+      "schedule": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/v1/schedule",
+      "scope_receipt_id": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/scope-receipt-id",
+      "scope_receipt_payload": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/scope-receipt-payload",
+      "stop_receipt_id": "agent-bridge/biocortex-ab/track-b/reference-provider-fault-injection/runner/v1/stop-receipt-id"
+    },
+    "external_receipt_resolution_rule": "EVERY_HASH_NAMED_RECEIPT_MUST_RESOLVE_FROM_THE_FROZEN_ALLOWLISTED_EVIDENCE_STORE_TO_DUPLICATE_FREE_CANONICAL_BYTES_WHOSE_SHA256_EQUALS_THE_REFERENCE; MISSING_NONCANONICAL_OR_HASH_MISMATCH_FAILS_CLOSED",
+    "framed_sha256_kat": {
+      "expected_sha256": "e280006e8a792f697155fbff2efe6b80307bdde21cb951c2cfe4bd3bd7f24f58",
+      "framed_bytes_hex": "000000226167656e742d6272696467652f72756e6e65722d6672616d696e672d6b61742f7631000000000000000200ff0000000942696f436f72746578",
+      "parts": [
+        "UTF8_agent-bridge/runner-framing-kat/v1",
+        "EMPTY_BYTES",
+        "HEX_00ff",
+        "UTF8_BioCortex"
+      ]
+    },
+    "framing_rule": "FRAMED_SHA256_PREFIXES_EVERY_PART_WITH_ITS_UNSIGNED_FOUR_BYTE_BIG_ENDIAN_BYTE_LENGTH_THEN_HASHES_THE_EXACT_CONCATENATION; SHA256_FIELDS_USED_AS_BINARY_PARTS_ARE_RAW_32_BYTES_DECODED_FROM_LOWERCASE_HEX",
+    "namespace_id_rule": "FRAMED_SHA256_OF_NAMESPACE_DOMAIN_AND_RAW_32_BYTE_SIMULATION_RUN_ID_USING_FOUR_BYTE_BIG_ENDIAN_LENGTH_PREFIXES",
+    "receipt_id_preimage": "FRAMED_SHA256_OF_SCOPE_RECEIPT_ID_DOMAIN_UTF8_ARTIFACT_TYPE_UTF8_RAW_32_BYTE_CANONICAL_PAYLOAD_SHA256_AND_RAW_32_BYTE_SIGNATURE_RECEIPT_SHA256",
+    "scope_receipt_payload_preimage": "FRAMED_SHA256_OF_SCOPE_RECEIPT_PAYLOAD_DOMAIN_UTF8_AND_AB_CANONICAL_JSON_V1_SCOPE_RECEIPT_BYTES_WITH_CANONICAL_PAYLOAD_SHA256_RECEIPT_ID_AND_SIGNATURE_RECEIPT_SHA256_OMITTED",
+    "signature_receipt_sha256_preimage": "SHA256_OF_AB_CANONICAL_JSON_V1_SIGNATURE_VERIFICATION_RECEIPT_WITH_THE_REQUIRED_FIELDS_AND_NO_ADDITIONAL_FIELDS",
+    "signature_rule": "RESOLVE_SIGNATURE_RECEIPT_BY_SHA256_AND_RESOLVE_SIGNATURE_SHA256_TO_THE_EXACT_NONSECRET_RAW_SIGNATURE_BYTES; RESOLVE_THE_EXACT_TRUST_POLICY_PUBLIC_KEY_VERSION_ROLE_MAPPING_AND_ALGORITHM; THE_VERIFIER_MUST_ACTIVELY_VERIFY_THE_SIGNATURE_OVER_THE_EXACT_RAW_32_BYTE_CANONICAL_PAYLOAD_SHA256_NOT_HEX_TEXT_AND_MUST_NOT_TRUST_SIGNATURE_VALID_TRUE_ALONE; THEN_VERIFY_ROLE_PRINCIPAL_AUTHORIZATION_REQUEST_REVOCATION_EPOCH_AND_VERIFICATION_TIME",
+    "signature_verification_receipt_required_fields": [
+      "SCHEMA",
+      "ARTIFACT_TYPE",
+      "ROLE",
+      "AUTHORITY_PRINCIPAL_ID_SHA256",
+      "AUTHORIZATION_REQUEST_SHA256",
+      "CANONICAL_PAYLOAD_SHA256",
+      "TRUST_POLICY_SHA256",
+      "VERIFICATION_KEY_VERSION_SHA256",
+      "SIGNATURE_ALGORITHM",
+      "SIGNATURE_SHA256",
+      "SIGNATURE_VALID_TRUE",
+      "REVOCATION_EPOCH",
+      "VERIFIED_AT_UTC"
+    ],
+    "simulation_run_id_rule": "FRAMED_SHA256_OF_RUN_DOMAIN_TRACK_ID_CASE_ID_REPETITION_INDEX_AS_FOUR_BIG_ENDIAN_BYTES_RAW_32_BYTE_CONFIGURATION_SHA256_AND_RAW_32_BYTE_ASSIGNMENT_SHA256_USING_FOUR_BYTE_BIG_ENDIAN_LENGTH_PREFIXES",
+    "suite_id_rule": "SUITE_ID_EQUALS_SHA256_OF_THE_FROZEN_PREDECESSOR_OFFLINE_HARNESS_SUITE_RECEIPT_BOUND_BY_OFFLINE_HARNESS_MANIFEST_SHA256"
+  },
+  "authority_model": {
+    "artifact_count": 5,
+    "artifacts": [
+      "OWNER_SCOPE_RECEIPT",
+      "CUSTODIAN_CREDENTIAL_RECEIPT",
+      "RESOURCE_AUTHORITY_RECEIPT",
+      "COST_AUTHORITY_RECEIPT",
+      "EMERGENCY_STOP_AUTHORITY_RECEIPT"
+    ],
+    "binding_fields": [
+      "TRACK_ID",
+      "AUTHORIZATION_PHASE",
+      "SUITE_ID",
+      "SIMULATION_RUN_ID",
+      "NAMESPACE_ID",
+      "ASSIGNMENT_SHA256",
+      "PREREGISTRATION_CONTRACT_SHA256",
+      "OFFLINE_HARNESS_MANIFEST_SHA256",
+      "PROVIDER_PROFILE_SHA256",
+      "CONFIGURATION_SHA256",
+      "SCHEDULE_SHA256",
+      "RUNNER_BUILD_SHA256",
+      "ADAPTER_BUILD_SHA256",
+      "ADAPTER_SET_MANIFEST_SHA256",
+      "STOP_CONTROL_PLANE_MANIFEST_SHA256",
+      "CASE_AND_REPETITION_SCOPE",
+      "RESOURCE_SCOPE_SHA256",
+      "CREDENTIAL_SCOPE_SHA256",
+      "COST_SCOPE_SHA256",
+      "RETENTION_POLICY_SHA256",
+      "CLEANUP_POLICY_SHA256",
+      "FIELD_LEVEL_INTERSECTION_SHA256",
+      "EFFECTIVE_ALLOWED_OPERATIONS",
+      "CURRENTNESS_AND_REVOCATION_EPOCH"
+    ],
+    "capability": {
+      "assignment_and_namespace_bound": true,
+      "credential_material_embedded": false,
+      "cross_run_reuse_allowed": false,
+      "cross_track_reuse_allowed": false,
+      "kind": "OPAQUE_NON_SERIALIZABLE_PROCESS_LOCAL_SINGLE_USE",
+      "persistence_allowed": false,
+      "phase_bound": true,
+      "receipt_or_capability_is_output_permit": false,
+      "serialization_allowed": false,
+      "stop_invalidates_immediately": true
+    },
+    "currentness_formula": {
+      "binding_equality": "ROOT_INTERSECTION_CAPABILITY_AND_ALL_FIVE_RECEIPTS_EXACTLY_MATCH_TRACK_PHASE_SUITE_SIMULATION_RUN_NAMESPACE_ASSIGNMENT_CONTRACT_HARNESS_PROFILE_CONFIGURATION_SCHEDULE_RUNNER_ADAPTER_ADAPTER_SET_STOP_CONTROL_PLANE_RESOURCE_CREDENTIAL_COST_RETENTION_CLEANUP_AND_REVOCATION_EPOCH_BINDINGS; ROOT_INTERSECTION_AND_CAPABILITY_EXACTLY_MATCH_FIELD_LEVEL_INTERSECTION_AND_EFFECTIVE_OPERATIONS",
+      "checked_at_rule": "ALL_TIMESTAMPS_ARE_STRICT_RFC3339_UTC_SECONDS_CALENDAR_VALID_AND_TRUSTED_CHECKED_AT_UTC_IS_AT_OR_AFTER_EVERY_NOT_BEFORE_UTC_AND_STRICTLY_BEFORE_EVERY_EXPIRES_AT_UTC",
+      "evidence_rule": "TRUSTED_TIME_AND_ROW_CURRENTNESS_RECEIPT_HASHES_MUST_RESOLVE_TO_CANONICAL_SIGNED_ALLOWLISTED_CONTROL_PLANE_EVIDENCE_BINDING_CHECKED_AT_TRACK_PHASE_SUITE_RUN_NAMESPACE_ASSIGNMENT_PROFILE_RESOURCE_CREDENTIAL_COST_AND_REVOCATION_EPOCH; BOOLEAN_ASSERTIONS_ALONE_ARE_NOT_EVIDENCE",
+      "phase_freshness_rule": "PREFLIGHT_AND_EXECUTION_USE_DISTINCT_REQUEST_NONCE_SIGNATURE_RECEIPT_AND_CAPABILITY_COMMITMENTS",
+      "receipt_time_order_rule": "FOR_EACH_RECEIPT_ISSUED_AT_UTC_IS_NOT_AFTER_NOT_BEFORE_UTC_AND_NOT_BEFORE_UTC_IS_STRICTLY_BEFORE_EXPIRES_AT_UTC; SIGNATURE_VERIFIED_AT_UTC_IS_NOT_BEFORE_ISSUED_AT_UTC_AND_NOT_AFTER_TRUSTED_CHECKED_AT_UTC",
+      "revocation_rule": "ROOT_CURRENTNESS_AND_ALL_FIVE_RECEIPTS_HAVE_ONE_EQUAL_CURRENT_REVOCATION_EPOCH_AND_NO_REVOCATION_OR_STOP_RECORD_EXISTS"
+    },
+    "emergency_stop_scope": {
+      "allowed_operations": [
+        "BLOCK_NEW_CALLS_FOR_EXACT_RUN",
+        "CAS_EXACT_RUN_CAPABILITY_TO_STOP_FENCED",
+        "CONFIRM_RETENTION_BINDINGS",
+        "CONFIRM_ZERO_ACTIVE_LEASE_COMMITMENTS",
+        "DISARM_EXACT_ASSIGNED_CUT",
+        "FREEZE_EXACT_ASSIGNED_RESOURCES",
+        "ISOLATE_EXACT_ASSIGNED_RUN_EGRESS",
+        "PERSIST_CURRENT_ROW_DURABLE_STATE_AND_SAFE_EVIDENCE",
+        "REDUCTIVE_TEARDOWN_WITHIN_EXACT_CLEANUP_SCOPE",
+        "REVOKE_EXACT_RUN_CREDENTIAL_LEASES"
+      ],
+      "forbidden_operations": [
+        "ARM_OR_TRIGGER_FAULT",
+        "AUTHORIZE_CONDITION_OUTPUT_OR_OUTPUT_PERMIT",
+        "CREATE_OR_EXPAND_RESOURCE_SCOPE",
+        "SIGN_PROVIDER_MESSAGE",
+        "START_OR_RESUME_EXPERIMENT"
+      ],
+      "positive_execution_authority_added": false
+    },
+    "intersection_formula": {
+      "case_ids": "SET_INTERSECTION_OF_OWNER_CUSTODIAN_RESOURCE_AND_COST_ALLOWED_CASE_IDS_WITH_EMERGENCY_SCOPE_REQUIRED_TO_BIND_THE_SAME_ASSIGNED_RUN",
+      "digest_scopes": "RESOURCE_CREDENTIAL_COST_RETENTION_AND_CLEANUP_SCOPE_HASHES_MUST_EACH_EXACTLY_MATCH_ACROSS_ALL_FIVE_RECEIPTS_AND_AUTHORITY_INTERSECTION",
+      "emergency_authority_algebra": "EMERGENCY_STOP_AUTHORITY_IS_A_REQUIRED_CURRENT_VETO_AND_REDUCTIVE_CAPABILITY_NEVER_A_POSITIVE_EXECUTION_GRANT; ITS_FORBIDDEN_OPERATIONS_PARTICIPATE_BUT ITS_ALLOWED_OPERATIONS_DO_NOT_ADD_OR_INTERSECT_POSITIVE_EXECUTION_AUTHORITY",
+      "execution_assignment_rule": "EFFECTIVE_CASE_AND_REPETITION_ARE_SINGLETON_AND_EQUAL_THE_FROZEN_ASSIGNMENT_CASE_AND_REPETITION",
+      "field_level_intersection_sha256": "FRAMED_SHA256_OF_AUTHORITY_INTERSECTION_DOMAIN_UTF8_AND_AB_CANONICAL_JSON_V1_COMPLETE_AUTHORITY_INTERSECTION_BYTES_WITH_FIELD_LEVEL_INTERSECTION_SHA256_OMITTED",
+      "operations": "SET_INTERSECTION_OF_OWNER_CUSTODIAN_RESOURCE_AND_COST_ALLOWED_OPERATIONS_MINUS_SET_UNION_OF_ALL_FIVE_FORBIDDEN_OPERATIONS",
+      "repetition_indices": "SET_INTERSECTION_OF_OWNER_CUSTODIAN_RESOURCE_AND_COST_ALLOWED_REPETITION_INDICES_WITH_EMERGENCY_SCOPE_REQUIRED_TO_BIND_THE_SAME_ASSIGNED_RUN",
+      "required_nonempty": true
+    },
+    "phase_operation_catalog": {
+      "EXPERIMENT_EXECUTION_GRANT": "EFFECTIVE_OPERATIONS_MUST_BE_A_NONEMPTY_SUBSET_OF_THE_EXACT_ASSIGNED_ROUTE_EXPERIMENT_ADAPTER_ALLOWED_OPERATIONS_AND_MUST_EXCLUDE_STOP_ONLY_OPERATIONS",
+      "PREFLIGHT_OBSERVATION_GRANT": [
+        "READ_COST_BUDGET_METADATA",
+        "READ_CREDENTIAL_LEASE_METADATA",
+        "READ_EVIDENCE_SINK_HEALTH",
+        "READ_PROVIDER_PROFILE_METADATA",
+        "READ_RESOURCE_METADATA"
+      ]
+    },
+    "phase_order": [
+      "PREFLIGHT_OBSERVATION",
+      "EXPERIMENT_EXECUTION"
+    ],
+    "phases": {
+      "EXPERIMENT_EXECUTION": {
+        "allowed_actions": "EXACT_TRACK_CASE_SCHEDULE_AND_ADAPTER_ACTIONS_ONLY",
+        "prerequisites": "FROZEN_CURRENT_PROFILE_CONFIGURATION_SCHEDULE_RUNNER_ADAPTER_SET_ASSIGNMENT_AND_ALL_FIVE_CURRENT_EXECUTION_AUTHORITY_ARTIFACTS",
+        "scope": "ONE_TRACK_ONE_ASSIGNED_RUN"
+      },
+      "PREFLIGHT_OBSERVATION": {
+        "allowed_actions": "EXACT_READ_ONLY_METADATA_AND_PROFILE_OBSERVATION_ONLY",
+        "forbidden_actions": "SIGN_MUTATE_FAULT_PROVISION_OR_START_LAB",
+        "scope": "ONE_TRACK_ONE_ASSIGNED_RUN_EXACT_RESOURCE_COMMITMENT_DISTINCT_FROM_AND_NOT_REUSABLE_AS_EXECUTION_AUTHORITY"
+      }
+    },
+    "track_grain": "SEPARATE_NON_SUBSTITUTABLE_AUTHORITY_BUNDLE_PER_TRACK",
+    "wildcard_or_parent_resource_scope_allowed": false
+  },
+  "baseline_commit": "b15a48d17fb30b0990bf26210978f2a4f78f54cc",
+  "boundary": {
+    "adapter_implementation_present": false,
+    "authority_receipts_bound": false,
+    "condition_output_authorized": false,
+    "cost_authority_bound": false,
+    "credentials_accessed": false,
+    "experiment_executed": false,
+    "live_endpoint_bound": false,
+    "live_generator_in_scope": false,
+    "live_output_permit_defined": false,
+    "paid_resources_provisioned": false,
+    "production_adapter_in_scope": false,
+    "provider_called": false,
+    "provider_profile_bound": false,
+    "receipt_is_output_permit": false,
+    "secret_material_present": false,
+    "side_effects_unlocked": "NONE",
+    "synthetic_authority_present": false
+  },
+  "credential_isolation": {
+    "ambient_or_default_credential_chain_allowed": false,
+    "broker_activity_separately_evidenced": true,
+    "credential_classes": [
+      "MANAGED_SPANNER_DATA_PLANE",
+      "MANAGED_KMS_SIGN",
+      "MANAGED_FAULT_PROXY_CONTROL",
+      "MANAGED_EVIDENCE_READ_ONLY",
+      "SELF_HOSTED_ETCD_DATA_PLANE",
+      "SELF_HOSTED_TRANSIT_SIGN",
+      "SELF_HOSTED_EXTERNAL_WITNESS",
+      "SELF_HOSTED_LAB_FAULT_CONTROL",
+      "SELF_HOSTED_EVIDENCE_READ_ONLY"
+    ],
+    "credential_material_in_artifact_log_cli_or_environment_allowed": false,
+    "cross_adapter_handle_reuse_allowed": false,
+    "emergency_revoke_and_cleanup_capability_separate": true,
+    "evidence_fields": [
+      "LEASE_ID_SHA256",
+      "ISSUER_AND_AUDIENCE_COMMITMENT_SHA256",
+      "PRINCIPAL_COMMITMENT_SHA256",
+      "ALLOWED_METHOD_AND_RESOURCE_SCOPE_SHA256",
+      "LEASE_CURRENTNESS_RECEIPT_SHA256",
+      "USE_COUNT",
+      "REVOCATION_RECEIPT_SHA256"
+    ],
+    "opaque_handle_only": true,
+    "runner_secret_visibility_allowed": false,
+    "stop_control_credential_classes": [
+      "STOP_CAPABILITY_FENCE_CONTROL",
+      "STOP_FAULT_DISARM_EGRESS_CONTROL",
+      "STOP_CREDENTIAL_REVOCATION_CONTROL",
+      "STOP_DURABLE_EVIDENCE_RETENTION_CONTROL",
+      "STOP_SCOPED_RESOURCE_CLEANUP_CONTROL"
+    ],
+    "stop_control_handles_reusable_for_experiment": false
+  },
+  "date": "2026-07-15",
+  "decision": "RUNNER_AUTHORITY_AND_ADAPTER_CONTRACT_PASS_EXECUTION_REMAINS_BLOCKED",
+  "evidence_contract": {
+    "actual_evidence_origins": [
+      "RUNTIME_CLIENT_CONFORMANCE_DOUBLE",
+      "MANAGED_SERVICE_WITH_CLIENT_FAULT_PROXY",
+      "SELF_HOSTED_ADVERSARIAL_LAB"
+    ],
+    "adapter_may_return_case_classification": false,
+    "causal_order_rule": "MONOTONIC_RUN_SEQUENCE_AND_HASH_BINDINGS_NOT_CROSS_SYSTEM_WALL_CLOCK_INFERENCE",
+    "counter_fields": [
+      "APPLICATION_CALL_COUNT",
+      "WIRE_ATTEMPT_COUNT",
+      "PROVIDER_PROCESSING_COUNT_NULL_UNLESS_INDEPENDENTLY_EVIDENCED"
+    ],
+    "eligibility_rules": [
+      "ACTUAL_ORIGIN_EQUALS_PLANNED_EVIDENCE_LOCUS",
+      "AUTHORITY_ASSIGNMENT_PROFILE_CONFIGURATION_SCHEDULE_RUNNER_ADAPTER_ADAPTER_SET_AND_STOP_CONTROL_PLANE_HASHES_MATCH",
+      "ALL_RAW_SAFE_EVIDENCE_HASHES_RESOLVE",
+      "NO_RESOURCE_CREDENTIAL_COST_OR_FAULT_SCOPE_BREACH",
+      "ASSIGNMENT_PRECEDES_ARM_AND_ARM_PRECEDES_CANDIDATE_START",
+      "FAULT_TRIGGER_CARDINALITY_MATCHES_CASE",
+      "ADAPTER_RETURN_CONTAINS_OBSERVATIONS_ONLY",
+      "NO_PROVIDER_PROCESSING_OR_EXACTLY_ONCE_OVERCLAIM"
+    ],
+    "envelope_required_fields": [
+      "TRACK_CASE_REPETITION_RUN_AND_NAMESPACE",
+      "ASSIGNMENT_CONFIGURATION_PROFILE_AUTHORITY_CURRENTNESS_RUNNER_ADAPTER_AND_ADAPTER_SET_SHA256",
+      "PLANNED_LOCUS_ACTUAL_ORIGIN_AND_ELIGIBILITY",
+      "PRE_AND_POST_DURABLE_STATE_SHA256",
+      "NINETEEN_FIELD_OPERATION_RECORD_AND_SIXTEEN_FIELD_CAS_ENVELOPE",
+      "PREPARED_CALL_VALIDATION_AND_RECEIPT_BINDING_SHA256",
+      "FAULT_ARM_TRIGGER_CUT_VARIANT_AND_CAUSAL_BINDING",
+      "REQUEST_RESPONSE_PROVIDER_AUDIT_AND_EVENT_INDEX_SHA256",
+      "CREDENTIAL_RESOURCE_COST_STOP_CLEANUP_AND_RETENTION_RECEIPTS",
+      "ZERO_OUTPUT_AND_NO_PERMIT_ASSERTIONS"
+    ],
+    "provider_evidence_hash_does_not_imply_provider_processing": true,
+    "raw_capture_rule": "ALLOWLISTED_NON_SECRET_PROTOCOL_FIELDS_ONLY_RAW_SECRET_BEARING_MATERIAL_FORBIDDEN"
+  },
+  "execution_plan": {
+    "assignment_order": "CONFIGURATION_AND_PROFILE_FROZEN_THEN_SCHEDULE_SEALED_THEN_PER_RUN_CURRENTNESS_THEN_ARM_THEN_START",
+    "case_routing": {
+      "CLIENT_CONFORMANCE_DOUBLE": {
+        "case_ids": [
+          "M02",
+          "M03",
+          "M05",
+          "M06",
+          "M07",
+          "M08",
+          "M09",
+          "M10",
+          "M11",
+          "S02",
+          "S03",
+          "S08",
+          "S16",
+          "S17"
+        ],
+        "rows": 420
+      },
+      "MANAGED_SERVICE_WITH_CLIENT_FAULT_PROXY": {
+        "case_ids": [
+          "M00",
+          "M01",
+          "M04",
+          "M12",
+          "M13",
+          "M14",
+          "M15"
+        ],
+        "rows": 210
+      },
+      "SELF_HOSTED_ADVERSARIAL_LAB": {
+        "case_ids": [
+          "S00",
+          "S01",
+          "S04",
+          "S05",
+          "S06",
+          "S07",
+          "S09",
+          "S10",
+          "S11",
+          "S12",
+          "S13",
+          "S14",
+          "S15"
+        ],
+        "rows": 390
+      }
+    },
+    "counts": {
+      "cases": 34,
+      "client_conformance_double_rows": 420,
+      "managed_service_fault_proxy_rows": 210,
+      "planned_rows": 1020,
+      "repetitions_per_case": 30,
+      "self_hosted_adversarial_lab_rows": 390,
+      "tracks": 2
+    },
+    "track_interleaving_allowed": false
+  },
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_OFFLINE_AUTHORITY_VERIFIER_AND_ADAPTER_DOUBLE_IMPLEMENTATION",
+  "non_claims": [
+    "NO_PROVIDER_EXPERIMENT_EXECUTED",
+    "NO_CREDENTIAL_RESOURCE_COST_OR_ENDPOINT_AUTHORITY_BOUND",
+    "NO_EXACTLY_ONCE_PROVIDER_RPC_OR_SIGNATURE_CREATION",
+    "NO_PROVIDER_PROCESSING_INFERENCE_FROM_CLIENT_OR_PROXY_EVIDENCE",
+    "NO_PRODUCTION_READINESS_OUTPUT_PERMIT_OR_CONDITION_OUTPUT_AUTHORIZATION",
+    "NO_CROSS_TRACK_CERTIFICATION_RANKING_OR_SUBSTITUTION",
+    "NO_REVISION_BUMP_WATCH_TIMEOUT_EOF_OR_SEAL_CONTINUITY_PROOF"
+  ],
+  "official_source_claims": [
+    {
+      "claim": "Workload Identity Federation can exchange supported external identities for short-lived Google credentials and can replace long-lived service-account keys.",
+      "claim_id": "GID_RUNNER_01",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://docs.cloud.google.com/iam/docs/best-practices-for-using-workload-identity-federation?hl=en"
+    },
+    {
+      "claim": "Spanner read-write transaction functions may be retried and commit timeouts can leave commit outcome unknown.",
+      "claim_id": "GSP_RUNNER_01",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://docs.cloud.google.com/spanner/docs/transactions"
+    },
+    {
+      "claim": "Cloud KMS asymmetricSign uses exact version resources and exposes request and response integrity fields.",
+      "claim_id": "GKM_RUNNER_01",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys.cryptoKeyVersions/asymmetricSign"
+    },
+    {
+      "claim": "Cloud KMS AsymmetricSign is represented in Data Access audit logs and uses the useToSign permission, so audit collection is a separately bound evidence path.",
+      "claim_id": "GKM_RUNNER_02",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://docs.cloud.google.com/kms/docs/audit-logging"
+    },
+    {
+      "claim": "etcd linearizable and serializable reads differ, Watch is not authority, and disrupted operations can be uncertain.",
+      "claim_id": "ETC_RUNNER_01",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://etcd.io/docs/v3.6/learning/api_guarantees/"
+    },
+    {
+      "claim": "etcd restore creates new logical identities and revision bump plus mark-compacted are recovery controls.",
+      "claim_id": "ETC_RUNNER_02",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://etcd.io/docs/v3.6/op-guide/recovery/"
+    },
+    {
+      "claim": "etcd supports client and peer TLS authentication, but transport authentication and RBAC are not enabled by default and must be proven by the frozen profile.",
+      "claim_id": "ETC_RUNNER_03",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://etcd.io/docs/v3.6/op-guide/security/"
+    },
+    {
+      "claim": "OpenBao Transit accepts explicit key versions and version zero selects latest.",
+      "claim_id": "OBA_RUNNER_01",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://openbao.org/api-docs/secret/transit/"
+    },
+    {
+      "claim": "OpenBao target-node seal status and HA service execution identity are distinct observations.",
+      "claim_id": "OBA_RUNNER_02",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://openbao.org/docs/internals/high-availability/"
+    },
+    {
+      "claim": "OpenBao audit devices cover API requests and responses but documented system paths such as seal-status, seal and unseal are not audited through that path.",
+      "claim_id": "OBA_RUNNER_03",
+      "evidence_class": "OFFICIAL_DOCUMENTATION_DIRECT",
+      "retrieved_on": "2026-07-15",
+      "url": "https://openbao.org/docs/next/audit/"
+    }
+  ],
+  "predecessor": {
+    "offline_configuration_sha256": "fd993935d9847f2a75b665cc77d078946cf2c0bd2d24adbd43c2a50d1dbd6a85",
+    "offline_harness_integration_commit": "b15a48d17fb30b0990bf26210978f2a4f78f54cc",
+    "offline_harness_manifest_sha256": "2e06aec1395957cd70ee86ab4af0452ca6c5da6a51112b4c21216bfd43e3a3ed",
+    "offline_harness_source_commit": "27fd73aa36ac897fb817398eca3a191181d8fb5d",
+    "offline_rows_sha256": "e4458abb43b7de6d8fb40809e679393198b29c2303ba9824bae414455d6b305e",
+    "offline_schedule_sha256": "37e00bb606b09760d0280e240afbbc2585412c7080a5bf909a130edf305d70b3",
+    "preregistration_contract_sha256": "632dbf1d8202d94d6aef70d8b20c04050e647679da973d81afbe13d68344ad22"
+  },
+  "profile_contract": {
+    "managed_required_fields": [
+      "PROJECT_INSTANCE_DATABASE_DIALECT_REGION_IDENTITY_SHA256",
+      "WORKLOAD_IDENTITY_OR_EQUIVALENT_SHORT_LIVED_CREDENTIAL_BROKER_PROFILE_SHA256",
+      "SPANNER_CLIENT_BUILD_API_DESCRIPTOR_RETRY_TIMEOUT_AND_ISOLATION_PROFILE_SHA256",
+      "EXACT_CRYPTOKEYVERSION_ALGORITHM_STATE_PROTECTION_PUBLIC_KEY_AND_METADATA_SHA256",
+      "KMS_TRANSPORT_RETRY_DISABLED_AND_WIRE_OBSERVATION_PROFILE_SHA256",
+      "FAULT_PROXY_BUILD_CONFIGURATION_TOPOLOGY_AND_TRUST_PIN_SHA256",
+      "RESOURCE_PRINCIPAL_QUOTA_COST_AND_RETENTION_SCOPE_SHA256",
+      "STOP_CONTROL_PLANE_BROKER_EGRESS_EVIDENCE_CLEANUP_AND_MANIFEST_SHA256",
+      "OFFICIAL_SOURCE_SNAPSHOT_AND_CURRENTNESS_SHA256"
+    ],
+    "self_hosted_required_fields": [
+      "ETCD_OPENBAO_BINARY_OR_IMAGE_CLIENT_AND_CONFIGURATION_SHA256",
+      "MEMBER_NODE_CLUSTER_INCARNATION_TOPOLOGY_QUORUM_TLS_AND_RESOURCE_CAP_SHA256",
+      "ETCD_CLIENT_PEER_MTLS_RBAC_AND_IDENTITY_ENFORCEMENT_SHA256",
+      "SNAPSHOT_REVISION_RESTORE_BUMP_MARK_COMPACTED_AND_NEW_IDENTITY_SHA256",
+      "TRANSIT_MOUNT_KEY_VERSION_PUBLIC_KEY_MINIMUM_VERSION_AND_REQUEST_MODE_SHA256",
+      "HA_ROUTE_REDIRECT_FORWARD_AUDIT_AND_REQUEST_CORRELATION_SHA256",
+      "OPENBAO_AUDIT_DEVICE_UNION_HEALTH_AND_NONAUDITED_PATH_ACCOUNTING_SHA256",
+      "FAULT_CONTROLLER_BUILD_TOPOLOGY_SEED_AND_MONOTONIC_CLOCK_SHA256",
+      "EXTERNAL_WITNESS_IDENTITY_CAS_AND_INDEPENDENT_FAILURE_DOMAIN_SHA256",
+      "STOP_CONTROL_PLANE_BROKER_EGRESS_EVIDENCE_CLEANUP_AND_MANIFEST_SHA256",
+      "RESOURCE_PRINCIPAL_COST_RETENTION_AND_OFFICIAL_SOURCE_CURRENTNESS_SHA256"
+    ],
+    "source_currentness_rule": "REFETCH_AND_FREEZE_OFFICIAL_PAGE_OR_UPSTREAM_DESCRIPTOR_HASHES_BEFORE_PREFLIGHT_AND_EXECUTION"
+  },
+  "purpose": "FREEZE_NON_AUTHORIZING_RUNNER_AUTHORITY_ADAPTER_EVIDENCE_STOP_AND_RECOVERY_SEMANTICS_WITHOUT_PROVIDER_OR_CREDENTIAL_ACCESS",
+  "recovery_protocol": {
+    "cleanup_capability_rule": "SEPARATE_MONOTONICALLY_REDUCING_REVOKE_ISOLATE_PRESERVE_AND_TEARDOWN_SCOPE_ONLY",
+    "durable_runner_states": [
+      "ASSIGNED",
+      "PREFLIGHT_PASSED",
+      "CAPABILITY_ISSUED",
+      "FAULT_ARMED",
+      "CANDIDATE_STARTED",
+      "ATTEMPT_PREPARED",
+      "CALL_CONSUMED",
+      "RESPONSE_OBSERVED",
+      "RESPONSE_VALIDATED",
+      "RECEIPT_COMMITTED",
+      "AMBIGUOUS_QUARANTINED",
+      "ROW_RETAINED",
+      "STOP_REQUESTED",
+      "STOP_FENCING",
+      "STOP_ABSORBING_COMPLETE",
+      "STOP_FAILED_QUARANTINED"
+    ],
+    "restart_rules": [
+      "SCHEDULE_RUN_ID_NAMESPACE_AND_ASSIGNMENT_NEVER_REGENERATE_OR_SUBSTITUTE",
+      "UNSTARTED_ROW_REQUIRES_FRESH_AUTHORITY_CURRENTNESS_AND_START_AND_GATE",
+      "PREPARED_CONSUMED_AMBIGUOUS_OR_UNRESOLVED_ATTEMPT_NEVER_REISSUES_SIGNING",
+      "UNKNOWN_DATABASE_OR_ETCD_MUTATION_RESOLVES_ONLY_BY_EXACT_READ_OR_TERMINAL_FENCE",
+      "NEXT_SCHEDULE_ENTRY_REQUIRES_CURRENT_ENTRY_TERMINAL_RETAINED_RECEIPT",
+      "EVIDENCE_PERSIST_FAILURE_STOPS_AND_QUARANTINES",
+      "STOP_REQUESTED_OR_LATER_NEVER_RETURNS_TO_AN_EXECUTABLE_STATE_AND_RESTART_CAN_ONLY_CONTINUE_REDUCTIVE_STOP_CONTROL"
+    ]
+  },
+  "retained_row_contract": {
+    "case_classification_null_for_nonevaluable_row": true,
+    "counts_toward_acceptance_evidence_rule": "ONLY_COMPLETED_EVALUABLE_ROW_WITH_ELIGIBLE_MATCHING_LOCUS_EVIDENCE",
+    "counts_toward_denominator_rule": "EVERY_ASSIGNED_RUNTIME_ATTEMPT_INCLUDING_FAILURE_ABORT_AND_STOP",
+    "outcomes": [
+      "EXPERIMENT_COMPLETED_EVALUABLE",
+      "EXPERIMENT_INFRASTRUCTURE_FAILURE_RETAINED",
+      "EXPERIMENT_BOUNDARY_BREACH_RETAINED",
+      "EXPERIMENT_OPERATOR_STOP_RETAINED"
+    ],
+    "provider_called_may_be_false_for_valid_experimental_row": true,
+    "retained": true,
+    "terminal_ambiguity_may_be_valid_case_classification": true
+  },
+  "s12_branch_contract": {
+    "correlated_postwire_failure_branch": {
+      "allowed_classification": "FAIL_CLOSED_REJECTED",
+      "branch_id": "CORRELATED_POSTWIRE_FAIL_CLOSED_REJECTED",
+      "requirements": [
+        "TARGET_ROUTE_EXECUTING_OR_REJECTING_NODE_CLUSTER_REQUEST_REDIRECT_FORWARD_AND_WIRE_BOUND",
+        "AUDIT_OR_TRANSPORT_REJECTION_RECEIPT_AND_EXPLICIT_FAIL_CLOSED_REJECTION",
+        "ZERO_ACCEPTED_SIGNATURE_RECEIPT_AND_ZERO_OUTPUT"
+      ]
+    },
+    "failure_branch": {
+      "branch_id": "FAIL_CLOSED_PREWIRE_NO_EXECUTOR_CLAIM",
+      "requirements": [
+        "TARGET_AND_ROUTE_IDENTITIES_RETAINED",
+        "EXECUTOR_HA_ROLE_REDIRECT_FORWARD_AUDIT_AND_WIRE_ATTEMPT_ARE_NULL",
+        "ZERO_ACCEPTED_RECEIPT_AND_ZERO_OUTPUT"
+      ]
+    },
+    "postwire_uncorrelated_rule": "RETAIN_AS_EXPERIMENT_INFRASTRUCTURE_FAILURE_NOT_CASE_CLASSIFICATION",
+    "success_branch": {
+      "branch_id": "SUCCESSOR_EXECUTOR_CORRELATED_AND_FULLY_VALIDATED",
+      "requirements": [
+        "TARGET_ROUTE_EXECUTOR_HA_ROLE_CLUSTER_REQUEST_REDIRECT_FORWARD_AUDIT_AND_WIRE_BOUND",
+        "SEALED_TARGET_DID_NOT_EXECUTE",
+        "FULL_EXACT_VERSION_MESSAGE_KEY_AND_SIGNATURE_VALIDATION",
+        "DURABLE_RECEIPT_AND_ZERO_OUTPUT"
+      ]
+    }
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_adapter_contract.v1",
+  "start_stop_logic": {
+    "start": {
+      "action": "AFTER_ALL_CONDITIONS_PASS_DURABLY_CAS_THE_EXACT_CAPABILITY_CONTROL_LEDGER_RECORD_FROM_UNUSED_TO_START_COMMITTED_ONCE_AND_ONLY_THEN_RELEASE_THE_PRIVATE_CAPABILITY_TO_THE_BOUND_EXECUTOR_SESSION; CAS_FAILURE_OR_UNKNOWN_OUTCOME_PERMITS_NO_PROVIDER_OR_FAULT_CALL",
+      "combination": "AND_ALL_REQUIRED",
+      "conditions": [
+        "EXACT_PHASE_AND_TRACK_AUTHORITY",
+        "ALL_FIVE_AUTHORITY_ARTIFACTS_AUTHENTIC_CURRENT_AND_UNREVOKED",
+        "EXACT_SUITE_SIMULATION_RUN_NAMESPACE_ASSIGNMENT_PROFILE_CONFIGURATION_SCHEDULE_RUNNER_ADAPTER_ADAPTER_SET_AND_STOP_CONTROL_PLANE_BINDINGS",
+        "RECOMPUTED_CASE_REPETITION_OPERATION_INTERSECTION_AND_EXACT_RESOURCE_CREDENTIAL_COST_RETENTION_CLEANUP_SCOPES_MATCH",
+        "OPAQUE_CAPABILITY_STATE_UNUSED_DURABLE_CAS_UNCONSUMED_SINGLE_USE_AND_UNEXPOSED",
+        "EVIDENCE_AND_RETENTION_PATH_READY",
+        "NO_STOP_CONDITION_PRESENT"
+      ]
+    },
+    "stop": {
+      "actions": [
+        "BLOCK_NEW_CALLS_AND_INVALIDATE_CAPABILITY",
+        "RETAIN_CURRENT_ROW_AND_DURABLE_STATE",
+        "DISARM_FAULT_CONTROLLER_AND_ISOLATE_EGRESS",
+        "REQUEST_CREDENTIAL_REVOCATION",
+        "PRESERVE_EVIDENCE_BEFORE_SCOPED_CLEANUP",
+        "EMIT_STOP_RECEIPT_AND_ESCALATE_UNRESOLVED_AMBIGUITY"
+      ],
+      "combination": "OR_ANY_TRIGGER",
+      "completion_rule": "STOP_ABSORBING_COMPLETE_REQUIRES_CAPABILITY_INVALIDATED_NEW_CALLS_BLOCKED_ROW_AND_EVIDENCE_PRESERVED_CLEANUP_REDUCTIVE_COMPLETE_CREDENTIAL_REVOKED_FAULT_DISARMED_ZERO_CONTROL_PLANE_FAILURES_ZERO_UNRESOLVED_AMBIGUITIES_AND_DURABLE_RECEIPT; ALL_OTHER_STATES_HAVE_NULL_STOP_COMPLETION_TIME; FAILED_QUARANTINED_IS_TERMINAL_ESCALATED_AND_NONCONTINUABLE",
+      "trigger_reason_role_map": {
+        "AUTHORITY_EXPIRED_REVOKED_OR_CURRENTNESS_FAILED": {
+          "reasons": [
+            "AUTHORITY_CURRENTNESS_FAILURE",
+            "AUTHORITY_EXPIRED",
+            "AUTHORITY_REVOKED"
+          ],
+          "roles": [
+            "SYSTEM_EXPIRY_OR_REVOCATION"
+          ]
+        },
+        "CREDENTIAL_LEASE_OR_COST_SCOPE_BREACH": {
+          "reasons": [
+            "COST_OR_RESOURCE_SCOPE_EXCEEDED",
+            "CREDENTIAL_LEASE_OR_SCOPE_BREACH"
+          ],
+          "roles": [
+            "SYSTEM_BOUNDARY"
+          ]
+        },
+        "EVIDENCE_WRITE_FAILURE_OR_SECRET_EXPOSURE": {
+          "reasons": [
+            "EVIDENCE_PERSIST_FAILURE",
+            "EVIDENCE_SINK_UNAVAILABLE",
+            "SECRET_EXPOSURE"
+          ],
+          "roles": [
+            "SYSTEM_BOUNDARY"
+          ]
+        },
+        "EXTRA_WIRE_ATTEMPT_OR_HIDDEN_RETRY": {
+          "reasons": [
+            "EXTRA_OR_UNKNOWN_WIRE_ATTEMPT"
+          ],
+          "roles": [
+            "SYSTEM_BOUNDARY"
+          ]
+        },
+        "FAULT_MISFIRE_MULTIPLE_TRIGGER_OR_CROSS_NAMESPACE_EFFECT": {
+          "reasons": [
+            "CROSS_NAMESPACE_EFFECT",
+            "FAULT_MISFIRE",
+            "MULTIPLE_FAULT_TRIGGER"
+          ],
+          "roles": [
+            "SYSTEM_BOUNDARY"
+          ]
+        },
+        "OUTPUT_PERMIT_CONDITION_OUTPUT_OR_OTHER_BOUNDARY_BREACH": {
+          "reasons": [
+            "BOUNDARY_BREACH",
+            "OUTPUT_OR_PERMIT_ATTEMPT"
+          ],
+          "roles": [
+            "SYSTEM_BOUNDARY"
+          ]
+        },
+        "OWNER_CUSTODIAN_OR_EMERGENCY_OPERATOR_STOP": {
+          "reasons": [
+            "OPERATOR_STOP"
+          ],
+          "roles": [
+            "CUSTODIAN",
+            "EMERGENCY_OPERATOR",
+            "OWNER"
+          ]
+        },
+        "PROFILE_CONFIGURATION_SCHEDULE_RUNNER_ADAPTER_ADAPTER_SET_ASSIGNMENT_OR_RESOURCE_DRIFT": {
+          "reasons": [
+            "BUILD_OR_PROFILE_DRIFT",
+            "CONFIGURATION_OR_SCHEDULE_DRIFT",
+            "RESOURCE_SCOPE_DRIFT"
+          ],
+          "roles": [
+            "SYSTEM_BOUNDARY"
+          ]
+        },
+        "UNKNOWN_PROVIDER_CALL_OR_UNCLOSED_AMBIGUITY": {
+          "reasons": [
+            "UNKNOWN_PROVIDER_CALL",
+            "UNRESOLVED_AMBIGUITY"
+          ],
+          "roles": [
+            "SYSTEM_BOUNDARY"
+          ]
+        },
+        "WITNESS_UNAVAILABLE_STALE_FORKED_CONFLICTING_OR_NOT_INDEPENDENT": {
+          "reasons": [
+            "WITNESS_CURRENTNESS_FAILURE"
+          ],
+          "roles": [
+            "SYSTEM_BOUNDARY"
+          ]
+        }
+      },
+      "triggers": [
+        "AUTHORITY_EXPIRED_REVOKED_OR_CURRENTNESS_FAILED",
+        "PROFILE_CONFIGURATION_SCHEDULE_RUNNER_ADAPTER_ADAPTER_SET_ASSIGNMENT_OR_RESOURCE_DRIFT",
+        "CREDENTIAL_LEASE_OR_COST_SCOPE_BREACH",
+        "EXTRA_WIRE_ATTEMPT_OR_HIDDEN_RETRY",
+        "FAULT_MISFIRE_MULTIPLE_TRIGGER_OR_CROSS_NAMESPACE_EFFECT",
+        "EVIDENCE_WRITE_FAILURE_OR_SECRET_EXPOSURE",
+        "WITNESS_UNAVAILABLE_STALE_FORKED_CONFLICTING_OR_NOT_INDEPENDENT",
+        "UNKNOWN_PROVIDER_CALL_OR_UNCLOSED_AMBIGUITY",
+        "OUTPUT_PERMIT_CONDITION_OUTPUT_OR_OTHER_BOUNDARY_BREACH",
+        "OWNER_CUSTODIAN_OR_EMERGENCY_OPERATOR_STOP"
+      ]
+    }
+  },
+  "status": "REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_V1_AUTHORITY_AND_ADAPTER_CONTRACT_PREREGISTERED_NO_PROVIDER_NO_CREDENTIAL_NO_PERMIT",
+  "stop_control_plane": {
+    "authority_rule": "INDEPENDENT_CURRENT_REDUCTIVE_ONLY_CAPABILITY_USABLE_BY_OWNER_CUSTODIAN_EMERGENCY_OPERATOR_OR_AN_ENUMERATED_AUTOMATIC_TRIGGER_EVEN_AFTER_EXECUTION_CAPABILITY_EXPIRY_REVOCATION_OR_FENCE",
+    "counted_in_experiment_adapter_count": false,
+    "failure_rule": "ANY_CONTROL_INTERFACE_FAILURE_ADDS_A_DURABLE_CONTROL_PLANE_FAILURE_ID_FENCES_EXECUTION_RETAINS_THE_ROW_PRESERVES_AVAILABLE_EVIDENCE_ENTERS_STOP_FAILED_QUARANTINED_AND_REQUIRES_MANUAL_ESCALATION_WITHOUT_EXPANDING_SCOPE",
+    "interface_count": 5,
+    "interfaces": [
+      {
+        "allowed_operations": [
+          "CAS_EXACT_RUN_CAPABILITY_TO_STOP_FENCED",
+          "BLOCK_NEW_CALLS_FOR_EXACT_RUN"
+        ],
+        "credential_class": "STOP_CAPABILITY_FENCE_CONTROL",
+        "forbidden_operations": [
+          "UNFENCE_OR_REAUTHORIZE_EXECUTION",
+          "CROSS_RUN_FENCE"
+        ],
+        "interface_id": "CAPABILITY_FENCE_CONTROL",
+        "receipt_fields": [
+          "CONTROL_LEDGER_REVISION",
+          "CAPABILITY_COMMITMENT_SHA256",
+          "FENCE_RECEIPT_SHA256"
+        ]
+      },
+      {
+        "allowed_operations": [
+          "DISARM_EXACT_ASSIGNED_CUT",
+          "ISOLATE_EXACT_ASSIGNED_RUN_EGRESS"
+        ],
+        "credential_class": "STOP_FAULT_DISARM_EGRESS_CONTROL",
+        "forbidden_operations": [
+          "ARM_OR_TRIGGER_FAULT",
+          "CROSS_NAMESPACE_CONTROL"
+        ],
+        "interface_id": "FAULT_DISARM_AND_EGRESS_ISOLATION_CONTROL",
+        "receipt_fields": [
+          "DISARM_RECEIPT_SHA256",
+          "EGRESS_ISOLATION_RECEIPT_SHA256"
+        ]
+      },
+      {
+        "allowed_operations": [
+          "REVOKE_EXACT_RUN_CREDENTIAL_LEASES",
+          "CONFIRM_ZERO_ACTIVE_LEASE_COMMITMENTS"
+        ],
+        "credential_class": "STOP_CREDENTIAL_REVOCATION_CONTROL",
+        "forbidden_operations": [
+          "ISSUE_OR_RENEW_CREDENTIAL",
+          "REVOKE_OUTSIDE_EXACT_RUN_SCOPE"
+        ],
+        "interface_id": "CREDENTIAL_BROKER_REVOCATION_CONTROL",
+        "receipt_fields": [
+          "REVOCATION_RECEIPT_SHA256",
+          "ACTIVE_LEASE_COMMITMENTS_AFTER_STOP"
+        ]
+      },
+      {
+        "allowed_operations": [
+          "PERSIST_CURRENT_ROW_DURABLE_STATE_AND_SAFE_EVIDENCE",
+          "CONFIRM_RETENTION_BINDINGS"
+        ],
+        "credential_class": "STOP_DURABLE_EVIDENCE_RETENTION_CONTROL",
+        "forbidden_operations": [
+          "DELETE_OR_RECLASSIFY_RETAINED_ROW",
+          "PERSIST_SECRET_MATERIAL"
+        ],
+        "interface_id": "DURABLE_EVIDENCE_RETENTION_CONTROL",
+        "receipt_fields": [
+          "CURRENT_RETAINED_ROW_SHA256",
+          "EVIDENCE_BUNDLE_SHA256",
+          "RETENTION_RECEIPT_SHA256"
+        ]
+      },
+      {
+        "allowed_operations": [
+          "FREEZE_EXACT_ASSIGNED_RESOURCES",
+          "REDUCTIVE_TEARDOWN_WITHIN_EXACT_CLEANUP_SCOPE"
+        ],
+        "credential_class": "STOP_SCOPED_RESOURCE_CLEANUP_CONTROL",
+        "forbidden_operations": [
+          "CREATE_OR_EXPAND_RESOURCE_SCOPE",
+          "DELETE_EVIDENCE_AUTHORITY_OR_RETAINED_ROW"
+        ],
+        "interface_id": "SCOPED_RESOURCE_CLEANUP_CONTROL",
+        "receipt_fields": [
+          "CLEANUP_CAPABILITY_COMMITMENT_SHA256",
+          "CLEANUP_STATUS",
+          "CLEANUP_COMPLETION_RECEIPT_SHA256"
+        ]
+      }
+    ],
+    "ordering_rule": "CAPABILITY_FENCE_AND_NEW_CALL_BLOCK_FIRST_THEN_ROW_AND_DURABLE_STATE_RETENTION_THEN_FAULT_DISARM_AND_EGRESS_ISOLATION_THEN_CREDENTIAL_REVOCATION_THEN_EVIDENCE_PERSIST_CONFIRMATION_THEN_SCOPED_REDUCTIVE_CLEANUP",
+    "shared_execution_credential_allowed": false,
+    "stop_receipt_integrity_rule": "STOP_ID_EQUALS_FRAMED_SHA256_OF_STOP_RECEIPT_ID_DOMAIN_UTF8_AND_AB_CANONICAL_JSON_V1_COMPLETE_STOP_RECEIPT_BYTES_WITH_STOP_ID_AND_SIGNATURE_RECEIPT_SHA256_OMITTED; SIGNATURE_RECEIPT_AND_RAW_SIGNATURE_BYTES_MUST_RESOLVE_AND_BE_ACTIVELY_VERIFIED_OVER_THE_EXACT_RAW_32_BYTE_STOP_ID_NOT_HEX_TEXT_WITH_EXACT_BINDINGS_TRIGGER_REASON_ROLE_REVOCATION_EPOCH_TIMESTAMPS_COMPONENT_RECEIPTS_AND_LIFECYCLE_STATE",
+    "timestamp_rule": "ALL_TIMESTAMPS_ARE_STRICT_RFC3339_UTC_SECONDS_CALENDAR_VALID; STOP_REQUESTED_AT_IS_TRUSTED_UTC; NONNULL_CLEANUP_COMPLETED_AT_AND_STOP_COMPLETED_AT_ARE_NOT_EARLIER_THAN_STOP_REQUESTED_AT; STOP_COMPLETED_AT_IS_NOT_EARLIER_THAN_CLEANUP_COMPLETED_AT"
+  },
+  "version": 1
+}
