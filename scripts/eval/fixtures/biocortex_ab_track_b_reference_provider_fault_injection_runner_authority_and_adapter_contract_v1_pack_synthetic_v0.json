@@ -1,0 +1,77 @@
+{
+  "audit_scope": {
+    "external_organization_state_observed": false,
+    "host_visibility_complete": false,
+    "network_observed": false,
+    "repository_scope": "CURRENT_PACKET_AND_FROZEN_PREDECESSOR_ARTIFACTS_ONLY",
+    "secret_values_inspected_or_recorded": false
+  },
+  "authority": {
+    "authority_bundles_bound": 0,
+    "cost_authority_receipts_bound": 0,
+    "credential_authority_receipts_bound": 0,
+    "custodian_scope_receipts_bound": 0,
+    "emergency_stop_authority_receipts_bound": 0,
+    "execution_capabilities_emitted": 0,
+    "owner_scope_receipts_bound": 0,
+    "phase": "UNBOUND_SYNTHETIC",
+    "resource_authority_receipts_bound": 0,
+    "row_currentness_receipts_bound": 0
+  },
+  "boundary": {
+    "adapter_implemented": false,
+    "condition_output_authorized": false,
+    "cost_authority_bound": false,
+    "credentials_accessed": false,
+    "execution_capability_emitted": false,
+    "experiment_executed": false,
+    "paid_resources_provisioned": false,
+    "production_adapter_in_scope": false,
+    "provider_called": false,
+    "receipt_is_execution_authority": false,
+    "receipt_is_output_permit": false,
+    "runner_implemented": false,
+    "side_effects_unlocked": "NONE",
+    "stop_capability_emitted": false
+  },
+  "inventory": {
+    "adapter_artifacts": [],
+    "credential_handles": [],
+    "endpoints": [],
+    "execution_runs": [],
+    "provider_profiles": [],
+    "resource_bindings": [],
+    "runtime_receipts": [],
+    "stop_receipts": []
+  },
+  "lineage": {
+    "baseline_commit": "b15a48d17fb30b0990bf26210978f2a4f78f54cc",
+    "offline_configuration_sha256": "fd993935d9847f2a75b665cc77d078946cf2c0bd2d24adbd43c2a50d1dbd6a85",
+    "offline_harness_manifest_sha256": "2e06aec1395957cd70ee86ab4af0452ca6c5da6a51112b4c21216bfd43e3a3ed",
+    "offline_rows_sha256": "e4458abb43b7de6d8fb40809e679393198b29c2303ba9824bae414455d6b305e",
+    "offline_schedule_sha256": "37e00bb606b09760d0280e240afbbc2585412c7080a5bf909a130edf305d70b3",
+    "predecessor_source_commit": "27fd73aa36ac897fb817398eca3a191181d8fb5d",
+    "preregistration_contract_sha256": "632dbf1d8202d94d6aef70d8b20c04050e647679da973d81afbe13d68344ad22"
+  },
+  "observation_class": "UNBOUND_SYNTHETIC_PACKET_AUDIT",
+  "observed_at_utc": "2026-07-15T20:00:00Z",
+  "planned_counts": {
+    "client_conformance_double_rows": 420,
+    "managed_cases": 16,
+    "managed_service_fault_proxy_rows": 210,
+    "planned_rows": 1020,
+    "self_hosted_adversarial_lab_rows": 390,
+    "self_hosted_cases": 18,
+    "tracks": 2
+  },
+  "runtime_counts": {
+    "application_calls": 0,
+    "evaluable_case_rows": 0,
+    "provider_evidence_rows": 0,
+    "provider_processing_events": 0,
+    "retained_rows": 0,
+    "runtime_rows": 0,
+    "wire_attempts": 0
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_contract_source_observation.v0"
+}
