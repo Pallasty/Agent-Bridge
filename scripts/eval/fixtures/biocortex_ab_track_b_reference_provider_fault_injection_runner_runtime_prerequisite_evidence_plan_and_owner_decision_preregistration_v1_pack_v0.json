@@ -1,0 +1,104 @@
+{
+  "boundary": {
+    "all_nonclaims_explicit": true,
+    "condition_output_authorized": false,
+    "credentials_accessed": false,
+    "deployment_authorized": false,
+    "evidence_items_present": 0,
+    "evidence_plan_preregistered": true,
+    "owner_decision_preregistered": true,
+    "owner_decision_recorded": false,
+    "output_permit_defined": false,
+    "positive_decision_representable": false,
+    "prerequisites_satisfied": 0,
+    "production_components_bound": 0,
+    "provider_called": false,
+    "receipt_is_evidence_receipt": false,
+    "receipt_is_execution_authority": false,
+    "receipt_is_output_permit": false,
+    "receipt_is_runtime_admission": false,
+    "runtime_admission_granted": false,
+    "runtime_admission_ready": false,
+    "runtime_authority": false,
+    "scientific_claim_authorized": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "date": "2026-07-16",
+  "decision": "RUNTIME_PREREQUISITE_EVIDENCE_PLAN_AND_OWNER_DECISION_PREREGISTERED_FAIL_CLOSED",
+  "evidence_sha256": {
+    "docs/reports/goal-c-u/2026-07-16-biocortex-track-b-reference-provider-fault-injection-runner-offline-integration-and-runtime-admission-boundary-review-v1-pack.md": "c860778ec8e968a69c77f13adea463697e4ff24b3a6359c47a078b629d247f32",
+    "docs/reports/goal-c-u/2026-07-16-biocortex-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-plan-and-owner-decision-preregistration-v1-pack.md": "cd58f282432a47a24df0cf2a5320c92b775b02570a44a678b2684246f486dbc1",
+    "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-offline-integration-and-runtime-admission-boundary-review-v1-pack.sh": "f363af5dbf58ee57c09a20c9f53549c07fcf57ebf167fb9495a993fb660ce96d",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_integration_and_runtime_admission_boundary_review_v1.py": "0c63a8111b0a1ceb4eabe6c3bbab99ff87872ef95f9d433060be643b20a952d6",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1.py": "e03b428797f9d2ea6235a7d4f730a11bd5aee9a07e6aa30fd965acac4dca0e18",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_integration_and_runtime_admission_boundary_review_v1_pack.py": "2c42418dbf81f0034c4095b92b9857111fcc9f496272068f2ee7766b57e46c67",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack.py": "047588e55b061663cd6915463503a28005a21166be0450e52105780a5b11cd16",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_integration_and_runtime_admission_boundary_review_v1_pack.expected.v0.tsv": "fcbf33046f9049451bc4d11228e47de4da98e2dc6655d16833e143ec3ccfacb7",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_integration_and_runtime_admission_boundary_review_v1_pack_synthetic_v0.json": "9104a4a3a41455d1293f7538a218d0454cb76cb423cfa7686931853f6a1dc756",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_integration_and_runtime_admission_boundary_review_v1_pack_v0.json": "8a107f72023fb419ebabd771a33172fa09c9eca5d4b1e574df494d8ce3f6fdb1",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack.expected.v0.tsv": "a0549882234f4d363714321a2e0d19ac9d78e76a4d34d49d94422e30c2d76ce7",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack_synthetic_v0.json": "156b9a0357f1d5773fdd39be25d832e1d9e2e1df0d766b1947bbcc9cee118db3"
+  },
+  "logical_baseline_commit": "c9c50917687c7715b031a6bfe8dd7801bfd737ee",
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_RUNTIME_PREREQUISITE_EVIDENCE_PACKET_SCHEMAS_AND_OFFLINE_VALIDATOR_DOUBLES",
+  "packet": {
+    "modes": {
+      "docs/reports/goal-c-u/2026-07-16-biocortex-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-plan-and-owner-decision-preregistration-v1-pack.md": "100644",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-plan-and-owner-decision-preregistration-v1-pack.sh": "100755",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1.py": "100644",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack.py": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack.expected.v0.tsv": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack_synthetic_v0.json": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack_v0.json": "100644"
+    },
+    "paths": [
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1.py",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack.py",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack_synthetic_v0.json",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack.expected.v0.tsv",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack_v0.json",
+      "docs/reports/goal-c-u/2026-07-16-biocortex-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-plan-and-owner-decision-preregistration-v1-pack.md",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-plan-and-owner-decision-preregistration-v1-pack.sh"
+    ]
+  },
+  "predecessor": {
+    "integration_commit": "c9c50917687c7715b031a6bfe8dd7801bfd737ee",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_integration_and_runtime_admission_boundary_review_v1_pack_v0.json",
+    "manifest_sha256": "8a107f72023fb419ebabd771a33172fa09c9eca5d4b1e574df494d8ce3f6fdb1",
+    "source_commit": "9a0f50ec378385be9ff0eda62a46666d04e04a97"
+  },
+  "results": {
+    "allowed_current_decision_count": 2,
+    "content_sha256": "68153ca604abd941c6b8874313db3e51c639ac6ab1195932a13985a23849aae9",
+    "distinct_evidence_class_count": 16,
+    "distinct_owner_class_count": 15,
+    "downstream_separate_gate_count": 4,
+    "downstream_separate_gates_sha256": "7bddf917ab9f16c01854d0b83032d22ede0b224b62faf15c7910f1e695f57b24",
+    "evidence_items_present": 0,
+    "evidence_prerequisite_count": 15,
+    "fail_closed_transition_count": 6,
+    "nonclaim_field_count": 31,
+    "nonclaims_sha256": "2c41cf3017e769a398d308491f32134543e518edc20ec870ebdba7389146a41a",
+    "owner_decision_preregistration_sha256": "fe35e633f6cd2448e322e254c55ee081cdd9b9c8f783cbd691b65550950384b1",
+    "owner_decision_prerequisite_count": 1,
+    "owner_decision_recorded": false,
+    "positive_decision_representable": false,
+    "prerequisite_evidence_plan_sha256": "260036232778e6d22f2050333b0daeab7d70153a15cb7f36526f47d1514a239b",
+    "prerequisite_plan_count": 16,
+    "prerequisites_satisfied": 0
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_plan_and_owner_decision_preregistration_v1_pack_manifest.v0",
+  "status": "REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_V1_RUNTIME_PREREQUISITE_EVIDENCE_PLAN_AND_OWNER_DECISION_PREREGISTERED_PENDING_NO_AUTHORITY",
+  "test_oracle": {
+    "directed_negative_tests": 434,
+    "downstream_separate_gates": 4,
+    "fail_closed_transitions": 6,
+    "nonclaim_fields": 31,
+    "prerequisite_plan_rows": 16,
+    "source_ast_purity": "PASS"
+  },
+  "tracks": {
+    "MANAGED_SPANNER_CLOUD_KMS": "EVIDENCE_PLAN_PREREGISTERED_RUNTIME_UNBOUND",
+    "SELF_HOSTED_ETCD_OPENBAO": "EVIDENCE_PLAN_PREREGISTERED_RUNTIME_UNBOUND"
+  }
+}
