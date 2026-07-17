@@ -1,0 +1,65 @@
+{
+  "adapter_ids": [
+    "SPANNER_AUTHORITY_ADAPTER",
+    "CLOUD_KMS_SIGNER_ADAPTER",
+    "MANAGED_FAULT_PROXY_ADAPTER",
+    "MANAGED_EVIDENCE_COLLECTOR_ADAPTER",
+    "ETCD_AUTHORITY_ADAPTER",
+    "OPENBAO_TRANSIT_ADAPTER",
+    "EXTERNAL_RESTORE_WITNESS_ADAPTER",
+    "LAB_FAULT_CONTROLLER_ADAPTER",
+    "SELF_HOSTED_EVIDENCE_COLLECTOR_ADAPTER"
+  ],
+  "authority_fixture_count": 9,
+  "boundary": {
+    "condition_output_authorized": false,
+    "credentials_accessed": false,
+    "experiment_rows": 0,
+    "live_endpoint_bound": false,
+    "output_permits": 0,
+    "paid_resources_provisioned": false,
+    "provider_called": false,
+    "receipt_is_execution_authority": false,
+    "receipt_is_output_permit": false,
+    "runtime_authority": false,
+    "runtime_rows": 0,
+    "side_effects_unlocked": "NONE",
+    "wire_attempts": 0
+  },
+  "control_evidence_kinds_per_fixture": [
+    "TRUSTED_TIME",
+    "ROW_CURRENTNESS"
+  ],
+  "date": "2026-07-16",
+  "private_capability_fixture": "DETERMINISTIC_32_BYTE_SHA256_TEST_DATA_NON_SERIALIZABLE_NO_CREDENTIAL_SEMANTICS",
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1.synthetic_configuration.v0",
+  "scope_authority_roles_per_fixture": [
+    "OWNER",
+    "CUSTODIAN",
+    "RESOURCE_CONTROLLER",
+    "COST_CONTROLLER",
+    "EMERGENCY_STOP_CONTROLLER"
+  ],
+  "signature_algorithm": "ED25519_REFERENCE_TEST_ONLY_NOT_PRODUCTION_KEY_HANDLING",
+  "stop_control_ids": [
+    "CAPABILITY_FENCE_CONTROL",
+    "FAULT_DISARM_AND_EGRESS_ISOLATION_CONTROL",
+    "CREDENTIAL_BROKER_REVOCATION_CONTROL",
+    "DURABLE_EVIDENCE_RETENTION_CONTROL",
+    "SCOPED_RESOURCE_CLEANUP_CONTROL"
+  ],
+  "stop_failure_injection_ids": [
+    "CAPABILITY_FENCE_CONTROL",
+    "FAULT_DISARM_AND_EGRESS_ISOLATION_CONTROL",
+    "CREDENTIAL_BROKER_REVOCATION_CONTROL",
+    "DURABLE_EVIDENCE_RETENTION_CONTROL",
+    "SCOPED_RESOURCE_CLEANUP_CONTROL"
+  ],
+  "timestamps": {
+    "checked_at_utc": "2026-07-16T20:00:00Z",
+    "expires_at_utc": "2026-07-16T21:00:00Z",
+    "issued_at_utc": "2026-07-16T19:00:00Z",
+    "not_before_utc": "2026-07-16T19:30:00Z",
+    "verified_at_utc": "2026-07-16T20:00:00Z"
+  }
+}
