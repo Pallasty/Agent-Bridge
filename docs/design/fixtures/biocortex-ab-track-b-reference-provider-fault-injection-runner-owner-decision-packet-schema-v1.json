@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_decision_packet.v1",
+  "title": "BioCortex Track B runtime owner-decision synthetic packet v1",
+  "description": "Closed-world synthetic-only owner-decision packet. This version can represent only pending or fail-closed rejection and deliberately has no positive runtime-admission state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "packet_kind",
+    "prerequisite_id",
+    "evidence_class",
+    "owner_class",
+    "predecessor_bindings",
+    "synthetic_provenance",
+    "evidence_set_binding",
+    "decision_state",
+    "decision_reason",
+    "owner_identity_bound",
+    "owner_identity_sha256",
+    "decision_recorded",
+    "decision_time_utc",
+    "delegated_agent_authority",
+    "positive_decision_representable",
+    "packet_id_sha256",
+    "boundary"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_decision_packet.v1"
+    },
+    "schema_version": { "const": 1 },
+    "packet_kind": { "const": "SYNTHETIC_OWNER_DECISION_VALIDATOR_DOUBLE" },
+    "prerequisite_id": { "const": "OWNER_RUNTIME_ADMISSION_DECISION_RECORDED" },
+    "evidence_class": { "const": "OWNER_DECISION_EVIDENCE" },
+    "owner_class": { "const": "OWNER" },
+    "predecessor_bindings": { "$ref": "#/$defs/predecessorBindings" },
+    "synthetic_provenance": { "$ref": "#/$defs/syntheticProvenance" },
+    "evidence_set_binding": { "$ref": "#/$defs/evidenceSetBinding" },
+    "decision_state": {
+      "enum": [
+        "PENDING_PREREQUISITE_EVIDENCE",
+        "REJECTED_FAIL_CLOSED"
+      ]
+    },
+    "decision_reason": {
+      "enum": [
+        "WAITING_FOR_ALL_EVIDENCE",
+        "EVIDENCE_VALIDATION_FAILED",
+        "EVIDENCE_FRESHNESS_FAILED",
+        "EVIDENCE_BINDING_FAILED",
+        "OWNER_DECISION_PENDING",
+        "POSITIVE_DECISION_NOT_REPRESENTABLE"
+      ]
+    },
+    "owner_identity_bound": { "const": false },
+    "owner_identity_sha256": { "const": "NONE" },
+    "decision_recorded": { "const": false },
+    "decision_time_utc": { "const": "NONE" },
+    "delegated_agent_authority": { "const": false },
+    "positive_decision_representable": { "const": false },
+    "packet_id_sha256": { "$ref": "#/$defs/sha256" },
+    "boundary": { "$ref": "#/$defs/boundary" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision_state": { "const": "PENDING_PREREQUISITE_EVIDENCE" }
+        },
+        "required": ["decision_state"]
+      },
+      "then": {
+        "properties": {
+          "evidence_set_binding": {
+            "$ref": "#/$defs/pendingEvidenceSetBinding"
+          },
+          "decision_reason": {
+            "enum": [
+              "WAITING_FOR_ALL_EVIDENCE",
+              "OWNER_DECISION_PENDING"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision_state": { "const": "REJECTED_FAIL_CLOSED" }
+        },
+        "required": ["decision_state"]
+      },
+      "then": {
+        "properties": {
+          "evidence_set_binding": {
+            "$ref": "#/$defs/rejectedEvidenceSetBinding"
+          },
+          "decision_reason": {
+            "enum": [
+              "EVIDENCE_VALIDATION_FAILED",
+              "EVIDENCE_FRESHNESS_FAILED",
+              "EVIDENCE_BINDING_FAILED",
+              "POSITIVE_DECISION_NOT_REPRESENTABLE"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "utcSecond": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+    },
+    "predecessorBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preregistration_manifest_sha256",
+        "prerequisite_plan_sha256",
+        "adapter_contract_sha256",
+        "authority_receipt_schema_sha256",
+        "stop_receipt_schema_sha256",
+        "s16_successor_gate_sha256"
+      ],
+      "properties": {
+        "preregistration_manifest_sha256": {
+          "const": "caf420dd4f4d2b310d80bd56ab287f6ef527256c0126a48106438f6a344e6498"
+        },
+        "prerequisite_plan_sha256": {
+          "const": "260036232778e6d22f2050333b0daeab7d70153a15cb7f36526f47d1514a239b"
+        },
+        "adapter_contract_sha256": {
+          "const": "d602d9f14f662145bd12f33304b2800bb9601ff4fd76634eb56c41b86aa17201"
+        },
+        "authority_receipt_schema_sha256": {
+          "const": "faea2234635441b0bc043b5d605a449decc61cc854e708f705f7bb09d58a7b90"
+        },
+        "stop_receipt_schema_sha256": {
+          "const": "7657cd25a9abf4037ce5eb4c403db36aebf4b43deb232886e62ff4afe9d45c36"
+        },
+        "s16_successor_gate_sha256": {
+          "const": "175b58589dbdb0c22310c41451271c822532945d85c25c8f268f5a9b2ac7f7c3"
+        }
+      }
+    },
+    "syntheticProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "fixture_sha256",
+        "generator_build_sha256",
+        "validator_build_sha256",
+        "fixed_checked_at_utc",
+        "real_collection_performed",
+        "owner_identity_observed",
+        "owner_signature_observed",
+        "secret_material_present"
+      ],
+      "properties": {
+        "origin": { "const": "SYNTHETIC_VALIDATOR_DOUBLE" },
+        "fixture_sha256": { "$ref": "#/$defs/sha256" },
+        "generator_build_sha256": { "$ref": "#/$defs/sha256" },
+        "validator_build_sha256": { "$ref": "#/$defs/sha256" },
+        "fixed_checked_at_utc": { "$ref": "#/$defs/utcSecond" },
+        "real_collection_performed": { "const": false },
+        "owner_identity_observed": { "const": false },
+        "owner_signature_observed": { "const": false },
+        "secret_material_present": { "const": false }
+      }
+    },
+    "evidenceSetBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_set_sha256",
+        "synthetic_schema_conformant_packet_count",
+        "runtime_validated_evidence_count",
+        "final_validation_state",
+        "final_validation_at_utc",
+        "same_evidence_hash_owner_window_proved"
+      ],
+      "properties": {
+        "evidence_set_sha256": {
+          "oneOf": [
+            { "const": "NONE" },
+            { "$ref": "#/$defs/sha256" }
+          ]
+        },
+        "synthetic_schema_conformant_packet_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "runtime_validated_evidence_count": { "const": 0 },
+        "final_validation_state": {
+          "enum": ["NOT_PERFORMED", "REJECTED_FAIL_CLOSED"]
+        },
+        "final_validation_at_utc": {
+          "oneOf": [
+            { "const": "NONE" },
+            { "$ref": "#/$defs/utcSecond" }
+          ]
+        },
+        "same_evidence_hash_owner_window_proved": { "const": false }
+      }
+    },
+    "pendingEvidenceSetBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_set_sha256",
+        "synthetic_schema_conformant_packet_count",
+        "runtime_validated_evidence_count",
+        "final_validation_state",
+        "final_validation_at_utc",
+        "same_evidence_hash_owner_window_proved"
+      ],
+      "properties": {
+        "evidence_set_sha256": { "const": "NONE" },
+        "synthetic_schema_conformant_packet_count": { "const": 15 },
+        "runtime_validated_evidence_count": { "const": 0 },
+        "final_validation_state": { "const": "NOT_PERFORMED" },
+        "final_validation_at_utc": { "const": "NONE" },
+        "same_evidence_hash_owner_window_proved": { "const": false }
+      }
+    },
+    "rejectedEvidenceSetBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_set_sha256",
+        "synthetic_schema_conformant_packet_count",
+        "runtime_validated_evidence_count",
+        "final_validation_state",
+        "final_validation_at_utc",
+        "same_evidence_hash_owner_window_proved"
+      ],
+      "properties": {
+        "evidence_set_sha256": { "const": "NONE" },
+        "synthetic_schema_conformant_packet_count": { "const": 15 },
+        "runtime_validated_evidence_count": { "const": 0 },
+        "final_validation_state": { "const": "REJECTED_FAIL_CLOSED" },
+        "final_validation_at_utc": { "$ref": "#/$defs/utcSecond" },
+        "same_evidence_hash_owner_window_proved": { "const": false }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "real_evidence_collected",
+        "evidence_receipt_accepted",
+        "owner_decision_recorded",
+        "positive_runtime_decision_recorded",
+        "runtime_prerequisite_satisfied",
+        "runtime_admission_ready",
+        "runtime_admission_granted",
+        "runtime_authority",
+        "deployment_authorized",
+        "condition_output_authorized",
+        "output_permit_defined",
+        "scientific_claim_authorized",
+        "application_claim_authorized",
+        "provider_called",
+        "wire_attempted",
+        "credentials_accessed",
+        "paid_resources_provisioned",
+        "runtime_rows_created",
+        "experiment_rows_created",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "real_evidence_collected": { "const": false },
+        "evidence_receipt_accepted": { "const": false },
+        "owner_decision_recorded": { "const": false },
+        "positive_runtime_decision_recorded": { "const": false },
+        "runtime_prerequisite_satisfied": { "const": false },
+        "runtime_admission_ready": { "const": false },
+        "runtime_admission_granted": { "const": false },
+        "runtime_authority": { "const": false },
+        "deployment_authorized": { "const": false },
+        "condition_output_authorized": { "const": false },
+        "output_permit_defined": { "const": false },
+        "scientific_claim_authorized": { "const": false },
+        "application_claim_authorized": { "const": false },
+        "provider_called": { "const": false },
+        "wire_attempted": { "const": false },
+        "credentials_accessed": { "const": false },
+        "paid_resources_provisioned": { "const": 0 },
+        "runtime_rows_created": { "const": 0 },
+        "experiment_rows_created": { "const": 0 },
+        "side_effects_unlocked": { "const": "NONE" }
+      }
+    }
+  }
+}
