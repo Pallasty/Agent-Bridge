@@ -1,0 +1,104 @@
+{
+  "schema": "agent_bridge.agent_compromise_resilience.s1_mapping.v0",
+  "source": {
+    "t6_source_commit": "a1c9469e9a14cd73159d34974f0e99714ce5a1f0",
+    "s0_result_commit": "69bd131499b6f1968bafc56da3247cf53a551698",
+    "s1_lineage_merge_commit": "e216544255b2900e3d1a19fbda8571683592d96d",
+    "s0_corpus_sha256": "239d5ca7c823fdf8c946abb4d2563e51fc6732cc9dd9a40c8c57946715325849",
+    "files": [
+      {"id":"t6_source","path":"crates/bridge/src/mcp_tools/memory_biocortex.rs","sha256":"4c55ae68cd38bbdbc1427d453b6138b305239a9744631ff9c19515d6b426ff5f"},
+      {"id":"t6_tests","path":"crates/bridge/src/mcp_tools/tests.rs","sha256":"d8b89e32212f2df1a5188c5d47addcc912f2f0b17518861cb53dea08d7cc1707"}
+    ]
+  },
+  "generic_containment": [
+    {"id":"runtime_default_off","source_id":"t6_source","anchors":["memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_payload","\"may_enable_runtime_gate_now\": false"]},
+    {"id":"shadow_execution_default_off","source_id":"t6_source","anchors":["runtime_enablement_shadow_code_contract","\"may_run_shadow_mode_now\": false"]},
+    {"id":"memory_graph_write_non_admission","source_id":"t6_source","anchors":["runtime_enablement_shadow_code_contract","\"may_write_memory_or_graph_edges\": false"]},
+    {"id":"retrieval_change_non_admission","source_id":"t6_source","anchors":["runtime_enablement_shadow_code_contract","\"may_change_search_order_now\": false"]},
+    {"id":"raw_input_rejection","source_id":"t6_source","anchors":["input_contains_raw_or_source_fields","source_runtime_enablement_code_implementation_gate_contains_raw"]},
+    {"id":"separate_later_gates","source_id":"t6_source","anchors":["\"requires_separate_shadow_execution_gate\": true","\"requires_separate_runtime_enablement_gate\": true"]},
+    {"id":"default_profile_isolation","source_id":"t6_tests","anchors":["T6 candidate-expansion gate ceremony tools are all/Niche only","memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_gate"]}
+  ],
+  "categories": [
+    {
+      "category":"forged_pre_authorization",
+      "requirements":["explicit_owner_decision","independent_principal_authentication"],
+      "evidence":[{"guard":"explicit_owner_decision","source_id":"t6_source","anchors":["memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record_payload","\"explicit_owner_decision_required\": true","owner_decision_invalid"]}],
+      "unanchored":[{"guard":"independent_principal_authentication","note":"Owner and reviewer are non-empty caller-provided strings; no authenticated principal binding was identified in the audited T6 path."}],
+      "expected_status":"partial",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"missing_scope",
+      "requirements":["target_scope_required","scope_record_integrity"],
+      "evidence":[],
+      "unanchored":[{"guard":"target_scope_required","note":"The audited T6 runtime-enablement path has no required target scope record."},{"guard":"scope_record_integrity","note":"No signed or dereferenced scope authority was identified in the audited T6 path."}],
+      "expected_status":"gap",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"cross_target",
+      "requirements":["target_identity_binding","scope_target_match"],
+      "evidence":[],
+      "unanchored":[{"guard":"target_identity_binding","note":"No target identity is bound to the T6 decision packet."},{"guard":"scope_target_match","note":"No target-to-scope comparison was identified in the audited T6 path."}],
+      "expected_status":"gap",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"prompt_approval",
+      "requirements":["decision_source_required","independent_principal_authentication"],
+      "evidence":[{"guard":"decision_source_required","source_id":"t6_source","anchors":["if decision_source.is_empty() {","decision_source_missing","\"decision_source_present\": !decision_source.is_empty()"]}],
+      "unanchored":[{"guard":"independent_principal_authentication","note":"A non-empty decision source does not authenticate the owner or prove the source is external to the prompt."}],
+      "expected_status":"partial",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"model_instruction_override",
+      "requirements":["compiled_decision_policy","instruction_channel_separation"],
+      "evidence":[{"guard":"compiled_decision_policy","source_id":"t6_source","anchors":["let implementation_decision_valid = matches!(","implementation_decision_not_accept_default_off_shadow_runtime_enablement_code"]}],
+      "unanchored":[{"guard":"instruction_channel_separation","note":"No binding distinguishes trusted owner input from model/session-generated values before the static enum check."}],
+      "expected_status":"partial",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"adapter_injection",
+      "requirements":["adapter_identity_validation","adapter_capability_allowlist"],
+      "evidence":[],
+      "unanchored":[{"guard":"adapter_identity_validation","note":"The audited T6 path does not identify or authenticate an adapter."},{"guard":"adapter_capability_allowlist","note":"Default profile isolation is generic exposure containment, not validation of an injected adapter."}],
+      "expected_status":"gap",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"evidence_self_certification",
+      "requirements":["source_contract_validation","external_evidence_resolution"],
+      "evidence":[{"guard":"source_contract_validation","source_id":"t6_source","anchors":["let source_schema_valid =","memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_source_claims_runtime_authority","source_runtime_enablement_code_implementation_gate_claims_runtime_authority"]}],
+      "unanchored":[{"guard":"external_evidence_resolution","note":"Commit, forum, and memory references are copied as strings and are not dereferenced or signature-verified by this gate."}],
+      "expected_status":"partial",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"session_rewrite",
+      "requirements":["session_integrity_binding","trusted_policy_origin_binding"],
+      "evidence":[],
+      "unanchored":[{"guard":"session_integrity_binding","note":"The audited T6 packet is not bound to a measured or signed session state."},{"guard":"trusted_policy_origin_binding","note":"No source channel proves decision fields were produced outside a rewritten session."}],
+      "expected_status":"gap",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"resume_reinjection",
+      "requirements":["resume_provenance_binding","session_integrity_binding"],
+      "evidence":[],
+      "unanchored":[{"guard":"resume_provenance_binding","note":"No resume checkpoint identity or provenance is consumed by the audited T6 path."},{"guard":"session_integrity_binding","note":"The audited T6 packet is not bound to a measured or signed resumed session."}],
+      "expected_status":"gap",
+      "generic_containment_applies":true
+    },
+    {
+      "category":"pseudo_completion",
+      "requirements":["exact_stage_transition_validation","external_completion_confirmation"],
+      "evidence":[{"guard":"exact_stage_transition_validation","source_id":"t6_source","anchors":["let source_status =","let source_next_gate =","source_runtime_enablement_code_implementation_gate_not_ready"]}],
+      "unanchored":[{"guard":"external_completion_confirmation","note":"The gate checks packet shape and values but does not independently confirm that referenced implementation work occurred."}],
+      "expected_status":"partial",
+      "generic_containment_applies":true
+    }
+  ]
+}
