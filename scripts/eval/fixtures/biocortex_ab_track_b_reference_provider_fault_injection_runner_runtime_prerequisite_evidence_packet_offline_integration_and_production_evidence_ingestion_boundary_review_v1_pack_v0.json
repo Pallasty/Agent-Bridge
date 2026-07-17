@@ -1,0 +1,109 @@
+{
+  "boundary": {
+    "all_nonclaims_explicit": true,
+    "downstream_gates_authorized": 0,
+    "implementation_authority_recorded": false,
+    "owner_decision_recorded": false,
+    "owner_handoff_eligible": false,
+    "owner_handoff_set_sha256": "NONE",
+    "owner_identity_bound": false,
+    "positive_decision_representable": false,
+    "production_evidence_ingestion_implemented": false,
+    "production_ingestion_controls_implemented": 0,
+    "production_review_subject_set_sha256": "NONE",
+    "production_validated_evidence_items": 0,
+    "real_currentness_proved": false,
+    "real_evidence_items_present": 0,
+    "runtime_admission_granted": false,
+    "runtime_admission_ready": false,
+    "runtime_authority": false,
+    "runtime_evidence_accepted": 0,
+    "runtime_prerequisites_satisfied": 0,
+    "side_effects_unlocked": "NONE",
+    "synthetic_fixture_is_production_evidence": false
+  },
+  "date": "2026-07-17",
+  "decision": "OFFLINE_AGGREGATE_CONFORMANT_PRODUCTION_EVIDENCE_INGESTION_BOUNDARY_FROZEN_RUNTIME_EVIDENCE_ZERO_FAIL_CLOSED",
+  "evidence_sha256": {
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1.py": "a2fa9559b43413e1c729d58b89f1ec951c6722ab142f0a3be4f7c6cdd98d9530",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack.py": "4fac8a588980811e12f4b324c31a9f42d70f683051555560924932c235eb1c45",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack.expected.v0.tsv": "70fbf15cc210fb365b5377642c49d91fa00a2a049affeeec595ef76dd1bf3234",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_synthetic_v0.json": "3aee2bc2f27290e9a57789d434f4373609b720f7ee1d963871fd99a613f55ff6"
+  },
+  "logical_baseline_commit": "3d03193b645ded944b10a310633be8d6a2c1ab1b",
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_PRODUCTION_EVIDENCE_INGESTION_IMPLEMENTATION_AUTHORITY_AND_RESOURCE_BINDING_DECISION",
+  "packet": {
+    "modes": {
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-packet-offline-integration-and-production-evidence-ingestion-boundary-review-v1-pack.md": "100644",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-packet-offline-integration-and-production-evidence-ingestion-boundary-review-v1-pack.sh": "100755",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1.py": "100644",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack.py": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack.expected.v0.tsv": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_synthetic_v0.json": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_v0.json": "100644"
+    },
+    "paths": [
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1.py",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack.py",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_synthetic_v0.json",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack.expected.v0.tsv",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_v0.json",
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-packet-offline-integration-and-production-evidence-ingestion-boundary-review-v1-pack.md",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-packet-offline-integration-and-production-evidence-ingestion-boundary-review-v1-pack.sh"
+    ]
+  },
+  "predecessor": {
+    "gate_path": "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-packet-schemas-and-offline-validator-doubles-v1-pack.sh",
+    "gate_sha256": "df47afdefdf04bf6e82f29a7b867543edfb511d3d124a095a2e998eb8c72cbe0",
+    "integration_commit": "3d03193b645ded944b10a310633be8d6a2c1ab1b",
+    "integration_first_parent": "d7f3e206169227905dbd320f1876de46e3facfea",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_schemas_and_offline_validator_doubles_v1_pack_v0.json",
+    "manifest_sha256": "c5d448a121b58549a62e20ec7b241386ad73c9685ae9a981223a591555e2bd47",
+    "receipt_content_sha256": "c6ea1a4872acacf1faff3695598d66e1cb0096f6574239199128225dab80e3c4",
+    "source_commit": "151c3294c92e79759401cf86e8f36263bbf17ade",
+    "source_parent": "8af4af0e5ceea8062b65ac06870cabf789567053"
+  },
+  "results": {
+    "aggregate_case_result_count": 16,
+    "aggregate_request_id_sha256": "9a812f63f8b6fe4dd1b7a9e67e037b798e1da46e7be65377774e12d5ec6a2b45",
+    "case_results_sha256": "8852dc9a04a828e7756f73e8f65c7c39ef72ed2c046f2a8c0b8cdd27e598df58",
+    "content_sha256": "7d48eb96d1a87894698d396efba848f90da8076cc3271bd9ac8c5250b0c722fa",
+    "dependency_topology_conformant": true,
+    "downstream_separate_gate_count": 4,
+    "evidence_packet_count": 15,
+    "freshness_arithmetic_conformant_count": 15,
+    "freshness_requirement_count": 8,
+    "nonclaim_field_count": 52,
+    "nonclaims_sha256": "6123bcbfdba739acd61ea264c625b9f2545081701774a8c8b3b3a6f7b08f5b4a",
+    "offline_double_conformant_count": 16,
+    "owner_handoff_requirement_count": 10,
+    "owner_packet_count": 1,
+    "production_ingestion_control_count": 14,
+    "production_ingestion_controls_implemented": 0,
+    "production_validated_evidence_items": 0,
+    "real_evidence_items_present": 0,
+    "runtime_prerequisites_satisfied": 0,
+    "synthetic_packet_set_sha256": "56e9343e7e31e8a80d1a56f7ab34fc11e15412d97620c031a06f740ae29ea460",
+    "threat_case_count": 20,
+    "track_separation_conformant": true,
+    "tracks_represented": 2,
+    "trust_domain_count": 5,
+    "valid_owner_state_reason_combination_count": 6
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_manifest.v0",
+  "status": "REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_V1_RUNTIME_PREREQUISITE_EVIDENCE_PACKET_OFFLINE_AGGREGATE_INTEGRATED_PRODUCTION_INGESTION_BOUNDARY_REVIEWED_RUNTIME_EVIDENCE_ZERO_NO_AUTHORITY",
+  "test_oracle": {
+    "aggregate_semantic_negative_tests": 36,
+    "directed_negative_tests": 253,
+    "fixture_semantic_negative_tests": 147,
+    "json_guard_negative_tests": 4,
+    "predecessor_public_validator_calls": 16,
+    "receipt_semantic_negative_tests": 66,
+    "source_ast_purity": "PASS",
+    "valid_owner_state_reason_combinations": 6
+  },
+  "tracks": {
+    "MANAGED_SPANNER_CLOUD_KMS": "OFFLINE_AGGREGATE_CONFORMANT_PRODUCTION_INGESTION_UNIMPLEMENTED_RUNTIME_UNBOUND",
+    "SELF_HOSTED_ETCD_OPENBAO": "OFFLINE_AGGREGATE_CONFORMANT_PRODUCTION_INGESTION_UNIMPLEMENTED_RUNTIME_UNBOUND"
+  }
+}
