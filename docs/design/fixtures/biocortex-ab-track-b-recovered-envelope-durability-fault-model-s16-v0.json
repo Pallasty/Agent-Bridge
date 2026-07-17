@@ -1,0 +1,1220 @@
+{
+  "boundary": {
+    "bridge_or_state_store_caller": false,
+    "currentness_or_admission_issued": false,
+    "external_durability_observation_count": 0,
+    "filesystem_network_database_or_provider_wiring": false,
+    "modeled_durable_state_is_external_durability_evidence": false,
+    "modeled_witness_is_independently_operated": false,
+    "owned_lab_durability_observation_count": 0,
+    "owner_authorized_object_selection_available": false,
+    "production_or_provider_concrete_runtime_transport_present": false,
+    "provider_durability_observation_count": 0,
+    "s15_adapter_logic_and_s14_verifier_unchanged": true,
+    "side_effects_unlocked": "NONE",
+    "test_only_synthetic_transport_present": true
+  },
+  "catalog": {
+    "catalog_commitment_is_derived_not_trusted_input": true,
+    "catalog_frame_count": 5644,
+    "catalog_frame_order": [
+      "catalog_domain",
+      "policy",
+      "profile",
+      "s15_contract_sha256_raw",
+      "row_count_u64be",
+      "ordered_row_commitment_sha256_raw_repeated"
+    ],
+    "duplicate_case_variant_or_commitment_allowed": false,
+    "family_counts": {
+      "D00_CLEAN_COMMITTED_HEAD": 1,
+      "D01_TORN_OR_PARTIAL_OBJECT": 5493,
+      "D02_ACK_BEFORE_DURABLE_COMMIT": 4,
+      "D03_DURABLE_HEAD_ACK_LOST": 1,
+      "D04_PUBLISH_CRASH_RESTART_CUTS": 6,
+      "D05_S15_READ_CRASH_RESTART_CUTS": 106,
+      "D06_OBJECT_PRESENT_RECEIPT_ABSENT": 1,
+      "D07_RECEIPT_PRESENT_OBJECT_ABSENT": 1,
+      "D08_RECEIPT_OBJECT_BINDING_MISMATCH": 5,
+      "D09_OLD_GENERATION_SNAPSHOT": 1,
+      "D10_SAME_GENERATION_LOWER_REVISION": 1,
+      "D11_SAME_REVISION_EQUIVOCATION": 2,
+      "D12_SELECTED_STALE_REPLICA": 1,
+      "D13_DIVERGENT_AUTHORITATIVE_VIEWS": 3,
+      "D14_WITNESS_FAILURES": 4,
+      "D15_POST_PERSISTENCE_CORRUPTION": 9
+    },
+    "ordering": "ASCII_CASE_ID_THEN_NUMERIC_VARIANT_INDEX",
+    "row_count": 5639,
+    "row_frame_count": 35,
+    "row_key": [
+      "case_id",
+      "variant_index"
+    ]
+  },
+  "decision": "BLOCKED_FAIL_CLOSED",
+  "dependency": {
+    "feature": "temporal-evidence-s16-recovered-envelope-durability-fault-model-synthetic",
+    "feature_default_enabled": false,
+    "frozen_s15_contract_sha256": "07d7ae5e7345bb5052aa130349af2e90bae853e5c74560346a4178b2b0397cc7",
+    "frozen_s15_integration_commit": "80fdb9b5d5f4be5f9663f30cd686cd5fb6bdfd35",
+    "frozen_s15_source_commit": "413ac9e94e457d31ae297647c2110768e05acc15",
+    "frozen_s15_source_sha256": "be722ae5d61cf2d120c9d30685ab90d453c2e713ca08edfc0754621e8dabee3a",
+    "only_allowed_s15_source_seam": "CFG_FEATURE_GATED_PRIVATE_CHILD_MODULE_DECLARATION",
+    "requires_feature": "temporal-evidence-s15-recovered-envelope-bounded-runtime-adapter-synthetic",
+    "s15_test_fixture_seam_allowed": false
+  },
+  "encoding": {
+    "absent_kinds": [
+      "OBJECT",
+      "RECEIPT",
+      "WITNESS",
+      "REPLICA_VIEW"
+    ],
+    "absent_sentinel": "SHA256_FRAME_ABSENT_DOMAIN_THEN_KIND_ASCII",
+    "canonicalization": "EXACT_ORDERED_U64BE_LENGTH_PREFIXED_BYTE_FRAMES",
+    "digest_field_encoding": "RAW_32_BYTES",
+    "domains": {
+      "absent": "agent-bridge/track-b/recovered-envelope-durability-fault-model/absent/v1",
+      "catalog": "agent-bridge/track-b/recovered-envelope-durability-fault-model/catalog/v1",
+      "receipt": "agent-bridge/track-b/recovered-envelope-durability-fault-model/receipt/v1",
+      "replica_view": "agent-bridge/track-b/recovered-envelope-durability-fault-model/replica-view/v1",
+      "row": "agent-bridge/track-b/recovered-envelope-durability-fault-model/row/v1",
+      "witness": "agent-bridge/track-b/recovered-envelope-durability-fault-model/witness/v1"
+    },
+    "empty_or_default_frame_allowed": false,
+    "frame": "U64BE_BYTE_LENGTH_THEN_EXACT_BYTES",
+    "receipt_frame_order": [
+      "receipt_domain",
+      "policy",
+      "profile",
+      "receipt_schema",
+      "s15_contract_sha256_raw",
+      "lookup_commitment_sha256_raw",
+      "source_incarnation_raw",
+      "source_generation_id_raw",
+      "object_id_raw",
+      "object_revision_u64be",
+      "record_len_u64be",
+      "record_sha256_raw",
+      "publish_sequence_u64be",
+      "previous_receipt_sha256_raw"
+    ],
+    "replica_view_frame_order": [
+      "replica_view_domain",
+      "policy",
+      "profile",
+      "replica_view_schema",
+      "s15_contract_sha256_raw",
+      "lookup_commitment_sha256_raw",
+      "replica_id_raw",
+      "authority_ascii",
+      "source_incarnation_raw",
+      "source_generation_id_raw",
+      "object_id_raw",
+      "object_revision_u64be",
+      "record_len_u64be",
+      "record_sha256_raw",
+      "receipt_sha256_raw"
+    ],
+    "row_frame_order": [
+      "row_domain",
+      "policy",
+      "profile",
+      "row_schema",
+      "s15_contract_sha256_raw",
+      "lookup_commitment_sha256_raw",
+      "case_id_ascii",
+      "variant_id_ascii",
+      "variant_index_u64be",
+      "evidence_origin_ascii",
+      "publisher_phase_ascii",
+      "object_persistence_ascii",
+      "object_len_u64be",
+      "observed_object_sha256_raw",
+      "receipt_state_ascii",
+      "computed_receipt_sha256_raw",
+      "stored_receipt_sha256_raw",
+      "witness_state_ascii",
+      "computed_witness_sha256_raw",
+      "stored_witness_sha256_raw",
+      "selected_view_sha256_raw",
+      "competing_view_sha256_or_absent_raw",
+      "ack_state_ascii",
+      "crash_cut_ascii",
+      "crash_cut_index_u64be",
+      "adapter_pre_state_ascii",
+      "adapter_post_state_ascii",
+      "disposition_ascii",
+      "reason_ascii",
+      "s15_execution_result_ascii",
+      "mapped_s15_failure_ascii",
+      "external_durability_observation_count_u64be",
+      "provider_durability_observation_count_u64be",
+      "owned_lab_durability_observation_count_u64be",
+      "side_effects_unlocked_ascii"
+    ],
+    "schemas": {
+      "receipt": "agent-bridge/track-b/recovered-envelope-durability-receipt/v1",
+      "replica_view": "agent-bridge/track-b/recovered-envelope-replica-view/v1",
+      "row": "agent-bridge/track-b/recovered-envelope-durability-fault-row/v1",
+      "witness": "agent-bridge/track-b/recovered-envelope-durability-witness/v1"
+    },
+    "stored_receipt_digest_is_outside_receipt_message": true,
+    "stored_witness_digest_is_outside_witness_message": true,
+    "string_field_encoding": "UPPERCASE_ASCII_FOR_ENUMS_EXACT_ASCII_FOR_IDENTIFIERS",
+    "u64_field_encoding": "RAW_8_BYTE_BIG_ENDIAN",
+    "unknown_frame_or_enum_is_fail_closed": true,
+    "witness_frame_order": [
+      "witness_domain",
+      "policy",
+      "profile",
+      "witness_schema",
+      "s15_contract_sha256_raw",
+      "witness_scope_id_raw",
+      "witness_incarnation_raw",
+      "witness_generation_id_raw",
+      "witness_sequence_u64be",
+      "lookup_commitment_sha256_raw",
+      "source_incarnation_raw",
+      "source_generation_id_raw",
+      "object_id_raw",
+      "object_revision_u64be",
+      "record_sha256_raw",
+      "receipt_sha256_raw",
+      "previous_witness_sha256_raw"
+    ]
+  },
+  "evaluator": {
+    "catalog_builder_sets_outcome_fields": false,
+    "precedence": [
+      "REJECT_UNKNOWN_SCHEMA_ENUM_FRAME_ROW_SHAPE_OR_LIFECYCLE_TUPLE_AS_INDETERMINATE",
+      "REJECT_NONZERO_EXTERNAL_PROVIDER_OR_OWNED_LAB_COUNT_OR_NON_NONE_SIDE_EFFECT",
+      "IF_SELECTED_AND_COMPETING_VIEWS_BOTH_CLAIM_AUTHORITY_SAME_GENERATION_AND_REVISION_DIVERGENCE_IS_EQUIVOCATION_OTHER_DIVERGENCE_IS_SPLIT_BRAIN",
+      "ACK_BEFORE_WITNESS_COMMIT_IS_AMBIGUOUS_INDETERMINATE",
+      "RECEIPT_PRESENT_WITH_OBJECT_ABSENT_IS_INTEGRITY_CONFLICT",
+      "OBJECT_ABSENT_OR_PARTIAL_IS_CLASSIFIED_FROM_RAW_PERSISTENCE_BYTES_AND_LIFECYCLE_WITHOUT_S15_OPEN",
+      "COMPUTED_VERSUS_STORED_RECEIPT_OR_WITNESS_HASH_MISMATCH_IS_MALFORMED_UNLESS_WITNESS_FORK_IS_WELL_FORMED",
+      "RECEIPT_TO_OBJECT_LOOKUP_INCARNATION_ID_OR_CHAIN_BINDING_MISMATCH_IS_CONFLICT_BEFORE_ROLLBACK",
+      "MISSING_WITNESS_IS_PENDING_AND_UNAVAILABLE_WITNESS_IS_UNAVAILABLE",
+      "ONLY_EXACT_CANONICAL_WITNESS_HEAD_AND_RECEIPT_BOUND_SELECTED_VIEW_CAN_PROVE_OLD_GENERATION_OR_LOWER_REVISION_ROLLBACK_WITHOUT_GENERATION_ORDERING",
+      "NON_AUTHORITATIVE_STALE_SELECTED_VIEW_IS_STALE_WITHOUT_REPLICA_SWITCH",
+      "ONLY_EXACT_OBJECT_RECEIPT_WITNESS_AND_SELECTED_VIEW_CAN_STREAM_TO_S15",
+      "ANY_UNCLASSIFIED_COMBINATION_IS_INDETERMINATE"
+    ],
+    "pre_open_failure_never_invokes_s15": true,
+    "raw_durable_lifecycle_pair_is_exactly_validated": true,
+    "raw_evaluator_is_single": true,
+    "raw_input_contains_outcome_fields": false,
+    "raw_lifecycle_tuple_is_exactly_validated": true,
+    "receipt_or_view_metadata_can_replace_frozen_lookup": false,
+    "replica_switch_latest_list_range_retry_cache_or_repair_allowed": false,
+    "unknown_combination_disposition": "MODEL_AMBIGUOUS_QUARANTINED",
+    "unknown_combination_mapped_s15_failure": "INDETERMINATE"
+  },
+  "execution_boundary": {
+    "d05_modeled_cut_position_count": 53,
+    "d05_modeled_row_count": 106,
+    "d05_model_only_cut_position_count": 3,
+    "d05_model_only_cuts": [
+      "BEFORE_OPEN",
+      "AFTER_COMPLETE_BEFORE_S14",
+      "AFTER_HISTORICAL"
+    ],
+    "d05_model_only_row_count": 6,
+    "d05_test_only_fresh_instance_reread_count": 50,
+    "d05_test_only_injected_failure_attempt_count": 50,
+    "external_durable_restart_execution_count": 0,
+    "os_process_crash_execution_count": 0,
+    "test_only_transport_is_external_durability_evidence": false
+  },
+  "fault_families": [
+    {
+      "case_id": "D00_CLEAN_COMMITTED_HEAD",
+      "disposition": "MODEL_EXACT_HISTORICAL_READ_ELIGIBLE",
+      "mapped_s15_failure": "NONE",
+      "reason": "EXACT_MODELED_HEAD",
+      "row_count": 1,
+      "s15_execution_result": "STREAM_EXACT",
+      "state_recipe": "DURABLE_TRIPLE_ACKED",
+      "variants": [
+        "CLEAN"
+      ]
+    },
+    {
+      "case_id": "D01_TORN_OR_PARTIAL_OBJECT",
+      "disposition": "MODEL_INCOMPLETE_FAIL_CLOSED",
+      "mapped_s15_failure": "MALFORMED",
+      "reason": "PARTIAL_OBJECT_NOT_COMMITTED",
+      "row_count": 5493,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "OBJECT_PREFIX_ONLY",
+      "variant_generator": {
+        "end_inclusive": 5493,
+        "format": "PREFIX_CUT_%04d",
+        "object_prefix_len_equals_variant_number": true,
+        "start_inclusive": 1,
+        "variant_index": "PREFIX_LENGTH_MINUS_ONE"
+      }
+    },
+    {
+      "case_id": "D02_ACK_BEFORE_DURABLE_COMMIT",
+      "disposition": "MODEL_AMBIGUOUS_QUARANTINED",
+      "mapped_s15_failure": "INDETERMINATE",
+      "reason": "ACK_OUTRAN_MODELED_DURABILITY",
+      "row_count": 4,
+      "s15_execution_result": "NOT_INVOKED",
+      "variant_index": "LIST_POSITION_FROM_ZERO",
+      "variants": [
+        {
+          "state_recipe": "EMPTY_ACK_OBSERVED",
+          "variant_id": "ACK_AT_EMPTY"
+        },
+        {
+          "prefix_len": 2747,
+          "state_recipe": "OBJECT_PREFIX_ACK_OBSERVED",
+          "variant_id": "ACK_AT_OBJECT_PARTIAL"
+        },
+        {
+          "state_recipe": "OBJECT_ONLY_ACK_OBSERVED",
+          "variant_id": "ACK_AT_OBJECT_COMMITTED"
+        },
+        {
+          "state_recipe": "OBJECT_AND_RECEIPT_ACK_OBSERVED",
+          "variant_id": "ACK_AT_RECEIPT_COMMITTED"
+        }
+      ]
+    },
+    {
+      "case_id": "D03_DURABLE_HEAD_ACK_LOST",
+      "disposition": "MODEL_EXACT_HISTORICAL_READ_ELIGIBLE",
+      "mapped_s15_failure": "NONE",
+      "reason": "MODELED_DURABLE_TRIPLE_ACK_LOST",
+      "row_count": 1,
+      "s15_execution_result": "STREAM_EXACT",
+      "state_recipe": "DURABLE_TRIPLE_ACK_NOT_OBSERVED",
+      "variants": [
+        "ACK_NOT_OBSERVED_AFTER_WITNESS"
+      ]
+    },
+    {
+      "case_id": "D04_PUBLISH_CRASH_RESTART_CUTS",
+      "row_count": 6,
+      "variant_index": "LIST_POSITION_FROM_ZERO",
+      "variants": [
+        {
+          "crash_cut": "NONE",
+          "disposition": "MODEL_INCOMPLETE_FAIL_CLOSED",
+          "mapped_s15_failure": "NOT_FOUND",
+          "reason": "NO_DURABLE_OBJECT_AFTER_RESTART",
+          "s15_execution_result": "NOT_INVOKED",
+          "state_recipe": "EMPTY_RESTART",
+          "variant_id": "CRASH_AT_EMPTY_RESTART"
+        },
+        {
+          "crash_cut": "PUBLISH_AFTER_OBJECT_PREFIX",
+          "disposition": "MODEL_INCOMPLETE_FAIL_CLOSED",
+          "mapped_s15_failure": "MALFORMED",
+          "prefix_len": 2747,
+          "reason": "PARTIAL_OBJECT_AFTER_RESTART",
+          "s15_execution_result": "NOT_INVOKED",
+          "state_recipe": "OBJECT_PREFIX_RESTART",
+          "variant_id": "CRASH_AFTER_OBJECT_PREFIX_RESTART"
+        },
+        {
+          "crash_cut": "PUBLISH_AFTER_OBJECT_COMMIT",
+          "disposition": "MODEL_INCOMPLETE_FAIL_CLOSED",
+          "mapped_s15_failure": "PENDING",
+          "reason": "RECEIPT_MISSING_AFTER_RESTART",
+          "s15_execution_result": "NOT_INVOKED",
+          "state_recipe": "OBJECT_ONLY_RESTART",
+          "variant_id": "CRASH_AFTER_OBJECT_COMMIT_RESTART"
+        },
+        {
+          "crash_cut": "PUBLISH_AFTER_RECEIPT_COMMIT",
+          "disposition": "MODEL_INCOMPLETE_FAIL_CLOSED",
+          "mapped_s15_failure": "PENDING",
+          "reason": "WITNESS_MISSING_AFTER_RESTART",
+          "s15_execution_result": "NOT_INVOKED",
+          "state_recipe": "OBJECT_AND_RECEIPT_RESTART",
+          "variant_id": "CRASH_AFTER_RECEIPT_COMMIT_RESTART"
+        },
+        {
+          "crash_cut": "PUBLISH_AFTER_WITNESS_COMMIT",
+          "disposition": "MODEL_EXACT_HISTORICAL_READ_ELIGIBLE",
+          "mapped_s15_failure": "NONE",
+          "reason": "MODELED_DURABLE_TRIPLE_RECOVERED",
+          "s15_execution_result": "STREAM_EXACT",
+          "state_recipe": "DURABLE_TRIPLE_ACK_NOT_OBSERVED_RESTART",
+          "variant_id": "CRASH_AFTER_WITNESS_COMMIT_RESTART"
+        },
+        {
+          "crash_cut": "PUBLISH_AFTER_ACK",
+          "disposition": "MODEL_EXACT_HISTORICAL_READ_ELIGIBLE",
+          "mapped_s15_failure": "NONE",
+          "reason": "MODELED_DURABLE_TRIPLE_RECOVERED",
+          "s15_execution_result": "STREAM_EXACT",
+          "state_recipe": "DURABLE_TRIPLE_ACKED_RESTART",
+          "variant_id": "CRASH_AFTER_ACK_RESTART"
+        }
+      ]
+    },
+    {
+      "case_id": "D05_S15_READ_CRASH_RESTART_CUTS",
+      "cut_generator": {
+        "after_data_range": {
+          "end_inclusive": 49,
+          "expanded_count": 49,
+          "format": "AFTER_DATA_%04d",
+          "start_inclusive": 1
+        },
+        "expanded_cut_count": 53,
+        "expanded_row_count": 106,
+        "ordered_cuts": [
+          "BEFORE_OPEN",
+          "AFTER_OPEN",
+          "AFTER_DATA_0001_THROUGH_0049",
+          "AFTER_COMPLETE_BEFORE_S14",
+          "AFTER_HISTORICAL"
+        ],
+        "phase_order_per_cut": [
+          "FIRST_ATTEMPT",
+          "RESTART"
+        ],
+        "variant_id": "CUT_ID_UNDERSCORE_PHASE",
+        "variant_index": "TWO_TIMES_CUT_ORDINAL_PLUS_PHASE_ORDINAL"
+      },
+      "first_attempt_outcomes": {
+        "AFTER_COMPLETE_BEFORE_S14": {
+          "adapter_post_state": "COMPLETED",
+          "adapter_pre_state": "STREAMING",
+          "disposition": "MODEL_AMBIGUOUS_QUARANTINED",
+          "mapped_s15_failure": "NONE",
+          "reason": "ADAPTER_COMPLETED_S14_RESULT_NOT_OBSERVED",
+          "s15_execution_result": "STREAM_EXACT"
+        },
+        "AFTER_DATA_0001_THROUGH_0049": {
+          "adapter_post_state": "TERMINAL_FAILED",
+          "adapter_pre_state": "STREAMING",
+          "crash_cut": "READ_AFTER_DATA",
+          "crash_cut_index": "DATA_ORDINAL_1_THROUGH_49",
+          "disposition": "MODEL_AMBIGUOUS_QUARANTINED",
+          "mapped_s15_failure": "INDETERMINATE",
+          "reason": "CRASH_DURING_STREAM_DISCARDED_PARTIAL_STATE",
+          "s15_execution_result": "FAIL_INDETERMINATE"
+        },
+        "AFTER_HISTORICAL": {
+          "adapter_post_state": "COMPLETED",
+          "adapter_pre_state": "COMPLETED",
+          "disposition": "MODEL_EXACT_HISTORICAL_READ_ELIGIBLE",
+          "mapped_s15_failure": "NONE",
+          "reason": "HISTORICAL_RESULT_OBSERVED_BEFORE_CRASH",
+          "s15_execution_result": "STREAM_EXACT"
+        },
+        "AFTER_OPEN": {
+          "adapter_post_state": "TERMINAL_FAILED",
+          "adapter_pre_state": "STREAMING",
+          "disposition": "MODEL_AMBIGUOUS_QUARANTINED",
+          "mapped_s15_failure": "INDETERMINATE",
+          "reason": "CRASH_DURING_STREAM_DISCARDED_PARTIAL_STATE",
+          "s15_execution_result": "FAIL_INDETERMINATE"
+        },
+        "BEFORE_OPEN": {
+          "adapter_post_state": "FRESH",
+          "adapter_pre_state": "FRESH",
+          "disposition": "MODEL_AMBIGUOUS_QUARANTINED",
+          "mapped_s15_failure": "INDETERMINATE",
+          "reason": "CRASH_BEFORE_OPEN_RESULT_UNKNOWN",
+          "s15_execution_result": "NOT_INVOKED"
+        }
+      },
+      "non_data_crash_cut_index": 0,
+      "restart_outcome": {
+        "adapter_post_state": "COMPLETED",
+        "adapter_pre_state": "FRESH",
+        "disposition": "MODEL_EXACT_HISTORICAL_READ_ELIGIBLE",
+        "mapped_s15_failure": "NONE",
+        "reason_after_historical": "REPEATED_HISTORICAL_REVERIFY_NO_REPLAY_FENCE",
+        "reason_other_cuts": "FRESH_ADAPTER_EXACT_REREAD",
+        "s15_execution_result": "STREAM_EXACT"
+      },
+      "row_count": 106,
+      "state_recipe": "DURABLE_TRIPLE_ACKED"
+    },
+    {
+      "case_id": "D06_OBJECT_PRESENT_RECEIPT_ABSENT",
+      "disposition": "MODEL_INCOMPLETE_FAIL_CLOSED",
+      "mapped_s15_failure": "PENDING",
+      "reason": "RECEIPT_MISSING",
+      "row_count": 1,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "OBJECT_ONLY",
+      "variants": [
+        "COMMITTED_OBJECT_NO_RECEIPT"
+      ]
+    },
+    {
+      "case_id": "D07_RECEIPT_PRESENT_OBJECT_ABSENT",
+      "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+      "mapped_s15_failure": "CONFLICT",
+      "reason": "RECEIPT_WITHOUT_OBJECT",
+      "row_count": 1,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "RECEIPT_WITHOUT_OBJECT",
+      "variants": [
+        "COMMITTED_RECEIPT_NO_OBJECT"
+      ]
+    },
+    {
+      "case_id": "D08_RECEIPT_OBJECT_BINDING_MISMATCH",
+      "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+      "mapped_s15_failure": "CONFLICT",
+      "row_count": 5,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "COHERENT_MUTATED_RECEIPT_WITNESS_AND_VIEW_AGAINST_FROZEN_OBJECT_OR_LOOKUP",
+      "variant_index": "LIST_POSITION_FROM_ZERO",
+      "variants": [
+        {
+          "mutation": "RECORD_LEN_5494_TO_5495",
+          "reason": "RECEIPT_LENGTH_MISMATCH",
+          "variant_id": "LENGTH"
+        },
+        {
+          "mutation": "RECORD_SHA256_XOR_FIRST_BYTE_01",
+          "reason": "RECEIPT_RECORD_HASH_MISMATCH",
+          "variant_id": "HASH"
+        },
+        {
+          "mutation": "SOURCE_GENERATION_82_FILL_TO_A2_FILL",
+          "reason": "RECEIPT_SOURCE_GENERATION_MISMATCH",
+          "variant_id": "GENERATION"
+        },
+        {
+          "mutation": "OBJECT_ID_83_FILL_TO_A3_FILL",
+          "reason": "RECEIPT_OBJECT_ID_MISMATCH",
+          "variant_id": "OBJECT_ID"
+        },
+        {
+          "mutation": "OBJECT_REVISION_17_TO_18",
+          "reason": "RECEIPT_OBJECT_REVISION_MISMATCH",
+          "variant_id": "REVISION"
+        }
+      ]
+    },
+    {
+      "case_id": "D09_OLD_GENERATION_SNAPSHOT",
+      "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+      "mapped_s15_failure": "ROLLBACK",
+      "reason": "WITNESS_HEAD_GENERATION_MISMATCH",
+      "row_count": 1,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "OLD_80_FILL_GENERATION_RECEIPT_AND_VIEW_AGAINST_BASE_WITNESS",
+      "variants": [
+        "OLD_GENERATION_EXACT_OBJECT"
+      ]
+    },
+    {
+      "case_id": "D10_SAME_GENERATION_LOWER_REVISION",
+      "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+      "mapped_s15_failure": "ROLLBACK",
+      "reason": "WITNESS_HEAD_REVISION_ROLLBACK",
+      "row_count": 1,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "REVISION_16_RECEIPT_AND_VIEW_AGAINST_BASE_REVISION_17_WITNESS",
+      "variants": [
+        "LOWER_REVISION_EXACT_OBJECT"
+      ]
+    },
+    {
+      "case_id": "D11_SAME_REVISION_EQUIVOCATION",
+      "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+      "mapped_s15_failure": "CONFLICT",
+      "reason": "SAME_REVISION_EQUIVOCATION",
+      "row_count": 2,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "BASE_HEAD_WITH_ONE_CLAIMS_AUTHORITATIVE_COMPETING_VIEW",
+      "variant_index": "LIST_POSITION_FROM_ZERO",
+      "variants": [
+        {
+          "competing_mutation": "RECORD_SHA256_XOR_FIRST_BYTE_01_WITH_RECOMPUTED_RECEIPT",
+          "variant_id": "DIVERGENT_RECORD_HASH"
+        },
+        {
+          "competing_mutation": "PREVIOUS_RECEIPT_SHA256_91_FILL_TO_99_FILL_WITH_SAME_HEAD_FIELDS",
+          "variant_id": "DIVERGENT_RECEIPT_HASH"
+        }
+      ]
+    },
+    {
+      "case_id": "D12_SELECTED_STALE_REPLICA",
+      "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+      "mapped_s15_failure": "STALE",
+      "reason": "SELECTED_REPLICA_STALE",
+      "row_count": 1,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "BASE_HEAD_WITH_SELECTED_VIEW_AUTHORITY_NON_AUTHORITATIVE_STALE",
+      "variants": [
+        "NON_AUTHORITATIVE_STALE_VIEW"
+      ]
+    },
+    {
+      "case_id": "D13_DIVERGENT_AUTHORITATIVE_VIEWS",
+      "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+      "mapped_s15_failure": "CONFLICT",
+      "reason": "DIVERGENT_AUTHORITATIVE_VIEWS",
+      "row_count": 3,
+      "s15_execution_result": "NOT_INVOKED",
+      "state_recipe": "BASE_HEAD_WITH_ONE_CLAIMS_AUTHORITATIVE_COMPETING_VIEW",
+      "variant_index": "LIST_POSITION_FROM_ZERO",
+      "variants": [
+        {
+          "competing_mutation": "SOURCE_GENERATION_82_FILL_TO_A2_FILL_WITH_RECOMPUTED_RECEIPT",
+          "variant_id": "DIVERGENT_GENERATION"
+        },
+        {
+          "competing_mutation": "OBJECT_REVISION_17_TO_18_WITH_RECOMPUTED_RECEIPT",
+          "variant_id": "DIVERGENT_REVISION"
+        },
+        {
+          "competing_mutation": "OBJECT_REVISION_17_TO_18_AND_RECORD_SHA256_XOR_MIDDLE_BYTE_01_WITH_RECOMPUTED_RECEIPT",
+          "variant_id": "DIVERGENT_RECORD"
+        }
+      ]
+    },
+    {
+      "case_id": "D14_WITNESS_FAILURES",
+      "row_count": 4,
+      "s15_execution_result": "NOT_INVOKED",
+      "variant_index": "LIST_POSITION_FROM_ZERO",
+      "variants": [
+        {
+          "disposition": "MODEL_INCOMPLETE_FAIL_CLOSED",
+          "mapped_s15_failure": "PENDING",
+          "reason": "WITNESS_MISSING",
+          "state_recipe": "OBJECT_RECEIPT_AND_VIEW_WITH_WITNESS_ABSENT",
+          "variant_id": "MISSING"
+        },
+        {
+          "disposition": "MODEL_INCOMPLETE_FAIL_CLOSED",
+          "mapped_s15_failure": "UNAVAILABLE",
+          "reason": "WITNESS_UNAVAILABLE",
+          "state_recipe": "BASE_HEAD_WITH_WITNESS_STATE_UNAVAILABLE",
+          "variant_id": "UNAVAILABLE"
+        },
+        {
+          "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+          "mapped_s15_failure": "MALFORMED",
+          "reason": "WITNESS_STORED_HASH_CORRUPT",
+          "state_recipe": "BASE_HEAD_WITH_STORED_WITNESS_SHA256_XOR_BYTE_7_01",
+          "variant_id": "CORRUPT_STORED_HASH"
+        },
+        {
+          "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+          "mapped_s15_failure": "CONFLICT",
+          "reason": "WITNESS_FORKED_SAME_SEQUENCE",
+          "state_recipe": "BASE_HEAD_WITH_VALID_FORK_WITNESS_PREVIOUS_HASH_9A_FILL",
+          "variant_id": "FORKED_SAME_SEQUENCE"
+        }
+      ]
+    },
+    {
+      "case_id": "D15_POST_PERSISTENCE_CORRUPTION",
+      "disposition": "MODEL_INTEGRITY_INCIDENT_QUARANTINED",
+      "mapped_s15_failure": "MALFORMED",
+      "row_count": 9,
+      "s15_execution_result": "NOT_INVOKED",
+      "variant_generator": {
+        "components_in_order": [
+          "OBJECT",
+          "RECEIPT_STORED_HASH",
+          "WITNESS_STORED_HASH"
+        ],
+        "positions_in_order": [
+          "FIRST",
+          "MIDDLE",
+          "LAST"
+        ],
+        "variant_id": "COMPONENT_BIT_POSITION",
+        "variant_index": "THREE_TIMES_COMPONENT_ORDINAL_PLUS_POSITION_ORDINAL",
+        "xor_mask_hex": "01"
+      },
+      "variant_outcomes": {
+        "OBJECT": {
+          "reason": "POST_PERSISTENCE_OBJECT_CORRUPTION",
+          "state_recipe": "BASE_HEAD_WITH_OBJECT_BYTE_XOR"
+        },
+        "RECEIPT_STORED_HASH": {
+          "reason": "POST_PERSISTENCE_RECEIPT_STORED_HASH_CORRUPTION",
+          "state_recipe": "BASE_HEAD_WITH_STORED_RECEIPT_DIGEST_BYTE_XOR"
+        },
+        "WITNESS_STORED_HASH": {
+          "reason": "POST_PERSISTENCE_WITNESS_STORED_HASH_CORRUPTION",
+          "state_recipe": "BASE_HEAD_WITH_STORED_WITNESS_DIGEST_BYTE_XOR"
+        }
+      }
+    }
+  ],
+  "fixed_fixture": {
+    "alternate_previous_receipt_fill_byte_hex": "99",
+    "alternate_previous_witness_fill_byte_hex": "9a",
+    "alternate_replica_fill_byte_hex": "97",
+    "alternate_source_generation_fill_byte_hex": "a2",
+    "base_object_id_fill_byte_hex": "83",
+    "base_object_revision": 17,
+    "base_previous_receipt_fill_byte_hex": "91",
+    "base_previous_witness_fill_byte_hex": "95",
+    "base_publish_sequence": 23,
+    "base_record_len": 5494,
+    "base_record_sha256": "a788ec43fefa76e393d77c86bbfabeef7d2ae8c5499bb834c1945af5cbb1b3cd",
+    "base_replica_fill_byte_hex": "96",
+    "base_source_generation_fill_byte_hex": "82",
+    "base_source_incarnation_fill_byte_hex": "81",
+    "base_witness_generation_fill_byte_hex": "94",
+    "base_witness_incarnation_fill_byte_hex": "93",
+    "base_witness_scope_fill_byte_hex": "92",
+    "base_witness_sequence": 31,
+    "digest_width_bytes": 32,
+    "higher_revision": 18,
+    "lookup_commitment_sha256": "866e016ce631433e3e272d0858906f3c76c67204cd74b73ab11b7353e57eae00",
+    "lower_revision": 16,
+    "object_id_mismatch_fill_byte_hex": "a3",
+    "old_generation_fill_byte_hex": "80",
+    "representative_prefix_len": 2747,
+    "s13_envelope_sha256": "5d74c7a300abe503b9a79c796394faa23de0c64f22fb80902294fa0654ee15d9",
+    "s14_historical_source_chain_sha256": "d29da2a081b09b2b124298eae40b15ada555196cc5e3fd52d8e4dfadf3f2149b",
+    "s15_contract_sha256_raw": "07d7ae5e7345bb5052aa130349af2e90bae853e5c74560346a4178b2b0397cc7",
+    "s15_exact_lookup_commitment_sha256": "866e016ce631433e3e272d0858906f3c76c67204cd74b73ab11b7353e57eae00",
+    "s9_s12_historical_chain_sha256": "afb8aa4945f0e491937f75233c621d52f1bcc1307e6d497352fd9d0fc79b7204"
+  },
+  "known_answers": {
+    "absent_replica_view_message_len": 100,
+    "absent_replica_view_sha256": "7d506bb223224db017103509af3ce278291bc82d53fc6c450376b57c1c4331cc",
+    "catalog_message_len": 225852,
+    "catalog_sha256": "c09cdc640957594cc7acc2eeea39cb4e59993631ef04a1fa1e26a69c285af853",
+    "clean_d00_row_message_len": 1061,
+    "clean_d00_row_sha256": "b9e4f9ab470de985c97b50292deae898181c96e21894b43de23ec98ec3fced1a",
+    "receipt_message_len": 633,
+    "receipt_sha256": "12c80f1b610d48438ec69457a6f553bf48fd6a15a9c3ffebd7b20c67895b76a2",
+    "selected_replica_authority": "CLAIMS_AUTHORITATIVE",
+    "selected_replica_view_message_len": 684,
+    "selected_replica_view_sha256": "9a8f959a01d3aead14b527d51bb1c744999e8e1ee33a564cea72bb15b2b00d6a",
+    "witness_message_len": 777,
+    "witness_sha256": "c336caea644548f287ddc285ee3b9433f853f9b1f562cee9f055df913458bf99"
+  },
+  "mutation_rules": {
+    "bit_flip": "XOR_EXACTLY_ONE_SELECTED_BYTE_WITH_0X01",
+    "component_bit_positions": {
+      "digest_first": 0,
+      "digest_last": 31,
+      "digest_middle": 16,
+      "object_first": 0,
+      "object_last": 5493,
+      "object_middle": 2747,
+      "witness_corrupt_stored_hash_non_d15_position": 7
+    },
+    "generation_values_are_opaque_equal_OR_not_equal_only": true,
+    "generation_values_have_numeric_order": false,
+    "prefix_observed_sha256": "SHA256_CANONICAL_S14_RECORD_BYTES_PREFIX_0_THROUGH_PREFIX_LEN_EXCLUSIVE",
+    "receipt_binding_mutation_recomputes_receipt_witness_and_selected_view": true,
+    "same_revision_competing_receipt_previous_hash_fill_byte_hex": "99",
+    "split_brain_competing_view_is_claims_authoritative": true,
+    "witness_fork_recomputes_valid_witness_at_same_sequence_with_previous_hash_fill_byte_hex": "9a"
+  },
+  "row_generation": {
+    "application_order": [
+      "ROW_DEFAULTS",
+      "IMAGE_TEMPLATE",
+      "FAMILY_STATE_RULE",
+      "VARIANT_STATE_RULE",
+      "D05_RAW_LIFECYCLE_STATE",
+      "RAW_STATE_EVALUATOR_OUTCOME",
+      "ENCODE_EXACT_35_FRAMES"
+    ],
+    "digest_tokens": {
+      "ABSENT_OBJECT": "ABSENT_SENTINEL_KIND_OBJECT",
+      "ABSENT_RECEIPT": "ABSENT_SENTINEL_KIND_RECEIPT",
+      "ABSENT_REPLICA_VIEW": "ABSENT_SENTINEL_KIND_REPLICA_VIEW",
+      "ABSENT_WITNESS": "ABSENT_SENTINEL_KIND_WITNESS",
+      "BASE_OBJECT": "SHA256_FULL_CANONICAL_S14_RECORD_BYTES",
+      "BASE_RECEIPT": "RECOMPUTE_RECEIPT_FROM_BASE_FIXED_FIXTURE",
+      "BASE_SELECTED_VIEW": "RECOMPUTE_REPLICA_VIEW_FROM_BASE_FIXED_FIXTURE_WITH_CLAIMS_AUTHORITATIVE",
+      "BASE_WITNESS": "RECOMPUTE_WITNESS_FROM_BASE_FIXED_FIXTURE_AND_BASE_RECEIPT",
+      "PREFIX_OBJECT": "SHA256_CANONICAL_S14_RECORD_PREFIX_0_THROUGH_PREFIX_LEN_EXCLUSIVE"
+    },
+    "family_state_rules": {
+      "D00_CLEAN_COMMITTED_HEAD": {
+        "ack_state": "OBSERVED",
+        "adapter_post_state": "COMPLETED",
+        "image_template": "BASE_TRIPLE",
+        "publisher_phase": "ACKED"
+      },
+      "D01_TORN_OR_PARTIAL_OBJECT": {
+        "crash_cut": "PUBLISH_AFTER_OBJECT_PREFIX",
+        "crash_cut_index": "PREFIX_LEN",
+        "image_template": "PREFIX_ONLY",
+        "prefix_len": "VARIANT_NUMBER_1_THROUGH_5493",
+        "publisher_phase": "OBJECT_PREFIX"
+      },
+      "D02_ACK_BEFORE_DURABLE_COMMIT": {
+        "ack_state": "OBSERVED",
+        "publisher_phase": "ACKED",
+        "variant_rules": {
+          "ACK_AT_EMPTY": {
+            "image_template": "ABSENT_IMAGE"
+          },
+          "ACK_AT_OBJECT_COMMITTED": {
+            "image_template": "OBJECT_ONLY"
+          },
+          "ACK_AT_OBJECT_PARTIAL": {
+            "image_template": "PREFIX_ONLY",
+            "prefix_len": 2747
+          },
+          "ACK_AT_RECEIPT_COMMITTED": {
+            "image_template": "OBJECT_AND_RECEIPT"
+          }
+        }
+      },
+      "D03_DURABLE_HEAD_ACK_LOST": {
+        "adapter_post_state": "COMPLETED",
+        "image_template": "BASE_TRIPLE",
+        "publisher_phase": "WITNESS_COMMITTED"
+      },
+      "D04_PUBLISH_CRASH_RESTART_CUTS": {
+        "ack_state_after_restart": "NOT_OBSERVED",
+        "variant_rules": {
+          "CRASH_AFTER_ACK_RESTART": {
+            "adapter_post_state": "COMPLETED",
+            "crash_cut": "PUBLISH_AFTER_ACK",
+            "image_template": "BASE_TRIPLE",
+            "publisher_phase": "ACKED"
+          },
+          "CRASH_AFTER_OBJECT_COMMIT_RESTART": {
+            "crash_cut": "PUBLISH_AFTER_OBJECT_COMMIT",
+            "image_template": "OBJECT_ONLY",
+            "publisher_phase": "OBJECT_COMMITTED"
+          },
+          "CRASH_AFTER_OBJECT_PREFIX_RESTART": {
+            "crash_cut": "PUBLISH_AFTER_OBJECT_PREFIX",
+            "crash_cut_index": 2747,
+            "image_template": "PREFIX_ONLY",
+            "prefix_len": 2747,
+            "publisher_phase": "OBJECT_PREFIX"
+          },
+          "CRASH_AFTER_RECEIPT_COMMIT_RESTART": {
+            "crash_cut": "PUBLISH_AFTER_RECEIPT_COMMIT",
+            "image_template": "OBJECT_AND_RECEIPT",
+            "publisher_phase": "RECEIPT_COMMITTED"
+          },
+          "CRASH_AFTER_WITNESS_COMMIT_RESTART": {
+            "adapter_post_state": "COMPLETED",
+            "crash_cut": "PUBLISH_AFTER_WITNESS_COMMIT",
+            "image_template": "BASE_TRIPLE",
+            "publisher_phase": "WITNESS_COMMITTED"
+          },
+          "CRASH_AT_EMPTY_RESTART": {
+            "image_template": "ABSENT_IMAGE",
+            "publisher_phase": "EMPTY"
+          }
+        }
+      },
+      "D05_S15_READ_CRASH_RESTART_CUTS": {
+        "ack_state": "NOT_OBSERVED",
+        "crash_cut_mapping": {
+          "AFTER_COMPLETE_BEFORE_S14": "READ_AFTER_COMPLETE_BEFORE_S14",
+          "AFTER_DATA_0001_THROUGH_0049": "READ_AFTER_DATA",
+          "AFTER_HISTORICAL": "READ_AFTER_HISTORICAL",
+          "AFTER_OPEN": "READ_AFTER_OPEN",
+          "BEFORE_OPEN": "READ_BEFORE_OPEN"
+        },
+        "crash_cut_index": "DATA_ORDINAL_FOR_AFTER_DATA_OTHERWISE_ZERO",
+        "first_attempt_adapter_states": "EXACT_FIRST_ATTEMPT_OUTCOME_TABLE",
+        "image_template": "BASE_TRIPLE",
+        "publisher_phase": "ACKED",
+        "restart_adapter_post_state": "COMPLETED",
+        "restart_adapter_pre_state": "FRESH"
+      },
+      "D06_OBJECT_PRESENT_RECEIPT_ABSENT": {
+        "image_template": "OBJECT_ONLY",
+        "publisher_phase": "OBJECT_COMMITTED"
+      },
+      "D07_RECEIPT_PRESENT_OBJECT_ABSENT": {
+        "image_template": "RECEIPT_WITHOUT_OBJECT",
+        "publisher_phase": "RECEIPT_COMMITTED"
+      },
+      "D08_RECEIPT_OBJECT_BINDING_MISMATCH": {
+        "image_template": "BASE_TRIPLE",
+        "mutation_application": "MUTATE_NAMED_RECEIPT_FIELD_THEN_RECOMPUTE_RECEIPT_WITNESS_AND_SELECTED_VIEW_WHILE_OBJECT_BYTES_REMAIN_BASE",
+        "publisher_phase": "WITNESS_COMMITTED"
+      },
+      "D09_OLD_GENERATION_SNAPSHOT": {
+        "image_template": "BASE_TRIPLE",
+        "mutation_application": "RECOMPUTE_RECEIPT_AND_SELECTED_VIEW_WITH_SOURCE_GENERATION_80_FILL_KEEP_BASE_WITNESS",
+        "publisher_phase": "WITNESS_COMMITTED"
+      },
+      "D10_SAME_GENERATION_LOWER_REVISION": {
+        "image_template": "BASE_TRIPLE",
+        "mutation_application": "RECOMPUTE_RECEIPT_AND_SELECTED_VIEW_WITH_REVISION_16_KEEP_BASE_WITNESS",
+        "publisher_phase": "WITNESS_COMMITTED"
+      },
+      "D11_SAME_REVISION_EQUIVOCATION": {
+        "image_template": "BASE_TRIPLE",
+        "mutation_application": "ADD_CLAIMS_AUTHORITATIVE_REPLICA_97_COMPETING_VIEW_USING_EXACT_VARIANT_MUTATION",
+        "publisher_phase": "WITNESS_COMMITTED"
+      },
+      "D12_SELECTED_STALE_REPLICA": {
+        "image_template": "BASE_TRIPLE",
+        "mutation_application": "KEEP_BASE_DURABLE_RECEIPT_AND_WITNESS_REPLACE_ONLY_SELECTED_VIEW_WITH_REPLICA_96_NON_AUTHORITATIVE_STALE_REVISION_16_VIEW_AND_RECOMPUTED_REVISION_16_RECEIPT_HASH",
+        "publisher_phase": "WITNESS_COMMITTED"
+      },
+      "D13_DIVERGENT_AUTHORITATIVE_VIEWS": {
+        "image_template": "BASE_TRIPLE",
+        "mutation_application": "ADD_CLAIMS_AUTHORITATIVE_REPLICA_97_COMPETING_VIEW_USING_EXACT_VARIANT_MUTATION",
+        "publisher_phase": "WITNESS_COMMITTED"
+      },
+      "D14_WITNESS_FAILURES": {
+        "image_template": "BASE_TRIPLE",
+        "publisher_phase": "WITNESS_COMMITTED",
+        "variant_rules": {
+          "CORRUPT_STORED_HASH": {
+            "computed_witness_sha256": "BASE_WITNESS",
+            "stored_witness_sha256": "BASE_WITNESS_XOR_BYTE_7_WITH_01",
+            "witness_state": "PRESENT"
+          },
+          "FORKED_SAME_SEQUENCE": {
+            "computed_witness_sha256": "BASE_WITNESS",
+            "stored_witness_sha256": "VALID_SAME_SEQUENCE_WITNESS_RECOMPUTED_WITH_PREVIOUS_WITNESS_9A_FILL",
+            "witness_state": "FORKED"
+          },
+          "MISSING": {
+            "computed_witness_sha256": "ABSENT_WITNESS",
+            "stored_witness_sha256": "ABSENT_WITNESS",
+            "witness_state": "ABSENT"
+          },
+          "UNAVAILABLE": {
+            "computed_witness_sha256": "ABSENT_WITNESS",
+            "stored_witness_sha256": "ABSENT_WITNESS",
+            "witness_state": "UNAVAILABLE"
+          }
+        }
+      },
+      "D15_POST_PERSISTENCE_CORRUPTION": {
+        "image_template": "BASE_TRIPLE",
+        "mutation_application": "XOR_COMPONENT_BYTE_AT_EXACT_COMPONENT_BIT_POSITION_WITH_01_WITHOUT_RECOMPUTING_DEPENDENT_COMMITMENTS",
+        "publisher_phase": "WITNESS_COMMITTED"
+      }
+    },
+    "image_templates": {
+      "ABSENT_IMAGE": {
+        "computed_receipt_sha256": "ABSENT_RECEIPT",
+        "computed_witness_sha256": "ABSENT_WITNESS",
+        "object_len": 0,
+        "object_persistence": "ABSENT",
+        "observed_object_sha256": "ABSENT_OBJECT",
+        "receipt_state": "ABSENT",
+        "selected_view_sha256": "ABSENT_REPLICA_VIEW",
+        "stored_receipt_sha256": "ABSENT_RECEIPT",
+        "stored_witness_sha256": "ABSENT_WITNESS",
+        "witness_state": "ABSENT"
+      },
+      "BASE_TRIPLE": {
+        "computed_receipt_sha256": "BASE_RECEIPT",
+        "computed_witness_sha256": "BASE_WITNESS",
+        "object_len": 5494,
+        "object_persistence": "COMMITTED",
+        "observed_object_sha256": "BASE_OBJECT",
+        "receipt_state": "COMMITTED",
+        "selected_view_sha256": "BASE_SELECTED_VIEW",
+        "stored_receipt_sha256": "BASE_RECEIPT",
+        "stored_witness_sha256": "BASE_WITNESS",
+        "witness_state": "PRESENT"
+      },
+      "OBJECT_AND_RECEIPT": {
+        "computed_receipt_sha256": "BASE_RECEIPT",
+        "computed_witness_sha256": "ABSENT_WITNESS",
+        "object_len": 5494,
+        "object_persistence": "COMMITTED",
+        "observed_object_sha256": "BASE_OBJECT",
+        "receipt_state": "COMMITTED",
+        "selected_view_sha256": "ABSENT_REPLICA_VIEW",
+        "stored_receipt_sha256": "BASE_RECEIPT",
+        "stored_witness_sha256": "ABSENT_WITNESS",
+        "witness_state": "ABSENT"
+      },
+      "OBJECT_ONLY": {
+        "computed_receipt_sha256": "ABSENT_RECEIPT",
+        "computed_witness_sha256": "ABSENT_WITNESS",
+        "object_len": 5494,
+        "object_persistence": "COMMITTED",
+        "observed_object_sha256": "BASE_OBJECT",
+        "receipt_state": "ABSENT",
+        "selected_view_sha256": "ABSENT_REPLICA_VIEW",
+        "stored_receipt_sha256": "ABSENT_RECEIPT",
+        "stored_witness_sha256": "ABSENT_WITNESS",
+        "witness_state": "ABSENT"
+      },
+      "PREFIX_ONLY": {
+        "computed_receipt_sha256": "ABSENT_RECEIPT",
+        "computed_witness_sha256": "ABSENT_WITNESS",
+        "object_len": "PREFIX_LEN",
+        "object_persistence": "PARTIAL",
+        "observed_object_sha256": "PREFIX_OBJECT",
+        "receipt_state": "ABSENT",
+        "selected_view_sha256": "ABSENT_REPLICA_VIEW",
+        "stored_receipt_sha256": "ABSENT_RECEIPT",
+        "stored_witness_sha256": "ABSENT_WITNESS",
+        "witness_state": "ABSENT"
+      },
+      "RECEIPT_WITHOUT_OBJECT": {
+        "computed_receipt_sha256": "BASE_RECEIPT",
+        "computed_witness_sha256": "ABSENT_WITNESS",
+        "object_len": 0,
+        "object_persistence": "ABSENT",
+        "observed_object_sha256": "ABSENT_OBJECT",
+        "receipt_state": "COMMITTED",
+        "selected_view_sha256": "ABSENT_REPLICA_VIEW",
+        "stored_receipt_sha256": "BASE_RECEIPT",
+        "stored_witness_sha256": "ABSENT_WITNESS",
+        "witness_state": "ABSENT"
+      }
+    },
+    "row_defaults": {
+      "ack_state": "NOT_OBSERVED",
+      "adapter_post_state": "FRESH",
+      "adapter_pre_state": "FRESH",
+      "competing_view_sha256": "ABSENT_REPLICA_VIEW",
+      "crash_cut": "NONE",
+      "crash_cut_index": 0,
+      "evidence_origin": "SIMULATED_MODEL",
+      "external_durability_observation_count": 0,
+      "owned_lab_durability_observation_count": 0,
+      "provider_durability_observation_count": 0,
+      "side_effects_unlocked": "NONE"
+    },
+    "unresolved_token_or_rule_is_fail_closed": true
+  },
+  "operational_gap_codes": [
+    "RECOVERED_S9_DECISION_EXTERNAL_RUNTIME_CARRIER_UNIMPLEMENTED",
+    "RECOVERED_S9_DECISION_BYTES_AVAILABILITY_UNATTESTED",
+    "RECOVERED_S9_RAW_DECISION_EXTERNAL_DURABILITY_UNATTESTED",
+    "RECOVERED_ENVELOPE_EXTERNAL_DURABLE_SOURCE_RUNTIME_UNIMPLEMENTED",
+    "RECOVERED_ENVELOPE_CONCRETE_RUNTIME_TRANSPORT_UNIMPLEMENTED",
+    "RECOVERED_ENVELOPE_CAPTURE_PROVENANCE_RUNTIME_UNATTESTED",
+    "RECOVERED_ENVELOPE_CAPTURE_SIGNER_CUSTODY_UNATTESTED",
+    "RECOVERED_ENVELOPE_CAPTURE_SIGNER_ROLE_SEPARATION_UNATTESTED",
+    "RECOVERED_ENVELOPE_EXACT_LOOKUP_OWNER_AUTHORIZATION_UNATTESTED",
+    "RECOVERED_ENVELOPE_SOURCE_ROLLBACK_AND_EQUIVOCATION_UNATTESTED",
+    "RECOVERED_S10_RAW_EVIDENCE_RUNTIME_DELIVERY_UNIMPLEMENTED",
+    "RECOVERED_HANDOFF_PROCESS_RESTART_UNAVAILABLE",
+    "RECOVERED_HANDOFF_NOT_GLOBAL_REPLAY_FENCE",
+    "RECOVERED_S9_DECISION_HISTORICAL_ONLY_NOT_CURRENT_AT_USE",
+    "OWNER_PINNED_TRUST_ANCHOR_UNAVAILABLE",
+    "PROVIDER_LINEARIZABILITY_UNATTESTED",
+    "PROVIDER_SPLIT_BRAIN_FENCING_UNATTESTED",
+    "PROVIDER_STATE_ROLLBACK_UNATTESTED",
+    "ATOMIC_AUTHORITY_OPERATION_EXTERNAL_DATABASE_UNIMPLEMENTED",
+    "DATABASE_KMS_CROSS_SERVICE_ATOMICITY_UNATTESTED",
+    "CURRENTNESS_AT_DOWNSTREAM_USE_UNATTESTED"
+  ],
+  "policy": "agent-bridge/track-b/recovered-envelope-durability-fault-model/v1",
+  "profile": "DETERMINISTIC_SYNTHETIC_OBJECT_RECEIPT_WITNESS_FAULT_MODEL_HISTORICAL_ONLY",
+  "publisher_model": {
+    "ack_is_durability_evidence": false,
+    "legal_phase_transitions": [
+      "EMPTY_TO_OBJECT_PREFIX",
+      "OBJECT_PREFIX_TO_OBJECT_COMMITTED",
+      "OBJECT_COMMITTED_TO_RECEIPT_COMMITTED",
+      "RECEIPT_COMMITTED_TO_WITNESS_COMMITTED",
+      "WITNESS_COMMITTED_TO_ACKED"
+    ],
+    "phases": [
+      "EMPTY",
+      "OBJECT_PREFIX",
+      "OBJECT_COMMITTED",
+      "RECEIPT_COMMITTED",
+      "WITNESS_COMMITTED",
+      "ACKED"
+    ],
+    "restart_discards_all_volatile_bytes_hashes_sink_and_adapter_state": true,
+    "restart_resumes_partial_s15_adapter": false,
+    "restart_uses_modeled_durable_image_only": true,
+    "response_loss_can_trigger_blind_republish_or_retry": false
+  },
+  "remaining_gap_codes": [
+    "AUTHORITY_POLICY_CUSTODY_UNRESOLVED",
+    "CAPTURE_PROVENANCE_UNATTESTED",
+    "CROSS_BIOCORTEX_OPAQUE_HANDLE_TRANSPORT_UNIMPLEMENTED",
+    "PHYSICAL_PRIVACY_DELETION_UNRESOLVED",
+    "PRODUCTION_PRODUCER_PROFILE_UNADMITTED"
+  ],
+  "row_model": {
+    "ack_states": [
+      "NOT_OBSERVED",
+      "OBSERVED"
+    ],
+    "adapter_states": [
+      "FRESH",
+      "STREAMING",
+      "COMPLETED",
+      "TERMINAL_FAILED"
+    ],
+    "authority_states": [
+      "CLAIMS_AUTHORITATIVE",
+      "NON_AUTHORITATIVE_STALE"
+    ],
+    "crash_cuts": [
+      "NONE",
+      "PUBLISH_AFTER_OBJECT_PREFIX",
+      "PUBLISH_AFTER_OBJECT_COMMIT",
+      "PUBLISH_AFTER_RECEIPT_COMMIT",
+      "PUBLISH_AFTER_WITNESS_COMMIT",
+      "PUBLISH_AFTER_ACK",
+      "READ_BEFORE_OPEN",
+      "READ_AFTER_OPEN",
+      "READ_AFTER_DATA",
+      "READ_AFTER_COMPLETE_BEFORE_S14",
+      "READ_AFTER_HISTORICAL"
+    ],
+    "dispositions": [
+      "MODEL_EXACT_HISTORICAL_READ_ELIGIBLE",
+      "MODEL_INCOMPLETE_FAIL_CLOSED",
+      "MODEL_AMBIGUOUS_QUARANTINED",
+      "MODEL_INTEGRITY_INCIDENT_QUARANTINED"
+    ],
+    "evidence_origins": [
+      "SIMULATED_MODEL"
+    ],
+    "mapped_s15_failures": [
+      "NONE",
+      "NOT_FOUND",
+      "PENDING",
+      "CONFLICT",
+      "STALE",
+      "ROLLBACK",
+      "UNAVAILABLE",
+      "UNAUTHENTICATED",
+      "MALFORMED",
+      "INDETERMINATE"
+    ],
+    "object_persistence_states": [
+      "ABSENT",
+      "PARTIAL",
+      "COMMITTED"
+    ],
+    "publisher_phases": [
+      "EMPTY",
+      "OBJECT_PREFIX",
+      "OBJECT_COMMITTED",
+      "RECEIPT_COMMITTED",
+      "WITNESS_COMMITTED",
+      "ACKED"
+    ],
+    "receipt_states": [
+      "ABSENT",
+      "COMMITTED"
+    ],
+    "s15_execution_results": [
+      "NOT_INVOKED",
+      "STREAM_EXACT",
+      "FAIL_INDETERMINATE"
+    ],
+    "side_effect_values": [
+      "NONE"
+    ],
+    "unauthenticated_failure_is_reachable": false,
+    "witness_states": [
+      "ABSENT",
+      "PRESENT",
+      "UNAVAILABLE",
+      "FORKED"
+    ]
+  },
+  "schema": "agent_bridge.memory_temporal_recovered_envelope_durability_fault_model_s16.v0",
+  "state_recipes": {
+    "base_clean_row_exact_values": [
+      "ROW_DOMAIN",
+      "POLICY",
+      "PROFILE",
+      "ROW_SCHEMA",
+      "S15_CONTRACT_SHA256_RAW",
+      "LOOKUP_COMMITMENT_SHA256_RAW",
+      "D00_CLEAN_COMMITTED_HEAD",
+      "CLEAN",
+      "U64BE_0",
+      "SIMULATED_MODEL",
+      "ACKED",
+      "COMMITTED",
+      "U64BE_5494",
+      "BASE_RECORD_SHA256_RAW",
+      "COMMITTED",
+      "COMPUTED_BASE_RECEIPT_SHA256_RAW",
+      "STORED_BASE_RECEIPT_SHA256_RAW",
+      "PRESENT",
+      "COMPUTED_BASE_WITNESS_SHA256_RAW",
+      "STORED_BASE_WITNESS_SHA256_RAW",
+      "SELECTED_BASE_VIEW_SHA256_RAW",
+      "ABSENT_REPLICA_VIEW_SHA256_RAW",
+      "OBSERVED",
+      "NONE",
+      "U64BE_0",
+      "FRESH",
+      "COMPLETED",
+      "MODEL_EXACT_HISTORICAL_READ_ELIGIBLE",
+      "EXACT_MODELED_HEAD",
+      "STREAM_EXACT",
+      "NONE",
+      "U64BE_0",
+      "U64BE_0",
+      "U64BE_0",
+      "NONE"
+    ],
+    "base_durable_triple": {
+      "ack_state": "OBSERVED_OR_NOT_OBSERVED_AS_RECIPE",
+      "computed_and_stored_receipt": "BASE_RECEIPT_DIGEST",
+      "computed_and_stored_witness": "BASE_WITNESS_DIGEST",
+      "competing_view": "ABSENT_REPLICA_VIEW_SENTINEL",
+      "object": "FULL_CANONICAL_S14_RECORD",
+      "object_persistence": "COMMITTED",
+      "receipt_state": "COMMITTED",
+      "selected_view": "BASE_CLAIMS_AUTHORITATIVE_VIEW",
+      "witness_state": "PRESENT"
+    },
+    "pre_open_default": {
+      "adapter_post_state": "FRESH",
+      "adapter_pre_state": "FRESH",
+      "s15_execution_result": "NOT_INVOKED"
+    },
+    "zero_evidence_default": {
+      "evidence_origin": "SIMULATED_MODEL",
+      "external_durability_observation_count": 0,
+      "owned_lab_durability_observation_count": 0,
+      "provider_durability_observation_count": 0,
+      "side_effects_unlocked": "NONE"
+    }
+  },
+  "status": "RECOVERED_ENVELOPE_DURABILITY_FAULT_MODEL_PREREGISTERED_SYNTHETIC_DETERMINISTIC_5639_ROWS_HISTORICAL_ONLY_ZERO_EXTERNAL_DURABILITY_OBSERVATIONS_NO_PRODUCTION_OR_PROVIDER_TRANSPORT_NO_DURABILITY_PROOF_NO_CURRENTNESS_NO_ADMISSION",
+  "test_matrix": {
+    "nonignored_rust_test_count": 20,
+    "test_names": [
+      "s16_known_answer_receipt_witness_row_and_full_historical_chain_are_stable",
+      "s16_legal_publish_transition_order_is_closed_and_wrong_order_rejects",
+      "s16_case_catalog_is_closed_unique_and_5639_row_commitments_are_deterministic",
+      "s16_every_partial_object_prefix_fails_closed_without_open",
+      "s16_premature_ack_variants_are_ambiguous_and_indeterminate",
+      "s16_durable_triple_with_lost_ack_uses_fresh_exact_read",
+      "s16_every_publish_crash_cut_restarts_from_modeled_persisted_image_only",
+      "s16_every_s15_read_crash_cut_discards_partial_state_and_uses_fresh_adapter",
+      "s16_object_present_receipt_absent_is_pending_without_open",
+      "s16_receipt_present_object_absent_is_integrity_conflict",
+      "s16_each_receipt_object_binding_mismatch_is_integrity_conflict",
+      "s16_old_generation_snapshot_is_rollback_without_generation_ordering",
+      "s16_same_generation_lower_revision_is_rollback",
+      "s16_same_revision_divergent_head_is_equivocation_conflict",
+      "s16_selected_stale_replica_is_stale_without_replica_switch",
+      "s16_divergent_authoritative_views_are_split_brain_conflict",
+      "s16_witness_missing_unavailable_corrupt_and_forked_map_exactly",
+      "s16_post_persistence_object_receipt_and_witness_corruption_is_malformed",
+      "s16_all_rows_are_simulated_with_zero_external_evidence_and_no_side_effects",
+      "s16_private_surface_has_no_production_transport_persistence_runtime_or_admission_wiring"
+    ]
+  }
+}
