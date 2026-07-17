@@ -17,6 +17,8 @@ from unittest import mock
 
 
 BASE = Path(__file__).resolve().parent
+PREPROBE_COMMIT = "8cfbd7869b38e7e0d20f72e7550b59c845bfb43a"
+RESULT_TEST_NAME = "test_majorana_certificate_p7_design_probe_result.py"
 
 
 def _load_probe():
@@ -36,7 +38,7 @@ class MajoranaP7DesignProbeTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.fixture = P7._validate_fixture(P7.load_json(BASE / P7.FIXTURE_NAME))
         cls.policy = P7.validate_policy(
-            P7.load_json(BASE / P7.POLICY_NAME), require_report_absent=True,
+            P7.load_json(BASE / P7.POLICY_NAME), require_report_absent=False,
         )
 
     def _complete_witness(self) -> dict:
@@ -202,15 +204,26 @@ class MajoranaP7DesignProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(P7.ProbeError, "duplicate JSON key"):
                 P7.load_json(path)
 
-    def test_policy_fixture_identity_and_preprobe_absence(self) -> None:
+    def test_policy_fixture_identity_and_historical_preprobe_absence(self) -> None:
         self.assertEqual(self.fixture["fixture_id"], P7.FIXTURE_ID)
         self.assertEqual(self.policy["policy_id"], P7.POLICY_ID)
         self.assertEqual(
             self.fixture["required_direct_parent_commit"], P7.DIRECT_PARENT,
         )
-        self.assertFalse((BASE / P7.REPORT_NAME).exists())
-        for relative in P7.RESULT_ARTIFACTS:
-            self.assertFalse((BASE / relative).exists(), relative)
+        commit = subprocess.run(
+            ["git", "cat-file", "-e", f"{PREPROBE_COMMIT}^{{commit}}"],
+            cwd=BASE, check=False, capture_output=True,
+        )
+        self.assertEqual(commit.returncode, 0)
+        for relative in (*P7.RESULT_ARTIFACTS, RESULT_TEST_NAME):
+            artifact = (
+                f"{PREPROBE_COMMIT}:docs/research/fermion-frontier/{relative}"
+            )
+            result = subprocess.run(
+                ["git", "cat-file", "-e", artifact],
+                cwd=BASE, check=False, capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0, relative)
 
     def test_single_candidate_P6_informed_firewall_is_frozen(self) -> None:
         design = self.fixture["candidate_design"]
@@ -563,11 +576,12 @@ class MajoranaP7DesignProbeTests(unittest.TestCase):
                         host, scratch,
                     )
 
-        self.assertFalse((BASE / P7.REPORT_NAME).exists())
+        report_path = BASE / P7.REPORT_NAME
+        report_before = report_path.read_bytes()
         with self.assertRaisesRegex(P7.ProbeError, "^INVALID_D0_PROBE") as caught:
             run_fake(66)
         self.assertNotIn(secret_stderr.decode(), str(caught.exception))
-        self.assertFalse((BASE / P7.REPORT_NAME).exists())
+        self.assertEqual(report_path.read_bytes(), report_before)
 
         indeterminate = run_fake(70)
         self.assertEqual(
@@ -687,7 +701,7 @@ class MajoranaP7DesignProbeTests(unittest.TestCase):
                 P7.ProbeError,
             ):
                 if target == "policy":
-                    P7.validate_policy(value, require_report_absent=True)
+                    P7.validate_policy(value, require_report_absent=False)
                 else:
                     P7._validate_fixture(value)
 
@@ -695,7 +709,7 @@ class MajoranaP7DesignProbeTests(unittest.TestCase):
         bad = copy.deepcopy(self.policy)
         bad["source_files"][0]["sha256"] = "0" * 64
         with self.assertRaises(P7.ProbeError):
-            P7.validate_policy(bad, require_report_absent=True)
+            P7.validate_policy(bad, require_report_absent=False)
 
     def test_policy_governance_semantic_pin_fails_closed(self) -> None:
         semantic_policy = {
@@ -740,7 +754,7 @@ class MajoranaP7DesignProbeTests(unittest.TestCase):
             bad = copy.deepcopy(self.policy)
             mutate(bad)
             with self.subTest(mutate=mutate), self.assertRaises(P7.ProbeError):
-                P7.validate_policy(bad, require_report_absent=True)
+                P7.validate_policy(bad, require_report_absent=False)
 
     def test_runtime_lock_bytes_and_source_closures_are_exact(self) -> None:
         runtime = self.fixture["runtime_custody"]
@@ -783,7 +797,7 @@ class MajoranaP7DesignProbeTests(unittest.TestCase):
 
         with mock.patch.object(P7, "_validate_runtime_lock_bytes") as validator:
             P7.validate_policy(
-                copy.deepcopy(self.policy), require_report_absent=True,
+                copy.deepcopy(self.policy), require_report_absent=False,
             )
             validator.assert_called_once_with(runtime)
 

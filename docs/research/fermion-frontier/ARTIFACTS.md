@@ -1172,6 +1172,32 @@ so they are versioned normally and are not added to the preservation-only
   checkerboard-Neel enclosure.  Step 3 and the remaining 98 steps, exact-
   Hubbard error, double occupancy, physical reference, selector global
   optimality and READY remain excluded.
+- `majorana_certificate_p7_design_probe.py`,
+  `majorana_certificate_p7_design_probe/majorana_p7_step3_resource_probe.jl`,
+  `majorana_certificate_p7_design_probe_fixture.json`,
+  `majorana_certificate_p7_design_probe_policy.json`,
+  `majorana_certificate_p7_design_probe_report.json` and their preprobe/result
+  tests: non-authoritative D0 admission attempt for the adjacent step-3
+  `E768-MAX-LAZY37-STEP3-V1` resource path.  The result-blind preprobe commit is
+  `8cfbd7869b38e7e0d20f72e7550b59c845bfb43a`; report SHA-256 is
+  `4bf4be7f77fd499ffc9bd975f07353fd14ee7403cd6fc7759974dda37f8588cf`.
+  One fresh process ran under the fixed 2 GiB memory, zero-swap and 1,800-second
+  admission.  Systemd delivered `SIGTERM` at the runtime boundary; the process
+  returned `-15` after `1800.604540675` outer-monotonic seconds, with zero
+  stdout bytes and a `null` resource witness.  Cgroup monitoring observed an
+  approximately 735 MiB memory peak, but this is run-monitoring context only:
+  the canonical report's `time_diagnostics` object is empty and it does not
+  claim that value as D0 evidence.  Terminal status is
+  `INDETERMINATE_HOST_OR_RUNTIME_FAILURE`; fixed S0 admission is
+  `NOT_ESTABLISHED` (the stored status is
+  `NOT_ESTABLISHED_INDETERMINATE_HOST_OR_RUNTIME_FAILURE`), with
+  `scientific_authority=NONE` and `certificate_eligible=false`.  This is
+  neither a deterministic-cap result nor a no-go, cannot enter P7 S0, and does
+  not permit any frozen cap to be relaxed in place.  A continuation requires a
+  separately precommitted new version for time/algorithmic-complexity probing
+  or proof/execution decomposition, without inspecting or using suppressed
+  scientific values such as term streams or digests, checkerboard-Neel values,
+  exact centers, declared intervals or operator-error ticks.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is

@@ -1274,3 +1274,37 @@ complete under unchanged host caps.  A cap or timeout must remain
 `INDETERMINATE`; any algorithmic or proof-
 allocation change belongs to a separate candidate rather than an in-place P6
 relaxation.
+
+## Majorana P7 D0 adjacent-step-3 resource admission remains indeterminate
+
+P7 D0 froze the adjacent-step-3 design and its result-blind resource probe at
+preprobe commit `8cfbd7869b38e7e0d20f72e7550b59c845bfb43a`.  The sole fresh
+process was admitted under the same fixed future-S0 host envelope: 2 GiB
+memory, zero swap and 1,800 seconds.  At the systemd runtime boundary it
+received `SIGTERM`, returning `-15` after an outer monotonic elapsed time of
+`1800.604540675` seconds.  It emitted zero stdout bytes, so the resource
+witness is `null`.  The canonical report SHA-256 is
+`4bf4be7f77fd499ffc9bd975f07353fd14ee7403cd6fc7759974dda37f8588cf`.
+
+Runtime monitoring observed a cgroup memory peak of approximately 735 MiB,
+well below the fixed memory ceiling, but that value is operational diagnostic
+context only.  It is not part of the canonical resource witness, and the
+report's `time_diagnostics` object is empty.  With no stdout witness,
+the run establishes neither P6-prefix resource conformance nor any step-3
+resource observation.
+
+The terminal status is `INDETERMINATE_HOST_OR_RUNTIME_FAILURE`; fixed S0
+admission is `NOT_ESTABLISHED` (stored as
+`NOT_ESTABLISHED_INDETERMINATE_HOST_OR_RUNTIME_FAILURE`), and
+`scientific_authority=NONE`.  This is not a deterministic-cap result and not a
+mathematical or algorithmic no-go.  It cannot admit the candidate to P7 S0,
+select or reject it, or authorize an in-place relaxation of any frozen host,
+engine or selection cap.
+
+The next route must therefore be a separately precommitted new version, not a
+revision of this frozen P7 D0 contract.  It should either introduce a
+result-blind time/algorithmic-complexity design probe or decompose the proof and
+execution into independently bounded stages before reconsidering formal S0
+admission.  Such work must not inspect, recover or use any suppressed
+scientific value, including term streams or digests, checkerboard-Neel values,
+exact centers, declared intervals or operator-error ticks.
