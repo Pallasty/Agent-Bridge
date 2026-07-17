@@ -947,6 +947,59 @@ fn result_json(res: &ToolResult) -> Value {
     serde_json::from_str(&result_text(res)).expect("valid json result")
 }
 
+#[tokio::test]
+async fn agent_task_contract_preview_is_pure_and_exposed_to_codex() {
+    let tool = AgentTaskContractPreviewTool::new();
+    let schema = tool.schema();
+    assert_eq!(tool.name(), "agent_task_contract_preview");
+    assert!(schema.description.contains("read-only"));
+    assert!(schema.description.contains("never spawns"));
+
+    let result = tool
+        .execute(
+            json!({
+                "contract": {
+                    "schema_version": "agent_bridge.agent_task_contract.v0",
+                    "contract_id": "contract:mcp:test",
+                    "revision": 1,
+                    "objective": "Preview a bounded task",
+                    "parent_evidence_refs": [],
+                    "this_attempt_only": ["preview"],
+                    "reserved_actions": ["spawn"],
+                    "continuity_locks": {},
+                    "allowed_changes": [],
+                    "acceptance_criteria": ["ready"],
+                    "authority_boundary": "read_only",
+                    "attempt_no": 1,
+                    "attempt_budget": 1,
+                    "changed_variable": "preview compiler",
+                    "planned_state": {},
+                    "observed_state": {}
+                }
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("preview tool should return a result");
+    let body = result_json(&result);
+
+    assert_eq!(body["status"], json!("ready"));
+    assert_eq!(body["safety"]["read_only"], json!(true));
+    assert_eq!(body["safety"]["can_spawn_agent"], json!(false));
+    assert_eq!(body["safety"]["can_write_memory"], json!(false));
+    assert!(exposed_tool_names_for(Some("codex-essential"), None, None)
+        .contains(&"agent_task_contract_preview".to_string()));
+
+    let invalid = tool
+        .execute(
+            json!({"contract": {"schema_version": "agent_bridge.agent_task_contract.v0"}}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("malformed input should return an MCP result");
+    assert!(invalid.is_error);
+}
+
 fn frontend_env_test_setup() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().expect("frontend env test lock")
