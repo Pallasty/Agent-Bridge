@@ -1,0 +1,925 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet.v1",
+  "title": "BioCortex Track B runtime-prerequisite synthetic evidence packet v1",
+  "description": "Closed-world schemas for the first fifteen preregistered runtime-prerequisite evidence packet doubles. Conformance is synthetic-only and cannot represent real evidence acceptance, prerequisite satisfaction, runtime admission, or downstream authority.",
+  "oneOf": [
+    { "$ref": "#/$defs/packet01" },
+    { "$ref": "#/$defs/packet02" },
+    { "$ref": "#/$defs/packet03" },
+    { "$ref": "#/$defs/packet04" },
+    { "$ref": "#/$defs/packet05" },
+    { "$ref": "#/$defs/packet06" },
+    { "$ref": "#/$defs/packet07" },
+    { "$ref": "#/$defs/packet08" },
+    { "$ref": "#/$defs/packet09" },
+    { "$ref": "#/$defs/packet10" },
+    { "$ref": "#/$defs/packet11" },
+    { "$ref": "#/$defs/packet12" },
+    { "$ref": "#/$defs/packet13" },
+    { "$ref": "#/$defs/packet14" },
+    { "$ref": "#/$defs/packet15" }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "utcSecond": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+    },
+    "predecessorBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preregistration_manifest_sha256",
+        "prerequisite_plan_sha256",
+        "adapter_contract_sha256",
+        "authority_receipt_schema_sha256",
+        "stop_receipt_schema_sha256",
+        "s16_successor_gate_sha256"
+      ],
+      "properties": {
+        "preregistration_manifest_sha256": {
+          "const": "caf420dd4f4d2b310d80bd56ab287f6ef527256c0126a48106438f6a344e6498"
+        },
+        "prerequisite_plan_sha256": {
+          "const": "260036232778e6d22f2050333b0daeab7d70153a15cb7f36526f47d1514a239b"
+        },
+        "adapter_contract_sha256": {
+          "const": "d602d9f14f662145bd12f33304b2800bb9601ff4fd76634eb56c41b86aa17201"
+        },
+        "authority_receipt_schema_sha256": {
+          "const": "faea2234635441b0bc043b5d605a449decc61cc854e708f705f7bb09d58a7b90"
+        },
+        "stop_receipt_schema_sha256": {
+          "const": "7657cd25a9abf4037ce5eb4c403db36aebf4b43deb232886e62ff4afe9d45c36"
+        },
+        "s16_successor_gate_sha256": {
+          "const": "175b58589dbdb0c22310c41451271c822532945d85c25c8f268f5a9b2ac7f7c3"
+        }
+      }
+    },
+    "syntheticProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "fixture_sha256",
+        "generator_build_sha256",
+        "validator_build_sha256",
+        "fixed_checked_at_utc",
+        "real_collection_performed",
+        "provider_sdk_present",
+        "secret_material_present"
+      ],
+      "properties": {
+        "origin": { "const": "SYNTHETIC_VALIDATOR_DOUBLE" },
+        "fixture_sha256": { "$ref": "#/$defs/sha256" },
+        "generator_build_sha256": { "$ref": "#/$defs/sha256" },
+        "validator_build_sha256": { "$ref": "#/$defs/sha256" },
+        "fixed_checked_at_utc": { "$ref": "#/$defs/utcSecond" },
+        "real_collection_performed": { "const": false },
+        "provider_sdk_present": { "const": false },
+        "secret_material_present": { "const": false }
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "observed_at_utc",
+        "checked_at_utc",
+        "expires_at_utc",
+        "freshness_arithmetic_conformant",
+        "real_currentness_proved",
+        "decision_recheck_required"
+      ],
+      "properties": {
+        "mode": { "const": "SYNTHETIC_FIXED_INSTANT_ARITHMETIC_ONLY" },
+        "observed_at_utc": { "$ref": "#/$defs/utcSecond" },
+        "checked_at_utc": { "$ref": "#/$defs/utcSecond" },
+        "expires_at_utc": { "$ref": "#/$defs/utcSecond" },
+        "freshness_arithmetic_conformant": { "const": true },
+        "real_currentness_proved": { "const": false },
+        "decision_recheck_required": { "const": true }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_endpoint_bound",
+        "provider_called",
+        "wire_attempted",
+        "credentials_accessed",
+        "paid_resources_provisioned",
+        "real_evidence_collected",
+        "runtime_evidence_accepted",
+        "prerequisite_satisfied",
+        "runtime_admission_ready",
+        "runtime_admission_granted",
+        "runtime_authority",
+        "deployment_authorized",
+        "condition_output_authorized",
+        "output_permit_defined",
+        "scientific_claim_authorized",
+        "application_claim_authorized",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "provider_endpoint_bound": { "const": false },
+        "provider_called": { "const": false },
+        "wire_attempted": { "const": false },
+        "credentials_accessed": { "const": false },
+        "paid_resources_provisioned": { "const": 0 },
+        "real_evidence_collected": { "const": false },
+        "runtime_evidence_accepted": { "const": false },
+        "prerequisite_satisfied": { "const": false },
+        "runtime_admission_ready": { "const": false },
+        "runtime_admission_granted": { "const": false },
+        "runtime_authority": { "const": false },
+        "deployment_authorized": { "const": false },
+        "condition_output_authorized": { "const": false },
+        "output_permit_defined": { "const": false },
+        "scientific_claim_authorized": { "const": false },
+        "application_claim_authorized": { "const": false },
+        "side_effects_unlocked": { "const": "NONE" }
+      }
+    },
+    "trackBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "track_packet_sha256",
+        "profile_sha256",
+        "configuration_sha256",
+        "namespace_sha256",
+        "assignment_sha256",
+        "resource_scope_sha256",
+        "credential_scope_sha256",
+        "revocation_epoch_sha256"
+      ],
+      "properties": {
+        "track_packet_sha256": { "$ref": "#/$defs/sha256" },
+        "profile_sha256": { "$ref": "#/$defs/sha256" },
+        "configuration_sha256": { "$ref": "#/$defs/sha256" },
+        "namespace_sha256": { "$ref": "#/$defs/sha256" },
+        "assignment_sha256": { "$ref": "#/$defs/sha256" },
+        "resource_scope_sha256": { "$ref": "#/$defs/sha256" },
+        "credential_scope_sha256": { "$ref": "#/$defs/sha256" },
+        "revocation_epoch_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "trackEvidenceBase": {
+      "type": "object",
+      "required": [
+        "track_id",
+        "binding",
+        "evidence_origin",
+        "synthetic_evidence_artifact_sha256",
+        "offline_validation_receipt_sha256",
+        "synthetic_observation_count",
+        "real_observation_count"
+      ],
+      "properties": {
+        "track_id": { "type": "string" },
+        "binding": { "$ref": "#/$defs/trackBinding" },
+        "evidence_origin": { "const": "SYNTHETIC_VALIDATOR_DOUBLE" },
+        "synthetic_evidence_artifact_sha256": { "$ref": "#/$defs/sha256" },
+        "offline_validation_receipt_sha256": { "$ref": "#/$defs/sha256" },
+        "synthetic_observation_count": { "type": "integer", "minimum": 1 },
+        "real_observation_count": { "const": 0 }
+      }
+    },
+    "managedTrackEvidence": {
+      "allOf": [
+        { "$ref": "#/$defs/trackEvidenceBase" },
+        {
+          "type": "object",
+          "properties": {
+            "track_id": { "const": "MANAGED_SPANNER_CLOUD_KMS" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "selfHostedTrackEvidence": {
+      "allOf": [
+        { "$ref": "#/$defs/trackEvidenceBase" },
+        {
+          "type": "object",
+          "properties": {
+            "track_id": { "const": "SELF_HOSTED_ETCD_OPENBAO" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "dualTrackEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ],
+      "properties": {
+        "MANAGED_SPANNER_CLOUD_KMS": { "$ref": "#/$defs/managedTrackEvidence" },
+        "SELF_HOSTED_ETCD_OPENBAO": { "$ref": "#/$defs/selfHostedTrackEvidence" }
+      }
+    },
+    "managedAdapterIds": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "SPANNER_AUTHORITY_ADAPTER" },
+        { "const": "CLOUD_KMS_SIGNER_ADAPTER" },
+        { "const": "MANAGED_FAULT_PROXY_ADAPTER" },
+        { "const": "MANAGED_EVIDENCE_COLLECTOR_ADAPTER" }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "selfHostedAdapterIds": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "ETCD_AUTHORITY_ADAPTER" },
+        { "const": "OPENBAO_TRANSIT_ADAPTER" },
+        { "const": "EXTERNAL_RESTORE_WITNESS_ADAPTER" },
+        { "const": "LAB_FAULT_CONTROLLER_ADAPTER" },
+        { "const": "SELF_HOSTED_EVIDENCE_COLLECTOR_ADAPTER" }
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "stopControlIds": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "CAPABILITY_FENCE_CONTROL" },
+        { "const": "FAULT_DISARM_AND_EGRESS_ISOLATION_CONTROL" },
+        { "const": "CREDENTIAL_BROKER_REVOCATION_CONTROL" },
+        { "const": "DURABLE_EVIDENCE_RETENTION_CONTROL" },
+        { "const": "SCOPED_RESOURCE_CLEANUP_CONTROL" }
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "payload01": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "source_commit_sha256",
+        "toolchain_manifest_sha256",
+        "sbom_sha256",
+        "build_attestation_sha256",
+        "test_matrix_sha256",
+        "reproducible_build_receipt_sha256",
+        "signature_verification_receipt_sha256",
+        "production_verifier_implemented"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "AUDITED_BUILD_AND_TEST_EVIDENCE_DOUBLE" },
+        "source_commit_sha256": { "$ref": "#/$defs/sha256" },
+        "toolchain_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "sbom_sha256": { "$ref": "#/$defs/sha256" },
+        "build_attestation_sha256": { "$ref": "#/$defs/sha256" },
+        "test_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "reproducible_build_receipt_sha256": { "$ref": "#/$defs/sha256" },
+        "signature_verification_receipt_sha256": { "$ref": "#/$defs/sha256" },
+        "production_verifier_implemented": { "const": false }
+      }
+    },
+    "payload02": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "adapter_ids",
+        "adapter_build_catalog_sha256",
+        "conformance_matrix_sha256",
+        "forbidden_call_count",
+        "provider_call_count",
+        "production_adapter_set_implemented"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "MANAGED_ADAPTER_CONFORMANCE_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/managedTrackEvidence" },
+        "adapter_ids": { "$ref": "#/$defs/managedAdapterIds" },
+        "adapter_build_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "conformance_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "forbidden_call_count": { "const": 0 },
+        "provider_call_count": { "const": 0 },
+        "production_adapter_set_implemented": { "const": false }
+      }
+    },
+    "payload03": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "adapter_ids",
+        "adapter_build_catalog_sha256",
+        "conformance_matrix_sha256",
+        "forbidden_call_count",
+        "provider_call_count",
+        "production_adapter_set_implemented"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "SELF_HOSTED_ADAPTER_CONFORMANCE_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/selfHostedTrackEvidence" },
+        "adapter_ids": { "$ref": "#/$defs/selfHostedAdapterIds" },
+        "adapter_build_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "conformance_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "forbidden_call_count": { "const": 0 },
+        "provider_call_count": { "const": 0 },
+        "production_adapter_set_implemented": { "const": false }
+      }
+    },
+    "payload04": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "stop_control_ids",
+        "stop_control_build_catalog_sha256",
+        "test_environment_sha256",
+        "ordered_stop_sequence_sha256",
+        "failure_injection_matrix_sha256",
+        "stop_credentials_separate",
+        "live_drill_performed",
+        "production_stop_control_set_implemented"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "STOP_CONTROL_FAILURE_INJECTION_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "stop_control_ids": { "$ref": "#/$defs/stopControlIds" },
+        "stop_control_build_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "test_environment_sha256": { "$ref": "#/$defs/sha256" },
+        "ordered_stop_sequence_sha256": { "$ref": "#/$defs/sha256" },
+        "failure_injection_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "stop_credentials_separate": { "const": true },
+        "live_drill_performed": { "const": false },
+        "production_stop_control_set_implemented": { "const": false }
+      }
+    },
+    "payload05": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "trust_policy_catalog_sha256",
+        "key_version_role_map_sha256",
+        "revocation_policy_sha256",
+        "private_key_material_present",
+        "production_trust_policy_bound"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "TRUST_ROOT_POLICY_BINDING_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "trust_policy_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "key_version_role_map_sha256": { "$ref": "#/$defs/sha256" },
+        "revocation_policy_sha256": { "$ref": "#/$defs/sha256" },
+        "private_key_material_present": { "const": false },
+        "production_trust_policy_bound": { "const": false }
+      }
+    },
+    "payload06": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "endpoint_identity_commitment_catalog_sha256",
+        "profile_region_namespace_tls_catalog_sha256",
+        "raw_endpoint_present",
+        "real_provider_configuration_observed",
+        "production_provider_identity_bound"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "PROVIDER_IDENTITY_BINDING_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "endpoint_identity_commitment_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "profile_region_namespace_tls_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "raw_endpoint_present": { "const": false },
+        "real_provider_configuration_observed": { "const": false },
+        "production_provider_identity_bound": { "const": false }
+      }
+    },
+    "payload07": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "credential_class_catalog_sha256",
+        "lease_scope_lifecycle_matrix_sha256",
+        "revocation_receipt_catalog_sha256",
+        "active_lease_commitments",
+        "secret_material_present",
+        "real_lease_drill_performed",
+        "production_credential_lifecycle_bound"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "CREDENTIAL_LIFECYCLE_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "credential_class_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "lease_scope_lifecycle_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "revocation_receipt_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "active_lease_commitments": { "const": 0 },
+        "secret_material_present": { "const": false },
+        "real_lease_drill_performed": { "const": false },
+        "production_credential_lifecycle_bound": { "const": false }
+      }
+    },
+    "payload08": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "resource_allowlist_sha256",
+        "cost_ceiling_policy_sha256",
+        "budget_authority_commitment_sha256",
+        "automatic_stop_policy_sha256",
+        "paid_resources_provisioned",
+        "real_budget_authority_bound"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "RESOURCE_AND_BUDGET_AUTHORITY_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "resource_allowlist_sha256": { "$ref": "#/$defs/sha256" },
+        "cost_ceiling_policy_sha256": { "$ref": "#/$defs/sha256" },
+        "budget_authority_commitment_sha256": { "$ref": "#/$defs/sha256" },
+        "automatic_stop_policy_sha256": { "$ref": "#/$defs/sha256" },
+        "paid_resources_provisioned": { "const": 0 },
+        "real_budget_authority_bound": { "const": false }
+      }
+    },
+    "payload09": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "authority_store_build_sha256",
+        "authority_store_configuration_sha256",
+        "linearizability_history_sha256",
+        "cas_failure_matrix_sha256",
+        "duplicate_cas_rejected",
+        "real_durability_proved"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "DURABLE_LEDGER_LINEARIZABILITY_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "authority_store_build_sha256": { "$ref": "#/$defs/sha256" },
+        "authority_store_configuration_sha256": { "$ref": "#/$defs/sha256" },
+        "linearizability_history_sha256": { "$ref": "#/$defs/sha256" },
+        "cas_failure_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "duplicate_cas_rejected": { "const": true },
+        "real_durability_proved": { "const": false }
+      }
+    },
+    "payload10": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "signed_time_receipt_catalog_sha256",
+        "row_currentness_receipt_catalog_sha256",
+        "maximum_clock_skew_seconds",
+        "system_clock_accessed",
+        "real_currentness_proved"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "TRUSTED_TIME_CURRENTNESS_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "signed_time_receipt_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "row_currentness_receipt_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "maximum_clock_skew_seconds": { "type": "integer", "minimum": 0, "maximum": 300 },
+        "system_clock_accessed": { "const": false },
+        "real_currentness_proved": { "const": false }
+      }
+    },
+    "payload11": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "runner_build_sha256",
+        "process_session_channel_exporter_catalog_sha256",
+        "adapter_set_manifest_sha256",
+        "stop_control_plane_manifest_sha256",
+        "live_process_inspected",
+        "production_provenance_bound"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "RUNNER_PROVENANCE_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "runner_build_sha256": { "$ref": "#/$defs/sha256" },
+        "process_session_channel_exporter_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "adapter_set_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "stop_control_plane_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "live_process_inspected": { "const": false },
+        "production_provenance_bound": { "const": false }
+      }
+    },
+    "payload12": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "runner_build_sha256",
+        "disarm_receipt_catalog_sha256",
+        "egress_isolation_receipt_catalog_sha256",
+        "independent_emergency_stop_receipt_catalog_sha256",
+        "absorbing_end_state_matrix_sha256",
+        "live_drill_performed",
+        "production_safety_stop_proved"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "SAFETY_STOP_DRILL_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "runner_build_sha256": { "$ref": "#/$defs/sha256" },
+        "disarm_receipt_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "egress_isolation_receipt_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "independent_emergency_stop_receipt_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "absorbing_end_state_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "live_drill_performed": { "const": false },
+        "production_safety_stop_proved": { "const": false }
+      }
+    },
+    "payload13": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "evidence_store_build_sha256",
+        "storage_policy_sha256",
+        "retention_replay_matrix_sha256",
+        "reductive_cleanup_matrix_sha256",
+        "tombstone_catalog_sha256",
+        "required_evidence_preservation_sha256",
+        "real_storage_written",
+        "production_retention_cleanup_proved"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "EVIDENCE_RETENTION_CLEANUP_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "evidence_store_build_sha256": { "$ref": "#/$defs/sha256" },
+        "storage_policy_sha256": { "$ref": "#/$defs/sha256" },
+        "retention_replay_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "reductive_cleanup_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "tombstone_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "required_evidence_preservation_sha256": { "$ref": "#/$defs/sha256" },
+        "real_storage_written": { "const": false },
+        "production_retention_cleanup_proved": { "const": false }
+      }
+    },
+    "payload14": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "track_evidence",
+        "trial_id_sha256",
+        "schedule_version_sha256",
+        "row_set_sha256",
+        "randomization_seal_sha256",
+        "custody_chain_sha256",
+        "post_outcome_exclusion_allowed",
+        "real_trial_rows_present",
+        "production_schedule_custody_bound"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "TRIAL_SCHEDULE_AND_CUSTODY_EVIDENCE_DOUBLE" },
+        "track_evidence": { "$ref": "#/$defs/dualTrackEvidence" },
+        "trial_id_sha256": { "$ref": "#/$defs/sha256" },
+        "schedule_version_sha256": { "$ref": "#/$defs/sha256" },
+        "row_set_sha256": { "$ref": "#/$defs/sha256" },
+        "randomization_seal_sha256": { "$ref": "#/$defs/sha256" },
+        "custody_chain_sha256": { "$ref": "#/$defs/sha256" },
+        "post_outcome_exclusion_allowed": { "const": false },
+        "real_trial_rows_present": { "const": false },
+        "production_schedule_custody_bound": { "const": false }
+      }
+    },
+    "payload15": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_kind",
+        "packet_id_hash_algorithm",
+        "packet_set_hash_domain",
+        "packet_set_canonicalization",
+        "ordered_prerequisite_packet_id_sha256",
+        "evidence_set_sha256",
+        "reviewer_identity_commitment_sha256",
+        "reviewer_independence_matrix_sha256",
+        "failure_mode_catalog_sha256",
+        "canary_plan_sha256",
+        "rollback_plan_sha256",
+        "real_review_performed",
+        "independent_approval_recorded"
+      ],
+      "properties": {
+        "evidence_kind": { "const": "INDEPENDENT_SECURITY_REVIEW_EVIDENCE_DOUBLE" },
+        "packet_id_hash_algorithm": { "const": "SHA-256" },
+        "packet_set_hash_domain": {
+          "const": "AB_TRACK_B_RUNTIME_PREREQUISITE_SYNTHETIC_PACKET_SET_V1"
+        },
+        "packet_set_canonicalization": {
+          "const": "AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_INDENT_2_LF"
+        },
+        "ordered_prerequisite_packet_id_sha256": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sha256" },
+          "minItems": 14,
+          "maxItems": 14,
+          "uniqueItems": true
+        },
+        "evidence_set_sha256": { "$ref": "#/$defs/sha256" },
+        "reviewer_identity_commitment_sha256": { "$ref": "#/$defs/sha256" },
+        "reviewer_independence_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "failure_mode_catalog_sha256": { "$ref": "#/$defs/sha256" },
+        "canary_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "rollback_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "real_review_performed": { "const": false },
+        "independent_approval_recorded": { "const": false }
+      }
+    },
+    "commonPacket": {
+      "type": "object",
+      "required": [
+        "schema",
+        "schema_version",
+        "packet_kind",
+        "prerequisite_id",
+        "evidence_class",
+        "owner_class",
+        "track_partition",
+        "predecessor_bindings",
+        "synthetic_provenance",
+        "freshness",
+        "packet_id_sha256",
+        "boundary",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet.v1"
+        },
+        "schema_version": { "const": 1 },
+        "packet_kind": { "const": "SYNTHETIC_VALIDATOR_DOUBLE" },
+        "prerequisite_id": { "type": "string" },
+        "evidence_class": { "type": "string" },
+        "owner_class": { "type": "string" },
+        "track_partition": {
+          "enum": ["GLOBAL", "MANAGED_ONLY", "SELF_HOSTED_ONLY", "DUAL_TRACK_SEPARATE"]
+        },
+        "predecessor_bindings": { "$ref": "#/$defs/predecessorBindings" },
+        "synthetic_provenance": { "$ref": "#/$defs/syntheticProvenance" },
+        "freshness": { "$ref": "#/$defs/freshness" },
+        "packet_id_sha256": { "$ref": "#/$defs/sha256" },
+        "boundary": { "$ref": "#/$defs/boundary" }
+      }
+    },
+    "packet01": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "PRODUCTION_AUTHORITY_VERIFIER_IMPLEMENTED" },
+            "evidence_class": { "const": "AUDITED_BUILD_AND_TEST_EVIDENCE" },
+            "owner_class": { "const": "IMPLEMENTATION_OWNER" },
+            "track_partition": { "const": "GLOBAL" },
+            "payload": { "$ref": "#/$defs/payload01" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet02": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "PRODUCTION_MANAGED_ADAPTER_SET_IMPLEMENTED" },
+            "evidence_class": { "const": "MANAGED_ADAPTER_CONFORMANCE_EVIDENCE" },
+            "owner_class": { "const": "MANAGED_PROVIDER_OPERATOR" },
+            "track_partition": { "const": "MANAGED_ONLY" },
+            "payload": { "$ref": "#/$defs/payload02" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet03": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "PRODUCTION_SELF_HOSTED_ADAPTER_SET_IMPLEMENTED" },
+            "evidence_class": { "const": "SELF_HOSTED_ADAPTER_CONFORMANCE_EVIDENCE" },
+            "owner_class": { "const": "SELF_HOSTED_LAB_OPERATOR" },
+            "track_partition": { "const": "SELF_HOSTED_ONLY" },
+            "payload": { "$ref": "#/$defs/payload03" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet04": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "PRODUCTION_STOP_CONTROL_SET_IMPLEMENTED" },
+            "evidence_class": { "const": "STOP_CONTROL_FAILURE_INJECTION_EVIDENCE" },
+            "owner_class": { "const": "SAFETY_OPERATOR" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload04" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet05": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "TRUST_ROOT_AND_KEY_VERSION_POLICY_BOUND" },
+            "evidence_class": { "const": "TRUST_ROOT_POLICY_BINDING_EVIDENCE" },
+            "owner_class": { "const": "SECURITY_OWNER" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload05" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet06": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "PROVIDER_ENDPOINT_AND_PROFILE_IDENTITY_BOUND" },
+            "evidence_class": { "const": "PROVIDER_IDENTITY_BINDING_EVIDENCE" },
+            "owner_class": { "const": "PROVIDER_OPERATOR" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload06" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet07": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "CREDENTIAL_BROKER_LEASE_AND_REVOCATION_BOUND" },
+            "evidence_class": { "const": "CREDENTIAL_LIFECYCLE_EVIDENCE" },
+            "owner_class": { "const": "CREDENTIAL_BROKER_OWNER" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload07" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet08": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "RESOURCE_SCOPE_AND_COST_BUDGET_AUTHORITY_BOUND" },
+            "evidence_class": { "const": "RESOURCE_AND_BUDGET_AUTHORITY_EVIDENCE" },
+            "owner_class": { "const": "RESOURCE_AND_COST_OWNER" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload08" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet09": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "DURABLE_CONTROL_LEDGER_AND_ATOMIC_CAS_PROVEN" },
+            "evidence_class": { "const": "DURABLE_LEDGER_LINEARIZABILITY_EVIDENCE" },
+            "owner_class": { "const": "AUTHORITY_STORE_OWNER" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload09" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet10": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "TRUSTED_TIME_AND_CURRENTNESS_EVIDENCE_BOUND" },
+            "evidence_class": { "const": "TRUSTED_TIME_CURRENTNESS_EVIDENCE" },
+            "owner_class": { "const": "TIME_AUTHORITY_OWNER" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload10" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet11": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "RUNNER_BUILD_PROCESS_SESSION_AND_CHANNEL_PROVENANCE_BOUND" },
+            "evidence_class": { "const": "RUNNER_PROVENANCE_EVIDENCE" },
+            "owner_class": { "const": "RUNNER_OPERATOR" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload11" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet12": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "FAULT_DISARM_EGRESS_ISOLATION_AND_EMERGENCY_STOP_PROVEN" },
+            "evidence_class": { "const": "SAFETY_STOP_DRILL_EVIDENCE" },
+            "owner_class": { "const": "SAFETY_OPERATOR" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload12" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet13": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "DURABLE_EVIDENCE_RETENTION_AND_SCOPED_CLEANUP_PROVEN" },
+            "evidence_class": { "const": "EVIDENCE_RETENTION_CLEANUP_EVIDENCE" },
+            "owner_class": { "const": "EVIDENCE_CUSTODIAN" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload13" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet14": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "REAL_PREREGISTERED_SCHEDULE_ASSIGNMENT_AND_ROW_CUSTODY_BOUND" },
+            "evidence_class": { "const": "TRIAL_SCHEDULE_AND_CUSTODY_EVIDENCE" },
+            "owner_class": { "const": "TRIAL_CUSTODIAN" },
+            "track_partition": { "const": "DUAL_TRACK_SEPARATE" },
+            "payload": { "$ref": "#/$defs/payload14" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "packet15": {
+      "allOf": [
+        { "$ref": "#/$defs/commonPacket" },
+        {
+          "properties": {
+            "prerequisite_id": { "const": "INDEPENDENT_SECURITY_FAILURE_MODE_AND_ROLLBACK_REVIEW_APPROVED" },
+            "evidence_class": { "const": "INDEPENDENT_SECURITY_REVIEW_EVIDENCE" },
+            "owner_class": { "const": "INDEPENDENT_REVIEWER" },
+            "track_partition": { "const": "GLOBAL" },
+            "payload": { "$ref": "#/$defs/payload15" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

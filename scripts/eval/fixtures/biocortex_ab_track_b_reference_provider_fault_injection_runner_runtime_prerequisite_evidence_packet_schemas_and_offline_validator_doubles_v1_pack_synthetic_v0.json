@@ -1,0 +1,211 @@
+{
+  "date": "2026-07-17",
+  "downstream_separate_gates": [
+    {
+      "authorized": false,
+      "gate_id": "CONDITION_OUTPUT_GATE",
+      "status": "SEPARATE_NOT_AUTHORIZED"
+    },
+    {
+      "authorized": false,
+      "gate_id": "OUTPUT_PERMIT_GATE",
+      "status": "SEPARATE_NOT_AUTHORIZED"
+    },
+    {
+      "authorized": false,
+      "gate_id": "SCIENTIFIC_CLAIM_GATE",
+      "status": "SEPARATE_NOT_AUTHORIZED"
+    },
+    {
+      "authorized": false,
+      "gate_id": "APPLICATION_CLAIM_GATE",
+      "status": "SEPARATE_NOT_AUTHORIZED"
+    }
+  ],
+  "expected": {
+    "downstream_gates_authorized": 0,
+    "evidence_packet_schema_count": 15,
+    "offline_validator_double_count": 16,
+    "owner_packet_schema_count": 1,
+    "packet_schema_count": 16,
+    "positive_decision_representable": false,
+    "production_validated_evidence_items": 0,
+    "real_evidence_items_present": 0,
+    "runtime_evidence_accepted": 0,
+    "runtime_prerequisites_satisfied": 0
+  },
+  "nonclaims": {
+    "application_claim_authorized": false,
+    "condition_output_authorized": false,
+    "credentials_accessed": false,
+    "deployment_authorized": false,
+    "evidence_receipt_accepted": false,
+    "experiment_row_created": false,
+    "output_permit_defined": false,
+    "owner_decision_authority_exercised": false,
+    "owner_decision_recorded": false,
+    "owner_identity_bound": false,
+    "paid_resource_provisioned": false,
+    "positive_owner_decision_representable": false,
+    "positive_runtime_decision_recorded": false,
+    "production_authority_verifier_implemented": false,
+    "production_managed_adapter_implemented": false,
+    "production_self_hosted_adapter_implemented": false,
+    "production_stop_control_implemented": false,
+    "production_validated_evidence_present": false,
+    "production_validator_implemented": false,
+    "provider_called": false,
+    "provider_endpoint_bound": false,
+    "real_evidence_collected": false,
+    "real_runner_launched": false,
+    "runtime_admission_granted": false,
+    "runtime_admission_ready": false,
+    "runtime_authority": false,
+    "runtime_evidence_accepted": false,
+    "runtime_prerequisite_satisfied": false,
+    "runtime_row_created": false,
+    "schema_receipt_is_evidence_receipt": false,
+    "scientific_claim_authorized": false,
+    "secret_material_present": false,
+    "side_effects_unlocked": "NONE",
+    "synthetic_fixture_is_production_evidence": false,
+    "validator_double_is_runtime_admission": false,
+    "validator_double_receipt_is_execution_authority": false,
+    "validator_double_receipt_is_output_permit": false,
+    "wire_attempted": false
+  },
+  "packet_profile_specs": [
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_AUTHORITY_VERIFIER_BUILD_EVIDENCE_V1",
+      "packet_def": "packet01",
+      "payload_def": "payload01",
+      "prerequisite_id": "PRODUCTION_AUTHORITY_VERIFIER_IMPLEMENTED"
+    },
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_MANAGED_ADAPTER_CONFORMANCE_EVIDENCE_V1",
+      "packet_def": "packet02",
+      "payload_def": "payload02",
+      "prerequisite_id": "PRODUCTION_MANAGED_ADAPTER_SET_IMPLEMENTED"
+    },
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_SELF_HOSTED_ADAPTER_CONFORMANCE_EVIDENCE_V1",
+      "packet_def": "packet03",
+      "payload_def": "payload03",
+      "prerequisite_id": "PRODUCTION_SELF_HOSTED_ADAPTER_SET_IMPLEMENTED"
+    },
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_STOP_CONTROL_FAILURE_INJECTION_EVIDENCE_V1",
+      "packet_def": "packet04",
+      "payload_def": "payload04",
+      "prerequisite_id": "PRODUCTION_STOP_CONTROL_SET_IMPLEMENTED"
+    },
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_TRUST_ROOT_POLICY_BINDING_EVIDENCE_V1",
+      "packet_def": "packet05",
+      "payload_def": "payload05",
+      "prerequisite_id": "TRUST_ROOT_AND_KEY_VERSION_POLICY_BOUND"
+    },
+    {
+      "max_age_seconds": 86400,
+      "offline_validator_id": "OFFLINE_PROVIDER_IDENTITY_BINDING_EVIDENCE_V1",
+      "packet_def": "packet06",
+      "payload_def": "payload06",
+      "prerequisite_id": "PROVIDER_ENDPOINT_AND_PROFILE_IDENTITY_BOUND"
+    },
+    {
+      "max_age_seconds": 3600,
+      "offline_validator_id": "OFFLINE_CREDENTIAL_LIFECYCLE_EVIDENCE_V1",
+      "packet_def": "packet07",
+      "payload_def": "payload07",
+      "prerequisite_id": "CREDENTIAL_BROKER_LEASE_AND_REVOCATION_BOUND"
+    },
+    {
+      "max_age_seconds": 86400,
+      "offline_validator_id": "OFFLINE_RESOURCE_AND_BUDGET_AUTHORITY_EVIDENCE_V1",
+      "packet_def": "packet08",
+      "payload_def": "payload08",
+      "prerequisite_id": "RESOURCE_SCOPE_AND_COST_BUDGET_AUTHORITY_BOUND"
+    },
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_DURABLE_LEDGER_LINEARIZABILITY_EVIDENCE_V1",
+      "packet_def": "packet09",
+      "payload_def": "payload09",
+      "prerequisite_id": "DURABLE_CONTROL_LEDGER_AND_ATOMIC_CAS_PROVEN"
+    },
+    {
+      "max_age_seconds": 300,
+      "offline_validator_id": "OFFLINE_TRUSTED_TIME_CURRENTNESS_EVIDENCE_V1",
+      "packet_def": "packet10",
+      "payload_def": "payload10",
+      "prerequisite_id": "TRUSTED_TIME_AND_CURRENTNESS_EVIDENCE_BOUND"
+    },
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_RUNNER_PROVENANCE_EVIDENCE_V1",
+      "packet_def": "packet11",
+      "payload_def": "payload11",
+      "prerequisite_id": "RUNNER_BUILD_PROCESS_SESSION_AND_CHANNEL_PROVENANCE_BOUND"
+    },
+    {
+      "max_age_seconds": 604800,
+      "offline_validator_id": "OFFLINE_SAFETY_STOP_DRILL_EVIDENCE_V1",
+      "packet_def": "packet12",
+      "payload_def": "payload12",
+      "prerequisite_id": "FAULT_DISARM_EGRESS_ISOLATION_AND_EMERGENCY_STOP_PROVEN"
+    },
+    {
+      "max_age_seconds": 604800,
+      "offline_validator_id": "OFFLINE_EVIDENCE_RETENTION_CLEANUP_EVIDENCE_V1",
+      "packet_def": "packet13",
+      "payload_def": "payload13",
+      "prerequisite_id": "DURABLE_EVIDENCE_RETENTION_AND_SCOPED_CLEANUP_PROVEN"
+    },
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_TRIAL_SCHEDULE_AND_CUSTODY_EVIDENCE_V1",
+      "packet_def": "packet14",
+      "payload_def": "payload14",
+      "prerequisite_id": "REAL_PREREGISTERED_SCHEDULE_ASSIGNMENT_AND_ROW_CUSTODY_BOUND"
+    },
+    {
+      "max_age_seconds": null,
+      "offline_validator_id": "OFFLINE_INDEPENDENT_SECURITY_REVIEW_EVIDENCE_V1",
+      "packet_def": "packet15",
+      "payload_def": "payload15",
+      "prerequisite_id": "INDEPENDENT_SECURITY_FAILURE_MODE_AND_ROLLBACK_REVIEW_APPROVED"
+    },
+    {
+      "max_age_seconds": 1800,
+      "offline_validator_id": "OFFLINE_OWNER_RUNTIME_ADMISSION_DECISION_V1",
+      "packet_def": "packet16",
+      "payload_def": "payload16",
+      "prerequisite_id": "OWNER_RUNTIME_ADMISSION_DECISION_RECORDED"
+    }
+  ],
+  "predecessor": {
+    "fixture_sha256": "156b9a0357f1d5773fdd39be25d832e1d9e2e1df0d766b1947bbcc9cee118db3",
+    "integration_commit": "8af4af0e5ceea8062b65ac06870cabf789567053",
+    "manifest_sha256": "caf420dd4f4d2b310d80bd56ab287f6ef527256c0126a48106438f6a344e6498",
+    "plan_sha256": "260036232778e6d22f2050333b0daeab7d70153a15cb7f36526f47d1514a239b",
+    "source_commit": "ca939cd3e097ebadb6adbea6d2778e2eff71da73"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_schemas_and_offline_validator_doubles_v1.synthetic.v0",
+  "synthetic_context": {
+    "checked_at_utc": "2026-07-17T12:01:00Z",
+    "fixture_identity_sha256": "c3b0141deeaed7cb9ff85d22f382e2a54e576e076b762e2ca2ccb8536a95d4a7",
+    "generator_build_sha256": "83265350e97bd5e8d2488982191c6b902ec1d2f81ea116046c195c87f0fdf05e",
+    "observed_at_utc": "2026-07-17T12:00:00Z",
+    "validator_build_sha256": "b7a5a2f3b87b1d8c39aa3acf0987acb72b5335c4af6738ab03033cb4583aa30f"
+  },
+  "synthetic_only": true,
+  "tracks": [
+    "MANAGED_SPANNER_CLOUD_KMS",
+    "SELF_HOSTED_ETCD_OPENBAO"
+  ]
+}
