@@ -1,0 +1,219 @@
+{
+  "date": "2026-07-16",
+  "downstream_separate_gates": [
+    {
+      "authorized": false,
+      "gate_id": "CONDITION_OUTPUT_GATE",
+      "status": "SEPARATE_NOT_AUTHORIZED"
+    },
+    {
+      "authorized": false,
+      "gate_id": "OUTPUT_PERMIT_GATE",
+      "status": "SEPARATE_NOT_AUTHORIZED"
+    },
+    {
+      "authorized": false,
+      "gate_id": "SCIENTIFIC_CLAIM_GATE",
+      "status": "SEPARATE_NOT_AUTHORIZED"
+    },
+    {
+      "authorized": false,
+      "gate_id": "APPLICATION_CLAIM_GATE",
+      "status": "SEPARATE_NOT_AUTHORIZED"
+    }
+  ],
+  "expected": {
+    "adapter_doubles_reviewed": 9,
+    "all_nonclaims_explicit": true,
+    "downstream_separate_gate_count": 4,
+    "integration_component_count": 15,
+    "nonclaim_field_count": 23,
+    "production_components_bound": 0,
+    "runtime_prerequisite_count": 16,
+    "runtime_prerequisites_satisfied": 0,
+    "stop_control_doubles_reviewed": 5,
+    "synthetic_components_complete": 15,
+    "track_count": 2
+  },
+  "nonclaims": {
+    "application_claim_authorized": false,
+    "condition_output_authorized": false,
+    "credentials_accessed": false,
+    "deployment_authorized": false,
+    "experiment_row_created": false,
+    "offline_review_is_runtime_admission": false,
+    "output_permit_defined": false,
+    "paid_resource_provisioned": false,
+    "production_adapter_implemented": false,
+    "production_authority_verifier_implemented": false,
+    "production_stop_control_implemented": false,
+    "provider_called": false,
+    "provider_endpoint_bound": false,
+    "real_runner_launched": false,
+    "review_receipt_is_execution_authority": false,
+    "review_receipt_is_output_permit": false,
+    "runtime_admission_granted": false,
+    "runtime_admission_ready": false,
+    "runtime_authority": false,
+    "runtime_row_created": false,
+    "scientific_claim_authorized": false,
+    "side_effects_unlocked": "NONE",
+    "wire_attempted": false
+  },
+  "predecessor": {
+    "checker_path": "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack.py",
+    "checker_sha256": "ed11f6d6c31812a70520a7fe30d7a5984a4e429598e102aa8540a18f2398789b",
+    "expected_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack.expected.v0.tsv",
+    "expected_sha256": "df468939b9cd8c0d1f5df9e4ddef1e00dcd5834a6b5bbcd683e6969ae9cbf303",
+    "gate_path": "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-offline-authority-and-adapter-doubles-v1-pack.sh",
+    "gate_sha256": "aa59a4f1ae0eb722a053779b79ab93f242b63747a54c48886f7abab463494925",
+    "integration_commit": "a1c9469e9a14cd73159d34974f0e99714ce5a1f0",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack_v0.json",
+    "manifest_sha256": "01f41e7a7a6760641bafc53b51fa6ea406ef18403bb7318b4f1c282f3b091d9b",
+    "module_path": "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1.py",
+    "module_sha256": "aa2682bd659723fda6cf3ca650690c1bebfd7f01eee0612507903409c75d2785",
+    "report_path": "docs/reports/goal-c-u/2026-07-16-biocortex-track-b-reference-provider-fault-injection-runner-offline-authority-and-adapter-doubles-v1-pack.md",
+    "report_sha256": "01a2c9a617afb7a170cd52ad62e1e053ecb8b260cb64cbb929483489e4682dbc",
+    "source_commit": "425ce42fa4f2bc1bbf2ce072c7a8b3407cd8bbb1"
+  },
+  "review_scope": {
+    "adapter_ids": [
+      "SPANNER_AUTHORITY_ADAPTER",
+      "CLOUD_KMS_SIGNER_ADAPTER",
+      "MANAGED_FAULT_PROXY_ADAPTER",
+      "MANAGED_EVIDENCE_COLLECTOR_ADAPTER",
+      "ETCD_AUTHORITY_ADAPTER",
+      "OPENBAO_TRANSIT_ADAPTER",
+      "EXTERNAL_RESTORE_WITNESS_ADAPTER",
+      "LAB_FAULT_CONTROLLER_ADAPTER",
+      "SELF_HOSTED_EVIDENCE_COLLECTOR_ADAPTER"
+    ],
+    "stop_control_ids": [
+      "CAPABILITY_FENCE_CONTROL",
+      "FAULT_DISARM_AND_EGRESS_ISOLATION_CONTROL",
+      "CREDENTIAL_BROKER_REVOCATION_CONTROL",
+      "DURABLE_EVIDENCE_RETENTION_CONTROL",
+      "SCOPED_RESOURCE_CLEANUP_CONTROL"
+    ],
+    "tracks": [
+      "MANAGED_SPANNER_CLOUD_KMS",
+      "SELF_HOSTED_ETCD_OPENBAO"
+    ]
+  },
+  "runtime_prerequisites": [
+    {
+      "evidence_required": "AUDITED_PRODUCTION_VERIFIER_BUILD_AND_TEST_RECEIPT",
+      "owner_class": "IMPLEMENTATION_OWNER",
+      "prerequisite_id": "PRODUCTION_AUTHORITY_VERIFIER_IMPLEMENTED",
+      "satisfied": false,
+      "status": "MISSING_NOT_IMPLEMENTED"
+    },
+    {
+      "evidence_required": "FOUR_MANAGED_ADAPTER_BUILD_AND_CONFORMANCE_RECEIPTS",
+      "owner_class": "MANAGED_PROVIDER_OPERATOR",
+      "prerequisite_id": "PRODUCTION_MANAGED_ADAPTER_SET_IMPLEMENTED",
+      "satisfied": false,
+      "status": "MISSING_NOT_IMPLEMENTED"
+    },
+    {
+      "evidence_required": "FIVE_SELF_HOSTED_ADAPTER_BUILD_AND_CONFORMANCE_RECEIPTS",
+      "owner_class": "SELF_HOSTED_LAB_OPERATOR",
+      "prerequisite_id": "PRODUCTION_SELF_HOSTED_ADAPTER_SET_IMPLEMENTED",
+      "satisfied": false,
+      "status": "MISSING_NOT_IMPLEMENTED"
+    },
+    {
+      "evidence_required": "FIVE_STOP_CONTROL_BUILD_AND_FAILURE_INJECTION_RECEIPTS",
+      "owner_class": "SAFETY_OPERATOR",
+      "prerequisite_id": "PRODUCTION_STOP_CONTROL_SET_IMPLEMENTED",
+      "satisfied": false,
+      "status": "MISSING_NOT_IMPLEMENTED"
+    },
+    {
+      "evidence_required": "TRUST_ROOT_KEY_VERSION_ROLE_AND_REVOCATION_POLICY_RECEIPTS",
+      "owner_class": "SECURITY_OWNER",
+      "prerequisite_id": "TRUST_ROOT_AND_KEY_VERSION_POLICY_BOUND",
+      "satisfied": false,
+      "status": "MISSING_NOT_BOUND"
+    },
+    {
+      "evidence_required": "EXACT_ENDPOINT_PROFILE_REGION_AND_NAMESPACE_BINDING_RECEIPTS",
+      "owner_class": "PROVIDER_OPERATOR",
+      "prerequisite_id": "PROVIDER_ENDPOINT_AND_PROFILE_IDENTITY_BOUND",
+      "satisfied": false,
+      "status": "MISSING_NOT_BOUND"
+    },
+    {
+      "evidence_required": "SCOPED_LEASE_ISSUE_REVOKE_AND_ZERO_ACTIVE_COMMITMENT_RECEIPTS",
+      "owner_class": "CREDENTIAL_BROKER_OWNER",
+      "prerequisite_id": "CREDENTIAL_BROKER_LEASE_AND_REVOCATION_BOUND",
+      "satisfied": false,
+      "status": "MISSING_NOT_BOUND"
+    },
+    {
+      "evidence_required": "EXACT_RESOURCE_SCOPE_COST_CEILING_AND_BUDGET_AUTHORITY_RECEIPTS",
+      "owner_class": "RESOURCE_AND_COST_OWNER",
+      "prerequisite_id": "RESOURCE_SCOPE_AND_COST_BUDGET_AUTHORITY_BOUND",
+      "satisfied": false,
+      "status": "MISSING_NOT_BOUND"
+    },
+    {
+      "evidence_required": "DURABLE_SINGLE_USE_LEDGER_LINEARIZABILITY_AND_CAS_FAILURE_RECEIPTS",
+      "owner_class": "AUTHORITY_STORE_OWNER",
+      "prerequisite_id": "DURABLE_CONTROL_LEDGER_AND_ATOMIC_CAS_PROVEN",
+      "satisfied": false,
+      "status": "MISSING_NOT_PROVEN"
+    },
+    {
+      "evidence_required": "SIGNED_TRUSTED_TIME_AND_ROW_CURRENTNESS_PRODUCTION_RECEIPTS",
+      "owner_class": "TIME_AUTHORITY_OWNER",
+      "prerequisite_id": "TRUSTED_TIME_AND_CURRENTNESS_EVIDENCE_BOUND",
+      "satisfied": false,
+      "status": "MISSING_NOT_BOUND"
+    },
+    {
+      "evidence_required": "RUNNER_BUILD_PROCESS_SESSION_CHANNEL_AND_EXPORTER_BINDING_RECEIPTS",
+      "owner_class": "RUNNER_OPERATOR",
+      "prerequisite_id": "RUNNER_BUILD_PROCESS_SESSION_AND_CHANNEL_PROVENANCE_BOUND",
+      "satisfied": false,
+      "status": "MISSING_NOT_BOUND"
+    },
+    {
+      "evidence_required": "LIVE_DISARM_EGRESS_ISOLATION_AND_INDEPENDENT_EMERGENCY_STOP_DRILL_RECEIPTS",
+      "owner_class": "SAFETY_OPERATOR",
+      "prerequisite_id": "FAULT_DISARM_EGRESS_ISOLATION_AND_EMERGENCY_STOP_PROVEN",
+      "satisfied": false,
+      "status": "MISSING_NOT_PROVEN"
+    },
+    {
+      "evidence_required": "DURABLE_RETENTION_REPLAY_AND_REDUCTIVE_CLEANUP_DRILL_RECEIPTS",
+      "owner_class": "EVIDENCE_CUSTODIAN",
+      "prerequisite_id": "DURABLE_EVIDENCE_RETENTION_AND_SCOPED_CLEANUP_PROVEN",
+      "satisfied": false,
+      "status": "MISSING_NOT_PROVEN"
+    },
+    {
+      "evidence_required": "OWNER_PREREGISTERED_SCHEDULE_ASSIGNMENT_AND_ALL_ROW_CUSTODY_RECEIPTS",
+      "owner_class": "TRIAL_CUSTODIAN",
+      "prerequisite_id": "REAL_PREREGISTERED_SCHEDULE_ASSIGNMENT_AND_ROW_CUSTODY_BOUND",
+      "satisfied": false,
+      "status": "MISSING_NOT_BOUND"
+    },
+    {
+      "evidence_required": "INDEPENDENT_SECURITY_FAILURE_MODE_CANARY_AND_ROLLBACK_APPROVAL",
+      "owner_class": "INDEPENDENT_REVIEWER",
+      "prerequisite_id": "INDEPENDENT_SECURITY_FAILURE_MODE_AND_ROLLBACK_REVIEW_APPROVED",
+      "satisfied": false,
+      "status": "MISSING_NOT_APPROVED"
+    },
+    {
+      "evidence_required": "EXPLICIT_OWNER_DECISION_BOUND_TO_ALL_PREREQUISITE_RECEIPTS",
+      "owner_class": "OWNER",
+      "prerequisite_id": "OWNER_RUNTIME_ADMISSION_DECISION_RECORDED",
+      "satisfied": false,
+      "status": "MISSING_OWNER_DECISION"
+    }
+  ],
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_integration_and_runtime_admission_boundary_review_v1.synthetic.v0",
+  "synthetic_only": true
+}
