@@ -4,6 +4,7 @@
 //!
 //! Routes incoming RPC calls to backend traits (Notifier, AgentRuntime, ...).
 
+pub mod agent_task_contract;
 pub mod anthropic_api;
 pub mod avatar_alert;
 pub mod avatar_cortex;

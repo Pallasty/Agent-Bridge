@@ -1,6 +1,7 @@
 //! Built-in MCP tools — wrap the bridge's backend bundle and expose it to
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
+use crate::agent_task_contract::{preview_agent_task_contract, AgentTaskContract};
 use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use crate::trigger_recall_opt_in::{
     trigger_recall_enforce_hold_approval_packet_validator,
@@ -14450,6 +14451,145 @@ async fn save_precompact_work_memory_snapshot(
             "truncated": truncated,
         }),
         Err(e) => json!({ "saved": false, "error": e.to_string() }),
+    }
+}
+
+/// Read-only contract compiler for reviewing a bounded agent attempt before
+/// any mutating orchestration tool is called.
+pub struct AgentTaskContractPreviewTool;
+
+impl AgentTaskContractPreviewTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for AgentTaskContractPreviewTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for AgentTaskContractPreviewTool {
+    fn name(&self) -> &'static str {
+        "agent_task_contract_preview"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Compile and validate a deterministic, read-only agent task contract preview. The tool never spawns or steers agents, never writes durable memory or work_memory, never promotes canon, and never enables runtime behavior. A blocked preview has typed violations and an empty compiled_instruction."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["contract"],
+                "properties": {
+                    "contract": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "schema_version",
+                            "contract_id",
+                            "revision",
+                            "objective",
+                            "this_attempt_only",
+                            "acceptance_criteria",
+                            "authority_boundary",
+                            "attempt_no",
+                            "attempt_budget"
+                        ],
+                        "properties": {
+                            "schema_version": {
+                                "type": "string",
+                                "const": "agent_bridge.agent_task_contract.v0"
+                            },
+                            "contract_id": { "type": "string", "minLength": 1 },
+                            "revision": { "type": "integer", "minimum": 1 },
+                            "objective": { "type": "string", "minLength": 1 },
+                            "parent_evidence_refs": {
+                                "type": "array",
+                                "default": [],
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": ["reference", "verdict", "authority_boundary"],
+                                    "properties": {
+                                        "reference": { "type": "string", "minLength": 1 },
+                                        "verdict": {
+                                            "type": "string",
+                                            "enum": ["accepted", "accepted_with_deviation", "rejected"]
+                                        },
+                                        "authority_boundary": {
+                                            "type": "string",
+                                            "enum": ["read_only", "project_write", "external_write", "runtime_enablement"]
+                                        }
+                                    }
+                                }
+                            },
+                            "this_attempt_only": {
+                                "type": "array",
+                                "items": { "type": "string", "minLength": 1 },
+                                "minItems": 1
+                            },
+                            "reserved_actions": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "default": []
+                            },
+                            "continuity_locks": {
+                                "type": "object",
+                                "additionalProperties": { "type": "string" },
+                                "default": {}
+                            },
+                            "allowed_changes": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "default": []
+                            },
+                            "acceptance_criteria": {
+                                "type": "array",
+                                "items": { "type": "string", "minLength": 1 },
+                                "minItems": 1
+                            },
+                            "authority_boundary": {
+                                "type": "string",
+                                "enum": ["read_only", "project_write", "external_write", "runtime_enablement"]
+                            },
+                            "attempt_no": { "type": "integer", "minimum": 1 },
+                            "attempt_budget": { "type": "integer", "minimum": 1 },
+                            "changed_variable": { "type": ["string", "null"] },
+                            "planned_state": {
+                                "type": "object",
+                                "additionalProperties": { "type": "string" },
+                                "default": {}
+                            },
+                            "observed_state": {
+                                "type": "object",
+                                "additionalProperties": { "type": "string" },
+                                "default": {}
+                            }
+                        }
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(contract_value) = args.get("contract") else {
+            return Ok(ToolResult::error("missing required object: contract"));
+        };
+        let contract = match serde_json::from_value::<AgentTaskContract>(contract_value.clone()) {
+            Ok(contract) => contract,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "invalid agent task contract: {error}"
+                )))
+            }
+        };
+        let preview = preview_agent_task_contract(contract);
+        Ok(ToolResult::json_text(&json!(preview)))
     }
 }
 
@@ -41496,6 +41636,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Essential,
         Arc::new(WorkMemoryTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(AgentTaskContractPreviewTool::new()),
     );
     reg_if(
         &mut reg,
