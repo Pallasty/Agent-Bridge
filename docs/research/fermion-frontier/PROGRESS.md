@@ -1385,3 +1385,48 @@ separately precommitted, D2-result-informed but scientific-blind D3 that
 subdivides only the frozen segment-E static window, or a separately versioned
 algorithm/proof decomposition.  D2, the candidate and the host admission must
 not be relaxed in place.
+
+## Majorana P7 D3 narrows the unresolved segment-E window to local ordinals 23--26
+
+P7 D3 froze its separately versioned, D2-result-informed but scientific-blind
+segment-E subgrid diagnostic at preprobe commit
+`55453f7fb0251f676a71220eb7b090d78ba6d8c5`, a direct child of D2 result
+commit `937065e0a576ba7615d48e389fb8e75e3e3aa677`.  Its sole fresh process used
+the unchanged 2 GiB memory, zero-swap and 1,800-second admission.  The
+controlled command returned `-15` after `1800.488401583` outer-monotonic
+seconds; the 1,830-second outer safety timeout did not fire and stdout was
+empty.  Those process-level facts are retained only as host/runtime
+diagnostics and do not establish why the process stopped, which signal source
+was responsible or which composite was active.  The verified canonical report
+is 11,888 bytes with SHA-256
+`8374dff73a0753f95eba1fb1bcf3612e269095b33a223717293b33ef5f65f0db`.
+
+The dedicated channel produced a 33-event `LEGAL_PREFIX_INTERRUPTED` trace.
+Segments A through D returned.  Segment E/H4 started and reached checkpoint 1
+after local composite ordinal 22.  No E subgrid-26 marker was emitted, nor was
+any later E subgrid-30, subgrid-34, subgrid-38, checkpoint-2, E-return,
+later-segment, step-3 engine-return or step-3 finalizer marker emitted.  These
+marker facts localize only frozen control-flow progress; they do not expose a
+scientific value or identify a failure mechanism.
+
+The fixed D3 subgrid emits its next marker immediately after E local ordinal
+26.  Combined with the confirmed checkpoint-1 marker, the unresolved static
+window is therefore E local ordinals 23--26, corresponding to global
+zero-based composite indices 246--249.  The returned A--D markers and E
+checkpoint 1 confirm passage through at least 224 + 22 = 246 frozen step-3
+completion points.  An interruption may occur after local ordinal 26
+completes but before its marker is successfully emitted, so the possible
+runtime completion-point-count envelope is 246--250.  The absent subgrid-26
+marker does not prove that ordinal 26 was unfinished, and neither endpoint is
+an observed scientific state.
+
+The observation remains `INDETERMINATE_HOST_OR_RUNTIME_FAILURE`, with no
+diagnostic terminal branch, `scientific_authority=NONE`,
+`certificate_eligible=false` and `result_contract_eligible=false`.  The
+resource witness is `null`, and S0 status is exactly
+`NOT_ESTABLISHED_BY_D3_E_SUBGRID_DIAGNOSTIC`.  This is neither a deterministic
+cap nor a mathematical or algorithmic no-go and cannot authorize an in-place
+change to the candidate, algorithm, caps or host admission.  Any further
+resolution requires another separately precommitted scientific-blind version
+targeting the remaining local 23--26 window, or a separately versioned
+algorithm/proof decomposition.

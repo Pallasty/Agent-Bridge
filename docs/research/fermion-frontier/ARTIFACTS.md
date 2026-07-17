@@ -1250,6 +1250,35 @@ so they are versioned normally and are not added to the preservation-only
   separately precommitted, scientific-blind D3 subgrid or a separately
   versioned algorithm/proof decomposition; no frozen candidate or admission
   cap may be changed in place.
+- `majorana_certificate_p7_d3_e_subgrid_probe.py`,
+  `majorana_certificate_p7_d3_e_subgrid_probe/majorana_p7_step3_e_subgrid_probe.jl`,
+  `majorana_certificate_p7_d3_e_subgrid_probe_fixture.json`,
+  `majorana_certificate_p7_d3_e_subgrid_probe_policy.json`,
+  `majorana_certificate_p7_d3_e_subgrid_probe_report.json` and their
+  preprobe/result tests: separately versioned, non-authoritative D3 static
+  segment-E subgrid diagnostic for the frozen P7 adjacent-step-3 path.  Its
+  D2-result-informed but scientific-blind preprobe commit is
+  `55453f7fb0251f676a71220eb7b090d78ba6d8c5`, a direct child of D2 result
+  commit `937065e0a576ba7615d48e389fb8e75e3e3aa677`.  The verified canonical
+  report is 11,888 bytes with SHA-256
+  `8374dff73a0753f95eba1fb1bcf3612e269095b33a223717293b33ef5f65f0db`.
+  Its sole controlled execution produced a 33-event
+  `LEGAL_PREFIX_INTERRUPTED` trace: segments A--D returned, segment E/H4
+  started and reached checkpoint 1, and no E subgrid-26 or later marker,
+  checkpoint-2, E-return, later-segment, step-3 engine-return or finalizer
+  marker was emitted.  The static marker contract narrows the unresolved
+  window to E local ordinals 23--26, corresponding to global zero-based
+  composite indices 246--249.  Markers confirm passage through at least 246
+  frozen step-3 completion points; because local ordinal 26 may complete
+  before its marker is emitted, the possible runtime completion-point-count
+  envelope is 246--250.  The controlled command returned `-15` after
+  `1800.488401583` outer-monotonic seconds; the 1,830-second outer safety
+  timeout did not fire and stdout was empty.  Those process-level facts are
+  only host/runtime diagnostics and do not identify a cause, signal source or
+  active composite.  The report remains `scientific_authority=NONE`, its
+  resource witness is `null`, and exact S0 status is
+  `NOT_ESTABLISHED_BY_D3_E_SUBGRID_DIAGNOSTIC`; this is neither a
+  deterministic-cap result nor a mathematical or algorithmic no-go.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is
