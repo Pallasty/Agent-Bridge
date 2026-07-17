@@ -30,6 +30,7 @@ use ab_mcp::{
 use ab_store::{
     cosine_similarity,
     embed_text,
+    mmr_rerank_by_text,
     now_secs,
     prioritize_session_handoff,
     semantic_blend_score,
@@ -13056,6 +13057,36 @@ fn distill_surfacing_disabled() -> bool {
     )
 }
 
+/// R3 MMR diversity kill switch (forum #147, default ON):
+/// `AB_BOOTSTRAP_MMR_DISABLE=1` skips the MMR re-rank of the
+/// session_bootstrap semantic page and restores plain blend-score order.
+/// Presentation-only — search ranking and telemetry writers are untouched.
+/// Same pure-split shape as the stage-1 ambient switch above.
+fn bootstrap_mmr_disabled_from(env_val: Option<&str>) -> bool {
+    matches!(env_val, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn bootstrap_mmr_disabled() -> bool {
+    bootstrap_mmr_disabled_from(std::env::var("AB_BOOTSTRAP_MMR_DISABLE").ok().as_deref())
+}
+
+/// Default relevance/diversity trade-off for the bootstrap MMR re-rank.
+const BOOTSTRAP_MMR_LAMBDA_DEFAULT: f64 = 0.7;
+
+/// Optional λ override: `AB_BOOTSTRAP_MMR_LAMBDA` ∈ [0, 1]. Unset, unparsable,
+/// non-finite, or out-of-range values all fall back to the default — the env
+/// var can degrade to stock behaviour but never to a nonsense λ.
+fn bootstrap_mmr_lambda_from(env_val: Option<&str>) -> f64 {
+    match env_val.and_then(|v| v.trim().parse::<f64>().ok()) {
+        Some(l) if l.is_finite() && (0.0..=1.0).contains(&l) => l,
+        _ => BOOTSTRAP_MMR_LAMBDA_DEFAULT,
+    }
+}
+
+fn bootstrap_mmr_lambda() -> f64 {
+    bootstrap_mmr_lambda_from(std::env::var("AB_BOOTSTRAP_MMR_LAMBDA").ok().as_deref())
+}
+
 /// Item B real-embedder gate: would a query embed produce a REAL vector (not the
 /// hash fallback)? Under remote delegation the embed runs on a warm peer, so the
 /// local model state is irrelevant. Otherwise the local ONNX model must have
@@ -13077,10 +13108,58 @@ fn fallback_embedder_ready() -> bool {
 #[cfg(test)]
 mod recall_semantic_fallback_tests {
     use super::{
-        ambient_surfacing_disabled_from, correction_cosurface_enabled_from,
-        distill_surfacing_disabled_from, outcome_collector_enabled_from,
-        recall_semantic_fallback_enabled_from, retrieval_traffic_class_from,
+        ambient_surfacing_disabled_from, bootstrap_mmr_disabled_from, bootstrap_mmr_lambda_from,
+        correction_cosurface_enabled_from, distill_surfacing_disabled_from,
+        outcome_collector_enabled_from, recall_semantic_fallback_enabled_from,
+        retrieval_traffic_class_from, BOOTSTRAP_MMR_LAMBDA_DEFAULT,
     };
+
+    #[test]
+    fn bootstrap_mmr_kill_switch_default_off_unless_truthy() {
+        // Default: MMR re-rank of the semantic page runs (owner-approved
+        // default-on, forum #147).
+        assert!(!bootstrap_mmr_disabled_from(None));
+        assert!(!bootstrap_mmr_disabled_from(Some("0")));
+        assert!(!bootstrap_mmr_disabled_from(Some("")));
+        assert!(!bootstrap_mmr_disabled_from(Some("off")));
+        // Only an explicit truthy value disables it.
+        assert!(bootstrap_mmr_disabled_from(Some("1")));
+        assert!(bootstrap_mmr_disabled_from(Some("true")));
+        assert!(bootstrap_mmr_disabled_from(Some("TRUE")));
+    }
+
+    #[test]
+    fn bootstrap_mmr_lambda_defaults_on_garbage_and_accepts_valid() {
+        // Unset / unparsable / non-finite / out-of-range → default 0.7.
+        assert_eq!(
+            bootstrap_mmr_lambda_from(None),
+            BOOTSTRAP_MMR_LAMBDA_DEFAULT
+        );
+        assert_eq!(
+            bootstrap_mmr_lambda_from(Some("banana")),
+            BOOTSTRAP_MMR_LAMBDA_DEFAULT
+        );
+        assert_eq!(
+            bootstrap_mmr_lambda_from(Some("")),
+            BOOTSTRAP_MMR_LAMBDA_DEFAULT
+        );
+        assert_eq!(
+            bootstrap_mmr_lambda_from(Some("NaN")),
+            BOOTSTRAP_MMR_LAMBDA_DEFAULT
+        );
+        assert_eq!(
+            bootstrap_mmr_lambda_from(Some("1.5")),
+            BOOTSTRAP_MMR_LAMBDA_DEFAULT
+        );
+        assert_eq!(
+            bootstrap_mmr_lambda_from(Some("-0.2")),
+            BOOTSTRAP_MMR_LAMBDA_DEFAULT
+        );
+        // Valid in-range values (whitespace tolerated) pass through.
+        assert_eq!(bootstrap_mmr_lambda_from(Some("0.5")), 0.5);
+        assert_eq!(bootstrap_mmr_lambda_from(Some(" 1.0 ")), 1.0);
+        assert_eq!(bootstrap_mmr_lambda_from(Some("0")), 0.0);
+    }
 
     #[test]
     fn distill_surfacing_kill_switch_default_off_unless_truthy() {
@@ -17710,7 +17789,10 @@ impl McpTool for SessionBootstrapTool {
                  (AGENT_BRIDGE_OUTCOME_COLLECTOR) is on, the semantic page is logged to \
                  retrieval_surfacing as mode=bootstrap — telemetry-only (excluded from \
                  reinforce/decay aggregates until a calibrated ambient rule exists); \
-                 AB_BOOTSTRAP_SURFACING_DISABLE=1 turns just this writer off. Also \
+                 AB_BOOTSTRAP_SURFACING_DISABLE=1 turns just this writer off. The \
+                 semantic page is MMR diversity re-ranked (default on, lambda=0.7; \
+                 AB_BOOTSTRAP_MMR_DISABLE=1 restores plain score order, \
+                 AB_BOOTSTRAP_MMR_LAMBDA overrides lambda). Also \
                  surfaces an S1 distillation-candidates block (propose-only; \
                  AB_DISTILL_SURFACING_DISABLE=1 drops it)."
                 .into(),
@@ -17757,6 +17839,12 @@ impl McpTool for SessionBootstrapTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(60)
             .min(200) as u32;
+
+        // R3 MMR switches: read env once at entry, pass plain values down so
+        // the re-rank itself stays a pure, directly testable function
+        // (same handling as AGENT_BRIDGE_FTS_OR_PRIMARY in memory_search).
+        let mmr_disabled = bootstrap_mmr_disabled();
+        let mmr_lambda = bootstrap_mmr_lambda();
 
         // Detect frontend: explicit arg > env var > default (claude-code).
         // Both `cursor` and `warp` use the compact output format (Warp
@@ -17827,10 +17915,9 @@ impl McpTool for SessionBootstrapTool {
                 .memory_search_semantic_in_scope(q, &cwd, limit, 0.15)
                 .await
                 .unwrap_or_default();
-            let mut ranked: Vec<MemoryRecord> = semantic_hits
+            let mut ranked: Vec<MemorySearchHit> = semantic_hits
                 .into_iter()
                 .filter(|h| h.record.status == "active")
-                .map(|h| h.record)
                 .collect();
             // Always prepend session_handoff rows for continuity.
             let handoff = store
@@ -17842,9 +17929,23 @@ impl McpTool for SessionBootstrapTool {
                 .collect::<Vec<_>>();
             let handoff_keys: std::collections::HashSet<_> =
                 handoff.iter().map(|r| r.key.clone()).collect();
-            ranked.retain(|r| !handoff_keys.contains(&r.key));
+            ranked.retain(|h| !handoff_keys.contains(&h.record.key));
+            // R3 (forum #147, default ON): MMR diversity re-rank of the
+            // semantic page, applied before the final truncation so dropping
+            // near-duplicates actually frees page slots for diverse rows.
+            // Scope: this block only — the handoff prefix above keeps its
+            // "always prepended" contract and the error_pattern section is
+            // untouched. Relevance is the existing semantic blend score.
+            if !mmr_disabled {
+                let texts: Vec<&str> = ranked.iter().map(|h| h.record.content.as_str()).collect();
+                let relevance: Vec<f64> = ranked.iter().map(|h| h.score).collect();
+                let order = mmr_rerank_by_text(&texts, &relevance, mmr_lambda);
+                let mut slots: Vec<Option<MemorySearchHit>> =
+                    ranked.into_iter().map(Some).collect();
+                ranked = order.into_iter().filter_map(|i| slots[i].take()).collect();
+            }
             let mut combined = handoff;
-            combined.extend(ranked);
+            combined.extend(ranked.into_iter().map(|h| h.record));
             combined.truncate(limit as usize);
             combined
         } else {

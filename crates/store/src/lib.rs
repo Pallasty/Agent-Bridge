@@ -12,6 +12,8 @@ pub mod codebase;
 pub mod connectivity_repair;
 pub mod embedding;
 pub mod lineage_audit;
+pub mod mmr;
+pub use mmr::mmr_rerank_by_text;
 pub mod quant;
 pub mod sqlite;
 #[cfg(feature = "temporal-evidence-s5-candidate-synthetic")]
