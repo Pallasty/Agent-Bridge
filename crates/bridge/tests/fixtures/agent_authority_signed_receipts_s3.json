@@ -1,0 +1,480 @@
+{
+   "baseline_claims" : {
+      "action_class" : "t6_runtime_enablement_review",
+      "adapter_build_digest" : "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "adapter_capabilities_digest" : "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "adapter_id" : "adapter:codex-desktop:v1",
+      "algorithm" : "ed25519",
+      "claims_schema" : "agent_bridge.authority_signed_receipt_claims.s3.v0",
+      "decision_source_digest" : "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "envelope_version" : "agent_bridge.authority_signed_receipt.v0",
+      "evidence_digest" : "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "expires_at_unix" : 1784262600,
+      "issued_at_unix" : 1784258400,
+      "issuer_id" : "issuer:owner-control-plane:v1",
+      "key_id" : "key:rfc8032-primary:v1",
+      "nonce" : "nonce:baseline-placeholder",
+      "policy_version" : "ab.t6.signed_authority_review.v0",
+      "principal_id" : "principal:owner:v1",
+      "receipt_id" : "receipt:baseline-placeholder",
+      "resume_parent_digest" : "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "scope_digest" : "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "session_epoch_digest" : "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "target_digest" : "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "verifier_id" : "verifier:ring-ed25519-offline:v1"
+   },
+   "cases" : [
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:verified-primary"
+         },
+         "control" : true,
+         "expected_reasons" : [],
+         "expected_status" : "verified",
+         "id" : "verified_primary_control",
+         "receipt_id" : "receipt:verified-primary",
+         "signature_base64" : "RJglwjqzRqODhuKCfXpFG/ThivmUhYeE6QXeTJLvz6JTd05k77evpbVIvWXmKhzIZNLV5w4BhEc6+LJe3cZNAA==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "issued_at_unix" : 1784259030,
+            "nonce" : "nonce:verified-future-boundary"
+         },
+         "control" : true,
+         "expected_reasons" : [],
+         "expected_status" : "verified",
+         "id" : "verified_future_skew_boundary_control",
+         "receipt_id" : "receipt:verified-future-boundary",
+         "signature_base64" : "8nk5vNpdr5Qf3VNLI24Uk1zEqNKOsOFxhx3Fyt1Q8dr5vYFkyfrRHLkah0zOlSOUQ7Qk1jxaW0/9tdIRueKtDA==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "expires_at_unix" : 1784258970,
+            "issued_at_unix" : 1784250000,
+            "nonce" : "nonce:verified-expiry-boundary"
+         },
+         "control" : true,
+         "expected_reasons" : [],
+         "expected_status" : "verified",
+         "id" : "verified_expiry_skew_boundary_control",
+         "receipt_id" : "receipt:verified-expiry-boundary",
+         "signature_base64" : "1tbnJo8wRcglt5KGYmL2wEPdmFYx6vnZfGbqRbNxvHklXieJw58k/ug9yq5RDcZquyNE7dNuOUs5P0dkg1gNCQ==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:verified-secondary"
+         },
+         "control" : true,
+         "expected_reasons" : [],
+         "expected_status" : "verified",
+         "id" : "verified_secondary_control",
+         "receipt_id" : "receipt:verified-secondary",
+         "signature_base64" : "igCr5UtCYWp0q2kMKB59XIXpXgPKuqqwd9MR5JSwlaRKz62gtesBOrV/hHTOT1LTXLdyDigXx9GfiSbxbCrpCw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:malformed-signature"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "signature_base64_invalid"
+         ],
+         "expected_status" : "invalid",
+         "id" : "malformed_signature_rejected",
+         "receipt_id" : "receipt:malformed-signature",
+         "signature_base64" : "%%%not-base64%%%",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:short-signature"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "signature_length_invalid"
+         ],
+         "expected_status" : "invalid",
+         "id" : "short_signature_rejected",
+         "receipt_id" : "receipt:short-signature",
+         "signature_base64" : "VDwqFcajI9Y+FX4fKaajRoe8gNHAr09M+3Unjm6ctSCVhk1XVGkmCuS5IKfbMyuyElhBo7hMlnflZYGFyQAz",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:bit-flipped-signature"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "signature_verification_failed"
+         ],
+         "expected_status" : "invalid",
+         "id" : "bit_flipped_signature_rejected",
+         "receipt_id" : "receipt:bit-flipped-signature",
+         "signature_base64" : "TAwFFUaBj3QnqcVA+qOj/oLkn5zDlxkp627tInjcaUbl2bHnGHVW15rf8lfUCKfuyIxaRe/jCVi0WIieyHDvDw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:payload-tamper",
+            "target_digest" : "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "signature_verification_failed"
+         ],
+         "expected_status" : "invalid",
+         "id" : "payload_tamper_rejected",
+         "receipt_id" : "receipt:payload-tamper",
+         "signature_base64" : "nKP1ML2W8XXXv+vt5aGHSirVYLdmhd11tSUZdhLhuO+FTNf9Oip2qJIrCl3uP/Pt7kro8cPrLdqIMw618aDiAw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "key_id" : "key:attacker-controlled:v9",
+            "nonce" : "nonce:unknown-key"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "key_id_not_trusted"
+         ],
+         "expected_status" : "untrusted",
+         "id" : "unknown_key_rejected",
+         "receipt_id" : "receipt:unknown-key",
+         "signature_base64" : "c101BnVdFoZkyqc57ClLDJsIVswJLo2CVCQc9MSfuDnZq85kbRk+yDEcRFSE+UdMhkBcDWy4ZnM8SeUTjOEHBw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "algorithm" : "ed448",
+            "nonce" : "nonce:algorithm-confusion"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "algorithm_key_mismatch",
+            "algorithm_not_allowed"
+         ],
+         "expected_status" : "untrusted",
+         "id" : "algorithm_confusion_rejected",
+         "receipt_id" : "receipt:algorithm-confusion",
+         "signature_base64" : "0immL9szDybGqhCcJwK9X09gUe3POUSxu4XxQaS3LZYmsH0M2U4kLQ5a2pvv7G1q5NELNRIx3fJRaRRzNeQSDg==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "key_id" : "key:rfc8032-restricted:v1",
+            "nonce" : "nonce:trust-binding-mismatch"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "action_not_authorized_by_key",
+            "issuer_not_authorized_by_key",
+            "policy_not_authorized_by_key",
+            "principal_not_authorized_by_key"
+         ],
+         "expected_status" : "untrusted",
+         "id" : "trust_binding_mismatch_rejected",
+         "receipt_id" : "receipt:trust-binding-mismatch",
+         "signature_base64" : "/ISZbSA/+pZRlfvpMI6RI7DNGEzeFxFj7nnpdphYbNKCcwIAJZSFug2WKyELR6IzJHHfP2Vlhn1DJ6PWclxEDg==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "key_id" : "key:rfc8032-revoked:v1",
+            "nonce" : "nonce:revoked-key"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "signing_key_revoked"
+         ],
+         "expected_status" : "revoked",
+         "id" : "revoked_key_rejected",
+         "receipt_id" : "receipt:revoked-key",
+         "signature_base64" : "fBld1owk6GQltNuPG3DGbAnpdUeW2RC5YBYWV1u+jeyTJUHdZtBOgzjo9cwKt5mmXkR9cw9risprU0X7VezKDw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:revoked-receipt"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "receipt_id_revoked"
+         ],
+         "expected_status" : "revoked",
+         "id" : "revoked_receipt_rejected",
+         "receipt_id" : "receipt:revoked-receipt",
+         "signature_base64" : "MnOgQ9ftBbRxnCW9l5vffU7bXMg5YPKZ0wcCXCPZrmx+W43uZiHOJ3CUt0Ic+7ZFdHqBoGVYvTGz4s16/LakCA==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "expires_at_unix" : 1784258969,
+            "issued_at_unix" : 1784250000,
+            "nonce" : "nonce:expired"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "receipt_expired"
+         ],
+         "expected_status" : "stale",
+         "id" : "expired_receipt_rejected",
+         "receipt_id" : "receipt:expired",
+         "signature_base64" : "MLIK7QnJnx+D7HUXXEoQZgB2qfYok2WMhatamOLBZTylYZFsZKugFQJNVIHghYhToVml0YsW5M3VkDME9GtVAw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "issued_at_unix" : 1784259031,
+            "nonce" : "nonce:future"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "receipt_not_yet_valid"
+         ],
+         "expected_status" : "stale",
+         "id" : "future_receipt_rejected",
+         "receipt_id" : "receipt:future",
+         "signature_base64" : "DfZ0Zp8ENC1SXbHrjxXcomkbNtPc11Hvx1qjgeBiEbK+YDx7hJYU4r2suqGYvs39xdzIUjuu6+RQjvoWrgiPCA==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "key_id" : "key:rfc8032-expired:v1",
+            "nonce" : "nonce:expired-key"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "signing_key_expired"
+         ],
+         "expected_status" : "stale",
+         "id" : "expired_key_rejected",
+         "receipt_id" : "receipt:expired-key",
+         "signature_base64" : "rCGFHJJW0gQpc0xOPvR1HWzgj75yQXUP6VoFXsGo3Kcs3vnkOb378F04eECKTC48KiLheAQYVujpxrIHrgqjCg==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "key_id" : "key:rfc8032-future:v1",
+            "nonce" : "nonce:future-key"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "receipt_issued_before_key_validity",
+            "signing_key_not_yet_valid"
+         ],
+         "expected_status" : "stale",
+         "id" : "future_key_rejected",
+         "receipt_id" : "receipt:future-key",
+         "signature_base64" : "Oxrv45Yik/ZPR+YtrxpNbVE7oSjZn84iOYt/eSAPvsTmoWtPmypnE1OIsiWw4mQE964psUNP04fEvUhIEzS8DQ==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:already-consumed"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "nonce_already_consumed"
+         ],
+         "expected_status" : "replayed",
+         "id" : "replayed_nonce_rejected",
+         "receipt_id" : "receipt:replayed",
+         "signature_base64" : "0CUlIp6WOB2CJrz2zaIUCTz1+epF0YWBzfpt7Zok8GmBtwBj6ZSFBNcER/Wyffqq2yEZ6Py4/41Xbe8MDEoNDw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "action_class" : "memory_write",
+            "key_id" : "key:rfc8032-memory-write:v1",
+            "nonce" : "nonce:wrong-action"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "action_class_mismatch"
+         ],
+         "expected_status" : "out_of_scope",
+         "id" : "wrong_action_rejected",
+         "receipt_id" : "receipt:wrong-action",
+         "signature_base64" : "zebUd1Hn4drYpm7weBoJ4OnlM0e3xKzajz8u0NYKOIv2YjAKYhsZRYqL70OQOEJlohGt3SfojvfNtr9ncHgaBw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:wrong-target",
+            "target_digest" : "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "target_digest_mismatch"
+         ],
+         "expected_status" : "out_of_scope",
+         "id" : "wrong_target_rejected",
+         "receipt_id" : "receipt:wrong-target",
+         "signature_base64" : "WrM89G4S+dilDAtayH0/XOaFN1LyKZEIwQx35SnUVYS2H7Yq8mEnSbMp/CaoOtZtdLeCoCnuSW0o9bU/Ht8nAQ==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:wrong-scope",
+            "scope_digest" : "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "scope_digest_mismatch"
+         ],
+         "expected_status" : "out_of_scope",
+         "id" : "wrong_scope_rejected",
+         "receipt_id" : "receipt:wrong-scope",
+         "signature_base64" : "RXN+M6XDVFIAFeOhS3yF8t80uQxOl1YgMigHYAJu3geStWHnszQhPE5PFKBsWvqr+T7y+sxQGREfG5myWuViCA==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "decision_source_digest" : "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "nonce" : "nonce:wrong-decision-source"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "decision_source_digest_mismatch"
+         ],
+         "expected_status" : "out_of_scope",
+         "id" : "wrong_decision_source_rejected",
+         "receipt_id" : "receipt:wrong-decision-source",
+         "signature_base64" : "hzsYes4pObZJnKpk121vC6xnNuQLpNf0S6ivESGSwJiqb6uLOmle+2aoB5QSpAgT0Ao6Eqhy9V83UcHec8eZCg==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:wrong-session",
+            "session_epoch_digest" : "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "session_epoch_digest_mismatch"
+         ],
+         "expected_status" : "out_of_scope",
+         "id" : "wrong_session_rejected",
+         "receipt_id" : "receipt:wrong-session",
+         "signature_base64" : "myuYLZlRtm28tIm/+uB5qLFrX14QFzsqtzvhI+smahr+RtYBl4/DGZa4r5w04oSZ8JjMrj5KSNXQQeDCq+TKBA==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:wrong-resume",
+            "resume_parent_digest" : "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "resume_parent_digest_mismatch"
+         ],
+         "expected_status" : "out_of_scope",
+         "id" : "wrong_resume_parent_rejected",
+         "receipt_id" : "receipt:wrong-resume",
+         "signature_base64" : "CJ5xfQhPcoHKgsk2gA5eifB8ZF+nXGpjGtMFGD81wmYJy6P+j2rfB0Ou+2+Ee0rrLUKobO4AhH6TuINFrgG5Dw==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "adapter_build_digest" : "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "adapter_capabilities_digest" : "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "adapter_id" : "adapter:injected:v9",
+            "nonce" : "nonce:wrong-adapter"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "adapter_build_digest_mismatch",
+            "adapter_capabilities_digest_mismatch",
+            "adapter_id_mismatch"
+         ],
+         "expected_status" : "out_of_scope",
+         "id" : "wrong_adapter_rejected",
+         "receipt_id" : "receipt:wrong-adapter",
+         "signature_base64" : "bfh0Kr9dMGb+vvDyTFiQB9sLQHadiG0LDpwSvOpuDfYiafibaKhcY3Rnw9aWDlDWasW8ZarTYKxMyctMIGFOAg==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "evidence_digest" : "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "nonce" : "nonce:wrong-evidence"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "evidence_digest_mismatch"
+         ],
+         "expected_status" : "out_of_scope",
+         "id" : "wrong_evidence_rejected",
+         "receipt_id" : "receipt:wrong-evidence",
+         "signature_base64" : "Tdoy9FL6Rm87gfiqswCjDb2Gw0RirmYtp5G16/bdFuWPWqHtVa5onNiPp6YqoBtFP6jWmGCLcQXZtm1q2E+rBA==",
+         "verifier_available" : true
+      },
+      {
+         "claims_overrides" : {
+            "nonce" : "nonce:unavailable"
+         },
+         "control" : false,
+         "expected_reasons" : [
+            "independent_verifier_unavailable"
+         ],
+         "expected_status" : "unavailable",
+         "id" : "verifier_unavailable_rejected",
+         "receipt_id" : "receipt:unavailable",
+         "signature_base64" : "FMCL7GPmAbdtJAL0yVrmggKBZna96v9oQRc300dYgEpXmpxLpPSuPcU7yx2LjSvz3f4mKSbCDsU0Pm4TGuI6Bw==",
+         "verifier_available" : false
+      }
+   ],
+   "contract" : {
+      "accepted_algorithm" : "ed25519",
+      "accepted_envelope_version" : "agent_bridge.authority_signed_receipt.v0",
+      "accepted_policy_version" : "ab.t6.signed_authority_review.v0",
+      "allowed_clock_skew_secs" : 30,
+      "claims_schema" : "agent_bridge.authority_signed_receipt_claims.s3.v0",
+      "evaluation_time_unix" : 1784259000,
+      "expected_action_class" : "t6_runtime_enablement_review",
+      "expected_adapter_build_digest" : "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "expected_adapter_capabilities_digest" : "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "expected_adapter_id" : "adapter:codex-desktop:v1",
+      "expected_decision_source_digest" : "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "expected_evidence_digest" : "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "expected_resume_parent_digest" : "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "expected_scope_digest" : "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "expected_session_epoch_digest" : "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "expected_target_digest" : "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "expected_verifier_id" : "verifier:ring-ed25519-offline:v1",
+      "persistent_replay_state_mutation" : false,
+      "private_signing_material_embedded" : false,
+      "runtime_consumer_enabled" : false
+   },
+   "fixture_signing_provenance" : "Signatures were precomputed with OpenSSL Ed25519 using the public RFC 8032 section 7.1 test-vector seed. The committed verifier embeds only public keys and signatures.",
+   "schema" : "agent_bridge.agent_authority_signed_receipts.s3_fixture.v0",
+   "source" : {
+      "files" : [
+         {
+            "id" : "s2_design",
+            "path" : "docs/design/AGENT_CONTROL_PLANE_AUTHORITY_PROVENANCE_ENVELOPE_S2_2026_07_16.md",
+            "sha256" : "5c34109bb215b017549f5012a0352f31b86d01f3d3cadbfcc7d5f62cc850a266"
+         },
+         {
+            "id" : "s2_fixture",
+            "path" : "crates/bridge/tests/fixtures/agent_authority_provenance_envelope_s2.json",
+            "sha256" : "a51b545d91fceecf81ec03d5355a686e0728b6ab92130b9cfc75b9a1983cd82c"
+         },
+         {
+            "id" : "s2_result",
+            "path" : "docs/reports/goal-c-u/2026-07-16-agent-authority-provenance-envelope-s2-result.md",
+            "sha256" : "f56ee48902ffe60ce9a432c898a8d796ac3b998621b12483f3114d2c81fac31f"
+         },
+         {
+            "id" : "trust_registry",
+            "path" : "crates/bridge/tests/fixtures/agent_authority_trust_registry_s3.json",
+            "sha256" : "1e26edf7a5c71ac972d5c1c7e2496d8c1baa772d9571db995cfac04fe6c3d573"
+         }
+      ],
+      "latest_master_commit" : "c9c50917687c7715b031a6bfe8dd7801bfd737ee",
+      "s2_result_commit" : "cdd426b846ff6c29bf008eba62a2d7bd57d09d4f",
+      "s3_lineage_merge_commit" : "c0267f617d1636e688cc3d6e12f326191574c198"
+   }
+}
