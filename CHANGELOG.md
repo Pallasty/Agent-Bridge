@@ -8,6 +8,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **ChatGPT read-only MCP compatibility.** MCP tool descriptors now support
+  non-empty titles, explicit safety annotations, optional `outputSchema`, and
+  `structuredContent`. The isolated `chatgpt-read`
+  toolset exposes four read-only tools, including company-knowledge-compatible
+  `search` and `fetch` adapters over side-effect-free memory reads, without
+  adding those generic tool names to existing Codex, Claude, Gemini, hook, or
+  development profiles.
 - **Typed Context Lane shadow contract.** A deterministic, side-effect-free
   `agent_bridge.context_lane_decision.v0` separates workflow state,
   interaction memory, source evidence, entity relations, and tool observations;

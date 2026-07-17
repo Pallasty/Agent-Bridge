@@ -288,6 +288,23 @@ their host explicitly:
 
 ---
 
+## Quick start (ChatGPT chats)
+
+The Codex task surface inside the unified desktop app can launch local stdio
+MCP servers directly. Ordinary ChatGPT conversations use Apps/Plugins instead
+and do not inherit `~/.codex/config.toml`.
+
+Agent-Bridge provides a separate `chatgpt-read` toolset for that path. It exposes
+only the ChatGPT-compatible `search` and `fetch` memory tools plus two read-only
+diagnostics, with MCP safety annotations and structured output schemas. Connect
+the local stdio process through OpenAI Secure MCP Tunnel; do not expose the full
+Codex or development profile to a ChatGPT App.
+
+See [ChatGPT App MCP setup](docs/CHATGPT-APP-MCP.md) for the local smoke test,
+tunnel command, security boundary, and Developer Mode connection steps.
+
+---
+
 ## Quick start (local CLI clients)
 
 agent-bridge is a stdio MCP server, so any local CLI client that can

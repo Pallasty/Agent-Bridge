@@ -3,6 +3,7 @@
 //! We deliberately keep these minimal: only the fields the server needs to
 //! parse from clients, plus the fields we emit. Unknown fields are tolerated.
 
+use crate::ToolAnnotations;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -124,9 +125,14 @@ pub struct ListToolsParams {
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolDefinition {
     pub name: String,
+    pub title: String,
     pub description: String,
     #[serde(rename = "inputSchema")]
     pub input_schema: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ToolAnnotations>,
+    #[serde(rename = "outputSchema", skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]

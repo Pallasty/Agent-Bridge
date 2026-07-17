@@ -24,7 +24,9 @@ use crate::warp_scheme::{
 };
 use ab_agent::{oz::fetch_run_status, GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
-use ab_mcp::{ContentBlock, McpTool, ToolContext, ToolRegistry, ToolResult, ToolSchema};
+use ab_mcp::{
+    ContentBlock, McpTool, ToolAnnotations, ToolContext, ToolRegistry, ToolResult, ToolSchema,
+};
 use ab_store::{
     cosine_similarity,
     embed_text,
@@ -43,6 +45,7 @@ use ab_store::{
     MemoryEdge,
     MemoryExportFilter,
     MemoryListSort,
+    MemoryPeekResult,
     MemoryQueryRecord,
     MemoryRecord,
     MemorySearchHit,
@@ -686,8 +689,10 @@ fn compact_mcp_output_default() -> bool {
 }
 
 fn compact_mcp_output_default_for_policy(policy: ToolPolicy) -> bool {
-    matches!(policy.set, ToolSet::CodexEssential | ToolSet::CodexLean)
-        || matches!(policy.profile(), ToolProfile::Compact)
+    matches!(
+        policy.set,
+        ToolSet::CodexEssential | ToolSet::CodexLean | ToolSet::ChatGptRead
+    ) || matches!(policy.profile(), ToolProfile::Compact)
 }
 
 const FORUM_READ_DEFAULT_LIMIT: u32 = 50;
@@ -12013,6 +12018,239 @@ fn memory_search_hit_value_compact(hit: &MemorySearchHit) -> Value {
     Value::Object(obj)
 }
 
+// ===========================================================================
+//          ChatGPT knowledge compatibility - strict read-only adapters
+// ===========================================================================
+
+const CHATGPT_KNOWLEDGE_SEARCH_LIMIT: u32 = 20;
+
+fn chatgpt_memory_title(key: &str) -> String {
+    let title = key.replace('_', " ").replace('-', " ");
+    let title = title.trim();
+    if title.is_empty() {
+        "Agent-Bridge memory".to_string()
+    } else {
+        truncate_chars(title, 120).0
+    }
+}
+
+fn chatgpt_search_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "results": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "title": { "type": "string" },
+                        "url": { "type": "string" }
+                    },
+                    "required": ["id", "title", "url"],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": ["results"],
+        "additionalProperties": false
+    })
+}
+
+fn chatgpt_fetch_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "text": { "type": "string" },
+            "url": { "type": "string" },
+            "metadata": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+            }
+        },
+        "required": ["id", "title", "text", "url"],
+        "additionalProperties": false
+    })
+}
+
+pub struct ChatGptSearchTool {
+    hub: Hub,
+}
+
+impl ChatGptSearchTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ChatGptSearchTool {
+    fn name(&self) -> &'static str {
+        "search"
+    }
+
+    fn title(&self) -> String {
+        "Search Agent-Bridge memory".into()
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn output_schema(&self) -> Option<Value> {
+        Some(chatgpt_search_output_schema())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Search active Agent-Bridge memories without changing access counters, \
+                 retrieval feedback, coactivation, or ranking state. Returns ChatGPT company-knowledge \
+                 result IDs; call fetch with an ID to read the full memory."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural-language or keyword memory query."
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|query| !query.is_empty());
+        let Some(query) = query else {
+            return Ok(ToolResult::error("missing or empty 'query'"));
+        };
+
+        // Call the store query directly. The existing memory_search MCP tool
+        // intentionally adds learning telemetry and retrieval feedback, while
+        // this ChatGPT compatibility surface promises strict read-only behavior.
+        let hits = store
+            .memory_search(query, &[], CHATGPT_KNOWLEDGE_SEARCH_LIMIT)
+            .await?;
+        let results: Vec<_> = hits
+            .into_iter()
+            .map(|hit| {
+                json!({
+                    "id": hit.record.key,
+                    "title": chatgpt_memory_title(&hit.record.key),
+                    // Local memories do not have a user-openable canonical URL.
+                    // Empty keeps the result useful without creating a false citation.
+                    "url": ""
+                })
+            })
+            .collect();
+        Ok(ToolResult::structured_json(&json!({ "results": results })))
+    }
+}
+
+pub struct ChatGptFetchTool {
+    hub: Hub,
+}
+
+impl ChatGptFetchTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for ChatGptFetchTool {
+    fn name(&self) -> &'static str {
+        "fetch"
+    }
+
+    fn title(&self) -> String {
+        "Fetch Agent-Bridge memory".into()
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn output_schema(&self) -> Option<Value> {
+        Some(chatgpt_fetch_output_schema())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Fetch one Agent-Bridge memory by the ID returned from search. \
+                 Uses the side-effect-free memory_peek path and never changes access or \
+                 retrieval telemetry."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Exact memory ID returned by search."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let Some(id) = id else {
+            return Ok(ToolResult::error("missing or empty 'id'"));
+        };
+
+        let record = match store.memory_peek(id).await? {
+            MemoryPeekResult::Present { record } => record,
+            MemoryPeekResult::Missing => {
+                return Ok(ToolResult::error(format!("memory '{id}' not found")))
+            }
+            MemoryPeekResult::Tombstoned { .. } => {
+                return Ok(ToolResult::error(format!("memory '{id}' is unavailable")))
+            }
+        };
+        let metadata = json!({
+            "source": "agent-bridge-memory",
+            "kind": record.kind,
+            "scope": record.scope.as_deref().unwrap_or("unscoped"),
+            "status": record.status,
+            "tags": record.tags.join(","),
+            "created_at": record.created_at.to_string(),
+            "updated_at": record.updated_at.to_string()
+        });
+        Ok(ToolResult::structured_json(&json!({
+            "id": record.key,
+            "title": chatgpt_memory_title(&record.key),
+            "text": record.content,
+            "url": "",
+            "metadata": metadata
+        })))
+    }
+}
+
 pub struct MemorySaveTool {
     hub: Hub,
 }
@@ -22062,6 +22300,9 @@ impl McpTool for CapabilitiesTool {
     fn name(&self) -> &'static str {
         "capabilities"
     }
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
@@ -22560,6 +22801,7 @@ fn readiness_profile_rows(hub: &Hub) -> Vec<Value> {
         ("profile-all", None, None, Some("all")),
         ("codex-essential", Some("codex-essential"), None, None),
         ("codex-lean", Some("codex-lean"), None, None),
+        ("chatgpt-read", Some("chatgpt-read"), None, None),
         ("claude-standard", Some("claude-standard"), None, None),
         ("gemini-lean", Some("gemini-lean"), None, None),
         ("hook-lifecycle", Some("hook-lifecycle"), None, None),
@@ -36073,6 +36315,9 @@ impl McpTool for ContextGovernorSnapshotTool {
     fn name(&self) -> &'static str {
         "context_governor_snapshot"
     }
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
@@ -38420,6 +38665,7 @@ enum ToolSet {
     Profile,
     CodexEssential,
     CodexLean,
+    ChatGptRead,
     ClaudeStandard,
     GeminiLean,
     HookLifecycle,
@@ -38432,6 +38678,7 @@ impl ToolSet {
             Self::Profile => "profile",
             Self::CodexEssential => "codex-essential",
             Self::CodexLean => "codex-lean",
+            Self::ChatGptRead => "chatgpt-read",
             Self::ClaudeStandard => "claude-standard",
             Self::GeminiLean => "gemini-lean",
             Self::HookLifecycle => "hook-lifecycle",
@@ -38444,6 +38691,7 @@ impl ToolSet {
             Some("profile") | Some("legacy") => Some(Self::Profile),
             Some("codex-essential") | Some("codex") => Some(Self::CodexEssential),
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
+            Some("chatgpt-read") | Some("chatgpt") | Some("openai-chat") => Some(Self::ChatGptRead),
             Some("claude-standard") | Some("claude-code") | Some("claude") => {
                 Some(Self::ClaudeStandard)
             }
@@ -38498,7 +38746,9 @@ impl ToolPolicy {
         let profile = match set {
             ToolSet::Profile => legacy_profile,
             ToolSet::CodexEssential => ToolProfile::Compact,
-            ToolSet::CodexLean | ToolSet::GeminiLean => ToolProfile::Essential,
+            ToolSet::CodexLean | ToolSet::ChatGptRead | ToolSet::GeminiLean => {
+                ToolProfile::Essential
+            }
             ToolSet::ClaudeStandard | ToolSet::HookLifecycle => ToolProfile::Standard,
             ToolSet::AllDev => ToolProfile::All,
         };
@@ -38530,6 +38780,7 @@ impl ToolPolicy {
             }
             ToolSet::CodexEssential => codex_essential_tool(tier, tool_name),
             ToolSet::CodexLean => codex_lean_tool(tool_name),
+            ToolSet::ChatGptRead => chatgpt_read_tool(tool_name),
             ToolSet::GeminiLean => gemini_lean_tool(tool_name),
             ToolSet::HookLifecycle => hook_lifecycle_tool(tool_name),
         }
@@ -38785,6 +39036,13 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "plan_save"
             | "plan_load"
             | "plan_update"
+    )
+}
+
+fn chatgpt_read_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "search" | "fetch" | "capabilities" | "context_governor_snapshot"
     )
 }
 
@@ -41600,6 +41858,14 @@ pub(crate) fn build_registry_with_policy_surface(
     ceremony: bool,
 ) -> ToolRegistry {
     let mut reg = ToolRegistry::new();
+
+    // Generic names are reserved for ChatGPT company-knowledge discovery.
+    // Keep them out of every existing client profile to avoid collisions with
+    // native search/fetch tools and preserve current Codex/Claude surfaces.
+    if matches!(policy.set, ToolSet::ChatGptRead) {
+        reg.register(Arc::new(ChatGptSearchTool::new(hub.clone())));
+        reg.register(Arc::new(ChatGptFetchTool::new(hub.clone())));
+    }
 
     // ── ESSENTIAL ──────────────────────────────────────────────────────
     // Memory: query + write + delete + graph navigation.
