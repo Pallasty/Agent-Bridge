@@ -73,14 +73,14 @@ pub fn probe(pid: i64) -> ProcSight {
 
 /// Process state char from `/proc/<pid>/stat` (field 3, right after the
 /// parenthesised comm). `Z` = zombie: already dead, just not yet waited on.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn proc_state(pid: u32) -> Option<char> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after = &stat[stat.rfind(')')? + 1..];
     after.split_ascii_whitespace().next()?.chars().next()
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn proc_state(_pid: u32) -> Option<char> {
     None
 }
@@ -575,7 +575,7 @@ mod tests {
         assert_eq!(reaper_tick_secs_from(Some("garbage")), 3_600);
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     fn spawn_setsid_sleeper() -> std::process::Child {
         use std::os::unix::process::CommandExt;
         let mut cmd = std::process::Command::new("sleep");
@@ -591,7 +591,7 @@ mod tests {
         cmd.spawn().expect("spawn sleeper")
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn reap_group_kills_a_real_setsid_leader() {
         let mut child = spawn_setsid_sleeper();
@@ -604,7 +604,7 @@ mod tests {
         let _ = child.wait();
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn reap_group_never_escalates_onto_recycled_identity() {
         // A mismatched token means "the process we knew no longer exists":
@@ -621,7 +621,7 @@ mod tests {
         let _ = child.wait();
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn reaper_pass_kills_orphan_spares_owned_and_legacy() {
         // Full matrix e2e on a real store: (a) dead-owner + live setsid child

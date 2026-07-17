@@ -10759,7 +10759,14 @@ fn agent_session_liveness(hub: &Hub, session: &StoredSession) -> (Option<u32>, &
 fn process_pid_exists(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        std::path::Path::new(&format!("/proc/{pid}")).exists()
+        if pid == 0 || pid > libc::pid_t::MAX as u32 {
+            return false;
+        }
+        let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        if rc == 0 {
+            return true;
+        }
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
     #[cfg(not(unix))]
     {

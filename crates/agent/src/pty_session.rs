@@ -262,12 +262,12 @@ impl PtySession {
 /// into signalling an unrelated process. `None` when the process is gone or
 /// the platform has no procfs.
 pub fn proc_start_ticks(pid: u32) -> Option<i64> {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         parse_stat_start_ticks(&stat)
     }
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     {
         let _ = pid;
         None
@@ -278,6 +278,7 @@ pub fn proc_start_ticks(pid: u32) -> Option<i64> {
 /// field (2) is parenthesised and may itself contain spaces or `)`, so all
 /// indexing is anchored AFTER the last `)`: state is overall field 3,
 /// starttime overall field 22 ⇒ index 19 of the post-comm split.
+#[cfg(any(target_os = "linux", test))]
 fn parse_stat_start_ticks(stat: &str) -> Option<i64> {
     let after = &stat[stat.rfind(')')? + 1..];
     after.split_ascii_whitespace().nth(19)?.parse().ok()
@@ -329,7 +330,7 @@ mod tests {
         assert_eq!(super::parse_stat_start_ticks(stat), Some(987_654));
         assert_eq!(super::parse_stat_start_ticks("no parens"), None);
         // own process: readable and positive on any linux CI
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         assert!(super::proc_start_ticks(std::process::id()).unwrap_or(0) > 0);
     }
     use std::time::Duration;
