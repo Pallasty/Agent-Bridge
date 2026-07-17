@@ -1,0 +1,94 @@
+{
+  "schema": "agent_bridge.agent_authority_trust_registry.s3.v0",
+  "registry_id": "fixture:agent-authority-trust-root-s3",
+  "registry_version": "2026-07-16.2",
+  "algorithm_allowlist": [
+    "ed25519"
+  ],
+  "fixture_key_note": "All entries use the public key from RFC 8032 section 7.1 test vector 1. The corresponding seed is public test data and is not stored in this registry.",
+  "private_key_present": false,
+  "production_trust_root": false,
+  "keys": [
+    {
+      "key_id": "key:rfc8032-primary:v1",
+      "algorithm": "ed25519",
+      "public_key_base64": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "allowed_issuer_id": "issuer:owner-control-plane:v1",
+      "allowed_principal_id": "principal:owner:v1",
+      "allowed_action_class": "t6_runtime_enablement_review",
+      "allowed_policy_version": "ab.t6.signed_authority_review.v0",
+      "not_before_unix": 1784250000,
+      "not_after_unix": 1784345400,
+      "revoked": false
+    },
+    {
+      "key_id": "key:rfc8032-memory-write:v1",
+      "algorithm": "ed25519",
+      "public_key_base64": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "allowed_issuer_id": "issuer:owner-control-plane:v1",
+      "allowed_principal_id": "principal:owner:v1",
+      "allowed_action_class": "memory_write",
+      "allowed_policy_version": "ab.t6.signed_authority_review.v0",
+      "not_before_unix": 1784250000,
+      "not_after_unix": 1784345400,
+      "revoked": false
+    },
+    {
+      "key_id": "key:rfc8032-revoked:v1",
+      "algorithm": "ed25519",
+      "public_key_base64": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "allowed_issuer_id": "issuer:owner-control-plane:v1",
+      "allowed_principal_id": "principal:owner:v1",
+      "allowed_action_class": "t6_runtime_enablement_review",
+      "allowed_policy_version": "ab.t6.signed_authority_review.v0",
+      "not_before_unix": 1784250000,
+      "not_after_unix": 1784345400,
+      "revoked": true
+    },
+    {
+      "key_id": "key:rfc8032-expired:v1",
+      "algorithm": "ed25519",
+      "public_key_base64": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "allowed_issuer_id": "issuer:owner-control-plane:v1",
+      "allowed_principal_id": "principal:owner:v1",
+      "allowed_action_class": "t6_runtime_enablement_review",
+      "allowed_policy_version": "ab.t6.signed_authority_review.v0",
+      "not_before_unix": 1784250000,
+      "not_after_unix": 1784258969,
+      "revoked": false
+    },
+    {
+      "key_id": "key:rfc8032-future:v1",
+      "algorithm": "ed25519",
+      "public_key_base64": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "allowed_issuer_id": "issuer:owner-control-plane:v1",
+      "allowed_principal_id": "principal:owner:v1",
+      "allowed_action_class": "t6_runtime_enablement_review",
+      "allowed_policy_version": "ab.t6.signed_authority_review.v0",
+      "not_before_unix": 1784259031,
+      "not_after_unix": 1784345400,
+      "revoked": false
+    },
+    {
+      "key_id": "key:rfc8032-restricted:v1",
+      "algorithm": "ed25519",
+      "public_key_base64": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "allowed_issuer_id": "issuer:other-control-plane:v1",
+      "allowed_principal_id": "principal:other:v1",
+      "allowed_action_class": "memory_write",
+      "allowed_policy_version": "ab.other.policy.v1",
+      "not_before_unix": 1784250000,
+      "not_after_unix": 1784345400,
+      "revoked": false
+    }
+  ],
+  "read_only_snapshot": {
+    "snapshot_id": "snapshot:agent-authority-s3-fixture:v1",
+    "consumed_nonces": [
+      "nonce:already-consumed"
+    ],
+    "revoked_receipt_ids": [
+      "receipt:revoked-receipt"
+    ]
+  }
+}
