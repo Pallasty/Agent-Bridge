@@ -38760,6 +38760,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "memory_delete"
             | "memory_neighbors"
             | "work_memory"
+            | "agent_task_contract_preview"
             | "session_bootstrap"
             | "session_finalize"
             | "skills_recommend"

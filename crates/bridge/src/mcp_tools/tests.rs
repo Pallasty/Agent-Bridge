@@ -989,6 +989,8 @@ async fn agent_task_contract_preview_is_pure_and_exposed_to_codex() {
     assert_eq!(body["safety"]["can_write_memory"], json!(false));
     assert!(exposed_tool_names_for(Some("codex-essential"), None, None)
         .contains(&"agent_task_contract_preview".to_string()));
+    assert!(exposed_tool_names_for(Some("codex-lean"), None, None)
+        .contains(&"agent_task_contract_preview".to_string()));
 
     let invalid = tool
         .execute(
@@ -6872,6 +6874,7 @@ fn codex_lean_preserves_curated_surface() {
         "memory_save",
         "memory_neighbors",
         "work_memory",
+        "agent_task_contract_preview",
         "session_bootstrap",
         "agent_spawn",
         "plan_save",
