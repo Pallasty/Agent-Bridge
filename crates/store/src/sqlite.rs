@@ -1995,7 +1995,8 @@ fn sanitise_fts_query(q: &str) -> String {
 /// that only prefix-matches the leading term, so requiring every term to match
 /// (implicit AND) returns empty. Operator / phrase / column-prefix queries are
 /// returned identically (no implicit AND to relax), so the fallback is a no-op
-/// for them.
+/// for them. `AGENT_BRIDGE_FTS_OR_PRIMARY` promotes this variant from fallback
+/// to primary query — see [`fts_or_primary_enabled`].
 fn sanitise_fts_query_any(q: &str) -> String {
     sanitise_fts_query_joined(q, " OR ")
 }
@@ -2034,6 +2035,25 @@ fn sanitise_fts_query_joined(q: &str, join: &str) -> String {
         .map(|s| format!("{s}*"))
         .collect::<Vec<_>>()
         .join(join)
+}
+
+/// Opt-in OR-primary FTS mode gate: `AGENT_BRIDGE_FTS_OR_PRIMARY=1` (or
+/// `true`) makes `memory_search` run the OR-joined variant as its *primary*
+/// query, with bm25 still ranking full-term matches first. Closes the
+/// zero-result-fallback blind spot: under implicit AND, a multi-term query
+/// whose terms fully match *some other* memory returns non-empty rows, so the
+/// fallback never fires and a memory matching only a subset of the terms is
+/// never surfaced. Default off — behaviour identical to the implicit-AND
+/// primary. Read once per search at the public entry, then passed down as a
+/// plain bool (`memory_search_as_of_inner`) so the parameterised path is
+/// testable without process-global env mutation.
+fn fts_or_primary_enabled() -> bool {
+    std::env::var("AGENT_BRIDGE_FTS_OR_PRIMARY")
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false)
 }
 
 /// True if the query contains any `col:` prefix where `col` is not `content`
@@ -4326,182 +4346,11 @@ impl StateStore for SqliteStore {
         limit: u32,
         as_of_secs: i64,
     ) -> Result<Vec<MemorySearchHit>> {
-        if as_of_secs < 0 {
-            return Err(Error::Backend(
-                "memory_search_as_of requires a non-negative as_of_secs".into(),
-            ));
-        }
-        let q = query.trim().to_string();
-        if q.is_empty() {
-            return Ok(Vec::new());
-        }
-        let fts_query = sanitise_fts_query(&q);
-        // Recall-recovery fallback: if the precise implicit-AND match finds
-        // nothing, retry with this OR-joined variant (see sanitise_fts_query_any).
-        let fts_query_any = sanitise_fts_query_any(&q);
-        let tags = tags_any.to_vec();
-        let limit_i = limit as i64;
-        let now = as_of_secs;
-
-        let hits = self
-            .conn
-            .call(move |c| -> RusqliteResult<Vec<MemorySearchHit>> {
-                // FTS5 first: get candidate rowids ranked by bm25.
-                // Then JOIN back to memories for the full record.
-                // Final ranking blends bm25 (lower=better → invert) with
-                // recency + frequency, applied in Rust.
-                let run_fts = |match_str: &str| -> RusqliteResult<Vec<(MemoryRecord, f64)>> {
-                    let mut stmt = c.prepare(
-                        "SELECT m.key, m.kind, m.content, m.tags, m.related_keys, m.scope,
-                                m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
-                                bm25(memories_fts) AS bm25_score,
-                                m.importance, m.status, m.trigger_pattern, m.superseded_by
-                         FROM memories_fts
-                         JOIN memories m ON m.rowid = memories_fts.rowid
-                         WHERE memories_fts MATCH ?1
-                           AND m.status = 'active'
-                         ORDER BY bm25_score, m.key COLLATE BINARY
-                         LIMIT ?2",
-                    )?;
-                    let rows = stmt
-                        .query_map(params![match_str, limit_i * 4], |row| {
-                            let tags_s: String = row.get(3)?;
-                            let related_s: String = row.get(4)?;
-                            let rec = MemoryRecord {
-                                key: row.get(0)?,
-                                kind: row.get(1)?,
-                                content: row.get(2)?,
-                                tags: parse_str_array(&tags_s),
-                                related_keys: parse_str_array(&related_s),
-                                scope: row.get(5)?,
-                                created_at: row.get(6)?,
-                                updated_at: row.get(7)?,
-                                last_accessed_at: row.get(8)?,
-                                access_count: row.get::<_, i64>(9)? as u64,
-                                importance: row.get::<_, f64>(11).unwrap_or(0.5),
-                                status: row
-                                    .get::<_, String>(12)
-                                    .unwrap_or_else(|_| "active".to_string()),
-                                trigger_pattern: row.get::<_, Option<String>>(13)?,
-                                superseded_by: row.get::<_, Option<String>>(14)?,
-                            };
-                            let bm25: f64 = row.get(10)?;
-                            Ok((rec, bm25))
-                        })?
-                        .collect::<std::result::Result<Vec<_>, _>>()?;
-                    Ok(rows)
-                };
-
-                // Precise implicit-AND first; broaden to OR only when it finds
-                // nothing. This recovers multi-term / CJK misses (the dominant
-                // miss class) without changing behaviour for any query that
-                // already matches under AND.
-                let mut rows = run_fts(&fts_query)?;
-                if rows.is_empty() && fts_query_any != fts_query {
-                    rows = run_fts(&fts_query_any)?;
-                }
-
-                let mut hits: Vec<MemorySearchHit> = rows
-                    .into_iter()
-                    .filter(|(r, _)| tags.is_empty() || tags.iter().any(|t| r.tags.contains(t)))
-                    .map(|(r, bm25)| {
-                        // bm25 is negative (more negative = better match in SQLite).
-                        // Convert to positive "match strength", then mix with our
-                        // existing recency+frequency score plus an importance
-                        // bonus. The `+ 0.5 * importance` term closes the
-                        // Hebbian retrieval loop: reinforce-active (586cbb1)
-                        // bumps importance for repeat-use memories, and this
-                        // line is what makes that bump actually move ranks.
-                        // Weight 0.5 calibrated against match_strength + memory_score
-                        // (typical 1.5..7.5) → importance contributes 7-14% of total,
-                        // comparable to semantic search's `+ 0.2 * importance` against
-                        // cosine 0..1. Mirror in exact-key branch below.
-                        let match_strength = (-bm25).max(0.0);
-                        let score = match_strength
-                            + memory_score(r.last_accessed_at, r.access_count, now, &r.kind)
-                            + 0.5 * r.importance
-                            + feedback_kind_boost_fts(&r.kind);
-                        MemorySearchHit {
-                            record: r,
-                            score,
-                            cosine: None,
-                        }
-                    })
-                    .collect();
-
-                // Intuition guardrail: FTS5 tokenisation can miss obvious "exact key"
-                // queries (e.g. keys with separators like `_` / `.`). Always add an
-                // exact-key fallback candidate so searching by key behaves predictably.
-                let exact_key_row = {
-                    let mut exact_stmt = c.prepare(
-                        "SELECT key, kind, content, tags, related_keys, scope,
-                                created_at, updated_at, last_accessed_at, access_count,
-                                importance, status, trigger_pattern, superseded_by
-                         FROM memories
-                         WHERE key = ?1 COLLATE NOCASE
-                           AND status = 'active'
-                         ORDER BY (key = ?1 COLLATE BINARY) DESC,
-                                  key COLLATE BINARY
-                         LIMIT 1",
-                    )?;
-                    exact_stmt
-                        .query_row(params![q], |row| {
-                            let tags_s: String = row.get(3)?;
-                            let related_s: String = row.get(4)?;
-                            Ok(MemoryRecord {
-                                key: row.get(0)?,
-                                kind: row.get(1)?,
-                                content: row.get(2)?,
-                                tags: parse_str_array(&tags_s),
-                                related_keys: parse_str_array(&related_s),
-                                scope: row.get(5)?,
-                                created_at: row.get(6)?,
-                                updated_at: row.get(7)?,
-                                last_accessed_at: row.get(8)?,
-                                access_count: row.get::<_, i64>(9)? as u64,
-                                importance: row.get::<_, f64>(10).unwrap_or(0.5),
-                                status: row
-                                    .get::<_, String>(11)
-                                    .unwrap_or_else(|_| "active".to_string()),
-                                trigger_pattern: row.get::<_, Option<String>>(12)?,
-                                superseded_by: row.get::<_, Option<String>>(13)?,
-                            })
-                        })
-                        .optional()?
-                };
-                if let Some(rec) = exact_key_row {
-                    let tags_match = tags.is_empty() || tags.iter().any(|t| rec.tags.contains(t));
-                    let exists = hits.iter().any(|h| h.record.key == rec.key);
-                    if tags_match && !exists {
-                        // Keep exact-key hits above fuzzy matches. Importance
-                        // term mirrors the fuzzy-match formula above so
-                        // ranking is consistent across paths (matters when
-                        // multiple exact-key candidates exist — rare, but
-                        // deterministic order beats coin flip).
-                        let score = 1_000_000.0
-                            + memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
-                            + 0.5 * rec.importance
-                            + feedback_kind_boost_fts(&rec.kind);
-                        hits.push(MemorySearchHit {
-                            record: rec,
-                            score,
-                            cosine: None,
-                        });
-                    }
-                }
-
-                hits.sort_by(|a, b| {
-                    b.score
-                        .partial_cmp(&a.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                        .then_with(|| a.record.key.cmp(&b.record.key))
-                });
-                hits.truncate(limit_i as usize);
-                Ok(hits)
-            })
+        // Env is read once here at the public entry; the inner path takes
+        // the resolved flag so tests can drive either mode directly.
+        let or_primary = fts_or_primary_enabled();
+        self.memory_search_as_of_inner(query, tags_any, limit, as_of_secs, or_primary)
             .await
-            .map_err(|e| Error::Backend(format!("memory_search: {e}")))?;
-        Ok(hits)
     }
 
     async fn memory_search_hybrid(
@@ -11877,6 +11726,205 @@ impl StateStore for SqliteStore {
 }
 
 impl SqliteStore {
+    /// Parameterised core of `memory_search_as_of`. `or_primary` selects the
+    /// primary FTS query shape — implicit-AND ([`sanitise_fts_query`]) or the
+    /// OR-joined variant ([`sanitise_fts_query_any`]), opted in via
+    /// `AGENT_BRIDGE_FTS_OR_PRIMARY` (see [`fts_or_primary_enabled`]). The env
+    /// flag is resolved once at the public entry and passed down as a plain
+    /// bool so this path stays testable without process-global env mutation.
+    async fn memory_search_as_of_inner(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        as_of_secs: i64,
+        or_primary: bool,
+    ) -> Result<Vec<MemorySearchHit>> {
+        if as_of_secs < 0 {
+            return Err(Error::Backend(
+                "memory_search_as_of requires a non-negative as_of_secs".into(),
+            ));
+        }
+        let q = query.trim().to_string();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let fts_query = if or_primary {
+            sanitise_fts_query_any(&q)
+        } else {
+            sanitise_fts_query(&q)
+        };
+        // Recall-recovery fallback: if the precise implicit-AND match finds
+        // nothing, retry with this OR-joined variant (see sanitise_fts_query_any).
+        // Under OR-primary the two strings are equal, so the retry is a no-op.
+        let fts_query_any = sanitise_fts_query_any(&q);
+        let tags = tags_any.to_vec();
+        let limit_i = limit as i64;
+        let now = as_of_secs;
+
+        let hits = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<MemorySearchHit>> {
+                // FTS5 first: get candidate rowids ranked by bm25.
+                // Then JOIN back to memories for the full record.
+                // Final ranking blends bm25 (lower=better → invert) with
+                // recency + frequency, applied in Rust.
+                let run_fts = |match_str: &str| -> RusqliteResult<Vec<(MemoryRecord, f64)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT m.key, m.kind, m.content, m.tags, m.related_keys, m.scope,
+                                m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
+                                bm25(memories_fts) AS bm25_score,
+                                m.importance, m.status, m.trigger_pattern, m.superseded_by
+                         FROM memories_fts
+                         JOIN memories m ON m.rowid = memories_fts.rowid
+                         WHERE memories_fts MATCH ?1
+                           AND m.status = 'active'
+                         ORDER BY bm25_score, m.key COLLATE BINARY
+                         LIMIT ?2",
+                    )?;
+                    let rows = stmt
+                        .query_map(params![match_str, limit_i * 4], |row| {
+                            let tags_s: String = row.get(3)?;
+                            let related_s: String = row.get(4)?;
+                            let rec = MemoryRecord {
+                                key: row.get(0)?,
+                                kind: row.get(1)?,
+                                content: row.get(2)?,
+                                tags: parse_str_array(&tags_s),
+                                related_keys: parse_str_array(&related_s),
+                                scope: row.get(5)?,
+                                created_at: row.get(6)?,
+                                updated_at: row.get(7)?,
+                                last_accessed_at: row.get(8)?,
+                                access_count: row.get::<_, i64>(9)? as u64,
+                                importance: row.get::<_, f64>(11).unwrap_or(0.5),
+                                status: row
+                                    .get::<_, String>(12)
+                                    .unwrap_or_else(|_| "active".to_string()),
+                                trigger_pattern: row.get::<_, Option<String>>(13)?,
+                                superseded_by: row.get::<_, Option<String>>(14)?,
+                            };
+                            let bm25: f64 = row.get(10)?;
+                            Ok((rec, bm25))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                };
+
+                // Precise implicit-AND first; broaden to OR only when it finds
+                // nothing. This recovers multi-term / CJK misses (the dominant
+                // miss class) without changing behaviour for any query that
+                // already matches under AND. With AGENT_BRIDGE_FTS_OR_PRIMARY
+                // the primary already is the OR variant (fts_query ==
+                // fts_query_any) and the empty-rows guard below never fires.
+                let mut rows = run_fts(&fts_query)?;
+                if rows.is_empty() && fts_query_any != fts_query {
+                    rows = run_fts(&fts_query_any)?;
+                }
+
+                let mut hits: Vec<MemorySearchHit> = rows
+                    .into_iter()
+                    .filter(|(r, _)| tags.is_empty() || tags.iter().any(|t| r.tags.contains(t)))
+                    .map(|(r, bm25)| {
+                        // bm25 is negative (more negative = better match in SQLite).
+                        // Convert to positive "match strength", then mix with our
+                        // existing recency+frequency score plus an importance
+                        // bonus. The `+ 0.5 * importance` term closes the
+                        // Hebbian retrieval loop: reinforce-active (586cbb1)
+                        // bumps importance for repeat-use memories, and this
+                        // line is what makes that bump actually move ranks.
+                        // Weight 0.5 calibrated against match_strength + memory_score
+                        // (typical 1.5..7.5) → importance contributes 7-14% of total,
+                        // comparable to semantic search's `+ 0.2 * importance` against
+                        // cosine 0..1. Mirror in exact-key branch below.
+                        let match_strength = (-bm25).max(0.0);
+                        let score = match_strength
+                            + memory_score(r.last_accessed_at, r.access_count, now, &r.kind)
+                            + 0.5 * r.importance
+                            + feedback_kind_boost_fts(&r.kind);
+                        MemorySearchHit {
+                            record: r,
+                            score,
+                            cosine: None,
+                        }
+                    })
+                    .collect();
+
+                // Intuition guardrail: FTS5 tokenisation can miss obvious "exact key"
+                // queries (e.g. keys with separators like `_` / `.`). Always add an
+                // exact-key fallback candidate so searching by key behaves predictably.
+                let exact_key_row = {
+                    let mut exact_stmt = c.prepare(
+                        "SELECT key, kind, content, tags, related_keys, scope,
+                                created_at, updated_at, last_accessed_at, access_count,
+                                importance, status, trigger_pattern, superseded_by
+                         FROM memories
+                         WHERE key = ?1 COLLATE NOCASE
+                           AND status = 'active'
+                         ORDER BY (key = ?1 COLLATE BINARY) DESC,
+                                  key COLLATE BINARY
+                         LIMIT 1",
+                    )?;
+                    exact_stmt
+                        .query_row(params![q], |row| {
+                            let tags_s: String = row.get(3)?;
+                            let related_s: String = row.get(4)?;
+                            Ok(MemoryRecord {
+                                key: row.get(0)?,
+                                kind: row.get(1)?,
+                                content: row.get(2)?,
+                                tags: parse_str_array(&tags_s),
+                                related_keys: parse_str_array(&related_s),
+                                scope: row.get(5)?,
+                                created_at: row.get(6)?,
+                                updated_at: row.get(7)?,
+                                last_accessed_at: row.get(8)?,
+                                access_count: row.get::<_, i64>(9)? as u64,
+                                importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                                status: row
+                                    .get::<_, String>(11)
+                                    .unwrap_or_else(|_| "active".to_string()),
+                                trigger_pattern: row.get::<_, Option<String>>(12)?,
+                                superseded_by: row.get::<_, Option<String>>(13)?,
+                            })
+                        })
+                        .optional()?
+                };
+                if let Some(rec) = exact_key_row {
+                    let tags_match = tags.is_empty() || tags.iter().any(|t| rec.tags.contains(t));
+                    let exists = hits.iter().any(|h| h.record.key == rec.key);
+                    if tags_match && !exists {
+                        // Keep exact-key hits above fuzzy matches. Importance
+                        // term mirrors the fuzzy-match formula above so
+                        // ranking is consistent across paths (matters when
+                        // multiple exact-key candidates exist — rare, but
+                        // deterministic order beats coin flip).
+                        let score = 1_000_000.0
+                            + memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
+                            + 0.5 * rec.importance
+                            + feedback_kind_boost_fts(&rec.kind);
+                        hits.push(MemorySearchHit {
+                            record: rec,
+                            score,
+                            cosine: None,
+                        });
+                    }
+                }
+
+                hits.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.record.key.cmp(&b.record.key))
+                });
+                hits.truncate(limit_i as usize);
+                Ok(hits)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_search: {e}")))?;
+        Ok(hits)
+    }
+
     async fn codebase_search_semantic(
         &self,
         query: &str,
@@ -12609,6 +12657,86 @@ mod tests {
         assert!(
             hits2.iter().any(|h| h.record.key == "k_fts_fallback"),
             "all-terms-match query must still hit"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_search_or_primary_recovers_subset_match_hidden_by_and_hits() {
+        // Blind spot of the zero-result OR fallback: when every term of a
+        // multi-term query matches ONE memory, the implicit-AND primary
+        // returns non-empty rows, the fallback never fires, and a second
+        // memory matching only a subset of the terms stays invisible. The
+        // opt-in OR-primary mode (AGENT_BRIDGE_FTS_OR_PRIMARY, exercised here
+        // through the parameterised inner path so no process env is touched)
+        // surfaces both, with bm25 keeping the full-term match ranked at
+        // least as high.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-fts-orprimary-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let mut full = mk_record("k_orp_full", 1_700_000_000);
+        full.content = "runtime checks for semantic bus conformance".into();
+        store.memory_save(&full).await.expect("save full");
+        let mut subset = mk_record("k_orp_subset", 1_700_000_000);
+        subset.content = "semantic bus conformance spec".into();
+        store.memory_save(&subset).await.expect("save subset");
+
+        let query = "semantic bus runtime conformance checks";
+        let as_of = 1_700_000_000;
+
+        // Default (AND primary): the full match satisfies every term, so the
+        // primary returns rows and the OR fallback never fires — the
+        // subset-terms memory is missed. This assertion pins the blind spot.
+        let and_hits = store
+            .memory_search_as_of_inner(query, &[], 10, as_of, false)
+            .await
+            .expect("and search");
+        let and_keys: Vec<&str> = and_hits.iter().map(|h| h.record.key.as_str()).collect();
+        assert!(
+            and_keys.contains(&"k_orp_full"),
+            "AND primary must keep the full-term match; got {and_keys:?}"
+        );
+        assert!(
+            !and_keys.contains(&"k_orp_subset"),
+            "blind spot: non-empty AND primary suppresses the OR fallback; got {and_keys:?}"
+        );
+
+        // OR-primary: both memories surface, full-term match ranked no lower.
+        let or_hits = store
+            .memory_search_as_of_inner(query, &[], 10, as_of, true)
+            .await
+            .expect("or search");
+        let or_keys: Vec<&str> = or_hits.iter().map(|h| h.record.key.as_str()).collect();
+        let pos_full = or_keys.iter().position(|k| *k == "k_orp_full");
+        let pos_subset = or_keys.iter().position(|k| *k == "k_orp_subset");
+        assert!(
+            pos_full.is_some() && pos_subset.is_some(),
+            "OR-primary must surface both memories; got {or_keys:?}"
+        );
+        assert!(
+            pos_full.unwrap() <= pos_subset.unwrap(),
+            "full-term match must rank no lower than the subset match; got {or_keys:?}"
+        );
+
+        // Regression: a single-term query has no join to change, so OR-primary
+        // behaves identically to the default for it.
+        let single = store
+            .memory_search_as_of_inner("runtime", &[], 10, as_of, true)
+            .await
+            .expect("single-term search");
+        assert!(
+            single.iter().any(|h| h.record.key == "k_orp_full"),
+            "single-term query must still hit under OR-primary"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
