@@ -1308,3 +1308,39 @@ execution into independently bounded stages before reconsidering formal S0
 admission.  Such work must not inspect, recover or use any suppressed
 scientific value, including term streams or digests, checkerboard-Neel values,
 exact centers, declared intervals or operator-error ticks.
+
+## Majorana P7 D1 localizes the runtime interruption to the step-3 engine
+
+P7 D1 froze the separately versioned, D0-result-informed but scientific-blind
+phase diagnostic at preprobe commit
+`48a1be6932331e2925261965c783e6b40b555747`, a direct child of D0 result
+commit `4ebed6b651e3c9605f84939d6a9efff8281bc38b`.  Its sole execution used the
+unchanged 2 GiB memory, zero-swap and 1,800-second memory/swap/runtime
+admission.  The supervised command returned `-15` after `1800.381352338`
+outer-monotonic seconds; the 1,830-second outer safety timeout did not fire.
+Stdout remained empty, the resource witness is `null`, and the canonical
+report SHA-256 is
+`9d37609c51f9149baf347fbf801338cc0abe7c7323c187fe71a4932099f8f713`.
+
+The dedicated phase channel produced a 15-event `LEGAL_PREFIX_INTERRUPTED`
+trace.  The outer receiver observed
+`P6_PREFIX_RESOURCE_CONFORMANCE_PASSED` at `660.422891266` seconds,
+`STEP2_TO_STEP3_HANDOFF_COMPLETED` at `660.560118161` seconds and
+`STEP3_ENGINE_STARTED` at `660.589519616` seconds.  No
+`STEP3_ENGINE_RETURNED` or step-3 finalizer event followed before termination;
+the last event is `STEP3_ENGINE_STARTED` and the diagnostic terminal branch is
+`null`.  These timestamps are outer-receive host diagnostics only, not
+scientific timings or bounds.  D1 therefore localizes this observed runtime-
+envelope interruption to the step-3 adaptive engine without reproving or
+expanding P6 scientific authority.
+
+The terminal observation remains `INDETERMINATE_HOST_OR_RUNTIME_FAILURE`, with
+`scientific_authority=NONE`, `certificate_eligible=false` and
+`result_contract_eligible=false`.  S0 status is exactly
+`NOT_ESTABLISHED_BY_D1_PHASE_DIAGNOSTIC`, while the D0 status remains
+unchanged.  This is neither a deterministic cap nor a mathematical or
+algorithmic no-go.  Any continuation must be a separately precommitted D2
+focused on the step-3 engine: either coarse source-pinned stage instrumentation
+or a separately versioned algorithm/proof decomposition.  It must not reuse or
+relax D1, change the scientific candidate or admission caps in place, or
+inspect/export suppressed scientific state.

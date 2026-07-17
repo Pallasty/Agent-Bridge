@@ -1198,6 +1198,33 @@ so they are versioned normally and are not added to the preservation-only
   or proof/execution decomposition, without inspecting or using suppressed
   scientific values such as term streams or digests, checkerboard-Neel values,
   exact centers, declared intervals or operator-error ticks.
+- `majorana_certificate_p7_d1_phase_probe.py`,
+  `majorana_certificate_p7_d1_phase_probe/majorana_p7_step3_phase_probe.jl`,
+  `majorana_certificate_p7_d1_phase_probe_fixture.json`,
+  `majorana_certificate_p7_d1_phase_probe_policy.json`,
+  `majorana_certificate_p7_d1_phase_probe_report.json` and their preprobe/result
+  tests: separately versioned, non-authoritative D1 phase diagnostic for the
+  frozen P7 adjacent-step-3 path.  The D0-result-informed but scientific-blind
+  preprobe commit is `48a1be6932331e2925261965c783e6b40b555747`, a direct child
+  of D0 result commit `4ebed6b651e3c9605f84939d6a9efff8281bc38b`; canonical
+  report SHA-256 is
+  `9d37609c51f9149baf347fbf801338cc0abe7c7323c187fe71a4932099f8f713`.
+  One fresh process ran under the unchanged 2 GiB memory, zero-swap and
+  1,800-second memory/swap/runtime admission.  The supervised command returned
+  `-15` after `1800.381352338` outer-monotonic seconds; stdout was empty and
+  the resource witness is `null`.  Its 15-event
+  `LEGAL_PREFIX_INTERRUPTED` trace observed the P6-prefix conformance milestone
+  at `660.422891266` seconds and `STEP3_ENGINE_STARTED` at `660.589519616`
+  seconds, but no step-3 engine-return or finalizer event.  These outer-receive
+  timestamps only localize the observed runtime-envelope interruption to the
+  step-3 adaptive engine; they are not scientific timings, do not reprove P6,
+  and establish neither a deterministic cap nor a no-go.  The report remains
+  `scientific_authority=NONE`; exact S0 status is
+  `NOT_ESTABLISHED_BY_D1_PHASE_DIAGNOSTIC`.  A continuation requires a
+  separately precommitted D2 focused on source-pinned step-3 stage diagnostics
+  or a separately versioned algorithm/proof decomposition, without changing
+  the candidate or admission caps in place or exporting suppressed scientific
+  state.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is
