@@ -63,6 +63,30 @@ pub fn weight_for_edge_type(edge_type: &str) -> f64 {
     }
 }
 
+/// Reciprocal-rank fusion (Robertson et al.; k=60 is the standard constant):
+/// each ranked list contributes `1/(k + rank + 1)` (rank 0-based) to a key's
+/// score. Extracted from the mode=hybrid Step-3 loop (2026-07-17) so the R2
+/// fusion shadow measures EXACTLY the fusion hybrid applies — scores and
+/// ordering are byte-identical to the previous inline code. Returns
+/// `(key, score)` sorted score DESC then key ASC (the hybrid merge's
+/// deterministic ordering contract). `k` is clamped to ≥ 1.
+pub fn rrf_fuse(lists: &[&[String]], k: f64) -> Vec<(String, f64)> {
+    let rrf_k = k.max(1.0);
+    let mut scores: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for list in lists {
+        for (rank, key) in list.iter().enumerate() {
+            *scores.entry(key.clone()).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
+        }
+    }
+    let mut out: Vec<(String, f64)> = scores.into_iter().collect();
+    out.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    out
+}
+
 /// AiOT temporal bonus multiplier for an edge type:
 /// causal edges get ×1.2, recall-penalty edges get ×0.85, others ×1.0.
 pub fn temporal_bonus(edge_type: &str) -> f64 {
@@ -77,17 +101,18 @@ use crate::{
     memory_scope_visible_in_context, AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert,
     CoactivationEdge, CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy,
     DecayUnusedStats, EmbeddingProfile, ForumExportResult, ForumImportReport, ForumPostExport,
-    ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord, GraphTopology,
-    HebbianCluster, IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallFilter,
-    McpToolCallRow, McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit,
-    MemoryEdge, MemoryEdgeExport, MemoryEvidenceProfile, MemoryEvidenceRecordMarker,
-    MemoryEvidenceSnapshot, MemoryEvidenceSnapshotLimits, MemoryExportFilter, MemoryExportResult,
-    MemoryListSort, MemoryLiveMeta, MemoryPeekResult, MemoryQueryRecord, MemoryQueryStats,
-    MemoryRecord, MemorySearchHit, MemoryStats, MemoryTombstoneMarker, MisrankRow, ModeStats,
-    NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow,
-    ReplayAuditStats, RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary,
-    S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow,
-    WaypointStats, AMBIENT_SURFACING_MODE, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
+    ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord, FusionShadowSample,
+    GraphTopology, HebbianCluster, IdentityWindow, ImportConflictPolicy, ImportReport,
+    McpToolCallFilter, McpToolCallRow, McpToolCallStats, McpToolErrorRecord, McpToolSourceStats,
+    MemoryCosineHit, MemoryEdge, MemoryEdgeExport, MemoryEvidenceProfile,
+    MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot, MemoryEvidenceSnapshotLimits,
+    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryLiveMeta, MemoryPeekResult,
+    MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats,
+    MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord, OverlapPair, PlanRecord,
+    PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, RetrievalOutcomeMemory,
+    RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts, SessionFilter,
+    SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
+    AMBIENT_SURFACING_MODE, FUSION_SHADOW_RING_CAP, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
     MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
@@ -625,6 +650,35 @@ CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_pending
 const SCHEMA_V42_RETRIEVAL_TRAFFIC_CLASS: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_traffic_at
     ON retrieval_surfacing(traffic_class, surfaced_at DESC);
+"#;
+
+// R2 fusion shadow (forum #147 "shadow first"): one compact row per passive
+// "what if the default (fts) memory_search page had a semantic leg RRF-fused
+// in" measurement, skips included. VERSION-LESS additive rung: the v43
+// temporal-evidence module owns `schema_meta.version` (it rejects any value it
+// doesn't know), so this table is gated by idempotent CREATE IF NOT EXISTS on
+// every open instead of a version bump. Rows are written only when the bridge's
+// AGENT_BRIDGE_FUSION_SHADOW gate is on; ring-capped FIFO at
+// FUSION_SHADOW_RING_CAP like the other telemetry rings.
+const SCHEMA_FUSION_SHADOW: &str = r#"
+CREATE TABLE IF NOT EXISTS fusion_shadow (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    at             INTEGER NOT NULL,
+    query          TEXT    NOT NULL DEFAULT '',
+    k              INTEGER NOT NULL,
+    actual_n       INTEGER NOT NULL,
+    semantic_n     INTEGER NOT NULL,
+    overlap        REAL    NOT NULL,
+    gained         INTEGER NOT NULL,
+    lost           INTEGER NOT NULL,
+    gained_keys    TEXT    NOT NULL DEFAULT '[]',
+    lost_keys      TEXT    NOT NULL DEFAULT '[]',
+    mean_abs_shift REAL    NOT NULL,
+    max_abs_shift  INTEGER NOT NULL,
+    skipped        INTEGER NOT NULL DEFAULT 0,
+    skip_reason    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fusion_shadow_at ON fusion_shadow(at DESC);
 "#;
 
 // v32 — timestamp integrity guard for sync/export tables.
@@ -1789,6 +1843,9 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V42_RETRIEVAL_TRAFFIC_CLASS)?;
                 let _ = c.execute("UPDATE schema_meta SET value='42' WHERE key='version'", []);
             }
+            // R2 fusion shadow — version-less additive rung (see the const's
+            // comment for why it cannot bump schema_meta.version past v43).
+            c.execute_batch(SCHEMA_FUSION_SHADOW)?;
             temporal_evidence::migrate_or_verify_v43(c)?;
             Ok(())
         })
@@ -4493,27 +4550,18 @@ impl StateStore for SqliteStore {
         }
 
         // ── Step 3: RRF fusion ─────────────────────────────────────────────────
-        // RRF score(d) = Σ_list 1/(k + rank_in_list)
-        // k=60 is the standard constant (Robertson et al.)
-        let rrf_k = k.max(1.0);
-        let mut rrf_scores: HashMap<String, f64> = HashMap::new();
-
-        // List A: FTS5 results
-        for (rank, hit) in fts_hits.iter().enumerate() {
-            let key = hit.record.key.clone();
-            *rrf_scores.entry(key).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
-        }
-        // List B: Graph neighbor results
+        // Delegates to the shared `rrf_fuse` (k=60 default upstream; Robertson
+        // et al.) so mode=hybrid and the R2 fusion shadow can never disagree on
+        // the fusion math. List A: FTS5 results; List B: graph neighbors.
         graph_hits.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.record.key.cmp(&b.record.key))
         });
-        for (rank, hit) in graph_hits.iter().enumerate() {
-            let key = hit.record.key.clone();
-            *rrf_scores.entry(key).or_insert(0.0) += 1.0 / (rrf_k + rank as f64 + 1.0);
-        }
+        let fts_keys: Vec<String> = fts_hits.iter().map(|h| h.record.key.clone()).collect();
+        let graph_keys: Vec<String> = graph_hits.iter().map(|h| h.record.key.clone()).collect();
+        let fused = rrf_fuse(&[&fts_keys, &graph_keys], k);
 
         // ── Step 4: Build final result set ────────────────────────────────────
         // Collect all unique MemoryRecords (prefer FTS5 record since it was freshly bumped)
@@ -4529,7 +4577,7 @@ impl StateStore for SqliteStore {
                 .or_insert(hit.record);
         }
 
-        let mut merged: Vec<MemorySearchHit> = rrf_scores
+        let mut merged: Vec<MemorySearchHit> = fused
             .into_iter()
             .filter_map(|(key, rrf_score)| {
                 all_records.remove(&key).map(|record| MemorySearchHit {
@@ -8009,6 +8057,104 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("retrieval_outcome_shadow_rows: {e}")))
+    }
+
+    /// R2 fusion shadow (forum #147) — append one passive measurement row.
+    /// FIFO ring-capped in the same transaction as the insert (mirrors
+    /// `record_retrieval_surfacing_classified`); fail-soft because a shadow
+    /// must never break the search that spawned it.
+    async fn record_fusion_shadow(&self, sample: &FusionShadowSample) -> Result<()> {
+        let s = sample.clone();
+        let now = now_secs();
+        let res = self
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                let tx = c.transaction()?;
+                tx.execute(
+                    "INSERT INTO fusion_shadow
+                        (at, query, k, actual_n, semantic_n, overlap, gained, lost,
+                         gained_keys, lost_keys, mean_abs_shift, max_abs_shift,
+                         skipped, skip_reason)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                    rusqlite::params![
+                        now,
+                        s.query,
+                        s.k,
+                        s.actual_n,
+                        s.semantic_n,
+                        s.overlap,
+                        s.gained,
+                        s.lost,
+                        serde_json::to_string(&s.gained_keys).unwrap_or_else(|_| "[]".into()),
+                        serde_json::to_string(&s.lost_keys).unwrap_or_else(|_| "[]".into()),
+                        s.mean_abs_shift,
+                        s.max_abs_shift,
+                        s.skipped as i64,
+                        s.skip_reason,
+                    ],
+                )?;
+                tx.execute(
+                    "DELETE FROM fusion_shadow
+                       WHERE id IN (
+                           SELECT id FROM fusion_shadow ORDER BY id ASC
+                           LIMIT MAX(0, (SELECT COUNT(*) FROM fusion_shadow) - ?1)
+                       )",
+                    rusqlite::params![FUSION_SHADOW_RING_CAP],
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await;
+        match res {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                tracing::warn!(error = %e, "record_fusion_shadow failed (non-fatal)");
+                Ok(())
+            }
+        }
+    }
+
+    /// R2 fusion-shadow readback — in-window rows, newest first. Read-only;
+    /// bounded by the ring cap. The `memory_fusion_shadow_report` MCP tool
+    /// aggregates bridge-side (the `retrieval_outcome_shadow_rows` pattern).
+    async fn fusion_shadow_rows(&self, window_secs: i64) -> Result<Vec<FusionShadowSample>> {
+        let cutoff = now_secs() - window_secs.max(0);
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<FusionShadowSample>> {
+                let mut stmt = c.prepare(
+                    "SELECT at, query, k, actual_n, semantic_n, overlap, gained, lost,
+                            gained_keys, lost_keys, mean_abs_shift, max_abs_shift,
+                            skipped, skip_reason
+                       FROM fusion_shadow
+                      WHERE at >= ?1
+                   ORDER BY at DESC, id DESC",
+                )?;
+                let rows = stmt
+                    .query_map(rusqlite::params![cutoff], |r| {
+                        let gained_s: String = r.get(8)?;
+                        let lost_s: String = r.get(9)?;
+                        Ok(FusionShadowSample {
+                            at: r.get(0)?,
+                            query: r.get(1)?,
+                            k: r.get::<_, i64>(2)? as u32,
+                            actual_n: r.get::<_, i64>(3)? as u32,
+                            semantic_n: r.get::<_, i64>(4)? as u32,
+                            overlap: r.get(5)?,
+                            gained: r.get::<_, i64>(6)? as u32,
+                            lost: r.get::<_, i64>(7)? as u32,
+                            gained_keys: parse_str_array(&gained_s),
+                            lost_keys: parse_str_array(&lost_s),
+                            mean_abs_shift: r.get(10)?,
+                            max_abs_shift: r.get::<_, i64>(11)? as u32,
+                            skipped: r.get::<_, i64>(12)? != 0,
+                            skip_reason: r.get(13)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("fusion_shadow_rows: {e}")))
     }
 
     /// Apply-pass raw material — the shadow aggregate restricted to the
@@ -19927,6 +20073,116 @@ mod tests {
             .await
             .expect("attribute delta");
         assert_eq!(none, 0, "an unsurfaced key has no used attribution");
+    }
+
+    #[test]
+    fn rrf_fuse_matches_documented_formula_and_tiebreak() {
+        // Two ranked lists sharing "b": score(b) = 1/(60+1) + 1/(60+2);
+        // singles score by their own rank. Ties break key-ASC.
+        let a = vec!["a".to_string(), "b".to_string()];
+        let s = vec!["b".to_string(), "c".to_string()];
+        let fused = rrf_fuse(&[&a, &s], 60.0);
+        assert_eq!(fused[0].0, "b", "shared key wins");
+        let expect_b = 1.0 / 61.0 + 1.0 / 62.0;
+        assert!((fused[0].1 - expect_b).abs() < 1e-12);
+        // "a" and "c" are both rank-0/rank-1 singles: a at rank 0 (1/61)
+        // outranks c at rank 1 (1/62).
+        assert_eq!(fused[1].0, "a");
+        assert_eq!(fused[2].0, "c");
+        // Identical scores fall back to key ASC.
+        let x = vec!["x".to_string()];
+        let y = vec!["y".to_string()];
+        let tie = rrf_fuse(&[&x, &y], 60.0);
+        assert_eq!(tie[0].0, "x");
+        assert_eq!(tie[1].0, "y");
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_fuses_fts_and_graph_via_shared_rrf() {
+        // Refactor guard (2026-07-17): Step 3 of mode=hybrid now delegates to
+        // the shared `rrf_fuse`. A graph neighbor with no lexical overlap must
+        // still be pulled in; both keys sit rank-0 in exactly one list each
+        // (1/61 both), so the pre-existing deterministic tiebreak — key ASC —
+        // orders "neighbor" before "seed".
+        let (_dir, store) = fresh_store("hybrid-rrf").await;
+        let seed = mk_record("seed", now_secs());
+        let mut seed = seed;
+        seed.content = "rust borrow checker lifetimes".into();
+        store.memory_save(&seed).await.expect("save seed");
+        let mut nb = mk_record("neighbor", now_secs());
+        nb.content = "ownership aliasing rules".into();
+        store.memory_save(&nb).await.expect("save neighbor");
+        store
+            .memory_link("seed", "neighbor", "relates", 1.0)
+            .await
+            .expect("link");
+
+        let hits = store
+            .memory_search_hybrid("borrow", &[], 10, 60.0, 10)
+            .await
+            .expect("hybrid search");
+        let keys: Vec<&str> = hits.iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["neighbor", "seed"],
+            "graph pull-in present; equal RRF scores tiebreak key-ASC"
+        );
+        assert!((hits[0].score - hits[1].score).abs() < 1e-12, "1/61 each");
+    }
+
+    #[tokio::test]
+    async fn fusion_shadow_records_and_reads_back() {
+        // R2 fusion shadow: a measured row and a skip row both persist (skips
+        // count toward coverage) and read back newest-first with fields intact.
+        let (_dir, store) = fresh_store("fusion-shadow").await;
+        let measured = FusionShadowSample {
+            at: 0, // store stamps its own timestamp
+            query: "rust ownership".to_string(),
+            k: 10,
+            actual_n: 10,
+            semantic_n: 7,
+            overlap: 0.8,
+            gained: 2,
+            lost: 2,
+            gained_keys: vec!["g1".to_string(), "g2".to_string()],
+            lost_keys: vec!["l1".to_string(), "l2".to_string()],
+            mean_abs_shift: 1.25,
+            max_abs_shift: 3,
+            skipped: false,
+            skip_reason: None,
+        };
+        store
+            .record_fusion_shadow(&measured)
+            .await
+            .expect("record measured");
+        let skip = FusionShadowSample {
+            query: "q2".to_string(),
+            k: 10,
+            skipped: true,
+            skip_reason: Some("hash_embedder".to_string()),
+            ..Default::default()
+        };
+        store
+            .record_fusion_shadow(&skip)
+            .await
+            .expect("record skip");
+
+        let rows = store.fusion_shadow_rows(3600).await.expect("readback");
+        assert_eq!(rows.len(), 2);
+        // Newest first (same second → id DESC): the skip row leads.
+        assert!(rows[0].skipped);
+        assert_eq!(rows[0].skip_reason.as_deref(), Some("hash_embedder"));
+        let m = &rows[1];
+        assert!(!m.skipped);
+        assert_eq!(m.query, "rust ownership");
+        assert_eq!((m.k, m.actual_n, m.semantic_n), (10, 10, 7));
+        assert!((m.overlap - 0.8).abs() < 1e-12);
+        assert_eq!((m.gained, m.lost), (2, 2));
+        assert_eq!(m.gained_keys, vec!["g1".to_string(), "g2".to_string()]);
+        assert_eq!(m.lost_keys, vec!["l1".to_string(), "l2".to_string()]);
+        assert!((m.mean_abs_shift - 1.25).abs() < 1e-12);
+        assert_eq!(m.max_abs_shift, 3);
+        assert!(m.at > 0, "store stamped its own at");
     }
 
     #[tokio::test]

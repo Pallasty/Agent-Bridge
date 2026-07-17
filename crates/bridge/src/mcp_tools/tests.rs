@@ -10481,6 +10481,91 @@ async fn retrieval_outcome_shadow_reports_what_if_and_writes_nothing() {
 }
 
 #[tokio::test]
+async fn fusion_shadow_runner_records_and_report_aggregates() {
+    // R2 end-to-end against a real SQLite store, env-free (the gate itself is
+    // unit-tested as a pure split; `run_fusion_shadow` takes everything as
+    // parameters): one measured sample + one counted skip land in the
+    // fusion_shadow table, the report aggregates both, and — the shadow's core
+    // claim — nothing about the searched memories changes.
+    let (hub, store_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    for (key, body) in [
+        ("fs_a", "fusion probe alpha content"),
+        ("fs_b", "fusion probe bravo content"),
+    ] {
+        let rec = ab_store::MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 1_700_000_000,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+    }
+
+    // Measured leg (skip_reason=None): semantic runs on whatever embedder the
+    // test build has — the metrics math is what's under test here.
+    run_fusion_shadow(
+        store.clone(),
+        "fusion probe".to_string(),
+        vec!["fs_a".to_string(), "fs_b".to_string()],
+        10,
+        10,
+        None,
+    )
+    .await;
+    // Counted skip (decided by the caller, costs no embed).
+    run_fusion_shadow(
+        store.clone(),
+        "fusion probe 2".to_string(),
+        vec!["fs_a".to_string()],
+        10,
+        10,
+        Some("hash_embedder"),
+    )
+    .await;
+
+    let out = MemoryFusionShadowReportTool::new(hub.clone())
+        .execute(
+            json!({"window_secs": 31_536_000, "top_n": 3}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("report");
+    let res = result_text_as_json(&out);
+    assert_eq!(res["samples"], json!(1));
+    assert_eq!(res["skips"], json!(1));
+    assert_eq!(res["skips_by_reason"]["hash_embedder"], json!(1));
+    assert_eq!(res["low_sample"], json!(true));
+    let examples = res["top_displacement_examples"]
+        .as_array()
+        .expect("examples");
+    assert_eq!(examples.len(), 1, "only measured rows are examples");
+    assert_eq!(examples[0]["query"], json!("fusion probe"));
+    assert_eq!(examples[0]["k"], json!(10));
+    assert_eq!(examples[0]["actual_n"], json!(2));
+
+    // Shadow writes telemetry ONLY — the memories themselves are untouched.
+    let a = store
+        .memory_get("fs_a")
+        .await
+        .expect("get")
+        .expect("fs_a row");
+    assert!((a.importance - 0.5).abs() < 1e-9, "importance unchanged");
+
+    let _ = std::fs::remove_dir_all(&store_dir);
+}
+
+#[tokio::test]
 async fn retrieval_outcome_apply_confirm_moves_consumes_and_accumulates() {
     // The four core apply invariants end-to-end against a real SQLite
     // store: (1) dry-run writes and consumes nothing; (2) a confirmed

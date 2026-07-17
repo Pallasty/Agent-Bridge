@@ -21,8 +21,8 @@ mod temporal_candidate_evidence;
 #[cfg(feature = "temporal-evidence-s6-detached-verifier-synthetic")]
 mod temporal_replay_transport;
 pub use sqlite::{
-    default_db_path, now_secs, semantic_blend_score, semantic_rank_weights, temporal_bonus,
-    weight_for_edge_type, SqliteStore,
+    default_db_path, now_secs, rrf_fuse, semantic_blend_score, semantic_rank_weights,
+    temporal_bonus, weight_for_edge_type, SqliteStore,
 };
 #[cfg(feature = "temporal-evidence-s4-synthetic")]
 pub use sqlite::{
@@ -257,6 +257,11 @@ pub const MEMORY_QUERY_LOG_RING_CAP: i64 = 5_000;
 /// via design review once the retrieval_outcome_report exposes real traffic
 /// shape.
 pub const RETRIEVAL_SURFACING_RING_CAP: i64 = 50_000;
+
+/// Cap on `fusion_shadow` rows (R2 passive RRF-fusion shadow, forum #147).
+/// One row per shadowed default-mode search (skips included), pruned FIFO on
+/// each write — same bound rationale as `memory_query_log` (one row/query).
+pub const FUSION_SHADOW_RING_CAP: i64 = 5_000;
 
 /// `retrieval_surfacing.mode` value for AMBIENT bootstrap injections — the
 /// session_bootstrap semantic page (hook-driven or agent-called), logged so
@@ -1547,6 +1552,37 @@ pub struct RetrievalOutcomeShadowRow {
     /// disabled (AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE=1).
     #[serde(default)]
     pub protected: bool,
+}
+
+/// One passive R2 fusion-shadow measurement (forum #147): what the page a
+/// default (mode=fts) `memory_search` actually returned WOULD look like had a
+/// semantic leg been RRF-fused in. Purely observational — the main query's
+/// results are final before this is ever computed. `at` is stamped by the
+/// store at insert (caller value ignored). `overlap` = |fused top-k ∩ actual|
+/// / max(|actual|, |fused top-k|), 1.0 when both are empty; `gained`/`lost`
+/// count keys fusion would add/drop (with a few example keys each); shifts are
+/// |rank_fused − rank_actual| over keys present in BOTH pages. Skip rows
+/// (`skipped=true`, metrics zeroed) count shadow opportunities where measuring
+/// would be meaningless (hash-fallback embedder, page already served by the
+/// semantic fallback), so coverage stays honest.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FusionShadowSample {
+    #[serde(default)]
+    pub at: i64,
+    pub query: String,
+    /// Requested page size — the top-k under comparison.
+    pub k: u32,
+    pub actual_n: u32,
+    pub semantic_n: u32,
+    pub overlap: f64,
+    pub gained: u32,
+    pub lost: u32,
+    pub gained_keys: Vec<String>,
+    pub lost_keys: Vec<String>,
+    pub mean_abs_shift: f64,
+    pub max_abs_shift: u32,
+    pub skipped: bool,
+    pub skip_reason: Option<String>,
 }
 
 /// Sort order for `list_memories`.
@@ -3962,6 +3998,22 @@ pub trait StateStore: Send + Sync {
         window_secs: i64,
     ) -> Result<Vec<RetrievalOutcomeShadowRow>> {
         let _ = window_secs;
+        Ok(Vec::new())
+    }
+
+    /// **R2 fusion shadow (flag-gated, default-OFF).** Append one passive
+    /// [`FusionShadowSample`] measurement row. Writes happen only when the
+    /// bridge's `AGENT_BRIDGE_FUSION_SHADOW` gate is on; default no-op so
+    /// non-SQLite backends degrade silently (telemetry-only, like
+    /// [`StateStore::record_retrieval_surfacing`]).
+    async fn record_fusion_shadow(&self, _sample: &FusionShadowSample) -> Result<()> {
+        Ok(())
+    }
+
+    /// R2 fusion-shadow readback — rows from the last `window_secs`, newest
+    /// first, bounded by [`FUSION_SHADOW_RING_CAP`]. Default returns empty
+    /// (an honest "no data yet" for a read-only report, never a wrong answer).
+    async fn fusion_shadow_rows(&self, _window_secs: i64) -> Result<Vec<FusionShadowSample>> {
         Ok(Vec::new())
     }
 

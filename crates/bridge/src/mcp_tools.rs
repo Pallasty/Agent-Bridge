@@ -39,6 +39,7 @@ use ab_store::{
     AgentPresenceRecord,
     CompactPolicy,
     ForumPostRecord,
+    FusionShadowSample,
     GraphTopology,
     ImportConflictPolicy,
     McpToolCallFilter,
@@ -13105,6 +13106,199 @@ fn fallback_embedder_ready() -> bool {
             .contains("hash")
 }
 
+/// R2 fusion-shadow gate (forum #147 "shadow first"). **Default-OFF** — every
+/// shadowed default-mode search pays one real extra query embed (the semantic
+/// leg), so the owner flips `AGENT_BRIDGE_FUSION_SHADOW=1`/`true` on the
+/// daemon only for a measurement window. Read ONCE at the `memory_search`
+/// public entry; everything below it takes parameters (the R1/R3 env-sinking
+/// idiom). Pure split for unit tests.
+fn fusion_shadow_enabled_from(env_val: Option<&str>) -> bool {
+    matches!(env_val, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn fusion_shadow_enabled() -> bool {
+    fusion_shadow_enabled_from(std::env::var("AGENT_BRIDGE_FUSION_SHADOW").ok().as_deref())
+}
+
+/// Fusion-shadow knobs pinned to the paths they mirror: semantic-leg cosine
+/// floor = the mode=semantic default; RRF k = the mode=hybrid default; a few
+/// example keys per side keep one shadow row one compact line.
+const FUSION_SHADOW_THRESHOLD: f32 = 0.3;
+const FUSION_SHADOW_RRF_K: f64 = 60.0;
+const FUSION_SHADOW_EXAMPLE_KEYS: usize = 5;
+
+/// Pure R2 shadow math: RRF-fuse the ACTUAL returned page with the semantic
+/// leg — via the very `ab_store::rrf_fuse` mode=hybrid runs — then measure how
+/// top-k membership and order would change. `overlap` divides the top-k
+/// intersection by `max(|actual|, |fused top-k|)` (1.0 when both are empty);
+/// shifts are |rank_fused − rank_actual| over keys present in BOTH pages.
+/// Returns a storable sample (`at` is stamped by the store).
+fn fusion_shadow_metrics(
+    query: &str,
+    actual: &[String],
+    semantic: &[String],
+    k: usize,
+) -> FusionShadowSample {
+    let fused_full = ab_store::rrf_fuse(&[actual, semantic], FUSION_SHADOW_RRF_K);
+    let fused: Vec<&String> = fused_full.iter().take(k).map(|(key, _)| key).collect();
+    let actual_set: HashSet<&String> = actual.iter().collect();
+    let fused_set: HashSet<&String> = fused.iter().copied().collect();
+    let inter = fused.iter().filter(|key| actual_set.contains(*key)).count();
+    let denom = actual.len().max(fused.len());
+    let overlap = if denom == 0 {
+        1.0
+    } else {
+        inter as f64 / denom as f64
+    };
+    let gained: Vec<String> = fused
+        .iter()
+        .filter(|key| !actual_set.contains(*key))
+        .map(|key| (*key).clone())
+        .collect();
+    let lost: Vec<String> = actual
+        .iter()
+        .filter(|key| !fused_set.contains(key))
+        .cloned()
+        .collect();
+    let shifts: Vec<u32> = actual
+        .iter()
+        .enumerate()
+        .filter_map(|(a_rank, key)| {
+            let f_rank = fused.iter().position(|f| *f == key)?;
+            Some((a_rank as i64 - f_rank as i64).unsigned_abs() as u32)
+        })
+        .collect();
+    let mean_abs_shift = if shifts.is_empty() {
+        0.0
+    } else {
+        shifts.iter().map(|s| *s as f64).sum::<f64>() / shifts.len() as f64
+    };
+    FusionShadowSample {
+        at: 0,
+        query: query.to_string(),
+        k: k as u32,
+        actual_n: actual.len() as u32,
+        semantic_n: semantic.len() as u32,
+        overlap,
+        gained: gained.len() as u32,
+        lost: lost.len() as u32,
+        max_abs_shift: shifts.iter().copied().max().unwrap_or(0),
+        gained_keys: gained
+            .into_iter()
+            .take(FUSION_SHADOW_EXAMPLE_KEYS)
+            .collect(),
+        lost_keys: lost.into_iter().take(FUSION_SHADOW_EXAMPLE_KEYS).collect(),
+        mean_abs_shift,
+        skipped: false,
+        skip_reason: None,
+    }
+}
+
+/// R2 shadow leg runner — spawned off the caller's path; everything in here is
+/// fail-soft (warn-only) because the main query already returned. The semantic
+/// leg reuses the EXISTING internal path (`memory_search_semantic`, one query
+/// embed). `skip_reason` is decided by the caller from cheap sync state so a
+/// skip costs no embed; a skip row is still recorded (skips count).
+async fn run_fusion_shadow(
+    store: Arc<dyn StateStore>,
+    query: String,
+    actual: Vec<String>,
+    k: usize,
+    sem_limit: u32,
+    skip_reason: Option<&'static str>,
+) {
+    let sample = match skip_reason {
+        Some(reason) => FusionShadowSample {
+            query,
+            k: k as u32,
+            actual_n: actual.len() as u32,
+            skipped: true,
+            skip_reason: Some(reason.to_string()),
+            ..Default::default()
+        },
+        None => {
+            match store
+                .memory_search_semantic(&query, sem_limit, FUSION_SHADOW_THRESHOLD)
+                .await
+            {
+                Ok(hits) => {
+                    let sem: Vec<String> = hits.iter().map(|h| h.record.key.clone()).collect();
+                    fusion_shadow_metrics(&query, &actual, &sem, k)
+                }
+                Err(e) => {
+                    tracing::warn!(target: "fusion_shadow", error = %e, "semantic leg failed (non-fatal)");
+                    return;
+                }
+            }
+        }
+    };
+    if let Err(e) = store.record_fusion_shadow(&sample).await {
+        tracing::warn!(target: "fusion_shadow", error = %e, "record_fusion_shadow failed (non-fatal)");
+    }
+}
+
+#[cfg(test)]
+mod fusion_shadow_tests {
+    use super::{fusion_shadow_enabled_from, fusion_shadow_metrics};
+
+    fn keys(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn fusion_shadow_gate_default_off_unless_truthy() {
+        assert!(!fusion_shadow_enabled_from(None));
+        assert!(!fusion_shadow_enabled_from(Some("")));
+        assert!(!fusion_shadow_enabled_from(Some("0")));
+        assert!(!fusion_shadow_enabled_from(Some("false")));
+        assert!(!fusion_shadow_enabled_from(Some("yes")));
+        assert!(fusion_shadow_enabled_from(Some("1")));
+        assert!(fusion_shadow_enabled_from(Some("true")));
+        assert!(fusion_shadow_enabled_from(Some("TRUE")));
+    }
+
+    #[test]
+    fn fusion_shadow_metrics_overlap_gained_lost_shift() {
+        // actual page [a,b,c,d] (k=4) fused with semantic [c,e,a] at RRF k=60:
+        //   a: 1/61 + 1/63     c: 1/63 + 1/61 (== a, key tiebreak → a first)
+        //   b: 1/62            e: 1/62 (== b, tiebreak → b first)   d: 1/64
+        // fused top-4 = [a, c, b, e] → keeps {a,b,c}, gains e, drops d.
+        let actual = keys(&["a", "b", "c", "d"]);
+        let semantic = keys(&["c", "e", "a"]);
+        let m = fusion_shadow_metrics("q", &actual, &semantic, 4);
+        assert_eq!((m.k, m.actual_n, m.semantic_n), (4, 4, 3));
+        assert!((m.overlap - 0.75).abs() < 1e-12, "3 of 4 kept");
+        assert_eq!(m.gained, 1);
+        assert_eq!(m.gained_keys, keys(&["e"]));
+        assert_eq!(m.lost, 1);
+        assert_eq!(m.lost_keys, keys(&["d"]));
+        // Shifts over both-page keys: a 0→0, b 1→2, c 2→1 → mean 2/3, max 1.
+        assert!((m.mean_abs_shift - 2.0 / 3.0).abs() < 1e-12);
+        assert_eq!(m.max_abs_shift, 1);
+        assert!(!m.skipped);
+    }
+
+    #[test]
+    fn fusion_shadow_metrics_edge_pages() {
+        // Empty actual page: fusion is pure semantic — all gained, no overlap.
+        let m = fusion_shadow_metrics("q", &[], &keys(&["x", "y"]), 2);
+        assert_eq!(m.overlap, 0.0);
+        assert_eq!((m.gained, m.lost), (2, 0));
+        assert_eq!(m.mean_abs_shift, 0.0);
+        assert_eq!(m.max_abs_shift, 0);
+        // Both legs empty: nothing to compare — overlap reads 1.0 (no change).
+        let e = fusion_shadow_metrics("q", &[], &[], 5);
+        assert_eq!(e.overlap, 1.0);
+        assert_eq!((e.gained, e.lost), (0, 0));
+        // Identical legs: fusion is a no-op page.
+        let same = keys(&["m", "n"]);
+        let s = fusion_shadow_metrics("q", &same, &same, 2);
+        assert_eq!(s.overlap, 1.0);
+        assert_eq!((s.gained, s.lost), (0, 0));
+        assert_eq!(s.max_abs_shift, 0);
+    }
+}
+
 #[cfg(test)]
 mod recall_semantic_fallback_tests {
     use super::{
@@ -13810,6 +14004,38 @@ impl McpTool for MemorySearchTool {
             elapsed,
             "mcp:memory_search",
         );
+
+        // R2 fusion shadow (forum #147, default-OFF): passively measure how
+        // the page just assembled WOULD change if a semantic leg were RRF-fused
+        // into the default (fts) ranking. Default-mode path only, spawned
+        // fire-and-forget AFTER the page is final — returned bytes identical
+        // flag on or off. Skips are decided here from cheap sync state and
+        // still recorded (counted): a hash-fallback embedder measures noise;
+        // a fallback-served page already IS the semantic leg.
+        if mode == "fts" && fusion_shadow_enabled() {
+            let skip_reason = if semantic_fallback_fired {
+                Some("semantic_fallback_served")
+            } else if !fallback_embedder_ready() {
+                Some("hash_embedder")
+            } else {
+                None
+            };
+            let store_shadow = store.clone();
+            let q_shadow = q.clone();
+            let actual_keys: Vec<String> = hits.iter().map(|h| h.record.key.clone()).collect();
+            let k_page = limit as usize;
+            tokio::spawn(async move {
+                run_fusion_shadow(
+                    store_shadow,
+                    q_shadow,
+                    actual_keys,
+                    k_page,
+                    inner_limit,
+                    skip_reason,
+                )
+                .await;
+            });
+        }
 
         // S4 projection dispatch. Param absent/false takes the pre-existing
         // full-record path untouched — the byte-identical default contract.
@@ -25388,6 +25614,145 @@ impl McpTool for RetrievalOutcomeShadowTool {
             "note": "WHAT-IF ONLY — nothing was written. low_sample=true means too few \
                 distinct memories to calibrate against; let the collector accrue longer. \
                 Non-active memories and one-off unused surfacings are excluded by design.",
+        })))
+    }
+}
+
+// ===========================================================================
+//   memory_fusion_shadow_report — R2 passive RRF-fusion shadow summary
+// ===========================================================================
+
+pub struct MemoryFusionShadowReportTool {
+    hub: Hub,
+}
+impl MemoryFusionShadowReportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryFusionShadowReportTool {
+    fn name(&self) -> &'static str {
+        "memory_fusion_shadow_report"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "READ-ONLY summary of the R2 fusion-shadow telemetry (forum \
+                 #147): while AGENT_BRIDGE_FUSION_SHADOW is enabled, every default \
+                 (mode=fts) memory_search passively records how its returned page \
+                 WOULD change if a semantic leg were RRF-fused in (k=60, the \
+                 mode=hybrid math) — overlap@k, gained/lost keys, rank displacement — \
+                 without altering a single returned byte. Aggregates those rows: \
+                 sample/skip counts, mean overlap, gained/lost totals, top \
+                 displacement examples. Evidence for the default-flip decision; \
+                 authorizes nothing."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer", "minimum": 60, "maximum": 31_536_000, "default": 604_800,
+                        "description": "Telemetry lookback in seconds. Default 7 days."
+                    },
+                    "top_n": {
+                        "type": "integer", "minimum": 1, "maximum": 50, "default": 5,
+                        "description": "Max top-displacement example rows. Default 5."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(604_800)
+            .clamp(60, 31_536_000);
+        let top_n = args
+            .get("top_n")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(5)
+            .clamp(1, 50) as usize;
+
+        let rows = store.fusion_shadow_rows(window_secs).await?;
+        let mut skips_by_reason: std::collections::BTreeMap<String, u64> =
+            std::collections::BTreeMap::new();
+        for r in rows.iter().filter(|r| r.skipped) {
+            *skips_by_reason
+                .entry(r.skip_reason.clone().unwrap_or_else(|| "unknown".into()))
+                .or_insert(0) += 1;
+        }
+        let mut measured: Vec<&FusionShadowSample> = rows.iter().filter(|r| !r.skipped).collect();
+        let n = measured.len();
+        let mean = |f: fn(&FusionShadowSample) -> f64| -> f64 {
+            if n == 0 {
+                0.0
+            } else {
+                measured.iter().map(|r| f(r)).sum::<f64>() / n as f64
+            }
+        };
+        let avg_overlap = mean(|r| r.overlap);
+        let avg_mean_abs_shift = mean(|r| r.mean_abs_shift);
+        let gained_total: u64 = measured.iter().map(|r| r.gained as u64).sum();
+        let lost_total: u64 = measured.iter().map(|r| r.lost as u64).sum();
+        let unchanged_pages = measured
+            .iter()
+            .filter(|r| r.gained == 0 && r.lost == 0 && r.max_abs_shift == 0)
+            .count();
+
+        // Top displacement examples: pages fusion would perturb the most.
+        measured.sort_by(|a, b| {
+            (b.gained + b.lost, b.max_abs_shift)
+                .cmp(&(a.gained + a.lost, a.max_abs_shift))
+                .then_with(|| {
+                    b.mean_abs_shift
+                        .partial_cmp(&a.mean_abs_shift)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| b.at.cmp(&a.at))
+        });
+        let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
+        let examples: Vec<Value> = measured
+            .iter()
+            .take(top_n)
+            .map(|r| {
+                json!({
+                    "at": r.at, "query": r.query, "k": r.k,
+                    "actual_n": r.actual_n, "semantic_n": r.semantic_n,
+                    "overlap": round3(r.overlap),
+                    "gained": r.gained, "lost": r.lost,
+                    "gained_keys": r.gained_keys, "lost_keys": r.lost_keys,
+                    "mean_abs_shift": round3(r.mean_abs_shift),
+                    "max_abs_shift": r.max_abs_shift,
+                })
+            })
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.memory_fusion_shadow.v0",
+            "read_only": true,
+            "gate_env": "AGENT_BRIDGE_FUSION_SHADOW",
+            "window_secs": window_secs,
+            "samples": n,
+            "skips": (rows.len() - n) as u64,
+            "skips_by_reason": skips_by_reason,
+            "avg_overlap": round3(avg_overlap),
+            "gained_total": gained_total,
+            "lost_total": lost_total,
+            "avg_mean_abs_shift": round3(avg_mean_abs_shift),
+            "unchanged_pages": unchanged_pages,
+            // Below ~10 measured pages the averages can't anchor a flip decision.
+            "low_sample": n < 10,
+            "top_displacement_examples": examples,
+            "note": "SHADOW ONLY — the measured searches returned their normal fts \
+                pages untouched. low_sample=true means too few measured pages to \
+                anchor a default-flip decision; leave the gate on longer.",
         })))
     }
 }
@@ -42672,6 +43037,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Standard,
         Arc::new(RetrievalOutcomeShadowTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryFusionShadowReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
