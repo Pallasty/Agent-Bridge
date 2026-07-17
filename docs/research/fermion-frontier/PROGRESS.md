@@ -1344,3 +1344,44 @@ focused on the step-3 engine: either coarse source-pinned stage instrumentation
 or a separately versioned algorithm/proof decomposition.  It must not reuse or
 relax D1, change the scientific candidate or admission caps in place, or
 inspect/export suppressed scientific state.
+
+## Majorana P7 D2 narrows the runtime interruption to segment E after checkpoint 1
+
+P7 D2 froze its separately versioned, D1-result-informed but scientific-blind
+static-schedule diagnostic at preprobe commit
+`2692f10a266b635ef1942bc510801a7db952c0d9`, a direct child of D1 result
+commit `29911a8ac46c068c550504f8b4a57d27a9441c0c`.  The sole execution used
+the unchanged 2 GiB memory, zero-swap and 1,800-second admission.  The
+supervised command returned `-15` after `1800.611541745` outer-monotonic
+seconds; the 1,830-second outer safety timeout did not fire.  Stdout remained
+empty, the resource witness is `null`, and the canonical report SHA-256 is
+`94c8cc4bd9487f14d598d92dd96153ae9e631c8c232d484952b91eab3e5fd0dc`.
+
+The dedicated channel produced a 33-event `LEGAL_PREFIX_INTERRUPTED` trace.
+The P6-prefix conformance marker arrived at `660.801840022` seconds and the
+step-3 engine started at `660.944943001` seconds.  Segments A through D
+returned.  Segment E/H4 started at `1585.779306765` seconds and reached
+checkpoint 1 at `1737.307683340` seconds.  No segment-E checkpoint-2 or return
+marker, later segment marker, step-3 engine return or step-3 finalizer marker
+followed.  These values are outer-receive host diagnostics only, not scientific
+timings or bounds.
+
+The frozen map emits checkpoint 1 after E composite ordinal 22 and checkpoint
+2 after ordinal 43.  The marker protocol therefore confirms that control flow
+passed the completion points for 224 earlier A--D composites plus the first 22
+E composites: at least 246 frozen step-3 completion points.  The unmarked
+static window is E local ordinals 23--43, corresponding to global zero-based
+composite indices 246--266.  Abrupt interruption can occur between completion
+and marker emission.  The absence proves only that no checkpoint-2 event was
+successfully emitted; it does not prove E local ordinal 43 was unfinished or
+identify the exact active composite.  The possible runtime completion-point-
+count envelope is 246--267.  No scientific state was inspected or exported.
+
+The observation remains `INDETERMINATE_HOST_OR_RUNTIME_FAILURE`, with no
+diagnostic terminal branch and `scientific_authority=NONE`.  S0 status is
+`NOT_ESTABLISHED_BY_D2_SCHEDULE_DIAGNOSTIC`; this is neither a deterministic
+cap nor a mathematical or algorithmic no-go.  Further resolution requires a
+separately precommitted, D2-result-informed but scientific-blind D3 that
+subdivides only the frozen segment-E static window, or a separately versioned
+algorithm/proof decomposition.  D2, the candidate and the host admission must
+not be relaxed in place.

@@ -1225,6 +1225,31 @@ so they are versioned normally and are not added to the preservation-only
   or a separately versioned algorithm/proof decomposition, without changing
   the candidate or admission caps in place or exporting suppressed scientific
   state.
+- `majorana_certificate_p7_d2_schedule_probe.py`,
+  `majorana_certificate_p7_d2_schedule_probe/majorana_p7_step3_schedule_probe.jl`,
+  `majorana_certificate_p7_d2_schedule_probe_fixture.json`,
+  `majorana_certificate_p7_d2_schedule_probe_policy.json`,
+  `majorana_certificate_p7_d2_schedule_probe_report.json` and their
+  preprobe/result tests: separately versioned, non-authoritative D2 static-
+  schedule diagnostic for the frozen P7 adjacent-step-3 path.  Its D1-result-
+  informed but scientific-blind preprobe commit is
+  `2692f10a266b635ef1942bc510801a7db952c0d9`, a direct child of D1 result
+  commit `29911a8ac46c068c550504f8b4a57d27a9441c0c`; canonical report SHA-256
+  is `94c8cc4bd9487f14d598d92dd96153ae9e631c8c232d484952b91eab3e5fd0dc`.
+  One fresh process ran under the unchanged 2 GiB memory, zero-swap and
+  1,800-second admission.  The supervised command returned `-15` after
+  `1800.611541745` outer-monotonic seconds; stdout was empty and the resource
+  witness is `null`.  Its 33-event `LEGAL_PREFIX_INTERRUPTED` trace returned
+  through segments A--D, then reached segment E/H4 checkpoint 1 after frozen
+  local composite ordinal 22.  It emitted no E checkpoint-2 or return,
+  later-segment, step-3 engine-return or finalizer marker.  The unresolved
+  static window is E local ordinals 23--43 (global zero-based composite
+  indices 246--266), not an observed scientific state or identified failure
+  cause.  The report remains `scientific_authority=NONE`; exact S0 status is
+  `NOT_ESTABLISHED_BY_D2_SCHEDULE_DIAGNOSTIC`.  A continuation requires a
+  separately precommitted, scientific-blind D3 subgrid or a separately
+  versioned algorithm/proof decomposition; no frozen candidate or admission
+  cap may be changed in place.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is
