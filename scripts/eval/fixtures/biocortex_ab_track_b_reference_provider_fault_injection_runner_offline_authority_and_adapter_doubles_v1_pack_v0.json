@@ -1,0 +1,98 @@
+{
+  "boundary": {
+    "condition_output_authorized": false,
+    "credentials_accessed": false,
+    "execution_capability_emitted": false,
+    "experiment_executed": false,
+    "live_endpoint_bound": false,
+    "offline_adapter_doubles_implemented": 9,
+    "offline_authority_verifier_implemented": true,
+    "offline_stop_control_doubles_implemented": 5,
+    "output_permit_defined": false,
+    "paid_resources_provisioned": false,
+    "production_adapter_implemented": false,
+    "provider_called": false,
+    "receipt_is_execution_authority": false,
+    "receipt_is_output_permit": false,
+    "runtime_authority": false,
+    "side_effects_unlocked": "NONE",
+    "synthetic_private_capability_consumed": true
+  },
+  "date": "2026-07-16",
+  "decision": "OFFLINE_AUTHORITY_VERIFIER_AND_ADAPTER_DOUBLES_PASS_RUNTIME_EXECUTION_REMAINS_BLOCKED",
+  "evidence_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-adapter-contract-v1.json": "d602d9f14f662145bd12f33304b2800bb9601ff4fd76634eb56c41b86aa17201",
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-authority-receipt-schema-v1.json": "faea2234635441b0bc043b5d605a449decc61cc854e708f705f7bb09d58a7b90",
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-stop-receipt-schema-v1.json": "7657cd25a9abf4037ce5eb4c403db36aebf4b43deb232886e62ff4afe9d45c36",
+    "docs/reports/goal-c-u/2026-07-15-biocortex-track-b-reference-provider-fault-injection-runner-authority-and-adapter-contract-v1-pack.md": "d64aabfc79b74819504997f11ced9c6bfeca3136e1c7248aec57259f3fae89de",
+    "docs/reports/goal-c-u/2026-07-16-biocortex-track-b-reference-provider-fault-injection-runner-offline-authority-and-adapter-doubles-v1-pack.md": "01a2c9a617afb7a170cd52ad62e1e053ecb8b260cb64cbb929483489e4682dbc",
+    "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-authority-and-adapter-contract-v1-pack.sh": "de303a52993d06e54fd9582f34a9cfcf65a4181889d976d4bd595a1150f207d6",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_authority_and_adapter_contract_v1.py": "38b0e31504b72f961baec7e037a9340a334d3655aff2ce4d90fd01db4afb45a3",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1.py": "aa2682bd659723fda6cf3ca650690c1bebfd7f01eee0612507903409c75d2785",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_authority_and_adapter_contract_v1_pack.py": "c8f2258f9f8bac956958d6ebd011790814b6df3bad7f72213dd8241add7b4605",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack.py": "ed11f6d6c31812a70520a7fe30d7a5984a4e429598e102aa8540a18f2398789b",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_authority_and_adapter_contract_v1_pack.expected.v0.tsv": "948842558a2be55a10660305758db5532ae89ec8b3340338c989befb26d5ce4b",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_authority_and_adapter_contract_v1_pack_synthetic_v0.json": "75259e4d211d40d1b00caccd4b13ca593363884b507a59cd2b57b55c462f6300",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_authority_and_adapter_contract_v1_pack_v0.json": "ff7cae32c8f19df080e40724ff353126c57caad1e23d957e467d490519738b12",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack.expected.v0.tsv": "df468939b9cd8c0d1f5df9e4ddef1e00dcd5834a6b5bbcd683e6969ae9cbf303",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack_synthetic_v0.json": "d480e337fbe0aad073c9250540898d3829c1a862c704fedc478e2c6c9dabe34b"
+  },
+  "logical_baseline_commit": "08594b04fe9e23b11c70b3a5640c43ada9911a7b",
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_OFFLINE_INTEGRATION_AND_RUNTIME_ADMISSION_BOUNDARY_REVIEW",
+  "packet": {
+    "modes": {
+      "docs/reports/goal-c-u/2026-07-16-biocortex-track-b-reference-provider-fault-injection-runner-offline-authority-and-adapter-doubles-v1-pack.md": "100644",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-offline-authority-and-adapter-doubles-v1-pack.sh": "100755",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1.py": "100644",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack.py": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack.expected.v0.tsv": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack_synthetic_v0.json": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack_v0.json": "100644"
+    },
+    "paths": [
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1.py",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack.py",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack_synthetic_v0.json",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack.expected.v0.tsv",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack_v0.json",
+      "docs/reports/goal-c-u/2026-07-16-biocortex-track-b-reference-provider-fault-injection-runner-offline-authority-and-adapter-doubles-v1-pack.md",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-offline-authority-and-adapter-doubles-v1-pack.sh"
+    ]
+  },
+  "predecessor": {
+    "integration_commit": "08594b04fe9e23b11c70b3a5640c43ada9911a7b",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_authority_and_adapter_contract_v1_pack_v0.json",
+    "manifest_sha256": "ff7cae32c8f19df080e40724ff353126c57caad1e23d957e467d490519738b12",
+    "source_commit": "8002636128b530c3f9b1989f2894785be91b7c18"
+  },
+  "results": {
+    "adapter_calls": 9,
+    "authority_bundles_verified": 9,
+    "conformance_content_sha256": "e35b9ce29df31b68ef67b1c19f6ff256b361106dc4946452ad585d604b49b899",
+    "control_evidence_receipts_verified": 18,
+    "experiment_rows": 0,
+    "private_capability_commitments_verified": 9,
+    "provider_calls": 0,
+    "runtime_rows": 0,
+    "scope_signature_receipts_verified": 45,
+    "stop_sequences_absorbing_complete": 1,
+    "stop_sequences_failed_quarantined": 5,
+    "wire_attempts": 0
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_offline_authority_and_adapter_doubles_v1_pack_manifest.v0",
+  "status": "REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_V1_OFFLINE_AUTHORITY_VERIFIER_AND_ADAPTER_DOUBLES_IMPLEMENTED_NO_PROVIDER_NO_CREDENTIAL_NO_PERMIT",
+  "test_oracle": {
+    "adapter_doubles": 9,
+    "authority_artifacts_per_bundle": 5,
+    "control_evidence_receipts_per_bundle": 2,
+    "directed_negative_tests": 115,
+    "scope_signature_receipts": 45,
+    "source_ast_purity": "PASS",
+    "stop_control_doubles": 5,
+    "stop_control_operation_receipts": 6
+  },
+  "tracks": {
+    "MANAGED_SPANNER_CLOUD_KMS": "OFFLINE_DOUBLE_CONFORMANCE_ONLY_NO_RUNTIME",
+    "SELF_HOSTED_ETCD_OPENBAO": "OFFLINE_DOUBLE_CONFORMANCE_ONLY_NO_RUNTIME"
+  }
+}
