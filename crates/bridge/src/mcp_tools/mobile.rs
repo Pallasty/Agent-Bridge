@@ -1120,6 +1120,7 @@ impl McpTool for MobileScreenshotTool {
                         serde_json::to_string_pretty(&meta).unwrap_or_else(|_| meta.to_string()),
                     ),
                 ],
+                structured_content: None,
                 is_error: false,
                 backend_id: None,
             });

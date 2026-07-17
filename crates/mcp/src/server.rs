@@ -10,7 +10,9 @@ use crate::protocol::{
     INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND, NOTIFICATION_CANCELLED,
     NOTIFICATION_INITIALIZED, NOTIFICATION_TOOLS_LIST_CHANGED, PARSE_ERROR, PROTOCOL_VERSION,
 };
-use crate::{ContentBlock, ToolContext, ToolRegistry, ToolResult, ToolSchema};
+#[cfg(test)]
+use crate::{default_tool_title, ToolSchema};
+use crate::{ContentBlock, ToolContext, ToolDescriptor, ToolRegistry, ToolResult};
 use ab_core::SessionId;
 use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
 use serde_json::{json, Value};
@@ -631,8 +633,27 @@ fn tools_list_start(params: Option<&Value>, tools_len: usize) -> Result<usize, S
     Ok(offset)
 }
 
+#[cfg(test)]
 fn tools_list_result_from_schemas(
     tools: &[ToolSchema],
+    params: Option<&Value>,
+    page_size: usize,
+) -> Result<Value, String> {
+    let descriptors: Vec<_> = tools
+        .iter()
+        .cloned()
+        .map(|schema| ToolDescriptor {
+            title: default_tool_title(&schema.name),
+            schema,
+            annotations: None,
+            output_schema: None,
+        })
+        .collect();
+    tools_list_result_from_descriptors(&descriptors, params, page_size)
+}
+
+fn tools_list_result_from_descriptors(
+    tools: &[ToolDescriptor],
     params: Option<&Value>,
     page_size: usize,
 ) -> Result<Value, String> {
@@ -643,9 +664,12 @@ fn tools_list_result_from_schemas(
     let page_tools = tools[start..end]
         .iter()
         .map(|t| ToolDefinition {
-            name: t.name.clone(),
-            description: t.description.clone(),
-            input_schema: t.input_schema.clone(),
+            name: t.schema.name.clone(),
+            title: t.title.clone(),
+            description: t.schema.description.clone(),
+            input_schema: t.schema.input_schema.clone(),
+            annotations: t.annotations,
+            output_schema: t.output_schema.clone(),
         })
         .collect();
 
@@ -657,8 +681,8 @@ fn tools_list_result_from_schemas(
 }
 
 fn tools_list_response(registry: &ToolRegistry, params: Option<&Value>) -> Result<Value, String> {
-    let tools = registry.list();
-    tools_list_result_from_schemas(&tools, params, tools_list_page_size())
+    let tools = registry.descriptors();
+    tools_list_result_from_descriptors(&tools, params, tools_list_page_size())
 }
 
 /// v17 telemetry — record every `tools/call` (success + failure) with timing
@@ -1201,6 +1225,9 @@ mod tests {
 
         assert_eq!(first["tools"].as_array().unwrap().len(), 250);
         assert_eq!(first["nextCursor"], json!("tools:v1:250"));
+        assert_eq!(first["tools"][0]["title"], json!("Tool 000"));
+        assert!(first["tools"][0].get("annotations").is_none());
+        assert!(first["tools"][0].get("outputSchema").is_none());
 
         let second = tools_list_result_from_schemas(
             &tools,

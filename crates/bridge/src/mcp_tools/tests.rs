@@ -7336,6 +7336,132 @@ fn tool_policy_codex_lean_excludes_native_overlap_tools() {
 }
 
 #[test]
+fn tool_policy_chatgpt_read_is_small_read_only_and_isolated() {
+    let policy = ToolPolicy::from_values(Some("chatgpt-read"), None, None, Some("all"));
+    assert_eq!(policy.label(), "chatgpt-read");
+    assert_eq!(policy.profile().label(), "essential");
+
+    let registry = build_registry_with_policy(Hub::builder().build(), policy);
+    let descriptors = registry.descriptors();
+    let names: Vec<_> = descriptors
+        .iter()
+        .map(|descriptor| descriptor.schema.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "capabilities",
+            "context_governor_snapshot",
+            "fetch",
+            "search"
+        ]
+    );
+    for descriptor in &descriptors {
+        assert!(!descriptor.title.trim().is_empty());
+        let annotations = descriptor.annotations.expect("ChatGPT annotation");
+        assert!(annotations.read_only_hint);
+        assert!(!annotations.destructive_hint);
+        assert!(!annotations.open_world_hint);
+    }
+    for name in ["search", "fetch"] {
+        let descriptor = descriptors
+            .iter()
+            .find(|descriptor| descriptor.schema.name == name)
+            .unwrap();
+        assert!(descriptor.output_schema.is_some());
+        assert_eq!(
+            descriptor.schema.input_schema["properties"]
+                .as_object()
+                .unwrap()
+                .len(),
+            1,
+            "{name} input must remain exactly compatible with ChatGPT knowledge discovery"
+        );
+    }
+
+    for existing in [
+        "codex-essential",
+        "codex-lean",
+        "claude-standard",
+        "gemini-lean",
+    ] {
+        let names: Vec<_> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy::from_values(Some(existing), None, None, None),
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(!names.iter().any(|name| name == "search" || name == "fetch"));
+    }
+}
+
+#[tokio::test]
+async fn chatgpt_search_and_fetch_return_structured_results_without_access_mutation() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.as_ref().expect("store").clone();
+    let now = now_secs();
+    store
+        .memory_save(&MemoryRecord {
+            key: "quarterly_plan".into(),
+            kind: "decision".into(),
+            content: "Ship the quarterly deployment plan after the release gate passes.".into(),
+            tags: vec!["release".into(), "plan".into()],
+            related_keys: vec![],
+            scope: Some("project:/tmp/agent-bridge".into()),
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.8,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        })
+        .await
+        .expect("save memory");
+    let before = match store.memory_peek("quarterly_plan").await.expect("peek") {
+        MemoryPeekResult::Present { record } => record,
+        other => panic!("expected present memory, got {other:?}"),
+    };
+
+    let search = ChatGptSearchTool::new(hub.clone())
+        .execute(json!({ "query": "quarterly" }), &ToolContext::default())
+        .await
+        .expect("search");
+    let search_structured = search
+        .structured_content
+        .clone()
+        .expect("structured search");
+    assert_eq!(search_structured["results"][0]["id"], "quarterly_plan");
+    assert_eq!(search_structured["results"][0]["url"], "");
+    assert_eq!(result_text_as_json(&search), search_structured);
+
+    let fetch = ChatGptFetchTool::new(hub)
+        .execute(json!({ "id": "quarterly_plan" }), &ToolContext::default())
+        .await
+        .expect("fetch");
+    let fetch_structured = fetch.structured_content.clone().expect("structured fetch");
+    assert_eq!(fetch_structured["id"], "quarterly_plan");
+    assert_eq!(
+        fetch_structured["metadata"]["source"],
+        "agent-bridge-memory"
+    );
+    assert_eq!(fetch_structured["url"], "");
+    assert_eq!(result_text_as_json(&fetch), fetch_structured);
+
+    let after = match store.memory_peek("quarterly_plan").await.expect("peek") {
+        MemoryPeekResult::Present { record } => record,
+        other => panic!("expected present memory, got {other:?}"),
+    };
+    assert_eq!(after.access_count, before.access_count);
+    assert_eq!(after.last_accessed_at, before.last_accessed_at);
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[test]
 fn tool_policy_hook_lifecycle_is_allowlisted() {
     let p = ToolPolicy::from_values(Some("hook-lifecycle"), None, None, None);
 
