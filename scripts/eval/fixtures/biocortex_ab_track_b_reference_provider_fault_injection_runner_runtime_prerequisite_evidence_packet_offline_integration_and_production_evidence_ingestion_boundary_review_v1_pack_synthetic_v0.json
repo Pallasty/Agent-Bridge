@@ -1,0 +1,593 @@
+{
+  "date": "2026-07-17",
+  "downstream_separate_gates": [
+    "CONDITION_OUTPUT_GATE",
+    "OUTPUT_PERMIT_GATE",
+    "SCIENTIFIC_CLAIM_GATE",
+    "APPLICATION_CLAIM_GATE"
+  ],
+  "expected": {
+    "aggregate_case_result_count": 16,
+    "aggregate_evidence_packet_count": 15,
+    "downstream_gate_count": 4,
+    "freshness_requirement_count": 8,
+    "nonclaim_field_count": 52,
+    "offline_double_conformant_count": 16,
+    "owner_handoff_eligible": false,
+    "owner_handoff_requirement_count": 10,
+    "owner_packet_count": 1,
+    "production_ingestion_control_count": 14,
+    "production_ingestion_controls_implemented": 0,
+    "production_validated_evidence_items": 0,
+    "real_evidence_items_present": 0,
+    "runtime_prerequisites_satisfied": 0,
+    "synthetic_packet_set_sha256": "56e9343e7e31e8a80d1a56f7ab34fc11e15412d97620c031a06f740ae29ea460",
+    "threat_case_count": 20,
+    "tracks_represented": 2,
+    "trust_domain_count": 5,
+    "valid_owner_state_reason_combination_count": 6
+  },
+  "freshness_requirements": [
+    {
+      "additional_requirement": "Exact build, configuration, identity, schedule, or evidence-set binding; the offline 31536000-second KAT horizon is not a production lifetime.",
+      "decision_recheck_required": false,
+      "freshness_id": "EXACT_BINDING_ONLY",
+      "max_age_seconds": null,
+      "prerequisite_ids": [
+        "PRODUCTION_AUTHORITY_VERIFIER_IMPLEMENTED",
+        "PRODUCTION_MANAGED_ADAPTER_SET_IMPLEMENTED",
+        "PRODUCTION_SELF_HOSTED_ADAPTER_SET_IMPLEMENTED",
+        "PRODUCTION_STOP_CONTROL_SET_IMPLEMENTED",
+        "TRUST_ROOT_AND_KEY_VERSION_POLICY_BOUND",
+        "DURABLE_CONTROL_LEDGER_AND_ATOMIC_CAS_PROVEN",
+        "RUNNER_BUILD_PROCESS_SESSION_AND_CHANNEL_PROVENANCE_BOUND",
+        "REAL_PREREGISTERED_SCHEDULE_ASSIGNMENT_AND_ROW_CUSTODY_BOUND",
+        "INDEPENDENT_SECURITY_FAILURE_MODE_AND_ROLLBACK_REVIEW_APPROVED"
+      ],
+      "production_implemented": false,
+      "real_currentness_proved": false
+    },
+    {
+      "additional_requirement": "Recheck exact endpoint, profile, region, namespace, TLS, and track at decision.",
+      "decision_recheck_required": true,
+      "freshness_id": "PROVIDER_IDENTITY_MAX_86400",
+      "max_age_seconds": 86400,
+      "prerequisite_ids": [
+        "PROVIDER_ENDPOINT_AND_PROFILE_IDENTITY_BOUND"
+      ],
+      "production_implemented": false,
+      "real_currentness_proved": false
+    },
+    {
+      "additional_requirement": "Recheck exact lease scope and prove zero active lease commitments at decision.",
+      "decision_recheck_required": true,
+      "freshness_id": "CREDENTIAL_LIFECYCLE_MAX_3600",
+      "max_age_seconds": 3600,
+      "prerequisite_ids": [
+        "CREDENTIAL_BROKER_LEASE_AND_REVOCATION_BOUND"
+      ],
+      "production_implemented": false,
+      "real_currentness_proved": false
+    },
+    {
+      "additional_requirement": "Recheck exact resource scope, cost ceiling, budget owner, and auto-stop policy at decision.",
+      "decision_recheck_required": true,
+      "freshness_id": "RESOURCE_BUDGET_MAX_86400",
+      "max_age_seconds": 86400,
+      "prerequisite_ids": [
+        "RESOURCE_SCOPE_AND_COST_BUDGET_AUTHORITY_BOUND"
+      ],
+      "production_implemented": false,
+      "real_currentness_proved": false
+    },
+    {
+      "additional_requirement": "Recheck signed trusted time, maximum skew, row epoch, and currentness at decision.",
+      "decision_recheck_required": true,
+      "freshness_id": "TRUSTED_TIME_MAX_300",
+      "max_age_seconds": 300,
+      "prerequisite_ids": [
+        "TRUSTED_TIME_AND_CURRENTNESS_EVIDENCE_BOUND"
+      ],
+      "production_implemented": false,
+      "real_currentness_proved": false
+    },
+    {
+      "additional_requirement": "Bind the exact runner build and retain the independent emergency-stop drill identity.",
+      "decision_recheck_required": false,
+      "freshness_id": "SAFETY_STOP_DRILL_MAX_604800",
+      "max_age_seconds": 604800,
+      "prerequisite_ids": [
+        "FAULT_DISARM_EGRESS_ISOLATION_AND_EMERGENCY_STOP_PROVEN"
+      ],
+      "production_implemented": false,
+      "real_currentness_proved": false
+    },
+    {
+      "additional_requirement": "Bind the exact storage policy and retain replay, cleanup, and tombstone identities.",
+      "decision_recheck_required": false,
+      "freshness_id": "RETENTION_CLEANUP_MAX_604800",
+      "max_age_seconds": 604800,
+      "prerequisite_ids": [
+        "DURABLE_EVIDENCE_RETENTION_AND_SCOPED_CLEANUP_PROVEN"
+      ],
+      "production_implemented": false,
+      "real_currentness_proved": false
+    },
+    {
+      "additional_requirement": "Decision must occur before min(final validation + 1800 seconds, every bounded evidence expiry) with an unchanged set hash.",
+      "decision_recheck_required": true,
+      "freshness_id": "OWNER_HANDOFF_MAX_1800",
+      "max_age_seconds": 1800,
+      "prerequisite_ids": [
+        "OWNER_RUNTIME_ADMISSION_DECISION_RECORDED"
+      ],
+      "production_implemented": false,
+      "real_currentness_proved": false
+    }
+  ],
+  "nonclaims": {
+    "application_claim_authorized": false,
+    "condition_output_authorized": false,
+    "credentials_accessed": false,
+    "deployment_authorized": false,
+    "evidence_receipt_accepted": false,
+    "experiment_row_created": false,
+    "independent_review_approved": false,
+    "output_permit_defined": false,
+    "owner_decision_recorded": false,
+    "owner_handoff_ready": false,
+    "owner_identity_bound": false,
+    "paid_resource_provisioned": false,
+    "positive_owner_decision_representable": false,
+    "production_authenticator_implemented": false,
+    "production_authority_verifier_implemented": false,
+    "production_custody_record_committed": false,
+    "production_custody_store_bound": false,
+    "production_evidence_packet_accepted": false,
+    "production_evidence_set_complete": false,
+    "production_evidence_source_authenticated": false,
+    "production_freshness_proved": false,
+    "production_ingestion_endpoint_implemented": false,
+    "production_ingestion_pipeline_implemented": false,
+    "production_managed_adapter_implemented": false,
+    "production_packet_schema_defined": false,
+    "production_replay_ledger_bound": false,
+    "production_replay_reservation_committed": false,
+    "production_schema_validated": false,
+    "production_self_hosted_adapter_implemented": false,
+    "production_signature_verified": false,
+    "production_stop_control_implemented": false,
+    "production_subject_binding_validated": false,
+    "production_track_binding_validated": false,
+    "production_trust_bootstrap_bound": false,
+    "production_trusted_time_bound": false,
+    "production_validator_implemented": false,
+    "provider_called": false,
+    "provider_endpoint_bound": false,
+    "real_evidence_collected": false,
+    "real_evidence_ingestion_attempted": false,
+    "real_runner_launched": false,
+    "runtime_admission_granted": false,
+    "runtime_admission_ready": false,
+    "runtime_authority": false,
+    "runtime_evidence_accepted": false,
+    "runtime_prerequisite_satisfied": false,
+    "runtime_row_created": false,
+    "scientific_claim_authorized": false,
+    "secret_material_present": false,
+    "side_effects_unlocked": "NONE",
+    "trusted_time_accessed": false,
+    "wire_attempted": false
+  },
+  "owner_handoff_requirements": [
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "All fifteen prerequisite evidence entries are authenticated and production validated.",
+      "requirement_id": "ALL_FIFTEEN_PRODUCTION_VALIDATED",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "Independent review binds ordered validated entries 1-14 in the production review-subject domain.",
+      "requirement_id": "PACKET15_BINDS_ORDERED_ONE_TO_FOURTEEN",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "Owner handoff binds ordered validated entries 1-15 in a separate production owner-set domain.",
+      "requirement_id": "OWNER_SET_BINDS_ORDERED_ONE_TO_FIFTEEN",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "The final validation and owner decision use exactly the same immutable validated set hash.",
+      "requirement_id": "SAME_VALIDATED_SET_HASH",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "Final validation time is supplied by the bound signed trusted-time source.",
+      "requirement_id": "TRUSTED_FINAL_VALIDATION_TIME",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "Owner decision occurs strictly less than 1800 seconds after final validation.",
+      "requirement_id": "OWNER_WINDOW_LESS_THAN_1800_SECONDS",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "Effective owner deadline is the minimum of the owner window and every bounded evidence expiry.",
+      "requirement_id": "EFFECTIVE_DEADLINE_IS_MINIMUM_EXPIRY",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "All decision-time rechecks pass without changing content, validation receipt, or set hash.",
+      "requirement_id": "DECISION_TIME_RECHECKS_PASS",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "Owner identity, role, audience, signature, and single-use decision authority are authenticated.",
+      "requirement_id": "OWNER_IDENTITY_AND_ROLE_AUTHENTICATED",
+      "satisfied": false
+    },
+    {
+      "offline_substitution_allowed": false,
+      "production_implemented": false,
+      "requirement": "A separate successor production owner schema is required because the current schema cannot represent approval.",
+      "requirement_id": "SEPARATE_POSITIVE_OWNER_SCHEMA_REQUIRED",
+      "satisfied": false
+    }
+  ],
+  "predecessor": {
+    "evidence_schema_canonical_json_sha256": "a8b66deefe134afdb17e624bc821aba90c9d5a2490433f6a65276a6bfa63eaac",
+    "evidence_schema_file_bytes_sha256": "121c66331f159539722acb8f173696811487d8b76b9da07ab9d83340e28277d3",
+    "integration_commit": "3d03193b645ded944b10a310633be8d6a2c1ab1b",
+    "owner_schema_canonical_json_sha256": "99f2737282f2df568792ced2f2e16820f74eb2820bcbe240eaa97c03cc197086",
+    "owner_schema_file_bytes_sha256": "7845de2ac7d1f069fd550f5625a1593c0a093563acbe1be1855bf7df0f3d4436",
+    "receipt_content_sha256": "c6ea1a4872acacf1faff3695598d66e1cb0096f6574239199128225dab80e3c4",
+    "reviewer_file_bytes_sha256": "29a4b67049429c09981f1742f072a3fe382f381259fa238b69041b3d46939351",
+    "schema_fixture_canonical_json_sha256": "236839e4a8e831a84ef11c089cbd624152ddb456e583c2c414ece6c5ebb09f97",
+    "source_commit": "151c3294c92e79759401cf86e8f36263bbf17ade",
+    "synthetic_packet_set_sha256": "56e9343e7e31e8a80d1a56f7ab34fc11e15412d97620c031a06f740ae29ea460"
+  },
+  "production_ingestion_controls": [
+    {
+      "control_id": "FRAME_AND_PARSE",
+      "implemented": false,
+      "mandatory_check": "Reject over-limit, non-UTF-8, BOM, trailing bytes, duplicate keys, non-finite numbers, compression, and remote references.",
+      "primary_failure_code": "E_PRODUCTION_FRAME_REJECTED",
+      "required_future_artifact": "Production framing limits, duplicate-safe decoder, and bounded quarantine contract.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 1
+    },
+    {
+      "control_id": "SYNTHETIC_PRODUCTION_MODE_SEPARATION",
+      "implemented": false,
+      "mandatory_check": "Reject every synthetic packet kind and synthetic hash domain at any future production entry.",
+      "primary_failure_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "required_future_artifact": "Distinct production schema, packet kind, canonicalization, and domain-separated hashes.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 2
+    },
+    {
+      "control_id": "BOOTSTRAP_TRUST_AUTHENTICATION",
+      "implemented": false,
+      "mandatory_check": "Verify a separately configured bootstrap trust root, signer chain, exact key version, role, and revocation state.",
+      "primary_failure_code": "E_PRODUCTION_TRUST_AUTHENTICATION_FAILED",
+      "required_future_artifact": "Bootstrap verifier and external trust-root, key-version, role, and revocation policy.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 3
+    },
+    {
+      "control_id": "SIGNER_ROLE_SCOPE_AUTHORIZATION",
+      "implemented": false,
+      "mandatory_check": "Authorize signer identity to the exact owner class, evidence class, track, subject, audience, and nonce scope.",
+      "primary_failure_code": "E_PRODUCTION_SIGNER_AUTHORIZATION_FAILED",
+      "required_future_artifact": "Signer authorization registry scoped to owner class, evidence class, track, and subject.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 4
+    },
+    {
+      "control_id": "TRACK_SUBJECT_BINDING",
+      "implemented": false,
+      "mandatory_check": "Bind prerequisite, provider or lab profile, namespace, build, configuration, subject, and non-substitutable track.",
+      "primary_failure_code": "E_PRODUCTION_TRACK_SUBJECT_BINDING_FAILED",
+      "required_future_artifact": "Provider and lab identity registry with exact profile, namespace, build, and configuration bindings.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 5
+    },
+    {
+      "control_id": "QUARANTINE_CUSTODY",
+      "implemented": false,
+      "mandatory_check": "Record distinct immutable raw-byte and canonical-payload hashes in bounded quarantine and append-only custody.",
+      "primary_failure_code": "E_PRODUCTION_CUSTODY_FAILED",
+      "required_future_artifact": "Append-only custody store retaining raw, canonical, validation, retention, and tombstone identities.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 6
+    },
+    {
+      "control_id": "SEMANTIC_VALIDATION",
+      "implemented": false,
+      "mandatory_check": "Apply exact schema, payload, dependency, subject, profile, provenance, and rejection-reason validation.",
+      "primary_failure_code": "E_PRODUCTION_SEMANTIC_VALIDATION_FAILED",
+      "required_future_artifact": "Production semantic validator preserving exact prerequisite-specific failure reasons.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 7
+    },
+    {
+      "control_id": "TRUSTED_TIME_FRESHNESS",
+      "implemented": false,
+      "mandatory_check": "Use signed trusted time, half-open observed <= checked < expires arithmetic, skew limits, and decision-time rechecks.",
+      "primary_failure_code": "E_PRODUCTION_FRESHNESS_FAILED",
+      "required_future_artifact": "Signed trusted-time source, skew policy, expiry arithmetic, and decision recheck receipt.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 8
+    },
+    {
+      "control_id": "DURABLE_REPLAY_CAS",
+      "implemented": false,
+      "mandatory_check": "Atomically reserve issuer, nonce or sequence, and raw hash in a durable linearizable single-use ledger.",
+      "primary_failure_code": "E_PRODUCTION_REPLAY_REJECTED",
+      "required_future_artifact": "Durable linearizable replay ledger with atomic CAS and idempotent same-byte receipt lookup.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 9
+    },
+    {
+      "control_id": "VALIDATION_RECEIPT_BINDING",
+      "implemented": false,
+      "mandatory_check": "Bind evidence hash, validator build and configuration, signed check time, track, prerequisite, and disposition.",
+      "primary_failure_code": "E_PRODUCTION_VALIDATION_RECEIPT_FAILED",
+      "required_future_artifact": "Signed validation receipt schema bound to validator build, configuration, time, and evidence identity.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 10
+    },
+    {
+      "control_id": "INDEPENDENT_REVIEW_BINDING",
+      "implemented": false,
+      "mandatory_check": "Bind independent reviewer identity and role to validated entries 1-14 plus validator build and configuration.",
+      "primary_failure_code": "E_PRODUCTION_INDEPENDENT_REVIEW_FAILED",
+      "required_future_artifact": "Independent-review signature over the production review-subject set and validator identity.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 11
+    },
+    {
+      "control_id": "OWNER_HANDOFF_SET",
+      "implemented": false,
+      "mandatory_check": "Derive a separate ordered production owner set from validated entries 1-15; never reuse the synthetic set domain.",
+      "primary_failure_code": "E_PRODUCTION_OWNER_SET_FAILED",
+      "required_future_artifact": "Domain-separated production owner-handoff set over ordered validated entries 1-15.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 12
+    },
+    {
+      "control_id": "OWNER_IDENTITY_DECISION",
+      "implemented": false,
+      "mandatory_check": "Bind owner identity, role, signature, final-validation revision, same-set hash, and effective decision deadline.",
+      "primary_failure_code": "E_PRODUCTION_OWNER_IDENTITY_OR_WINDOW_FAILED",
+      "required_future_artifact": "Authenticated owner decision schema and single-use same-set decision window.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 13
+    },
+    {
+      "control_id": "DOWNSTREAM_GATE_SEPARATION",
+      "implemented": false,
+      "mandatory_check": "Commit one owner decision by atomic CAS and keep all four downstream gates independently unauthorized.",
+      "primary_failure_code": "E_PRODUCTION_DECISION_OR_DOWNSTREAM_SEPARATION_FAILED",
+      "required_future_artifact": "Atomic owner-decision ledger plus four separately evaluated downstream gate contracts.",
+      "runtime_exercised": false,
+      "satisfiable_by_offline": false,
+      "stage_ordinal": 14
+    }
+  ],
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1.synthetic.v0",
+  "synthetic_only": true,
+  "threat_cases": [
+    {
+      "case_id": "T01",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_FRAME_REJECTED",
+      "mutation": "Oversized or malformed envelope, BOM, trailing bytes, compression, or remote reference",
+      "threat_class": "FRAMING"
+    },
+    {
+      "case_id": "T02",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_FRAME_REJECTED",
+      "mutation": "Duplicate JSON key, non-finite number, excessive depth, or alternate encoding",
+      "threat_class": "PARSER_DIFFERENTIAL"
+    },
+    {
+      "case_id": "T03",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "mutation": "Synthetic validator-double packet presented to a production boundary",
+      "threat_class": "TYPE_CONFUSION"
+    },
+    {
+      "case_id": "T04",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "mutation": "Unknown production schema, version, packet kind, or hash domain",
+      "threat_class": "SCHEMA_CONFUSION"
+    },
+    {
+      "case_id": "T05",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_TRUST_AUTHENTICATION_FAILED",
+      "mutation": "Invalid signature, untrusted root, wrong key version, or revoked signer",
+      "threat_class": "AUTHENTICATION"
+    },
+    {
+      "case_id": "T06",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_SIGNER_AUTHORIZATION_FAILED",
+      "mutation": "Signer role is not authorized for owner class, evidence class, track, or subject",
+      "threat_class": "AUTHORIZATION"
+    },
+    {
+      "case_id": "T07",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_TRACK_SUBJECT_BINDING_FAILED",
+      "mutation": "Managed and self-hosted packet, profile, namespace, or configuration substitution",
+      "threat_class": "TRACK_ISOLATION"
+    },
+    {
+      "case_id": "T08",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_TRACK_SUBJECT_BINDING_FAILED",
+      "mutation": "Prerequisite, source, build, session, channel, schedule, row set, or subject mismatch",
+      "threat_class": "SUBJECT_BINDING"
+    },
+    {
+      "case_id": "T09",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_CUSTODY_FAILED",
+      "mutation": "Raw hash, canonical hash, packet ID, signature subject, or validation subject mismatch",
+      "threat_class": "CONTENT_IDENTITY"
+    },
+    {
+      "case_id": "T10",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_FRESHNESS_FAILED",
+      "mutation": "Evidence is stale at validation or at the required decision-time recheck",
+      "threat_class": "FRESHNESS"
+    },
+    {
+      "case_id": "T11",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_FRESHNESS_FAILED",
+      "mutation": "Evidence is future dated or trusted-time skew exceeds the bound",
+      "threat_class": "CLOCK_SKEW"
+    },
+    {
+      "case_id": "T12",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_OWNER_IDENTITY_OR_WINDOW_FAILED",
+      "mutation": "Evidence expires or set contents change after final validation and before owner decision",
+      "threat_class": "OWNER_TOCTOU"
+    },
+    {
+      "case_id": "T13",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_REPLAY_REJECTED",
+      "mutation": "Previously reserved issuer nonce, sequence, or packet identity is submitted again",
+      "threat_class": "REPLAY"
+    },
+    {
+      "case_id": "T14",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_REPLAY_REJECTED",
+      "mutation": "Concurrent submissions race a non-atomic replay check",
+      "threat_class": "CONCURRENT_REPLAY"
+    },
+    {
+      "case_id": "T15",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_INDEPENDENT_REVIEW_FAILED",
+      "mutation": "Missing, duplicated, reordered, or substituted validated entry 1-14",
+      "threat_class": "SET_COMPLETENESS"
+    },
+    {
+      "case_id": "T16",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_OWNER_SET_FAILED",
+      "mutation": "Owner handoff omits, duplicates, reorders, or changes validated entry 1-15",
+      "threat_class": "OWNER_SET"
+    },
+    {
+      "case_id": "T17",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_CUSTODY_FAILED",
+      "mutation": "Raw, canonical, validation, retention, cleanup, or tombstone chain diverges",
+      "threat_class": "CUSTODY"
+    },
+    {
+      "case_id": "T18",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_INDEPENDENT_REVIEW_FAILED",
+      "mutation": "Reviewer identity is not independent or validator build/config binding drifts",
+      "threat_class": "REVIEW_INDEPENDENCE"
+    },
+    {
+      "case_id": "T19",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_OWNER_IDENTITY_OR_WINDOW_FAILED",
+      "mutation": "Owner identity, role, signature, same-set hash, revision, or deadline mismatch",
+      "threat_class": "OWNER_IDENTITY"
+    },
+    {
+      "case_id": "T20",
+      "expected_disposition": "REJECTED_FAIL_CLOSED",
+      "expected_reason_code": "E_PRODUCTION_DECISION_OR_DOWNSTREAM_SEPARATION_FAILED",
+      "mutation": "Positive decision attempted before all production controls and fifteen evidence entries validate",
+      "threat_class": "PREMATURE_AUTHORITY"
+    }
+  ],
+  "tracks": [
+    "MANAGED_SPANNER_CLOUD_KMS",
+    "SELF_HOSTED_ETCD_OPENBAO"
+  ],
+  "trust_domains": [
+    {
+      "cross_domain_substitution_allowed": false,
+      "domain_id": "AB_TRACK_B_RUNTIME_PREREQUISITE_SYNTHETIC_PACKET_SET_V1",
+      "offline_usable": true,
+      "production_implemented": false,
+      "purpose": "Exact frozen synthetic KAT packet-set identity; offline conformance only."
+    },
+    {
+      "cross_domain_substitution_allowed": false,
+      "domain_id": "AB_TRACK_B_RUNTIME_PREREQUISITE_PRODUCTION_EVIDENCE_ENVELOPE_SIGNATURE_V1",
+      "offline_usable": false,
+      "production_implemented": false,
+      "purpose": "Future signed production evidence envelopes; never reusable by the synthetic domain."
+    },
+    {
+      "cross_domain_substitution_allowed": false,
+      "domain_id": "AB_TRACK_B_RUNTIME_PREREQUISITE_PRODUCTION_REVIEW_SUBJECT_SET_V1",
+      "offline_usable": false,
+      "production_implemented": false,
+      "purpose": "Future ordered validated entries 1-14 for independent review."
+    },
+    {
+      "cross_domain_substitution_allowed": false,
+      "domain_id": "AB_TRACK_B_RUNTIME_PREREQUISITE_PRODUCTION_OWNER_HANDOFF_SET_V1",
+      "offline_usable": false,
+      "production_implemented": false,
+      "purpose": "Future ordered validated entries 1-15 for owner handoff."
+    },
+    {
+      "cross_domain_substitution_allowed": false,
+      "domain_id": "AB_TRACK_B_RUNTIME_PREREQUISITE_PRODUCTION_OWNER_DECISION_SIGNATURE_V1",
+      "offline_usable": false,
+      "production_implemented": false,
+      "purpose": "Future owner identity, role, same-set decision, and single-use signature."
+    }
+  ]
+}
