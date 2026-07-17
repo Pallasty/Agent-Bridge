@@ -16,6 +16,9 @@ use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
 use std::fmt;
 
+#[cfg(feature = "temporal-evidence-s16-recovered-envelope-durability-fault-model-synthetic")]
+mod durability_fault_model;
+
 const POLICY_ID: &str = "agent-bridge/track-b/recovered-envelope-bounded-runtime-adapter/v1";
 const PROFILE: &str =
     "PRIVATE_ONE_SHOT_EXACT_OPEN_FIXED_BUFFER_RAW_BYTES_UNTRUSTED_COMPLETION_HISTORICAL_ONLY";
