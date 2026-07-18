@@ -1,0 +1,137 @@
+{
+  "boundary": {
+    "downstream_gates_authorized": 0,
+    "exact_next_unit_authorized": true,
+    "implementation_authority_recorded": true,
+    "implementation_resource_binding_recorded": true,
+    "implementation_scope_decision_recorded": true,
+    "implementation_side_effects_unlocked": "REVERSIBLE_LOCAL_CODE_SCHEMA_TEST_DOCS_FOR_EXACT_NEXT_UNIT_ONLY",
+    "owner_handoff_eligible": false,
+    "production_environment_implementation_authorized": false,
+    "production_ingestion_controls_implemented": 0,
+    "production_ingestion_controls_runtime_exercised": 0,
+    "production_ingestion_enabled": false,
+    "production_ingestion_implemented": false,
+    "production_shaped_component_code_authorized": true,
+    "production_validated_evidence_items": 0,
+    "provider_authority": false,
+    "real_evidence_items_present": 0,
+    "runtime_admission_granted": false,
+    "runtime_admission_ready": false,
+    "runtime_authority": false,
+    "runtime_evidence_accepted": 0,
+    "runtime_owner_decision_recorded": false,
+    "runtime_owner_identity_bound": false,
+    "runtime_prerequisites_satisfied": 0,
+    "runtime_side_effects_unlocked": "NONE"
+  },
+  "date": "2026-07-17",
+  "decision": "AUTHORIZE_EXACT_BOUNDED_REVERSIBLE_ISOLATED_LAB_COMPONENT_IMPLEMENTATION_ONLY_FAIL_CLOSED",
+  "evidence_sha256": {
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1.py": "8d3357d85513d4715553b363ebeca8ae825f92776f674ebd35acb8437c4684fa",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack.py": "e7194d800ec811612ca7f003f1a1c29cde07ee3e9788ec8d3632c0eb4853ade0",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "cb9aca5ec6bf5fe9889d37adffb509b6249752de913356ebf4eece51993f815e",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "69e2976c1298263240e384817df3a172686e80b8a7c57359829d9e50dda5e3c3"
+  },
+  "logical_baseline_commit": "d5bbe55d5d95b1163e287415f437cf77c594135d",
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_PRODUCTION_EVIDENCE_ENVELOPE_BOUNDED_FRAME_PARSER_AND_SYNTHETIC_MODE_SEPARATION_ISOLATED_LAB_IMPLEMENTATION",
+  "owner_semantics": {
+    "binding_basis": "ESTABLISHED_PROFILE_PLUS_CURRENT_SESSION_CONTINUITY",
+    "cryptographic_identity_verified": false,
+    "runtime_owner_decision_recorded": false,
+    "runtime_owner_identity_bound": false,
+    "semantic_actor_binding_recorded": true,
+    "semantic_actor_label": "pallasting",
+    "semantic_actor_role": "PROJECT_OWNER",
+    "signature_observed": false
+  },
+  "packet": {
+    "modes": {
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-production-evidence-ingestion-implementation-authority-and-resource-binding-decision-v1-pack.md": "100644",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-production-evidence-ingestion-implementation-authority-and-resource-binding-decision-v1-pack.sh": "100755",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1.py": "100644",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack.py": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack_v0.json": "100644"
+    },
+    "paths": [
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1.py",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack.py",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack_v0.json",
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-production-evidence-ingestion-implementation-authority-and-resource-binding-decision-v1-pack.md",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-production-evidence-ingestion-implementation-authority-and-resource-binding-decision-v1-pack.sh"
+    ]
+  },
+  "predecessor": {
+    "gate_path": "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-runtime-prerequisite-evidence-packet-offline-integration-and-production-evidence-ingestion-boundary-review-v1-pack.sh",
+    "gate_sha256": "e2a3e5fd49ebd58697838bc3f7e1860ce511f225a4bdd11ac8f2772bd8087cf7",
+    "integration_commit": "d5bbe55d5d95b1163e287415f437cf77c594135d",
+    "integration_parents": [
+      "3d03193b645ded944b10a310633be8d6a2c1ab1b",
+      "0268990ee74a6a958269d1c07f7d575d0284e6bf"
+    ],
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_v0.json",
+    "manifest_sha256": "59260f9d4d5e00924739f96de567695dfe326413a01fcb3600703d9efb945b54",
+    "receipt_content_sha256": "7d48eb96d1a87894698d396efba848f90da8076cc3271bd9ac8c5250b0c722fa",
+    "source_commit": "0268990ee74a6a958269d1c07f7d575d0284e6bf",
+    "source_parent": "3d03193b645ded944b10a310633be8d6a2c1ab1b"
+  },
+  "resource_binding": {
+    "allowed_resource_classes": [
+      "EXISTING_LOCAL_CPU_AND_MEMORY",
+      "ISOLATED_AGENT_BRIDGE_WORKTREE",
+      "PRIVATE_LOCAL_TEST_SCRATCH"
+    ],
+    "component_limits": {
+      "max_array_items": 64,
+      "max_input_frame_bytes": 1048576,
+      "max_json_depth": 32,
+      "max_object_members": 256,
+      "max_parallel_workers": 1,
+      "max_private_scratch_bytes": 67108864
+    },
+    "component_runtime_network": false,
+    "credential_handle_count": 0,
+    "credential_path_count": 0,
+    "currency_scope": "ALL_CURRENCIES_ZERO_ONLY",
+    "effective_external_paid_spend_cap": 0,
+    "owner_supplied_numeric_budget_cap": false,
+    "production_resource_authority_bound": false,
+    "provider_endpoint_count": 0,
+    "real_evidence_input_authorized": false
+  },
+  "results": {
+    "allowed_operation_count": 5,
+    "boundary_sha256": "dbc94c68d8820197ca0df13e6f072d56c7ccffd2607d6a43d441f084989c556a",
+    "content_sha256": "48f4eee93f565005ffa79a119529d58e5d61eb947754d4672c96541001268463",
+    "decision_record_sha256": "eda3b8b6d1288d4b9ccaeeec1427be890bfcfecac0034788f451a1bfe4bed76a",
+    "forbidden_operation_count": 16,
+    "implementation_authority_sha256": "9add7e535c3a4370e9fb79597274f0cc565f9f6e6358f3c52a3329b0a57cfa3c",
+    "nonclaim_field_count": 48,
+    "nonclaims_sha256": "58164b47e696429385dc5db1fb16630f1499eba3bd214a762dd0865d532980ca",
+    "owner_implementation_actor_sha256": "efae8f560404112f6f15f5000dc87b707701ea7732c999ef9c9efbbc6f49bf3e",
+    "resource_binding_sha256": "e1f431d6ecbc3c4400b2832d28a0c734b5530c9dcd0d6f9cf64c3d55c8c22276",
+    "rollback_sha256": "4f8b5dd436c6a3d3547dcd4c899b7870b7ecd87c16934a9e4bd72e1a32c8c47b",
+    "state_count": 5,
+    "state_machine_sha256": "7a8fed45182582088e68294407ff30b5b6ba37bb5393f0924b8ae06c936fac9e",
+    "transition_count": 4
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack_manifest.v0",
+  "status": "REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_V1_ISOLATED_LAB_FIRST_IMPLEMENTATION_AUTHORITY_AND_RESOURCE_SCOPE_RECORDED_ZERO_EXTERNAL_SPEND_NO_RUNTIME_OR_PROVIDER_AUTHORITY",
+  "test_oracle": {
+    "closed_world_negative_tests": 37,
+    "directed_negative_tests": 279,
+    "grounding_matrix_negative_tests": 60,
+    "json_guard_negative_tests": 7,
+    "overclaim_negative_tests": 101,
+    "predecessor_artifact_hashes_frozen": 7,
+    "predecessor_exact_receipt": "PASS",
+    "receipt_negative_tests": 56,
+    "section_hash_negative_tests": 8,
+    "source_ast_negative_tests": 10,
+    "source_ast_purity": "PASS"
+  }
+}
