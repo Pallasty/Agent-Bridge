@@ -13,12 +13,14 @@
 # This script enforces the discipline that prevents that:
 #   1. build from the LATEST origin/master (the superset of every merged lane),
 #      never a stale branch;
-#   2. anti-regression gate: the new binary must still contain every lane
+#   2. re-fetch after the potentially long release build and refuse to deploy
+#      when origin/master advanced during that build;
+#   3. anti-regression gate: the new binary must still contain every lane
 #      feature-marker the CURRENTLY-deployed binary has (catches a stale build);
-#   3. back up the current .real before overwriting (so a clobber is recoverable
+#   4. back up the current .real before overwriting (so a clobber is recoverable
 #      — the clobbering lane on 2026-06-03 did NOT back ours up);
-#   4. never touch the wrapper (only .real);
-#   5. remind to /mcp reconnect (a running MCP server keeps the old binary).
+#   5. never touch the wrapper (only .real);
+#   6. remind to /mcp reconnect (a running MCP server keeps the old binary).
 #
 # Companion to scripts/wrapper/install.sh (which installs the WRAPPER; this
 # installs the BINARY). Honors the same env vars.
@@ -178,7 +180,21 @@ fi
 
 is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach-O): $NEW_BIN"
 
-# ---- 2. anti-regression gate vs the currently-deployed binary ----
+# ---- 2. post-build master recheck ----
+# A release build can take tens of minutes. Another lane may merge during that
+# window, making this artifact stale even though it came from origin/master at
+# build start. Re-check before the first live-state mutation (backup/copy).
+if [ -z "$USE_BINARY" ]; then
+    say ">> rechecking origin/master after build ..."
+    git -C "$REPO" fetch origin --quiet
+    CURRENT_MASTER_SHA="$(git -C "$REPO" rev-parse origin/master)"
+    if [ "$CURRENT_MASTER_SHA" != "$MASTER_SHA" ]; then
+        die "origin/master advanced during the release build (${MASTER_SHA:0:7} -> ${CURRENT_MASTER_SHA:0:7}); refusing to deploy a stale artifact before backup/copy. Re-run the deploy from the new master."
+    fi
+    say "OK: origin/master is still ${MASTER_SHA:0:7}."
+fi
+
+# ---- 3. anti-regression gate vs the currently-deployed binary ----
 say
 say "=== feature gate (new binary must not drop any current capability) ==="
 new_markers="$(markers_in "$NEW_BIN")"
@@ -199,7 +215,7 @@ else
 fi
 say "new binary markers present:"; printf '  + %s\n' $new_markers
 
-# ---- 3. plan summary ----
+# ---- 4. plan summary ----
 new_size="$(stat -c %s "$NEW_BIN" 2>/dev/null || stat -f %z "$NEW_BIN")"
 cur_size="$( [ -f "$REAL_PATH" ] && (stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH") || echo 0 )"
 say
@@ -215,7 +231,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     exit 0
 fi
 
-# ---- 4. confirm ----
+# ---- 5. confirm ----
 if [ "$ASSUME_YES" -ne 1 ]; then
     if [ ! -t 0 ]; then
         die "non-interactive stdin and no --yes given: re-run with --yes to deploy"
@@ -225,7 +241,7 @@ if [ "$ASSUME_YES" -ne 1 ]; then
     case "$ans" in y|Y|yes|YES) ;; *) say "aborted."; exit 0 ;; esac
 fi
 
-# ---- 5. backup current, then deploy ----
+# ---- 6. backup current, then deploy ----
 if [ -f "$REAL_PATH" ]; then
     ts="$(date +%Y%m%dT%H%M%S)"
     # NB: ${MASTER_SHA:0:7} must not be expanded on the --use-binary path, where
@@ -247,7 +263,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
     new_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
 fi
 
-# ---- 6. post-deploy verification ----
+# ---- 7. post-deploy verification ----
 say
 say "=== post-deploy verification ==="
 dep_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
