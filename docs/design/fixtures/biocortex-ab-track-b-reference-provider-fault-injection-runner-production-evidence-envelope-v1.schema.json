@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BioCortex Track B production-shaped evidence envelope isolated-lab KAT v1",
+  "description": "Closed-world schema for the two exact track-specific variants of a nonsecret, deterministic, production-shaped isolated-lab parser KAT. This is not an operational production evidence schema, is never production-admissible, and conveys no runtime, provider, evidence-acceptance, custody, trust, signer, time, replay, owner, or downstream-gate authority.",
+  "$comment": "Byte framing is enforced independently by the pure parser: exact bytes, UTF-8 without BOM, no outer whitespace or concatenated JSON, recognized compression signatures and enumerated compression/URI/reference metadata shapes rejected, at most 1048576 input bytes, depth 32, 256 members per object, 64 items per array, 4096 total JSON nodes, signed 64-bit integers, and no floating-point values. Closed-world envelope review, not shape enumeration, rejects every additional field.",
+  "type": "object",
+  "required": [
+    "canonicalization",
+    "fixture_case_id",
+    "fixture_payload",
+    "hash_domain",
+    "packet_kind",
+    "prerequisite_id",
+    "production_admissible",
+    "schema",
+    "schema_version",
+    "synthetic_fixture",
+    "track_id"
+  ],
+  "properties": {
+    "canonicalization": {
+      "type": "string",
+      "const": "AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8"
+    },
+    "fixture_case_id": {
+      "type": "string",
+      "const": "VALID_MINIMAL_FRAME_V1"
+    },
+    "fixture_payload": {
+      "type": "string",
+      "const": "NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1"
+    },
+    "hash_domain": {
+      "type": "string",
+      "const": "AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1"
+    },
+    "packet_kind": {
+      "type": "string",
+      "const": "SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT"
+    },
+    "prerequisite_id": {
+      "type": "string",
+      "const": "FRAME_AND_PARSE"
+    },
+    "production_admissible": {
+      "type": "boolean",
+      "const": false
+    },
+    "schema": {
+      "type": "string",
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "synthetic_fixture": {
+      "type": "boolean",
+      "const": true
+    },
+    "track_id": {
+      "type": "string",
+      "enum": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "unevaluatedProperties": false,
+  "minProperties": 11,
+  "maxProperties": 11
+}
