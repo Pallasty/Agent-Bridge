@@ -13920,6 +13920,9 @@ async fn agent_session_output_reads_live_then_finalized_transcript() {
 fn agent_spawn_schema_exposes_interactive_flag() {
     let schema = AgentSpawnTool::new(crate::Hub::builder().build()).schema();
     let interactive = &schema.input_schema["properties"]["interactive"];
+    let backend_values = schema.input_schema["properties"]["backend"]["enum"]
+        .as_array()
+        .expect("backend enum");
     let desc = interactive["description"]
         .as_str()
         .expect("interactive description");
@@ -13928,6 +13931,16 @@ fn agent_spawn_schema_exposes_interactive_flag() {
     assert_eq!(interactive["type"], "boolean");
     assert!(desc.contains("send_input"));
     assert!(desc.contains("reject"));
+    for backend in ["acp", "grok-build"] {
+        assert!(
+            backend_values.iter().any(|value| value == backend),
+            "agent_spawn backend enum should expose {backend}: {backend_values:?}"
+        );
+    }
+    assert!(
+        desc.contains("ACP/grok-build"),
+        "interactive schema should explain protocol-native ACP lifecycle: {desc}"
+    );
     for backend in ["claude-code", "codex", "kilo", "opencode", "gemini"] {
         assert!(
             desc.contains(backend),
@@ -13940,6 +13953,17 @@ fn agent_spawn_schema_exposes_interactive_flag() {
             "interactive schema must not imply unsupported backend {backend}: {desc}"
         );
     }
+}
+
+#[test]
+fn agent_spawn_resolves_grok_build_alias_to_acp() {
+    let hub = crate::Hub::builder()
+        .register_agent(Arc::new(ab_agent::AcpRuntime::with_binary(
+            "/definitely/not/grok",
+        )))
+        .build();
+    let runtime = resolve_agent_backend(&hub, Some("grok-build")).expect("resolve ACP alias");
+    assert_eq!(runtime.id(), "acp");
 }
 
 #[tokio::test]

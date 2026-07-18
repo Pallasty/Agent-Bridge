@@ -723,7 +723,7 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 | | `browser_screenshot` | Capture full-page PNG (file or inline) |
 | | `browser_extract_text` | Visible page text (`innerText`), JSON `{ text, chars }` |
 | | `browser_fill_form` | Fill first matching input/textarea (`selector` + `value`) |
-| agent | `agent_spawn` | Launch a sibling agent one-shot, or a live `claude-code` PTY with `interactive=true` |
+| agent | `agent_spawn` | Launch a sibling agent one-shot, a live PTY session, or a protocol-native ACP session (`backend=acp` / `grok-build`) |
 | | `agent_send_input` | Send one follow-up turn to a live interactive agent session |
 | | `agent_kill` | SIGTERM a running sub-agent |
 | | `agent_session_list` | List recent agent sessions |
@@ -897,7 +897,7 @@ MCP tool (`limit` 1–500, default 20).
 |-------|-------------|-------------|
 | `Notifier` | `DbusNotifier` (Linux), `MacOsNotifier` | webhook, Slack, Pushover |
 | `BrowserBackend` | `ChromiumCdpBackend` | webkit, playwright, Firefox |
-| `AgentRuntime` | `ClaudeCodeRuntime`, `CodexRuntime`, `GeminiRuntime`, `OpenCodeFamilyRuntime` (kilo/opencode), `AuggieRuntime`, `OzAgentRuntime` (Warp cloud) | aider, ghostty-native |
+| `AgentRuntime` | `ClaudeCodeRuntime`, `CodexRuntime`, `GeminiRuntime`, `OpenCodeFamilyRuntime` (kilo/opencode), `AuggieRuntime`, `OzAgentRuntime` (Warp cloud), `AcpRuntime` | aider, ghostty-native |
 | `TerminalBackend` | `KittyBackend`, `ZellijBackend`, `WezTermBackend`, `WarpBackend` | ghostty, tmux |
 | `StateStore` | `SqliteStore` (rusqlite-bundled) | in-memory, postgres |
 | `McpTool` | ~296 built-in tools (tier/toolset gated) | drop in any `Box<dyn McpTool>` |
@@ -913,6 +913,8 @@ MCP tool (`limit` 1–500, default 20).
 | `AGENT_BRIDGE_CHROME` | auto-detect | Path to chrome/chromium binary |
 | `AGENT_BRIDGE_CLAUDE_BIN` | `claude` | Override claude CLI path |
 | `AGENT_BRIDGE_AGENT_RUNTIME` | `claude-code` | Pick agent runtime: `claude-code` \| `warp-oz` |
+| `AGENT_BRIDGE_ACP_BIN` | `grok` | ACP executable used by explicit `backend=acp` / `grok-build` spawns |
+| `AGENT_BRIDGE_ACP_ARGS` | `agent stdio` | Whitespace-separated arguments used to start the ACP stdio server |
 | `AGENT_BRIDGE_OZ_BIN` | `oz` | Override Warp `oz` CLI path (when runtime = `warp-oz`) |
 | `AGENT_BRIDGE_OZ_ENVIRONMENT_ID` | _(none)_ | Default Oz cloud environment id; can be overridden per `agent_spawn` via `env.OZ_ENVIRONMENT_ID` |
 | `AGENT_BRIDGE_TERMINAL` | auto-detect | Force: `wezterm` \| `kitty` \| `zellij` \| `warp` |
@@ -934,6 +936,7 @@ MCP tool (`limit` 1–500, default 20).
 | Runtime | id | Underlying CLI | Notes |
 |---------|----|----------------|-------|
 | `ClaudeCodeRuntime` (default) | `claude-code` | `claude -p <prompt>` or bare `claude` in a PTY | One-shot local invocation by default; set `interactive=true` on `agent_spawn` for a live PTY session that accepts follow-up turns via `agent_send_input`. |
+| `AcpRuntime` | `acp` (`grok-build` alias) | `grok agent stdio` | Protocol-native ACP v1 session. Structured updates are flattened into the existing session output surface; permission requests auto-select an allow option when offered. The child remains live for follow-up turns regardless of `interactive`. |
 | `OzAgentRuntime` | `warp-oz` | `oz agent run-cloud --prompt <prompt> [--environment <id>]` | Spawns a Warp Oz cloud agent. The local `oz` child exits quickly after POSTing to `https://app.warp.dev/api/v1/agent/run`; the run id is captured in the session's stdout. To cancel the cloud run itself, use `oz run cancel <run-id>` — `agent_kill` only signals the local CLI child. |
 
 Switch with `export AGENT_BRIDGE_AGENT_RUNTIME=warp-oz`. Pin a default
@@ -941,9 +944,10 @@ cloud environment with `AGENT_BRIDGE_OZ_ENVIRONMENT_ID`, or override
 per-spawn by passing `env.OZ_ENVIRONMENT_ID` to the `agent_spawn` MCP
 tool.
 
-Interactive agent sessions are currently supported only by
-`backend=claude-code`. Other backends reject `interactive=true` before
-spawning; one-shot sessions and finished sessions reject `agent_send_input`.
+Interactive PTY sessions are supported by `claude-code`, `codex`, `kilo`,
+`opencode`, and `gemini`. ACP sessions are protocol-native rather than PTY-backed
+and stay live for follow-up turns. Other backends reject `interactive=true`;
+one-shot sessions and finished sessions reject `agent_send_input`.
 
 ### Cloud Agent Lifecycle (warp-oz)
 

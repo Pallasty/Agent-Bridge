@@ -9778,7 +9778,7 @@ impl McpTool for AgentSpawnTool {
         ToolSchema {
             name: self.name().into(),
             description: "Spawn a sibling AI agent (one-shot by default; set `interactive` with \
-                 backend=claude-code/codex/kilo/opencode/gemini for a live PTY session). Pass prompt + cwd; runs to \
+                 backend=claude-code/codex/kilo/opencode/gemini for a live PTY session, or backend=acp for a protocol-native long session). Pass prompt + cwd; runs to \
                  completion, returns session id. Pick a backend explicitly, or a policy \
                  ('cheap'=kilo, 'second_opinion'/'openai'=codex). backend takes precedence \
                  over policy; both omitted = the configured primary-to-backup fallback chain \
@@ -9795,7 +9795,7 @@ impl McpTool for AgentSpawnTool {
                     "backend": {
                         "type": "string",
                         "description": "Explicit runtime id. Wins over 'policy' if both given.",
-                        "enum": ["claude-code", "opencode", "kilo", "gemini", "codex", "auggie", "warp-oz", "oz"]
+                        "enum": ["claude-code", "opencode", "kilo", "gemini", "codex", "acp", "grok-build", "auggie", "warp-oz", "oz"]
                     },
                     "policy": {
                         "type": "string",
@@ -9816,7 +9816,7 @@ impl McpTool for AgentSpawnTool {
                     },
                     "interactive": {
                         "type": "boolean",
-                        "description": "Open a live PTY-backed session instead of a one-shot run. Supported by backend=claude-code, codex, kilo, opencode, gemini (live PTY); other backends reject this flag before spawning. The child stays alive so follow-up turns can be sent with send_input, and `prompt` is submitted as the first turn."
+                        "description": "Open a live PTY-backed session instead of a one-shot run. Supported by backend=claude-code, codex, kilo, opencode, gemini; other non-ACP backends reject this flag. ACP/grok-build is always a protocol-native long session regardless of this flag. The child stays alive so follow-up turns can be sent with send_input, and `prompt` is submitted as the first turn."
                     }
                 },
                 "required": ["cwd", "prompt"]
@@ -9955,6 +9955,7 @@ fn resolve_agent_backend(
             // here so callers can use either spelling.
             let canonical = match id {
                 "oz" => "warp-oz",
+                "grok-build" => "acp",
                 other => other,
             };
             hub.agents.get(canonical).cloned().ok_or_else(|| {
@@ -10716,7 +10717,7 @@ fn append_reconcile_reason(existing: Option<&str>, reason: &str) -> String {
 fn is_local_process_agent_runtime(runtime_id: &str) -> bool {
     matches!(
         runtime_id,
-        "claude-code" | "codex" | "kilo" | "opencode" | "gemini" | "auggie"
+        "claude-code" | "codex" | "kilo" | "opencode" | "gemini" | "auggie" | "acp"
     )
 }
 
