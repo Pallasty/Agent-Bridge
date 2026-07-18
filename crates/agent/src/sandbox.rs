@@ -24,6 +24,8 @@ pub const BWRAP_BIN_ENV: &str = "AGENT_BRIDGE_BWRAP_BIN";
 const CREDS_FILE_ENV: &str = "AGENT_BRIDGE_CREDS_FILE";
 const INTERNAL_MARKER: &str = "__ab_agent_sandbox_exec";
 const INTERNAL_PREFIX: &str = "__AGENT_BRIDGE_SANDBOX_";
+#[cfg(target_os = "macos")]
+const MACOS_SYSTEM_CA_FILE: &str = "/etc/ssl/cert.pem";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentSandboxMode {
@@ -186,6 +188,10 @@ pub fn configure_command_env(
     env: &HashMap<String, String>,
     sandboxed: bool,
 ) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Some(path) = macos_sandbox_ca_file(env, sandboxed) {
+        cmd.env("SSL_CERT_FILE", path);
+    }
     if sandboxed {
         for (key, _) in std::env::vars_os() {
             if key.to_str().is_some_and(|key| {
@@ -217,6 +223,10 @@ pub fn configure_pty_env(
     env: &HashMap<String, String>,
     sandboxed: bool,
 ) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Some(path) = macos_sandbox_ca_file(env, sandboxed) {
+        cmd.env("SSL_CERT_FILE", path);
+    }
     if sandboxed {
         for (key, _) in std::env::vars_os() {
             if key.to_str().is_some_and(|key| {
@@ -240,6 +250,30 @@ pub fn configure_pty_env(
         cmd.env(key, value);
     }
     Ok(())
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn should_set_sandbox_ca_file(
+    sandboxed: bool,
+    spawn_configured: bool,
+    inherited_configured: bool,
+    candidate_exists: bool,
+) -> bool {
+    sandboxed && !spawn_configured && !inherited_configured && candidate_exists
+}
+
+#[cfg(target_os = "macos")]
+fn macos_sandbox_ca_file(env: &HashMap<String, String>, sandboxed: bool) -> Option<&'static str> {
+    // nono blocks Keychain Mach services unless a keychain database is granted.
+    // Native TLS verification can depend on those services, so use Apple's
+    // root-owned static CA bundle without making login-keychain secrets visible.
+    should_set_sandbox_ca_file(
+        sandboxed,
+        env.contains_key("SSL_CERT_FILE"),
+        std::env::var_os("SSL_CERT_FILE").is_some(),
+        Path::new(MACOS_SYSTEM_CA_FILE).is_file(),
+    )
+    .then_some(MACOS_SYSTEM_CA_FILE)
 }
 
 fn is_spawn_control_env(key: &str) -> bool {
@@ -1109,6 +1143,31 @@ mod tests {
         }
         assert!(!should_forward_spawn_env(POLICY_ENV, false));
         assert!(!should_forward_spawn_env("GITHUB_TOKEN", true));
+    }
+
+    #[test]
+    fn sandbox_ca_default_only_fills_an_unconfigured_sandbox() {
+        assert!(should_set_sandbox_ca_file(true, false, false, true));
+        assert!(!should_set_sandbox_ca_file(false, false, false, true));
+        assert!(!should_set_sandbox_ca_file(true, true, false, true));
+        assert!(!should_set_sandbox_ca_file(true, false, true, true));
+        assert!(!should_set_sandbox_ca_file(true, false, false, false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn sandboxed_pipe_command_receives_static_ca_default() {
+        if std::env::var_os("SSL_CERT_FILE").is_some() {
+            return;
+        }
+        let mut cmd = TokioCommand::new("/usr/bin/true");
+        configure_command_env(&mut cmd, &HashMap::new(), true).unwrap();
+        let configured = cmd
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new("SSL_CERT_FILE"))
+            .and_then(|(_, value)| value);
+        assert_eq!(configured, Some(OsStr::new(MACOS_SYSTEM_CA_FILE)));
     }
 
     #[test]
