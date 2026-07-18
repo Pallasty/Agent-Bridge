@@ -42,7 +42,11 @@ On macOS, `nono = 0.53.0` emits the Seatbelt profile. Read denies are added
 after broad read grants. Credential write denies include concrete write
 actions as well as `file-write*`, preserving the grok-build finding that a
 later broad workspace write grant can otherwise win. `/private` aliases are
-covered for `/tmp`, `/var`, and `/etc` paths.
+covered for `/tmp`, `/var`, and `/etc` paths. Because `nono` also blocks
+Keychain Mach services, native TLS verification can otherwise fail with
+`UnknownIssuer`. Sandboxed children therefore default `SSL_CERT_FILE` to the
+root-owned `/etc/ssl/cert.pem` when neither the daemon nor the spawn supplied a
+value. This preserves provider networking without exposing the login keychain.
 
 On Linux, Landlock cannot subtract a child path from a read grant on `/`.
 The outer launcher therefore re-execs under bubblewrap, overlays sensitive
