@@ -1,0 +1,2585 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_recovered_envelope_owned_lab_process_crash_restart_observation_s17.v0",
+  "title": "Agent-Bridge S17 owned-lab L1 process-crash observation envelope",
+  "description": "Closed-world schema for a future authenticated owned-lab observation. Schema conformance alone is not evidence, authority, currentness, admission, or a claim beyond local same-boot L1 process death and fresh-exec reopen.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "evidence_origin",
+    "claim_level",
+    "claim_ceiling",
+    "hashing_contract",
+    "semantic_validation_contract",
+    "identity",
+    "frozen_bindings",
+    "assignment",
+    "authorization",
+    "storage_environment",
+    "crash_observation",
+    "restart_observation",
+    "raw_recovered_state",
+    "mapping_phase_records",
+    "custody",
+    "accounting",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.memory_temporal_recovered_envelope_owned_lab_process_crash_restart_observation_s17.v0"
+    },
+    "packet_kind": {
+      "const": "AUTHENTICATED_OWNED_LAB_RUNTIME_OBSERVATION"
+    },
+    "evidence_origin": {
+      "const": "OWNED_LAB_OBSERVED_RUNTIME"
+    },
+    "claim_level": {
+      "const": "L1_PROCESS_CRASH_FRESH_PROCESS_RESTART_ONLY"
+    },
+    "claim_ceiling": {
+      "const": "OWNED_LAB_LOCAL_PROCESS_DEATH_RECOVERY_L1_ONLY_NOT_HOST_POWER_LOSS_NOT_STORAGE_DEVICE_DURABILITY_NOT_PROVIDER_DURABILITY_NOT_ROLLBACK_RESISTANCE"
+    },
+    "hashing_contract": {
+      "$ref": "#/$defs/hashing_contract"
+    },
+    "semantic_validation_contract": {
+      "$ref": "#/$defs/semantic_validation_contract"
+    },
+    "identity": {
+      "$ref": "#/$defs/identity"
+    },
+    "frozen_bindings": {
+      "$ref": "#/$defs/frozen_bindings"
+    },
+    "assignment": {
+      "$ref": "#/$defs/assignment"
+    },
+    "authorization": {
+      "$ref": "#/$defs/authorization"
+    },
+    "storage_environment": {
+      "$ref": "#/$defs/storage_environment"
+    },
+    "crash_observation": {
+      "$ref": "#/$defs/crash_observation"
+    },
+    "restart_observation": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/restart_observation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "raw_recovered_state": {
+      "$ref": "#/$defs/raw_recovered_state"
+    },
+    "mapping_phase_records": {
+      "type": "array"
+    },
+    "custody": {
+      "$ref": "#/$defs/custody"
+    },
+    "accounting": {
+      "$ref": "#/$defs/accounting"
+    },
+    "nonclaims": {
+      "$ref": "#/$defs/nonclaims"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "assignment": {
+            "properties": {
+              "owned_lab_family_id": {
+                "const": "OL00"
+              }
+            },
+            "required": [
+              "owned_lab_family_id"
+            ]
+          }
+        },
+        "required": [
+          "assignment"
+        ]
+      },
+      "then": {
+        "properties": {
+          "crash_observation": {
+            "$ref": "#/$defs/control_process_observation_constraints"
+          },
+          "restart_observation": {
+            "type": "null"
+          },
+          "mapping_phase_records": {
+            "minItems": 1,
+            "maxItems": 1,
+            "prefixItems": [
+              {"$ref": "#/$defs/single_mapping_phase_record"}
+            ],
+            "items": false
+          },
+          "accounting": {
+            "properties": {
+              "owned_lab_process_sigkill_observation_count": {
+                "const": 0
+              },
+              "owned_lab_fresh_process_restart_observation_count": {
+                "const": 0
+              },
+              "s16_mapping_phase_record_count": {
+                "const": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "assignment": {
+            "properties": {
+              "owned_lab_family_id": {"const": "OL04"}
+            },
+            "required": [
+              "owned_lab_family_id"
+            ]
+          }
+        },
+        "required": [
+          "assignment"
+        ]
+      },
+      "then": {
+        "properties": {
+          "crash_observation": {
+            "$ref": "#/$defs/pidfd_sigkill_observation_constraints"
+          },
+          "restart_observation": {
+            "$ref": "#/$defs/restart_observation"
+          },
+          "mapping_phase_records": {
+            "minItems": 1,
+            "maxItems": 1,
+            "prefixItems": [
+              {"$ref": "#/$defs/single_mapping_phase_record"}
+            ],
+            "items": false
+          },
+          "accounting": {
+            "properties": {
+              "owned_lab_process_sigkill_observation_count": {
+                "const": 1
+              },
+              "owned_lab_fresh_process_restart_observation_count": {
+                "const": 1
+              },
+              "s16_mapping_phase_record_count": {
+                "const": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "assignment": {
+            "properties": {
+              "owned_lab_family_id": {"const": "OL05"}
+            },
+            "required": ["owned_lab_family_id"]
+          }
+        },
+        "required": ["assignment"]
+      },
+      "then": {
+        "properties": {
+          "crash_observation": {
+            "$ref": "#/$defs/pidfd_sigkill_observation_constraints"
+          },
+          "restart_observation": {
+            "$ref": "#/$defs/restart_observation"
+          },
+          "mapping_phase_records": {
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              {"$ref": "#/$defs/first_attempt_mapping_phase_record"},
+              {"$ref": "#/$defs/restart_mapping_phase_record"}
+            ],
+            "items": false
+          },
+          "accounting": {
+            "properties": {
+              "owned_lab_process_sigkill_observation_count": {"const": 1},
+              "owned_lab_fresh_process_restart_observation_count": {"const": 1},
+              "s16_mapping_phase_record_count": {"const": 2}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nonempty_ascii": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[ -~]+$"
+    },
+    "proc_start_ticks": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$",
+      "maxLength": 32
+    },
+    "nullable_proc_start_ticks": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/proc_start_ticks"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_positive_integer": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_nonnegative_integer": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash_algorithm",
+        "canonical_json",
+        "domain_separator",
+        "raw_packet_hash_scope",
+        "canonical_payload_top_level_fields",
+        "canonical_payload_excludes_identity_and_custody",
+        "custody_entry_hash_scope",
+        "retained_raw_event_frame_hash_scope",
+        "classification_input_domain_separator",
+        "classification_input_hash_scope",
+        "classification_input_frame_fields",
+        "classification_input_frame_encoding",
+        "phase_record_domain_separator",
+        "phase_record_hash_scope",
+        "phase_record_self_hash_excluded",
+        "observation_id_derivation",
+        "self_referential_fields_excluded"
+      ],
+      "properties": {
+        "hash_algorithm": {
+          "const": "SHA-256"
+        },
+        "canonical_json": {
+          "const": "RFC8785_JCS"
+        },
+        "domain_separator": {
+          "const": "agent_bridge.s17.owned_lab.observation.v0"
+        },
+        "raw_packet_hash_scope": {
+          "const": "EXTERNAL_RAW_EVENT_STREAM_BYTES_NOT_CONTAINING_THIS_OBSERVATION_JSON"
+        },
+        "canonical_payload_top_level_fields": {
+          "const": [
+            "schema",
+            "packet_kind",
+            "evidence_origin",
+            "claim_level",
+            "claim_ceiling",
+            "hashing_contract",
+            "semantic_validation_contract",
+            "frozen_bindings",
+            "assignment",
+            "authorization",
+            "storage_environment",
+            "crash_observation",
+            "restart_observation",
+            "raw_recovered_state",
+            "mapping_phase_records",
+            "accounting",
+            "nonclaims"
+          ]
+        },
+        "canonical_payload_excludes_identity_and_custody": {
+          "const": true
+        },
+        "custody_entry_hash_scope": {
+          "const": "RFC8785_JCS_OF_CUSTODY_OBJECT_WITH_CUSTODY_ENTRY_SHA256_OMITTED"
+        },
+        "retained_raw_event_frame_hash_scope": {
+          "const": "SHA256_OF_EXACT_BYTE_RANGE_AT_OFFSET_AND_LENGTH_IN_EXTERNAL_RAW_EVENT_STREAM"
+        },
+        "classification_input_domain_separator": {
+          "const": "agent_bridge.s17.owned_lab.classification_input.v0"
+        },
+        "classification_input_hash_scope": {
+          "const": "SHA256_UTF8_DOMAIN_NUL_RFC8785_JCS_OF_EXACT_CLASSIFICATION_INPUT_FRAME"
+        },
+        "classification_input_frame_fields": {
+          "const": [
+            "identity.raw_packet_sha256",
+            "identity.assignment_id",
+            "mapping_phase_record.phase_ordinal",
+            "mapping_phase_record.phase_kind",
+            "mapping_phase_record.process_identity_sha256",
+            "mapping_phase_record.raw_phase_measurement",
+            "mapping_phase_record.s16_virtual_projection"
+          ]
+        },
+        "classification_input_frame_encoding": {
+          "const": "RFC8785_OBJECT_WITH_TERMINAL_SOURCE_PATH_COMPONENTS_AS_KEYS"
+        },
+        "phase_record_domain_separator": {
+          "const": "agent_bridge.s17.owned_lab.mapping_phase_record.v0"
+        },
+        "phase_record_hash_scope": {
+          "const": "SHA256_UTF8_DOMAIN_NUL_RFC8785_JCS_OF_MAPPING_PHASE_RECORD_WITH_PHASE_RECORD_SHA256_OMITTED"
+        },
+        "phase_record_self_hash_excluded": {
+          "const": true
+        },
+        "observation_id_derivation": {
+          "const": "SHA256_DOMAIN_SEPARATOR_RUN_ID_ASSIGNMENT_ID_CANONICAL_PAYLOAD_SHA256"
+        },
+        "self_referential_fields_excluded": {
+          "const": true
+        }
+      }
+    },
+    "semantic_validation_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_conformance_alone_proves_cross_field_identity",
+        "independent_semantic_validator_required",
+        "validator_build_bound_by_owner_decision",
+        "required_cross_field_rules"
+      ],
+      "properties": {
+        "schema_conformance_alone_proves_cross_field_identity": {"const": false},
+        "independent_semantic_validator_required": {"const": true},
+        "validator_build_bound_by_owner_decision": {"const": true},
+        "required_cross_field_rules": {
+          "const": [
+            "PIDFD_TARGET_PID_AND_START_EQUAL_INITIAL_CHILD",
+            "SIGNAL_SENDER_PID_AND_START_EQUAL_CONTROLLER",
+            "FRESH_PID_START_AND_NONCE_DISTINCT_FROM_INITIAL_CHILD",
+            "INITIAL_AND_FRESH_EXEC_IMAGE_HASH_EQUAL_FROZEN_RUNNER_BINARY",
+            "BOOT_IDS_EQUAL_WHEN_SAME_BOOT_VERIFIED",
+            "ROOT_STAT_IDENTITIES_EQUAL_WHEN_ROOT_STABLE",
+            "MOUNT_IDENTITIES_AND_MOUNTINFO_EQUAL_WHEN_MOUNT_STABLE",
+            "DATABASE_PATH_IS_DIRECT_DESCENDANT_OF_EXACT_RUN_ROOT",
+            "DATABASE_IDENTITIES_EQUAL_WHEN_DATABASE_STABLE",
+            "SQLITE_PROFILE_AND_SCHEMA_HASH_EQUAL_FROZEN_BINDINGS",
+            "CUSTODY_RAW_AND_CANONICAL_HASHES_EQUAL_IDENTITY_HASHES",
+            "RAW_EVENT_FRAME_BYTE_RANGE_HASH_RECOMPUTED_FROM_RETAINED_RAW_PACKET",
+            "PHASE_RAW_MEASUREMENT_DECODED_FROM_BOUND_RAW_EVENT_FRAME",
+            "ACK_OBSERVED_PAYLOAD_BINDS_RECEIPT_AND_WITNESS_AND_NOT_OBSERVED_HAS_NO_PAYLOAD",
+            "S16_VIRTUAL_PROJECTION_EXACTLY_DERIVED_FROM_RAW_PHASE_MEASUREMENT_WITH_DOMAIN_SEPARATED_ABSENT_SENTINELS",
+            "S16_VIRTUAL_PROJECTION_COUNTERS_ZERO_SIDE_EFFECTS_NONE_AND_DISTINCT_FROM_S17_LEDGER",
+            "CLASSIFICATION_INPUT_SHA256_RECOMPUTED_FROM_DOMAIN_AND_EXACT_FRAME",
+            "PHASE_RECORD_SHA256_RECOMPUTED_WITH_SELF_HASH_OMITTED",
+            "CLASSIFIER_BUILD_EQUALS_FROZEN_CLASSIFIER_BINARY_AND_OWNER_RECEIPT",
+            "CLASSIFICATION_RECOMPUTED_BY_PHASE_LIFECYCLE_EVALUATOR_AND_FULL_FROZEN_S16_CATALOG",
+            "ASSIGNMENT_FAMILY_CASE_AND_VARIANT_NOT_USED_TO_PREFILTER_CLASSIFICATION",
+            "ASSIGNMENT_LABELS_COMPARED_WITH_RECOMPUTED_CLASSIFICATION_ONLY_AFTER_FULL_CATALOG_LOOKUP",
+            "UNIQUE_MAPPING_CASE_VARIANT_ROW_REASON_AND_FAILURE_EQUAL_RECOMPUTED_FROZEN_S16_ROW",
+            "S16_ABSENT_SENTINELS_USED_ONLY_IN_VIRTUAL_MODEL_PROJECTION_NOT_RAW_PACKET_FACTS",
+            "D05_CUT_INDEX_OBSERVED_DATA_STEPS_LENGTH_AND_ADAPTER_STATE_RELATION_VALID",
+            "D05_FIRST_AND_RESTART_PHASES_BIND_SAME_ATTEMPT_CUT",
+            "EVERY_PHASE_DURABLE_IMAGE_FACTS_EQUAL_TOP_LEVEL_RAW_RECOVERED_STATE",
+            "D05_FIRST_PHASE_PROCESS_EQUALS_INITIAL_CHILD",
+            "D05_RESTART_PHASE_PROCESS_EQUALS_FRESH_CHILD",
+            "SINGLE_PHASE_PROCESS_EQUALS_ELIGIBLE_RESULT_PROCESS",
+            "CUSTODY_SEQUENCE_AND_PREVIOUS_HASH_RELATION_VALID",
+            "OWNER_RECEIPT_ASSIGNMENT_RESOURCE_SAFETY_AND_DECISION_BINDINGS_VALID"
+          ]
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_id",
+        "run_id",
+        "assignment_id",
+        "repetition",
+        "raw_packet_sha256",
+        "canonical_payload_sha256"
+      ],
+      "properties": {
+        "observation_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "run_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "assignment_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repetition": {
+          "const": 1
+        },
+        "raw_packet_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonical_payload_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "frozen_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_parent_commit",
+        "s16_source_commit",
+        "s16_integration_commit",
+        "s15_contract_sha256",
+        "s16_contract_sha256",
+        "s16_catalog_sha256",
+        "s16_catalog_message_len",
+        "base_record_sha256",
+        "base_record_len",
+        "lookup_commitment_sha256",
+        "plan_sha256",
+        "runner_source_sha256",
+        "runner_binary_sha256",
+        "classifier_source_sha256",
+        "classifier_binary_sha256",
+        "expected_oracle_sha256",
+        "toolchain_sha256",
+        "sqlite_profile_sha256",
+        "sqlite_schema_sha256",
+        "control_protocol_sha256"
+      ],
+      "properties": {
+        "source_parent_commit": {
+          "const": "d5bbe55d5d95b1163e287415f437cf77c594135d"
+        },
+        "s16_source_commit": {
+          "const": "dca7436a9d9df990355d67e374184202332f0354"
+        },
+        "s16_integration_commit": {
+          "const": "d7f3e206169227905dbd320f1876de46e3facfea"
+        },
+        "s15_contract_sha256": {
+          "const": "07d7ae5e7345bb5052aa130349af2e90bae853e5c74560346a4178b2b0397cc7"
+        },
+        "s16_contract_sha256": {
+          "const": "2500ae0651025434392b87d5a151487faa4b6e60a6523e083c1987446c3bdb66"
+        },
+        "s16_catalog_sha256": {
+          "const": "c09cdc640957594cc7acc2eeea39cb4e59993631ef04a1fa1e26a69c285af853"
+        },
+        "s16_catalog_message_len": {
+          "const": 225852
+        },
+        "base_record_sha256": {
+          "const": "a788ec43fefa76e393d77c86bbfabeef7d2ae8c5499bb834c1945af5cbb1b3cd"
+        },
+        "base_record_len": {
+          "const": 5494
+        },
+        "lookup_commitment_sha256": {
+          "const": "866e016ce631433e3e272d0858906f3c76c67204cd74b73ab11b7353e57eae00"
+        },
+        "plan_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "runner_source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "runner_binary_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "classifier_source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "classifier_binary_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "expected_oracle_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "toolchain_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sqlite_profile_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sqlite_schema_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "control_protocol_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Closed-world assignment. planned_variant_id is the sole authoritative cut identifier; duplicate free-form cut fields are intentionally forbidden.",
+      "required": [
+        "owned_lab_family_id",
+        "planned_s16_case_id",
+        "planned_variant_id",
+        "read_quantum_bytes",
+        "planned_label_is_outcome_oracle"
+      ],
+      "properties": {
+        "owned_lab_family_id": {
+          "enum": [
+            "OL00",
+            "OL04",
+            "OL05"
+          ]
+        },
+        "planned_s16_case_id": {
+          "enum": [
+            "D00_CLEAN_COMMITTED_HEAD",
+            "D04_PUBLISH_CRASH_RESTART_CUTS",
+            "D05_S15_READ_CRASH_RESTART_CUTS"
+          ]
+        },
+        "planned_variant_id": {
+          "type": "string"
+        },
+        "read_quantum_bytes": {
+          "oneOf": [
+            {
+              "const": 113
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "planned_label_is_outcome_oracle": {
+          "const": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "owned_lab_family_id": {
+                "const": "OL00"
+              }
+            },
+            "required": [
+              "owned_lab_family_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "planned_s16_case_id": {
+                "const": "D00_CLEAN_COMMITTED_HEAD"
+              },
+              "planned_variant_id": {
+                "const": "CLEAN_CONTROL_NO_CRASH"
+              },
+              "read_quantum_bytes": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "owned_lab_family_id": {
+                "const": "OL04"
+              }
+            },
+            "required": [
+              "owned_lab_family_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "planned_s16_case_id": {
+                "const": "D04_PUBLISH_CRASH_RESTART_CUTS"
+              },
+              "planned_variant_id": {
+                "enum": [
+                  "CRASH_AT_EMPTY_RESTART",
+                  "CRASH_AFTER_OBJECT_PREFIX_RESTART",
+                  "CRASH_AFTER_OBJECT_COMMIT_RESTART",
+                  "CRASH_AFTER_RECEIPT_COMMIT_RESTART",
+                  "CRASH_AFTER_WITNESS_COMMIT_RESTART",
+                  "CRASH_AFTER_ACK_RESTART"
+                ]
+              },
+              "read_quantum_bytes": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "owned_lab_family_id": {
+                "const": "OL05"
+              }
+            },
+            "required": [
+              "owned_lab_family_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "planned_s16_case_id": {
+                "const": "D05_S15_READ_CRASH_RESTART_CUTS"
+              },
+              "planned_variant_id": {
+                "enum": [
+                  "BEFORE_OPEN",
+                  "AFTER_OPEN",
+                  "AFTER_DATA_0001",
+                  "AFTER_DATA_0002",
+                  "AFTER_DATA_0003",
+                  "AFTER_DATA_0004",
+                  "AFTER_DATA_0005",
+                  "AFTER_DATA_0006",
+                  "AFTER_DATA_0007",
+                  "AFTER_DATA_0008",
+                  "AFTER_DATA_0009",
+                  "AFTER_DATA_0010",
+                  "AFTER_DATA_0011",
+                  "AFTER_DATA_0012",
+                  "AFTER_DATA_0013",
+                  "AFTER_DATA_0014",
+                  "AFTER_DATA_0015",
+                  "AFTER_DATA_0016",
+                  "AFTER_DATA_0017",
+                  "AFTER_DATA_0018",
+                  "AFTER_DATA_0019",
+                  "AFTER_DATA_0020",
+                  "AFTER_DATA_0021",
+                  "AFTER_DATA_0022",
+                  "AFTER_DATA_0023",
+                  "AFTER_DATA_0024",
+                  "AFTER_DATA_0025",
+                  "AFTER_DATA_0026",
+                  "AFTER_DATA_0027",
+                  "AFTER_DATA_0028",
+                  "AFTER_DATA_0029",
+                  "AFTER_DATA_0030",
+                  "AFTER_DATA_0031",
+                  "AFTER_DATA_0032",
+                  "AFTER_DATA_0033",
+                  "AFTER_DATA_0034",
+                  "AFTER_DATA_0035",
+                  "AFTER_DATA_0036",
+                  "AFTER_DATA_0037",
+                  "AFTER_DATA_0038",
+                  "AFTER_DATA_0039",
+                  "AFTER_DATA_0040",
+                  "AFTER_DATA_0041",
+                  "AFTER_DATA_0042",
+                  "AFTER_DATA_0043",
+                  "AFTER_DATA_0044",
+                  "AFTER_DATA_0045",
+                  "AFTER_DATA_0046",
+                  "AFTER_DATA_0047",
+                  "AFTER_DATA_0048",
+                  "AFTER_DATA_0049",
+                  "AFTER_COMPLETE_BEFORE_S14",
+                  "AFTER_HISTORICAL"
+                ]
+              },
+              "read_quantum_bytes": {
+                "const": 113
+              }
+            }
+          }
+        }
+      ]
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_resource_decision_sha256",
+        "owner_identity_authenticated",
+        "decision_authorizes_exact_assignment",
+        "single_use_replay_cas_committed",
+        "production_authorized",
+        "provider_authorized"
+      ],
+      "properties": {
+        "owner_resource_decision_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "owner_identity_authenticated": {
+          "const": true
+        },
+        "decision_authorizes_exact_assignment": {
+          "const": true
+        },
+        "single_use_replay_cas_committed": {
+          "const": true
+        },
+        "production_authorized": {
+          "const": false
+        },
+        "provider_authorized": {
+          "const": false
+        }
+      }
+    },
+    "storage_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "canonical_root",
+        "root_is_unique_per_run",
+        "root_created_exclusively",
+        "root_mode_octal",
+        "root_symlink_observed",
+        "root_stat_identity_before_sha256",
+        "root_stat_identity_after_sha256",
+        "root_identity_stable_across_observation",
+        "root_device_major_minor",
+        "root_mount_id",
+        "device",
+        "filesystem",
+        "mountinfo_entry_before_sha256",
+        "mountinfo_entry_after_sha256",
+        "mount_identity_stable_across_observation",
+        "mount_options_sha256",
+        "filesystem_verified_from_mountinfo",
+        "persistent_filesystem_verified",
+        "tmpfs_overlay_or_fuse_detected",
+        "kernel_identity_sha256",
+        "boot_id_before_sha256",
+        "boot_id_after_sha256",
+        "same_boot_verified",
+        "database_canonical_path",
+        "database_relative_path",
+        "database_regular_file",
+        "database_mode_octal",
+        "database_symlink_observed",
+        "database_hardlink_count",
+        "sqlite_runtime_profile",
+        "network_disabled",
+        "root_privilege_used",
+        "drop_caches_used",
+        "reboot_used",
+        "block_device_fault_used"
+      ],
+      "properties": {
+        "profile": {
+          "const": "ISOLATED_OWNED_LAB_F2FS_PROCESS_SIGKILL_FRESH_PROCESS_RESTART_HISTORICAL_ONLY"
+        },
+        "canonical_root": {
+          "type": "string",
+          "pattern": "^/Data/CascadeProjects/\\.ab-owned-lab/s17-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{64}$",
+          "maxLength": 512
+        },
+        "root_is_unique_per_run": {
+          "const": true
+        },
+        "root_created_exclusively": {
+          "const": true
+        },
+        "root_mode_octal": {
+          "const": "0700"
+        },
+        "root_symlink_observed": {
+          "const": false
+        },
+        "root_stat_identity_before_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "root_stat_identity_after_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "root_identity_stable_across_observation": {
+          "const": true
+        },
+        "root_device_major_minor": {
+          "type": "string",
+          "pattern": "^[0-9]+:[0-9]+$"
+        },
+        "root_mount_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "device": {
+          "const": "/dev/nvme0n1p7"
+        },
+        "filesystem": {
+          "const": "f2fs"
+        },
+        "mountinfo_entry_before_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "mountinfo_entry_after_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "mount_identity_stable_across_observation": {
+          "const": true
+        },
+        "mount_options_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "filesystem_verified_from_mountinfo": {
+          "const": true
+        },
+        "persistent_filesystem_verified": {
+          "const": true
+        },
+        "tmpfs_overlay_or_fuse_detected": {
+          "const": false
+        },
+        "kernel_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "boot_id_before_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "boot_id_after_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "same_boot_verified": {
+          "const": true
+        },
+        "database_canonical_path": {
+          "type": "string",
+          "pattern": "^/Data/CascadeProjects/\\.ab-owned-lab/s17-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{64}/[A-Za-z0-9._-]+\\.sqlite3$",
+          "maxLength": 768
+        },
+        "database_relative_path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+\\.sqlite3$",
+          "maxLength": 128
+        },
+        "database_regular_file": {
+          "const": true
+        },
+        "database_mode_octal": {
+          "const": "0600"
+        },
+        "database_symlink_observed": {
+          "const": false
+        },
+        "database_hardlink_count": {
+          "const": 1
+        },
+        "sqlite_runtime_profile": {
+          "$ref": "#/$defs/sqlite_runtime_profile"
+        },
+        "network_disabled": {
+          "const": true
+        },
+        "root_privilege_used": {
+          "const": false
+        },
+        "drop_caches_used": {
+          "const": false
+        },
+        "reboot_used": {
+          "const": false
+        },
+        "block_device_fault_used": {
+          "const": false
+        }
+      }
+    },
+    "sqlite_runtime_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_sha256",
+        "schema_sha256",
+        "profile_matches_frozen_binding",
+        "schema_matches_frozen_binding",
+        "journal_mode",
+        "pragma_journal_mode_observed",
+        "synchronous",
+        "pragma_synchronous_observed",
+        "application_id",
+        "application_id_matches_frozen_profile",
+        "user_version",
+        "user_version_matches_frozen_profile",
+        "database_created_exclusively",
+        "normal_reopen_may_create",
+        "normal_open_opened_existing_regular_file",
+        "database_identity_before_sha256",
+        "database_identity_after_sha256",
+        "database_identity_stable_across_observation",
+        "declared_durable_stage_requires_database_fsync",
+        "declared_durable_stage_requires_parent_directory_fsync",
+        "database_fsync_attempted_before_kill",
+        "database_fsync_return_code",
+        "parent_directory_fsync_attempted_before_kill",
+        "parent_directory_fsync_return_code",
+        "fsync_event_log_sha256",
+        "quick_check_result",
+        "unexpected_schema_object_count",
+        "unexpected_temp_object_count",
+        "unexpected_sidecar_count"
+      ],
+      "properties": {
+        "profile_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "schema_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "profile_matches_frozen_binding": {
+          "const": true
+        },
+        "schema_matches_frozen_binding": {
+          "const": true
+        },
+        "journal_mode": {
+          "const": "DELETE"
+        },
+        "pragma_journal_mode_observed": {
+          "const": "delete"
+        },
+        "synchronous": {
+          "const": "EXTRA"
+        },
+        "pragma_synchronous_observed": {
+          "const": 3
+        },
+        "application_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "application_id_matches_frozen_profile": {
+          "const": true
+        },
+        "user_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "user_version_matches_frozen_profile": {
+          "const": true
+        },
+        "database_created_exclusively": {
+          "const": true
+        },
+        "normal_reopen_may_create": {
+          "const": false
+        },
+        "normal_open_opened_existing_regular_file": {
+          "const": true
+        },
+        "database_identity_before_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "database_identity_after_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "database_identity_stable_across_observation": {
+          "const": true
+        },
+        "declared_durable_stage_requires_database_fsync": {
+          "const": true
+        },
+        "declared_durable_stage_requires_parent_directory_fsync": {
+          "const": true
+        },
+        "database_fsync_attempted_before_kill": {
+          "type": "boolean"
+        },
+        "database_fsync_return_code": {
+          "oneOf": [
+            {
+              "const": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_directory_fsync_attempted_before_kill": {
+          "type": "boolean"
+        },
+        "parent_directory_fsync_return_code": {
+          "oneOf": [
+            {
+              "const": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fsync_event_log_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "quick_check_result": {
+          "const": "ok"
+        },
+        "unexpected_schema_object_count": {
+          "const": 0
+        },
+        "unexpected_temp_object_count": {
+          "const": 0
+        },
+        "unexpected_sidecar_count": {
+          "const": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "database_fsync_attempted_before_kill": {
+                "const": true
+              }
+            },
+            "required": [
+              "database_fsync_attempted_before_kill"
+            ]
+          },
+          "then": {
+            "properties": {
+              "database_fsync_return_code": {
+                "const": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "database_fsync_return_code": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "parent_directory_fsync_attempted_before_kill": {
+                "const": true
+              }
+            },
+            "required": [
+              "parent_directory_fsync_attempted_before_kill"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parent_directory_fsync_return_code": {
+                "const": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "parent_directory_fsync_return_code": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "crash_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control_sequence",
+        "controller_process_identity_sha256",
+        "controller_pid",
+        "controller_start_identity",
+        "controller_distinct_from_child",
+        "child_process_identity_sha256",
+        "child_process_nonce_sha256",
+        "child_pid",
+        "child_start_identity",
+        "child_exec_image_sha256",
+        "child_exec_image_matches_frozen_runner",
+        "cut_ready_channel",
+        "cut_ready_frame_sha256",
+        "cut_ready_persisted_before_kill",
+        "kill_method",
+        "pidfd_open_succeeded",
+        "pidfd_open_errno",
+        "pidfd_fd_number",
+        "pidfd_fdinfo_sha256",
+        "pidfd_target_pid",
+        "pidfd_target_start_identity",
+        "pidfd_target_matches_child",
+        "kill_target_identity_rechecked",
+        "pidfd_send_signal_return_code",
+        "pidfd_send_signal_errno",
+        "signal_sender_pid",
+        "signal_sender_start_identity",
+        "signal_sender_matches_controller",
+        "child_descendant_count_before_kill",
+        "pidfd_became_readable",
+        "wait_status_kind",
+        "terminating_signal",
+        "observed_exit_signal_number",
+        "child_reaped",
+        "post_reap_original_proc_identity_present",
+        "graceful_exit_observed",
+        "process_crash_observed"
+      ],
+      "properties": {
+        "control_sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "controller_process_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "controller_pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "controller_start_identity": {
+          "$ref": "#/$defs/proc_start_ticks"
+        },
+        "controller_distinct_from_child": {
+          "const": true
+        },
+        "child_process_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "child_process_nonce_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "child_pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "child_start_identity": {
+          "$ref": "#/$defs/proc_start_ticks"
+        },
+        "child_exec_image_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "child_exec_image_matches_frozen_runner": {
+          "const": true
+        },
+        "cut_ready_channel": {
+          "const": "ANONYMOUS_PIPE"
+        },
+        "cut_ready_frame_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cut_ready_persisted_before_kill": {
+          "const": false
+        },
+        "kill_method": {
+          "enum": [
+            "NONE_CONTROL",
+            "CONTROLLER_PIDFD_SEND_SIGNAL_SIGKILL"
+          ]
+        },
+        "pidfd_open_succeeded": {
+          "type": "boolean"
+        },
+        "pidfd_open_errno": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pidfd_fd_number": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "pidfd_fdinfo_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "pidfd_target_pid": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "pidfd_target_start_identity": {
+          "$ref": "#/$defs/nullable_proc_start_ticks"
+        },
+        "pidfd_target_matches_child": {
+          "type": "boolean"
+        },
+        "kill_target_identity_rechecked": {
+          "type": "boolean"
+        },
+        "pidfd_send_signal_return_code": {
+          "oneOf": [
+            {
+              "const": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pidfd_send_signal_errno": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signal_sender_pid": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "signal_sender_start_identity": {
+          "$ref": "#/$defs/nullable_proc_start_ticks"
+        },
+        "signal_sender_matches_controller": {
+          "type": "boolean"
+        },
+        "child_descendant_count_before_kill": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pidfd_became_readable": {
+          "type": "boolean"
+        },
+        "wait_status_kind": {
+          "enum": [
+            "CLEAN_CONTROL_EXIT",
+            "SIGNALED"
+          ]
+        },
+        "terminating_signal": {
+          "enum": [
+            "NONE",
+            "SIGKILL"
+          ]
+        },
+        "observed_exit_signal_number": {
+          "oneOf": [
+            {
+              "const": 9
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "child_reaped": {
+          "type": "boolean"
+        },
+        "post_reap_original_proc_identity_present": {
+          "type": "boolean"
+        },
+        "graceful_exit_observed": {
+          "type": "boolean"
+        },
+        "process_crash_observed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "control_process_observation_constraints": {
+      "type": "object",
+      "properties": {
+        "kill_method": {
+          "const": "NONE_CONTROL"
+        },
+        "pidfd_open_succeeded": {
+          "const": false
+        },
+        "pidfd_open_errno": {
+          "type": "null"
+        },
+        "pidfd_fd_number": {
+          "type": "null"
+        },
+        "pidfd_fdinfo_sha256": {
+          "type": "null"
+        },
+        "pidfd_target_pid": {
+          "type": "null"
+        },
+        "pidfd_target_start_identity": {
+          "type": "null"
+        },
+        "pidfd_target_matches_child": {
+          "const": false
+        },
+        "kill_target_identity_rechecked": {
+          "const": false
+        },
+        "pidfd_send_signal_return_code": {
+          "type": "null"
+        },
+        "pidfd_send_signal_errno": {
+          "type": "null"
+        },
+        "signal_sender_pid": {
+          "type": "null"
+        },
+        "signal_sender_start_identity": {
+          "type": "null"
+        },
+        "signal_sender_matches_controller": {
+          "const": false
+        },
+        "child_descendant_count_before_kill": {
+          "const": 0
+        },
+        "pidfd_became_readable": {
+          "const": false
+        },
+        "wait_status_kind": {
+          "const": "CLEAN_CONTROL_EXIT"
+        },
+        "terminating_signal": {
+          "const": "NONE"
+        },
+        "observed_exit_signal_number": {
+          "type": "null"
+        },
+        "child_reaped": {
+          "const": true
+        },
+        "post_reap_original_proc_identity_present": {
+          "const": false
+        },
+        "graceful_exit_observed": {
+          "const": true
+        },
+        "process_crash_observed": {
+          "const": false
+        }
+      }
+    },
+    "pidfd_sigkill_observation_constraints": {
+      "type": "object",
+      "properties": {
+        "kill_method": {
+          "const": "CONTROLLER_PIDFD_SEND_SIGNAL_SIGKILL"
+        },
+        "pidfd_open_succeeded": {
+          "const": true
+        },
+        "pidfd_open_errno": {
+          "type": "null"
+        },
+        "pidfd_fd_number": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pidfd_fdinfo_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "pidfd_target_pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pidfd_target_start_identity": {
+          "$ref": "#/$defs/proc_start_ticks"
+        },
+        "pidfd_target_matches_child": {
+          "const": true
+        },
+        "kill_target_identity_rechecked": {
+          "const": true
+        },
+        "pidfd_send_signal_return_code": {
+          "const": 0
+        },
+        "pidfd_send_signal_errno": {
+          "type": "null"
+        },
+        "signal_sender_pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "signal_sender_start_identity": {
+          "$ref": "#/$defs/proc_start_ticks"
+        },
+        "signal_sender_matches_controller": {
+          "const": true
+        },
+        "child_descendant_count_before_kill": {
+          "const": 0
+        },
+        "pidfd_became_readable": {
+          "const": true
+        },
+        "wait_status_kind": {
+          "const": "SIGNALED"
+        },
+        "terminating_signal": {
+          "const": "SIGKILL"
+        },
+        "observed_exit_signal_number": {
+          "const": 9
+        },
+        "child_reaped": {
+          "const": true
+        },
+        "post_reap_original_proc_identity_present": {
+          "const": false
+        },
+        "graceful_exit_observed": {
+          "const": false
+        },
+        "process_crash_observed": {
+          "const": true
+        }
+      }
+    },
+    "restart_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fresh_process_started",
+        "spawn_method",
+        "fresh_child_process_identity_sha256",
+        "fresh_process_nonce_sha256",
+        "fresh_child_pid",
+        "fresh_child_start_identity",
+        "fresh_exec_image_sha256",
+        "fresh_exec_image_matches_frozen_runner",
+        "fresh_pid_and_start_identity_distinct_from_initial_child",
+        "fresh_process_nonce_distinct_from_initial_child",
+        "fresh_process_parent_matches_controller",
+        "same_process_reused",
+        "same_boot_verified",
+        "target_fds_closed_before_exec",
+        "inherited_target_file_descriptor_used",
+        "inherited_adapter_sink_or_cache_used",
+        "exact_path_reopened",
+        "fresh_process_reaped",
+        "fresh_process_exit_status",
+        "read_result",
+        "observed_record_len",
+        "observed_record_sha256"
+      ],
+      "properties": {
+        "fresh_process_started": {
+          "const": true
+        },
+        "spawn_method": {
+          "const": "NEW_EXEC"
+        },
+        "fresh_child_process_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "fresh_process_nonce_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "fresh_child_pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fresh_child_start_identity": {
+          "$ref": "#/$defs/proc_start_ticks"
+        },
+        "fresh_exec_image_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "fresh_exec_image_matches_frozen_runner": {
+          "const": true
+        },
+        "fresh_pid_and_start_identity_distinct_from_initial_child": {
+          "const": true
+        },
+        "fresh_process_nonce_distinct_from_initial_child": {
+          "const": true
+        },
+        "fresh_process_parent_matches_controller": {
+          "const": true
+        },
+        "same_process_reused": {
+          "const": false
+        },
+        "same_boot_verified": {
+          "const": true
+        },
+        "target_fds_closed_before_exec": {
+          "const": true
+        },
+        "inherited_target_file_descriptor_used": {
+          "const": false
+        },
+        "inherited_adapter_sink_or_cache_used": {
+          "const": false
+        },
+        "exact_path_reopened": {
+          "const": true
+        },
+        "fresh_process_reaped": {
+          "const": true
+        },
+        "fresh_process_exit_status": {
+          "const": "CLEAN_EXIT_ZERO"
+        },
+        "read_result": {
+          "enum": [
+            "STREAM_EXACT",
+            "NOT_FOUND",
+            "PENDING",
+            "CONFLICT",
+            "STALE",
+            "ROLLBACK",
+            "UNAVAILABLE",
+            "UNAUTHENTICATED",
+            "MALFORMED",
+            "INDETERMINATE"
+          ]
+        },
+        "observed_record_len": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 278528
+        },
+        "observed_record_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "read_result": {
+                "const": "STREAM_EXACT"
+              }
+            },
+            "required": [
+              "read_result"
+            ]
+          },
+          "then": {
+            "properties": {
+              "observed_record_len": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 278528
+              },
+              "observed_record_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "observed_record_len": {
+                "const": 0
+              },
+              "observed_record_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "raw_recovered_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_log_sha256",
+        "write_sync_receipt_state",
+        "write_sync_receipt_sha256",
+        "object_state",
+        "object_len",
+        "object_sha256",
+        "receipt_state",
+        "receipt_sha256",
+        "witness_state",
+        "witness_sha256",
+        "selected_view_state",
+        "selected_view_sha256",
+        "competing_view_state",
+        "competing_view_sha256",
+        "pre_crash_ack_state",
+        "post_restart_local_ack_state"
+      ],
+      "properties": {
+        "event_log_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "write_sync_receipt_state": {
+          "enum": [
+            "ABSENT",
+            "PRESENT",
+            "UNKNOWN"
+          ]
+        },
+        "write_sync_receipt_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "object_state": {
+          "enum": [
+            "ABSENT",
+            "PARTIAL",
+            "COMMITTED",
+            "UNKNOWN"
+          ]
+        },
+        "object_len": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 278528
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "object_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "receipt_state": {
+          "enum": [
+            "ABSENT",
+            "COMMITTED",
+            "UNKNOWN"
+          ]
+        },
+        "receipt_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "witness_state": {
+          "enum": [
+            "ABSENT",
+            "PRESENT",
+            "UNAVAILABLE",
+            "FORKED",
+            "UNKNOWN"
+          ]
+        },
+        "witness_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "selected_view_state": {
+          "enum": [
+            "ABSENT",
+            "PRESENT",
+            "UNKNOWN"
+          ]
+        },
+        "selected_view_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "competing_view_state": {
+          "enum": [
+            "ABSENT",
+            "PRESENT",
+            "UNKNOWN"
+          ]
+        },
+        "competing_view_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "pre_crash_ack_state": {
+          "enum": [
+            "NOT_OBSERVED",
+            "OBSERVED",
+            "UNKNOWN"
+          ]
+        },
+        "post_restart_local_ack_state": {
+          "enum": [
+            "NOT_OBSERVED",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "write_sync_receipt_state": {
+                "const": "PRESENT"
+              }
+            },
+            "required": [
+              "write_sync_receipt_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "write_sync_receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "write_sync_receipt_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "object_state": {
+                "const": "ABSENT"
+              }
+            },
+            "required": [
+              "object_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "object_len": {
+                "const": 0
+              },
+              "object_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "object_state": {
+                "enum": [
+                  "PARTIAL",
+                  "COMMITTED"
+                ]
+              }
+            },
+            "required": [
+              "object_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "object_len": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 278528
+              },
+              "object_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "object_state": {
+                "const": "UNKNOWN"
+              }
+            },
+            "required": [
+              "object_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "object_len": {
+                "type": "null"
+              },
+              "object_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "receipt_state": {
+                "const": "COMMITTED"
+              }
+            },
+            "required": [
+              "receipt_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "receipt_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "receipt_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "witness_state": {
+                "enum": [
+                  "PRESENT",
+                  "FORKED"
+                ]
+              }
+            },
+            "required": [
+              "witness_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "witness_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "witness_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "selected_view_state": {
+                "const": "PRESENT"
+              }
+            },
+            "required": [
+              "selected_view_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "selected_view_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "selected_view_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "competing_view_state": {
+                "const": "PRESENT"
+              }
+            },
+            "required": [
+              "competing_view_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "competing_view_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "competing_view_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "phase_raw_measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Retained, phase-specific raw facts used to reconstruct the observational S16 row input. No disposition, reason, mapped failure, case result, or planned variant label is accepted here.",
+      "required": [
+        "retained_raw_event_stream_sha256",
+        "raw_event_frame_index",
+        "raw_event_frame_offset_bytes",
+        "raw_event_frame_length_bytes",
+        "raw_event_frame_sha256",
+        "measurement_decode_status",
+        "publisher_phase",
+        "object_state",
+        "object_len",
+        "object_sha256",
+        "receipt_state",
+        "computed_receipt_sha256",
+        "stored_receipt_sha256",
+        "witness_state",
+        "computed_witness_sha256",
+        "stored_witness_sha256",
+        "selected_view_state",
+        "selected_view_sha256",
+        "competing_view_state",
+        "competing_view_sha256",
+        "ack_state",
+        "ack_receipt_sha256",
+        "ack_witness_sha256",
+        "crash_cut",
+        "crash_cut_index",
+        "restarted_after_crash",
+        "observed_data_steps",
+        "observed_len",
+        "adapter_pre_state",
+        "adapter_post_state"
+      ],
+      "properties": {
+        "retained_raw_event_stream_sha256": {"$ref": "#/$defs/sha256"},
+        "raw_event_frame_index": {"type": "integer", "minimum": 0},
+        "raw_event_frame_offset_bytes": {"type": "integer", "minimum": 0},
+        "raw_event_frame_length_bytes": {"type": "integer", "minimum": 1},
+        "raw_event_frame_sha256": {"$ref": "#/$defs/sha256"},
+        "measurement_decode_status": {"const": "EXACT_BOUND_FRAME_DECODED"},
+        "publisher_phase": {
+          "enum": ["EMPTY", "OBJECT_PREFIX", "OBJECT_COMMITTED", "RECEIPT_COMMITTED", "WITNESS_COMMITTED", "ACKED"]
+        },
+        "object_state": {"enum": ["ABSENT", "PARTIAL", "COMMITTED"]},
+        "object_len": {"type": "integer", "minimum": 0, "maximum": 278528},
+        "object_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "receipt_state": {"enum": ["ABSENT", "COMMITTED"]},
+        "computed_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "stored_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "witness_state": {"enum": ["ABSENT", "PRESENT"]},
+        "computed_witness_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "stored_witness_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "selected_view_state": {"enum": ["ABSENT", "PRESENT"]},
+        "selected_view_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "competing_view_state": {"enum": ["ABSENT", "PRESENT"]},
+        "competing_view_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "ack_state": {"enum": ["NOT_OBSERVED", "OBSERVED"]},
+        "ack_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "ack_witness_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "crash_cut": {
+          "enum": [
+            "NONE",
+            "PUBLISH_AFTER_OBJECT_PREFIX",
+            "PUBLISH_AFTER_OBJECT_COMMIT",
+            "PUBLISH_AFTER_RECEIPT_COMMIT",
+            "PUBLISH_AFTER_WITNESS_COMMIT",
+            "PUBLISH_AFTER_ACK",
+            "READ_BEFORE_OPEN",
+            "READ_AFTER_OPEN",
+            "READ_AFTER_DATA",
+            "READ_AFTER_COMPLETE_BEFORE_S14",
+            "READ_AFTER_HISTORICAL"
+          ]
+        },
+        "crash_cut_index": {"type": "integer", "minimum": 0, "maximum": 5493},
+        "restarted_after_crash": {"type": "boolean"},
+        "observed_data_steps": {"type": "integer", "minimum": 0, "maximum": 49},
+        "observed_len": {"type": "integer", "minimum": 0, "maximum": 5494},
+        "adapter_pre_state": {"enum": ["FRESH", "STREAMING", "COMPLETED"]},
+        "adapter_post_state": {"enum": ["FRESH", "TERMINAL_FAILED", "COMPLETED"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"object_state": {"const": "ABSENT"}}, "required": ["object_state"]},
+          "then": {"properties": {"object_len": {"const": 0}, "object_sha256": {"type": "null"}}},
+          "else": {"properties": {"object_len": {"type": "integer", "minimum": 1, "maximum": 278528}, "object_sha256": {"$ref": "#/$defs/sha256"}}}
+        },
+        {
+          "if": {"properties": {"receipt_state": {"const": "COMMITTED"}}, "required": ["receipt_state"]},
+          "then": {"properties": {"computed_receipt_sha256": {"$ref": "#/$defs/sha256"}, "stored_receipt_sha256": {"$ref": "#/$defs/sha256"}}},
+          "else": {"properties": {"computed_receipt_sha256": {"type": "null"}, "stored_receipt_sha256": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"witness_state": {"const": "PRESENT"}}, "required": ["witness_state"]},
+          "then": {"properties": {"computed_witness_sha256": {"$ref": "#/$defs/sha256"}, "stored_witness_sha256": {"$ref": "#/$defs/sha256"}}},
+          "else": {"properties": {"computed_witness_sha256": {"type": "null"}, "stored_witness_sha256": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"selected_view_state": {"const": "PRESENT"}}, "required": ["selected_view_state"]},
+          "then": {"properties": {"selected_view_sha256": {"$ref": "#/$defs/sha256"}}},
+          "else": {"properties": {"selected_view_sha256": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"competing_view_state": {"const": "PRESENT"}}, "required": ["competing_view_state"]},
+          "then": {"properties": {"competing_view_sha256": {"$ref": "#/$defs/sha256"}}},
+          "else": {"properties": {"competing_view_sha256": {"type": "null"}}}
+        },
+        {
+          "if": {
+            "properties": {"ack_state": {"const": "OBSERVED"}},
+            "required": ["ack_state"]
+          },
+          "then": {
+            "properties": {
+              "ack_receipt_sha256": {"$ref": "#/$defs/sha256"},
+              "ack_witness_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          },
+          "else": {
+            "properties": {
+              "ack_receipt_sha256": {"type": "null"},
+              "ack_witness_sha256": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "s16_virtual_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Frozen virtual S16 row projection. These are not S17 observed-evidence counters and cannot be populated from the S17 ledger.",
+      "required": [
+        "projection_kind",
+        "publisher_phase",
+        "object_persistence",
+        "object_len",
+        "observed_object_sha256",
+        "receipt_state",
+        "computed_receipt_sha256",
+        "stored_receipt_sha256",
+        "witness_state",
+        "computed_witness_sha256",
+        "stored_witness_sha256",
+        "selected_view_sha256",
+        "competing_view_sha256",
+        "ack_state",
+        "crash_cut",
+        "crash_cut_index",
+        "adapter_pre_state",
+        "adapter_post_state",
+        "restarted_after_crash",
+        "observed_data_steps",
+        "observed_len",
+        "ack_receipt_sha256",
+        "ack_witness_sha256",
+        "external_durability_observation_count",
+        "provider_durability_observation_count",
+        "owned_lab_durability_observation_count",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "projection_kind": {"const": "FROZEN_S16_EVALUATOR_INPUT_V0"},
+        "publisher_phase": {"enum": ["EMPTY", "OBJECT_PREFIX", "OBJECT_COMMITTED", "RECEIPT_COMMITTED", "WITNESS_COMMITTED", "ACKED"]},
+        "object_persistence": {"enum": ["ABSENT", "PARTIAL", "COMMITTED"]},
+        "object_len": {"type": "integer", "minimum": 0, "maximum": 278528},
+        "observed_object_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_state": {"enum": ["ABSENT", "COMMITTED"]},
+        "computed_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "stored_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "witness_state": {"enum": ["ABSENT", "PRESENT"]},
+        "computed_witness_sha256": {"$ref": "#/$defs/sha256"},
+        "stored_witness_sha256": {"$ref": "#/$defs/sha256"},
+        "selected_view_sha256": {"$ref": "#/$defs/sha256"},
+        "competing_view_sha256": {"$ref": "#/$defs/sha256"},
+        "ack_state": {"enum": ["NOT_OBSERVED", "OBSERVED"]},
+        "crash_cut": {
+          "enum": ["NONE", "PUBLISH_AFTER_OBJECT_PREFIX", "PUBLISH_AFTER_OBJECT_COMMIT", "PUBLISH_AFTER_RECEIPT_COMMIT", "PUBLISH_AFTER_WITNESS_COMMIT", "PUBLISH_AFTER_ACK", "READ_BEFORE_OPEN", "READ_AFTER_OPEN", "READ_AFTER_DATA", "READ_AFTER_COMPLETE_BEFORE_S14", "READ_AFTER_HISTORICAL"]
+        },
+        "crash_cut_index": {"type": "integer", "minimum": 0, "maximum": 5493},
+        "adapter_pre_state": {"enum": ["FRESH", "STREAMING", "COMPLETED"]},
+        "adapter_post_state": {"enum": ["FRESH", "TERMINAL_FAILED", "COMPLETED"]},
+        "restarted_after_crash": {"type": "boolean"},
+        "observed_data_steps": {"type": "integer", "minimum": 0, "maximum": 49},
+        "observed_len": {"type": "integer", "minimum": 0, "maximum": 5494},
+        "ack_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "ack_witness_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "external_durability_observation_count": {"const": 0},
+        "provider_durability_observation_count": {"const": 0},
+        "owned_lab_durability_observation_count": {"const": 0},
+        "side_effects_unlocked": {"const": "NONE"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"ack_state": {"const": "OBSERVED"}}, "required": ["ack_state"]},
+          "then": {"properties": {"ack_receipt_sha256": {"$ref": "#/$defs/sha256"}, "ack_witness_sha256": {"$ref": "#/$defs/sha256"}}},
+          "else": {"properties": {"ack_receipt_sha256": {"type": "null"}, "ack_witness_sha256": {"type": "null"}}}
+        }
+      ]
+    },
+    "mapping_phase_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase_ordinal",
+        "phase_kind",
+        "process_identity_sha256",
+        "raw_phase_measurement",
+        "s16_virtual_projection",
+        "classification_input_sha256",
+        "classification",
+        "phase_record_sha256"
+      ],
+      "properties": {
+        "phase_ordinal": {"type": "integer", "minimum": 1, "maximum": 2},
+        "phase_kind": {
+          "enum": ["ATTEMPT_RESULT", "FIRST_ATTEMPT", "RESTART"]
+        },
+        "process_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "raw_phase_measurement": {"$ref": "#/$defs/phase_raw_measurement"},
+        "s16_virtual_projection": {"$ref": "#/$defs/s16_virtual_projection"},
+        "classification_input_sha256": {"$ref": "#/$defs/sha256"},
+        "classification": {"$ref": "#/$defs/classification"},
+        "phase_record_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "single_mapping_phase_record": {
+      "allOf": [
+        {"$ref": "#/$defs/mapping_phase_record"},
+        {
+          "type": "object",
+          "properties": {
+            "phase_ordinal": {"const": 1},
+            "phase_kind": {"const": "ATTEMPT_RESULT"}
+          }
+        }
+      ]
+    },
+    "first_attempt_mapping_phase_record": {
+      "allOf": [
+        {"$ref": "#/$defs/mapping_phase_record"},
+        {
+          "type": "object",
+          "properties": {
+            "phase_ordinal": {"const": 1},
+            "phase_kind": {"const": "FIRST_ATTEMPT"}
+          }
+        }
+      ]
+    },
+    "restart_mapping_phase_record": {
+      "allOf": [
+        {"$ref": "#/$defs/mapping_phase_record"},
+        {
+          "type": "object",
+          "properties": {
+            "phase_ordinal": {"const": 2},
+            "phase_kind": {"const": "RESTART"}
+          }
+        }
+      ]
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classifier_build_sha256",
+        "classification_derived_from_raw_state",
+        "planned_label_used_as_outcome_oracle",
+        "mapping_cardinality",
+        "mapped_s16_case_id",
+        "mapped_s16_variant_id",
+        "mapped_s16_row_sha256",
+        "mapped_reason",
+        "mapped_failure",
+        "mapping_status"
+      ],
+      "properties": {
+        "classifier_build_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "classification_derived_from_raw_state": {
+          "const": true
+        },
+        "planned_label_used_as_outcome_oracle": {
+          "const": false
+        },
+        "mapping_cardinality": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "mapped_s16_case_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^D(?:0[0-9]|1[0-5])_[A-Z0-9_]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mapped_s16_variant_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9_]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mapped_s16_row_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "mapped_reason": {
+          "$ref": "#/$defs/nonempty_ascii"
+        },
+        "mapped_failure": {
+          "enum": [
+            "NONE",
+            "NOT_FOUND",
+            "PENDING",
+            "CONFLICT",
+            "STALE",
+            "ROLLBACK",
+            "UNAVAILABLE",
+            "UNAUTHENTICATED",
+            "MALFORMED",
+            "INDETERMINATE"
+          ]
+        },
+        "mapping_status": {
+          "enum": [
+            "UNIQUE_FROZEN_S16_REFERENCE",
+            "OBSERVED_OUT_OF_MODEL_INDETERMINATE"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mapping_status": {
+                "const": "UNIQUE_FROZEN_S16_REFERENCE"
+              }
+            },
+            "required": [
+              "mapping_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mapping_cardinality": {
+                "const": 1
+              },
+              "mapped_s16_case_id": {
+                "type": "string",
+                "pattern": "^D(?:0[0-9]|1[0-5])_[A-Z0-9_]+$"
+              },
+              "mapped_s16_variant_id": {
+                "type": "string",
+                "pattern": "^[A-Z0-9_]+$"
+              },
+              "mapped_s16_row_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mapping_status": {
+                "const": "OBSERVED_OUT_OF_MODEL_INDETERMINATE"
+              }
+            },
+            "required": [
+              "mapping_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mapping_cardinality": {
+                "const": 0
+              },
+              "mapped_s16_case_id": {
+                "type": "null"
+              },
+              "mapped_s16_variant_id": {
+                "type": "null"
+              },
+              "mapped_s16_row_sha256": {
+                "type": "null"
+              },
+              "mapped_failure": {
+                "const": "INDETERMINATE"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "custody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_evidence_sha256",
+        "canonical_evidence_sha256",
+        "raw_evidence_matches_identity_raw_packet",
+        "canonical_evidence_matches_identity_payload",
+        "custody_sequence",
+        "previous_custody_entry_sha256",
+        "custody_entry_sha256",
+        "custodian_identity_sha256",
+        "trusted_time_obtained",
+        "trusted_time_receipt_sha256",
+        "retained_before_cleanup",
+        "independent_failure_domain_proved"
+      ],
+      "properties": {
+        "raw_evidence_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonical_evidence_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "raw_evidence_matches_identity_raw_packet": {
+          "const": true
+        },
+        "canonical_evidence_matches_identity_payload": {
+          "const": true
+        },
+        "custody_sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "previous_custody_entry_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "custody_entry_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "custodian_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "trusted_time_obtained": {
+          "const": false
+        },
+        "trusted_time_receipt_sha256": {
+          "type": "null"
+        },
+        "retained_before_cleanup": {
+          "const": true
+        },
+        "independent_failure_domain_proved": {
+          "const": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"custody_sequence": {"const": 1}},
+            "required": ["custody_sequence"]
+          },
+          "then": {
+            "properties": {"previous_custody_entry_sha256": {"type": "null"}}
+          },
+          "else": {
+            "properties": {"previous_custody_entry_sha256": {"$ref": "#/$defs/sha256"}}
+          }
+        }
+      ]
+    },
+    "accounting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assigned_attempt_denominator_increment",
+        "provider_observation_count",
+        "owned_lab_process_sigkill_observation_count",
+        "owned_lab_fresh_process_restart_observation_count",
+        "s16_mapping_phase_record_count",
+        "guest_reboot_observation_count",
+        "host_reboot_observation_count",
+        "power_loss_observation_count",
+        "application_side_effects_unlocked"
+      ],
+      "properties": {
+        "assigned_attempt_denominator_increment": {
+          "const": 1
+        },
+        "provider_observation_count": {
+          "const": 0
+        },
+        "owned_lab_process_sigkill_observation_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "owned_lab_fresh_process_restart_observation_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "s16_mapping_phase_record_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "guest_reboot_observation_count": {
+          "const": 0
+        },
+        "host_reboot_observation_count": {
+          "const": 0
+        },
+        "power_loss_observation_count": {
+          "const": 0
+        },
+        "application_side_effects_unlocked": {
+          "const": "NONE"
+        }
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_conformance_is_evidence",
+        "schema_conformance_alone_proves_cross_field_identity",
+        "process_restart_is_service_or_container_restart_proof",
+        "process_restart_is_guest_kernel_crash_or_reboot_proof",
+        "process_restart_is_host_or_power_loss_proof",
+        "same_kernel_read_bypasses_page_cache",
+        "kernel_page_cache_loss_proved",
+        "host_crash_or_reboot_proved",
+        "power_loss_proved",
+        "storage_controller_failure_or_flush_proved",
+        "storage_device_durability_proved",
+        "filesystem_general_durability_proved",
+        "database_general_durability_proved",
+        "provider_durability_proved",
+        "provider_linearizability_or_quorum_proved",
+        "witness_independence_proved_by_same_host",
+        "rollback_resistance_proved",
+        "equivocation_or_split_brain_resistance_proved",
+        "currentness_issued",
+        "production_admission_granted",
+        "production_readiness_proved",
+        "bridge_or_state_store_enabled",
+        "output_permit_issued",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "schema_conformance_is_evidence": {
+          "const": false
+        },
+        "schema_conformance_alone_proves_cross_field_identity": {
+          "const": false
+        },
+        "process_restart_is_service_or_container_restart_proof": {
+          "const": false
+        },
+        "process_restart_is_guest_kernel_crash_or_reboot_proof": {
+          "const": false
+        },
+        "process_restart_is_host_or_power_loss_proof": {
+          "const": false
+        },
+        "same_kernel_read_bypasses_page_cache": {
+          "const": false
+        },
+        "kernel_page_cache_loss_proved": {
+          "const": false
+        },
+        "host_crash_or_reboot_proved": {
+          "const": false
+        },
+        "power_loss_proved": {
+          "const": false
+        },
+        "storage_controller_failure_or_flush_proved": {
+          "const": false
+        },
+        "storage_device_durability_proved": {
+          "const": false
+        },
+        "filesystem_general_durability_proved": {
+          "const": false
+        },
+        "database_general_durability_proved": {
+          "const": false
+        },
+        "provider_durability_proved": {
+          "const": false
+        },
+        "provider_linearizability_or_quorum_proved": {
+          "const": false
+        },
+        "witness_independence_proved_by_same_host": {
+          "const": false
+        },
+        "rollback_resistance_proved": {
+          "const": false
+        },
+        "equivocation_or_split_brain_resistance_proved": {
+          "const": false
+        },
+        "currentness_issued": {
+          "const": false
+        },
+        "production_admission_granted": {
+          "const": false
+        },
+        "production_readiness_proved": {
+          "const": false
+        },
+        "bridge_or_state_store_enabled": {
+          "const": false
+        },
+        "output_permit_issued": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      }
+    }
+  }
+}

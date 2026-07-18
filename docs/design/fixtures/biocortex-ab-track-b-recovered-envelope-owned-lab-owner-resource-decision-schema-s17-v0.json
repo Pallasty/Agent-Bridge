@@ -1,0 +1,686 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_recovered_envelope_owned_lab_owner_resource_decision_s17.v0",
+  "title": "Agent-Bridge S17 bounded owned-lab owner and resource decision",
+  "description": "Closed-world pending/rejected decision schema plus a non-admissible target receipt definition for a future single-use OL00/OL04/OL05 L1 canary. Positive authorization is deliberately impossible in this v0 schema.",
+  "$comment": "A future positive state requires a separate schema and semantic/signature validator. This v0 accepts no positive owner decision and cannot authorize execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "positive_decision_admissible_in_this_schema",
+    "decision_state",
+    "decision_reason",
+    "owner",
+    "frozen_subject",
+    "execution_scope",
+    "resource_scope",
+    "safety_and_custody",
+    "authorization_receipt",
+    "global_runtime_boundary",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.memory_temporal_recovered_envelope_owned_lab_owner_resource_decision_s17.v0"
+    },
+    "packet_kind": {
+      "const": "OWNED_LAB_OWNER_RESOURCE_DECISION"
+    },
+    "positive_decision_admissible_in_this_schema": {
+      "const": false
+    },
+    "decision_state": {
+      "enum": [
+        "PENDING_AUTHENTICATED_OWNER_RESOURCE_BINDING",
+        "REJECTED_FAIL_CLOSED"
+      ]
+    },
+    "decision_reason": {
+      "enum": [
+        "WAITING_FOR_AUTHENTICATED_OWNER_RESOURCE_BINDING",
+        "OWNER_AUTHENTICATION_FAILED",
+        "RESOURCE_OR_SCOPE_BINDING_FAILED",
+        "PREREQUISITE_OR_REVIEW_FAILED"
+      ]
+    },
+    "owner": {
+      "$ref": "#/$defs/owner"
+    },
+    "frozen_subject": {
+      "$ref": "#/$defs/frozen_subject"
+    },
+    "execution_scope": {
+      "$ref": "#/$defs/execution_scope"
+    },
+    "resource_scope": {
+      "$ref": "#/$defs/resource_scope"
+    },
+    "safety_and_custody": {
+      "$ref": "#/$defs/safety_and_custody"
+    },
+    "authorization_receipt": {
+      "oneOf": [
+        {"$ref": "#/$defs/authorization_receipt"},
+        {"type": "null"}
+      ]
+    },
+    "global_runtime_boundary": {
+      "$ref": "#/$defs/global_runtime_boundary"
+    },
+    "nonclaims": {
+      "$ref": "#/$defs/nonclaims"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision_state": {"const": "PENDING_AUTHENTICATED_OWNER_RESOURCE_BINDING"}
+        }
+      },
+      "then": {
+        "properties": {
+          "decision_reason": {"const": "WAITING_FOR_AUTHENTICATED_OWNER_RESOURCE_BINDING"},
+          "owner": {
+            "properties": {
+              "identity_authenticated": {"const": false},
+              "decision_recorded": {"const": false},
+              "owner_identity_sha256": {"type": "null"},
+              "owner_key_id": {"type": "null"},
+              "owner_signature_sha256": {"type": "null"},
+              "decision_issued_at_utc": {"type": "null"},
+              "decision_expires_at_utc": {"type": "null"}
+            }
+          },
+          "execution_scope": {
+            "properties": {
+              "owned_lab_execution_authorized": {"const": false},
+              "single_use_execution_capability_issued": {"const": false}
+            }
+          },
+          "safety_and_custody": {
+            "properties": {
+              "trusted_time_bound": {"const": false},
+              "single_use_replay_cas_ready": {"const": false},
+              "stop_controls_ready": {"const": false},
+              "custody_and_retention_ready": {"const": false},
+              "independent_review_approved": {"const": false},
+              "trusted_time_receipt_sha256": {"type": "null"},
+              "single_use_replay_cas_receipt_sha256": {"type": "null"},
+              "stop_control_sha256": {"type": "null"},
+              "stop_receipt_sha256": {"type": "null"},
+              "retention_policy_sha256": {"type": "null"},
+              "cleanup_policy_sha256": {"type": "null"},
+              "cleanup_receipt_sha256": {"type": "null"},
+              "reviewer_receipt_sha256": {"type": "null"}
+            }
+          },
+          "authorization_receipt": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision_state": {"const": "REJECTED_FAIL_CLOSED"}
+        }
+      },
+      "then": {
+        "properties": {
+          "decision_reason": {
+            "enum": [
+              "OWNER_AUTHENTICATION_FAILED",
+              "RESOURCE_OR_SCOPE_BINDING_FAILED",
+              "PREREQUISITE_OR_REVIEW_FAILED"
+            ]
+          },
+          "owner": {
+            "properties": {
+              "identity_authenticated": {"const": false},
+              "decision_recorded": {"const": false},
+              "owner_identity_sha256": {"type": "null"},
+              "owner_key_id": {"type": "null"},
+              "owner_signature_sha256": {"type": "null"},
+              "decision_issued_at_utc": {"type": "null"},
+              "decision_expires_at_utc": {"type": "null"}
+            }
+          },
+          "execution_scope": {
+            "properties": {
+              "owned_lab_execution_authorized": {"const": false},
+              "single_use_execution_capability_issued": {"const": false}
+            }
+          },
+          "safety_and_custody": {
+            "properties": {
+              "trusted_time_bound": {"const": false},
+              "single_use_replay_cas_ready": {"const": false},
+              "stop_controls_ready": {"const": false},
+              "custody_and_retention_ready": {"const": false},
+              "independent_review_approved": {"const": false},
+              "trusted_time_receipt_sha256": {"type": "null"},
+              "single_use_replay_cas_receipt_sha256": {"type": "null"},
+              "stop_control_sha256": {"type": "null"},
+              "stop_receipt_sha256": {"type": "null"},
+              "retention_policy_sha256": {"type": "null"},
+              "cleanup_policy_sha256": {"type": "null"},
+              "cleanup_receipt_sha256": {"type": "null"},
+              "reviewer_receipt_sha256": {"type": "null"}
+            }
+          },
+          "authorization_receipt": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "git_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "nonempty_ascii": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[ -~]+$"
+    },
+    "rfc3339": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {"$ref": "#/$defs/sha256"},
+        {"type": "null"}
+      ]
+    },
+    "nullable_ascii": {
+      "oneOf": [
+        {"$ref": "#/$defs/nonempty_ascii"},
+        {"type": "null"}
+      ]
+    },
+    "nullable_time": {
+      "oneOf": [
+        {"$ref": "#/$defs/rfc3339"},
+        {"type": "null"}
+      ]
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity_authenticated",
+        "decision_recorded",
+        "owner_role",
+        "owner_identity_sha256",
+        "owner_key_id",
+        "owner_signature_sha256",
+        "decision_issued_at_utc",
+        "decision_expires_at_utc",
+        "audience"
+      ],
+      "properties": {
+        "identity_authenticated": {"type": "boolean"},
+        "decision_recorded": {"type": "boolean"},
+        "owner_role": {"const": "OWNED_LAB_EXECUTION_OWNER"},
+        "owner_identity_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "owner_key_id": {"$ref": "#/$defs/nullable_ascii"},
+        "owner_signature_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "decision_issued_at_utc": {"$ref": "#/$defs/nullable_time"},
+        "decision_expires_at_utc": {"$ref": "#/$defs/nullable_time"},
+        "audience": {"const": "AGENT_BRIDGE_S17_OWNED_LAB_ONLY"}
+      }
+    },
+    "frozen_subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_parent_commit",
+        "s16_integration_commit",
+        "plan_sha256",
+        "schedule_sha256",
+        "assignment_set_sha256",
+        "runner_source_commit",
+        "runner_source_sha256",
+        "runner_binary_sha256",
+        "toolchain_sha256",
+        "observation_schema_sha256",
+        "control_protocol_sha256",
+        "sqlite_profile_sha256",
+        "sqlite_schema_sha256",
+        "classifier_source_sha256",
+        "classifier_binary_sha256",
+        "expected_oracle_sha256"
+      ],
+      "properties": {
+        "source_parent_commit": {"const": "d5bbe55d5d95b1163e287415f437cf77c594135d"},
+        "s16_integration_commit": {"const": "d7f3e206169227905dbd320f1876de46e3facfea"},
+        "plan_sha256": {"$ref": "#/$defs/sha256"},
+        "schedule_sha256": {"$ref": "#/$defs/sha256"},
+        "assignment_set_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_source_commit": {"$ref": "#/$defs/git_commit"},
+        "runner_source_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "toolchain_sha256": {"$ref": "#/$defs/sha256"},
+        "observation_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "control_protocol_sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_profile_sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "classifier_source_sha256": {"$ref": "#/$defs/sha256"},
+        "classifier_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "expected_oracle_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "execution_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_level",
+        "family_id_namespace",
+        "authorized_family_ids",
+        "authorized_family_scenario_counts",
+        "family_count",
+        "scenario_count_per_canary_batch",
+        "canary_batch_start_inclusive",
+        "canary_batch_end_inclusive",
+        "canary_batch_count",
+        "assigned_attempt_count",
+        "planned_pidfd_sigkill_attempt_count",
+        "planned_distinct_fresh_exec_read_count",
+        "planned_d05_first_and_restart_phase_record_count",
+        "planned_total_s16_mapping_phase_record_count",
+        "full_102_scenario_schedule_authorized",
+        "post_canary_execution_authorized",
+        "pidfd_required",
+        "pidfd_identity_recheck_required",
+        "pidfd_unavailable_policy",
+        "pidfd_unavailable_counts_as_observation",
+        "fresh_process_required",
+        "control_channel",
+        "persisted_control_marker_allowed",
+        "owned_lab_execution_authorized",
+        "single_use_execution_capability_issued",
+        "production_execution_authorized",
+        "provider_execution_authorized",
+        "network_allowed",
+        "credential_access_allowed",
+        "paid_resource_allowed",
+        "allowed_operations",
+        "forbidden_operations"
+      ],
+      "properties": {
+        "claim_level": {"const": "L1_PROCESS_CRASH_FRESH_PROCESS_RESTART_ONLY"},
+        "family_id_namespace": {"const": "OL00_OL04_OL05_FIRST_BATCH"},
+        "authorized_family_ids": {"const": ["OL00", "OL04", "OL05"]},
+        "authorized_family_scenario_counts": {
+          "const": {"OL00": 1, "OL04": 6, "OL05": 53}
+        },
+        "family_count": {"const": 3},
+        "scenario_count_per_canary_batch": {"const": 60},
+        "canary_batch_start_inclusive": {"const": 1},
+        "canary_batch_end_inclusive": {"const": 1},
+        "canary_batch_count": {"const": 1},
+        "assigned_attempt_count": {"const": 60},
+        "planned_pidfd_sigkill_attempt_count": {"const": 59},
+        "planned_distinct_fresh_exec_read_count": {"const": 59},
+        "planned_d05_first_and_restart_phase_record_count": {"const": 106},
+        "planned_total_s16_mapping_phase_record_count": {"const": 113},
+        "full_102_scenario_schedule_authorized": {"const": false},
+        "post_canary_execution_authorized": {"const": false},
+        "pidfd_required": {"const": true},
+        "pidfd_identity_recheck_required": {"const": true},
+        "pidfd_unavailable_policy": {"const": "FAIL_CLOSED_NO_OBSERVATION"},
+        "pidfd_unavailable_counts_as_observation": {"const": false},
+        "fresh_process_required": {"const": true},
+        "control_channel": {"const": "ANONYMOUS_PIPE"},
+        "persisted_control_marker_allowed": {"const": false},
+        "owned_lab_execution_authorized": {"type": "boolean"},
+        "single_use_execution_capability_issued": {"type": "boolean"},
+        "production_execution_authorized": {"const": false},
+        "provider_execution_authorized": {"const": false},
+        "network_allowed": {"const": false},
+        "credential_access_allowed": {"const": false},
+        "paid_resource_allowed": {"const": false},
+        "allowed_operations": {
+          "const": [
+            "CREATE_NEW_UNIQUE_RUN_ROOT_UNDER_EXISTING_F2FS",
+            "CREATE_AND_SYNC_FILES_UNDER_EXACT_NEW_RUN_ROOT_NO_FOLLOW",
+            "SQLITE_INITIAL_CREATE_EXCLUSIVE_DELETE_EXTRA",
+            "SQLITE_REOPEN_READWRITE_EXISTING_NO_CREATE",
+            "ANONYMOUS_PIPE_CUT_CONTROL_NO_PERSISTED_MARKER",
+            "SPAWN_EXACT_BOUND_CHILD",
+            "PIDFD_SIGKILL_AND_REAP_EXACT_BOUND_CHILD_ONLY",
+            "START_FRESH_BOUND_READER",
+            "RETAIN_ALLOWLISTED_EVIDENCE",
+            "REDUCTIVE_CLEANUP_EXACT_ASSIGNED_ROOT"
+          ]
+        },
+        "forbidden_operations": {
+          "const": [
+            "NETWORK_ACCESS",
+            "PROVIDER_ACCESS",
+            "CREDENTIAL_ACCESS",
+            "PAID_RESOURCE_ACCESS",
+            "ROOT_OR_PRIVILEGE_ESCALATION",
+            "MOUNT_OR_UNMOUNT",
+            "DROP_CACHES",
+            "REBOOT_KERNEL_CRASH_OR_POWER_FAULT",
+            "DIRECT_BLOCK_DEVICE_WRITE_OR_MUTATION",
+            "KILL_NON_ASSIGNED_PROCESS",
+            "BRIDGE_STATE_STORE_OR_APPLICATION_SIDE_EFFECT"
+          ]
+        }
+      }
+    },
+    "resource_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "canonical_root",
+        "per_run_root_creation_policy",
+        "root_must_not_preexist",
+        "root_mode_octal",
+        "path_resolution_policy",
+        "symlink_follow_allowed",
+        "device",
+        "filesystem",
+        "direct_block_device_writes_allowed",
+        "mount_options_sha256",
+        "kernel_identity_sha256",
+        "sqlite_database_relative_path",
+        "sqlite_initial_open_mode",
+        "sqlite_journal_mode",
+        "sqlite_synchronous",
+        "sqlite_reopen_mode",
+        "sqlite_reopen_create_allowed",
+        "sqlite_profile_sha256",
+        "sqlite_schema_sha256",
+        "sqlite_application_id",
+        "sqlite_user_version",
+        "sqlite_unexpected_sidecars_allowed",
+        "sqlite_database_file_fsync_required",
+        "sqlite_parent_directory_fsync_required",
+        "maximum_active_assigned_attempts",
+        "maximum_controller_processes",
+        "maximum_child_processes",
+        "memory_limit_bytes",
+        "swap_limit_bytes",
+        "tasks_max",
+        "nofile_limit",
+        "disk_limit_bytes",
+        "kill_and_reap_timeout_seconds",
+        "recover_timeout_seconds",
+        "suite_timeout_seconds",
+        "build_jobs",
+        "nested_cargo_allowed",
+        "cost_ceiling_usd"
+      ],
+      "properties": {
+        "profile": {"const": "ISOLATED_OWNED_LAB_F2FS_PROCESS_SIGKILL_FRESH_PROCESS_RESTART_HISTORICAL_ONLY"},
+        "canonical_root": {
+          "type": "string",
+          "pattern": "^/Data/CascadeProjects/\\.ab-owned-lab/s17-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{64}$",
+          "maxLength": 512
+        },
+        "per_run_root_creation_policy": {"const": "CREATE_NEW_EXCLUSIVE_FAIL_IF_EXISTS"},
+        "root_must_not_preexist": {"const": true},
+        "root_mode_octal": {"const": "0700"},
+        "path_resolution_policy": {"const": "BENEATH_EXACT_ROOT_NO_FOLLOW_NO_SYMLINK_COMPONENTS"},
+        "symlink_follow_allowed": {"const": false},
+        "device": {"const": "/dev/nvme0n1p7"},
+        "filesystem": {"const": "f2fs"},
+        "direct_block_device_writes_allowed": {"const": false},
+        "mount_options_sha256": {"$ref": "#/$defs/sha256"},
+        "kernel_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_database_relative_path": {"const": "state.sqlite3"},
+        "sqlite_initial_open_mode": {"const": "CREATE_NEW_EXCLUSIVE"},
+        "sqlite_journal_mode": {"const": "DELETE"},
+        "sqlite_synchronous": {"const": "EXTRA"},
+        "sqlite_reopen_mode": {"const": "READWRITE_EXISTING_NO_CREATE"},
+        "sqlite_reopen_create_allowed": {"const": false},
+        "sqlite_profile_sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_application_id": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "sqlite_user_version": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "sqlite_unexpected_sidecars_allowed": {"const": false},
+        "sqlite_database_file_fsync_required": {"const": true},
+        "sqlite_parent_directory_fsync_required": {"const": true},
+        "maximum_active_assigned_attempts": {"const": 1},
+        "maximum_controller_processes": {"const": 1},
+        "maximum_child_processes": {"const": 1},
+        "memory_limit_bytes": {"const": 805306368},
+        "swap_limit_bytes": {"const": 268435456},
+        "tasks_max": {"const": 16},
+        "nofile_limit": {"const": 256},
+        "disk_limit_bytes": {"const": 268435456},
+        "kill_and_reap_timeout_seconds": {"const": 10},
+        "recover_timeout_seconds": {"const": 20},
+        "suite_timeout_seconds": {"const": 900},
+        "build_jobs": {"const": 1},
+        "nested_cargo_allowed": {"const": false},
+        "cost_ceiling_usd": {"const": 0}
+      }
+    },
+    "safety_and_custody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trusted_time_bound",
+        "single_use_authorization_cas_required",
+        "single_use_authorization_cas_success_limit",
+        "single_use_replay_cas_ready",
+        "stop_controls_ready",
+        "stop_is_absorbing",
+        "custody_and_retention_ready",
+        "independent_review_approved",
+        "oom_timeout_or_leak_invalidates_batch",
+        "batch_invalidation_causes",
+        "invalidated_batch_yields_observation",
+        "partial_batch_acceptance_allowed",
+        "trusted_time_receipt_sha256",
+        "single_use_replay_cas_receipt_sha256",
+        "stop_control_sha256",
+        "stop_receipt_sha256",
+        "retention_policy_sha256",
+        "cleanup_policy_sha256",
+        "cleanup_receipt_sha256",
+        "reviewer_receipt_sha256",
+        "revocation_epoch"
+      ],
+      "properties": {
+        "trusted_time_bound": {"type": "boolean"},
+        "single_use_authorization_cas_required": {"const": true},
+        "single_use_authorization_cas_success_limit": {"const": 1},
+        "single_use_replay_cas_ready": {"type": "boolean"},
+        "stop_controls_ready": {"type": "boolean"},
+        "stop_is_absorbing": {"const": true},
+        "custody_and_retention_ready": {"type": "boolean"},
+        "independent_review_approved": {"type": "boolean"},
+        "oom_timeout_or_leak_invalidates_batch": {"const": true},
+        "batch_invalidation_causes": {
+          "const": [
+            "OOM_OR_OOM_KILL",
+            "KILL_OR_REAP_TIMEOUT",
+            "RECOVERY_TIMEOUT",
+            "SUITE_TIMEOUT",
+            "PROCESS_FD_OR_RESOURCE_LEAK"
+          ]
+        },
+        "invalidated_batch_yields_observation": {"const": false},
+        "partial_batch_acceptance_allowed": {"const": false},
+        "trusted_time_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "single_use_replay_cas_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "stop_control_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "stop_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "retention_policy_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "cleanup_policy_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "cleanup_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "reviewer_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "revocation_epoch": {"type": "integer", "minimum": 0}
+      }
+    },
+    "authorization_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "packet_kind",
+        "complete_semantic_binding",
+        "decision_state",
+        "decision_reason",
+        "owner_identity_sha256",
+        "owner_key_id",
+        "owner_signature_sha256",
+        "decision_issued_at_utc",
+        "decision_expires_at_utc",
+        "source_parent_commit",
+        "s16_integration_commit",
+        "plan_sha256",
+        "schedule_sha256",
+        "assignment_set_sha256",
+        "runner_source_commit",
+        "runner_source_sha256",
+        "runner_binary_sha256",
+        "toolchain_sha256",
+        "observation_schema_sha256",
+        "control_protocol_sha256",
+        "sqlite_profile_sha256",
+        "sqlite_schema_sha256",
+        "classifier_source_sha256",
+        "classifier_binary_sha256",
+        "expected_oracle_sha256",
+        "claim_level",
+        "authorized_family_ids",
+        "authorized_family_scenario_counts",
+        "canary_batch_count",
+        "assigned_attempt_count",
+        "resource_scope_sha256",
+        "safety_and_custody_sha256",
+        "trusted_time_receipt_sha256",
+        "single_use_replay_cas_receipt_sha256",
+        "single_use_replay_cas_revision",
+        "single_use_authorization_cas_success_count",
+        "stop_control_sha256",
+        "stop_receipt_sha256",
+        "retention_policy_sha256",
+        "cleanup_policy_sha256",
+        "cleanup_receipt_sha256",
+        "reviewer_receipt_sha256",
+        "semantic_binding_rules"
+      ],
+      "properties": {
+        "schema": {"const": "agent_bridge.memory_temporal_recovered_envelope_owned_lab_authorization_receipt_s17.v0"},
+        "packet_kind": {"const": "COMPLETE_OL00_OL04_OL05_CANARY_AUTHORIZATION_RECEIPT"},
+        "complete_semantic_binding": {"const": true},
+        "decision_state": {"const": "AUTHORIZED_OWNED_LAB_L1_OL00_OL04_OL05_CANARY_EXECUTION"},
+        "decision_reason": {"const": "EXACT_BOUNDED_L1_OL00_OL04_OL05_CANARY_SCOPE_AUTHORIZED"},
+        "owner_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_key_id": {"$ref": "#/$defs/nonempty_ascii"},
+        "owner_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "decision_issued_at_utc": {"$ref": "#/$defs/rfc3339"},
+        "decision_expires_at_utc": {"$ref": "#/$defs/rfc3339"},
+        "source_parent_commit": {"const": "d5bbe55d5d95b1163e287415f437cf77c594135d"},
+        "s16_integration_commit": {"const": "d7f3e206169227905dbd320f1876de46e3facfea"},
+        "plan_sha256": {"$ref": "#/$defs/sha256"},
+        "schedule_sha256": {"$ref": "#/$defs/sha256"},
+        "assignment_set_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_source_commit": {"$ref": "#/$defs/git_commit"},
+        "runner_source_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "toolchain_sha256": {"$ref": "#/$defs/sha256"},
+        "observation_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "control_protocol_sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_profile_sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "classifier_source_sha256": {"$ref": "#/$defs/sha256"},
+        "classifier_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "expected_oracle_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_level": {"const": "L1_PROCESS_CRASH_FRESH_PROCESS_RESTART_ONLY"},
+        "authorized_family_ids": {"const": ["OL00", "OL04", "OL05"]},
+        "authorized_family_scenario_counts": {"const": {"OL00": 1, "OL04": 6, "OL05": 53}},
+        "canary_batch_count": {"const": 1},
+        "assigned_attempt_count": {"const": 60},
+        "resource_scope_sha256": {"$ref": "#/$defs/sha256"},
+        "safety_and_custody_sha256": {"$ref": "#/$defs/sha256"},
+        "trusted_time_receipt_sha256": {"type": "null"},
+        "single_use_replay_cas_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "single_use_replay_cas_revision": {"type": "integer", "minimum": 1},
+        "single_use_authorization_cas_success_count": {"const": 1},
+        "stop_control_sha256": {"$ref": "#/$defs/sha256"},
+        "stop_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "retention_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "cleanup_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "cleanup_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "reviewer_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "semantic_binding_rules": {
+          "const": [
+            "RECEIPT_OWNER_EQUALS_OWNER",
+            "RECEIPT_SUBJECT_EQUALS_FROZEN_SUBJECT",
+            "RECEIPT_BINDS_OBSERVATION_CONTROL_SQLITE_CLASSIFIER_AND_ORACLE_DIGESTS",
+            "RECEIPT_SCOPE_EQUALS_CANONICAL_RESOURCE_AND_SAFETY_HASHES",
+            "RECEIPT_BINDS_EXACT_OL00_OL04_OL05_60_ATTEMPT_CANARY",
+            "RECEIPT_CAS_REVISION_IS_SINGLE_USE",
+            "RECEIPT_CAS_STOP_CLEANUP_REVIEW_HASHES_EQUAL_SAFETY_AND_CUSTODY",
+            "RECEIPT_DECISION_WINDOW_EQUALS_OWNER_DECISION"
+          ]
+        }
+      }
+    },
+    "global_runtime_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "global_runtime_prerequisite_count",
+        "global_runtime_prerequisites_satisfied",
+        "global_runtime_admission_ready",
+        "global_runtime_admission_granted",
+        "lab_scoped_decision_satisfies_global_prerequisite"
+      ],
+      "properties": {
+        "global_runtime_prerequisite_count": {"const": 16},
+        "global_runtime_prerequisites_satisfied": {"const": 0},
+        "global_runtime_admission_ready": {"const": false},
+        "global_runtime_admission_granted": {"const": false},
+        "lab_scoped_decision_satisfies_global_prerequisite": {"const": false}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "positive_decision_admissible_in_this_schema",
+        "schema_conformance_alone_authorizes_execution",
+        "cross_field_semantic_validation_implemented",
+        "cryptographic_owner_signature_verification_implemented",
+        "decision_is_production_authority",
+        "decision_is_provider_authority",
+        "decision_is_currentness_or_admission",
+        "decision_is_output_permit",
+        "decision_authorizes_scientific_or_application_claim",
+        "process_crash_is_power_loss_proof",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "positive_decision_admissible_in_this_schema": {"const": false},
+        "schema_conformance_alone_authorizes_execution": {"const": false},
+        "cross_field_semantic_validation_implemented": {"const": false},
+        "cryptographic_owner_signature_verification_implemented": {"const": false},
+        "decision_is_production_authority": {"const": false},
+        "decision_is_provider_authority": {"const": false},
+        "decision_is_currentness_or_admission": {"const": false},
+        "decision_is_output_permit": {"const": false},
+        "decision_authorizes_scientific_or_application_claim": {"const": false},
+        "process_crash_is_power_loss_proof": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}
