@@ -98,7 +98,8 @@ The audit consumes automated evidence rather than per-action prompts:
   mounting onto a missing destination under a host-root bind creates a host
   mountpoint. Such a path has no existing secret contents; if its parent is
   writable, the target may create new data there. Path inspection errors still
-  fail closed.
+  fail closed. Symlink aliases are not mount destinations; their canonical
+  targets are mounted instead, so alias access resolves into the same denial.
 - macOS uses the process-specific `$TMPDIR`; it does not grant the whole
   `/private/var/folders` tree writable.
 - Common cache directories are writable for build usability and may contain

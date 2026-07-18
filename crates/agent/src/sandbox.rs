@@ -874,17 +874,27 @@ fn build_bwrap_args(
         OsString::from("--die-with-parent"),
     ];
     for denied in &policy.denied {
-        let exists = denied.path.try_exists().map_err(|e| {
-            Error::Backend(format!(
-                "{}: inspect sandbox deny path '{}': {e}",
-                request.runtime,
-                denied.path.display()
-            ))
-        })?;
-        if !exists {
-            // Mounting onto a missing destination under `--bind / /` creates
-            // that mountpoint on the host. A missing path has no launch-time
-            // contents to protect, so P1 skips it instead of mutating the host.
+        let canonical = match denied.path.canonicalize() {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // Mounting onto a missing destination under `--bind / /`
+                // creates that mountpoint on the host. A missing path has no
+                // launch-time contents to protect, so P1 skips it instead of
+                // mutating the host.
+                continue;
+            }
+            Err(error) => {
+                return Err(Error::Backend(format!(
+                    "{}: inspect sandbox deny path '{}': {error}",
+                    request.runtime,
+                    denied.path.display()
+                )));
+            }
+        };
+        if canonical != denied.path {
+            // `collapse_denied_paths` also inserted the canonical target. Only
+            // mount that target: bubblewrap rejects symlink destinations, while
+            // access through the alias still resolves into the covered inode.
             continue;
         }
         match denied.kind {
@@ -1146,7 +1156,7 @@ mod tests {
                     kind: DeniedKind::File,
                 },
                 DeniedPath {
-                    path: PathBuf::from("/tmp"),
+                    path: PathBuf::from("/usr"),
                     kind: DeniedKind::Directory,
                 },
                 DeniedPath {
@@ -1171,16 +1181,62 @@ mod tests {
             window
                 == [
                     OsStr::new("--tmpfs"),
-                    OsStr::new("/tmp"),
+                    OsStr::new("/usr"),
                     OsStr::new("--chmod"),
                     OsStr::new("000"),
-                    OsStr::new("/tmp"),
+                    OsStr::new("/usr"),
                 ]
         }));
         assert!(!values.iter().any(|value| *value == missing.as_os_str()));
         assert!(values
             .windows(2)
             .any(|window| { window == [OsStr::new(INTERNAL_MARKER), OsStr::new("--inner")] }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_bwrap_plan_mounts_canonical_target_not_symlink_alias() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!(
+            "ab-sandbox-bwrap-alias-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&base).unwrap();
+        let base = base.canonicalize().unwrap();
+        let target = base.join("target");
+        let alias = base.join("alias");
+        std::fs::write(&target, "secret").unwrap();
+        symlink(&target, &alias).unwrap();
+
+        let request = InternalRequest {
+            inner: false,
+            runtime: "codex".into(),
+            workspace: PathBuf::from("/work"),
+            program: OsString::from("codex"),
+            args: vec![],
+        };
+        let policy = ResolvedPolicy {
+            workspace: PathBuf::from("/work"),
+            writable: vec![],
+            denied: vec![
+                DeniedPath {
+                    path: alias.clone(),
+                    kind: DeniedKind::File,
+                },
+                DeniedPath {
+                    path: target.clone(),
+                    kind: DeniedKind::File,
+                },
+            ],
+        };
+        let args = build_bwrap_args(&request, &policy, Path::new("/bin/agent-bridge"), 17).unwrap();
+        assert!(args.iter().any(|value| value == target.as_os_str()));
+        assert!(!args.iter().any(|value| value == alias.as_os_str()));
+
+        std::fs::remove_file(&alias).unwrap();
+        std::fs::remove_file(&target).unwrap();
+        std::fs::remove_dir(&base).unwrap();
     }
 
     #[test]
