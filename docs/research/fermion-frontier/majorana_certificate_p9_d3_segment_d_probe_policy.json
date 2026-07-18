@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P9-STEP3-E768-BITORDER-D3-SEGMENT-D-SUBGRID-V1",
+  "policy_role": "separately_versioned_non_authoritative_static_segment_D_subgrid_diagnostic_for_the_frozen_P9_step3_path_under_unchanged_admission",
+  "required_direct_parent_commit": "770076085452822a0128a5898042d986b5c2ec36",
+  "scientific_authority": "NONE",
+  "certificate_eligible": false,
+  "result_contract_eligible": false,
+  "hindsight_firewall": {
+    "classification": "P9_D2_RESULT_INFORMED_D3_RESULT_UNPINNED_SCIENTIFIC_BLIND_SEGMENT_D_SUBGRID_DIAGNOSTIC",
+    "D2_result_informed": true,
+    "D3_result_unpinned_before_preprobe_commit": true,
+    "allowed_D2_result_facts_are_exhaustive": [
+      "D2_report_identity_and_scientific_authority_NONE",
+      "D2_certificate_and_result_contract_eligibility_are_false",
+      "D2_trace_was_a_legal_interrupted_protocol_prefix",
+      "D2_reached_the_P6_prefix_resource_conformance_passed_marker",
+      "D2_reached_step3_state_initialized_and_schedule_entered",
+      "D2_segments_A_through_C_returned",
+      "D2_segment_D_started_and_checkpoint_1_reached",
+      "D2_segment_D_checkpoint_2_returned_and_every_coarse_schedule_marker_after_D_were_absent",
+      "D2_step3_schedule_engine_returned_and_D2_diagnostic_completed_markers_were_absent",
+      "D2_diagnostic_terminal_branch_was_null",
+      "D2_resource_witness_is_null",
+      "D2_future_S0_admission_is_not_established"
+    ],
+    "forbidden_D2_or_suppressed_inputs_beyond_transient_parent_validation": [
+      "D2_raw_report_bytes_after_transient_identity_and_minimal_projection_validation",
+      "D2_complete_phase_event_array_event_count_or_phase_digest_after_transient_exact_parent_validation",
+      "D2_host_failure_timeout_or_any_timing_returncode_stdout_stderr_or_time_diagnostics",
+      "D2_raw_phase_channel_bytes_hash_byte_count_or_receive_times",
+      "D2_clone_driver_policy_or_any_D2_runner_state",
+      "D2_fixture_bytes_after_transient_host_and_runtime_custody_validation",
+      "any_resource_count_memory_RSS_or_resource_witness",
+      "any_live_term_count_index_mask_coefficient_tick_budget_cap_final_state_or_selector_callback_value",
+      "any_D0_D1_D2_or_D3_observation_used_to_change_candidate_caps_host_admission_or_fallback"
+    ],
+    "D3_does_not_rerun_D0_D1_or_D2": true,
+    "a_second_D3_execution_requires_a_new_precommitted_version": true,
+    "no_D3_execution_output_may_exist_before_the_preprobe_commit": true
+  },
+  "source_clone_contract": {
+    "frozen_P9_driver_git_commit": "92629e3049ac0dfac12c390fc5ed499597076b7f",
+    "frozen_P9_driver_relative_path": "docs/research/fermion-frontier/majorana_certificate_p9_bit_order_resource_probe/majorana_p9_bit_order_step3_resource_probe.jl",
+    "frozen_P9_driver_sha256": "f12ea9a93d4079792de8b5e8bae5b5ee0b45895a4399c19f41b7041034d3f14c",
+    "frozen_P9_driver_size_bytes": 78229,
+    "clone_driver_relative_path": "majorana_certificate_p9_d3_segment_d_probe/majorana_p9_bit_order_step3_segment_d_probe.jl",
+    "checker_owned_preamble_and_exact_marker_blocks_only": true,
+    "outer_phase_marker_block_count": 8,
+    "schedule_marker_block_count": 4,
+    "exact_marker_block_count": 12,
+    "forward_byte_construction_and_reverse_deletion_are_required": true,
+    "runtime_source_or_AST_transform_is_forbidden": true,
+    "D3_driver_is_derived_directly_from_frozen_P9_source_not_D2_clone": true,
+    "D2_artifacts_are_not_included_opened_or_staged_by_the_D3_driver": true,
+    "nonmarker_source_difference_stops_without_execution": true
+  },
+  "D3_execution_contract": {
+    "fresh_O0_process_only": true,
+    "all_steps_share_one_live_process_until_the_D3_terminal": true,
+    "checkpoint_or_serialized_resume_forbidden": true,
+    "P9_core_mode_is_exactly_E768_BITORDER_STEP3_V1": true,
+    "D3_stops_after_the_first_D3_terminal_and_does_not_construct_or_emit_a_P9_D0_resource_witness": true,
+    "stdout_must_be_empty_and_resource_witness_must_be_null": true,
+    "stdout_and_stderr_are_drained_without_unbounded_outer_buffering_and_limit_violation_stops_the_scope": true,
+    "only_fixed_outer_static_schedule_and_anonymous_segment_D_subgrid_phase_events_are_allowed": true,
+    "phase_event_vocabulary_count": 52,
+    "phase_event_protocol_maximum_event_count": 51,
+    "ordered_internal_schedule_event_count": 39,
+    "exact_legal_terminal_count": 32,
+    "segment_D_anonymous_subgrid_completed_composite_ordinals": [20, 24, 28],
+    "segment_D_anonymous_subgrid_events": [
+      "STEP3_SEGMENT_D_SUBGRID_ALPHA_REACHED",
+      "STEP3_SEGMENT_D_SUBGRID_BETA_REACHED",
+      "STEP3_SEGMENT_D_SUBGRID_GAMMA_REACHED"
+    ],
+    "allowed_early_schedule_prefix_event_counts": [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 16, 17, 18, 20, 21, 22, 24, 25, 26, 28, 29, 30, 32, 33, 34, 36, 37, 38],
+    "forbidden_early_schedule_prefix_event_counts": [0, 4, 8, 12, 19, 23, 27, 31, 35],
+    "early_and_full_schedule_return_suffix": ["STEP3_SCHEDULE_RETURNED", "STEP3_ENGINE_RETURNED", "D3_DIAGNOSTIC_COMPLETED"],
+    "zero_schedule_markers_or_a_segment_returned_before_the_next_segment_started_cannot_cleanly_early_return": true,
+    "subgrid_wire_names_export_no_ordinal_or_live_state": true,
+    "subgrid_marker_logic_reads_only_D3_owned_static_schedule_cursors": true,
+    "term_count_index_mask_coefficient_tick_budget_cap_selector_callback_boundary_constituent_and_hot_loop_events_are_forbidden": true,
+    "D3_phase_IO_has_no_S0_admission_authority": true
+  },
+  "phase_report_contract": {
+    "report_type": "majorana_p9_step3_e768_bitorder_segment_d_subgrid_report_d3_v1",
+    "report_contains_only_D3_phase_language_and_nonmathematical_host_status": true,
+    "no_D0_D1_D2_or_D3_timing_RSS_stderr_stdout_returncode_or_resource_measurement_is_persisted": true,
+    "no_raw_phase_channel_bytes_hash_byte_count_or_receive_times_are_persisted": true,
+    "resource_witness_is_always_null": true,
+    "D3_has_scientific_authority_NONE_and_does_not_establish_future_S0_admission": true,
+    "only_allowed_post_D3_refinement_route": "a_new_precommitted_D4_static_per_composite_DFA_for_the_single_four_composite_partition_containing_a_legal_D3_interruption",
+    "target_partition_route_map": [
+      {
+        "last_reached_boundary": "STEP3_SEGMENT_D_CHECKPOINT_1_REACHED",
+        "required_absent_next_boundary": "STEP3_SEGMENT_D_SUBGRID_ALPHA_REACHED",
+        "only_allowed_D4_completed_composite_ordinals": [17, 18, 19, 20]
+      },
+      {
+        "last_reached_boundary": "STEP3_SEGMENT_D_SUBGRID_ALPHA_REACHED",
+        "required_absent_next_boundary": "STEP3_SEGMENT_D_SUBGRID_BETA_REACHED",
+        "only_allowed_D4_completed_composite_ordinals": [21, 22, 23, 24]
+      },
+      {
+        "last_reached_boundary": "STEP3_SEGMENT_D_SUBGRID_BETA_REACHED",
+        "required_absent_next_boundary": "STEP3_SEGMENT_D_SUBGRID_GAMMA_REACHED",
+        "only_allowed_D4_completed_composite_ordinals": [25, 26, 27, 28]
+      },
+      {
+        "last_reached_boundary": "STEP3_SEGMENT_D_SUBGRID_GAMMA_REACHED",
+        "required_absent_next_boundary": "STEP3_SEGMENT_D_CHECKPOINT_2_REACHED",
+        "only_allowed_D4_completed_composite_ordinals": [29, 30, 31, 32]
+      }
+    ],
+    "complete_invalid_or_outside_target_D3_traces_do_not_authorize_this_D4_route": true,
+    "D3_phase_trace_must_not_enter_the_D4_runner": true,
+    "no_automatic_repeat_or_in_place_cap_relaxation_is_allowed": true
+  },
+  "staged_source_custody": {
+    "staged_path_order": [
+      "majorana_certificate_p0/Project.toml",
+      "majorana_certificate_p0/Manifest.toml",
+      "majorana_certificate_p2/majorana_p2_runner.jl",
+      "majorana_certificate_p3/majorana_p3_runner.jl",
+      "majorana_certificate_p4/majorana_p4_runner.jl",
+      "majorana_certificate_p6/majorana_p6_runner.jl",
+      "majorana_certificate_p2_fixture.json",
+      "majorana_certificate_p3_fixture.json",
+      "majorana_certificate_p4_fixture.json",
+      "majorana_certificate_p5_fixture.json",
+      "majorana_certificate_p6_fixture.json",
+      "majorana_certificate_p9_bit_order_resource_probe_fixture.json",
+      "majorana_certificate_p9_d3_segment_d_probe_fixture.json",
+      "majorana_certificate_p9_d3_segment_d_probe/majorana_p9_bit_order_step3_segment_d_probe.jl"
+    ],
+    "exact_staged_path_count": 14,
+    "all_staged_files_must_be_regular_nonsymlink_and_byte_pinned_before_B0": true,
+    "staged_bytes_must_equal_repository_bytes": true,
+    "D2_report_policy_fixture_Python_and_clone_are_outer_checker_only_and_not_staged": true,
+    "original_P9_driver_is_outer_checker_only_and_not_staged": true,
+    "one_exclusive_execution_claim_is_acquired_immediately_before_launch": true,
+    "abnormal_stop_before_a_canonical_report_retains_the_claim": true
+  },
+  "preprobe_and_result_lifecycle": {
+    "B0_has_exactly_five_new_paths_and_is_a_direct_child_of_D2_B1": true,
+    "B0_cannot_contain_a_D3_report_or_execution_claim": true,
+    "B1_has_exactly_one_new_path_the_canonical_D3_report_and_is_a_direct_child_of_B0": true,
+    "B1_report_Git_blob_must_equal_canonical_report_bytes_and_the_clean_worktree_file": true,
+    "B1_verification_must_reject_any_extra_changed_path_or_dirty_worktree": true,
+    "claimed_B0_HEAD_and_worktree_are_reverified_before_report_write_and_claim_release": true,
+    "claim_is_deleted_only_after_validate_report_and_exclusive_canonical_report_write_succeed": true
+  },
+  "source_pins_status": "FROZEN_EXACT",
+  "exact_source_file_count": 18,
+  "source_files": [
+    {"relative_path": "majorana_certificate_p0/Project.toml", "size_bytes": 235, "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f"},
+    {"relative_path": "majorana_certificate_p0/Manifest.toml", "size_bytes": 15336, "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406"},
+    {"relative_path": "majorana_certificate_p2/majorana_p2_runner.jl", "size_bytes": 33888, "sha256": "03edd9640bc3d83a61ea0c9c7d9e93af3fc683972c517af4a7691e21359e25ed"},
+    {"relative_path": "majorana_certificate_p3/majorana_p3_runner.jl", "size_bytes": 59318, "sha256": "958de8886bb8e56cda26eb6c45029c7016e886caae26c598c7e6b5c595257fe2"},
+    {"relative_path": "majorana_certificate_p4/majorana_p4_runner.jl", "size_bytes": 24880, "sha256": "f425dbab80d60c49fceefc2b3e805fd3a4b29037f0e95491c50891ed7b7b9f47"},
+    {"relative_path": "majorana_certificate_p6/majorana_p6_runner.jl", "size_bytes": 74471, "sha256": "b63143c066d3d258594e27ee4062632632030e9962a0fcd127fcd5000ff9cc1c"},
+    {"relative_path": "majorana_certificate_p2_fixture.json", "size_bytes": 5891, "sha256": "252fa0c4ed26db5581bcd9ff0101d18d858faf6d31fb9b6cdcaa821bf318e82a"},
+    {"relative_path": "majorana_certificate_p3_fixture.json", "size_bytes": 6033, "sha256": "a478b783ae4005f7ef79572a4b34eee72299da262e439bdc35eca13496bdc236"},
+    {"relative_path": "majorana_certificate_p4_fixture.json", "size_bytes": 17259, "sha256": "b020b6bcc0ed56010af9ed3b1836469c084b9244a9303a8101cf7657adb79964"},
+    {"relative_path": "majorana_certificate_p5_fixture.json", "size_bytes": 4763, "sha256": "fd8b46c8761f548d615042b24f8ec85b32891e4f42dbafdd9bd70d58379a8afb"},
+    {"relative_path": "majorana_certificate_p6_fixture.json", "size_bytes": 14267, "sha256": "fb381c613d675551d33680484a88870020a494e4a356dafd9fd869714c9d475d"},
+    {"relative_path": "majorana_certificate_p9_bit_order_resource_probe_fixture.json", "size_bytes": 21575, "sha256": "8365f441765cc5dbe1658b8aba2e2371c1619a0894c73ad5c0b21f8bf74a1be8"},
+    {"relative_path": "majorana_certificate_p9_d3_segment_d_probe_fixture.json", "size_bytes": 16836, "sha256": "0889693476ac4b60d0e9a2a6540336a0bd3293de26f480430ad3967d72dcbe6f"},
+    {"relative_path": "majorana_certificate_p9_d3_segment_d_probe/majorana_p9_bit_order_step3_segment_d_probe.jl", "size_bytes": 88652, "sha256": "942c6366fa509da83bf9a59749b75de3021558fb5cf45d68dbc5ee4665e2d171"},
+    {"relative_path": "majorana_certificate_p0_runtime_lock.json", "size_bytes": 5281, "sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17"},
+    {"relative_path": "majorana_certificate_p9_d3_segment_d_probe.py", "size_bytes": 98718, "sha256": "98822f8afc38fbf019260a3cf540267d0ba1756302cac97f8dbed08a945db71c"},
+    {"relative_path": "test_majorana_certificate_p9_d3_segment_d_probe.py", "size_bytes": 32758, "sha256": "06bba0bc09563a19b85bd16e64a542d88bba5a07e4ac56d16d6e20008c6f5118"},
+    {"relative_path": "majorana_certificate_p9_bit_order_resource_probe/majorana_p9_bit_order_step3_resource_probe.jl", "size_bytes": 78229, "sha256": "f12ea9a93d4079792de8b5e8bae5b5ee0b45895a4399c19f41b7041034d3f14c"}
+  ]
+}
