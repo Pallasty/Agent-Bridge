@@ -88,6 +88,19 @@ runtime promotion. See
 `docs/design/ENGRAM_G1_GROUPED_CORPUS_PREREGISTRATION_2026_07_17.md` and run
 `scripts/check-engram-g1-corpus-design.sh`.
 
+`engram_g1_freeze_preflight.py` is the G1.1 successor boundary. It preserves
+the G1 v0 bytes while replacing sample-size-dependent rate interpretation with
+paired integer gates, separating the Agent-Bridge failure-classification
+baseline from the later stable/density experiment comparators, and fixing the
+30-group family cap at 10. It validates hash-only private role and grouped-
+corpus packets, but does not authenticate identities or receipts. Real packets
+must remain untracked under ignored `data/`; redacted receipts contain only
+aggregate counts. Contract, role, and manifest passes grant review readiness
+only—never corpus assembly/freeze, candidate implementation, BioCortex
+execution, retrieval mutation, live writes, or promotion. See
+`docs/design/ENGRAM_G1_FREEZE_PREFLIGHT_2026_07_18.md` and run
+`scripts/check-engram-g1-freeze-preflight.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class

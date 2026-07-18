@@ -1,0 +1,178 @@
+{
+  "schema": "agent_bridge.engram_g1_freeze_preflight_contract.v1",
+  "contract_id": "engram_g1_freeze_preflight_20260718",
+  "stage": "g1_freeze_preflight_only",
+  "predecessor": {
+    "design_id": "engram_g1_grouped_corpus_preregistration_20260717",
+    "design_commit": "d8a17461858354a1b0bbd4f86c29eae75bdf0aa9",
+    "design_sha256": "275ae840b62a8a5408ea11e98836aefded998d87d2a2c4846939414a3128a0f0",
+    "validator_sha256": "2a408d64b34605f434377b3c11f71807f6c81068aa7bcba069c8d3a6dc44cb91",
+    "immutable": true
+  },
+  "amendment": {
+    "reason_codes": [
+      "discrete_sample_granularity",
+      "comparator_roster_ambiguity",
+      "family_cap_rounding",
+      "role_and_manifest_custody"
+    ],
+    "made_before_new_corpus_observation": true,
+    "replaces_rate_only_decision_rule": true,
+    "changes_predecessor_bytes": false
+  },
+  "claim_scope": {
+    "decision_class": "deterministic_engineering_screen",
+    "population_effect_claim_authority": false,
+    "neuroscience_equivalence_claim_authority": false,
+    "runtime_value_claim_authority": false
+  },
+  "application_baseline": {
+    "purpose": "failure_signature_classification",
+    "source_commit": "3bf8ad3a67ff02a4e717db8e29e89079f66c01cf",
+    "binary_sha256": "2fcd99a55acb0e433320ada9b058651d46c10500a2ec6459866c3dd504580f30",
+    "environment_sha256": "13be7b202d061a1fd37bc2405427ecf1251f85d043b8b5341c8efbc835564f5e",
+    "perception_filter_state_sha256": "9569e1553c59f54bc95dc9cca9aed6cb65f1fd1b4aae2c4522629aaf63ed9b31",
+    "embedding_transport": "loopback_delegated",
+    "retrieval_modes": [
+      "fts",
+      "hybrid",
+      "semantic"
+    ],
+    "aggregate_envelope": "any_mode",
+    "top_k": 10,
+    "deterministic_replays": 2,
+    "ranks_must_match": true
+  },
+  "experiment_decision": {
+    "unit": "episode_group",
+    "partition": "sealed",
+    "primary_signature": "overgeneralization_gap",
+    "candidate_arm": "clustered_reorganization",
+    "comparator_arms": [
+      "stable_control",
+      "density_only"
+    ],
+    "must_beat_each_comparator": true,
+    "minimum_paired_primary_repairs_vs_each_comparator": 2,
+    "minimum_sealed_primary_episode_groups": 5,
+    "rate_statistics_are_reporting_only": true,
+    "hit_guards": {
+      "maximum_new_exact_misses": 0,
+      "maximum_new_related_misses": 0,
+      "maximum_no_relevant_gap_regressions": 0,
+      "maximum_new_per_mode_unrelated_intrusions": 0
+    },
+    "rank_guards": {
+      "maximum_exact_mrr_absolute_loss": 0.05,
+      "maximum_related_mrr_absolute_loss": 0.05
+    },
+    "falsifiers": {
+      "arms": [
+        "mechanism_off",
+        "cluster_shuffled"
+      ],
+      "candidate_advantage_must_disappear_when_disabled_or_shuffled": true
+    }
+  },
+  "corpus": {
+    "frozen_episode_groups": 30,
+    "intake_episode_group_hard_cap": 36,
+    "probes_per_episode_group": 3,
+    "probe_classes": [
+      "exact",
+      "related",
+      "unrelated"
+    ],
+    "split_unit": "episode_group",
+    "partitions": {
+      "fit": 12,
+      "development": 8,
+      "sealed": 10
+    },
+    "signature_minimums": {
+      "overgeneralization_gap": {
+        "fit": 6,
+        "development": 4,
+        "sealed": 5
+      },
+      "no_relevant_gap": {
+        "fit": 3,
+        "development": 3,
+        "sealed": 3
+      },
+      "ordinary_retrieval_gap": {
+        "fit": 1,
+        "development": 1,
+        "sealed": 1
+      }
+    },
+    "ordinary_retrieval_gap_exact_count": 3,
+    "eligible_signatures": [
+      "overgeneralization_gap",
+      "no_relevant_gap",
+      "ordinary_retrieval_gap",
+      "generalization_gap"
+    ],
+    "excluded_signatures": [
+      "ambiguous_dual_failure"
+    ],
+    "minimum_application_families": 4,
+    "maximum_frozen_groups_per_application_family": 10,
+    "family_cap_rounding": "floor_0.35_times_30",
+    "admitted_g0_incident": {
+      "episode_group_id_sha256": "5bb20800cea3bdb973ea0604fcd280e89666736b7cd9e595e24c89f4b744a1fc",
+      "signature": "overgeneralization_gap",
+      "partition": "fit",
+      "exact_count": 1
+    }
+  },
+  "role_commitment": {
+    "packet_schema": "agent_bridge.engram_g1_role_commitment_packet.v1",
+    "required_role_counts": {
+      "candidate_implementer": 1,
+      "consumer_curator": 1,
+      "freeze_reviewer": 2,
+      "sealed_evaluator_custodian": 1
+    },
+    "all_holder_commitments_must_be_distinct": true,
+    "holder_commitments_require_private_salts": true,
+    "all_appointment_receipts_must_be_nonzero": true,
+    "created_before_private_corpus_assembly": true,
+    "candidate_may_curate": false,
+    "candidate_may_review_freeze": false,
+    "candidate_may_hold_sealed_custody": false,
+    "validator_authenticates_real_world_identity": false
+  },
+  "private_manifest": {
+    "packet_schema": "agent_bridge.engram_g1_private_corpus_manifest.v1",
+    "real_packets_must_be_ignored_under_data": true,
+    "stores_probe_hashes_not_raw_material": true,
+    "probe_and_group_commitments_require_private_salts": true,
+    "stores_partition_membership_privately": true,
+    "requires_role_packet_binding": true,
+    "requires_role_appointment_before_manifest": true,
+    "requires_consumer_owned": true,
+    "requires_observed_before_candidate_lock": true,
+    "forbids_candidate_authored_probes": true,
+    "requires_rights_cleared": true,
+    "requires_identical_baseline_replays": true,
+    "redacted_receipt_contains_group_identifiers": false
+  },
+  "resource_envelope": {
+    "frozen_manifest_observations_per_replay": 270,
+    "frozen_manifest_baseline_observations": 540,
+    "intake_maximum_observations_per_replay": 324,
+    "intake_maximum_baseline_observations": 648
+  },
+  "boundaries": {
+    "contains_raw_probe_material": false,
+    "assigns_real_role_holders": false,
+    "assembles_real_corpus": false,
+    "g1_corpus_freeze_authority": false,
+    "candidate_implementation_authority": false,
+    "biocortex_experiment_execution_authority": false,
+    "retrieval_order_mutation_authority": false,
+    "live_store_write_authority": false,
+    "runtime_promotion_authority": false
+  }
+}
