@@ -26,11 +26,11 @@ was read or assembled.
 - predecessor validator SHA-256:
   `f276765f22ee5b2f69e24cf7a79bd9a30e8291f900973d89c06f17d1d0468cdc`;
 - G1.2 role-review contract SHA-256:
-  `668656be38d1fc9572fd6dde0f012a8facb83a089ad3ee28dba97bc9a58d3a28`;
+  `842a86010b61a030993d37e6cc2b06206315a22a5b319c79dfaf07ed32522c09`;
 - G1.2 validator SHA-256:
-  `fb2003edd60041ba456f471fb245811c045600c72531e637bf47fbf3927021c1`;
+  `4e61e5910bd20f26d0e10b9306e42f22645195cf85cdba8a10fc4a958318287d`;
 - G1.2 checker SHA-256:
-  `9f3926059951baeeacedaa39b13f5b9ede78a1f6571263482d275a45296ac821`.
+  `cae7a3b00f3769e2f035bed27bf8e29d98a81b3f75785cabba2f2c3831ca161e`.
 
 The predecessor files remain unchanged. G1.2 validates G1.1 role packets
 through the bound predecessor validator before it evaluates any review.
