@@ -76,6 +76,18 @@ corpus-freeze, or runtime authority. See
 `docs/design/ENGRAM_G0_REAL_FAILURE_INTAKE_2026_07_17.md` and run
 `scripts/check-engram-g0-failure-intake.sh`.
 
+`engram_g1_corpus_design.py` validates the aggregate-only G1 grouped-corpus
+preregistration opened by a positive real G0 receipt. It fixes episode-level
+FIT/development/sealed splits, provenance and role separation, a specificity
+primary endpoint, exact/related non-inferiority guards, matched-arm names, and
+a bounded observation budget. It rejects raw probes, keys, split membership,
+threshold relaxation, or any later-stage authority. A passing receipt permits
+only independent consumer corpus-assembly review; it does not freeze a corpus
+or authorize candidate code, retrieval mutation, BioCortex execution, or
+runtime promotion. See
+`docs/design/ENGRAM_G1_GROUPED_CORPUS_PREREGISTRATION_2026_07_17.md` and run
+`scripts/check-engram-g1-corpus-design.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class

@@ -1,0 +1,193 @@
+{
+  "schema": "agent_bridge.engram_g1_grouped_corpus_design.v0",
+  "design_id": "engram_g1_grouped_corpus_preregistration_20260717",
+  "stage": "g1_grouped_corpus_design_only",
+  "g0_receipt_binding": {
+    "contract_id": "engram_g0_real_failure_intake_20260717",
+    "contract_sha256": "0490e0db9fcc5681ca44229f3f2178a19d8dda08f8acf72f006cd211d6175de8",
+    "packet_id": "hard_miss_cohort_20260622_23_g0",
+    "packet_sha256": "feb5c8c639f48a6179144cfbe6b16a548aef91a127840c37640b7673a88c97e1",
+    "g0_verdict": "PASS_OBSERVED_RELEVANT_FAILURE",
+    "admitted_signature": "overgeneralization_gap",
+    "admitted_episode_group_id": "remote_session_steering_gap",
+    "consumer_review_receipt_sha256": "6a45b042bc978e19dade66ff95d8846ece4c18985e51622296febc99fdfef711"
+  },
+  "objective": {
+    "primary_failure": "overgeneralization_gap",
+    "primary_metric": "unrelated_target_intrusion_rate_at_10",
+    "direction": "lower_is_better",
+    "preservation_metrics": [
+      "exact_hit_at_10",
+      "related_hit_at_10",
+      "exact_mrr",
+      "related_mrr"
+    ]
+  },
+  "corpus": {
+    "episode_group_target": 30,
+    "episode_group_hard_cap": 36,
+    "frozen_scored_group_count": 30,
+    "probes_per_episode_group": 3,
+    "probe_classes": [
+      "exact",
+      "related",
+      "unrelated"
+    ],
+    "split_unit": "episode_group",
+    "keep_group_probes_together": true,
+    "partitions": {
+      "fit": {
+        "episode_groups": 12,
+        "visibility": "candidate_visible"
+      },
+      "development": {
+        "episode_groups": 8,
+        "visibility": "reviewer_mediated"
+      },
+      "sealed": {
+        "episode_groups": 10,
+        "visibility": "custodian_only"
+      }
+    },
+    "g0_incident_handling": {
+      "partition": "fit",
+      "counts_toward_signature_minimum": true,
+      "excluded_from_development": true,
+      "excluded_from_sealed": true
+    },
+    "signature_strata": [
+      {
+        "signature": "overgeneralization_gap",
+        "role": "primary",
+        "minimum_episode_groups": 15,
+        "partition_minimums": {
+          "fit": 6,
+          "development": 4,
+          "sealed": 5
+        }
+      },
+      {
+        "signature": "no_relevant_gap",
+        "role": "stability_control",
+        "minimum_episode_groups": 9,
+        "partition_minimums": {
+          "fit": 3,
+          "development": 3,
+          "sealed": 3
+        }
+      },
+      {
+        "signature": "ordinary_retrieval_gap",
+        "role": "exclusion_control",
+        "minimum_episode_groups": 3,
+        "partition_minimums": {
+          "fit": 1,
+          "development": 1,
+          "sealed": 1
+        }
+      }
+    ],
+    "excluded_signatures": [
+      "ambiguous_dual_failure"
+    ],
+    "conditionally_eligible_signatures": [
+      "generalization_gap"
+    ],
+    "minimum_application_families": 4,
+    "maximum_fraction_per_application_family": 0.35
+  },
+  "provenance": {
+    "consumer_owned_required": true,
+    "observed_before_candidate_implementation_lock": true,
+    "candidate_authored_probes_forbidden": true,
+    "candidate_team_may_curate_probes": false,
+    "rights_cleared_required": true,
+    "minimum_independent_consumer_reviewers": 2
+  },
+  "baseline": {
+    "retrieval_modes": [
+      "fts",
+      "hybrid",
+      "semantic"
+    ],
+    "aggregate_envelope": "any_mode",
+    "top_k": 10,
+    "deterministic_replay_count_before_freeze_review": 2,
+    "require_identical_ranks_across_replays": true,
+    "require_frozen_environment_receipt": true
+  },
+  "metrics": {
+    "decision_partition": "sealed",
+    "unit_of_analysis": "episode_group",
+    "primary": {
+      "metric": "unrelated_target_intrusion_rate_at_10",
+      "stratum": "overgeneralization_gap",
+      "aggregation": "any_mode",
+      "comparison_baseline": "strongest_preregistered_baseline",
+      "strongest_baseline_selection": "lowest_intrusion_rate",
+      "minimum_absolute_reduction": 0.2
+    },
+    "noninferiority": {
+      "exact_hit_at_10_maximum_absolute_loss": 0.02,
+      "related_hit_at_10_maximum_absolute_loss": 0.02,
+      "exact_mrr_maximum_absolute_loss": 0.05,
+      "related_mrr_maximum_absolute_loss": 0.05
+    },
+    "specificity_guards": {
+      "per_mode_unrelated_intrusion_maximum_absolute_increase": 0.05,
+      "no_relevant_gap_control_maximum_absolute_regression": 0.02
+    }
+  },
+  "custody": {
+    "consumer_curator_role": "consumer_curator",
+    "candidate_implementer_role": "candidate_implementer",
+    "sealed_evaluator_role": "sealed_evaluator_custodian",
+    "require_role_separation": true,
+    "same_person_may_hold_multiple_roles": false,
+    "minimum_independent_freeze_reviewers": 2,
+    "fit_visibility": "candidate_visible",
+    "development_visibility": "reviewer_mediated",
+    "sealed_raw_material_visibility": "custodian_only"
+  },
+  "sealed_evaluation": {
+    "maximum_attempts": 1,
+    "requires_candidate_hash_lock": true,
+    "raw_material_hidden_from_candidate": true,
+    "partition_membership_hidden_from_candidate": true,
+    "labels_hidden_from_candidate": true,
+    "one_shot_after_candidate_lock": true
+  },
+  "experiment_design": {
+    "arms": [
+      "stable_control",
+      "density_only",
+      "clustered_reorganization",
+      "mechanism_off",
+      "cluster_shuffled"
+    ],
+    "equal_growth_budget": true,
+    "deterministic": true,
+    "opt_in": true,
+    "runtime_api_change": false,
+    "arms_are_design_declarations_only": true
+  },
+  "resource_envelope": {
+    "maximum_episode_groups": 36,
+    "probes_per_episode_group": 3,
+    "retrieval_modes": 3,
+    "maximum_observations_per_replay": 324,
+    "baseline_replay_count": 2,
+    "maximum_baseline_observations": 648
+  },
+  "boundaries": {
+    "contains_raw_queries": false,
+    "contains_episode_keys": false,
+    "contains_partition_membership": false,
+    "writes_live_store": false,
+    "mutates_retrieval_order": false,
+    "g1_corpus_freeze_authority": false,
+    "candidate_implementation_authority": false,
+    "biocortex_experiment_execution_authority": false,
+    "runtime_promotion_authority": false
+  }
+}
