@@ -1,5 +1,5 @@
 use ab_agent::{
-    AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
+    AcpRuntime, AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
 use ab_bridge::biocortex_capability_ledger::{
@@ -20344,6 +20344,8 @@ async fn run_rescue_snapshot(
 /// - `AGENT_BRIDGE_REPO`           — git repo for the worktree manager (default: `$PWD`)
 /// - `AGENT_BRIDGE_AGENT_RUNTIME`  — `claude-code` (default) | `warp-oz` | `auggie`
 /// - `AGENT_BRIDGE_CLAUDE_BIN`     — path to the `claude` CLI (default: `claude`)
+/// - `AGENT_BRIDGE_ACP_BIN`        — ACP executable for explicit spawns (default: `grok`)
+/// - `AGENT_BRIDGE_ACP_ARGS`       — ACP stdio argv (default: `agent stdio`)
 /// - `AGENT_BRIDGE_OZ_BIN`         — path to the `oz` CLI (default: `oz`)
 /// - `AGENT_BRIDGE_OZ_ENVIRONMENT_ID` — default cloud env id for `warp-oz`
 /// - `AGENT_BRIDGE_AUGGIE_BIN`     — path to the `auggie` CLI (default: `auggie`)
@@ -20418,7 +20420,7 @@ async fn build_hub() -> Result<Hub> {
 
     // Always register the auxiliary CLI agent runtimes so `agent_spawn` can
     // fan out to them when the caller passes `backend: "opencode" | "kilo"
-    // | "gemini" | "codex"`. The `binary` on each is just the CLI name; if
+    // | "gemini" | "codex" | "acp"`. The `binary` on each is just the CLI name; if
     // it's not on PATH, spawn() returns a clear error at call time rather
     // than failing daemon startup.
     let opencode: Arc<dyn AgentRuntime> =
@@ -20427,6 +20429,17 @@ async fn build_hub() -> Result<Hub> {
         Arc::new(OpenCodeFamilyRuntime::kilo().with_store(store.clone()));
     let gemini: Arc<dyn AgentRuntime> = Arc::new(GeminiRuntime::new().with_store(store.clone()));
     let codex: Arc<dyn AgentRuntime> = Arc::new(CodexRuntime::new().with_store(store.clone()));
+    let acp_bin = std::env::var("AGENT_BRIDGE_ACP_BIN").unwrap_or_else(|_| "grok".into());
+    let acp_args = std::env::var("AGENT_BRIDGE_ACP_ARGS")
+        .ok()
+        .map(|s| s.split_whitespace().map(str::to_string).collect::<Vec<_>>())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| vec!["agent".into(), "stdio".into()]);
+    let acp: Arc<dyn AgentRuntime> = Arc::new(
+        AcpRuntime::with_binary(acp_bin)
+            .with_args(acp_args)
+            .with_store(store.clone()),
+    );
 
     Ok(Hub::builder()
         .notifier(notifier)
@@ -20438,6 +20451,7 @@ async fn build_hub() -> Result<Hub> {
         .register_agent(kilo)
         .register_agent(gemini)
         .register_agent(codex)
+        .register_agent(acp)
         .worktree(worktree)
         .build())
 }

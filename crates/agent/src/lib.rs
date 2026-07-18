@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod acp;
 pub mod auggie;
 pub mod claude_code;
 pub mod codex;
@@ -27,6 +28,7 @@ pub mod pty_interactive;
 pub mod pty_session;
 pub mod worktree;
 
+pub use acp::AcpRuntime;
 pub use auggie::AuggieRuntime;
 pub use claude_code::ClaudeCodeRuntime;
 pub use codex::CodexRuntime;
