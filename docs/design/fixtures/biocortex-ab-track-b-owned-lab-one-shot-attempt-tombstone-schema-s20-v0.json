@@ -1,0 +1,558 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_one_shot_attempt_tombstone_s20.v0",
+  "title": "Agent-Bridge S20 one-shot attempt tombstone",
+  "description": "Closed packet for a durable one-attempt orchestration state. Revalidation, a new run, challenge, controller, or nonce cannot bypass a terminal authorization tombstone.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "hashing_contract",
+    "test_only",
+    "synthetic",
+    "tombstone_state",
+    "authority_binding",
+    "attempt_binding",
+    "transition",
+    "counters",
+    "result",
+    "parent_receipts",
+    "tombstone_receipt_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.memory_temporal_owned_lab_one_shot_attempt_tombstone_s20.v0"
+    },
+    "packet_kind": {
+      "const": "S20_ONE_SHOT_ATTEMPT_TOMBSTONE"
+    },
+    "canonicalization": {
+      "const": "AB_RESTRICTED_CANONICAL_JSON_S20_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+    },
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "test_only": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "tombstone_state": {
+      "enum": [
+        "SYNTHETIC_KAT_NON_LIVE_TOMBSTONE",
+        "ATTEMPT_RESERVED",
+        "PREFLIGHT_FAILED_TERMINAL",
+        "CLAIM_FAILED_TERMINAL",
+        "CLAIM_OUTCOME_UNKNOWN_TERMINAL",
+        "CLAIM_CONSUMED",
+        "ACTION_OR_RUN_TERMINAL"
+      ]
+    },
+    "authority_binding": {"$ref": "#/$defs/authority_binding"},
+    "attempt_binding": {"$ref": "#/$defs/attempt_binding"},
+    "transition": {"$ref": "#/$defs/transition"},
+    "counters": {"$ref": "#/$defs/counters"},
+    "result": {"$ref": "#/$defs/result"},
+    "parent_receipts": {"$ref": "#/$defs/parent_receipts"},
+    "tombstone_receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"test_only": {"const": true}},
+        "required": ["test_only"]
+      },
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "tombstone_state": {"const": "SYNTHETIC_KAT_NON_LIVE_TOMBSTONE"},
+          "counters": {
+            "properties": {
+              "preflight_attempt_count": {"const": 0},
+              "claim_attempt_count": {"const": 0},
+              "successful_claim_count": {"const": 0},
+              "action_start_count": {"const": 0}
+            }
+          },
+          "result": {
+            "properties": {
+              "failure_code": {"const": null},
+              "execution_permit_issued": {"const": false},
+              "live_action_started": {"const": false}
+            }
+          },
+          "transition": {
+            "properties": {
+              "prior_state": {"const": null},
+              "reservation_committed_before_preflight": {"const": false},
+              "claim_opportunity_burned_before_cas": {"const": false},
+              "terminal_absorbing": {"const": false},
+              "revalidation_with_same_authorization_denied": {"const": false}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthetic": {"const": false},
+          "tombstone_state": {
+            "enum": [
+              "ATTEMPT_RESERVED",
+              "PREFLIGHT_FAILED_TERMINAL",
+              "CLAIM_FAILED_TERMINAL",
+              "CLAIM_OUTCOME_UNKNOWN_TERMINAL",
+              "CLAIM_CONSUMED",
+              "ACTION_OR_RUN_TERMINAL"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"tombstone_state": {"const": "ATTEMPT_RESERVED"}},
+        "required": ["tombstone_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {
+              "prior_state": {"const": null},
+              "reservation_committed_before_preflight": {"const": true},
+              "claim_opportunity_burned_before_cas": {"const": false},
+              "terminal_absorbing": {"const": false},
+              "revalidation_with_same_authorization_denied": {"const": true}
+            }
+          },
+          "counters": {
+            "properties": {
+              "preflight_attempt_count": {"const": 0},
+              "claim_attempt_count": {"const": 0},
+              "successful_claim_count": {"const": 0},
+              "action_start_count": {"const": 0}
+            }
+          },
+          "result": {
+            "properties": {
+              "failure_code": {"const": null},
+              "execution_permit_issued": {"const": false},
+              "live_action_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"tombstone_state": {"const": "PREFLIGHT_FAILED_TERMINAL"}},
+        "required": ["tombstone_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {
+              "prior_state": {"const": "ATTEMPT_RESERVED"},
+              "reservation_committed_before_preflight": {"const": true},
+              "claim_opportunity_burned_before_cas": {"const": false},
+              "terminal_absorbing": {"const": true},
+              "revalidation_with_same_authorization_denied": {"const": true}
+            }
+          },
+          "counters": {
+            "properties": {
+              "preflight_attempt_count": {"const": 1},
+              "claim_attempt_count": {"const": 0},
+              "successful_claim_count": {"const": 0},
+              "action_start_count": {"const": 0}
+            }
+          },
+          "result": {
+            "properties": {
+              "failure_code": {"const": "PREFLIGHT_FAILED"},
+              "execution_permit_issued": {"const": false},
+              "live_action_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"tombstone_state": {"const": "CLAIM_FAILED_TERMINAL"}},
+        "required": ["tombstone_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {
+              "prior_state": {"const": "ATTEMPT_RESERVED"},
+              "reservation_committed_before_preflight": {"const": true},
+              "claim_opportunity_burned_before_cas": {"const": true},
+              "terminal_absorbing": {"const": true},
+              "revalidation_with_same_authorization_denied": {"const": true}
+            }
+          },
+          "counters": {
+            "properties": {
+              "preflight_attempt_count": {"const": 1},
+              "claim_attempt_count": {"const": 1},
+              "successful_claim_count": {"const": 0},
+              "action_start_count": {"const": 0}
+            }
+          },
+          "result": {
+            "properties": {
+              "failure_code": {
+                "enum": [
+                  "CAS_PREDICATE_MISMATCH",
+                  "ROW_MISSING",
+                  "ROW_ALREADY_CONSUMED",
+                  "STOP_TRIGGERED",
+                  "REVOCATION_MISMATCH",
+                  "CONTROL_ROLLBACK_OR_UNKNOWN"
+                ]
+              },
+              "execution_permit_issued": {"const": false},
+              "live_action_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"tombstone_state": {"const": "CLAIM_OUTCOME_UNKNOWN_TERMINAL"}},
+        "required": ["tombstone_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {
+              "prior_state": {"const": "ATTEMPT_RESERVED"},
+              "reservation_committed_before_preflight": {"const": true},
+              "claim_opportunity_burned_before_cas": {"const": true},
+              "terminal_absorbing": {"const": true},
+              "revalidation_with_same_authorization_denied": {"const": true}
+            }
+          },
+          "counters": {
+            "properties": {
+              "preflight_attempt_count": {"const": 1},
+              "claim_attempt_count": {"const": 1},
+              "successful_claim_count": {"const": 0},
+              "action_start_count": {"const": 0}
+            }
+          },
+          "result": {
+            "properties": {
+              "failure_code": {
+                "enum": [
+                  "CHECKPOINT_PREPARE_OR_COMMIT_UNKNOWN",
+                  "DURABILITY_FAILURE"
+                ]
+              },
+              "execution_permit_issued": {"const": false},
+              "live_action_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"tombstone_state": {"const": "CLAIM_CONSUMED"}},
+        "required": ["tombstone_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {
+              "prior_state": {"const": "ATTEMPT_RESERVED"},
+              "reservation_committed_before_preflight": {"const": true},
+              "claim_opportunity_burned_before_cas": {"const": true},
+              "terminal_absorbing": {"const": false},
+              "revalidation_with_same_authorization_denied": {"const": true}
+            }
+          },
+          "counters": {
+            "properties": {
+              "preflight_attempt_count": {"const": 1},
+              "claim_attempt_count": {"const": 1},
+              "successful_claim_count": {"const": 1},
+              "action_start_count": {"const": 0}
+            }
+          },
+          "result": {
+            "properties": {
+              "failure_code": {"const": null},
+              "execution_permit_issued": {"const": true},
+              "live_action_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"tombstone_state": {"const": "ACTION_OR_RUN_TERMINAL"}},
+        "required": ["tombstone_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {
+              "prior_state": {"const": "CLAIM_CONSUMED"},
+              "reservation_committed_before_preflight": {"const": true},
+              "claim_opportunity_burned_before_cas": {"const": true},
+              "terminal_absorbing": {"const": true},
+              "revalidation_with_same_authorization_denied": {"const": true}
+            }
+          },
+          "counters": {
+            "properties": {
+              "preflight_attempt_count": {"const": 1},
+              "claim_attempt_count": {"const": 1},
+              "successful_claim_count": {"const": 1},
+              "action_start_count": {"minimum": 1}
+            }
+          },
+          "result": {
+            "properties": {
+              "failure_code": {"const": "ACTION_OR_RUN_TERMINATED"},
+              "execution_permit_issued": {"const": false},
+              "live_action_started": {"const": true}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {"$ref": "#/$defs/sha256"},
+        {"type": "null"}
+      ]
+    },
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash_algorithm",
+        "canonicalization",
+        "digest_domain",
+        "digest_framing",
+        "hash_scope",
+        "self_hash_field",
+        "self_hash_field_excluded",
+        "repository_framing_lf_excluded",
+        "cross_field_semantic_validation_required",
+        "self_reported_match_fields_are_authoritative"
+      ],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S20_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s20/one-shot-attempt-tombstone/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_TOMBSTONE_RECEIPT_SHA256"},
+        "self_hash_field": {"const": "tombstone_receipt_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "self_reported_match_fields_are_authoritative": {"const": false}
+      }
+    },
+    "nullable_state": {
+      "oneOf": [
+        {
+          "enum": [
+            "ATTEMPT_RESERVED",
+            "PREFLIGHT_FAILED_TERMINAL",
+            "CLAIM_FAILED_TERMINAL",
+            "CLAIM_OUTCOME_UNKNOWN_TERMINAL",
+            "CLAIM_CONSUMED",
+            "ACTION_OR_RUN_TERMINAL"
+          ]
+        },
+        {"type": "null"}
+      ]
+    },
+    "authority_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "signed_payload_sha256",
+        "subject_manifest_sha256",
+        "resource_scope_sha256",
+        "signed_revocation_epoch",
+        "claim_namespace_sha256",
+        "claim_key_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_scope_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_revocation_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "attempt_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id_sha256",
+        "attempt_key_derivation_profile",
+        "run_id_sha256",
+        "controller_binary_sha256",
+        "capability_nonce_sha256",
+        "challenge_nonce_sha256",
+        "reservation_revision"
+      ],
+      "properties": {
+        "attempt_id_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_key_derivation_profile": {
+          "const": "AUTHORIZATION_ID_CLAIM_NAMESPACE_CLAIM_KEY"
+        },
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "challenge_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "reservation_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prior_state",
+        "reservation_committed_before_preflight",
+        "claim_opportunity_burned_before_cas",
+        "terminal_absorbing",
+        "revalidation_with_same_authorization_denied",
+        "automatic_retry_allowed"
+      ],
+      "properties": {
+        "prior_state": {"$ref": "#/$defs/nullable_state"},
+        "reservation_committed_before_preflight": {"type": "boolean"},
+        "claim_opportunity_burned_before_cas": {"type": "boolean"},
+        "terminal_absorbing": {"type": "boolean"},
+        "revalidation_with_same_authorization_denied": {"type": "boolean"},
+        "automatic_retry_allowed": {"const": false}
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preflight_attempt_count",
+        "claim_attempt_count",
+        "successful_claim_count",
+        "action_start_count"
+      ],
+      "properties": {
+        "preflight_attempt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "claim_attempt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "successful_claim_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "action_start_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "failure_code",
+        "execution_permit_issued",
+        "live_action_started"
+      ],
+      "properties": {
+        "failure_code": {
+          "oneOf": [
+            {
+              "enum": [
+                "PREFLIGHT_FAILED",
+                "CAS_PREDICATE_MISMATCH",
+                "ROW_MISSING",
+                "ROW_ALREADY_CONSUMED",
+                "STOP_TRIGGERED",
+                "REVOCATION_MISMATCH",
+                "CONTROL_ROLLBACK_OR_UNKNOWN",
+                "CHECKPOINT_PREPARE_OR_COMMIT_UNKNOWN",
+                "DURABILITY_FAILURE",
+                "ACTION_OR_RUN_TERMINATED"
+              ]
+            },
+            {"type": "null"}
+          ]
+        },
+        "execution_permit_issued": {"type": "boolean"},
+        "live_action_started": {"type": "boolean"}
+      }
+    },
+    "parent_receipts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registration_receipt_sha256",
+        "preflight_receipt_sha256",
+        "control_snapshot_sha256",
+        "claim_receipt_sha256",
+        "checkpoint_receipt_sha256"
+      ],
+      "properties": {
+        "registration_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "preflight_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "control_snapshot_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "claim_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "checkpoint_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tombstone_is_owner_authority",
+        "tombstone_is_serializable_execution_capability",
+        "failed_attempt_allows_automatic_retry",
+        "synthetic_fixture_is_real_attempt",
+        "schema_conformance_authorizes_live_execution",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "tombstone_is_owner_authority": {"const": false},
+        "tombstone_is_serializable_execution_capability": {"const": false},
+        "failed_attempt_allows_automatic_retry": {"const": false},
+        "synthetic_fixture_is_real_attempt": {"const": false},
+        "schema_conformance_authorizes_live_execution": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}

@@ -183,6 +183,25 @@ shadow. See
 and run
 `scripts/check-engram-g1-authenticated-freeze-authority-envelope-shadow.sh`.
 
+`engram_g1_authenticated_freeze_authority_adapter_isolated_lab.py` is the
+separate default-off synthetic implementation gate permitted by that
+preregistration. It exercises integer-domain RFC 8785 canonicalization,
+five distinct role-scoped RFC 8032 Ed25519 KAT signatures, a packet-independent
+owner-only SQLite trust ledger double, Darwin component-by-component retained
+`openat` custody, signed checkpoint plus monotonic/high-water time, absorbing
+success/denial CAS, and a process/key-bound nonserializable one-use capability.
+Every database open recomputes the closed schema, key-derived ledger identity,
+full event chain, and sequence/time projection; stale snapshots and offline
+tampering fail closed. Monotonic high-water is scoped to one boot epoch; a
+fresh signed checkpoint can establish a reset monotonic domain after reboot,
+while a time-invalid absorbing denial consumes sequence/nonce/digest without
+poisoning trusted-time state. It accepts only public nonsecret `SYNTHETIC_KAT`
+fixtures, has no MCP/runtime registration, and leaves production authority and
+G1.4 unrepresentable. See
+`docs/design/ENGRAM_G1_AUTHENTICATED_FREEZE_AUTHORITY_ADAPTER_ISOLATED_LAB_2026_07_18.md`
+and run
+`scripts/check-engram-g1-authenticated-freeze-authority-adapter-isolated-lab.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class

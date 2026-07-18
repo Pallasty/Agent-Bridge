@@ -12029,10 +12029,11 @@ fn memory_search_hit_value_compact(hit: &MemorySearchHit) -> Value {
 
 const CHATGPT_KNOWLEDGE_SEARCH_LIMIT: u32 = 20;
 const CHATGPT_FORUM_TAGS_ENV: &str = "AGENT_BRIDGE_CHATGPT_FORUM_TAGS";
-const CHATGPT_FORUM_SEARCH_LIMIT: u32 = 20;
-const CHATGPT_FORUM_FETCH_POST_LIMIT: u32 = 30;
-const CHATGPT_FORUM_PREVIEW_CHARS: usize = 500;
-const CHATGPT_FORUM_FETCH_TEXT_CHARS: usize = 64 * 1024;
+const CHATGPT_FORUM_SEARCH_LIMIT: u32 = 8;
+const CHATGPT_FORUM_FETCH_POST_LIMIT: u32 = 8;
+const CHATGPT_FORUM_PREVIEW_CHARS: usize = 240;
+const CHATGPT_FORUM_POST_BODY_CHARS: usize = 1_200;
+const CHATGPT_FORUM_FETCH_TEXT_CHARS: usize = 12 * 1024;
 
 fn chatgpt_forum_tags_from_value(value: Option<&str>) -> Vec<String> {
     let mut tags: Vec<String> = value
@@ -12506,6 +12507,7 @@ impl McpTool for ChatGptForumFetchTool {
             .forum_recent_posts(thread_id, CHATGPT_FORUM_FETCH_POST_LIMIT)
             .await?;
         posts.reverse();
+        let omitted_posts = thread.post_count.saturating_sub(posts.len() as i64);
         let mut text = format!(
             "# {}\n\nBoard: {}\nStatus: {}\nTags: {}\n\n",
             thread.title,
@@ -12513,13 +12515,18 @@ impl McpTool for ChatGptForumFetchTool {
             thread.status,
             thread.tags.join(", ")
         );
+        let mut body_truncated_posts = 0usize;
         for post in &posts {
+            let (body, body_truncated, _) =
+                truncate_chars(&post.body, CHATGPT_FORUM_POST_BODY_CHARS);
+            body_truncated_posts += usize::from(body_truncated);
             text.push_str(&format!(
                 "## Post {} | {} | {} | {}\n\n{}\n\n",
-                post.id, post.kind, post.author, post.created_at, post.body
+                post.id, post.kind, post.author, post.created_at, body
             ));
         }
-        let (text, content_truncated, _) = truncate_chars(&text, CHATGPT_FORUM_FETCH_TEXT_CHARS);
+        let (text, text_truncated, _) = truncate_chars(&text, CHATGPT_FORUM_FETCH_TEXT_CHARS);
+        let content_truncated = text_truncated || omitted_posts > 0 || body_truncated_posts > 0;
         let metadata = json!({
             "source": "agent-bridge-forum",
             "board": thread.board,
@@ -12527,6 +12534,8 @@ impl McpTool for ChatGptForumFetchTool {
             "tags": thread.tags.join(","),
             "post_count": thread.post_count.to_string(),
             "returned_posts": posts.len().to_string(),
+            "omitted_posts": omitted_posts.to_string(),
+            "body_truncated_posts": body_truncated_posts.to_string(),
             "content_truncated": content_truncated.to_string(),
             "last_post_at": thread.last_post_at.to_string()
         });

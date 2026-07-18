@@ -9,6 +9,9 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
+#[cfg(feature = "temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic")]
+mod trusted_controller_orchestration;
+
 use super::*;
 use serde::Serialize;
 use std::collections::BTreeMap;

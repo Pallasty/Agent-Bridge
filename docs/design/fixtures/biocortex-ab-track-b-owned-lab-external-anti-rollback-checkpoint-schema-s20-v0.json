@@ -1,0 +1,410 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_external_anti_rollback_checkpoint_s20.v0",
+  "title": "Agent-Bridge S20 external anti-rollback checkpoint receipt",
+  "description": "Closed packet for a target external monotonic checkpoint protocol. S20 provides synthetic non-live fixtures only; a real independent provider is deferred to a newly owner-bound S21 subject.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "hashing_contract",
+    "test_only",
+    "synthetic",
+    "checkpoint_state",
+    "authority_binding",
+    "ledger_binding",
+    "checkpoint_binding",
+    "transition",
+    "result",
+    "checkpoint_receipt_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.memory_temporal_owned_lab_external_anti_rollback_checkpoint_s20.v0"
+    },
+    "packet_kind": {
+      "const": "S20_EXTERNAL_ANTI_ROLLBACK_CHECKPOINT_RECEIPT"
+    },
+    "canonicalization": {
+      "const": "AB_RESTRICTED_CANONICAL_JSON_S20_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+    },
+    "hashing_contract": {
+      "$ref": "#/$defs/hashing_contract"
+    },
+    "test_only": {
+      "type": "boolean"
+    },
+    "synthetic": {
+      "type": "boolean"
+    },
+    "checkpoint_state": {
+      "enum": [
+        "SYNTHETIC_KAT_NON_LIVE_CHECKPOINT",
+        "PREPARED",
+        "COMMITTED",
+        "REJECTED_ROLLBACK_OR_FORK",
+        "UNKNOWN_FAIL_CLOSED"
+      ]
+    },
+    "authority_binding": {
+      "$ref": "#/$defs/authority_binding"
+    },
+    "ledger_binding": {
+      "$ref": "#/$defs/ledger_binding"
+    },
+    "checkpoint_binding": {
+      "$ref": "#/$defs/checkpoint_binding"
+    },
+    "transition": {
+      "$ref": "#/$defs/transition"
+    },
+    "result": {
+      "$ref": "#/$defs/result"
+    },
+    "checkpoint_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "nonclaims": {
+      "$ref": "#/$defs/nonclaims"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "test_only": {"const": true}
+        },
+        "required": ["test_only"]
+      },
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "checkpoint_state": {"const": "SYNTHETIC_KAT_NON_LIVE_CHECKPOINT"},
+          "checkpoint_binding": {
+            "properties": {
+              "independent_failure_domain_proved": {"const": false}
+            }
+          },
+          "transition": {
+            "properties": {
+              "preparation_durable": {"const": false},
+              "database_commit_observed": {"const": false},
+              "external_commit_observed": {"const": false}
+            }
+          },
+          "result": {
+            "properties": {
+              "checkpoint_decision": {"const": "SYNTHETIC_VALIDATION_ONLY"},
+              "rollback_or_fork_detected": {"const": false},
+              "execution_permit_release_allowed": {"const": false}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthetic": {"const": false},
+          "checkpoint_state": {
+            "enum": [
+              "PREPARED",
+              "COMMITTED",
+              "REJECTED_ROLLBACK_OR_FORK",
+              "UNKNOWN_FAIL_CLOSED"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checkpoint_state": {"const": "COMMITTED"}
+        },
+        "required": ["checkpoint_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {
+              "preparation_durable": {"const": true},
+              "database_commit_observed": {"const": true},
+              "external_commit_observed": {"const": true}
+            }
+          },
+          "checkpoint_binding": {
+            "properties": {
+              "independent_failure_domain_proved": {"const": true}
+            }
+          },
+          "result": {
+            "properties": {
+              "checkpoint_decision": {"const": "CHECKPOINT_CURRENT_COMMITTED"},
+              "rollback_or_fork_detected": {"const": false},
+              "execution_permit_release_allowed": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"checkpoint_state": {"const": "PREPARED"}},
+        "required": ["checkpoint_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {
+              "preparation_durable": {"const": true},
+              "database_commit_observed": {"const": false},
+              "external_commit_observed": {"const": false}
+            }
+          },
+          "result": {
+            "properties": {
+              "checkpoint_decision": {"const": "DENY_PREPARED_NOT_FINAL"},
+              "rollback_or_fork_detected": {"const": false},
+              "execution_permit_release_allowed": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"checkpoint_state": {"const": "REJECTED_ROLLBACK_OR_FORK"}},
+        "required": ["checkpoint_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {"external_commit_observed": {"const": false}}
+          },
+          "result": {
+            "properties": {
+              "checkpoint_decision": {"const": "DENY_ROLLBACK_OR_FORK"},
+              "rollback_or_fork_detected": {"const": true},
+              "execution_permit_release_allowed": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"checkpoint_state": {"const": "UNKNOWN_FAIL_CLOSED"}},
+        "required": ["checkpoint_state"]
+      },
+      "then": {
+        "properties": {
+          "transition": {
+            "properties": {"external_commit_observed": {"const": false}}
+          },
+          "result": {
+            "properties": {
+              "checkpoint_decision": {"const": "DENY_MISSING_STALE_OR_UNKNOWN"},
+              "rollback_or_fork_detected": {"const": false},
+              "execution_permit_release_allowed": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checkpoint_binding": {
+            "properties": {"monotonic_counter": {"const": 1}},
+            "required": ["monotonic_counter"]
+          }
+        },
+        "required": ["checkpoint_binding"]
+      },
+      "then": {
+        "properties": {
+          "checkpoint_binding": {
+            "properties": {"previous_checkpoint_sha256": {"type": "null"}}
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "checkpoint_binding": {
+            "properties": {"previous_checkpoint_sha256": {"$ref": "#/$defs/sha256"}}
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {"$ref": "#/$defs/sha256"},
+        {"type": "null"}
+      ]
+    },
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash_algorithm",
+        "canonicalization",
+        "digest_domain",
+        "digest_framing",
+        "hash_scope",
+        "self_hash_field",
+        "self_hash_field_excluded",
+        "repository_framing_lf_excluded",
+        "cross_field_semantic_validation_required",
+        "self_reported_match_fields_are_authoritative"
+      ],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S20_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s20/external-checkpoint-receipt/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_CHECKPOINT_RECEIPT_SHA256"},
+        "self_hash_field": {"const": "checkpoint_receipt_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "self_reported_match_fields_are_authoritative": {"const": false}
+      }
+    },
+    "authority_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "signed_payload_sha256",
+        "subject_manifest_sha256",
+        "claim_namespace_sha256",
+        "claim_key_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "ledger_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledger_identity_sha256",
+        "ledger_schema_sha256",
+        "ledger_profile_sha256",
+        "database_file_identity_sha256",
+        "ledger_revision"
+      ],
+      "properties": {
+        "ledger_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "ledger_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "ledger_profile_sha256": {"$ref": "#/$defs/sha256"},
+        "database_file_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "ledger_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "checkpoint_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpoint_id_sha256",
+        "checkpoint_provider_identity_sha256",
+        "previous_checkpoint_sha256",
+        "monotonic_counter",
+        "ledger_state_sha256",
+        "prepared_nonce_sha256",
+        "independent_failure_domain_proved"
+      ],
+      "properties": {
+        "checkpoint_id_sha256": {"$ref": "#/$defs/sha256"},
+        "checkpoint_provider_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "previous_checkpoint_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "monotonic_counter": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ledger_state_sha256": {"$ref": "#/$defs/sha256"},
+        "prepared_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "independent_failure_domain_proved": {
+          "type": "boolean"
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "preparation_durable",
+        "database_commit_observed",
+        "external_commit_observed"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "PREPARED_DATABASE_COMMIT_COMMITTED"
+        },
+        "preparation_durable": {"type": "boolean"},
+        "database_commit_observed": {"type": "boolean"},
+        "external_commit_observed": {"type": "boolean"}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpoint_decision",
+        "rollback_or_fork_detected",
+        "execution_permit_release_allowed",
+        "automatic_retry_allowed"
+      ],
+      "properties": {
+        "checkpoint_decision": {
+          "enum": [
+            "SYNTHETIC_VALIDATION_ONLY",
+            "CHECKPOINT_CURRENT_COMMITTED",
+            "DENY_PREPARED_NOT_FINAL",
+            "DENY_ROLLBACK_OR_FORK",
+            "DENY_MISSING_STALE_OR_UNKNOWN"
+          ]
+        },
+        "rollback_or_fork_detected": {"type": "boolean"},
+        "execution_permit_release_allowed": {"type": "boolean"},
+        "automatic_retry_allowed": {"const": false}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpoint_is_owner_authority",
+        "checkpoint_is_execution_capability",
+        "same_failure_domain_checkpoint_is_independent",
+        "schema_conformance_authorizes_live_execution",
+        "synthetic_fixture_is_real_checkpoint",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "checkpoint_is_owner_authority": {"const": false},
+        "checkpoint_is_execution_capability": {"const": false},
+        "same_failure_domain_checkpoint_is_independent": {"const": false},
+        "schema_conformance_authorizes_live_execution": {"const": false},
+        "synthetic_fixture_is_real_checkpoint": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}
