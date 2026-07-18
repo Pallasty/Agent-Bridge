@@ -659,6 +659,11 @@ impl fmt::Debug for ExpectedOwnedLabAuthorizationBindingV1 {
 struct VerifiedUnclaimedOwnedLabAuthorizationV1 {
     authorization_id_sha256: [u8; 32],
     payload_sha256: [u8; 32],
+    owner_envelope_sha256: [u8; 32],
+    trust_anchor_document_sha256: [u8; 32],
+    owner_identity_sha256: [u8; 32],
+    owner_key_id: String,
+    owner_key_version: u64,
     revocation_epoch: u64,
 }
 
@@ -932,6 +937,11 @@ fn verify_unclaimed_owner_authorization_v1(
     Ok(VerifiedUnclaimedOwnedLabAuthorizationV1 {
         authorization_id_sha256: expected_authorization_id,
         payload_sha256,
+        owner_envelope_sha256: sha256_bytes(envelope_raw),
+        trust_anchor_document_sha256: anchor.document_sha256,
+        owner_identity_sha256: anchor.owner_identity_sha256,
+        owner_key_id: anchor.owner_key_id,
+        owner_key_version: anchor.owner_key_version,
         revocation_epoch: integer(payload, "revocation_epoch")?,
     })
 }
@@ -1218,6 +1228,28 @@ mod tests {
         assert_eq!(verified.revocation_epoch, 7);
         assert!(format!("{verified:?}").contains("NOT_CAPABILITY"));
         assert_eq!(FUTURE_TRANSITION, "UNCLAIMED_TO_CONSUMED_FOR_EXACT_RUN");
+    }
+
+    #[test]
+    fn s20_opaque_authorization_projection_is_derived_by_the_s18_verifier() {
+        let (anchor, envelope, expected) = fixture();
+        let anchor_value: Value = serde_json::from_slice(&anchor).unwrap();
+        let verified = verify_unclaimed_owner_authorization_v1(&anchor, &envelope, &expected)
+            .expect("synthetic authenticated-unclaimed fixture");
+        assert_eq!(verified.owner_envelope_sha256, sha256_bytes(&envelope));
+        assert_eq!(verified.trust_anchor_document_sha256, sha256_bytes(&anchor));
+        assert_eq!(
+            hex(&verified.owner_identity_sha256),
+            anchor_value["owner_identity_sha256"].as_str().unwrap()
+        );
+        assert_eq!(
+            verified.owner_key_id,
+            anchor_value["owner_key_id"].as_str().unwrap()
+        );
+        assert_eq!(
+            verified.owner_key_version,
+            anchor_value["owner_key_version"].as_u64().unwrap()
+        );
     }
 
     #[test]

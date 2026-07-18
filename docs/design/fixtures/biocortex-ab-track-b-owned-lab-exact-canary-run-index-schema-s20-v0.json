@@ -1,0 +1,516 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_exact_canary_run_index_s20.v0",
+  "title": "Agent-Bridge S20 exact canary run index",
+  "description": "Closed index for the exact 60-attempt OL00, OL04, and OL05 receipt chain. A valid-complete run has exactly one action-start receipt per assigned attempt (60 total), not one receipt per internal operation call. The S20 fixture is synthetic and records zero execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "hashing_contract",
+    "test_only",
+    "synthetic",
+    "index_state",
+    "authority_binding",
+    "run_binding",
+    "assigned_denominator",
+    "observed_counts",
+    "receipt_chain",
+    "evidence_outcome",
+    "run_index_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.memory_temporal_owned_lab_exact_canary_run_index_s20.v0"
+    },
+    "packet_kind": {
+      "const": "S20_EXACT_CANARY_RUN_INDEX"
+    },
+    "canonicalization": {
+      "const": "AB_RESTRICTED_CANONICAL_JSON_S20_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+    },
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "test_only": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "index_state": {
+      "enum": [
+        "SYNTHETIC_KAT_NON_LIVE_RUN_INDEX",
+        "POST_RUN_TERMINAL_COMPLETE",
+        "POST_RUN_TERMINAL_INVALID",
+        "POST_RUN_TERMINAL_INDETERMINATE"
+      ]
+    },
+    "authority_binding": {"$ref": "#/$defs/authority_binding"},
+    "run_binding": {"$ref": "#/$defs/run_binding"},
+    "assigned_denominator": {"$ref": "#/$defs/assigned_denominator"},
+    "observed_counts": {"$ref": "#/$defs/observed_counts"},
+    "receipt_chain": {"$ref": "#/$defs/receipt_chain"},
+    "evidence_outcome": {"$ref": "#/$defs/evidence_outcome"},
+    "run_index_sha256": {"$ref": "#/$defs/sha256"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"test_only": {"const": true}},
+        "required": ["test_only"]
+      },
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "index_state": {"const": "SYNTHETIC_KAT_NON_LIVE_RUN_INDEX"},
+          "observed_counts": {
+            "properties": {
+              "actual_assigned_attempt_count": {"const": 0},
+              "actual_pidfd_sigkill_attempt_count": {"const": 0},
+              "actual_distinct_fresh_exec_read_count": {"const": 0},
+              "actual_s16_mapping_phase_record_count": {"const": 0},
+              "actual_observation_count": {"const": 0},
+              "successful_claim_count": {"const": 0},
+              "automatic_retry_count": {"const": 0}
+            }
+          },
+          "evidence_outcome": {
+            "properties": {
+              "evidence_decision": {"const": "SYNTHETIC_VALIDATION_ONLY"},
+              "receipt_validation_state": {"const": "NOT_RUN_SYNTHETIC"},
+              "scientific_outcome": {"const": "NOT_EVALUATED"},
+              "execution_occurred": {"const": false},
+              "live_action_count": {"const": 0}
+            }
+          },
+          "receipt_chain": {
+            "properties": {
+              "action_start_receipt_set_sha256": {"type": "null"},
+              "action_start_receipt_count": {"const": 0},
+              "all_parent_links_exact": {"const": false}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthetic": {"const": false},
+          "index_state": {
+            "enum": [
+              "POST_RUN_TERMINAL_COMPLETE",
+              "POST_RUN_TERMINAL_INVALID",
+              "POST_RUN_TERMINAL_INDETERMINATE"
+            ]
+          },
+          "evidence_outcome": {
+            "properties": {
+              "evidence_decision": {
+                "enum": [
+                  "VALID_COMPLETE_EXACT_CANARY_EVIDENCE",
+                  "INVALID_INCOMPLETE_OR_SEMANTIC_FAILURE",
+                  "INDETERMINATE_CONTROL_OR_CUSTODY_FAILURE"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_outcome": {
+            "properties": {
+              "evidence_decision": {"const": "VALID_COMPLETE_EXACT_CANARY_EVIDENCE"}
+            },
+            "required": ["evidence_decision"]
+          }
+        },
+        "required": ["evidence_outcome"]
+      },
+      "then": {
+        "properties": {
+          "index_state": {"const": "POST_RUN_TERMINAL_COMPLETE"},
+          "observed_counts": {
+            "properties": {
+              "actual_assigned_attempt_count": {"const": 60},
+              "actual_pidfd_sigkill_attempt_count": {"const": 59},
+              "actual_distinct_fresh_exec_read_count": {"const": 59},
+              "actual_s16_mapping_phase_record_count": {"const": 113},
+              "actual_observation_count": {"const": 60},
+              "successful_claim_count": {"const": 1},
+              "automatic_retry_count": {"const": 0}
+            }
+          },
+          "receipt_chain": {
+            "properties": {
+              "action_start_receipt_set_sha256": {"$ref": "#/$defs/sha256"},
+              "action_start_receipt_count": {"const": 60},
+              "all_parent_links_exact": {"const": true}
+            }
+          },
+          "evidence_outcome": {
+            "properties": {
+              "execution_occurred": {"const": true},
+              "receipt_validation_state": {"const": "PASS"},
+              "live_action_count": {"const": 60}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_outcome": {
+            "properties": {
+              "evidence_decision": {"const": "INVALID_INCOMPLETE_OR_SEMANTIC_FAILURE"}
+            },
+            "required": ["evidence_decision"]
+          }
+        },
+        "required": ["evidence_outcome"]
+      },
+      "then": {
+        "properties": {
+          "index_state": {"const": "POST_RUN_TERMINAL_INVALID"},
+          "evidence_outcome": {
+            "properties": {"receipt_validation_state": {"const": "FAIL"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_outcome": {
+            "properties": {
+              "evidence_decision": {"const": "INDETERMINATE_CONTROL_OR_CUSTODY_FAILURE"}
+            },
+            "required": ["evidence_decision"]
+          }
+        },
+        "required": ["evidence_outcome"]
+      },
+      "then": {
+        "properties": {
+          "index_state": {"const": "POST_RUN_TERMINAL_INDETERMINATE"},
+          "evidence_outcome": {
+            "properties": {"receipt_validation_state": {"const": "INDETERMINATE"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "receipt_chain": {
+            "properties": {"stop_triggered": {"const": true}},
+            "required": ["stop_triggered"]
+          }
+        },
+        "required": ["receipt_chain"]
+      },
+      "then": {
+        "properties": {
+          "receipt_chain": {
+            "properties": {
+              "optional_stop_receipt_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "receipt_chain": {
+            "properties": {
+              "optional_stop_receipt_sha256": {"type": "null"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "receipt_chain": {
+            "properties": {"action_start_receipt_count": {"const": 0}},
+            "required": ["action_start_receipt_count"]
+          }
+        },
+        "required": ["receipt_chain"]
+      },
+      "then": {
+        "properties": {
+          "receipt_chain": {
+            "properties": {"action_start_receipt_set_sha256": {"type": "null"}}
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "receipt_chain": {
+            "properties": {"action_start_receipt_set_sha256": {"$ref": "#/$defs/sha256"}}
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {"$ref": "#/$defs/sha256"},
+        {"type": "null"}
+      ]
+    },
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash_algorithm",
+        "canonicalization",
+        "digest_domain",
+        "digest_framing",
+        "hash_scope",
+        "self_hash_field",
+        "self_hash_field_excluded",
+        "repository_framing_lf_excluded",
+        "cross_field_semantic_validation_required",
+        "self_reported_match_fields_are_authoritative"
+      ],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S20_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s20/exact-canary-run-index/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_RUN_INDEX_SHA256"},
+        "self_hash_field": {"const": "run_index_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "self_reported_match_fields_are_authoritative": {"const": false}
+      }
+    },
+    "authority_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "signed_payload_sha256",
+        "subject_manifest_sha256",
+        "owner_envelope_sha256",
+        "trust_anchor_document_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "trust_anchor_document_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "run_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id_sha256",
+        "attempt_id_sha256",
+        "controller_binary_sha256",
+        "runner_binary_sha256",
+        "capability_nonce_sha256",
+        "attempt_tombstone_sha256"
+      ],
+      "properties": {
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_id_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_tombstone_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "assigned_denominator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family_id_namespace",
+        "authorized_family_ids",
+        "authorized_family_scenario_counts",
+        "canary_batch_count",
+        "assigned_attempt_count",
+        "planned_pidfd_sigkill_attempt_count",
+        "planned_distinct_fresh_exec_read_count",
+        "planned_total_s16_mapping_phase_record_count",
+        "retry_or_implicit_rerun_allowed"
+      ],
+      "properties": {
+        "family_id_namespace": {"const": "OL00_OL04_OL05_FIRST_BATCH"},
+        "authorized_family_ids": {"const": ["OL00", "OL04", "OL05"]},
+        "authorized_family_scenario_counts": {
+          "const": {"OL00": 1, "OL04": 6, "OL05": 53}
+        },
+        "canary_batch_count": {"const": 1},
+        "assigned_attempt_count": {"const": 60},
+        "planned_pidfd_sigkill_attempt_count": {"const": 59},
+        "planned_distinct_fresh_exec_read_count": {"const": 59},
+        "planned_total_s16_mapping_phase_record_count": {"const": 113},
+        "retry_or_implicit_rerun_allowed": {"const": false}
+      }
+    },
+    "observed_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actual_assigned_attempt_count",
+        "actual_pidfd_sigkill_attempt_count",
+        "actual_distinct_fresh_exec_read_count",
+        "actual_s16_mapping_phase_record_count",
+        "actual_observation_count",
+        "successful_claim_count",
+        "automatic_retry_count"
+      ],
+      "properties": {
+        "actual_assigned_attempt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "actual_pidfd_sigkill_attempt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 59
+        },
+        "actual_distinct_fresh_exec_read_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 59
+        },
+        "actual_s16_mapping_phase_record_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 113
+        },
+        "actual_observation_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "successful_claim_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "automatic_retry_count": {"const": 0}
+      }
+    },
+    "receipt_chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registration_receipt_sha256",
+        "external_checkpoint_receipt_sha256",
+        "preflight_receipt_sha256",
+        "control_snapshot_sha256",
+        "claim_receipt_sha256",
+        "attempt_tombstone_sha256",
+        "raw_observations_sha256",
+        "retention_receipt_sha256",
+        "semantic_receipt_sha256",
+        "batch_receipt_sha256",
+        "stop_triggered",
+        "optional_stop_receipt_sha256",
+        "cleanup_receipt_sha256",
+        "custody_receipt_sha256",
+        "post_run_bundle_sha256",
+        "receipt_chain_profile",
+        "action_start_receipt_set_sha256",
+        "action_start_receipt_count",
+        "all_parent_links_exact"
+      ],
+      "properties": {
+        "registration_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "external_checkpoint_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "preflight_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_tombstone_sha256": {"$ref": "#/$defs/sha256"},
+        "raw_observations_sha256": {"$ref": "#/$defs/sha256"},
+        "retention_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "semantic_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "batch_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "stop_triggered": {"type": "boolean"},
+        "optional_stop_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "cleanup_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "custody_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "post_run_bundle_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_chain_profile": {
+          "const": "EXACT_60_ASSIGNED_ATTEMPT_START_RECEIPTS_NOT_INTERNAL_OPERATION_CALL_COUNT"
+        },
+        "action_start_receipt_set_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "action_start_receipt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "all_parent_links_exact": {"type": "boolean"}
+      }
+    },
+    "evidence_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_decision",
+        "receipt_validation_state",
+        "scientific_outcome",
+        "execution_occurred",
+        "live_action_count"
+      ],
+      "properties": {
+        "evidence_decision": {
+          "enum": [
+            "SYNTHETIC_VALIDATION_ONLY",
+            "VALID_COMPLETE_EXACT_CANARY_EVIDENCE",
+            "INVALID_INCOMPLETE_OR_SEMANTIC_FAILURE",
+            "INDETERMINATE_CONTROL_OR_CUSTODY_FAILURE"
+          ]
+        },
+        "receipt_validation_state": {
+          "enum": ["NOT_RUN_SYNTHETIC", "PASS", "FAIL", "INDETERMINATE"]
+        },
+        "scientific_outcome": {
+          "enum": ["NOT_EVALUATED", "PASS", "FAIL", "MIXED_OR_INDETERMINATE"]
+        },
+        "execution_occurred": {"type": "boolean"},
+        "live_action_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid_evidence_means_favorable_result",
+        "run_index_is_owner_authority",
+        "run_index_permits_retry",
+        "synthetic_fixture_is_real_run",
+        "process_restart_is_power_loss_proof",
+        "provider_or_production_authority",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "valid_evidence_means_favorable_result": {"const": false},
+        "run_index_is_owner_authority": {"const": false},
+        "run_index_permits_retry": {"const": false},
+        "synthetic_fixture_is_real_run": {"const": false},
+        "process_restart_is_power_loss_proof": {"const": false},
+        "provider_or_production_authority": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}
