@@ -76,7 +76,7 @@
     "redacted_receipt_contains_packet_identifiers": false,
     "redacted_receipt_contains_holder_commitments": false,
     "redacted_receipt_contains_reviewer_commitments": false,
-    "redacted_receipt_contains_appointment_or_review_receipts": false
+    "redacted_receipt_contains_appointment_review_or_endorsement_receipts": false
   },
   "boundaries": {
     "observes_real_role_evidence": false,

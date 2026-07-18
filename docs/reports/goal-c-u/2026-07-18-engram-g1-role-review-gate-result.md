@@ -26,9 +26,9 @@ was read or assembled.
 - predecessor validator SHA-256:
   `f276765f22ee5b2f69e24cf7a79bd9a30e8291f900973d89c06f17d1d0468cdc`;
 - G1.2 role-review contract SHA-256:
-  `842a86010b61a030993d37e6cc2b06206315a22a5b319c79dfaf07ed32522c09`;
+  `f8c6cb0784b9981d5f9492bfa5d3539972e9eda2a0c28568ecda251c3f1c9e35`;
 - G1.2 validator SHA-256:
-  `4e61e5910bd20f26d0e10b9306e42f22645195cf85cdba8a10fc4a958318287d`;
+  `98c71e96cfc05552ed5fecfb92f74066d3e0ddab173015f64abede730545a3a6`;
 - G1.2 checker SHA-256:
   `cae7a3b00f3769e2f035bed27bf8e29d98a81b3f75785cabba2f2c3831ca161e`.
 

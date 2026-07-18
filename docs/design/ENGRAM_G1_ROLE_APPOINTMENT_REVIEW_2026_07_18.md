@@ -14,7 +14,7 @@ then issue a separate endorsement bound to the completed review bytes.
 
 The registered public contract is
 `scripts/eval/fixtures/engram_g1_role_review_contract_v1.json`, SHA-256
-`842a86010b61a030993d37e6cc2b06206315a22a5b319c79dfaf07ed32522c09`.
+`f8c6cb0784b9981d5f9492bfa5d3539972e9eda2a0c28568ecda251c3f1c9e35`.
 It binds G1.1 commit
 `3256fe024c2a280bcd4ac0fee4ff79563c0cc36a`, contract SHA-256
 `5d4835fa2aa404224b98e7a60574121118051d771079f5a0422ab5839564e94a`,

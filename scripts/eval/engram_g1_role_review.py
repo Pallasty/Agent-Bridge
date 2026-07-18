@@ -36,7 +36,7 @@ from engram_g1_corpus_design import (
 CONTRACT_SCHEMA = "agent_bridge.engram_g1_role_review_contract.v1"
 CONTRACT_RECEIPT_SCHEMA = "agent_bridge.engram_g1_role_review_contract_receipt.v1"
 CONTRACT_ID = "engram_g1_role_review_20260718"
-CONTRACT_SHA256 = "842a86010b61a030993d37e6cc2b06206315a22a5b319c79dfaf07ed32522c09"
+CONTRACT_SHA256 = "f8c6cb0784b9981d5f9492bfa5d3539972e9eda2a0c28568ecda251c3f1c9e35"
 REVIEW_PACKET_SCHEMA = "agent_bridge.engram_g1_role_review_packet.v1"
 REVIEW_RECEIPT_SCHEMA = "agent_bridge.engram_g1_role_review_receipt.v1"
 OWNER_DECISION_PACKET_SCHEMA = "agent_bridge.engram_g1_role_owner_decision_packet.v1"
@@ -236,7 +236,7 @@ def validate_contract(value: dict[str, Any], raw: bytes) -> dict[str, Any]:
             "redacted_receipt_contains_packet_identifiers": False,
             "redacted_receipt_contains_holder_commitments": False,
             "redacted_receipt_contains_reviewer_commitments": False,
-            "redacted_receipt_contains_appointment_or_review_receipts": False,
+            "redacted_receipt_contains_appointment_review_or_endorsement_receipts": False,
         },
         "contract.privacy",
     )
