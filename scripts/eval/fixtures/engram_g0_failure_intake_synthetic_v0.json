@@ -1,0 +1,203 @@
+{
+  "schema": "agent_bridge.engram_g0_failure_replay_packet.v0",
+  "contract_id": "engram_g0_real_failure_intake_20260717",
+  "packet_id": "synthetic_g0_classification_coverage_v0",
+  "evidence_class": "synthetic_contract_test",
+  "application": {
+    "application_owner_id": "synthetic_owner",
+    "affected_workflow_id": "synthetic_retrieval_workflow",
+    "failure_id": "synthetic_failure",
+    "current_baseline_version": "synthetic_baseline_v0"
+  },
+  "provenance": {
+    "consumer_owned": false,
+    "observed_before_candidate_selection": false,
+    "candidate_authored_probes": true,
+    "rights_cleared": false,
+    "source_identity_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "consumer_review_receipt_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "replay": {
+    "baseline_source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseline_binary_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "baseline_environment_sha256": "1211111111111111111111111111111111111111111111111111111111111111",
+    "embedding_transport": "loopback_delegated",
+    "perception_filter_state_status": "frozen",
+    "perception_filter_state_sha256": "1311111111111111111111111111111111111111111111111111111111111111",
+    "baseline_modes": [
+      "fts",
+      "hybrid",
+      "semantic"
+    ],
+    "top_k": 10,
+    "traffic_class": "eval",
+    "source_db_access_mode": "ro",
+    "source_db_query_only": true,
+    "source_db_total_changes_before": 0,
+    "source_db_total_changes_after": 0,
+    "base_snapshot_sha256_before": "2222222222222222222222222222222222222222222222222222222222222222",
+    "base_snapshot_sha256_after": "2222222222222222222222222222222222222222222222222222222222222222",
+    "base_snapshot_unchanged": true,
+    "fresh_snapshot_per_probe_mode": true,
+    "all_observation_snapshots_started_from_base": true,
+    "durable_content_index_state_sha256_before": "2333333333333333333333333333333333333333333333333333333333333333",
+    "durable_content_index_state_sha256_after": "2333333333333333333333333333333333333333333333333333333333333333",
+    "durable_content_index_state_unchanged": true,
+    "disposable_baseline_side_effects_confined": true,
+    "baseline_observation_count": 36,
+    "live_memory_writes": 0,
+    "candidate_retrieval_order_mutations": 0,
+    "outcome_collector_enabled": false,
+    "candidate_mechanism_enabled": false
+  },
+  "episode_groups": [
+    {
+      "episode_group_id": "synthetic_generalization_gap",
+      "episode_identity_sha256": "3000000000000000000000000000000000000000000000000000000000000001",
+      "partition": "fit_only",
+      "probes": [
+        {
+          "probe_class": "exact",
+          "query_sha256": "4000000000000000000000000000000000000000000000000000000000000001",
+          "expected_target_set_sha256": "5000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 1,
+            "hybrid": 2,
+            "semantic": 0
+          }
+        },
+        {
+          "probe_class": "related",
+          "query_sha256": "4000000000000000000000000000000000000000000000000000000000000002",
+          "expected_target_set_sha256": "5000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 0,
+            "hybrid": 0,
+            "semantic": 0
+          }
+        },
+        {
+          "probe_class": "unrelated",
+          "query_sha256": "4000000000000000000000000000000000000000000000000000000000000003",
+          "expected_target_set_sha256": "5000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 0,
+            "hybrid": 0,
+            "semantic": 0
+          }
+        }
+      ]
+    },
+    {
+      "episode_group_id": "synthetic_overgeneralization_gap",
+      "episode_identity_sha256": "3000000000000000000000000000000000000000000000000000000000000002",
+      "partition": "fit_only",
+      "probes": [
+        {
+          "probe_class": "exact",
+          "query_sha256": "6000000000000000000000000000000000000000000000000000000000000001",
+          "expected_target_set_sha256": "7000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 1,
+            "hybrid": 1,
+            "semantic": 1
+          }
+        },
+        {
+          "probe_class": "related",
+          "query_sha256": "6000000000000000000000000000000000000000000000000000000000000002",
+          "expected_target_set_sha256": "7000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 0,
+            "hybrid": 3,
+            "semantic": 2
+          }
+        },
+        {
+          "probe_class": "unrelated",
+          "query_sha256": "6000000000000000000000000000000000000000000000000000000000000003",
+          "expected_target_set_sha256": "7000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 0,
+            "hybrid": 8,
+            "semantic": 4
+          }
+        }
+      ]
+    },
+    {
+      "episode_group_id": "synthetic_ordinary_retrieval_gap",
+      "episode_identity_sha256": "3000000000000000000000000000000000000000000000000000000000000003",
+      "partition": "fit_only",
+      "probes": [
+        {
+          "probe_class": "exact",
+          "query_sha256": "8000000000000000000000000000000000000000000000000000000000000001",
+          "expected_target_set_sha256": "9000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 0,
+            "hybrid": 0,
+            "semantic": 0
+          }
+        },
+        {
+          "probe_class": "related",
+          "query_sha256": "8000000000000000000000000000000000000000000000000000000000000002",
+          "expected_target_set_sha256": "9000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 0,
+            "hybrid": 0,
+            "semantic": 0
+          }
+        },
+        {
+          "probe_class": "unrelated",
+          "query_sha256": "8000000000000000000000000000000000000000000000000000000000000003",
+          "expected_target_set_sha256": "9000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 0,
+            "hybrid": 0,
+            "semantic": 0
+          }
+        }
+      ]
+    },
+    {
+      "episode_group_id": "synthetic_no_relevant_gap",
+      "episode_identity_sha256": "3000000000000000000000000000000000000000000000000000000000000004",
+      "partition": "fit_only",
+      "probes": [
+        {
+          "probe_class": "exact",
+          "query_sha256": "a000000000000000000000000000000000000000000000000000000000000001",
+          "expected_target_set_sha256": "b000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 1,
+            "hybrid": 1,
+            "semantic": 1
+          }
+        },
+        {
+          "probe_class": "related",
+          "query_sha256": "a000000000000000000000000000000000000000000000000000000000000002",
+          "expected_target_set_sha256": "b000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 3,
+            "hybrid": 2,
+            "semantic": 1
+          }
+        },
+        {
+          "probe_class": "unrelated",
+          "query_sha256": "a000000000000000000000000000000000000000000000000000000000000003",
+          "expected_target_set_sha256": "b000000000000000000000000000000000000000000000000000000000000001",
+          "ranks": {
+            "fts": 0,
+            "hybrid": 0,
+            "semantic": 0
+          }
+        }
+      ]
+    }
+  ]
+}

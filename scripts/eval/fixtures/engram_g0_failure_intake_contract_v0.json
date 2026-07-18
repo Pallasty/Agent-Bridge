@@ -1,0 +1,64 @@
+{
+  "schema": "agent_bridge.engram_g0_failure_intake_contract.v0",
+  "contract_id": "engram_g0_real_failure_intake_20260717",
+  "stage": "g0_observed_failure_only",
+  "baseline": {
+    "retrieval_modes": [
+      "fts",
+      "hybrid",
+      "semantic"
+    ],
+    "top_k": 10,
+    "exclude_kinds": [
+      "skill"
+    ],
+    "traffic_class": "eval",
+    "environment_keys": [
+      "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+      "AB_BIOCORTEX_RETRIEVAL_OPT_IN",
+      "AGENT_BRIDGE_COACTIVATION_RERANK_DISABLE",
+      "AGENT_BRIDGE_CORRECTION_COSURFACE",
+      "AGENT_BRIDGE_EMBED_BACKEND",
+      "AGENT_BRIDGE_EMBED_REMOTE_URL",
+      "AGENT_BRIDGE_FTS_OR_PRIMARY",
+      "AGENT_BRIDGE_FUSION_SHADOW",
+      "AGENT_BRIDGE_MEMORY_CLASS_QUOTA",
+      "AGENT_BRIDGE_MEMORY_SEARCH_EXCLUDE_KINDS",
+      "AGENT_BRIDGE_ONNX_MODEL",
+      "AGENT_BRIDGE_ONNX_MODEL_DIR",
+      "AGENT_BRIDGE_OUTCOME_COLLECTOR",
+      "AGENT_BRIDGE_PERCEPTION_FILTER_STATE_PATH",
+      "AGENT_BRIDGE_PROJECT_SCOPE_ALIASES",
+      "AGENT_BRIDGE_RECALL_SEMANTIC_FALLBACK",
+      "AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS",
+      "AGENT_BRIDGE_SEED_BOOST_DISABLE",
+      "AGENT_BRIDGE_SEED_STATE_PATH",
+      "AGENT_BRIDGE_SEMANTIC_RANK_LEGACY",
+      "AGENT_BRIDGE_SEMANTIC_W_COS",
+      "AGENT_BRIDGE_SEMANTIC_W_FB",
+      "AGENT_BRIDGE_SEMANTIC_W_IMP",
+      "AGENT_BRIDGE_SEMANTIC_W_MEM",
+      "HOME"
+    ]
+  },
+  "admission": {
+    "minimum_real_relevant_groups": 1,
+    "require_consumer_owned": true,
+    "require_observed_before_candidate_selection": true,
+    "forbid_candidate_authored_probes": true,
+    "require_rights_cleared": true,
+    "accepted_relevant_signatures": [
+      "generalization_gap",
+      "overgeneralization_gap"
+    ]
+  },
+  "boundaries": {
+    "writes_live_store": false,
+    "mutates_retrieval_order": false,
+    "enables_candidate_mechanism": false,
+    "contains_raw_content_in_receipt": false,
+    "candidate_implementation_authority": false,
+    "g1_corpus_freeze_authority": false,
+    "runtime_promotion_authority": false
+  }
+}

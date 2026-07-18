@@ -62,6 +62,20 @@ and bootstrap calls cannot be counted as organic telemetry.
 
 ## Sibling probes (not benchmark components)
 
+`engram_g0_failure_intake.py` — live-store-read-only G0 intake and baseline replay for a
+consumer-owned precision/generalization failure. Real private specs stay under
+ignored `data/`; capture runs FTS/hybrid/semantic searches only against a
+fresh disposable clone of one frozen SQLite backup per probe/mode observation,
+with the BioCortex retrieval path forced off. A hash-only environment receipt
+binds retrieval knobs and embedding transport, and any active perception-filter
+rerank state is copied once and frozen across observations. The
+redacted receipt distinguishes generalization gaps, overgeneralization gaps,
+ordinary retrieval misses, and no-gap cases. Even a positive real receipt only
+opens G1 grouped-corpus design; it grants no candidate, ranking, memory-write,
+corpus-freeze, or runtime authority. See
+`docs/design/ENGRAM_G0_REAL_FAILURE_INTAKE_2026_07_17.md` and run
+`scripts/check-engram-g0-failure-intake.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class
