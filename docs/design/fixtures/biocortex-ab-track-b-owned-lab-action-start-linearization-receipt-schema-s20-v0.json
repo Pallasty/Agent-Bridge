@@ -1,0 +1,557 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_action_start_linearization_receipt_s20.v0",
+  "title": "Agent-Bridge S20 action-start linearization receipt",
+  "description": "Closed packet binding one action intent to a fresh same-writer control decision. S20 adapters are synthetic only and record zero live invocations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "hashing_contract",
+    "test_only",
+    "synthetic",
+    "action_start_state",
+    "authority_binding",
+    "run_binding",
+    "action_binding",
+    "control_linearization",
+    "start_result",
+    "parent_receipts",
+    "action_start_receipt_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.memory_temporal_owned_lab_action_start_linearization_receipt_s20.v0"
+    },
+    "packet_kind": {
+      "const": "S20_ACTION_START_LINEARIZATION_RECEIPT"
+    },
+    "canonicalization": {
+      "const": "AB_RESTRICTED_CANONICAL_JSON_S20_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+    },
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "test_only": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "action_start_state": {
+      "enum": [
+        "SYNTHETIC_KAT_NON_LIVE_ACTION_START",
+        "ACTION_START_LINEARIZED",
+        "DENIED_STOP_TRIGGERED",
+        "DENIED_REVOCATION_MISMATCH",
+        "DENIED_CONTROL_UNKNOWN_OR_ROLLBACK",
+        "DENIED_CLAIM_NOT_CONSUMED",
+        "DENIED_ATTEMPT_TERMINAL"
+      ]
+    },
+    "authority_binding": {"$ref": "#/$defs/authority_binding"},
+    "run_binding": {"$ref": "#/$defs/run_binding"},
+    "action_binding": {"$ref": "#/$defs/action_binding"},
+    "control_linearization": {"$ref": "#/$defs/control_linearization"},
+    "start_result": {"$ref": "#/$defs/start_result"},
+    "parent_receipts": {"$ref": "#/$defs/parent_receipts"},
+    "action_start_receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"test_only": {"const": true}},
+        "required": ["test_only"]
+      },
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "action_start_state": {"const": "SYNTHETIC_KAT_NON_LIVE_ACTION_START"},
+          "control_linearization": {
+            "properties": {
+              "writer_lock_held_for_check_intent_and_adapter_entry": {"const": false},
+              "claim_state": {"const": "AUTHORIZED_UNCLAIMED"},
+              "attempt_state": {"const": "UNKNOWN"},
+              "stop_state": {"const": "CLEAR"},
+              "revocation_epoch_exact_match": {"const": true},
+              "action_intent_committed": {"const": false}
+            }
+          },
+          "start_result": {
+            "properties": {
+              "start_decision": {"const": "SYNTHETIC_VALIDATION_ONLY"},
+              "affected_rows": {"const": 0},
+              "synthetic_adapter_invocation_count": {"const": 0},
+              "live_adapter_invocation_count": {"const": 0},
+              "execution_started": {"const": false}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthetic": {"const": false},
+          "action_start_state": {
+            "enum": [
+              "ACTION_START_LINEARIZED",
+              "DENIED_STOP_TRIGGERED",
+              "DENIED_REVOCATION_MISMATCH",
+              "DENIED_CONTROL_UNKNOWN_OR_ROLLBACK",
+              "DENIED_CLAIM_NOT_CONSUMED",
+              "DENIED_ATTEMPT_TERMINAL"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"action_start_state": {"const": "ACTION_START_LINEARIZED"}},
+        "required": ["action_start_state"]
+      },
+      "then": {
+        "properties": {
+          "control_linearization": {
+            "properties": {
+              "writer_lock_held_for_check_intent_and_adapter_entry": {"const": true},
+              "claim_state": {"const": "CONSUMED_FOR_EXACT_RUN"},
+              "attempt_state": {
+                "enum": ["CLAIM_CONSUMED", "ACTION_START_LINEARIZED"]
+              },
+              "stop_state": {"const": "CLEAR"},
+              "revocation_epoch_exact_match": {"const": true},
+              "action_intent_committed": {"const": true}
+            }
+          },
+          "start_result": {
+            "properties": {
+              "start_decision": {"const": "START_EXACT_BOUND_ACTION"},
+              "affected_rows": {"const": 1},
+              "synthetic_adapter_invocation_count": {"const": 0},
+              "live_adapter_invocation_count": {"const": 1},
+              "execution_started": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"action_start_state": {"const": "DENIED_STOP_TRIGGERED"}},
+        "required": ["action_start_state"]
+      },
+      "then": {
+        "properties": {
+          "control_linearization": {
+            "properties": {
+              "claim_state": {"const": "CONSUMED_FOR_EXACT_RUN"},
+              "attempt_state": {"const": "CLAIM_CONSUMED"},
+              "stop_state": {"const": "TRIGGERED"},
+              "writer_lock_held_for_check_intent_and_adapter_entry": {"const": true},
+              "action_intent_committed": {"const": true}
+            }
+          },
+          "start_result": {
+            "properties": {
+              "start_decision": {"const": "DENY_STOP_TRIGGERED"},
+              "affected_rows": {"const": 0},
+              "synthetic_adapter_invocation_count": {"const": 0},
+              "live_adapter_invocation_count": {"const": 0},
+              "execution_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"action_start_state": {"const": "DENIED_REVOCATION_MISMATCH"}},
+        "required": ["action_start_state"]
+      },
+      "then": {
+        "properties": {
+          "control_linearization": {
+            "properties": {
+              "claim_state": {"const": "CONSUMED_FOR_EXACT_RUN"},
+              "attempt_state": {"const": "CLAIM_CONSUMED"},
+              "stop_state": {"const": "CLEAR"},
+              "writer_lock_held_for_check_intent_and_adapter_entry": {"const": true},
+              "revocation_epoch_exact_match": {"const": false},
+              "action_intent_committed": {"const": true}
+            }
+          },
+          "start_result": {
+            "properties": {
+              "start_decision": {"const": "DENY_REVOCATION_MISMATCH"},
+              "affected_rows": {"const": 0},
+              "synthetic_adapter_invocation_count": {"const": 0},
+              "live_adapter_invocation_count": {"const": 0},
+              "execution_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"action_start_state": {"const": "DENIED_CONTROL_UNKNOWN_OR_ROLLBACK"}},
+        "required": ["action_start_state"]
+      },
+      "then": {
+        "properties": {
+          "control_linearization": {
+            "properties": {
+              "claim_state": {"const": "CONSUMED_FOR_EXACT_RUN"},
+              "attempt_state": {"const": "CLAIM_CONSUMED"},
+              "stop_state": {"const": "UNKNOWN"},
+              "writer_lock_held_for_check_intent_and_adapter_entry": {"const": true},
+              "action_intent_committed": {"const": false}
+            }
+          },
+          "start_result": {
+            "properties": {
+              "start_decision": {"const": "DENY_CONTROL_UNKNOWN_OR_ROLLBACK"},
+              "affected_rows": {"const": 0},
+              "synthetic_adapter_invocation_count": {"const": 0},
+              "live_adapter_invocation_count": {"const": 0},
+              "execution_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"action_start_state": {"const": "DENIED_CLAIM_NOT_CONSUMED"}},
+        "required": ["action_start_state"]
+      },
+      "then": {
+        "properties": {
+          "control_linearization": {
+            "properties": {
+              "claim_state": {"enum": ["AUTHORIZED_UNCLAIMED", "UNKNOWN"]},
+              "attempt_state": {"enum": ["ATTEMPT_RESERVED", "UNKNOWN"]},
+              "writer_lock_held_for_check_intent_and_adapter_entry": {"const": true},
+              "action_intent_committed": {"const": false}
+            }
+          },
+          "start_result": {
+            "properties": {
+              "start_decision": {"const": "DENY_CLAIM_NOT_CONSUMED"},
+              "affected_rows": {"const": 0},
+              "synthetic_adapter_invocation_count": {"const": 0},
+              "live_adapter_invocation_count": {"const": 0},
+              "execution_started": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"action_start_state": {"const": "DENIED_ATTEMPT_TERMINAL"}},
+        "required": ["action_start_state"]
+      },
+      "then": {
+        "properties": {
+          "control_linearization": {
+            "properties": {
+              "attempt_state": {"const": "TERMINAL"},
+              "writer_lock_held_for_check_intent_and_adapter_entry": {"const": true},
+              "action_intent_committed": {"const": false}
+            }
+          },
+          "start_result": {
+            "properties": {
+              "start_decision": {"const": "DENY_ATTEMPT_TERMINAL"},
+              "affected_rows": {"const": 0},
+              "synthetic_adapter_invocation_count": {"const": 0},
+              "live_adapter_invocation_count": {"const": 0},
+              "execution_started": {"const": false}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {"$ref": "#/$defs/sha256"},
+        {"type": "null"}
+      ]
+    },
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash_algorithm",
+        "canonicalization",
+        "digest_domain",
+        "digest_framing",
+        "hash_scope",
+        "self_hash_field",
+        "self_hash_field_excluded",
+        "repository_framing_lf_excluded",
+        "cross_field_semantic_validation_required",
+        "self_reported_match_fields_are_authoritative"
+      ],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S20_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s20/action-start-linearization-receipt/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_ACTION_START_RECEIPT_SHA256"},
+        "self_hash_field": {"const": "action_start_receipt_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "self_reported_match_fields_are_authoritative": {"const": false}
+      }
+    },
+    "authority_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "signed_payload_sha256",
+        "subject_manifest_sha256",
+        "claim_namespace_sha256",
+        "claim_key_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "run_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id_sha256",
+        "run_id_sha256",
+        "controller_binary_sha256",
+        "runner_binary_sha256",
+        "capability_nonce_sha256"
+      ],
+      "properties": {
+        "attempt_id_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "action_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_sequence",
+        "operation_id",
+        "assignment_id_sha256",
+        "action_intent_sha256",
+        "action_intent_derivation_profile",
+        "previous_action_start_receipt_sha256",
+        "sealed_adapter_profile"
+      ],
+      "properties": {
+        "action_sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "operation_id": {
+          "enum": [
+            "CREATE_EXACT_RUN_ROOT",
+            "SQLITE_EXACT_PROFILE_SETUP",
+            "SPAWN_ONE_ASSIGNED_CHILD",
+            "PIDFD_OPEN_ASSIGNED_CHILD",
+            "PIDFD_SEND_SIGNAL_SIGKILL",
+            "FRESH_EXEC_REOPEN",
+            "WRITE_BOUND_RECEIPTS",
+            "CLEANUP_EXACT_RUN_ROOT"
+          ]
+        },
+        "assignment_id_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "action_intent_sha256": {"$ref": "#/$defs/sha256"},
+        "action_intent_derivation_profile": {
+          "const": "AUTHORIZATION_CLAIM_RUN_ACTION_SEQUENCE_OPERATION_ASSIGNMENT_PREVIOUS_RECEIPT"
+        },
+        "previous_action_start_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "sealed_adapter_profile": {
+          "const": "CHECK_INTENT_AND_ADAPTER_ENTRY_WITHOUT_RETURNED_GUARD"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation_id": {
+                "enum": [
+                  "SPAWN_ONE_ASSIGNED_CHILD",
+                  "PIDFD_OPEN_ASSIGNED_CHILD",
+                  "PIDFD_SEND_SIGNAL_SIGKILL",
+                  "FRESH_EXEC_REOPEN"
+                ]
+              }
+            },
+            "required": ["operation_id"]
+          },
+          "then": {
+            "properties": {"assignment_id_sha256": {"$ref": "#/$defs/sha256"}}
+          },
+          "else": {
+            "properties": {"assignment_id_sha256": {"type": "null"}}
+          }
+        },
+        {
+          "if": {
+            "properties": {"action_sequence": {"const": 1}},
+            "required": ["action_sequence"]
+          },
+          "then": {
+            "properties": {"previous_action_start_receipt_sha256": {"type": "null"}}
+          },
+          "else": {
+            "properties": {"previous_action_start_receipt_sha256": {"$ref": "#/$defs/sha256"}}
+          }
+        }
+      ]
+    },
+    "control_linearization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control_snapshot_sha256",
+        "control_transaction_sequence",
+        "writer_lock_held_for_check_intent_and_adapter_entry",
+        "claim_state",
+        "attempt_state",
+        "stop_state",
+        "stop_revision",
+        "revocation_epoch_exact_match",
+        "revocation_revision",
+        "action_intent_committed"
+      ],
+      "properties": {
+        "control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "control_transaction_sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "writer_lock_held_for_check_intent_and_adapter_entry": {"type": "boolean"},
+        "claim_state": {
+          "enum": [
+            "AUTHORIZED_UNCLAIMED",
+            "CONSUMED_FOR_EXACT_RUN",
+            "UNKNOWN"
+          ]
+        },
+        "attempt_state": {
+          "enum": [
+            "CLAIM_CONSUMED",
+            "ACTION_START_LINEARIZED",
+            "ATTEMPT_RESERVED",
+            "TERMINAL",
+            "UNKNOWN"
+          ]
+        },
+        "stop_state": {
+          "enum": ["CLEAR", "TRIGGERED", "UNKNOWN"]
+        },
+        "stop_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revocation_epoch_exact_match": {"type": "boolean"},
+        "revocation_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "action_intent_committed": {"type": "boolean"}
+      }
+    },
+    "start_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_decision",
+        "affected_rows",
+        "synthetic_adapter_invocation_count",
+        "live_adapter_invocation_count",
+        "execution_started",
+        "automatic_retry_allowed"
+      ],
+      "properties": {
+        "start_decision": {
+          "enum": [
+            "SYNTHETIC_VALIDATION_ONLY",
+            "START_EXACT_BOUND_ACTION",
+            "DENY_STOP_TRIGGERED",
+            "DENY_REVOCATION_MISMATCH",
+            "DENY_CONTROL_UNKNOWN_OR_ROLLBACK",
+            "DENY_CLAIM_NOT_CONSUMED",
+            "DENY_ATTEMPT_TERMINAL"
+          ]
+        },
+        "affected_rows": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "synthetic_adapter_invocation_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "live_adapter_invocation_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "execution_started": {"type": "boolean"},
+        "automatic_retry_allowed": {"const": false}
+      }
+    },
+    "parent_receipts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_receipt_sha256",
+        "checkpoint_receipt_sha256",
+        "attempt_tombstone_sha256",
+        "control_snapshot_sha256"
+      ],
+      "properties": {
+        "claim_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "checkpoint_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_tombstone_sha256": {"$ref": "#/$defs/sha256"},
+        "control_snapshot_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_is_owner_authority",
+        "receipt_is_serializable_execution_capability",
+        "synthetic_adapter_is_live_adapter",
+        "schema_conformance_authorizes_live_execution",
+        "s20_action_start_is_real_process_or_filesystem_action",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "receipt_is_owner_authority": {"const": false},
+        "receipt_is_serializable_execution_capability": {"const": false},
+        "synthetic_adapter_is_live_adapter": {"const": false},
+        "schema_conformance_authorizes_live_execution": {"const": false},
+        "s20_action_start_is_real_process_or_filesystem_action": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}
