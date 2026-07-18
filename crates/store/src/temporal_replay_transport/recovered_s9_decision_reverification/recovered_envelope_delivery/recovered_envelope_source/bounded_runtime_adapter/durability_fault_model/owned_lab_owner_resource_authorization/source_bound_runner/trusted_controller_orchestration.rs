@@ -8,6 +8,9 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
+#[cfg(feature = "temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic")]
+mod rich_packet_validators;
+
 use super::*;
 use serde_json::Value;
 
@@ -17,6 +20,12 @@ const S20_CHECKPOINT_INITIAL_DOMAIN: &[u8] =
     b"agent-bridge/biocortex/owned-lab/s20/checkpoint-initial/v1";
 const S20_CHECKPOINT_TRANSITION_DOMAIN: &[u8] =
     b"agent-bridge/biocortex/owned-lab/s20/checkpoint-transition/v1";
+const S20_SYNTHETIC_CHECKPOINT_PROVIDER_DOMAIN: &[u8] =
+    b"agent-bridge/biocortex/owned-lab/s20/synthetic-checkpoint-provider-identity/v1";
+const S20_BUSINESS_CONTENT_ROOT_DOMAIN: &[u8] =
+    b"agent-bridge/biocortex/owned-lab/s20/business-content-root/v1";
+const S20_INITIAL_BUSINESS_CONTENT_ROOT_SHA256_KAT: &str =
+    "5463bd72d21d1515cebb33c8c575883db86cd12c1a980c878192a9802459e56d";
 const S20_PREFLIGHT_DOMAIN: &[u8] = b"agent-bridge/biocortex/owned-lab/s20/preflight/v1";
 const S20_CLAIM_DOMAIN: &[u8] = b"agent-bridge/biocortex/owned-lab/s20/claim/v1";
 const S20_ACTION_DOMAIN: &[u8] = b"agent-bridge/biocortex/owned-lab/s20/action-start/v1";
@@ -51,6 +60,7 @@ CREATE TABLE kernel_meta (
   singleton INTEGER PRIMARY KEY CHECK(singleton=1),
   database_identity_sha256 BLOB NOT NULL CHECK(length(database_identity_sha256)=32),
   schema_catalog_sha256 BLOB NOT NULL CHECK(length(schema_catalog_sha256)=32),
+  business_content_root_sha256 BLOB NOT NULL CHECK(length(business_content_root_sha256)=32),
   generation INTEGER NOT NULL CHECK(generation>0),
   checkpoint_head_sha256 BLOB NOT NULL CHECK(length(checkpoint_head_sha256)=32)
 ) STRICT;
@@ -58,6 +68,7 @@ CREATE TRIGGER kernel_meta_update_guard BEFORE UPDATE ON kernel_meta
 WHEN NEW.singleton!=OLD.singleton
   OR NEW.database_identity_sha256 IS NOT OLD.database_identity_sha256
   OR NEW.schema_catalog_sha256 IS NOT OLD.schema_catalog_sha256
+  OR NEW.business_content_root_sha256 IS OLD.business_content_root_sha256
   OR NEW.generation!=OLD.generation+1
   OR NEW.checkpoint_head_sha256 IS OLD.checkpoint_head_sha256
 BEGIN SELECT RAISE(ABORT,'S20_META_TRANSITION_REJECTED'); END;
@@ -270,6 +281,7 @@ BEGIN SELECT RAISE(ABORT,'S20_ACTION_DELETE_REJECTED'); END;
 struct KernelHeadV1 {
     database_identity_sha256: [u8; 32],
     schema_catalog_sha256: [u8; 32],
+    business_content_root_sha256: [u8; 32],
     generation: u64,
     checkpoint_head_sha256: [u8; 32],
 }
@@ -283,6 +295,7 @@ enum CheckpointSnapshotV1 {
 struct PreparedCheckpointV1 {
     database_identity_sha256: [u8; 32],
     schema_catalog_sha256: [u8; 32],
+    business_content_root_sha256: [u8; 32],
     generation: u64,
     checkpoint_head_sha256: [u8; 32],
 }
@@ -293,10 +306,13 @@ mod checkpoint_seal {
 
 trait SyntheticCheckpointPortV1: checkpoint_seal::Sealed {
     fn snapshot(&self) -> CheckpointSnapshotV1;
+    fn provider_identity_sha256(&self) -> [u8; 32];
+    fn independent_failure_domain_proved(&self) -> bool;
     fn prepare(
         &mut self,
         expected: &KernelHeadV1,
         intent_sha256: [u8; 32],
+        next_business_content_root_sha256: [u8; 32],
     ) -> AuthorizationResult<PreparedCheckpointV1>;
     fn commit(&mut self, prepared: PreparedCheckpointV1) -> AuthorizationResult<()>;
 }
@@ -304,10 +320,15 @@ trait SyntheticCheckpointPortV1: checkpoint_seal::Sealed {
 fn checkpoint_initial_digest(
     database_identity_sha256: &[u8; 32],
     schema_catalog_sha256: &[u8; 32],
+    business_content_root_sha256: &[u8; 32],
 ) -> AuthorizationResult<[u8; 32]> {
     framed_digest(
         S20_CHECKPOINT_INITIAL_DOMAIN,
-        &[database_identity_sha256, schema_catalog_sha256],
+        &[
+            database_identity_sha256,
+            schema_catalog_sha256,
+            business_content_root_sha256,
+        ],
     )
 }
 
@@ -315,10 +336,217 @@ fn checkpoint_transition_digest(
     previous: &[u8; 32],
     generation: u64,
     intent: &[u8; 32],
+    business_content_root_sha256: &[u8; 32],
 ) -> AuthorizationResult<[u8; 32]> {
     framed_digest(
         S20_CHECKPOINT_TRANSITION_DOMAIN,
-        &[previous, &generation.to_be_bytes(), intent],
+        &[
+            previous,
+            &generation.to_be_bytes(),
+            intent,
+            business_content_root_sha256,
+        ],
+    )
+}
+
+fn append_business_value_frame_v1(
+    message: &mut Vec<u8>,
+    value: rusqlite::types::ValueRef<'_>,
+) -> AuthorizationResult<()> {
+    let append = |message: &mut Vec<u8>, tag: u8, bytes: &[u8]| -> AuthorizationResult<()> {
+        let len = u64::try_from(bytes.len())
+            .map_err(|_| sqlite_error("s20_content_root", "business value length overflow"))?;
+        message.push(tag);
+        message.extend_from_slice(&len.to_be_bytes());
+        message.extend_from_slice(bytes);
+        Ok(())
+    };
+    match value {
+        rusqlite::types::ValueRef::Null => append(message, 0, &[]),
+        rusqlite::types::ValueRef::Integer(value) => append(message, 1, &value.to_be_bytes()),
+        rusqlite::types::ValueRef::Real(value) => {
+            append(message, 2, &value.to_bits().to_be_bytes())
+        }
+        rusqlite::types::ValueRef::Text(value) => append(message, 3, value),
+        rusqlite::types::ValueRef::Blob(value) => append(message, 4, value),
+    }
+}
+
+fn append_business_table_v1(
+    connection: &Connection,
+    message: &mut Vec<u8>,
+    table: &'static str,
+    columns: &[&'static str],
+    order_by: &'static str,
+) -> AuthorizationResult<()> {
+    append_u32_frame(message, table.as_bytes())?;
+    message.extend_from_slice(
+        &u64::try_from(columns.len())
+            .map_err(|_| sqlite_error("s20_content_root", "column count overflow"))?
+            .to_be_bytes(),
+    );
+    for column in columns {
+        append_u32_frame(message, column.as_bytes())?;
+    }
+
+    // Table and column names are frozen compile-time literals above; no
+    // caller-controlled identifier reaches this statement.
+    let sql = format!(
+        "SELECT {} FROM {} ORDER BY {}",
+        columns.join(","),
+        table,
+        order_by
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|_| sqlite_error("s20_content_root", "cannot prepare business table read"))?;
+    let mut rows = statement
+        .query([])
+        .map_err(|_| sqlite_error("s20_content_root", "cannot query business table"))?;
+    let mut row_count = 0_u64;
+    let mut framed_rows = Vec::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|_| sqlite_error("s20_content_root", "cannot iterate business table"))?
+    {
+        framed_rows.extend_from_slice(&row_count.to_be_bytes());
+        for index in 0..columns.len() {
+            let value = row.get_ref(index).map_err(|_| {
+                sqlite_error("s20_content_root", "cannot read typed business value")
+            })?;
+            append_business_value_frame_v1(&mut framed_rows, value)?;
+        }
+        row_count = row_count
+            .checked_add(1)
+            .ok_or_else(|| sqlite_error("s20_content_root", "business row count overflow"))?;
+    }
+    message.extend_from_slice(&row_count.to_be_bytes());
+    message.extend_from_slice(&framed_rows);
+    Ok(())
+}
+
+fn sqlite_business_content_root_for_head_v1(
+    connection: &Connection,
+    database_identity_sha256: &[u8; 32],
+    schema_catalog_sha256: &[u8; 32],
+    generation: u64,
+) -> AuthorizationResult<[u8; 32]> {
+    if generation == 0 || !nonzero(database_identity_sha256) || !nonzero(schema_catalog_sha256) {
+        return Err(sqlite_error(
+            "s20_content_root",
+            "database identity, schema catalog, or generation is invalid",
+        ));
+    }
+    const AUTHORITY_CONTROL_COLUMNS: &[&str] = &[
+        "singleton",
+        "control_ledger_identity_sha256",
+        "anti_rollback_policy_sha256",
+        "stop_state",
+        "stop_revision",
+        "current_revocation_epoch",
+        "revocation_revision",
+        "stop_policy_identity_sha256",
+        "revocation_policy_identity_sha256",
+        "sqlite_profile_sha256",
+        "sqlite_schema_sha256",
+    ];
+    const CLAIM_LEDGER_COLUMNS: &[&str] = &[
+        "authorization_id_sha256",
+        "claim_namespace_sha256",
+        "claim_key_sha256",
+        "signed_payload_sha256",
+        "subject_manifest_sha256",
+        "resource_scope_sha256",
+        "signed_revocation_epoch",
+        "state",
+        "revision",
+        "successful_claim_count",
+        "run_id_sha256",
+        "controller_binary_sha256",
+        "runner_binary_sha256",
+        "capability_nonce_sha256",
+        "preflight_receipt_sha256",
+        "control_snapshot_sha256",
+        "claim_receipt_sha256",
+    ];
+    const ORCHESTRATION_ATTEMPT_COLUMNS: &[&str] = &[
+        "authorization_id_sha256",
+        "claim_namespace_sha256",
+        "claim_key_sha256",
+        "owner_envelope_sha256",
+        "trust_anchor_document_sha256",
+        "owner_identity_sha256",
+        "owner_key_version",
+        "signed_payload_sha256",
+        "subject_manifest_sha256",
+        "resource_scope_sha256",
+        "state",
+        "revision",
+        "run_id_sha256",
+        "run_assignment_id_sha256",
+        "challenge_nonce_sha256",
+        "controller_binary_sha256",
+        "controller_start_token_sha256",
+        "boot_id_sha256",
+        "preflight_receipt_sha256",
+        "claim_receipt_sha256",
+        "terminal_receipt_sha256",
+    ];
+    const ACTION_JOURNAL_COLUMNS: &[&str] = &[
+        "authorization_id_sha256",
+        "claim_namespace_sha256",
+        "claim_key_sha256",
+        "action_index",
+        "run_assignment_id_sha256",
+        "operation_id_sha256",
+        "intent_sha256",
+        "outcome",
+    ];
+
+    let mut message = Vec::new();
+    append_u32_frame(&mut message, S20_BUSINESS_CONTENT_ROOT_DOMAIN)?;
+    append_u32_frame(&mut message, database_identity_sha256)?;
+    append_u32_frame(&mut message, schema_catalog_sha256)?;
+    message.extend_from_slice(&generation.to_be_bytes());
+    message.extend_from_slice(&4_u64.to_be_bytes());
+    append_business_table_v1(
+        connection,
+        &mut message,
+        "authority_control",
+        AUTHORITY_CONTROL_COLUMNS,
+        "singleton",
+    )?;
+    append_business_table_v1(
+        connection,
+        &mut message,
+        "claim_ledger",
+        CLAIM_LEDGER_COLUMNS,
+        "authorization_id_sha256,claim_namespace_sha256,claim_key_sha256",
+    )?;
+    append_business_table_v1(
+        connection,
+        &mut message,
+        "orchestration_attempt",
+        ORCHESTRATION_ATTEMPT_COLUMNS,
+        "authorization_id_sha256,claim_namespace_sha256,claim_key_sha256",
+    )?;
+    append_business_table_v1(
+        connection,
+        &mut message,
+        "action_journal",
+        ACTION_JOURNAL_COLUMNS,
+        "authorization_id_sha256,claim_namespace_sha256,claim_key_sha256,action_index",
+    )?;
+    Ok(sha256_bytes(&message))
+}
+
+fn sqlite_business_content_root_v1(connection: &Connection) -> AuthorizationResult<[u8; 32]> {
+    let head = read_kernel_head(connection)?;
+    sqlite_business_content_root_for_head_v1(
+        connection,
+        &head.database_identity_sha256,
+        &head.schema_catalog_sha256,
+        head.generation,
     )
 }
 
@@ -363,7 +591,10 @@ fn sqlite_schema_catalog_digest_v1(connection: &Connection) -> AuthorizationResu
 }
 
 fn verify_s20_profile(connection: &Connection) -> AuthorizationResult<()> {
-    if pragma_i64(connection, "PRAGMA synchronous")? != 3
+    if pragma_i64(connection, "PRAGMA application_id")? != S20_APPLICATION_ID
+        || pragma_i64(connection, "PRAGMA user_version")? != S20_USER_VERSION
+        || !pragma_text(connection, "PRAGMA journal_mode")?.eq_ignore_ascii_case("delete")
+        || pragma_i64(connection, "PRAGMA synchronous")? != 3
         || pragma_i64(connection, "PRAGMA temp_store")? != 1
         || pragma_i64(connection, "PRAGMA mmap_size")? != 0
         || pragma_i64(connection, "PRAGMA cache_size")? != -2048
@@ -395,15 +626,17 @@ fn apply_s20_profile(connection: &Connection) -> AuthorizationResult<()> {
 fn read_kernel_head(connection: &Connection) -> AuthorizationResult<KernelHeadV1> {
     connection
         .query_row(
-            "SELECT database_identity_sha256,schema_catalog_sha256,generation,
-                    checkpoint_head_sha256 FROM kernel_meta WHERE singleton=1",
+            "SELECT database_identity_sha256,schema_catalog_sha256,
+                    business_content_root_sha256,generation,checkpoint_head_sha256
+             FROM kernel_meta WHERE singleton=1",
             [],
             |row| {
                 Ok((
                     row.get::<_, Vec<u8>>(0)?,
                     row.get::<_, Vec<u8>>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Vec<u8>>(4)?,
                 ))
             },
         )
@@ -418,10 +651,13 @@ fn read_kernel_head(connection: &Connection) -> AuthorizationResult<KernelHeadV1
                     .1
                     .try_into()
                     .map_err(|_| sqlite_error("s20_meta", "schema digest length drifted"))?,
-                generation: u64::try_from(row.2)
+                business_content_root_sha256: row.2.try_into().map_err(|_| {
+                    sqlite_error("s20_meta", "business content root length drifted")
+                })?,
+                generation: u64::try_from(row.3)
                     .map_err(|_| sqlite_error("s20_meta", "generation is invalid"))?,
                 checkpoint_head_sha256: row
-                    .3
+                    .4
                     .try_into()
                     .map_err(|_| sqlite_error("s20_meta", "checkpoint length drifted"))?,
             })
@@ -440,10 +676,18 @@ fn verify_committed_checkpoint<P: SyntheticCheckpointPortV1>(
             "live schema differs from checkpointed schema",
         ));
     }
+    if sqlite_business_content_root_v1(connection)? != database.business_content_root_sha256 {
+        return Err(sqlite_error(
+            "s20_content_root",
+            "live business content differs from checkpointed content root",
+        ));
+    }
     match port.snapshot() {
         CheckpointSnapshotV1::Committed(external)
             if external.database_identity_sha256 == database.database_identity_sha256
                 && external.schema_catalog_sha256 == database.schema_catalog_sha256
+                && external.business_content_root_sha256
+                    == database.business_content_root_sha256
                 && external.generation == database.generation
                 && external.checkpoint_head_sha256 == database.checkpoint_head_sha256 =>
         {
@@ -456,25 +700,105 @@ fn verify_committed_checkpoint<P: SyntheticCheckpointPortV1>(
     }
 }
 
+/// Opaque evidence that the live SQLite business rows, committed kernel head,
+/// and the sealed external checkpoint snapshot were recomputed and equal in
+/// one verification call.  Raw digests supplied by a rich-packet caller never
+/// construct this token.
+#[must_use]
+struct ValidatedCommittedDatabaseStateV1 {
+    database_identity_sha256: [u8; 32],
+    schema_catalog_sha256: [u8; 32],
+    business_content_root_sha256: [u8; 32],
+    generation: u64,
+    checkpoint_head_sha256: [u8; 32],
+    checkpoint_provider_identity_sha256: [u8; 32],
+    independent_failure_domain_proved: bool,
+}
+
+fn validate_committed_database_state_v1<P: SyntheticCheckpointPortV1>(
+    connection: &Connection,
+    port: &P,
+) -> AuthorizationResult<ValidatedCommittedDatabaseStateV1> {
+    let head = verify_committed_checkpoint(connection, port)?;
+    Ok(ValidatedCommittedDatabaseStateV1 {
+        database_identity_sha256: head.database_identity_sha256,
+        schema_catalog_sha256: head.schema_catalog_sha256,
+        business_content_root_sha256: head.business_content_root_sha256,
+        generation: head.generation,
+        checkpoint_head_sha256: head.checkpoint_head_sha256,
+        checkpoint_provider_identity_sha256: port.provider_identity_sha256(),
+        independent_failure_domain_proved: port.independent_failure_domain_proved(),
+    })
+}
+
 fn prepare_transition<P: SyntheticCheckpointPortV1>(
     transaction: &rusqlite::Transaction<'_>,
     port: &mut P,
+    old: &KernelHeadV1,
     intent_sha256: [u8; 32],
 ) -> AuthorizationResult<PreparedCheckpointV1> {
-    let old = verify_committed_checkpoint(transaction, port)?;
-    port.prepare(&old, intent_sha256)
+    let still_old = read_kernel_head(transaction)?;
+    if still_old.database_identity_sha256 != old.database_identity_sha256
+        || still_old.schema_catalog_sha256 != old.schema_catalog_sha256
+        || still_old.business_content_root_sha256 != old.business_content_root_sha256
+        || still_old.generation != old.generation
+        || still_old.checkpoint_head_sha256 != old.checkpoint_head_sha256
+    {
+        return Err(sqlite_error(
+            "s20_content_root",
+            "kernel head changed before staged business content was sealed",
+        ));
+    }
+    let next_generation = old
+        .generation
+        .checked_add(1)
+        .ok_or_else(|| sqlite_error("s20_content_root", "checkpoint generation overflow"))?;
+    let staged_at_old_generation = sqlite_business_content_root_for_head_v1(
+        transaction,
+        &old.database_identity_sha256,
+        &old.schema_catalog_sha256,
+        old.generation,
+    )?;
+    if staged_at_old_generation == old.business_content_root_sha256 {
+        return Err(sqlite_error(
+            "s20_content_root",
+            "checkpointed transaction did not change business content",
+        ));
+    }
+    let next_business_content_root_sha256 = sqlite_business_content_root_for_head_v1(
+        transaction,
+        &old.database_identity_sha256,
+        &old.schema_catalog_sha256,
+        next_generation,
+    )?;
+    port.prepare(old, intent_sha256, next_business_content_root_sha256)
 }
 
 fn advance_meta(
     transaction: &rusqlite::Transaction<'_>,
     prepared: &PreparedCheckpointV1,
 ) -> AuthorizationResult<()> {
+    if sqlite_business_content_root_for_head_v1(
+        transaction,
+        &prepared.database_identity_sha256,
+        &prepared.schema_catalog_sha256,
+        prepared.generation,
+    )? != prepared.business_content_root_sha256
+    {
+        return Err(sqlite_error(
+            "s20_content_root",
+            "prepared checkpoint does not bind the staged business content",
+        ));
+    }
     let meta_changed = transaction
         .execute(
-            "UPDATE kernel_meta SET generation=?1,checkpoint_head_sha256=?2 WHERE singleton=1",
+            "UPDATE kernel_meta
+             SET business_content_root_sha256=?1,generation=?2,checkpoint_head_sha256=?3
+             WHERE singleton=1",
             params![
+                &prepared.business_content_root_sha256[..],
                 to_sql_integer(prepared.generation)?,
-                &prepared.checkpoint_head_sha256[..]
+                &prepared.checkpoint_head_sha256[..],
             ],
         )
         .map_err(|_| sqlite_error("s20_meta", "cannot advance kernel metadata"))?;
@@ -693,6 +1017,7 @@ fn reserve_preflight_once_v1<P: SyntheticCheckpointPortV1>(
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| sqlite_error("s20_preflight_reserve", "cannot begin reservation"))?;
+    let old = verify_committed_checkpoint(&transaction, port)?;
     if !control_is_clear_and_current(&transaction, authorized)? {
         return Err(manifest_error(
             "s20_preflight_reserve",
@@ -729,7 +1054,6 @@ fn reserve_preflight_once_v1<P: SyntheticCheckpointPortV1>(
             &request.boot_id_sha256,
         ],
     )?;
-    let prepared = prepare_transition(&transaction, port, intent)?;
     let changed = transaction
         .execute(
             "UPDATE orchestration_attempt
@@ -757,6 +1081,7 @@ fn reserve_preflight_once_v1<P: SyntheticCheckpointPortV1>(
             "reservation CAS failed",
         ));
     }
+    let prepared = prepare_transition(&transaction, port, &old, intent)?;
     advance_meta(&transaction, &prepared)?;
     transaction
         .commit()
@@ -779,9 +1104,9 @@ fn validate_preflight_once_v1<P: SyntheticCheckpointPortV1>(
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| sqlite_error("s20_preflight_validate", "cannot begin validation"))?;
+    let head = verify_committed_checkpoint(&transaction, port)?;
     let controls = read_exact_controls(&transaction)?;
     let controls_ok = controls_match_authorized_s20(&controls, authorized);
-    let head = verify_committed_checkpoint(&transaction, port)?;
     let control_snapshot_sha256 = framed_digest(
         S20_PREFLIGHT_DOMAIN,
         &[
@@ -822,7 +1147,6 @@ fn validate_preflight_once_v1<P: SyntheticCheckpointPortV1>(
             &control_snapshot_sha256,
         ],
     )?;
-    let prepared = prepare_transition(&transaction, port, receipt)?;
     let next_state = if valid && controls_ok {
         ATTEMPT_PREFLIGHT_VALIDATED
     } else {
@@ -867,6 +1191,7 @@ fn validate_preflight_once_v1<P: SyntheticCheckpointPortV1>(
             "validation token was replayed",
         ));
     }
+    let prepared = prepare_transition(&transaction, port, &head, receipt)?;
     advance_meta(&transaction, &prepared)?;
     transaction
         .commit()
@@ -896,6 +1221,7 @@ fn burn_claim_attempt_once_v1<P: SyntheticCheckpointPortV1>(
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| sqlite_error("s20_claim_burn", "cannot begin claim burn"))?;
+    let old = verify_committed_checkpoint(&transaction, port)?;
     let key = exact_attempt_key_params(authorized);
     let intent = framed_digest(
         S20_CLAIM_DOMAIN,
@@ -909,7 +1235,6 @@ fn burn_claim_attempt_once_v1<P: SyntheticCheckpointPortV1>(
             &preflight.preflight_receipt_sha256,
         ],
     )?;
-    let prepared = prepare_transition(&transaction, port, intent)?;
     let changed = transaction
         .execute(
             "UPDATE orchestration_attempt SET state='CLAIM_ATTEMPT_RESERVED',revision=revision+1
@@ -931,6 +1256,7 @@ fn burn_claim_attempt_once_v1<P: SyntheticCheckpointPortV1>(
             "claim opportunity already burned",
         ));
     }
+    let prepared = prepare_transition(&transaction, port, &old, intent)?;
     advance_meta(&transaction, &prepared)?;
     transaction
         .commit()
@@ -948,7 +1274,7 @@ fn execute_burned_claim_once_v1<P: SyntheticCheckpointPortV1>(
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| sqlite_error("s20_claim", "cannot begin single claim"))?;
-    verify_committed_checkpoint(&transaction, port)?;
+    let old = verify_committed_checkpoint(&transaction, port)?;
     let key = exact_attempt_key_params(authorized);
     let controls = read_exact_controls(&transaction)?;
     let controls_ok = controls_match_authorized_s20(&controls, authorized)
@@ -1070,7 +1396,6 @@ fn execute_burned_claim_once_v1<P: SyntheticCheckpointPortV1>(
             &receipt,
         ],
     )?;
-    let prepared = prepare_transition(&transaction, port, intent)?;
     let attempt_changed = transaction
         .execute(
             "UPDATE orchestration_attempt SET state=?1,revision=revision+1,
@@ -1100,6 +1425,7 @@ fn execute_burned_claim_once_v1<P: SyntheticCheckpointPortV1>(
             "claim attempt was not uniquely reserved",
         ));
     }
+    let prepared = prepare_transition(&transaction, port, &old, intent)?;
     advance_meta(&transaction, &prepared)?;
     transaction
         .commit()
@@ -1168,7 +1494,7 @@ where
     let intent_transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| sqlite_error("s20_action", "cannot begin action intent"))?;
-    verify_committed_checkpoint(&intent_transaction, port)?;
+    let intent_old = verify_committed_checkpoint(&intent_transaction, port)?;
     if !control_is_clear_and_current(&intent_transaction, authorized)? {
         return Err(manifest_error(
             "s20_action",
@@ -1255,7 +1581,6 @@ where
             &action_sequence.to_be_bytes(),
         ],
     )?;
-    let prepared = prepare_transition(&intent_transaction, port, intent)?;
     let intent_changed = intent_transaction
         .execute(
             "INSERT INTO action_journal(
@@ -1279,6 +1604,7 @@ where
             "action intent insert was not singular",
         ));
     }
+    let prepared = prepare_transition(&intent_transaction, port, &intent_old, intent)?;
     advance_meta(&intent_transaction, &prepared)?;
     intent_transaction
         .commit()
@@ -1294,7 +1620,7 @@ where
     let start_transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| sqlite_error("s20_action", "cannot begin action start"))?;
-    verify_committed_checkpoint(&start_transaction, port)?;
+    let outcome_old = verify_committed_checkpoint(&start_transaction, port)?;
     let controls_ok = control_is_clear_and_current(&start_transaction, authorized)?;
     let outcome_intent = framed_digest(
         S20_ACTION_DOMAIN,
@@ -1307,7 +1633,6 @@ where
             &intent,
         ],
     )?;
-    let outcome_prepared = prepare_transition(&start_transaction, port, outcome_intent)?;
     if !controls_ok {
         let journal_changed = start_transaction
             .execute(
@@ -1346,6 +1671,8 @@ where
                 "denied action terminal transition was not singular",
             ));
         }
+        let outcome_prepared =
+            prepare_transition(&start_transaction, port, &outcome_old, outcome_intent)?;
         advance_meta(&start_transaction, &outcome_prepared)?;
         start_transaction
             .commit()
@@ -1448,6 +1775,8 @@ where
             ));
         }
     }
+    let outcome_prepared =
+        prepare_transition(&start_transaction, port, &outcome_old, outcome_intent)?;
     advance_meta(&start_transaction, &outcome_prepared)?;
     start_transaction
         .commit()
@@ -1581,9 +1910,11 @@ fn validate_exact_canary_accounting_v1(
 struct SyntheticCheckpointPortImplV1 {
     database_identity_sha256: [u8; 32],
     schema_catalog_sha256: [u8; 32],
+    business_content_root_sha256: [u8; 32],
     generation: u64,
     checkpoint_head_sha256: [u8; 32],
-    prepared: Option<([u8; 32], [u8; 32], u64, [u8; 32])>,
+    checkpoint_provider_identity_sha256: [u8; 32],
+    prepared: Option<([u8; 32], [u8; 32], [u8; 32], u64, [u8; 32])>,
     fail_commit_once: bool,
 }
 
@@ -1599,22 +1930,35 @@ impl SyntheticCheckpointPortV1 for SyntheticCheckpointPortImplV1 {
             CheckpointSnapshotV1::Committed(KernelHeadV1 {
                 database_identity_sha256: self.database_identity_sha256,
                 schema_catalog_sha256: self.schema_catalog_sha256,
+                business_content_root_sha256: self.business_content_root_sha256,
                 generation: self.generation,
                 checkpoint_head_sha256: self.checkpoint_head_sha256,
             })
         }
     }
 
+    fn provider_identity_sha256(&self) -> [u8; 32] {
+        self.checkpoint_provider_identity_sha256
+    }
+
+    fn independent_failure_domain_proved(&self) -> bool {
+        false
+    }
+
     fn prepare(
         &mut self,
         expected: &KernelHeadV1,
         intent_sha256: [u8; 32],
+        next_business_content_root_sha256: [u8; 32],
     ) -> AuthorizationResult<PreparedCheckpointV1> {
         if self.prepared.is_some()
             || self.database_identity_sha256 != expected.database_identity_sha256
             || self.schema_catalog_sha256 != expected.schema_catalog_sha256
+            || self.business_content_root_sha256 != expected.business_content_root_sha256
             || self.generation != expected.generation
             || self.checkpoint_head_sha256 != expected.checkpoint_head_sha256
+            || next_business_content_root_sha256 == self.business_content_root_sha256
+            || !nonzero(&next_business_content_root_sha256)
         {
             return Err(sqlite_error(
                 "s20_checkpoint",
@@ -1625,17 +1969,23 @@ impl SyntheticCheckpointPortV1 for SyntheticCheckpointPortImplV1 {
             .generation
             .checked_add(1)
             .ok_or_else(|| sqlite_error("s20_checkpoint", "checkpoint generation overflow"))?;
-        let checkpoint_head_sha256 =
-            checkpoint_transition_digest(&self.checkpoint_head_sha256, generation, &intent_sha256)?;
+        let checkpoint_head_sha256 = checkpoint_transition_digest(
+            &self.checkpoint_head_sha256,
+            generation,
+            &intent_sha256,
+            &next_business_content_root_sha256,
+        )?;
         let prepared = PreparedCheckpointV1 {
             database_identity_sha256: self.database_identity_sha256,
             schema_catalog_sha256: self.schema_catalog_sha256,
+            business_content_root_sha256: next_business_content_root_sha256,
             generation,
             checkpoint_head_sha256,
         };
         self.prepared = Some((
             prepared.database_identity_sha256,
             prepared.schema_catalog_sha256,
+            prepared.business_content_root_sha256,
             prepared.generation,
             prepared.checkpoint_head_sha256,
         ));
@@ -1647,11 +1997,13 @@ impl SyntheticCheckpointPortV1 for SyntheticCheckpointPortImplV1 {
             |(
                 database_identity_sha256,
                 schema_catalog_sha256,
+                business_content_root_sha256,
                 generation,
                 checkpoint_head_sha256,
             )| {
                 *database_identity_sha256 == prepared.database_identity_sha256
                     && *schema_catalog_sha256 == prepared.schema_catalog_sha256
+                    && *business_content_root_sha256 == prepared.business_content_root_sha256
                     && *generation == prepared.generation
                     && *checkpoint_head_sha256 == prepared.checkpoint_head_sha256
             },
@@ -1659,6 +2011,7 @@ impl SyntheticCheckpointPortV1 for SyntheticCheckpointPortImplV1 {
         if !prepared_matches
             || prepared.database_identity_sha256 != self.database_identity_sha256
             || prepared.schema_catalog_sha256 != self.schema_catalog_sha256
+            || prepared.business_content_root_sha256 == self.business_content_root_sha256
             || prepared.generation != self.generation + 1
         {
             return Err(sqlite_error(
@@ -1673,6 +2026,7 @@ impl SyntheticCheckpointPortV1 for SyntheticCheckpointPortImplV1 {
                 "synthetic checkpoint commit acknowledgement is unknown",
             ));
         }
+        self.business_content_root_sha256 = prepared.business_content_root_sha256;
         self.generation = prepared.generation;
         self.checkpoint_head_sha256 = prepared.checkpoint_head_sha256;
         self.prepared = None;
@@ -1713,29 +2067,9 @@ fn initialize_synthetic_authority_ledger_v1(
         .execute_batch(S20_SCHEMA_SQL)
         .map_err(|_| sqlite_error("s20_setup", "cannot create synthetic authority schema"))?;
     let schema_catalog_sha256 = sqlite_schema_catalog_digest_v1(&connection)?;
-    let checkpoint_head_sha256 =
-        checkpoint_initial_digest(&database_identity_sha256, &schema_catalog_sha256)?;
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| sqlite_error("s20_setup", "cannot begin authority registration"))?;
-    let meta_changed = transaction
-        .execute(
-            "INSERT INTO kernel_meta(singleton,database_identity_sha256,schema_catalog_sha256,
-                                     generation,checkpoint_head_sha256)
-             VALUES(1,?1,?2,1,?3)",
-            params![
-                &database_identity_sha256[..],
-                &schema_catalog_sha256[..],
-                &checkpoint_head_sha256[..]
-            ],
-        )
-        .map_err(|_| sqlite_error("s20_setup", "cannot register kernel metadata"))?;
-    if meta_changed != 1 {
-        return Err(sqlite_error(
-            "s20_setup",
-            "kernel metadata registration was not singular",
-        ));
-    }
     let control_changed = transaction
         .execute(
             "INSERT INTO authority_control(
@@ -1822,6 +2156,41 @@ fn initialize_synthetic_authority_ledger_v1(
             "attempt eligibility preregistration was not singular",
         ));
     }
+    let business_content_root_sha256 = sqlite_business_content_root_for_head_v1(
+        &transaction,
+        &database_identity_sha256,
+        &schema_catalog_sha256,
+        1,
+    )?;
+    let checkpoint_head_sha256 = checkpoint_initial_digest(
+        &database_identity_sha256,
+        &schema_catalog_sha256,
+        &business_content_root_sha256,
+    )?;
+    let checkpoint_provider_identity_sha256 = framed_digest(
+        S20_SYNTHETIC_CHECKPOINT_PROVIDER_DOMAIN,
+        &[&database_identity_sha256, &schema_catalog_sha256],
+    )?;
+    let meta_changed = transaction
+        .execute(
+            "INSERT INTO kernel_meta(singleton,database_identity_sha256,schema_catalog_sha256,
+                                     business_content_root_sha256,generation,
+                                     checkpoint_head_sha256)
+             VALUES(1,?1,?2,?3,1,?4)",
+            params![
+                &database_identity_sha256[..],
+                &schema_catalog_sha256[..],
+                &business_content_root_sha256[..],
+                &checkpoint_head_sha256[..],
+            ],
+        )
+        .map_err(|_| sqlite_error("s20_setup", "cannot register kernel metadata"))?;
+    if meta_changed != 1 {
+        return Err(sqlite_error(
+            "s20_setup",
+            "kernel metadata registration was not singular",
+        ));
+    }
     transaction
         .commit()
         .map_err(|_| sqlite_error("s20_setup", "authority registration commit unknown"))?;
@@ -1830,8 +2199,10 @@ fn initialize_synthetic_authority_ledger_v1(
         SyntheticCheckpointPortImplV1 {
             database_identity_sha256,
             schema_catalog_sha256,
+            business_content_root_sha256,
             generation: 1,
             checkpoint_head_sha256,
+            checkpoint_provider_identity_sha256,
             prepared: None,
             fail_commit_once: false,
         },
@@ -1917,7 +2288,6 @@ fn authority_trigger_stop_v1<P: SyntheticCheckpointPortV1>(
         S20_ACTION_DOMAIN,
         &[b"ABSORBING_STOP", &head.generation.to_be_bytes()],
     )?;
-    let prepared = port.prepare(&head, intent)?;
     let changed = transaction
         .execute(
             "UPDATE authority_control SET stop_state='TRIGGERED',stop_revision=stop_revision+1
@@ -1931,6 +2301,7 @@ fn authority_trigger_stop_v1<P: SyntheticCheckpointPortV1>(
             "STOP transition was replayed or not singular",
         ));
     }
+    let prepared = prepare_transition(&transaction, port, &head, intent)?;
     advance_meta(&transaction, &prepared)?;
     transaction
         .commit()
@@ -1982,6 +2353,27 @@ mod tests {
                 claim_namespace_sha256: repeated(0x1f),
                 claim_key_sha256: repeated(0x20),
                 expected_unclaimed_revision: 41,
+                assignment_set_sha256: repeated(0x21),
+                schedule_sha256: repeated(0x22),
+                catalog_row_count: 5_639,
+                catalog_sha256: [0x28; 32],
+                classifier_binary_sha256: repeated(0x23),
+                classifier_source_sha256: repeated(0x24),
+                expected_oracle_sha256: repeated(0x25),
+                s17_observation_schema_sha256: repeated(0x26),
+                s17_plan_sha256: repeated(0x27),
+                target_phase_count: 113,
+                target_phase_unique_match_count: 113,
+                allowed_operation_ids: vec![
+                    "CREATE_EXACT_RUN_ROOT".into(),
+                    "SQLITE_EXACT_PROFILE_SETUP".into(),
+                    "SPAWN_ONE_ASSIGNED_CHILD".into(),
+                    "PIDFD_OPEN_ASSIGNED_CHILD".into(),
+                    "PIDFD_SEND_SIGNAL_SIGKILL".into(),
+                    "FRESH_EXEC_REOPEN".into(),
+                    "WRITE_BOUND_RECEIPTS".into(),
+                    "CLEANUP_EXACT_RUN_ROOT".into(),
+                ],
             },
             capability_nonce_sha256: repeated(0x21),
             revocation_policy_sha256: repeated(0x22),
@@ -2296,6 +2688,239 @@ mod tests {
         assert_eq!(rows.3, ATTEMPT_CLAIM_FAILED);
     }
 
+    fn insert_uncheckpointed_action_rows(connection: &Connection, indices: &[u64]) {
+        let authorization_id_sha256 = repeated(0xd1);
+        let claim_namespace_sha256 = repeated(0xd2);
+        let claim_key_sha256 = repeated(0xd3);
+        let run_assignment_id_sha256 = repeated(0xd4);
+        for index in indices {
+            let mut operation_id_sha256 = repeated(0xd5);
+            operation_id_sha256[0] = u8::try_from(*index).unwrap();
+            let mut intent_sha256 = repeated(0xd6);
+            intent_sha256[0] = u8::try_from(*index).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO action_journal(
+                       authorization_id_sha256,claim_namespace_sha256,claim_key_sha256,
+                       action_index,run_assignment_id_sha256,operation_id_sha256,
+                       intent_sha256,outcome)
+                     VALUES(?1,?2,?3,?4,?5,?6,?7,'STARTED_SYNTHETIC')",
+                    params![
+                        &authorization_id_sha256[..],
+                        &claim_namespace_sha256[..],
+                        &claim_key_sha256[..],
+                        to_sql_integer(*index).unwrap(),
+                        &run_assignment_id_sha256[..],
+                        &operation_id_sha256[..],
+                        &intent_sha256[..],
+                    ],
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn s20_business_content_root_is_order_stable_and_type_framed() {
+        let mut first = LedgerFixture::new("content-root-order-first");
+        let mut second = LedgerFixture::new("content-root-order-second");
+        insert_uncheckpointed_action_rows(first.connection(), &[1, 0]);
+        insert_uncheckpointed_action_rows(second.connection(), &[0, 1]);
+        let first_root = sqlite_business_content_root_v1(first.connection()).unwrap();
+        let second_root = sqlite_business_content_root_v1(second.connection()).unwrap();
+        assert_eq!(first_root, second_root);
+        let head = read_kernel_head(first.connection()).unwrap();
+        let mut other_database = head.database_identity_sha256;
+        other_database[0] ^= 1;
+        let mut other_schema = head.schema_catalog_sha256;
+        other_schema[0] ^= 1;
+        assert_ne!(
+            first_root,
+            sqlite_business_content_root_for_head_v1(
+                first.connection(),
+                &other_database,
+                &head.schema_catalog_sha256,
+                head.generation,
+            )
+            .unwrap()
+        );
+        assert_ne!(
+            first_root,
+            sqlite_business_content_root_for_head_v1(
+                first.connection(),
+                &head.database_identity_sha256,
+                &other_schema,
+                head.generation,
+            )
+            .unwrap()
+        );
+        assert_ne!(
+            first_root,
+            sqlite_business_content_root_for_head_v1(
+                first.connection(),
+                &head.database_identity_sha256,
+                &head.schema_catalog_sha256,
+                head.generation + 1,
+            )
+            .unwrap()
+        );
+
+        let integer_bytes = 1_i64.to_be_bytes();
+        let mut integer_frame = Vec::new();
+        append_business_value_frame_v1(&mut integer_frame, rusqlite::types::ValueRef::Integer(1))
+            .unwrap();
+        let mut blob_frame = Vec::new();
+        append_business_value_frame_v1(
+            &mut blob_frame,
+            rusqlite::types::ValueRef::Blob(&integer_bytes),
+        )
+        .unwrap();
+        let mut null_frame = Vec::new();
+        append_business_value_frame_v1(&mut null_frame, rusqlite::types::ValueRef::Null).unwrap();
+        let mut empty_blob_frame = Vec::new();
+        append_business_value_frame_v1(&mut empty_blob_frame, rusqlite::types::ValueRef::Blob(&[]))
+            .unwrap();
+        assert_ne!(integer_frame, blob_frame);
+        assert_ne!(null_frame, empty_blob_frame);
+    }
+
+    #[test]
+    fn s20_business_content_root_tracks_meta_and_external_checkpoint() {
+        let mut fixture = LedgerFixture::new("content-root-transition");
+        let initial = read_kernel_head(fixture.connection()).unwrap();
+        assert_eq!(
+            hex(&initial.business_content_root_sha256),
+            S20_INITIAL_BUSINESS_CONTENT_ROOT_SHA256_KAT
+        );
+        assert_eq!(
+            initial.business_content_root_sha256,
+            sqlite_business_content_root_v1(fixture.connection()).unwrap()
+        );
+        assert_eq!(
+            initial.business_content_root_sha256,
+            fixture.port.business_content_root_sha256
+        );
+        let evidence = validate_committed_database_state_v1(
+            fixture.connection.as_ref().unwrap(),
+            &fixture.port,
+        )
+        .unwrap();
+        assert_eq!(
+            evidence.checkpoint_provider_identity_sha256,
+            fixture.port.checkpoint_provider_identity_sha256
+        );
+        assert!(!evidence.independent_failure_domain_proved);
+        let before = initial.business_content_root_sha256;
+        {
+            let (connection, port, authorized) = (
+                fixture.connection.as_mut().unwrap(),
+                &mut fixture.port,
+                &fixture.authorized,
+            );
+            let _ =
+                reserve_preflight_once_v1(connection, port, authorized, reservation(0x30)).unwrap();
+        }
+        let committed =
+            verify_committed_checkpoint(fixture.connection.as_ref().unwrap(), &fixture.port)
+                .unwrap();
+        assert_ne!(committed.business_content_root_sha256, before);
+        assert_eq!(
+            committed.business_content_root_sha256,
+            fixture.port.business_content_root_sha256
+        );
+    }
+
+    #[test]
+    fn s20_committed_state_rejects_same_connection_identity_and_journal_drift() {
+        let mut application_id = LedgerFixture::new("same-connection-application-id-drift");
+        application_id
+            .connection()
+            .execute_batch("PRAGMA application_id=1094865691;")
+            .unwrap();
+        assert!(validate_committed_database_state_v1(
+            application_id.connection.as_ref().unwrap(),
+            &application_id.port,
+        )
+        .is_err());
+
+        let mut user_version = LedgerFixture::new("same-connection-user-version-drift");
+        user_version
+            .connection()
+            .execute_batch("PRAGMA user_version=21;")
+            .unwrap();
+        assert!(validate_committed_database_state_v1(
+            user_version.connection.as_ref().unwrap(),
+            &user_version.port,
+        )
+        .is_err());
+
+        let mut journal_mode = LedgerFixture::new("same-connection-journal-mode-drift");
+        assert_eq!(
+            pragma_text(journal_mode.connection(), "PRAGMA journal_mode=MEMORY").unwrap(),
+            "memory"
+        );
+        assert!(validate_committed_database_state_v1(
+            journal_mode.connection.as_ref().unwrap(),
+            &journal_mode.port,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn s20_business_content_root_reopen_rejects_insert_update_and_delete_tamper() {
+        let mut inserted = LedgerFixture::new("content-root-insert-tamper");
+        insert_uncheckpointed_action_rows(inserted.connection(), &[0]);
+        inserted.connection.take();
+        assert!(open_existing_s20_ledger_v1(&inserted.path, &inserted.port).is_err());
+
+        let mut updated = LedgerFixture::new("content-root-update-tamper");
+        let changed = updated
+            .connection()
+            .execute(
+                "UPDATE authority_control
+                 SET stop_state='TRIGGERED',stop_revision=stop_revision+1
+                 WHERE singleton=1 AND stop_state='CLEAR'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(changed, 1);
+        updated.connection.take();
+        assert!(open_existing_s20_ledger_v1(&updated.path, &updated.port).is_err());
+
+        let mut deleted = LedgerFixture::new("content-root-delete-tamper");
+        let schema_before = sqlite_schema_catalog_digest_v1(deleted.connection()).unwrap();
+        let delete_guard_sql: String = deleted
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_schema
+                 WHERE type='trigger' AND name='claim_ledger_delete_guard'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        deleted
+            .connection()
+            .execute_batch("DROP TRIGGER claim_ledger_delete_guard")
+            .unwrap();
+        assert_eq!(
+            deleted
+                .connection()
+                .execute("DELETE FROM claim_ledger", [])
+                .unwrap(),
+            1
+        );
+        deleted
+            .connection()
+            .execute_batch(&delete_guard_sql)
+            .unwrap();
+        assert_eq!(
+            sqlite_schema_catalog_digest_v1(deleted.connection()).unwrap(),
+            schema_before,
+            "delete-tamper KAT must restore the exact schema so only business-row loss is detected"
+        );
+        deleted.connection.take();
+        assert!(open_existing_s20_ledger_v1(&deleted.path, &deleted.port).is_err());
+    }
+
     #[test]
     fn s20_checkpoint_prepared_fork_and_old_file_replacement_fail_closed() {
         let mut fixture = LedgerFixture::new("checkpoint");
@@ -2323,6 +2948,7 @@ mod tests {
         prepared.port.prepared = Some((
             prepared.port.database_identity_sha256,
             prepared.port.schema_catalog_sha256,
+            repeated(0xb9),
             prepared.port.generation + 1,
             repeated(0xba),
         ));
@@ -2333,18 +2959,27 @@ mod tests {
         forked.port.checkpoint_head_sha256[0] ^= 1;
         assert!(open_existing_s20_ledger_v1(&forked.path, &forked.port).is_err());
 
+        let mut content_forked = LedgerFixture::new("checkpoint-content-root-forked");
+        content_forked.connection.take();
+        content_forked.port.business_content_root_sha256[0] ^= 1;
+        assert!(open_existing_s20_ledger_v1(&content_forked.path, &content_forked.port).is_err());
+
         let mut swapped = LedgerFixture::new("checkpoint-swapped-token");
         let expected = read_kernel_head(swapped.connection.as_ref().unwrap()).unwrap();
-        let authentic = swapped.port.prepare(&expected, repeated(0xc1)).unwrap();
-        let mut fabricated_head = authentic.checkpoint_head_sha256;
-        fabricated_head[0] ^= 1;
+        let authentic = swapped
+            .port
+            .prepare(&expected, repeated(0xc1), repeated(0xc2))
+            .unwrap();
+        let mut fabricated_root = authentic.business_content_root_sha256;
+        fabricated_root[0] ^= 1;
         assert!(swapped
             .port
             .commit(PreparedCheckpointV1 {
                 database_identity_sha256: authentic.database_identity_sha256,
                 schema_catalog_sha256: authentic.schema_catalog_sha256,
+                business_content_root_sha256: fabricated_root,
                 generation: authentic.generation,
-                checkpoint_head_sha256: fabricated_head,
+                checkpoint_head_sha256: authentic.checkpoint_head_sha256,
             })
             .is_err());
         assert!(swapped.port.prepared.is_some());
@@ -2517,7 +3152,7 @@ mod tests {
             authority_trigger_stop_v1(connection, port)
         };
         assert!(replay.is_err());
-        assert!(fixture.port.prepared.is_some());
+        assert!(fixture.port.prepared.is_none());
         let control: (String, i64) = fixture
             .connection()
             .query_row(
