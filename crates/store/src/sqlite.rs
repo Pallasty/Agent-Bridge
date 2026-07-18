@@ -101,17 +101,17 @@ use crate::{
     memory_scope_visible_in_context, AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert,
     CoactivationEdge, CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy,
     DecayUnusedStats, EmbeddingProfile, ForumExportResult, ForumImportReport, ForumPostExport,
-    ForumPostOutcome, ForumPostRecord, ForumThreadExport, ForumThreadRecord, FusionShadowSample,
-    GraphTopology, HebbianCluster, IdentityWindow, ImportConflictPolicy, ImportReport,
-    McpToolCallFilter, McpToolCallRow, McpToolCallStats, McpToolErrorRecord, McpToolSourceStats,
-    MemoryCosineHit, MemoryEdge, MemoryEdgeExport, MemoryEvidenceProfile,
-    MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot, MemoryEvidenceSnapshotLimits,
-    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryLiveMeta, MemoryPeekResult,
-    MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats,
-    MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord, OverlapPair, PlanRecord,
-    PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, RetrievalOutcomeMemory,
-    RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts, SessionFilter,
-    SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
+    ForumPostOutcome, ForumPostRecord, ForumSearchPostRecord, ForumSearchRecord, ForumThreadExport,
+    ForumThreadRecord, FusionShadowSample, GraphTopology, HebbianCluster, IdentityWindow,
+    ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow, McpToolCallStats,
+    McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
+    MemoryEvidenceProfile, MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot,
+    MemoryEvidenceSnapshotLimits, MemoryExportFilter, MemoryExportResult, MemoryListSort,
+    MemoryLiveMeta, MemoryPeekResult, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
+    MemorySearchHit, MemoryStats, MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord,
+    OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats,
+    RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts,
+    SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
     AMBIENT_SURFACING_MODE, FUSION_SHADOW_RING_CAP, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
     MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
@@ -10837,6 +10837,192 @@ impl StateStore for SqliteStore {
                 }
             },
         ))
+    }
+
+    async fn forum_thread_get(&self, thread_id: i64) -> Result<Option<ForumThreadRecord>> {
+        self.conn
+            .call(move |c| -> RusqliteResult<Option<ForumThreadRecord>> {
+                let mut stmt = c.prepare(
+                    "SELECT t.id, t.board, t.title, t.created_by, t.created_at, \
+                            t.last_post_at, t.status, t.tags_json, \
+                            (SELECT COUNT(*) FROM forum_posts p WHERE p.thread_id = t.id) \
+                     FROM forum_threads t WHERE t.id = ?1",
+                )?;
+                let mut rows = stmt.query(params![thread_id])?;
+                let Some(row) = rows.next()? else {
+                    return Ok(None);
+                };
+                let tags_json: Option<String> = row.get(7)?;
+                let tags = tags_json
+                    .as_deref()
+                    .and_then(|raw| serde_json::from_str(raw).ok())
+                    .unwrap_or_default();
+                Ok(Some(ForumThreadRecord {
+                    id: row.get(0)?,
+                    board: row.get(1)?,
+                    title: row.get(2)?,
+                    created_by: row.get(3)?,
+                    created_at: row.get(4)?,
+                    last_post_at: row.get(5)?,
+                    status: row.get(6)?,
+                    tags,
+                    post_count: row.get(8)?,
+                    unread_count: None,
+                }))
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("forum_thread_get: {e}")))
+    }
+
+    async fn forum_search(
+        &self,
+        query: &str,
+        allowed_tags: &[String],
+        limit: u32,
+    ) -> Result<Vec<ForumSearchRecord>> {
+        let query = query.trim();
+        if query.is_empty() || allowed_tags.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut tokens = Vec::new();
+        for raw in query.split_whitespace() {
+            let token = raw
+                .trim_matches(|c: char| c.is_ascii_punctuation())
+                .trim()
+                .to_lowercase();
+            if !token.is_empty() && !tokens.contains(&token) {
+                tokens.push(token);
+            }
+            if tokens.len() == 8 {
+                break;
+            }
+        }
+        if tokens.is_empty() {
+            tokens.push(query.to_lowercase());
+        }
+        let patterns: Vec<String> = tokens
+            .into_iter()
+            .map(|token| {
+                let escaped = token
+                    .replace('\\', r"\\")
+                    .replace('%', r"\%")
+                    .replace('_', r"\_");
+                format!("%{escaped}%")
+            })
+            .collect();
+
+        let mut tags: Vec<String> = allowed_tags
+            .iter()
+            .map(|tag| tag.trim().to_lowercase())
+            .filter(|tag| !tag.is_empty())
+            .collect();
+        tags.sort();
+        tags.dedup();
+        tags.truncate(32);
+        if tags.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let pattern_refs: Vec<String> = (1..=patterns.len())
+            .map(|index| format!("?{index}"))
+            .collect();
+        let body_match = pattern_refs
+            .iter()
+            .map(|param| format!("LOWER(p2.body) LIKE {param} ESCAPE '\\'"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let title_match = pattern_refs
+            .iter()
+            .map(|param| format!("LOWER(t.title) LIKE {param} ESCAPE '\\'"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let title_score = pattern_refs
+            .iter()
+            .map(|param| {
+                format!("CASE WHEN LOWER(t.title) LIKE {param} ESCAPE '\\' THEN 1 ELSE 0 END")
+            })
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let tag_start = patterns.len() + 1;
+        let tag_params = (tag_start..tag_start + tags.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let limit_param = patterns.len() + tags.len() + 1;
+        let sql = format!(
+            "SELECT t.id, t.board, t.title, t.created_by, t.created_at, \
+                    t.last_post_at, t.status, t.tags_json, \
+                    (SELECT COUNT(*) FROM forum_posts pc WHERE pc.thread_id = t.id), \
+                    p.id, p.author, p.kind, p.body, p.created_at \
+             FROM forum_threads t \
+             LEFT JOIN forum_posts p ON p.id = ( \
+                 SELECT p2.id FROM forum_posts p2 \
+                 WHERE p2.thread_id = t.id AND ({body_match}) \
+                 ORDER BY p2.id DESC LIMIT 1 \
+             ) \
+             WHERE EXISTS ( \
+                 SELECT 1 \
+                 FROM json_each( \
+                     CASE WHEN json_valid(t.tags_json) THEN t.tags_json ELSE '[]' END \
+                 ) tag \
+                 WHERE LOWER(CAST(tag.value AS TEXT)) IN ({tag_params}) \
+             ) \
+               AND (({title_match}) OR p.id IS NOT NULL) \
+             ORDER BY ({title_score}) DESC, t.last_post_at DESC, t.id DESC \
+             LIMIT ?{limit_param}"
+        );
+
+        let mut sql_params: Vec<rusqlite::types::Value> = patterns
+            .into_iter()
+            .map(rusqlite::types::Value::Text)
+            .collect();
+        sql_params.extend(tags.into_iter().map(rusqlite::types::Value::Text));
+        sql_params.push(rusqlite::types::Value::Integer(i64::from(
+            limit.clamp(1, 100),
+        )));
+
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<ForumSearchRecord>> {
+                let mut stmt = c.prepare(&sql)?;
+                let mut rows = stmt.query(rusqlite::params_from_iter(sql_params.iter()))?;
+                let mut results = Vec::new();
+                while let Some(row) = rows.next()? {
+                    let tags_json: Option<String> = row.get(7)?;
+                    let thread = ForumThreadRecord {
+                        id: row.get(0)?,
+                        board: row.get(1)?,
+                        title: row.get(2)?,
+                        created_by: row.get(3)?,
+                        created_at: row.get(4)?,
+                        last_post_at: row.get(5)?,
+                        status: row.get(6)?,
+                        tags: tags_json
+                            .as_deref()
+                            .and_then(|raw| serde_json::from_str(raw).ok())
+                            .unwrap_or_default(),
+                        post_count: row.get(8)?,
+                        unread_count: None,
+                    };
+                    let matched_post = match row.get::<_, Option<i64>>(9)? {
+                        Some(id) => Some(ForumSearchPostRecord {
+                            id,
+                            author: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                            kind: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
+                            body: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                            created_at: row.get::<_, Option<i64>>(13)?.unwrap_or_default(),
+                        }),
+                        None => None,
+                    };
+                    results.push(ForumSearchRecord {
+                        thread,
+                        matched_post,
+                    });
+                }
+                Ok(results)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("forum_search: {e}")))
     }
 
     async fn forum_subscribe(

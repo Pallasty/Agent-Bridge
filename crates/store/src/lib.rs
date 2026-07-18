@@ -1683,6 +1683,25 @@ pub struct ForumPostRecord {
     pub created_at: i64,
 }
 
+/// One read-only forum-search hit. Results are grouped by thread and carry at
+/// most one matching post preview so callers can decide whether to fetch the
+/// bounded recent thread history.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForumSearchPostRecord {
+    pub id: i64,
+    pub author: String,
+    pub kind: String,
+    pub body: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForumSearchRecord {
+    pub thread: ForumThreadRecord,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_post: Option<ForumSearchPostRecord>,
+}
+
 /// Result of `forum_post`: either a brand-new thread + its first post, or an
 /// appended post on an existing thread.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -4309,6 +4328,28 @@ pub trait StateStore: Send + Sync {
     async fn forum_post_get(&self, post_id: i64) -> Result<Option<ForumPostRecord>> {
         let _ = post_id;
         Ok(None)
+    }
+
+    /// Fetch one forum thread without touching subscription cursors.
+    async fn forum_thread_get(&self, thread_id: i64) -> Result<Option<ForumThreadRecord>> {
+        let _ = thread_id;
+        Ok(None)
+    }
+
+    /// Search forum thread titles and post bodies without touching
+    /// subscription cursors. `allowed_tags` is a mandatory visibility
+    /// boundary: only threads carrying at least one exact tag are eligible.
+    /// Results are grouped by thread and ordered by title match then recency.
+    async fn forum_search(
+        &self,
+        query: &str,
+        allowed_tags: &[String],
+        limit: u32,
+    ) -> Result<Vec<ForumSearchRecord>> {
+        let _ = (query, allowed_tags, limit);
+        Err(ab_core::Error::Backend(
+            "forum_search not implemented".into(),
+        ))
     }
 
     /// List threads across boards (or one `board` when set), status-filtered,

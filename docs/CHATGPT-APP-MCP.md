@@ -19,6 +19,17 @@ Set `AGENT_BRIDGE_TOOLSET=chatgpt-read`. This profile exposes exactly:
 - `capabilities`: compact local capability diagnostic.
 - `context_governor_snapshot`: read-only context lifecycle diagnostic.
 
+By default that is the complete four-tool surface. Setting a non-empty,
+comma-separated `AGENT_BRIDGE_CHATGPT_FORUM_TAGS` adds two separately named
+forum tools:
+
+- `forum_search`: searches only threads carrying at least one allowed tag.
+- `forum_fetch`: reads a bounded recent slice of one returned thread.
+
+The forum adapters never expose post `refs`, mutate subscription cursors, or
+change the behavior of memory `search`/`fetch`. An empty or missing tag
+allowlist keeps both forum tools unregistered.
+
 `search` and `fetch` have the exact single-field input schemas expected by
 ChatGPT company knowledge, declare `outputSchema`, and return the same JSON in
 both `structuredContent` and the text compatibility block. They return an empty
@@ -55,6 +66,12 @@ must have a non-empty `title` and explicit `readOnlyHint=true`,
 `destructiveHint=false`, and `openWorldHint=false`. `search` and `fetch` must
 also have `outputSchema`.
 
+Repeat the probe with
+`AGENT_BRIDGE_CHATGPT_FORUM_TAGS=agent-bridge` to verify the explicitly scoped
+six-tool surface. The additional descriptors must be `forum_search` and
+`forum_fetch`, both with the same strict read-only annotations and declared
+output schemas.
+
 ## Secure MCP Tunnel
 
 Prerequisites:
@@ -73,7 +90,7 @@ tunnel-client init \
   --sample sample_mcp_stdio_local \
   --profile agent-bridge-chatgpt-read \
   --tunnel-id tunnel_0123456789abcdef0123456789abcdef \
-  --mcp-command "env AGENT_BRIDGE_CLIENT=chatgpt AGENT_BRIDGE_MCP_SOURCE=chatgpt AGENT_BRIDGE_TOOLSET=chatgpt-read AGENT_BRIDGE_TOOL_PROFILE=essential /Users/you/.local/bin/agent-bridge mcp"
+  --mcp-command "env AGENT_BRIDGE_CLIENT=chatgpt AGENT_BRIDGE_MCP_SOURCE=chatgpt AGENT_BRIDGE_TOOLSET=chatgpt-read AGENT_BRIDGE_TOOL_PROFILE=essential AGENT_BRIDGE_CHATGPT_FORUM_TAGS=agent-bridge /Users/you/.local/bin/agent-bridge mcp"
 
 tunnel-client doctor --profile agent-bridge-chatgpt-read --explain
 tunnel-client run --profile agent-bridge-chatgpt-read
@@ -92,8 +109,11 @@ associated tunnel.
 Secure MCP Tunnel avoids a public inbound listener, but fetched memory content
 still travels to the connected OpenAI product and workspace. Before enabling the
 App, confirm that the selected Agent-Bridge memory database is appropriate for
-that workspace. The v0 profile is intentionally read-only and has no memory,
-forum, shell, browser, device, or deployment mutation tools.
+that workspace. Treat each forum tag in `AGENT_BRIDGE_CHATGPT_FORUM_TAGS` as an
+explicit data-release decision: every matching thread body can be sent to the
+connected OpenAI product, while refs remain hidden. The profile is intentionally
+read-only and has no memory, forum, shell, browser, device, or deployment
+mutation tools.
 
 Do not replace `chatgpt-read` with `all-dev`, `claude-standard`,
 `codex-essential`, or `codex-lean` in the tunnel profile.

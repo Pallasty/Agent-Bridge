@@ -12025,6 +12025,41 @@ fn memory_search_hit_value_compact(hit: &MemorySearchHit) -> Value {
 // ===========================================================================
 
 const CHATGPT_KNOWLEDGE_SEARCH_LIMIT: u32 = 20;
+const CHATGPT_FORUM_TAGS_ENV: &str = "AGENT_BRIDGE_CHATGPT_FORUM_TAGS";
+const CHATGPT_FORUM_SEARCH_LIMIT: u32 = 20;
+const CHATGPT_FORUM_FETCH_POST_LIMIT: u32 = 30;
+const CHATGPT_FORUM_PREVIEW_CHARS: usize = 500;
+const CHATGPT_FORUM_FETCH_TEXT_CHARS: usize = 64 * 1024;
+
+fn chatgpt_forum_tags_from_value(value: Option<&str>) -> Vec<String> {
+    let mut tags: Vec<String> = value
+        .into_iter()
+        .flat_map(|raw| raw.split(','))
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(|tag| truncate_chars(&tag.to_lowercase(), 80).0)
+        .collect();
+    tags.sort();
+    tags.dedup();
+    tags.truncate(32);
+    tags
+}
+
+fn configured_chatgpt_forum_tags() -> Vec<String> {
+    let value = std::env::var(CHATGPT_FORUM_TAGS_ENV).ok();
+    chatgpt_forum_tags_from_value(value.as_deref())
+}
+
+fn chatgpt_forum_thread_allowed(
+    thread: &ab_store::ForumThreadRecord,
+    allowed_tags: &[String],
+) -> bool {
+    thread.tags.iter().any(|thread_tag| {
+        allowed_tags
+            .iter()
+            .any(|allowed| thread_tag.eq_ignore_ascii_case(allowed))
+    })
+}
 
 fn chatgpt_memory_title(key: &str) -> String {
     let title = key.replace('_', " ").replace('-', " ");
@@ -12073,6 +12108,34 @@ fn chatgpt_fetch_output_schema() -> Value {
             }
         },
         "required": ["id", "title", "text", "url"],
+        "additionalProperties": false
+    })
+}
+
+fn chatgpt_forum_search_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "results": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "title": { "type": "string" },
+                        "url": { "type": "string" },
+                        "preview": { "type": "string" },
+                        "metadata": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" }
+                        }
+                    },
+                    "required": ["id", "title", "url", "preview", "metadata"],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": ["results"],
         "additionalProperties": false
     })
 }
@@ -12247,6 +12310,227 @@ impl McpTool for ChatGptFetchTool {
             "id": record.key,
             "title": chatgpt_memory_title(&record.key),
             "text": record.content,
+            "url": "",
+            "metadata": metadata
+        })))
+    }
+}
+
+pub struct ChatGptForumSearchTool {
+    hub: Hub,
+    allowed_tags: Vec<String>,
+}
+
+impl ChatGptForumSearchTool {
+    pub fn new(hub: Hub, allowed_tags: Vec<String>) -> Self {
+        Self { hub, allowed_tags }
+    }
+}
+
+#[async_trait]
+impl McpTool for ChatGptForumSearchTool {
+    fn name(&self) -> &'static str {
+        "forum_search"
+    }
+
+    fn title(&self) -> String {
+        "Search approved Agent-Bridge forum threads".into()
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn output_schema(&self) -> Option<Value> {
+        Some(chatgpt_forum_search_output_schema())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Search only Agent-Bridge forum threads whose tags were explicitly \
+                 approved when this ChatGPT tunnel started. This is separate from memory search, \
+                 never advances subscriptions, and never exposes post refs. Call forum_fetch with \
+                 a returned thread ID to read bounded recent posts."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural-language or keyword forum query."
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|query| !query.is_empty());
+        let Some(query) = query else {
+            return Ok(ToolResult::error("missing or empty 'query'"));
+        };
+
+        let hits = store
+            .forum_search(query, &self.allowed_tags, CHATGPT_FORUM_SEARCH_LIMIT)
+            .await?;
+        let results: Vec<Value> = hits
+            .into_iter()
+            .map(|hit| {
+                let preview = hit
+                    .matched_post
+                    .as_ref()
+                    .map(|post| truncate_chars(&post.body, CHATGPT_FORUM_PREVIEW_CHARS).0)
+                    .unwrap_or_default();
+                let matched_post_id = hit
+                    .matched_post
+                    .as_ref()
+                    .map(|post| post.id.to_string())
+                    .unwrap_or_default();
+                json!({
+                    "id": format!("forum-thread:{}", hit.thread.id),
+                    "title": hit.thread.title,
+                    "url": "",
+                    "preview": preview,
+                    "metadata": {
+                        "source": "agent-bridge-forum",
+                        "board": hit.thread.board,
+                        "status": hit.thread.status,
+                        "tags": hit.thread.tags.join(","),
+                        "matched_post_id": matched_post_id,
+                        "last_post_at": hit.thread.last_post_at.to_string()
+                    }
+                })
+            })
+            .collect();
+        Ok(ToolResult::structured_json(&json!({ "results": results })))
+    }
+}
+
+pub struct ChatGptForumFetchTool {
+    hub: Hub,
+    allowed_tags: Vec<String>,
+}
+
+impl ChatGptForumFetchTool {
+    pub fn new(hub: Hub, allowed_tags: Vec<String>) -> Self {
+        Self { hub, allowed_tags }
+    }
+}
+
+#[async_trait]
+impl McpTool for ChatGptForumFetchTool {
+    fn name(&self) -> &'static str {
+        "forum_fetch"
+    }
+
+    fn title(&self) -> String {
+        "Fetch an approved Agent-Bridge forum thread".into()
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn output_schema(&self) -> Option<Value> {
+        Some(chatgpt_fetch_output_schema())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Fetch bounded recent posts from one forum thread returned by \
+                 forum_search. The thread must still match the tunnel's explicit tag allowlist. \
+                 The result excludes refs and does not advance subscription cursors."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Exact forum-thread ID returned by forum_search."
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let Some(id) = id else {
+            return Ok(ToolResult::error("missing or empty 'id'"));
+        };
+        let Some(thread_id) = id
+            .strip_prefix("forum-thread:")
+            .and_then(|raw| raw.parse::<i64>().ok())
+            .filter(|thread_id| *thread_id > 0)
+        else {
+            return Ok(ToolResult::error("invalid forum thread id"));
+        };
+
+        let Some(thread) = store.forum_thread_get(thread_id).await? else {
+            return Ok(ToolResult::error(format!(
+                "forum thread '{thread_id}' not found"
+            )));
+        };
+        if !chatgpt_forum_thread_allowed(&thread, &self.allowed_tags) {
+            return Ok(ToolResult::error(format!(
+                "forum thread '{thread_id}' is unavailable"
+            )));
+        }
+
+        let mut posts = store
+            .forum_recent_posts(thread_id, CHATGPT_FORUM_FETCH_POST_LIMIT)
+            .await?;
+        posts.reverse();
+        let mut text = format!(
+            "# {}\n\nBoard: {}\nStatus: {}\nTags: {}\n\n",
+            thread.title,
+            thread.board,
+            thread.status,
+            thread.tags.join(", ")
+        );
+        for post in &posts {
+            text.push_str(&format!(
+                "## Post {} | {} | {} | {}\n\n{}\n\n",
+                post.id, post.kind, post.author, post.created_at, post.body
+            ));
+        }
+        let (text, content_truncated, _) = truncate_chars(&text, CHATGPT_FORUM_FETCH_TEXT_CHARS);
+        let metadata = json!({
+            "source": "agent-bridge-forum",
+            "board": thread.board,
+            "status": thread.status,
+            "tags": thread.tags.join(","),
+            "post_count": thread.post_count.to_string(),
+            "returned_posts": posts.len().to_string(),
+            "content_truncated": content_truncated.to_string(),
+            "last_post_at": thread.last_post_at.to_string()
+        });
+        Ok(ToolResult::structured_json(&json!({
+            "id": format!("forum-thread:{thread_id}"),
+            "title": thread.title,
+            "text": text,
             "url": "",
             "metadata": metadata
         })))
@@ -39516,8 +39800,32 @@ fn codex_lean_tool(tool_name: &str) -> bool {
 fn chatgpt_read_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
-        "search" | "fetch" | "capabilities" | "context_governor_snapshot"
+        "search"
+            | "fetch"
+            | "forum_search"
+            | "forum_fetch"
+            | "capabilities"
+            | "context_governor_snapshot"
     )
+}
+
+fn register_chatgpt_forum_tools(
+    registry: &mut ToolRegistry,
+    hub: &Hub,
+    policy: ToolPolicy,
+    allowed_tags: Vec<String>,
+) {
+    if !matches!(policy.set, ToolSet::ChatGptRead) || allowed_tags.is_empty() {
+        return;
+    }
+    registry.register(Arc::new(ChatGptForumSearchTool::new(
+        hub.clone(),
+        allowed_tags.clone(),
+    )));
+    registry.register(Arc::new(ChatGptForumFetchTool::new(
+        hub.clone(),
+        allowed_tags,
+    )));
 }
 
 fn gemini_lean_tool(tool_name: &str) -> bool {
@@ -41166,12 +41474,15 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     let policy = ToolPolicy::from_env();
     let surface = HostSurface::detect();
     let ceremony = ceremony_tools_exposed(policy);
-    let reg = build_registry_with_policy_surface(hub, policy, surface, ceremony);
+    let mut reg = build_registry_with_policy_surface(hub.clone(), policy, surface, ceremony);
+    let chatgpt_forum_tags = configured_chatgpt_forum_tags();
+    register_chatgpt_forum_tools(&mut reg, &hub, policy, chatgpt_forum_tags.clone());
     tracing::info!(
         profile = policy.profile().label(),
         toolset = policy.label(),
         tools = reg.list().len(),
         ceremony_tools = ceremony,
+        chatgpt_forum_tags = chatgpt_forum_tags.len(),
         android_adb = surface.android_adb,
         apple_host = surface.apple_host,
         brave = surface.brave,
@@ -44372,12 +44683,15 @@ pub(crate) fn build_registry_with_policy_surface(
 /// deterministic nominal view and will overcount on hosts missing
 /// devices/credentials.
 pub(crate) fn build_registry_current_view(policy: ToolPolicy) -> ToolRegistry {
-    build_registry_with_policy_surface(
-        Hub::builder().build(),
+    let hub = Hub::builder().build();
+    let mut registry = build_registry_with_policy_surface(
+        hub.clone(),
         policy,
         HostSurface::detect(),
         ceremony_tools_exposed(policy),
-    )
+    );
+    register_chatgpt_forum_tools(&mut registry, &hub, policy, configured_chatgpt_forum_tags());
+    registry
 }
 
 /// `exposed_tool_count_for`, but for what the host would actually serve.

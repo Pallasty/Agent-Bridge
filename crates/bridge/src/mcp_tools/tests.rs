@@ -1439,11 +1439,19 @@ fn record_ttl_is_live_suppresses_expired_rollback_map_audit_rows() {
     };
 
     // Past its 14d window → suppressed from retrieval.
-    let expired = mk("expired", vec!["rollback_map".to_string(), "ttl:14d".to_string()], 15);
+    let expired = mk(
+        "expired",
+        vec!["rollback_map".to_string(), "ttl:14d".to_string()],
+        15,
+    );
     assert!(!record_ttl_is_live(&expired, now));
 
     // Within its window → still live (rollback correctness during the window).
-    let fresh = mk("fresh", vec!["rollback_map".to_string(), "ttl:14d".to_string()], 3);
+    let fresh = mk(
+        "fresh",
+        vec!["rollback_map".to_string(), "ttl:14d".to_string()],
+        3,
+    );
     assert!(record_ttl_is_live(&fresh, now));
 
     // No ttl tag → never affected (byte-identical to prior behavior).
@@ -7340,6 +7348,8 @@ fn tool_policy_chatgpt_read_is_small_read_only_and_isolated() {
     let policy = ToolPolicy::from_values(Some("chatgpt-read"), None, None, Some("all"));
     assert_eq!(policy.label(), "chatgpt-read");
     assert_eq!(policy.profile().label(), "essential");
+    assert!(policy.includes(Tier::Essential, "forum_search"));
+    assert!(policy.includes(Tier::Essential, "forum_fetch"));
 
     let registry = build_registry_with_policy(Hub::builder().build(), policy);
     let descriptors = registry.descriptors();
@@ -7394,6 +7404,47 @@ fn tool_policy_chatgpt_read_is_small_read_only_and_isolated() {
         .map(|schema| schema.name)
         .collect();
         assert!(!names.iter().any(|name| name == "search" || name == "fetch"));
+    }
+}
+
+#[test]
+fn chatgpt_forum_surface_requires_explicit_normalized_tags() {
+    assert!(chatgpt_forum_tags_from_value(None).is_empty());
+    assert_eq!(
+        chatgpt_forum_tags_from_value(Some(" Agent-Bridge,agent-bridge, Read-Only ")),
+        vec!["agent-bridge", "read-only"]
+    );
+
+    let policy = ToolPolicy::from_values(Some("chatgpt-read"), None, None, None);
+    let hub = Hub::builder().build();
+    let mut registry = build_registry_with_policy(hub.clone(), policy);
+    register_chatgpt_forum_tools(&mut registry, &hub, policy, vec!["agent-bridge".into()]);
+    let descriptors = registry.descriptors();
+    let names: Vec<_> = descriptors
+        .iter()
+        .map(|descriptor| descriptor.schema.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "capabilities",
+            "context_governor_snapshot",
+            "fetch",
+            "forum_fetch",
+            "forum_search",
+            "search"
+        ]
+    );
+    for name in ["forum_fetch", "forum_search"] {
+        let descriptor = descriptors
+            .iter()
+            .find(|descriptor| descriptor.schema.name == name)
+            .expect("forum descriptor");
+        let annotations = descriptor.annotations.expect("forum annotations");
+        assert!(annotations.read_only_hint);
+        assert!(!annotations.destructive_hint);
+        assert!(!annotations.open_world_hint);
+        assert!(descriptor.output_schema.is_some());
     }
 }
 
@@ -7457,6 +7508,89 @@ async fn chatgpt_search_and_fetch_return_structured_results_without_access_mutat
     };
     assert_eq!(after.access_count, before.access_count);
     assert_eq!(after.last_accessed_at, before.last_accessed_at);
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn chatgpt_forum_search_and_fetch_enforce_tag_boundary_and_omit_refs() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.as_ref().expect("store").clone();
+    let allowed_tags = vec!["agent-bridge".to_string()];
+    let visible_refs = json!({ "secret_path": "/private/never-return-this" });
+    let visible = store
+        .forum_post(
+            None,
+            Some("design"),
+            Some("ChatGPT tunnel attribution"),
+            "codex-test",
+            "finding",
+            "The secure tunnel now attributes dispatch to ChatGPT.",
+            Some(&visible_refs),
+            Some(&["agent-bridge".into(), "chatgpt".into()]),
+        )
+        .await
+        .expect("visible forum thread");
+    let hidden = store
+        .forum_post(
+            None,
+            Some("private"),
+            Some("Private tunnel notes"),
+            "codex-test",
+            "finding",
+            "The private tunnel result must remain hidden.",
+            None,
+            Some(&["private".into()]),
+        )
+        .await
+        .expect("hidden forum thread");
+
+    let search = ChatGptForumSearchTool::new(hub.clone(), allowed_tags.clone())
+        .execute(json!({ "query": "tunnel" }), &ToolContext::default())
+        .await
+        .expect("forum search");
+    let structured = search
+        .structured_content
+        .clone()
+        .expect("structured search");
+    assert_eq!(structured["results"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        structured["results"][0]["id"],
+        format!("forum-thread:{}", visible.thread_id)
+    );
+    assert_eq!(
+        structured["results"][0]["metadata"]["source"],
+        "agent-bridge-forum"
+    );
+    assert_eq!(result_text_as_json(&search), structured);
+
+    let fetch = ChatGptForumFetchTool::new(hub.clone(), allowed_tags.clone())
+        .execute(
+            json!({ "id": format!("forum-thread:{}", visible.thread_id) }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("forum fetch");
+    let fetched = fetch.structured_content.clone().expect("structured fetch");
+    assert!(fetched["text"]
+        .as_str()
+        .unwrap()
+        .contains("attributes dispatch to ChatGPT"));
+    assert!(!fetched["text"]
+        .as_str()
+        .unwrap()
+        .contains("never-return-this"));
+    assert_eq!(fetched["metadata"]["returned_posts"], "1");
+    assert_eq!(result_text_as_json(&fetch), fetched);
+
+    let denied = ChatGptForumFetchTool::new(hub, allowed_tags)
+        .execute(
+            json!({ "id": format!("forum-thread:{}", hidden.thread_id) }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("denied fetch result");
+    assert!(denied.is_error);
 
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
