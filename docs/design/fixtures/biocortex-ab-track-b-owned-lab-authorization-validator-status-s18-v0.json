@@ -1,0 +1,65 @@
+{
+  "schema": "agent_bridge.memory_temporal_owned_lab_authorization_validator_status_s18.v0",
+  "status": "S18_POSITIVE_OWNER_SCHEMA_AND_OFFLINE_SEMANTIC_SIGNATURE_VERIFIER_IMPLEMENTED_REAL_OWNER_AND_EXECUTION_STILL_BLOCKED",
+  "decision": "BLOCKED_PENDING_SOURCE_BOUND_RUNNER_REAL_OUT_OF_BAND_TRUST_ANCHOR_AND_OWNER_SIGNED_UNCLAIMED_ENVELOPE",
+  "implementation": {
+    "positive_owner_schema_available": true,
+    "out_of_band_trust_anchor_schema_available": true,
+    "restricted_canonical_json_parser_implemented": true,
+    "owner_cross_field_semantic_validator_implemented": true,
+    "active_ed25519_signature_verifier_implemented": true,
+    "rfc8032_test_only_known_answer_present": true,
+    "rfc8032_test_key_is_real_owner_authority": false,
+    "source_bound_runner_implemented": false,
+    "single_use_cas_ledger_implemented": false,
+    "execution_capability_type_implemented": false,
+    "live_observation_runtime_validator_implemented": false
+  },
+  "real_authority": {
+    "real_trust_anchor_document_present": false,
+    "real_owner_decision_present": false,
+    "real_owner_signature_present": false,
+    "owner_identity_bound": false,
+    "cas_claimed": false,
+    "owned_lab_execution_authorized": false,
+    "single_use_execution_capability_issued": false,
+    "execution_start_permitted": false
+  },
+  "actual_execution": {
+    "runner_launched": false,
+    "live_root_created": false,
+    "actual_assigned_attempt_count": 0,
+    "actual_sigkill_attempt_count": 0,
+    "actual_fresh_process_read_count": 0,
+    "actual_s16_mapping_phase_record_count": 0,
+    "actual_observation_count": 0,
+    "provider_or_production_evidence_count": 0,
+    "side_effects_unlocked": "NONE"
+  },
+  "lifecycle": {
+    "owner_envelope_state_if_future_valid": "AUTHORIZED_UNCLAIMED_OWNED_LAB_L1_OL00_OL04_OL05_CANARY",
+    "owner_envelope_is_bearer_capability": false,
+    "future_atomic_transition": "UNCLAIMED_TO_CONSUMED_FOR_EXACT_RUN",
+    "future_successful_claim_limit": 1,
+    "future_failed_claim_grants_execution": false,
+    "future_failed_claim_mutates_unclaimed_state": false,
+    "future_failed_claim_allows_automatic_retry": false,
+    "future_successful_claim_then_crash_allows_retry": false,
+    "preflight_cas_and_post_run_receipts_are_separate": true,
+    "timestamps_are_audit_metadata_only": true,
+    "signed_stop_state_is_audit_only": true,
+    "use_time_stop_and_revocation_require_external_ledger_reads": true
+  },
+  "nonclaims": {
+    "synthetic_signature_is_real_owner_decision": false,
+    "positive_schema_is_execution_authority": false,
+    "verified_unclaimed_envelope_is_execution_capability": false,
+    "signed_stop_state_is_use_time_stop_proof": false,
+    "s18_implements_or_launches_runner": false,
+    "process_restart_is_power_loss_proof": false,
+    "provider_or_production_authority": false,
+    "global_runtime_admission": false,
+    "currentness_or_output_permit": false,
+    "side_effects_unlocked": "NONE"
+  }
+}
