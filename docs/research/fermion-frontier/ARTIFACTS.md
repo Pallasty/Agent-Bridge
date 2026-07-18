@@ -1279,6 +1279,35 @@ so they are versioned normally and are not added to the preservation-only
   resource witness is `null`, and exact S0 status is
   `NOT_ESTABLISHED_BY_D3_E_SUBGRID_DIAGNOSTIC`; this is neither a
   deterministic-cap result nor a mathematical or algorithmic no-go.
+- `majorana_certificate_p7_d4_e_per_composite_probe.py`,
+  `majorana_certificate_p7_d4_e_per_composite_probe/majorana_p7_step3_e_per_composite_probe.jl`,
+  `majorana_certificate_p7_d4_e_per_composite_probe_fixture.json`,
+  `majorana_certificate_p7_d4_e_per_composite_probe_policy.json`,
+  `majorana_certificate_p7_d4_e_per_composite_probe_report.json` and their
+  preprobe/result tests: separately versioned, non-authoritative D4 V2 static
+  segment-E per-composite diagnostic for the frozen P7 adjacent-step-3 path.
+  Its D3-result-informed but scientific-blind preprobe commit is
+  `75371cf32b31e09ae255a1aafc2a98b2bf9d0a5a`, a direct child of D3 result
+  commit `70b5095fde9fdb743d1e5910b80bbcac88de4fca`.  Superseded D4 V1
+  preprobe commit `c8a4d9e137d4976e1b8841041a72b53993068e46` was never executed,
+  produced no report or execution claim and is not a V2 result input.  The
+  verified V2 canonical report is 11,822 bytes with SHA-256
+  `269e74dd23c33b0e2d1943d7f25e44ebcd897bdde1a96645a80eba4cf4e5da19`.
+  Its sole controlled execution produced a 32-event
+  `LEGAL_PREFIX_INTERRUPTED` trace: segments A--D returned and segment E/H4
+  started, but no E checkpoint-1 or fixed local-ordinal 23, 24, 25 or 26
+  per-composite marker was emitted.  D4 V2 therefore adds no
+  localization inside D3's 23--26 window and does not refute the separately
+  frozen D3 result.  The command returned `-15` after `1800.351788777`
+  outer-monotonic seconds; the 1,830-second outer safety timeout did not fire
+  and stdout was empty.  These facts are host/runtime diagnostics only and do
+  not identify a cause or active composite.  The report remains
+  `scientific_authority=NONE`, its resource witness is `null`, and exact S0
+  status is `NOT_ESTABLISHED_BY_D4_E_PER_COMPOSITE_DIAGNOSTIC`; this is
+  neither a deterministic-cap result nor a mathematical or algorithmic no-go.
+  D4 V2 must not be rerun in place; a continuation requires a separately
+  versioned algorithm/proof decomposition or a separately precommitted,
+  scientific-blind cross-run repeatability design.
 - `hubbard_l8_double_occupancy_adaptive_k_four_gate_k655360_c37_l1048576_d1048576_q76_screen.py`
   and its `*_transcript.json`: same-cap D37 horizon extension through q76.  The
   58,178-byte screen source SHA-256 is

@@ -1430,3 +1430,42 @@ change to the candidate, algorithm, caps or host admission.  Any further
 resolution requires another separately precommitted scientific-blind version
 targeting the remaining local 23--26 window, or a separately versioned
 algorithm/proof decomposition.
+
+## Majorana P7 D4 V2 does not add a per-composite localization
+
+P7 D4 V2 froze its separately versioned, D3-result-informed but scientific-
+blind segment-E per-composite diagnostic at preprobe commit
+`75371cf32b31e09ae255a1aafc2a98b2bf9d0a5a`, a direct child of D3 result
+commit `70b5095fde9fdb743d1e5910b80bbcac88de4fca`.  The superseded D4 V1
+preprobe commit `c8a4d9e137d4976e1b8841041a72b53993068e46` was never executed,
+produced no report or execution claim and is not a result input to V2.  V2's
+sole fresh process used the unchanged 2 GiB memory, zero-swap and
+1,800-second admission.  The controlled command returned `-15` after
+`1800.351788777` outer-monotonic seconds; the 1,830-second outer safety
+timeout did not fire and stdout was empty.  These process-level facts are
+host/runtime diagnostics only and do not identify a cause, signal source or
+active composite.  The verified canonical report is 11,822 bytes with
+SHA-256
+`269e74dd23c33b0e2d1943d7f25e44ebcd897bdde1a96645a80eba4cf4e5da19`.
+
+The dedicated channel produced a 32-event `LEGAL_PREFIX_INTERRUPTED` trace.
+Segments A through D returned and segment E/H4 started, but no E checkpoint-1
+marker was emitted.  Consequently none of the fixed per-composite markers
+after E local ordinals 23, 24, 25 and 26 was emitted, nor was any later E or
+step-3 terminal marker emitted.  D4 V2 therefore confirms only entry into
+segment E for this execution.  It does not reproduce D3's checkpoint-1
+progress and adds no localization inside D3's remaining local-ordinal 23--26
+window.
+Cross-run progress need not be monotonic, so this observation also does not
+refute or weaken the separately frozen D3 result.
+
+The observation is `INDETERMINATE_HOST_OR_RUNTIME_FAILURE`, with no
+diagnostic terminal branch, `scientific_authority=NONE`,
+`certificate_eligible=false` and `result_contract_eligible=false`.  The
+resource witness is `null`, D3's status remains unchanged, and S0 status is
+exactly `NOT_ESTABLISHED_BY_D4_E_PER_COMPOSITE_DIAGNOSTIC`.  This is neither
+a deterministic cap nor a mathematical or algorithmic no-go.  D4 V2 must not
+be rerun or relaxed in place.  A continuation should instead use a separately
+versioned algorithm/proof decomposition, or a separately precommitted
+scientific-blind design that tests cross-run repeatability without treating
+host timing or marker reach as scientific evidence.
