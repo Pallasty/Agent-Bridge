@@ -162,6 +162,11 @@ impl AgentRuntime for OzAgentRuntime {
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         cfg.reject_unsupported_interactive(self.id())?;
+        crate::sandbox::reject_nonlocal_if_requested(
+            self.id(),
+            &cfg.env,
+            "the Warp Oz cloud runtime",
+        )?;
 
         let prompt = cfg.initial_prompt.clone().unwrap_or_default();
         if prompt.is_empty() {
@@ -355,6 +360,7 @@ impl AgentRuntime for OzAgentRuntime {
             id: session_id,
             runtime_id: self.id().into(),
             cwd,
+            sandbox_profile_requested: None,
         })
     }
 

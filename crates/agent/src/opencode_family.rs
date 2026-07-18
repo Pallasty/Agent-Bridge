@@ -272,8 +272,10 @@ fn is_provider_miss(output: &str) -> bool {
 
 /// Everything needed to (re)build the one-shot run Command, so the background
 /// wait loop can retry the SAME invocation on a free-pool miss without
-/// re-deriving it. `build()` is pure construction — no I/O.
+/// re-deriving it. `build()` only constructs the local/remote launch command;
+/// `spawn()` performs process creation.
 struct SpawnPlan {
+    runtime_id: &'static str,
     remote: bool,
     // remote (ssh) fields
     ssh_dest: String,
@@ -289,7 +291,7 @@ struct SpawnPlan {
 }
 
 impl SpawnPlan {
-    fn build(&self) -> Command {
+    fn build(&self) -> Result<Command> {
         if self.remote {
             let mut c = Command::new("ssh");
             c.arg("-o")
@@ -304,23 +306,38 @@ impl SpawnPlan {
             c.stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            c
+            Ok(c)
         } else {
-            let mut c = Command::new(&self.binary);
-            c.arg("run").arg(self.auto_flag);
+            let mut args = vec!["run".to_string(), self.auto_flag.to_string()];
             if let Some(m) = &self.model {
-                c.arg("--model").arg(m);
+                args.push("--model".to_string());
+                args.push(m.clone());
             }
             // The prompt comes last as a positional argument so any preceding
             // flag values (model strings, etc.) can't shadow it.
-            c.arg(&self.prompt);
+            args.push(self.prompt.clone());
+            let launch = crate::sandbox::wrap_local_command(
+                self.runtime_id,
+                &self.cwd,
+                &self.env,
+                &self.binary,
+                &args,
+            )?;
+            let mut c = Command::new(&launch.program);
+            c.args(&launch.args);
             c.current_dir(&self.cwd)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            apply_env(&mut c, &self.env);
-            c
+            crate::sandbox::configure_command_env(&mut c, &self.env, launch.sandboxed)?;
+            Ok(c)
         }
+    }
+
+    fn spawn(&self) -> Result<tokio::process::Child> {
+        self.build()?
+            .spawn()
+            .map_err(|e| Error::Backend(format!("spawn {}: {e}", self.runtime_id)))
     }
 }
 
@@ -428,6 +445,16 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             )));
         }
         let model = cfg.model.clone().or_else(|| self.default_model.clone());
+        let remote = is_remote_node(cfg.node.as_deref());
+        let sandbox_profile_requested = (crate::sandbox::effective_mode(&cfg.env)?
+            == crate::sandbox::AgentSandboxMode::Workspace)
+            .then(|| "workspace".to_string());
+        if remote && sandbox_profile_requested.is_some() {
+            return Err(Error::InvalidArgument(format!(
+                "{}: workspace sandboxing is local-only in P1; refusing to launch a remote SSH executor without equivalent remote enforcement",
+                self.runtime_id
+            )));
+        }
 
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
@@ -456,7 +483,6 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             }
         }
 
-        let remote = is_remote_node(cfg.node.as_deref());
         let plan = if remote {
             // Dispatch the one-shot run to a tailnet node via ssh. The local ssh
             // child's stdout/stderr capture the remote output and ssh's exit
@@ -493,6 +519,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                 "dispatching one-shot run to remote node via ssh"
             );
             SpawnPlan {
+                runtime_id: self.runtime_id,
                 remote: true,
                 ssh_dest: dest,
                 ssh_key: env_nonempty("AGENT_BRIDGE_SSH_KEY"),
@@ -506,6 +533,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             }
         } else {
             SpawnPlan {
+                runtime_id: self.runtime_id,
                 remote: false,
                 ssh_dest: String::new(),
                 ssh_key: None,
@@ -528,7 +556,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             .filter(|n| *n >= 1)
             .unwrap_or(3);
 
-        let child = match plan.build().spawn() {
+        let child = match plan.spawn() {
             Ok(child) => child,
             Err(e) => {
                 let message = format!("spawn {}: {e}", self.runtime_id);
@@ -594,7 +622,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
                                 "free-pool miss (ProviderModelNotFoundError) — retrying"
                             );
                             tokio::time::sleep(std::time::Duration::from_secs(4)).await;
-                            match plan.build().spawn() {
+                            match plan.spawn() {
                                 Ok(next) => {
                                     let npid = next.id().unwrap_or(0);
                                     if npid != 0 {
@@ -684,6 +712,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             id: session_id,
             runtime_id: self.runtime_id.into(),
             cwd,
+            sandbox_profile_requested,
         })
     }
 
@@ -746,12 +775,6 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
             supports_teams: false,
             supports_thinking: false,
         }
-    }
-}
-
-fn apply_env(cmd: &mut Command, env: &HashMap<String, String>) {
-    for (k, v) in env {
-        cmd.env(k, v);
     }
 }
 

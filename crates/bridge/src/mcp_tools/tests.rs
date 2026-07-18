@@ -13928,6 +13928,8 @@ fn agent_spawn_schema_exposes_interactive_flag() {
         .expect("interactive description");
 
     assert!(schema.description.contains("interactive"));
+    assert!(schema.description.contains("AGENT_BRIDGE_AGENT_SANDBOX"));
+    assert!(schema.description.contains("fail closed"));
     assert_eq!(interactive["type"], "boolean");
     assert!(desc.contains("send_input"));
     assert!(desc.contains("reject"));
@@ -14035,6 +14037,7 @@ impl ab_agent::AgentRuntime for MockRuntime {
                 id: ab_core::SessionId::new(),
                 runtime_id: self.id.clone(),
                 cwd: cfg.cwd,
+                sandbox_profile_requested: None,
             })
         }
     }

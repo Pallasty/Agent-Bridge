@@ -22,3 +22,6 @@ portable-pty = "0.9"
 # graceful SIGHUP portable-pty's ChildKiller sends (e.g. gemini's Ink TUI).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+# Keep this exact pin: the macOS Seatbelt profile is order-sensitive, and the
+# workspace-deny contract must be re-audited with its e2e test before upgrades.
+nono = { version = "=0.53.0", default-features = false }

@@ -11,7 +11,6 @@ use ab_store::{StateStore, StoredSession};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -350,12 +349,6 @@ async fn reader_loop(
     }
 }
 
-fn apply_env(cmd: &mut Command, env: &HashMap<String, String>) {
-    for (k, v) in env {
-        cmd.env(k, v);
-    }
-}
-
 #[async_trait]
 impl AgentRuntime for AcpRuntime {
     fn id(&self) -> &str {
@@ -370,8 +363,15 @@ impl AgentRuntime for AcpRuntime {
         }
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
-        let mut cmd = Command::new(&self.binary);
-        cmd.args(&self.args)
+        let launch = crate::sandbox::wrap_local_command(
+            self.id(),
+            &cfg.cwd,
+            &cfg.env,
+            &self.binary,
+            &self.args,
+        )?;
+        let mut cmd = Command::new(&launch.program);
+        cmd.args(&launch.args)
             .current_dir(&cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -381,7 +381,7 @@ impl AgentRuntime for AcpRuntime {
         // `kill_on_drop` covers the leader; `ProcessGroupGuard` also covers
         // descendants that inherited the dedicated pgid.
         cmd.kill_on_drop(true);
-        apply_env(&mut cmd, &cfg.env);
+        crate::sandbox::configure_command_env(&mut cmd, &cfg.env, launch.sandboxed)?;
         let mut child = cmd
             .spawn()
             .map_err(|e| Error::Backend(format!("spawn ACP agent '{}': {e}", self.binary)))?;
@@ -555,6 +555,7 @@ impl AgentRuntime for AcpRuntime {
             id: session_id,
             runtime_id: self.id().into(),
             cwd: cfg.cwd,
+            sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
         })
     }
 

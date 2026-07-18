@@ -915,6 +915,8 @@ MCP tool (`limit` 1–500, default 20).
 | `AGENT_BRIDGE_AGENT_RUNTIME` | `claude-code` | Pick agent runtime: `claude-code` \| `warp-oz` |
 | `AGENT_BRIDGE_ACP_BIN` | `grok` | ACP executable used by explicit `backend=acp` / `grok-build` spawns |
 | `AGENT_BRIDGE_ACP_ARGS` | `agent stdio` | Whitespace-separated arguments used to start the ACP stdio server |
+| `AGENT_BRIDGE_AGENT_SANDBOX` | `off` | `workspace` wraps every local agent child in Landlock (Linux) or Seatbelt (macOS); a per-spawn `env` value may opt in but cannot weaken an ambient daemon policy |
+| `AGENT_BRIDGE_BWRAP_BIN` | `bwrap` | Linux bubblewrap executable used to hide credential subpaths before Landlock is applied |
 | `AGENT_BRIDGE_OZ_BIN` | `oz` | Override Warp `oz` CLI path (when runtime = `warp-oz`) |
 | `AGENT_BRIDGE_OZ_ENVIRONMENT_ID` | _(none)_ | Default Oz cloud environment id; can be overridden per `agent_spawn` via `env.OZ_ENVIRONMENT_ID` |
 | `AGENT_BRIDGE_TERMINAL` | auto-detect | Force: `wezterm` \| `kitty` \| `zellij` \| `warp` |
@@ -948,6 +950,26 @@ Interactive PTY sessions are supported by `claude-code`, `codex`, `kilo`,
 `opencode`, and `gemini`. ACP sessions are protocol-native rather than PTY-backed
 and stay live for follow-up turns. Other backends reject `interactive=true`;
 one-shot sessions and finished sessions reject `agent_send_input`.
+
+### Agent workspace sandbox (P1)
+
+Set `AGENT_BRIDGE_AGENT_SANDBOX=workspace` on the daemon, or pass the same
+key in `agent_spawn.env`, to sandbox local one-shot, PTY, and ACP executors.
+The profile reads the host, writes only the selected workspace, temporary
+directories, and required agent/build caches, and hides common SSH, cloud,
+package-registry, and bridge credential paths. Non-model credentials inherited
+by the daemon are removed; model-provider keys remain available. Sandboxed
+per-spawn env cannot replace `HOME`, `TMPDIR`, `PATH`, or dynamic-loader
+variables before enforcement. Network stays open in P1.
+
+The daemon policy is a floor: a spawn can opt in but cannot opt out. Explicit
+requests fail closed if Seatbelt/Landlock is unavailable, if Linux bubblewrap
+cannot start, or if the executor is remote/cloud. P1 is default-off pending the
+cross-platform evidence and trust-boundary audit described in
+`docs/design/AGENT_RUNTIME_WORKSPACE_SANDBOX_P1.md`.
+Successful `agent_spawn` responses include `sandbox_profile_requested` when a
+profile was requested; this is launch intent, while launcher failures remain
+visible through the finalized session exit/output.
 
 ### Cloud Agent Lifecycle (warp-oz)
 

@@ -34,7 +34,6 @@ use ab_core::{Error, Result, SessionId};
 use ab_store::{StateStore, StoredSession};
 use async_trait::async_trait;
 use dashmap::DashMap;
-use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -169,6 +168,19 @@ impl AgentRuntime for CodexRuntime {
             ));
         }
         let model = cfg.model.clone().or_else(|| self.default_model.clone());
+        let mut launch_args = vec!["exec".to_string(), "--skip-git-repo-check".to_string()];
+        if let Some(model) = &model {
+            launch_args.push("-m".to_string());
+            launch_args.push(model.clone());
+        }
+        launch_args.push(prompt.clone());
+        let launch = crate::sandbox::wrap_local_command(
+            self.id(),
+            &cfg.cwd,
+            &cfg.env,
+            &self.binary,
+            &launch_args,
+        )?;
 
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
@@ -197,17 +209,13 @@ impl AgentRuntime for CodexRuntime {
             }
         }
 
-        let mut cmd = Command::new(&self.binary);
-        cmd.arg("exec").arg("--skip-git-repo-check");
-        if let Some(m) = &model {
-            cmd.arg("-m").arg(m);
-        }
-        cmd.arg(&prompt);
+        let mut cmd = Command::new(&launch.program);
+        cmd.args(&launch.args);
         cmd.current_dir(&cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        apply_env(&mut cmd, &cfg.env);
+        crate::sandbox::configure_command_env(&mut cmd, &cfg.env, launch.sandboxed)?;
 
         let child = cmd
             .spawn()
@@ -222,6 +230,7 @@ impl AgentRuntime for CodexRuntime {
             runtime = "codex",
             model = ?model,
             cwd = %cwd,
+            sandboxed = launch.sandboxed,
             "session started"
         );
 
@@ -288,6 +297,7 @@ impl AgentRuntime for CodexRuntime {
             id: session_id,
             runtime_id: self.id().into(),
             cwd,
+            sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
         })
     }
 
@@ -352,12 +362,6 @@ impl AgentRuntime for CodexRuntime {
             supports_teams: false,
             supports_thinking: true,
         }
-    }
-}
-
-fn apply_env(cmd: &mut Command, env: &HashMap<String, String>) {
-    for (k, v) in env {
-        cmd.env(k, v);
     }
 }
 

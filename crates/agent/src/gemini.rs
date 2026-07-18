@@ -24,7 +24,6 @@ use ab_core::{Error, Result, SessionId};
 use ab_store::{StateStore, StoredSession};
 use async_trait::async_trait;
 use dashmap::DashMap;
-use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -195,6 +194,20 @@ impl AgentRuntime for GeminiRuntime {
             ));
         }
         let model = cfg.model.clone().or_else(|| self.default_model.clone());
+        let mut launch_args = vec!["--skip-trust".to_string(), "--yolo".to_string()];
+        if let Some(model) = &model {
+            launch_args.push("-m".to_string());
+            launch_args.push(model.clone());
+        }
+        launch_args.push("-p".to_string());
+        launch_args.push(prompt.clone());
+        let launch = crate::sandbox::wrap_local_command(
+            self.id(),
+            &cfg.cwd,
+            &cfg.env,
+            &self.binary,
+            &launch_args,
+        )?;
 
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
@@ -223,17 +236,13 @@ impl AgentRuntime for GeminiRuntime {
             }
         }
 
-        let mut cmd = Command::new(&self.binary);
-        cmd.arg("--skip-trust").arg("--yolo");
-        if let Some(m) = &model {
-            cmd.arg("-m").arg(m);
-        }
-        cmd.arg("-p").arg(&prompt);
+        let mut cmd = Command::new(&launch.program);
+        cmd.args(&launch.args);
         cmd.current_dir(&cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        apply_env(&mut cmd, &cfg.env);
+        crate::sandbox::configure_command_env(&mut cmd, &cfg.env, launch.sandboxed)?;
 
         let child = cmd
             .spawn()
@@ -248,6 +257,7 @@ impl AgentRuntime for GeminiRuntime {
             runtime = "gemini",
             model = ?model,
             cwd = %cwd,
+            sandboxed = launch.sandboxed,
             "session started"
         );
 
@@ -355,6 +365,7 @@ impl AgentRuntime for GeminiRuntime {
             id: session_id,
             runtime_id: self.id().into(),
             cwd,
+            sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
         })
     }
 
@@ -415,12 +426,6 @@ impl AgentRuntime for GeminiRuntime {
     }
 }
 
-fn apply_env(cmd: &mut Command, env: &HashMap<String, String>) {
-    for (k, v) in env {
-        cmd.env(k, v);
-    }
-}
-
 fn truncate(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
@@ -438,6 +443,7 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     async fn wait_for<F: FnMut() -> bool>(total_ms: u64, step_ms: u64, mut predicate: F) -> bool {
         let mut waited = 0u64;

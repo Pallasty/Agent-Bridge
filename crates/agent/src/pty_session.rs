@@ -76,6 +76,7 @@ impl PtySession {
         args: &[String],
         cwd: &str,
         env: &HashMap<String, String>,
+        sandboxed: bool,
     ) -> Result<(Self, oneshot::Receiver<PtyExit>)> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -94,9 +95,7 @@ impl PtySession {
         if !cwd.is_empty() {
             cmd.cwd(cwd);
         }
-        for (k, v) in env {
-            cmd.env(k, v);
-        }
+        crate::sandbox::configure_pty_env(&mut cmd, env, sandboxed)?;
         // Parity with the env interactive terminals set, so the agent CLI's
         // prompt / pager behaviour matches a "real" terminal.
         cmd.env("TERM", "xterm-256color");
@@ -352,7 +351,7 @@ mod tests {
         // `cat` stays alive reading stdin and echoes each line back through the
         // PTY: a deterministic stand-in for an interactive agent CLI.
         let (sess, _rx) =
-            PtySession::spawn("/bin/cat", &[], "/tmp", &HashMap::new()).expect("spawn cat");
+            PtySession::spawn("/bin/cat", &[], "/tmp", &HashMap::new(), false).expect("spawn cat");
 
         sess.write_input("alpha-one\r").expect("write turn 1");
         let ok1 = wait_for(2000, 25, || sess.output_snapshot().contains("alpha-one")).await;
@@ -374,6 +373,7 @@ mod tests {
             &["-c".into(), "exit 7".into()],
             "/tmp",
             &HashMap::new(),
+            false,
         )
         .expect("spawn sh");
         let exit = tokio::time::timeout(Duration::from_secs(5), rx)
@@ -391,7 +391,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_unknown_binary_errors() {
-        let err = PtySession::spawn("/no/such/binary-xyzzy", &[], "/tmp", &HashMap::new())
+        let err = PtySession::spawn("/no/such/binary-xyzzy", &[], "/tmp", &HashMap::new(), false)
             .err()
             .expect("spawning a missing binary must fail");
         assert!(matches!(err, Error::Backend(_)));
