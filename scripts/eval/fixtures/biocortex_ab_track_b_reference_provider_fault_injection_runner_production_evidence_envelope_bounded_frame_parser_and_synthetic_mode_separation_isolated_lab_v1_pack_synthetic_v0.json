@@ -1,0 +1,823 @@
+{
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1_pack.synthetic.v0",
+  "date": "2026-07-17",
+  "execution_mode": "SYNTHETIC_KAT",
+  "limits": {
+    "max_array_items": 64,
+    "max_input_frame_bytes": 1048576,
+    "max_json_depth": 32,
+    "max_json_nodes": 4096,
+    "max_object_members": 256,
+    "max_parallel_workers": 1,
+    "max_signed_int64": 9223372036854775807,
+    "min_signed_int64": -9223372036854775808
+  },
+  "valid_frames": [
+    {
+      "track_id": "MANAGED_SPANNER_CLOUD_KMS",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "track_id": "SELF_HOSTED_ETCD_OPENBAO",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"SELF_HOSTED_ETCD_OPENBAO\"}"
+    }
+  ],
+  "expected_receipts": [
+    {
+      "array_count": 0,
+      "array_item_count": 0,
+      "canonical_bytes_match_raw": true,
+      "canonical_frame_sha256": "e298865e753a96d58b6c23d49b58cb2c4b512a519a65666d31170325bd34d295",
+      "canonicalization": "AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8",
+      "component_state": "PARSED_ISOLATED_LAB_KAT_COMPONENT_ONLY",
+      "content_sha256": "16ba99d94139396dd1dae80adf31dd610656042ba290523b294bbae85fd82c37",
+      "custody_committed": false,
+      "domain_separated_frame_sha256": "84d102d948c45f044e62798cc3a0adfedab172606f3c9145400c3d4fb37eb530",
+      "downstream_gates_authorized": 0,
+      "envelope_schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1",
+      "evidence_acceptance_authorized": false,
+      "execution_mode": "SYNTHETIC_KAT",
+      "frame_bytes": 659,
+      "hash_domain": "AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1",
+      "isolated_lab_candidate_surface_component_implemented": 2,
+      "isolated_lab_candidate_surface_component_total": 2,
+      "json_depth": 1,
+      "node_count": 12,
+      "object_count": 1,
+      "object_member_count": 11,
+      "packet_kind": "SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT",
+      "production_admissible": false,
+      "production_ingestion_control_count": 14,
+      "production_ingestion_controls_implemented": 0,
+      "production_ingestion_controls_runtime_exercised": 0,
+      "production_validated_evidence_items": 0,
+      "provider_authority": false,
+      "raw_frame_sha256": "e298865e753a96d58b6c23d49b58cb2c4b512a519a65666d31170325bd34d295",
+      "real_evidence_items_present": 0,
+      "runtime_authority": false,
+      "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1.receipt.v0",
+      "side_effects_unlocked": "NONE",
+      "status": "PRODUCTION_SHAPED_EVIDENCE_ENVELOPE_ISOLATED_LAB_SYNTHETIC_KAT_FRAME_REVIEWED_NO_PRODUCTION_AUTHORITY",
+      "synthetic_fixture": true,
+      "track_id": "MANAGED_SPANNER_CLOUD_KMS"
+    },
+    {
+      "array_count": 0,
+      "array_item_count": 0,
+      "canonical_bytes_match_raw": true,
+      "canonical_frame_sha256": "da147c9e4bcb4ac54e98209f5ea2970322726d3d851ac415903e1dbe311da69e",
+      "canonicalization": "AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8",
+      "component_state": "PARSED_ISOLATED_LAB_KAT_COMPONENT_ONLY",
+      "content_sha256": "381adf1576413c94605c9e4659353daa29088c784826f6b7a018c7253600171e",
+      "custody_committed": false,
+      "domain_separated_frame_sha256": "bcb962f4d80a9b86bc509103142748b67cc5888cc04772f9aebe185fdf3a0d94",
+      "downstream_gates_authorized": 0,
+      "envelope_schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1",
+      "evidence_acceptance_authorized": false,
+      "execution_mode": "SYNTHETIC_KAT",
+      "frame_bytes": 658,
+      "hash_domain": "AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1",
+      "isolated_lab_candidate_surface_component_implemented": 2,
+      "isolated_lab_candidate_surface_component_total": 2,
+      "json_depth": 1,
+      "node_count": 12,
+      "object_count": 1,
+      "object_member_count": 11,
+      "packet_kind": "SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT",
+      "production_admissible": false,
+      "production_ingestion_control_count": 14,
+      "production_ingestion_controls_implemented": 0,
+      "production_ingestion_controls_runtime_exercised": 0,
+      "production_validated_evidence_items": 0,
+      "provider_authority": false,
+      "raw_frame_sha256": "da147c9e4bcb4ac54e98209f5ea2970322726d3d851ac415903e1dbe311da69e",
+      "real_evidence_items_present": 0,
+      "runtime_authority": false,
+      "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1.receipt.v0",
+      "side_effects_unlocked": "NONE",
+      "status": "PRODUCTION_SHAPED_EVIDENCE_ENVELOPE_ISOLATED_LAB_SYNTHETIC_KAT_FRAME_REVIEWED_NO_PRODUCTION_AUTHORITY",
+      "synthetic_fixture": true,
+      "track_id": "SELF_HOSTED_ETCD_OPENBAO"
+    }
+  ],
+  "negative_cases": [
+    {
+      "case_id": "N001",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "PRODUCTION",
+      "expected_code": "E_PRODUCTION_MODE_NOT_AUTHORIZED",
+      "expected_detail_code": null,
+      "threat_case_id": "MODE",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N002",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "UNKNOWN",
+      "expected_code": "E_MODE_UNKNOWN",
+      "expected_detail_code": null,
+      "threat_case_id": "MODE",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N003",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": 7,
+      "expected_code": "E_MODE_UNKNOWN",
+      "expected_detail_code": null,
+      "threat_case_id": "MODE",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N004",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_FRAME_EMPTY",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": ""
+    },
+    {
+      "case_id": "N005",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_FRAME_TOO_LARGE",
+      "expected_detail_code": null,
+      "threat_case_id": "RESOURCE",
+      "frame_recipe": {
+        "kind": "OVERSIZED_FRAME",
+        "frame_bytes": 1048577
+      }
+    },
+    {
+      "case_id": "N006",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_BOM_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "efbbbf7b7d"
+    },
+    {
+      "case_id": "N007",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_BOM_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "fffe7b7d"
+    },
+    {
+      "case_id": "N008",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_BOM_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "feff7b7d"
+    },
+    {
+      "case_id": "N009",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_BOM_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "0000feff7b7d"
+    },
+    {
+      "case_id": "N010",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_BOM_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "fffe00007b7d"
+    },
+    {
+      "case_id": "N011",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "1f8b"
+    },
+    {
+      "case_id": "N012",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "504b0304"
+    },
+    {
+      "case_id": "N013",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "504b0506"
+    },
+    {
+      "case_id": "N014",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "504b0708"
+    },
+    {
+      "case_id": "N015",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "425a68"
+    },
+    {
+      "case_id": "N016",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "fd377a585a00"
+    },
+    {
+      "case_id": "N017",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "377abcaf271c"
+    },
+    {
+      "case_id": "N018",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "28b52ffd"
+    },
+    {
+      "case_id": "N019",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "04224d18"
+    },
+    {
+      "case_id": "N020",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "ff060000734e61507059"
+    },
+    {
+      "case_id": "N021",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "7801"
+    },
+    {
+      "case_id": "N022",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "789c"
+    },
+    {
+      "case_id": "N023",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "78da"
+    },
+    {
+      "case_id": "N024",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_FRAME_OUTER_WHITESPACE",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": " {}"
+    },
+    {
+      "case_id": "N025",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_FRAME_OUTER_WHITESPACE",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": "{}\n"
+    },
+    {
+      "case_id": "N026",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_UTF8_INVALID",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_hex": "7b2278223aff7d"
+    },
+    {
+      "case_id": "N027",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_SYNTAX",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": "{"
+    },
+    {
+      "case_id": "N028",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_TRAILING_DATA",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": "{}{}"
+    },
+    {
+      "case_id": "N029",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_DUPLICATE_KEY",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":1,\"x\":2}"
+    },
+    {
+      "case_id": "N030",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_NONFINITE",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":NaN}"
+    },
+    {
+      "case_id": "N031",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_NONFINITE",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":Infinity}"
+    },
+    {
+      "case_id": "N032",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_NONFINITE",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":-Infinity}"
+    },
+    {
+      "case_id": "N033",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_FLOAT_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":1.0}"
+    },
+    {
+      "case_id": "N034",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_FLOAT_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":1e0}"
+    },
+    {
+      "case_id": "N035",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_FLOAT_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":-0.0}"
+    },
+    {
+      "case_id": "N036",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_INTEGER_RANGE",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":9223372036854775808}"
+    },
+    {
+      "case_id": "N037",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_INTEGER_RANGE",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":-9223372036854775809}"
+    },
+    {
+      "case_id": "N038",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_INTEGER_RANGE",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":100000000000000000000}"
+    },
+    {
+      "case_id": "N039",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_ROOT_NOT_OBJECT",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "[]"
+    },
+    {
+      "case_id": "N040",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_DEPTH",
+      "expected_detail_code": null,
+      "threat_case_id": "RESOURCE",
+      "frame_recipe": {
+        "kind": "DEPTH_OVERFLOW",
+        "depth": 33
+      }
+    },
+    {
+      "case_id": "N041",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_OBJECT_MEMBERS",
+      "expected_detail_code": null,
+      "threat_case_id": "RESOURCE",
+      "frame_recipe": {
+        "kind": "OBJECT_MEMBER_OVERFLOW",
+        "members": 257
+      }
+    },
+    {
+      "case_id": "N042",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_ARRAY_ITEMS",
+      "expected_detail_code": null,
+      "threat_case_id": "RESOURCE",
+      "frame_recipe": {
+        "kind": "ARRAY_ITEM_OVERFLOW",
+        "items": 65
+      }
+    },
+    {
+      "case_id": "N043",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_NODE_COUNT",
+      "expected_detail_code": null,
+      "threat_case_id": "RESOURCE",
+      "frame_recipe": {
+        "kind": "NODE_OVERFLOW",
+        "minimum_nodes": 4097
+      }
+    },
+    {
+      "case_id": "N044",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_UNICODE_SCALAR",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"x\":\"\\ud800\"}"
+    },
+    {
+      "case_id": "N045",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_JSON_UNICODE_SCALAR",
+      "expected_detail_code": null,
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"\\ud800\":0}"
+    },
+    {
+      "case_id": "N046",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_REMOTE_REFERENCE_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": "{\"outer\":{\"source_url\":\"local\"}}"
+    },
+    {
+      "case_id": "N047",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_REMOTE_REFERENCE_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": "{\"x\":\"https://example.invalid/a\"}"
+    },
+    {
+      "case_id": "N048",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_REMOTE_REFERENCE_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": "{\"x\":\"urn:example:test\"}"
+    },
+    {
+      "case_id": "N049",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": "{\"content_encoding\":\"identity\"}"
+    },
+    {
+      "case_id": "N050",
+      "ingress": "DECODE_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_COMPRESSION_FORBIDDEN",
+      "expected_detail_code": null,
+      "threat_case_id": "T01",
+      "frame_utf8": "{\"x\":\"gzip\"}"
+    },
+    {
+      "case_id": "N051",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_PRODUCTION_FRAME_REJECTED",
+      "expected_detail_code": "E_FRAME_NONCANONICAL",
+      "threat_case_id": "T02",
+      "frame_utf8": "{\"canonicalization\": \"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N052",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_KEYS",
+      "threat_case_id": "DOMAIN",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\",\"unknown\":0}"
+    },
+    {
+      "case_id": "N053",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_SCHEMA",
+      "threat_case_id": "T04",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"unknown\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N054",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_SCHEMA_VERSION",
+      "threat_case_id": "T04",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":true,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N055",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_PACKET_KIND",
+      "threat_case_id": "T04",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"PRODUCTION_EVIDENCE_ENVELOPE\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N056",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_PACKET_KIND",
+      "threat_case_id": "T03",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_RUNTIME_PREREQUISITE_EVIDENCE_PACKET_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N057",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_HASH_DOMAIN",
+      "threat_case_id": "T03",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_RUNTIME_PREREQUISITE_SYNTHETIC_PACKET_SET_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N058",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_CANONICALIZATION",
+      "threat_case_id": "T04",
+      "frame_utf8": "{\"canonicalization\":\"RFC8785\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N059",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_SYNTHETIC_FLAG",
+      "threat_case_id": "T03",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":false,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N060",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_PRODUCTION_FLAG",
+      "threat_case_id": "T03",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":true,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N061",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_TRACK",
+      "threat_case_id": "T03",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"OTHER\"}"
+    },
+    {
+      "case_id": "N062",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_PREREQUISITE",
+      "threat_case_id": "DOMAIN",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"BOOTSTRAP_TRUST_AUTHENTICATION\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N063",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_FIXTURE_CASE",
+      "threat_case_id": "DOMAIN",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"OTHER\",\"fixture_payload\":\"NONSECRET_DETERMINISTIC_UTF8_JSON_FRAME_KAT_V1\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    },
+    {
+      "case_id": "N064",
+      "ingress": "REVIEW_FRAME",
+      "execution_mode": "SYNTHETIC_KAT",
+      "expected_code": "E_SYNTHETIC_PRODUCTION_DOMAIN_REJECTED",
+      "expected_detail_code": "E_ENVELOPE_FIXTURE_PAYLOAD",
+      "threat_case_id": "DOMAIN",
+      "frame_utf8": "{\"canonicalization\":\"AGENT_BRIDGE_CANONICAL_JSON_V1_SORTED_KEYS_COMPACT_UTF8\",\"fixture_case_id\":\"VALID_MINIMAL_FRAME_V1\",\"fixture_payload\":\"OTHER\",\"hash_domain\":\"AB_TRACK_B_PRODUCTION_EVIDENCE_ENVELOPE_ISOLATED_LAB_KAT_V1\",\"packet_kind\":\"SYNTHETIC_PRODUCTION_EVIDENCE_ENVELOPE_KAT\",\"prerequisite_id\":\"FRAME_AND_PARSE\",\"production_admissible\":false,\"schema\":\"agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_kat.v1\",\"schema_version\":1,\"synthetic_fixture\":true,\"track_id\":\"MANAGED_SPANNER_CLOUD_KMS\"}"
+    }
+  ],
+  "threat_contract": {
+    "locally_kat_covered": [
+      "T01",
+      "T02",
+      "T03",
+      "T04"
+    ],
+    "deferred": [
+      "T05",
+      "T06",
+      "T07",
+      "T08",
+      "T09",
+      "T10",
+      "T11",
+      "T12",
+      "T13",
+      "T14",
+      "T15",
+      "T16",
+      "T17",
+      "T18",
+      "T19",
+      "T20"
+    ],
+    "production_runtime_exercised": []
+  },
+  "boundary": {
+    "boundary_threat_specifications_locally_kat_covered": 4,
+    "downstream_gates_authorized": 0,
+    "isolated_lab_candidate_surface_component_implemented": 2,
+    "isolated_lab_candidate_surface_component_locally_kat_exercised": 2,
+    "isolated_lab_candidate_surface_component_total": 2,
+    "production_ingestion_control_count": 14,
+    "production_ingestion_controls_implemented": 0,
+    "production_ingestion_controls_runtime_exercised": 0,
+    "production_threat_cases_runtime_exercised": 0,
+    "production_validated_evidence_items": 0,
+    "provider_authority": false,
+    "real_evidence_items_present": 0,
+    "runtime_authority": false,
+    "runtime_evidence_accepted": 0,
+    "runtime_prerequisites_satisfied": 0,
+    "runtime_side_effects_unlocked": "NONE",
+    "threat_case_count": 20
+  },
+  "nonclaims": {
+    "any_production_ingestion_control_implemented": false,
+    "application_claim_authorized": false,
+    "bootstrap_trust_authentication_implemented": false,
+    "bootstrap_trust_implementation_authorized": false,
+    "condition_output_authorized": false,
+    "credential_or_secret_material_accessed": false,
+    "deployment_authorized": false,
+    "downstream_gate_authority_derived": false,
+    "durable_custody_proved": false,
+    "durable_replay_cas_proved": false,
+    "evidence_acceptance_authorized": false,
+    "evidence_authenticated": false,
+    "evidence_quarantined": false,
+    "evidence_semantically_validated": false,
+    "experiment_rows_created": false,
+    "external_paid_spend_authorized": false,
+    "fault_injected": false,
+    "fault_injection_authorized": false,
+    "global_single_use_proved": false,
+    "independent_checker_is_security_approval": false,
+    "local_kat_is_production_mitigation": false,
+    "operational_production_evidence_schema_defined": false,
+    "output_permit_defined": false,
+    "owner_decision_recorded": false,
+    "owner_handoff_set_defined": false,
+    "owner_identity_bound": false,
+    "paid_resource_provisioned": false,
+    "parser_production_fitness_proved": false,
+    "production_credentials_authorized": false,
+    "production_denial_of_service_resistance_proved": false,
+    "production_endpoint_bound": false,
+    "production_environment_implementation_authorized": false,
+    "production_frame_and_parse_control_implemented": false,
+    "production_ingestion_enabled": false,
+    "production_ingestion_implemented": false,
+    "production_resource_authority_bound": false,
+    "production_rollback_authority_bound": false,
+    "production_security_approval": false,
+    "production_signer_bound": false,
+    "production_synthetic_mode_separation_control_implemented": false,
+    "production_threat_exercised": false,
+    "production_trust_root_bound": false,
+    "provider_authority": false,
+    "provider_called": false,
+    "real_evidence_accepted": false,
+    "real_evidence_collected": false,
+    "real_evidence_ingested": false,
+    "real_evidence_parsed": false,
+    "real_evidence_present": false,
+    "real_evidence_validated": false,
+    "remote_reference_dereferenced": false,
+    "runner_launch_authorized": false,
+    "runner_launched": false,
+    "runtime_admission_granted": false,
+    "runtime_admission_ready": false,
+    "runtime_authority": false,
+    "runtime_owner_decision_recorded": false,
+    "runtime_owner_identity_bound": false,
+    "runtime_rows_created": false,
+    "scientific_claim_authorized": false,
+    "trusted_production_time_bound": false,
+    "validation_receipt_is_production_evidence_receipt": false,
+    "wire_attempted": false
+  },
+  "predecessor": {
+    "artifact_raw_sha256": {
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-production-evidence-ingestion-implementation-authority-and-resource-binding-decision-v1-pack.md": "27e7a5662fcc1861f6dfef7026389bb185854171fe81767f4c6b1c0292d3e6ea",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-production-evidence-ingestion-implementation-authority-and-resource-binding-decision-v1-pack.sh": "743fb03730df6e2717b95da8dfcbb8d94a2b83ba2b7442b6b2cf3d95f39a73cd",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1.py": "8d3357d85513d4715553b363ebeca8ae825f92776f674ebd35acb8437c4684fa",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack.py": "e7194d800ec811612ca7f003f1a1c29cde07ee3e9788ec8d3632c0eb4853ade0",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "cb9aca5ec6bf5fe9889d37adffb509b6249752de913356ebf4eece51993f815e",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "69e2976c1298263240e384817df3a172686e80b8a7c57359829d9e50dda5e3c3",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_ingestion_implementation_authority_and_resource_binding_decision_v1_pack_v0.json": "86a03cc5c97729a1b7b8ca35885e98840cb72fda44eff8a789fa9b7520de3150"
+    },
+    "expected_receipt_line_count": 56,
+    "integration_commit": "58ab80243bc1e9484a4c4ac65dba978f35307abf",
+    "receipt_content_sha256": "48f4eee93f565005ffa79a119529d58e5d61eb947754d4672c96541001268463",
+    "source_commit": "5d46f0ac978548c4373c5db89ae8c8557048df44",
+    "source_parent": "d5bbe55d5d95b1163e287415f437cf77c594135d"
+  }
+}
