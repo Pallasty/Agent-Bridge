@@ -1,0 +1,241 @@
+{
+  "schema": "agent_bridge.engram_g1_authenticated_freeze_authority_adapter_preregistration_contract.v0",
+  "contract_id": "engram_g1_authenticated_freeze_authority_adapter_preregistration_20260718",
+  "stage": "g1_authenticated_freeze_authority_adapter_preregistration_only",
+  "predecessor": {
+    "stage": "g1_corpus_freeze_structural_review_only",
+    "commit": "7062869196d1a3ff8bb72572a39700e65130cde4",
+    "contract_id": "engram_g1_corpus_freeze_review_20260718",
+    "contract_sha256": "5657ac8f4b6fd4f154de7285fd4a62125bf4ea15cba787d25da40701a3ac1504",
+    "validator_sha256": "0b7cb3295bc3690bbfeee033de2ddf27a39eb71d0cec68f96e9b27b1a67ef089",
+    "checker_sha256": "e56a6f50a2c0372d0d59390e8792bc4269c4f63e282d49cf1a1bfe1fdd463e39",
+    "immutable": true
+  },
+  "scope": {
+    "artifact_kind": "public_design_contract_only",
+    "loads_private_packets": false,
+    "loads_key_material": false,
+    "implements_adapter": false,
+    "implements_cryptographic_verification": false,
+    "implements_secure_custody_capture": false,
+    "implements_replay_ledger": false,
+    "mints_capability_receipts": false,
+    "observes_real_evidence": false,
+    "permitted_next_action": "prepare_separate_threat_reviewed_adapter_implementation_gate",
+    "opens_g1_4_candidate_protocol_preregistration": false
+  },
+  "future_trust_model": {
+    "signature_algorithm": "ed25519",
+    "canonical_signed_encoding": "rfc8785_json_canonicalization_scheme_utf8_v1",
+    "trust_root_source": "owner_provisioned_private_capability_control_ledger_outside_packet_and_repository",
+    "packet_may_define_or_replace_trust_root": false,
+    "required_signer_roles_in_order": [
+      "application_owner",
+      "independence_auditor",
+      "freeze_reviewer_1",
+      "freeze_reviewer_2",
+      "sealed_evaluator_custodian"
+    ],
+    "required_signature_count": 5,
+    "quorum_rule": "all_required_roles_exactly_once",
+    "all_signers_must_be_distinct": true,
+    "key_id_epoch_and_role_scope_required": true,
+    "current_non_revoked_key_required_at_claim": true,
+    "trust_ledger_revision_monotonic_and_rollback_protected": true,
+    "key_injection_or_substitution_fails_closed": true,
+    "signature_domains": {
+      "application_owner": "agent-bridge/engram/g1/authenticated-freeze-authority/application-owner/v0",
+      "independence_auditor": "agent-bridge/engram/g1/authenticated-freeze-authority/independence-auditor/v0",
+      "freeze_reviewer_1": "agent-bridge/engram/g1/authenticated-freeze-authority/freeze-reviewer-1/v0",
+      "freeze_reviewer_2": "agent-bridge/engram/g1/authenticated-freeze-authority/freeze-reviewer-2/v0",
+      "sealed_evaluator_custodian": "agent-bridge/engram/g1/authenticated-freeze-authority/sealed-evaluator-custodian/v0"
+    },
+    "implemented_by_this_gate": false
+  },
+  "future_secure_custody": {
+    "path_resolution_profile": "component_by_component_openat_dirfd_nofollow",
+    "retain_repository_root_descriptor_through_validation": true,
+    "retain_parent_directory_descriptors_through_validation": true,
+    "retain_file_descriptors_through_validation": true,
+    "hash_bytes_from_retained_file_descriptors": true,
+    "fstat_before_and_after_must_match": true,
+    "final_name_to_inode_recheck_from_retained_parent_required": true,
+    "regular_files_only": true,
+    "hardlinks_forbidden": true,
+    "required_file_link_count": 1,
+    "owner_only_directory_mode": "0700",
+    "owner_only_file_mode": "0600",
+    "repository_identity_profile": "retained_root_device_inode_exact_git_common_dir_and_g1_3_commit_v1",
+    "canonical_repository_and_scope_binding_required": true,
+    "mount_identity_required": true,
+    "single_local_filesystem_required": true,
+    "network_fuse_and_remote_filesystems_forbidden": true,
+    "path_or_mount_identity_drift_fails_closed": true,
+    "implemented_by_this_gate": false,
+    "secure_custody_capture_verified": false
+  },
+  "future_authenticated_envelope": {
+    "binds_exact_g1_3_contract_validator_and_checker": true,
+    "binds_exact_g1_3_input_packet_digests": true,
+    "binds_exact_private_manifest_bytes": true,
+    "binds_canonical_repository_identity": true,
+    "binds_canonical_scope_identity": true,
+    "binds_adapter_contract_and_implementation_version": true,
+    "binds_all_signer_role_key_and_epoch_identities": true,
+    "binds_nonce_sequence_issued_at_and_expires_at": true,
+    "private_digest_values_must_not_alias_public_bindings": true,
+    "cross_stage_cross_scope_or_cross_repository_use_forbidden": true,
+    "label_only_or_claimed_real_evidence_forbidden": true,
+    "implemented_by_this_gate": false
+  },
+  "future_replay_lifecycle": {
+    "minimum_nonce_bytes": 32,
+    "sequence_monotonic_per_repository_scope": true,
+    "maximum_envelope_age_secs": 86400,
+    "maximum_claim_window_secs": 900,
+    "trusted_monotonic_time_required": true,
+    "trusted_time_profile": "monotonic_clock_plus_durable_boot_epoch_and_signed_time_checkpoint_v1",
+    "durable_time_high_water_mark_required": true,
+    "boot_epoch_change_requires_fresh_signed_envelope": true,
+    "clock_regression_fails_closed": true,
+    "local_wall_clock_alone_is_forbidden": true,
+    "durable_append_only_claim_ledger_required": true,
+    "single_use_compare_and_swap_claim_required": true,
+    "claim_receipt_binds_envelope_nonce_sequence_scope_and_digest": true,
+    "replay_after_success_or_fail_closed_denial_forbidden": true,
+    "key_revocation_and_currentness_rechecked_at_claim": true,
+    "implemented_by_this_gate": false
+  },
+  "future_capability_receipt": {
+    "schema": "agent_bridge.engram_g1_authenticated_freeze_authority_capability_receipt.v0",
+    "receipt_kind": "one_shot_exact_manifest_freeze_authority",
+    "receipt_contains_raw_identity_query_or_manifest_material": false,
+    "receipt_is_single_use": true,
+    "bearer_receipt_forbidden": true,
+    "receipt_binds_authorized_consumer_key_and_process_identity": true,
+    "receipt_scope_must_equal_authenticated_envelope_scope": true,
+    "only_permitted_successor": "open_separate_g1_4_candidate_protocol_preregistration_design_review",
+    "grants_g1_4_implementation": false,
+    "grants_candidate_manifest_or_fit_access": false,
+    "grants_candidate_implementation": false,
+    "grants_biocortex_execution": false,
+    "grants_retrieval_mutation": false,
+    "grants_live_store_write": false,
+    "grants_runtime_promotion": false,
+    "implemented_by_this_gate": false
+  },
+  "human_audit_policy": {
+    "routine_reversible_validation_requires_human_approval": false,
+    "unchanged_authenticated_validation_requires_per_run_human_approval": false,
+    "fail_closed_denial_requires_human_approval": false,
+    "reversible_failure_requires_automatic_rollback": true,
+    "rollback_failure_requires_durable_lesson": true,
+    "manual_safety_audit_is_a_per_run_gate": false,
+    "manual_safety_audit_required_for": [
+      "initial_trust_root_provisioning",
+      "key_rotation_or_revocation",
+      "signer_role_or_quorum_change",
+      "repository_scope_or_predecessor_widening",
+      "hardlink_mount_or_filesystem_policy_change",
+      "first_production_adapter_enablement",
+      "suspected_secret_privacy_or_identity_exposure"
+    ],
+    "manual_audit_outcome_may_be_inferred_by_structural_validator": false
+  },
+  "threat_model": {
+    "all_controls_are_future_requirements_not_current_implementation": true,
+    "unimplemented_control_verdict": "REJECTED_FAIL_CLOSED",
+    "required_threats": [
+      {
+        "threat": "label_laundering",
+        "required_control": "authenticated_evidence_class_role_and_scope_binding",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "symlink_or_path_swap",
+        "required_control": "retained_nofollow_directory_and_file_descriptors",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "hardlink_escape",
+        "required_control": "regular_file_with_single_link_and_final_inode_recheck",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "key_injection_or_substitution",
+        "required_control": "out_of_band_private_capability_control_ledger",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "stale_or_revoked_key",
+        "required_control": "key_epoch_revocation_and_claim_time_currentness",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "cross_stage_scope_or_repository_replay",
+        "required_control": "exact_stage_repository_scope_and_predecessor_binding",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "local_time_rollback",
+        "required_control": "trusted_monotonic_time_durable_boot_epoch_high_water_and_bounded_freshness",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "partial_or_duplicate_quorum",
+        "required_control": "five_distinct_role_signatures_exactly_once",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "digest_alias_or_privacy_echo",
+        "required_control": "disjoint_private_and_public_digest_namespaces_and_redaction",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "duplicate_json_or_noncanonical_bytes",
+        "required_control": "duplicate_key_rejection_and_exact_canonical_signed_encoding",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "scope_or_repository_identity_drift",
+        "required_control": "retained_root_identity_and_exact_canonical_scope_binding",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "capability_receipt_replay",
+        "required_control": "durable_single_use_compare_and_swap_claim_with_consumer_binding",
+        "current_status": "unimplemented_fail_closed"
+      }
+    ]
+  },
+  "state_machine": {
+    "current_state": "PENDING_IMPLEMENTATION_PREREQUISITES",
+    "representable_current_states": [
+      "PENDING_IMPLEMENTATION_PREREQUISITES",
+      "REJECTED_FAIL_CLOSED"
+    ],
+    "positive_authority_state_representable": false,
+    "adapter_implementation_present": false,
+    "secure_custody_capture_present": false,
+    "authenticated_authority_verification_present": false,
+    "capability_receipt_minting_present": false,
+    "g1_4_candidate_protocol_preregistration_open": false
+  },
+  "boundaries": {
+    "observes_real_role_or_corpus_evidence": false,
+    "current_private_corpus_assembly_authority": false,
+    "current_g1_corpus_freeze_authority": false,
+    "authenticated_freeze_authority_verified": false,
+    "secure_custody_capture_verified": false,
+    "adapter_implementation_authority": false,
+    "ready_for_authenticated_freeze_authority_review": false,
+    "ready_for_g1_4_candidate_protocol_preregistration": false,
+    "candidate_manifest_access_authority": false,
+    "candidate_fit_access_authority": false,
+    "candidate_implementation_authority": false,
+    "biocortex_experiment_execution_authority": false,
+    "retrieval_order_mutation_authority": false,
+    "live_store_write_authority": false,
+    "runtime_promotion_authority": false
+  }
+}

@@ -143,6 +143,29 @@ targets. See
 `docs/design/ENGRAM_G1_CORPUS_FREEZE_REVIEW_2026_07_18.md` and run
 `scripts/check-engram-g1-corpus-freeze-review.sh`.
 
+`engram_g1_authenticated_freeze_authority_adapter_preregistration.py` freezes
+the design-only successor security contract without implementing the adapter
+or opening G1.4. A future implementation must use five distinct,
+domain-separated Ed25519 role signatures over RFC 8785 canonical bytes against
+an independently provisioned, revision-monotonic private trust ledger;
+component-by-component no-follow path capture with
+retained repository, parent, and file descriptors; a single-local-filesystem,
+regular-file, `st_nlink == 1` policy; trusted monotonic freshness with durable
+boot epoch and high-water state; a durable single-use CAS claim ledger; and a
+consumer-bound non-bearer capability. The current state vocabulary cannot
+represent positive authority. Routine reversible or unchanged authenticated
+validation requires no human approval, while initial trust-root provisioning,
+key governance, scope or filesystem-policy widening, first production
+enablement, and suspected exposure require transition-specific manual safety
+audit.
+Rollback failure requires a durable lesson. The public validator loads no
+private packets or keys, performs no cryptography or secure-custody capture,
+mints no capability, and keeps all access, implementation, execution,
+mutation, write, promotion, and G1.4 readiness fields false. See
+`docs/design/ENGRAM_G1_AUTHENTICATED_FREEZE_AUTHORITY_ADAPTER_PREREGISTRATION_2026_07_18.md`
+and run
+`scripts/check-engram-g1-authenticated-freeze-authority-adapter-preregistration.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class
