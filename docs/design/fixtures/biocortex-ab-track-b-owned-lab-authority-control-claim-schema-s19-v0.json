@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_authority_control_claim_s19.v0",
+  "title": "Agent-Bridge frozen S20 target contract for external authority-control and single-use claim packets",
+  "description": "S20_TARGET_SCHEMA_ONLY_NOT_EMITTED_OR_VALIDATED_BY_S19_RUST. Frozen S20 target JSON contract with four disjoint packet shapes for independent registration, ledger state, successful single-use claim, and failed claim. Every CAS predicate binds owner authorization, signed payload, frozen S19 manifest, resource, revocation, exact run, controller, runner, nonce, preflight, and same-transaction STOP/revocation reads. S19 Rust exercises compact internal synthetic state/digests but does not emit, parse, or validate these rich JSON packets. No packet is owner authority by itself, and action-start linearization remains an S20 hard gate.",
+  "oneOf": [
+    {"$ref": "#/$defs/authorization_registration_receipt"},
+    {"$ref": "#/$defs/authority_control_ledger_row"},
+    {"$ref": "#/$defs/successful_claim_receipt"},
+    {"$ref": "#/$defs/failed_claim_receipt"}
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "u64_nonzero": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S19_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "authorization_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "owner_envelope_sha256",
+        "resource_scope_sha256",
+        "signed_revocation_epoch",
+        "signed_payload_sha256",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_scope_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "cas_where_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "capability_nonce_sha256",
+        "claim_key_sha256",
+        "claim_namespace_sha256",
+        "control_snapshot_sha256",
+        "controller_binary_sha256",
+        "preflight_receipt_sha256",
+        "resource_scope_sha256",
+        "revocation_revision",
+        "revision",
+        "run_id_sha256",
+        "runner_binary_sha256",
+        "signed_payload_sha256",
+        "signed_revocation_epoch",
+        "stop_revision",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "preflight_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_scope_sha256": {"$ref": "#/$defs/sha256"},
+        "revocation_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "revision": {"$ref": "#/$defs/u64_nonzero"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "stop_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "same_transaction_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor_minimum_key_version_satisfied",
+        "cas_and_control_reads_same_sqlite_transaction",
+        "control_snapshot_sha256",
+        "current_revocation_epoch",
+        "database_identity_sha256",
+        "envelope_revocation_epoch",
+        "exact_revocation_epoch_equality_satisfied",
+        "revocation_ledger_revision",
+        "revocation_policy_identity_sha256",
+        "rollback_detected",
+        "stop_ledger_revision",
+        "stop_policy_identity_sha256",
+        "stop_state",
+        "transaction_sequence"
+      ],
+      "properties": {
+        "anchor_minimum_key_version_satisfied": {"const": true},
+        "cas_and_control_reads_same_sqlite_transaction": {"const": true},
+        "control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "current_revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "database_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "envelope_revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "exact_revocation_epoch_equality_satisfied": {"const": true},
+        "revocation_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "revocation_policy_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "rollback_detected": {"const": false},
+        "stop_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "stop_policy_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "stop_state": {"const": "CLEAR"},
+        "transaction_sequence": {"$ref": "#/$defs/u64_nonzero"}
+      }
+    },
+    "failed_same_transaction_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor_minimum_key_version_satisfied",
+        "cas_and_control_reads_same_sqlite_transaction",
+        "control_snapshot_sha256",
+        "current_revocation_epoch",
+        "database_identity_sha256",
+        "envelope_revocation_epoch",
+        "exact_revocation_epoch_equality_satisfied",
+        "revocation_ledger_revision",
+        "revocation_policy_identity_sha256",
+        "rollback_detected",
+        "stop_ledger_revision",
+        "stop_policy_identity_sha256",
+        "stop_state",
+        "transaction_sequence"
+      ],
+      "properties": {
+        "anchor_minimum_key_version_satisfied": {"type": "boolean"},
+        "cas_and_control_reads_same_sqlite_transaction": {"const": true},
+        "control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "current_revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "database_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "envelope_revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "exact_revocation_epoch_equality_satisfied": {"type": "boolean"},
+        "revocation_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "revocation_policy_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "rollback_detected": {"type": "boolean"},
+        "stop_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "stop_policy_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "stop_state": {"enum": ["CLEAR", "TRIGGERED", "UNKNOWN_FAIL_CLOSED"]},
+        "transaction_sequence": {"$ref": "#/$defs/u64_nonzero"}
+      }
+    },
+    "registration_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_key_sha256",
+        "claim_namespace_sha256",
+        "revision",
+        "registered_by_independent_authority_control_plane",
+        "registration_nonce_sha256"
+      ],
+      "properties": {
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "revision": {"$ref": "#/$defs/u64_nonzero"},
+        "registered_by_independent_authority_control_plane": {"const": true},
+        "registration_nonce_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "common_nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_authority_created",
+        "owner_envelope_mutated",
+        "packet_is_bearer_capability",
+        "packet_permits_automatic_retry",
+        "provider_or_production_authority",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "owner_authority_created": {"const": false},
+        "owner_envelope_mutated": {"const": false},
+        "packet_is_bearer_capability": {"const": false},
+        "packet_permits_automatic_retry": {"const": false},
+        "provider_or_production_authority": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    },
+    "authorization_registration_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "packet_kind",
+        "canonicalization",
+        "authorization_binding",
+        "registration_binding",
+        "initial_row_state",
+        "initial_row_revision",
+        "durable_commit_completed",
+        "registration_receipt_sha256",
+        "nonclaims"
+      ],
+      "properties": {
+        "schema": {"const": "agent_bridge.memory_temporal_owned_lab_authority_control_claim_s19.v0"},
+        "packet_kind": {"const": "S19_AUTHORIZATION_REGISTRATION_RECEIPT"},
+        "canonicalization": {"$ref": "#/$defs/canonicalization"},
+        "authorization_binding": {"$ref": "#/$defs/authorization_binding"},
+        "registration_binding": {"$ref": "#/$defs/registration_binding"},
+        "initial_row_state": {"const": "AUTHORIZED_UNCLAIMED"},
+        "initial_row_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "durable_commit_completed": {"const": true},
+        "registration_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "nonclaims": {"$ref": "#/$defs/common_nonclaims"}
+      }
+    },
+    "authority_control_ledger_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "packet_kind",
+        "canonicalization",
+        "authorization_binding",
+        "claim_key_sha256",
+        "claim_namespace_sha256",
+        "row_state",
+        "row_revision",
+        "consumed_run_id_sha256",
+        "consumed_capability_nonce_sha256",
+        "consumed_tombstone_absorbing",
+        "row_binding_sha256",
+        "nonclaims"
+      ],
+      "properties": {
+        "schema": {"const": "agent_bridge.memory_temporal_owned_lab_authority_control_claim_s19.v0"},
+        "packet_kind": {"const": "S19_AUTHORITY_CONTROL_LEDGER_ROW"},
+        "canonicalization": {"$ref": "#/$defs/canonicalization"},
+        "authorization_binding": {"$ref": "#/$defs/authorization_binding"},
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "row_state": {"enum": ["AUTHORIZED_UNCLAIMED", "CONSUMED_FOR_EXACT_RUN"]},
+        "row_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "consumed_run_id_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "consumed_capability_nonce_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "consumed_tombstone_absorbing": {"const": true},
+        "row_binding_sha256": {"$ref": "#/$defs/sha256"},
+        "nonclaims": {"$ref": "#/$defs/common_nonclaims"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"row_state": {"const": "AUTHORIZED_UNCLAIMED"}}, "required": ["row_state"]},
+          "then": {
+            "properties": {
+              "consumed_run_id_sha256": {"type": "null"},
+              "consumed_capability_nonce_sha256": {"type": "null"}
+            }
+          },
+          "else": {
+            "properties": {
+              "consumed_run_id_sha256": {"$ref": "#/$defs/sha256"},
+              "consumed_capability_nonce_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        }
+      ]
+    },
+    "successful_claim_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "packet_kind",
+        "canonicalization",
+        "cas_where_bindings",
+        "same_transaction_control",
+        "prior_state",
+        "resulting_state",
+        "affected_rows",
+        "resulting_row_revision",
+        "claim_receipt_committed_in_same_transaction",
+        "durable_commit_completed_before_affine_permit",
+        "affine_permit_issued",
+        "affine_permit_serializable",
+        "affine_permit_cloneable",
+        "claim_receipt_sha256",
+        "nonclaims"
+      ],
+      "properties": {
+        "schema": {"const": "agent_bridge.memory_temporal_owned_lab_authority_control_claim_s19.v0"},
+        "packet_kind": {"const": "S19_SUCCESSFUL_SINGLE_USE_CLAIM_RECEIPT"},
+        "canonicalization": {"$ref": "#/$defs/canonicalization"},
+        "cas_where_bindings": {"$ref": "#/$defs/cas_where_bindings"},
+        "same_transaction_control": {"$ref": "#/$defs/same_transaction_control"},
+        "prior_state": {"const": "AUTHORIZED_UNCLAIMED"},
+        "resulting_state": {"const": "CONSUMED_FOR_EXACT_RUN"},
+        "affected_rows": {"const": 1},
+        "resulting_row_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "claim_receipt_committed_in_same_transaction": {"const": true},
+        "durable_commit_completed_before_affine_permit": {"const": true},
+        "affine_permit_issued": {"const": true},
+        "affine_permit_serializable": {"const": false},
+        "affine_permit_cloneable": {"const": false},
+        "claim_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "nonclaims": {"$ref": "#/$defs/common_nonclaims"}
+      }
+    },
+    "failed_claim_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "packet_kind",
+        "canonicalization",
+        "cas_where_bindings",
+        "same_transaction_control",
+        "failure_class",
+        "affected_rows",
+        "unclaimed_state_mutated",
+        "affine_permit_issued",
+        "automatic_retry_allowed",
+        "failed_claim_receipt_sha256",
+        "nonclaims"
+      ],
+      "properties": {
+        "schema": {"const": "agent_bridge.memory_temporal_owned_lab_authority_control_claim_s19.v0"},
+        "packet_kind": {"const": "S19_FAILED_SINGLE_USE_CLAIM_RECEIPT"},
+        "canonicalization": {"$ref": "#/$defs/canonicalization"},
+        "cas_where_bindings": {"$ref": "#/$defs/cas_where_bindings"},
+        "same_transaction_control": {"$ref": "#/$defs/failed_same_transaction_control"},
+        "failure_class": {
+          "enum": [
+            "CAS_PREDICATE_MISMATCH",
+            "ROW_MISSING",
+            "ROW_ALREADY_CONSUMED",
+            "STOP_TRIGGERED",
+            "REVOCATION_MISMATCH",
+            "CONTROL_ROLLBACK_OR_UNKNOWN",
+            "DURABILITY_FAILURE"
+          ]
+        },
+        "affected_rows": {"const": 0},
+        "unclaimed_state_mutated": {"const": false},
+        "affine_permit_issued": {"const": false},
+        "automatic_retry_allowed": {"const": false},
+        "failed_claim_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "nonclaims": {"$ref": "#/$defs/common_nonclaims"}
+      }
+    }
+  }
+}

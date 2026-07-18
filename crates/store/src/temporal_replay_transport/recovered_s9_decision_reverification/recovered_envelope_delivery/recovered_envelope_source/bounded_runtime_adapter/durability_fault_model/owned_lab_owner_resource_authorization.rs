@@ -7,6 +7,9 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
+#[cfg(feature = "temporal-evidence-s19-owned-lab-source-bound-runner-synthetic")]
+mod source_bound_runner;
+
 use ring::signature::{UnparsedPublicKey, ED25519};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
