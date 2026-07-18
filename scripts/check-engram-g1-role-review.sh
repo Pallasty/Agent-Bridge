@@ -9,7 +9,20 @@ contract="scripts/eval/fixtures/engram_g1_role_review_contract_v1.json"
 preflight_contract="scripts/eval/fixtures/engram_g1_freeze_preflight_contract_v1.json"
 preflight_validator="scripts/eval/engram_g1_freeze_preflight.py"
 scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+data_root="$repo_root/data"
+created_data_root=0
+if [[ ! -d "$data_root" ]]; then
+  mkdir "$data_root"
+  created_data_root=1
+fi
+private_scratch="$(mktemp -d "$data_root/.engram-g1-role-review-check.XXXXXX")"
+cleanup() {
+  rm -rf "$scratch" "$private_scratch"
+  if [[ "$created_data_root" -eq 1 ]]; then
+    rmdir "$data_root" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
 python3 -m py_compile "$validator"
 bash -n "$0"
@@ -35,11 +48,12 @@ preflight_validator = Path(sys.argv[4])
 assert hashlib.sha256(contract.read_bytes()).hexdigest() == receipt["contract_sha256"]
 assert hashlib.sha256(preflight_contract.read_bytes()).hexdigest() == receipt["predecessor_contract_sha256"]
 assert hashlib.sha256(preflight_validator.read_bytes()).hexdigest() == receipt["predecessor_validator_sha256"]
-assert receipt["contract_verdict"] == "READY_FOR_PRIVATE_ROLE_REVIEW_PACKET"
+assert receipt["contract_verdict"] == "READY_FOR_PRIVATE_ROLE_REVIEW_PACKET_NO_AUTHORITY"
 assert receipt["ready_for_private_role_review_packet"] is True
+assert receipt["authenticated_authority_required_before_assembly"] is True
 assert receipt["application_owner_may_equal_consumer_curator"] is True
 assert receipt["independence_auditor_must_be_outside_all_role_holders"] is True
-assert receipt["maximum_intake_episode_groups"] == 36
+assert receipt["proposed_maximum_intake_episode_groups"] == 36
 assert receipt["current_private_corpus_assembly_authority"] is False
 assert receipt["g1_corpus_freeze_authority"] is False
 assert receipt["candidate_implementation_authority"] is False
@@ -122,7 +136,7 @@ review = {
     "schema": "agent_bridge.engram_g1_role_review_packet.v1",
     "contract_id": "engram_g1_role_review_20260718",
     "contract_sha256": contract_sha256,
-    "packet_id": "synthetic_role_review_v1",
+    "packet_id": digest("packet:synthetic-role-review"),
     "evidence_class": "synthetic_contract_test",
     "role_packet_sha256": role_sha256,
     "review_started_at_unix": 1784370100,
@@ -164,17 +178,17 @@ decision = {
     "schema": "agent_bridge.engram_g1_role_owner_decision_packet.v1",
     "contract_id": "engram_g1_role_review_20260718",
     "contract_sha256": contract_sha256,
-    "decision_id": "synthetic_owner_decision_v1",
+    "decision_id": digest("decision:synthetic-owner-decision"),
     "evidence_class": "synthetic_contract_test",
     "role_packet_sha256": role_sha256,
     "review_packet_sha256": review_sha256,
     "owner_commitment_sha256": digest("holder:curator"),
     "decided_at_unix": 1784370300,
-    "decision": "approve_private_corpus_assembly",
-    "owner_authorization_receipt_sha256": digest("owner:authorization"),
-    "authorization_scope": contract["approved_assembly_scope"],
+    "decision": "endorse_private_corpus_assembly_for_authentication",
+    "owner_endorsement_receipt_sha256": digest("owner:endorsement"),
+    "proposed_assembly_scope": contract["proposed_assembly_scope"],
     "attestations": {
-        "application_owner_authored_decision": True,
+        "application_owner_authored_endorsement": True,
         "candidate_did_not_author_decision": True,
         "candidate_did_not_see_raw_decision_evidence": True,
         "owner_commitment_uses_private_salt": True,
@@ -231,7 +245,8 @@ owner_decision = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
 assert review["role_review_verdict"] == "SYNTHETIC_REVIEW_APPROVAL_VALID"
 assert review["both_reviews_approved"] is True
 assert review["owner_is_consumer_curator"] is True
-assert review["ready_for_application_owner_decision"] is False
+assert review["ready_for_structural_owner_endorsement"] is False
+assert review["authenticated_authority_verified"] is False
 assert review["real_world_identity_authenticated_by_validator"] is False
 assert review["holder_commitments_in_receipt"] is False
 assert review["reviewer_commitments_in_receipt"] is False
@@ -239,9 +254,11 @@ assert review["appointment_or_review_receipts_in_receipt"] is False
 assert review["private_corpus_assembly_authority"] is False
 assert review["candidate_implementation_authority"] is False
 assert review["runtime_promotion_authority"] is False
+assert "packet_id" not in review
 
-assert decision["owner_decision_verdict"] == "SYNTHETIC_APPROVAL_VALID_NO_AUTHORITY"
-assert decision["structurally_approvable"] is True
+assert decision["owner_decision_verdict"] == "SYNTHETIC_ENDORSEMENT_VALID_NO_AUTHORITY"
+assert decision["structure_valid_for_authentication"] is True
+assert decision["ready_for_authenticated_authority_review"] is False
 assert decision["ready_for_private_corpus_assembly"] is False
 assert decision["private_corpus_assembly_authority"] is False
 assert decision["candidate_lane_may_execute"] is False
@@ -253,7 +270,12 @@ assert decision["live_store_write_authority"] is False
 assert decision["runtime_promotion_authority"] is False
 assert decision["holder_commitments_in_receipt"] is False
 assert decision["reviewer_commitments_in_receipt"] is False
-assert decision["appointment_review_or_authorization_receipts_in_receipt"] is False
+assert decision["appointment_review_or_endorsement_receipts_in_receipt"] is False
+assert decision["authenticated_authority_verified"] is False
+assert decision["proposed_executor_role"] == "consumer_curator"
+assert decision["proposed_custody_role"] == "sealed_evaluator_custodian"
+assert decision["proposed_maximum_intake_episode_groups"] == 36
+assert "decision_id" not in decision
 
 private_commitments = {
     field
@@ -270,7 +292,7 @@ private_commitments.update(
         review_packet["independence_audit"]["auditor_commitment_sha256"],
         review_packet["independence_audit"]["audit_receipt_sha256"],
         owner_decision["owner_commitment_sha256"],
-        owner_decision["owner_authorization_receipt_sha256"],
+        owner_decision["owner_endorsement_receipt_sha256"],
     }
 )
 
@@ -291,7 +313,7 @@ assert private_commitments.isdisjoint(set(string_leaves(decision)))
 PY
 
 python3 - "$contract" "$role_packet" "$review_packet" "$owner_decision" \
-  "$scratch" <<'PY'
+  "$scratch" "$private_scratch" <<'PY'
 import copy
 import hashlib
 import json
@@ -303,6 +325,7 @@ role = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 review = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
 decision = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
 scratch = Path(sys.argv[5])
+private_scratch = Path(sys.argv[6])
 
 
 def digest(label):
@@ -318,8 +341,17 @@ def write(name, value):
     return path
 
 
+def write_private(name, value):
+    path = private_scratch / f"{name}.json"
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 relaxed = copy.deepcopy(contract)
-relaxed["approved_assembly_scope"]["maximum_intake_episode_groups"] = 37
+relaxed["proposed_assembly_scope"]["maximum_intake_episode_groups"] = 37
 write("contract-relaxed", relaxed)
 
 review_mutations = {}
@@ -342,9 +374,31 @@ auditor_holder["independence_audit"]["auditor_commitment_sha256"] = digest(
 )
 review_mutations["review-auditor-holder"] = auditor_holder
 
+auditor_owner = copy.deepcopy(review)
+auditor_owner["independence_audit"]["auditor_commitment_sha256"] = (
+    review["application_owner_review"]["reviewer_commitment_sha256"]
+)
+review_mutations["review-auditor-owner"] = auditor_owner
+
+shared_review_receipt = copy.deepcopy(review)
+shared_review_receipt["independence_audit"]["audit_receipt_sha256"] = (
+    review["application_owner_review"]["review_receipt_sha256"]
+)
+review_mutations["review-shared-receipt"] = shared_review_receipt
+
 chronology = copy.deepcopy(review)
 chronology["review_started_at_unix"] = role["created_at_unix"]
 review_mutations["review-chronology"] = chronology
+
+completion_before_start = copy.deepcopy(review)
+completion_before_start["review_completed_at_unix"] = (
+    review["review_started_at_unix"] - 1
+)
+review_mutations["review-completion-before-start"] = completion_before_start
+
+review_evidence_mismatch = copy.deepcopy(review)
+review_evidence_mismatch["evidence_class"] = "consumer_owned_real"
+review_mutations["review-evidence-mismatch"] = review_evidence_mismatch
 
 candidate_authored = copy.deepcopy(review)
 candidate_authored["attestations"]["candidate_did_not_author_review"] = False
@@ -357,6 +411,28 @@ review_mutations["review-unsalted"] = unsalted
 raw_identity = copy.deepcopy(review)
 raw_identity["application_owner_review"]["name"] = "forbidden"
 review_mutations["review-raw-identity"] = raw_identity
+
+nonopaque_packet_id = copy.deepcopy(review)
+nonopaque_packet_id["packet_id"] = "review_for_alice"
+review_mutations["review-nonopaque-packet-id"] = nonopaque_packet_id
+
+packet_id_alias_holder = copy.deepcopy(review)
+packet_id_alias_holder["packet_id"] = role["holders"][0]["holder_commitment_sha256"]
+review_mutations["review-packet-id-alias-holder"] = packet_id_alias_holder
+
+packet_id_alias_appointment = copy.deepcopy(review)
+packet_id_alias_appointment["packet_id"] = role["holders"][0][
+    "appointment_receipt_sha256"
+]
+review_mutations["review-packet-id-alias-appointment"] = packet_id_alias_appointment
+
+packet_id_alias_review_receipt = copy.deepcopy(review)
+packet_id_alias_review_receipt["packet_id"] = review["application_owner_review"][
+    "review_receipt_sha256"
+]
+review_mutations["review-packet-id-alias-review-receipt"] = (
+    packet_id_alias_review_receipt
+)
 
 zero_receipt = copy.deepcopy(review)
 zero_receipt["application_owner_review"]["review_receipt_sha256"] = "0" * 64
@@ -380,7 +456,7 @@ write("decision-approval-after-review-reject", decision_after_reject)
 
 record_rejection = copy.deepcopy(decision_after_reject)
 record_rejection["decision"] = "reject_role_roster"
-record_rejection["decision_id"] = "synthetic_owner_rejection_v1"
+record_rejection["decision_id"] = digest("decision:synthetic-owner-rejection")
 write("decision-record-review-rejection", record_rejection)
 
 decision_mutations = {}
@@ -392,12 +468,12 @@ owner_mismatch = copy.deepcopy(decision)
 owner_mismatch["owner_commitment_sha256"] = digest("reviewer:outside-owner")
 decision_mutations["decision-owner-mismatch"] = owner_mismatch
 
-zero_authorization = copy.deepcopy(decision)
-zero_authorization["owner_authorization_receipt_sha256"] = "0" * 64
-decision_mutations["decision-zero-authorization"] = zero_authorization
+zero_endorsement = copy.deepcopy(decision)
+zero_endorsement["owner_endorsement_receipt_sha256"] = "0" * 64
+decision_mutations["decision-zero-endorsement"] = zero_endorsement
 
 scope_mutation = copy.deepcopy(decision)
-scope_mutation["authorization_scope"]["maximum_intake_episode_groups"] = 37
+scope_mutation["proposed_assembly_scope"]["maximum_intake_episode_groups"] = 37
 decision_mutations["decision-scope-mutation"] = scope_mutation
 
 review_drift = copy.deepcopy(decision)
@@ -407,6 +483,34 @@ decision_mutations["decision-review-hash-drift"] = review_drift
 candidate_decision = copy.deepcopy(decision)
 candidate_decision["attestations"]["candidate_did_not_author_decision"] = False
 decision_mutations["decision-candidate-authored"] = candidate_decision
+
+nonopaque_decision_id = copy.deepcopy(decision)
+nonopaque_decision_id["decision_id"] = "decision_for_alice"
+decision_mutations["decision-nonopaque-id"] = nonopaque_decision_id
+
+decision_id_alias_holder = copy.deepcopy(decision)
+decision_id_alias_holder["decision_id"] = role["holders"][0][
+    "holder_commitment_sha256"
+]
+decision_mutations["decision-id-alias-holder"] = decision_id_alias_holder
+
+decision_id_alias_review_receipt = copy.deepcopy(decision)
+decision_id_alias_review_receipt["decision_id"] = review[
+    "application_owner_review"
+]["review_receipt_sha256"]
+decision_mutations["decision-id-alias-review-receipt"] = (
+    decision_id_alias_review_receipt
+)
+
+decision_id_alias_endorsement = copy.deepcopy(decision)
+decision_id_alias_endorsement["decision_id"] = decision[
+    "owner_endorsement_receipt_sha256"
+]
+decision_mutations["decision-id-alias-endorsement"] = decision_id_alias_endorsement
+
+decision_evidence_mismatch = copy.deepcopy(decision)
+decision_evidence_mismatch["evidence_class"] = "consumer_owned_real"
+decision_mutations["decision-evidence-mismatch"] = decision_evidence_mismatch
 
 for name, value in decision_mutations.items():
     write(name, value)
@@ -418,6 +522,27 @@ real_review = copy.deepcopy(review)
 real_review["evidence_class"] = "consumer_owned_real"
 real_review["role_packet_sha256"] = hashlib.sha256(real_role_path.read_bytes()).hexdigest()
 write("real-review-outside-data", real_review)
+
+forged_real_role = copy.deepcopy(role)
+forged_real_role["evidence_class"] = "consumer_owned_real"
+forged_real_role_path = write_private("forged-real-role", forged_real_role)
+
+forged_real_review = copy.deepcopy(review)
+forged_real_review["evidence_class"] = "consumer_owned_real"
+forged_real_review["role_packet_sha256"] = hashlib.sha256(
+    forged_real_role_path.read_bytes()
+).hexdigest()
+forged_real_review_path = write_private("forged-real-review", forged_real_review)
+
+forged_real_decision = copy.deepcopy(decision)
+forged_real_decision["evidence_class"] = "consumer_owned_real"
+forged_real_decision["role_packet_sha256"] = hashlib.sha256(
+    forged_real_role_path.read_bytes()
+).hexdigest()
+forged_real_decision["review_packet_sha256"] = hashlib.sha256(
+    forged_real_review_path.read_bytes()
+).hexdigest()
+write_private("forged-real-decision", forged_real_decision)
 PY
 
 if python3 "$validator" validate-contract \
@@ -428,8 +553,13 @@ fi
 
 for mutation in \
   review-owner-candidate review-owner-curator-mismatch review-auditor-holder \
-  review-chronology review-candidate-authored review-unsalted \
-  review-raw-identity review-zero-receipt review-role-hash-drift; do
+  review-auditor-owner review-shared-receipt review-chronology \
+  review-completion-before-start review-evidence-mismatch \
+  review-candidate-authored review-unsalted \
+  review-raw-identity review-nonopaque-packet-id \
+  review-packet-id-alias-holder review-packet-id-alias-appointment \
+  review-packet-id-alias-review-receipt review-zero-receipt \
+  review-role-hash-drift; do
   if python3 "$validator" validate-review --contract "$contract" \
     --preflight-contract "$preflight_contract" --role-packet "$role_packet" \
     --review-packet "$scratch/$mutation.json" >/dev/null 2>&1; then
@@ -449,7 +579,7 @@ from pathlib import Path
 
 receipt = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 assert receipt["both_reviews_approved"] is False
-assert receipt["ready_for_application_owner_decision"] is False
+assert receipt["ready_for_structural_owner_endorsement"] is False
 assert receipt["private_corpus_assembly_authority"] is False
 PY
 
@@ -458,7 +588,7 @@ if python3 "$validator" validate-owner-decision --contract "$contract" \
   --review-packet "$scratch/review-one-reject.json" \
   --owner-decision "$scratch/decision-approval-after-review-reject.json" \
   >/dev/null 2>&1; then
-  echo "owner approval survived a rejected independent review" >&2
+  echo "owner endorsement survived a rejected independent review" >&2
   exit 1
 fi
 
@@ -478,9 +608,12 @@ assert receipt["private_corpus_assembly_authority"] is False
 PY
 
 for mutation in \
-  decision-before-review decision-owner-mismatch decision-zero-authorization \
+  decision-before-review decision-owner-mismatch decision-zero-endorsement \
   decision-scope-mutation decision-review-hash-drift \
-  decision-candidate-authored; do
+  decision-candidate-authored decision-nonopaque-id \
+  decision-id-alias-holder decision-id-alias-review-receipt \
+  decision-id-alias-endorsement \
+  decision-evidence-mismatch; do
   if python3 "$validator" validate-owner-decision --contract "$contract" \
     --preflight-contract "$preflight_contract" --role-packet "$role_packet" \
     --review-packet "$review_packet" \
@@ -498,6 +631,35 @@ if python3 "$validator" validate-review --contract "$contract" \
   echo "real G1.2 packets outside ignored data/ were not rejected" >&2
   exit 1
 fi
+
+python3 "$validator" validate-owner-decision --contract "$contract" \
+  --preflight-contract "$preflight_contract" \
+  --role-packet "$private_scratch/forged-real-role.json" \
+  --review-packet "$private_scratch/forged-real-review.json" \
+  --owner-decision "$private_scratch/forged-real-decision.json" \
+  >"$scratch/forged-real-decision.receipt.json"
+python3 - "$scratch/forged-real-decision.receipt.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+receipt = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert receipt["owner_decision_verdict"] == (
+    "CLAIMED_REAL_ENDORSEMENT_READY_FOR_AUTHENTICATION"
+)
+assert receipt["structure_valid_for_authentication"] is True
+assert receipt["ready_for_authenticated_authority_review"] is True
+assert receipt["authenticated_authority_verified"] is False
+assert receipt["ready_for_private_corpus_assembly"] is False
+assert receipt["private_corpus_assembly_authority"] is False
+assert receipt["candidate_lane_may_execute"] is False
+assert receipt["g1_corpus_freeze_authority"] is False
+assert receipt["candidate_implementation_authority"] is False
+assert receipt["biocortex_experiment_execution_authority"] is False
+assert receipt["retrieval_order_mutation_authority"] is False
+assert receipt["live_store_write_authority"] is False
+assert receipt["runtime_promotion_authority"] is False
+PY
 
 printf '{"schema":"%s","schema":"duplicate"}\n' \
   "agent_bridge.engram_g1_role_review_contract.v1" \

@@ -2,19 +2,19 @@
 
 Date: 2026-07-18
 
-Status: **READY FOR PRIVATE ROLE REVIEW PACKETS / NO CURRENT AUTHORITY**
+Status: **READY FOR PRIVATE ROLE REVIEW PACKETS / AUTHENTICATION REQUIRED / NO AUTHORITY**
 
 ## Decision
 
-G1.2 inserts an independently reviewable authorization chain between the G1.1
-role-commitment packet and any private grouped-corpus assembly. A role roster is
-not self-authorizing: an application owner and an independence auditor must
-review the exact role-packet bytes, and the application owner must then issue a
-separate decision bound to the completed review bytes.
+G1.2 inserts an independently reviewable structural review chain between the
+G1.1 role-commitment packet and any future private grouped-corpus assembly. A
+role roster is not self-authorizing: an application owner and an independence
+auditor must review the exact role-packet bytes, and the application owner must
+then issue a separate endorsement bound to the completed review bytes.
 
 The registered public contract is
 `scripts/eval/fixtures/engram_g1_role_review_contract_v1.json`, SHA-256
-`efb7464e2922d0dd2645698435272714316d07f786bd5a56114e900b99e31f6c`.
+`668656be38d1fc9572fd6dde0f012a8facb83a089ad3ee28dba97bc9a58d3a28`.
 It binds G1.1 commit
 `3256fe024c2a280bcd4ac0fee4ff79563c0cc36a`, contract SHA-256
 `5d4835fa2aa404224b98e7a60574121118051d771079f5a0422ab5839564e94a`,
@@ -23,8 +23,10 @@ and validator SHA-256
 
 This public contract does not observe appointment evidence, assign real people,
 or authorize assembly. It defines only the next fail-closed review protocol.
+No self-declared evidence class, ignored path, hash-shaped value, or successful
+local validation can produce assembly authority.
 
-## Authorization chain
+## Structural review chain
 
 The chain has four distinct records:
 
@@ -34,7 +36,7 @@ The chain has four distinct records:
    ownership, and authority to run this workflow;
 3. an independence auditor checks holder separation, owner overlap, candidate
    exclusions, sealed custody, salt custody, and appointment chronology;
-4. the application owner issues a separate approve-or-reject decision after
+4. the application owner issues a separate endorse-or-reject decision after
    both reviews are complete.
 
 The candidate implementer cannot author or approve either review, issue the
@@ -45,7 +47,12 @@ receive sealed material.
 
 Reviewer identities are represented only by privately salted SHA-256
 commitments. Raw names, handles, contact data, and identity fields are
-forbidden.
+forbidden. Review `packet_id` and owner `decision_id` values must also be
+non-placeholder SHA-256 identifiers, so redacted receipts cannot echo a
+human-readable identity hidden inside an otherwise generic identifier field.
+An identifier must also differ from every holder, reviewer, appointment,
+review, audit, and endorsement commitment in its packet lineage. Those
+identifiers remain private and are omitted from redacted receipts.
 
 The application owner may be the consumer curator. If that overlap is claimed,
 the owner commitment must exactly match the sole consumer-curator commitment.
@@ -71,10 +78,10 @@ repository's ignored `data/` tree. A packet binds:
 - review start and completion timestamps strictly after role appointment;
 - explicit approve-or-reject decisions and bounded attestations.
 
-Both reviewers must approve before an owner may approve assembly. A reviewer
-rejection is itself a valid structural result, but it cannot be converted into
-an assembly approval. The owner may only record `reject_role_roster` for that
-chain.
+Both reviewers must approve before an owner may endorse the bounded assembly
+proposal for later authentication. A reviewer rejection is itself a valid
+structural result, but it cannot be converted into an endorsement. The owner
+may only record `reject_role_roster` for that chain.
 
 A redacted review receipt contains decisions and hashes of whole packets. It
 does not contain holder commitments, reviewer commitments, appointment
@@ -87,20 +94,21 @@ Actual decisions use schema
 `agent_bridge.engram_g1_role_owner_decision_packet.v1`. They bind the exact
 role and review packet bytes, repeat the application-owner commitment from the
 review, occur strictly after review completion, and carry a non-placeholder
-authorization-receipt commitment.
+endorsement-receipt commitment.
 
 The only decisions are:
 
-- `approve_private_corpus_assembly` after both reviews approve; or
+- `endorse_private_corpus_assembly_for_authentication` after both reviews
+  approve; or
 - `reject_role_roster`.
 
-An approval scope must exactly match the public contract. It cannot be widened
-inside a private packet.
+A proposed scope must exactly match the public contract. It cannot be widened
+inside a private packet, and structural validation never authorizes it.
 
-## Exact approved scope
+## Exact proposed scope
 
-Only a structurally valid `consumer_owned_real` chain ending in owner approval
-can authorize the following:
+A structurally valid chain may propose only the following for a later,
+authenticated authority review:
 
 - the consumer curator may create a private intake under ignored `data/`;
 - the sealed evaluator/custodian retains custody;
@@ -108,30 +116,39 @@ can authorize the following:
 - the curator may prepare a hash-only manifest for later freeze review;
 - intake is capped at 36 episode groups.
 
-Even that approval does not freeze the corpus. It does not authorize candidate
-implementation, BioCortex experiment execution, retrieval-order mutation,
-live-store writes, or runtime promotion. The candidate lane may not execute the
-assembly scope.
+The proposal itself authorizes none of those actions. It also cannot freeze the
+corpus, authorize candidate implementation, execute BioCortex, mutate retrieval
+order, write live state, or promote runtime. The candidate lane may not execute
+the proposed scope.
 
 ## Synthetic evidence cannot authorize
 
 Synthetic packets are accepted only to exercise the contract. A complete
-synthetic owner approval can be `structurally_approvable`, but every authority
-field remains false. This prevents test fixtures from becoming operational
-receipts through copying, path changes, or optimistic interpretation.
+synthetic endorsement can be structurally valid, but every authority field
+remains false. A chain labeled `consumer_owned_real` is likewise only a claim:
+it may advance to authenticated authority review, never directly to assembly.
 
 The state boundary is:
 
 | Evidence and decision | Structural result | Private assembly authority |
 | --- | --- | --- |
 | Public contract only | review packets may be prepared | false |
-| Synthetic double approval + owner approval | contract path exercised | false |
+| Synthetic double approval + owner endorsement | contract path exercised | false |
 | Real review with any rejection | role roster rejected | false |
-| Real double approval + real owner approval | curator-only intake may begin | true |
+| Claimed-real double approval + owner endorsement | ready for authentication | false |
 
-The last row remains a structural authorization claim. The validator explicitly
-does not authenticate the application owner, auditor, role holders, or source
-appointment evidence.
+The validator explicitly does not authenticate the application owner, auditor,
+role holders, or source appointment evidence. A later adapter must verify
+domain-separated signatures against independently configured trust anchors
+before any assembly authority can become true.
+
+The current ignored-path check is likewise structural, not a custody proof.
+The reader captures stable bytes before a later pathname privacy check; a
+future authority-bearing adapter must instead anchor the canonical repository,
+walk the private path with no-follow directory descriptors, retain the same
+file identity through validation, and define a hardlink policy. Until then,
+foreign-repository copies and pathname races cannot gain authority because this
+validator has no authority-producing state.
 
 ## Fail-closed validation
 
@@ -160,11 +177,14 @@ python3 scripts/eval/engram_g1_role_review.py validate-owner-decision \
 The checker proves deterministic receipts and rejects contract relaxation,
 forbidden owner overlap, false curator overlap, auditor overlap, chronology
 errors, candidate authorship, unsalted commitments, raw identities, zero
-receipts, role/review hash drift, approval after reviewer rejection, premature
-owner decisions, owner mismatch, authorization-scope widening, real packets
-outside ignored `data/`, and duplicate JSON fields.
+receipts, human-readable or private-commitment-aliasing packet identifiers,
+role/review hash drift,
+endorsement after reviewer rejection, premature owner decisions, owner
+mismatch, proposed-scope widening, synthetic-to-real relabeling as an authority
+escalation, real packets outside ignored `data/`, and duplicate JSON fields.
 
 No real role, review, or owner-decision packet is created by G1.2. The next
 external action belongs to the application owner and an auditor outside the
-five role holders. Until their consumer-owned evidence exists, private corpus
-assembly authority remains false.
+five role holders. Even after their consumer-owned evidence exists, private
+corpus assembly authority remains false until a separately registered,
+authenticated authority verifier accepts the chain.

@@ -3,7 +3,7 @@
 
 This gate sits between the G1.1 role packet and any private corpus assembly.
 It checks salted reviewer commitments, reviewer/holder separation, chronology,
-packet-byte bindings, and an exact owner-authorized assembly scope. It does not
+packet-byte bindings, and an exact proposed assembly scope. It does not
 authenticate people or appointment evidence. Synthetic packets exercise the
 contract but can never grant authority. Real packets must remain untracked
 below the repository ``data/`` tree.
@@ -36,7 +36,7 @@ from engram_g1_corpus_design import (
 CONTRACT_SCHEMA = "agent_bridge.engram_g1_role_review_contract.v1"
 CONTRACT_RECEIPT_SCHEMA = "agent_bridge.engram_g1_role_review_contract_receipt.v1"
 CONTRACT_ID = "engram_g1_role_review_20260718"
-CONTRACT_SHA256 = "efb7464e2922d0dd2645698435272714316d07f786bd5a56114e900b99e31f6c"
+CONTRACT_SHA256 = "842a86010b61a030993d37e6cc2b06206315a22a5b319c79dfaf07ed32522c09"
 REVIEW_PACKET_SCHEMA = "agent_bridge.engram_g1_role_review_packet.v1"
 REVIEW_RECEIPT_SCHEMA = "agent_bridge.engram_g1_role_review_receipt.v1"
 OWNER_DECISION_PACKET_SCHEMA = "agent_bridge.engram_g1_role_owner_decision_packet.v1"
@@ -54,13 +54,13 @@ PREDECESSOR_VALIDATOR_SHA256 = (
 EVIDENCE_CLASSES = {"synthetic_contract_test", "consumer_owned_real"}
 REVIEW_DECISIONS = {"approve", "reject"}
 OWNER_DECISIONS = {
-    "approve_private_corpus_assembly",
+    "endorse_private_corpus_assembly_for_authentication",
     "reject_role_roster",
 }
 
-EXPECTED_APPROVED_ASSEMBLY_SCOPE = {
-    "authorized_executor_role": "consumer_curator",
-    "authorized_custody_role": "sealed_evaluator_custodian",
+EXPECTED_PROPOSED_ASSEMBLY_SCOPE = {
+    "executor_role": "consumer_curator",
+    "custody_role": "sealed_evaluator_custodian",
     "permitted_actions": [
         "create_private_corpus_intake_under_ignored_data",
         "perform_read_only_baseline_replay_on_disposable_snapshots",
@@ -74,6 +74,8 @@ EXPECTED_APPROVED_ASSEMBLY_SCOPE = {
     "grants_candidate_implementation": False,
     "grants_biocortex_execution": False,
     "grants_runtime_promotion": False,
+    "currently_authorized": False,
+    "requires_authenticated_owner_and_auditor_evidence": True,
 }
 
 EXPECTED_BOUNDARIES = {
@@ -108,6 +110,13 @@ def require_nonzero_sha256(value: Any, path: str) -> str:
     return digest
 
 
+def reject_private_commitment_alias(
+    identifier: str, private_values: set[str], path: str
+) -> None:
+    if identifier in private_values:
+        raise InputError(f"{path} must not alias a private commitment or receipt")
+
+
 def reject_raw_identities(value: Any, path: str) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -133,7 +142,7 @@ def validate_contract(value: dict[str, Any], raw: bytes) -> dict[str, Any]:
             "predecessor",
             "role_review",
             "owner_decision",
-            "approved_assembly_scope",
+            "proposed_assembly_scope",
             "privacy",
             "boundaries",
         },
@@ -178,7 +187,7 @@ def validate_contract(value: dict[str, Any], raw: bytes) -> dict[str, Any]:
             "review_must_follow_role_packet": True,
             "candidate_may_author_or_approve_review": False,
             "accepted_decisions": ["approve", "reject"],
-            "both_reviews_must_approve_for_owner_decision": True,
+            "both_reviews_must_approve_for_owner_endorsement": True,
             "validator_authenticates_real_world_identity": False,
         },
         "contract.role_review",
@@ -194,24 +203,26 @@ def validate_contract(value: dict[str, Any], raw: bytes) -> dict[str, Any]:
             "owner_commitment_must_match_review": True,
             "decision_must_follow_completed_review": True,
             "accepted_decisions": [
-                "approve_private_corpus_assembly",
+                "endorse_private_corpus_assembly_for_authentication",
                 "reject_role_roster",
             ],
-            "approve_requires_both_reviews_approved": True,
-            "authorization_receipt_must_be_nonzero": True,
+            "endorsement_requires_both_reviews_approved": True,
+            "endorsement_receipt_must_be_nonzero": True,
             "candidate_may_author_owner_decision": False,
             "validator_authenticates_owner_identity": False,
+            "structural_endorsement_grants_assembly_authority": False,
+            "authenticated_authority_required_before_assembly": True,
         },
         "contract.owner_decision",
     )
 
-    approved_scope = require_object(
-        value.get("approved_assembly_scope"), "contract.approved_assembly_scope"
+    proposed_scope = require_object(
+        value.get("proposed_assembly_scope"), "contract.proposed_assembly_scope"
     )
     require_exact_value(
-        approved_scope,
-        EXPECTED_APPROVED_ASSEMBLY_SCOPE,
-        "contract.approved_assembly_scope",
+        proposed_scope,
+        EXPECTED_PROPOSED_ASSEMBLY_SCOPE,
+        "contract.proposed_assembly_scope",
     )
     privacy = require_object(value.get("privacy"), "contract.privacy")
     require_exact_value(
@@ -220,6 +231,9 @@ def validate_contract(value: dict[str, Any], raw: bytes) -> dict[str, Any]:
             "real_packets_must_be_ignored_under_data": True,
             "raw_identities_forbidden": True,
             "raw_queries_forbidden": True,
+            "packet_identifiers_must_be_opaque_sha256": True,
+            "packet_identifiers_must_not_alias_private_commitments_or_receipts": True,
+            "redacted_receipt_contains_packet_identifiers": False,
             "redacted_receipt_contains_holder_commitments": False,
             "redacted_receipt_contains_reviewer_commitments": False,
             "redacted_receipt_contains_appointment_or_review_receipts": False,
@@ -231,7 +245,7 @@ def validate_contract(value: dict[str, Any], raw: bytes) -> dict[str, Any]:
     return {
         "contract_sha256": CONTRACT_SHA256,
         "predecessor": predecessor,
-        "approved_assembly_scope": approved_scope,
+        "proposed_assembly_scope": proposed_scope,
         "boundaries": boundaries,
     }
 
@@ -439,7 +453,9 @@ def validate_review_packet(
         contract["contract_sha256"],
         "review_packet.contract_sha256",
     )
-    packet_id = require_label(value.get("packet_id"), "review_packet.packet_id")
+    packet_id = require_nonzero_sha256(
+        value.get("packet_id"), "review_packet.packet_id"
+    )
     evidence_class = require_label(
         value.get("evidence_class"), "review_packet.evidence_class"
     )
@@ -476,6 +492,25 @@ def validate_review_packet(
     )
     if owner["receipt"] == auditor["receipt"]:
         raise InputError("owner and auditor receipts must be distinct")
+    private_commitments = {
+        value
+        for holder in role["holders"]
+        for value in (
+            holder["holder_commitment_sha256"],
+            holder["appointment_receipt_sha256"],
+        )
+    }
+    private_commitments.update(
+        {
+            owner["commitment"],
+            owner["receipt"],
+            auditor["commitment"],
+            auditor["receipt"],
+        }
+    )
+    reject_private_commitment_alias(
+        packet_id, private_commitments, "review_packet.packet_id"
+    )
 
     attestations = require_object(
         value.get("attestations"), "review_packet.attestations"
@@ -499,7 +534,7 @@ def validate_review_packet(
     both_approved = owner["decision"] == "approve" and auditor["decision"] == "approve"
     real = evidence_class == "consumer_owned_real"
     if real and both_approved:
-        verdict = "READY_FOR_APPLICATION_OWNER_DECISION"
+        verdict = "CLAIMED_REAL_REVIEW_READY_FOR_OWNER_ENDORSEMENT"
     elif real:
         verdict = "ROLE_REVIEW_REJECTED"
     elif both_approved:
@@ -508,19 +543,18 @@ def validate_review_packet(
         verdict = "SYNTHETIC_REVIEW_REJECTION_VALID"
 
     normalized = {
-        "packet_id": packet_id,
         "evidence_class": evidence_class,
         "completed_at_unix": completed_at,
         "owner_commitment": owner["commitment"],
         "owner_decision": owner["decision"],
         "auditor_decision": auditor["decision"],
         "both_approved": both_approved,
+        "private_commitments": private_commitments,
     }
     receipt = {
         "schema": REVIEW_RECEIPT_SCHEMA,
         "contract_id": CONTRACT_ID,
         "contract_sha256": contract["contract_sha256"],
-        "packet_id": packet_id,
         "packet_sha256": sha256_bytes(raw),
         "role_packet_sha256": sha256_bytes(role_raw),
         "evidence_class": evidence_class,
@@ -529,7 +563,8 @@ def validate_review_packet(
         "both_reviews_approved": both_approved,
         "owner_is_consumer_curator": owner["owner_is_consumer_curator"],
         "role_review_verdict": verdict,
-        "ready_for_application_owner_decision": real and both_approved,
+        "ready_for_structural_owner_endorsement": real and both_approved,
+        "authenticated_authority_verified": False,
         "real_world_identity_authenticated_by_validator": False,
         "holder_commitments_in_receipt": False,
         "reviewer_commitments_in_receipt": False,
@@ -573,8 +608,8 @@ def validate_owner_decision_packet(
             "owner_commitment_sha256",
             "decided_at_unix",
             "decision",
-            "owner_authorization_receipt_sha256",
-            "authorization_scope",
+            "owner_endorsement_receipt_sha256",
+            "proposed_assembly_scope",
             "attestations",
         },
         "owner_decision",
@@ -590,7 +625,9 @@ def validate_owner_decision_packet(
         contract["contract_sha256"],
         "owner_decision.contract_sha256",
     )
-    decision_id = require_label(value.get("decision_id"), "owner_decision.decision_id")
+    decision_id = require_nonzero_sha256(
+        value.get("decision_id"), "owner_decision.decision_id"
+    )
     evidence_class = require_label(
         value.get("evidence_class"), "owner_decision.evidence_class"
     )
@@ -633,17 +670,23 @@ def validate_owner_decision_packet(
     decision = require_label(value.get("decision"), "owner_decision.decision")
     if decision not in OWNER_DECISIONS:
         raise InputError("owner_decision.decision is unsupported")
-    require_nonzero_sha256(
-        value.get("owner_authorization_receipt_sha256"),
-        "owner_decision.owner_authorization_receipt_sha256",
+    endorsement_receipt = require_nonzero_sha256(
+        value.get("owner_endorsement_receipt_sha256"),
+        "owner_decision.owner_endorsement_receipt_sha256",
+    )
+    reject_private_commitment_alias(
+        decision_id,
+        {*review["private_commitments"], owner_commitment, endorsement_receipt},
+        "owner_decision.decision_id",
     )
     scope = require_object(
-        value.get("authorization_scope"), "owner_decision.authorization_scope"
+        value.get("proposed_assembly_scope"),
+        "owner_decision.proposed_assembly_scope",
     )
     require_exact_value(
         scope,
-        contract["approved_assembly_scope"],
-        "owner_decision.authorization_scope",
+        contract["proposed_assembly_scope"],
+        "owner_decision.proposed_assembly_scope",
     )
     attestations = require_object(
         value.get("attestations"), "owner_decision.attestations"
@@ -651,7 +694,7 @@ def validate_owner_decision_packet(
     require_exact_value(
         attestations,
         {
-            "application_owner_authored_decision": True,
+            "application_owner_authored_endorsement": True,
             "candidate_did_not_author_decision": True,
             "candidate_did_not_see_raw_decision_evidence": True,
             "owner_commitment_uses_private_salt": True,
@@ -661,21 +704,21 @@ def validate_owner_decision_packet(
         "owner_decision.attestations",
     )
 
-    approving = decision == "approve_private_corpus_assembly"
-    if approving and not review["both_approved"]:
-        raise InputError("owner approval requires both role reviews to approve")
+    endorsing = decision == "endorse_private_corpus_assembly_for_authentication"
+    if endorsing and not review["both_approved"]:
+        raise InputError("owner endorsement requires both role reviews to approve")
     if evidence_class == "consumer_owned_real":
         freeze_preflight.ensure_real_packet_is_private(role_path, repo_root)
         freeze_preflight.ensure_real_packet_is_private(review_path, repo_root)
         freeze_preflight.ensure_real_packet_is_private(decision_path, repo_root)
 
-    real_approval = evidence_class == "consumer_owned_real" and approving
-    if real_approval:
-        verdict = "PRIVATE_CORPUS_ASSEMBLY_AUTHORIZED_FOR_CURATOR_ONLY"
+    structural_real_endorsement = evidence_class == "consumer_owned_real" and endorsing
+    if structural_real_endorsement:
+        verdict = "CLAIMED_REAL_ENDORSEMENT_READY_FOR_AUTHENTICATION"
     elif evidence_class == "consumer_owned_real":
         verdict = "ROLE_ROSTER_REJECTED"
-    elif approving:
-        verdict = "SYNTHETIC_APPROVAL_VALID_NO_AUTHORITY"
+    elif endorsing:
+        verdict = "SYNTHETIC_ENDORSEMENT_VALID_NO_AUTHORITY"
     else:
         verdict = "SYNTHETIC_REJECTION_VALID_NO_AUTHORITY"
 
@@ -683,24 +726,27 @@ def validate_owner_decision_packet(
         "schema": OWNER_DECISION_RECEIPT_SCHEMA,
         "contract_id": CONTRACT_ID,
         "contract_sha256": contract["contract_sha256"],
-        "decision_id": decision_id,
         "owner_decision_sha256": sha256_bytes(raw),
         "role_packet_sha256": sha256_bytes(role_raw),
         "review_packet_sha256": sha256_bytes(review_raw),
         "evidence_class": evidence_class,
         "decision": decision,
         "both_reviews_approved": review["both_approved"],
-        "structurally_approvable": approving and review["both_approved"],
+        "structure_valid_for_authentication": endorsing and review["both_approved"],
         "owner_decision_verdict": verdict,
-        "ready_for_private_corpus_assembly": real_approval,
-        "authorized_executor_role": scope["authorized_executor_role"],
-        "authorized_custody_role": scope["authorized_custody_role"],
-        "maximum_intake_episode_groups": scope["maximum_intake_episode_groups"],
+        "ready_for_authenticated_authority_review": structural_real_endorsement,
+        "ready_for_private_corpus_assembly": False,
+        "proposed_executor_role": scope["executor_role"],
+        "proposed_custody_role": scope["custody_role"],
+        "proposed_maximum_intake_episode_groups": scope[
+            "maximum_intake_episode_groups"
+        ],
+        "authenticated_authority_verified": False,
         "real_world_identity_authenticated_by_validator": False,
         "holder_commitments_in_receipt": False,
         "reviewer_commitments_in_receipt": False,
-        "appointment_review_or_authorization_receipts_in_receipt": False,
-        "private_corpus_assembly_authority": real_approval,
+        "appointment_review_or_endorsement_receipts_in_receipt": False,
+        "private_corpus_assembly_authority": False,
         "candidate_lane_may_execute": False,
         "g1_corpus_freeze_authority": False,
         "candidate_implementation_authority": False,
@@ -720,11 +766,12 @@ def contract_receipt(contract: dict[str, Any]) -> dict[str, Any]:
         "predecessor_commit": PREDECESSOR_COMMIT,
         "predecessor_contract_sha256": PREDECESSOR_CONTRACT_SHA256,
         "predecessor_validator_sha256": PREDECESSOR_VALIDATOR_SHA256,
-        "contract_verdict": "READY_FOR_PRIVATE_ROLE_REVIEW_PACKET",
+        "contract_verdict": "READY_FOR_PRIVATE_ROLE_REVIEW_PACKET_NO_AUTHORITY",
         "ready_for_private_role_review_packet": True,
+        "authenticated_authority_required_before_assembly": True,
         "application_owner_may_equal_consumer_curator": True,
         "independence_auditor_must_be_outside_all_role_holders": True,
-        "maximum_intake_episode_groups": contract["approved_assembly_scope"][
+        "proposed_maximum_intake_episode_groups": contract["proposed_assembly_scope"][
             "maximum_intake_episode_groups"
         ],
         "current_private_corpus_assembly_authority": boundaries[
@@ -782,7 +829,7 @@ def main() -> int:
             emit(contract_receipt(contract))
             return 0
 
-        repo_root = freeze_preflight.find_repo_root(args.contract.resolve().parent)
+        repo_root = freeze_preflight.find_repo_root(Path(__file__).resolve().parent)
         preflight_contract, _ = validate_predecessor_contract(args.preflight_contract)
         role_value, role_raw = read_json(args.role_packet)
         role, _ = freeze_preflight.validate_role_packet(

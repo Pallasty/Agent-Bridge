@@ -103,15 +103,19 @@ execution, retrieval mutation, live writes, or promotion. See
 
 `engram_g1_role_review.py` is the G1.2 appointment-review boundary. It binds
 the exact G1.1 role-packet bytes to separate application-owner and outside-
-auditor reviews, then binds a later owner decision to the completed review.
+auditor reviews, then binds a later owner endorsement to the completed review.
 The owner may equal only the consumer curator; the auditor must be outside all
-five role holders. Synthetic approvals always emit zero authority. A real
-approval chain must stay untracked under ignored `data/` and can authorize
-only curator-run private intake, read-only disposable-snapshot replay, and a
-hash-only manifest capped at 36 groups. It still cannot freeze a corpus,
-authorize candidate code or candidate-lane assembly, execute BioCortex, mutate
-retrieval, write live state, or promote runtime. The validator checks packet
-structure and commitments, not real identities or evidence truth. See
+five role holders. Synthetic and claimed-real chains always emit zero
+authority. A claimed-real chain must stay untracked under ignored `data/` and
+can only propose curator-run private intake, read-only disposable-snapshot
+replay, and a hash-only manifest capped at 36 groups for later authenticated
+authority review. It cannot open intake, freeze a corpus, authorize candidate
+code or candidate-lane assembly, execute BioCortex, mutate retrieval, write
+live state, or promote runtime. Review and decision packet identifiers are
+opaque SHA-256 values, cannot alias any private commitment or receipt in their
+packet lineage, and are omitted from redacted receipts, preventing those
+receipts from echoing identity-like labels. The validator checks packet structure and commitments, not real
+identities, evidence truth, or signatures. See
 `docs/design/ENGRAM_G1_ROLE_APPOINTMENT_REVIEW_2026_07_18.md` and run
 `scripts/check-engram-g1-role-review.sh`.
 

@@ -30,7 +30,7 @@
       "approve",
       "reject"
     ],
-    "both_reviews_must_approve_for_owner_decision": true,
+    "both_reviews_must_approve_for_owner_endorsement": true,
     "validator_authenticates_real_world_identity": false
   },
   "owner_decision": {
@@ -38,17 +38,19 @@
     "owner_commitment_must_match_review": true,
     "decision_must_follow_completed_review": true,
     "accepted_decisions": [
-      "approve_private_corpus_assembly",
+      "endorse_private_corpus_assembly_for_authentication",
       "reject_role_roster"
     ],
-    "approve_requires_both_reviews_approved": true,
-    "authorization_receipt_must_be_nonzero": true,
+    "endorsement_requires_both_reviews_approved": true,
+    "endorsement_receipt_must_be_nonzero": true,
     "candidate_may_author_owner_decision": false,
-    "validator_authenticates_owner_identity": false
+    "validator_authenticates_owner_identity": false,
+    "structural_endorsement_grants_assembly_authority": false,
+    "authenticated_authority_required_before_assembly": true
   },
-  "approved_assembly_scope": {
-    "authorized_executor_role": "consumer_curator",
-    "authorized_custody_role": "sealed_evaluator_custodian",
+  "proposed_assembly_scope": {
+    "executor_role": "consumer_curator",
+    "custody_role": "sealed_evaluator_custodian",
     "permitted_actions": [
       "create_private_corpus_intake_under_ignored_data",
       "perform_read_only_baseline_replay_on_disposable_snapshots",
@@ -61,12 +63,17 @@
     "grants_corpus_freeze": false,
     "grants_candidate_implementation": false,
     "grants_biocortex_execution": false,
-    "grants_runtime_promotion": false
+    "grants_runtime_promotion": false,
+    "currently_authorized": false,
+    "requires_authenticated_owner_and_auditor_evidence": true
   },
   "privacy": {
     "real_packets_must_be_ignored_under_data": true,
     "raw_identities_forbidden": true,
     "raw_queries_forbidden": true,
+    "packet_identifiers_must_be_opaque_sha256": true,
+    "packet_identifiers_must_not_alias_private_commitments_or_receipts": true,
+    "redacted_receipt_contains_packet_identifiers": false,
     "redacted_receipt_contains_holder_commitments": false,
     "redacted_receipt_contains_reviewer_commitments": false,
     "redacted_receipt_contains_appointment_or_review_receipts": false

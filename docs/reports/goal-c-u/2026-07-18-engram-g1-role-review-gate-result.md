@@ -2,14 +2,15 @@
 
 Date: 2026-07-18
 
-Status: **PASS / PRIVATE ROLE REVIEW ONLY**
+Status: **PASS / STRUCTURAL ROLE REVIEW ONLY / NO AUTHORITY**
 
 ## Result
 
 The G1.2 public contract, role-review validator, owner-decision validator, and
 synthetic negative gates pass. The new gate closes the gap between a
-structurally valid role roster and permission to assemble private corpus
-material.
+structurally valid role roster and a bounded endorsement that can be presented
+to a later authenticated authority verifier. It does not grant assembly
+permission.
 
 No real appointment evidence was found or created. No role holder, application
 owner, or independence auditor was appointed by this change. No private corpus,
@@ -25,11 +26,11 @@ was read or assembled.
 - predecessor validator SHA-256:
   `f276765f22ee5b2f69e24cf7a79bd9a30e8291f900973d89c06f17d1d0468cdc`;
 - G1.2 role-review contract SHA-256:
-  `efb7464e2922d0dd2645698435272714316d07f786bd5a56114e900b99e31f6c`;
+  `668656be38d1fc9572fd6dde0f012a8facb83a089ad3ee28dba97bc9a58d3a28`;
 - G1.2 validator SHA-256:
-  `5efe72815341492b84a4bd0dee487d1eb572e60e7938f3df7e5cb9710ef8706f`;
+  `fb2003edd60041ba456f471fb245811c045600c72531e637bf47fbf3927021c1`;
 - G1.2 checker SHA-256:
-  `a3e2824ca764d9a316d0509f2da6257e473bd34a605c1149c5ecfee3255c320a`.
+  `9f3926059951baeeacedaa39b13f5b9ede78a1f6571263482d275a45296ac821`.
 
 The predecessor files remain unchanged. G1.2 validates G1.1 role packets
 through the bound predecessor validator before it evaluates any review.
@@ -42,8 +43,8 @@ independence auditor must be outside all five role holders and distinct from
 the owner.
 
 Review must start after the role packet and complete before the owner decision.
-Every transition binds the exact prior packet bytes. A later approval cannot be
-replayed against a changed role or review packet.
+Every transition binds the exact prior packet bytes. A later endorsement cannot
+be replayed against a changed role or review packet.
 
 The validator checks these structural relationships and private commitments.
 It does not authenticate real-world identities, appointments, evidence truth,
@@ -53,16 +54,20 @@ or organizational authority.
 
 The positive fixture exercises an owner who is also the consumer curator, an
 outside independence auditor, two approving reviews, and an approving owner
-decision. Its receipt is
-`SYNTHETIC_APPROVAL_VALID_NO_AUTHORITY`: it is structurally approvable but
-grants no private assembly permission.
+endorsement. Its receipt is
+`SYNTHETIC_ENDORSEMENT_VALID_NO_AUTHORITY`: it is structurally valid for a
+future authentication step but grants no private assembly permission.
 
 Negative cases reject owner/candidate overlap, false curator matching,
 auditor/holder overlap, reversed chronology, candidate authorship, unsalted
 commitments, raw identity fields, placeholder receipts, byte-binding drift,
-scope widening, approval after a rejected audit, real packets outside ignored
-`data/`, and duplicate JSON keys. A rejected audit can be followed only by an
-owner record rejecting the role roster.
+human-readable packet identifiers, identifiers aliasing private commitments or
+receipts, scope widening, endorsement after a rejected
+audit, real packets outside ignored `data/`, and duplicate JSON keys. A
+rejected audit can be followed only by an owner record rejecting the role
+roster. An adversarial synthetic chain relabeled as real inside ignored `data/`
+is accepted only as structurally ready for authentication and still emits zero
+assembly authority.
 
 ## Verification
 
@@ -75,8 +80,10 @@ Passed:
 - Python compile and deterministic double-run checks;
 - outside-working-directory invocation check;
 - fail-closed synthetic mutation suite;
+- forged synthetic-to-real laundering check under ignored `data/`, with every
+  authority field remaining false;
 - direct redacted-receipt scan for holder, reviewer, appointment, review, and
-  authorization commitments;
+  endorsement commitments;
 - scan of all six changed files against 12 protected G0 query/target literal
   occurrences: zero matches;
 - changed-file scan for real role/review/decision evidence: zero files;
@@ -85,13 +92,19 @@ Passed:
 ## Authority boundary
 
 The checked-in public contract and all checked-in synthetic evidence grant no
-authority. A future real double-review plus real owner approval can authorize
-only consumer-curator intake under ignored `data/`, read-only replay on
-disposable snapshots, and preparation of a hash-only manifest for later freeze
-review, capped at 36 groups.
+authority. A claimed-real double-review plus owner endorsement can only become
+ready for authenticated authority review. This validator never sets private
+corpus assembly authority to true.
 
-The following remain false even after that narrow authorization:
+Residual path/custody hardening is explicitly deferred to that authenticated
+adapter: the current stable byte capture and later ignored-path check do not
+prove canonical-repository identity, no-follow traversal for every ancestor,
+or unique-inode custody. Those gaps cannot escalate this structural validator
+because all authority outputs are hard false.
 
+The following remain false for every output of this validator:
+
+- private corpus assembly;
 - candidate-lane corpus assembly;
 - G1 corpus-freeze authority;
 - candidate implementation authority;
@@ -106,5 +119,7 @@ The next step is external, not an implementation step: the application owner
 and an independence auditor outside all five role holders must produce private,
 consumer-owned review evidence. If either rejects, the roster returns for
 replacement. If both approve, the owner may issue the separately bound private
-decision that opens curator-only intake. A later freeze-review gate is still
-required before any corpus can be frozen.
+endorsement. A later adapter must verify domain-separated signatures against
+independently configured owner and auditor trust anchors before curator-only
+intake can open. A still-later freeze-review gate is required before any corpus
+can be frozen.
