@@ -94,6 +94,11 @@ The audit consumes automated evidence rather than per-action prompts:
 - Open network means a readable, non-denied secret can still be exfiltrated.
 - Linux bind-over protects the resolved launch-time deny set; future policy
   additions need corresponding mount-plan tests.
+- Linux P1 bind-over skips deny paths that do not exist at launch, because
+  mounting onto a missing destination under a host-root bind creates a host
+  mountpoint. Such a path has no existing secret contents; if its parent is
+  writable, the target may create new data there. Path inspection errors still
+  fail closed.
 - macOS uses the process-specific `$TMPDIR`; it does not grant the whole
   `/private/var/folders` tree writable.
 - Common cache directories are writable for build usability and may contain

@@ -445,7 +445,7 @@ fn run_internal_launcher(request: InternalRequest) -> Result<()> {
             })?;
             let blocked_file = bwrap_empty_data_fd(&request.runtime)?;
             use std::os::fd::AsRawFd;
-            let args = build_bwrap_args(&request, &policy, &self_exe, blocked_file.as_raw_fd());
+            let args = build_bwrap_args(&request, &policy, &self_exe, blocked_file.as_raw_fd())?;
             let error = std::process::Command::new(&bwrap).args(&args).exec();
             return Err(Error::Backend(format!(
                 "{}: exec bubblewrap '{}': {error}; install bubblewrap or set {BWRAP_BIN_ENV}",
@@ -866,7 +866,7 @@ fn build_bwrap_args(
     policy: &ResolvedPolicy,
     self_exe: &Path,
     blocked_file_fd: i32,
-) -> Vec<OsString> {
+) -> Result<Vec<OsString>> {
     let mut args = vec![
         OsString::from("--bind"),
         OsString::from("/"),
@@ -874,8 +874,17 @@ fn build_bwrap_args(
         OsString::from("--die-with-parent"),
     ];
     for denied in &policy.denied {
-        let parent_exists = denied.path.parent().is_some_and(Path::is_dir);
-        if !denied.path.exists() && !parent_exists {
+        let exists = denied.path.try_exists().map_err(|e| {
+            Error::Backend(format!(
+                "{}: inspect sandbox deny path '{}': {e}",
+                request.runtime,
+                denied.path.display()
+            ))
+        })?;
+        if !exists {
+            // Mounting onto a missing destination under `--bind / /` creates
+            // that mountpoint on the host. A missing path has no launch-time
+            // contents to protect, so P1 skips it instead of mutating the host.
             continue;
         }
         match denied.kind {
@@ -919,7 +928,7 @@ fn build_bwrap_args(
         request.program.clone(),
     ]);
     args.extend(request.args.iter().cloned());
-    args
+    Ok(args)
 }
 
 /// Open an EOF source for bubblewrap's anonymous `--ro-bind-data` files and
@@ -1127,21 +1136,26 @@ mod tests {
             program: OsString::from("codex"),
             args: vec![OsString::from("exec")],
         };
+        let missing = PathBuf::from("/definitely/not/an/ab-sandbox-deny-path");
         let policy = ResolvedPolicy {
             workspace: PathBuf::from("/work"),
             writable: vec![],
             denied: vec![
                 DeniedPath {
-                    path: PathBuf::from("/tmp/secret-file"),
+                    path: PathBuf::from("/dev/null"),
                     kind: DeniedKind::File,
                 },
                 DeniedPath {
-                    path: PathBuf::from("/tmp/secret-dir"),
+                    path: PathBuf::from("/tmp"),
                     kind: DeniedKind::Directory,
+                },
+                DeniedPath {
+                    path: missing.clone(),
+                    kind: DeniedKind::File,
                 },
             ],
         };
-        let args = build_bwrap_args(&request, &policy, Path::new("/bin/agent-bridge"), 17);
+        let args = build_bwrap_args(&request, &policy, Path::new("/bin/agent-bridge"), 17).unwrap();
         let values: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
         assert!(values.windows(5).any(|window| {
             window
@@ -1150,19 +1164,20 @@ mod tests {
                     OsStr::new("000"),
                     OsStr::new("--ro-bind-data"),
                     OsStr::new("17"),
-                    OsStr::new("/tmp/secret-file"),
+                    OsStr::new("/dev/null"),
                 ]
         }));
         assert!(values.windows(5).any(|window| {
             window
                 == [
                     OsStr::new("--tmpfs"),
-                    OsStr::new("/tmp/secret-dir"),
+                    OsStr::new("/tmp"),
                     OsStr::new("--chmod"),
                     OsStr::new("000"),
-                    OsStr::new("/tmp/secret-dir"),
+                    OsStr::new("/tmp"),
                 ]
         }));
+        assert!(!values.iter().any(|value| *value == missing.as_os_str()));
         assert!(values
             .windows(2)
             .any(|window| { window == [OsStr::new(INTERNAL_MARKER), OsStr::new("--inner")] }));
