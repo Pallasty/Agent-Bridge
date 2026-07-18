@@ -1,0 +1,460 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_control_snapshot_s20b.v0",
+  "title": "Agent-Bridge S20B tagged external authority-control snapshot",
+  "description": "Closed non-live replacement for the frozen S19 control snapshot. Missing rows, rollback, and unknown reads are explicit tagged states. Every phase binds only an earlier parent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "packet_kind", "canonicalization", "hashing_contract", "test_only",
+    "synthetic", "snapshot_state", "snapshot_phase", "authorization_binding",
+    "run_binding", "assignment_binding", "phase_parent", "ledger_binding",
+    "read_outcome", "claim_view", "stop_view", "revocation_view", "freshness",
+    "result", "control_snapshot_sha256", "semantic_validation", "nonclaims"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.memory_temporal_owned_lab_control_snapshot_s20b.v0"},
+    "packet_kind": {"const": "S20B_EXTERNAL_AUTHORITY_CONTROL_SNAPSHOT"},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S20B_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "test_only": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "snapshot_state": {
+      "enum": [
+        "SYNTHETIC_KAT_NON_LIVE_CONTROL_SNAPSHOT",
+        "COMPLETE_ALLOW",
+        "DENY_STOP_TRIGGERED",
+        "DENY_REVOCATION_MISMATCH",
+        "DENY_CLAIM_STATE_MISMATCH",
+        "DENY_ROLLBACK_TERMINAL_HARD_LOCK",
+        "DENY_UNKNOWN_TERMINAL_HARD_LOCK"
+      ]
+    },
+    "snapshot_phase": {
+      "enum": ["PREFLIGHT_BEFORE_CLAIM", "CAS_LINEARIZATION", "POST_CLAIM_PRE_START", "RUNTIME_ACTION_BOUNDARY"]
+    },
+    "authorization_binding": {"$ref": "#/$defs/authorization_binding"},
+    "run_binding": {"$ref": "#/$defs/run_binding"},
+    "assignment_binding": {"$ref": "#/$defs/assignment_binding"},
+    "phase_parent": {"$ref": "#/$defs/phase_parent"},
+    "ledger_binding": {"$ref": "#/$defs/ledger_binding"},
+    "read_outcome": {"enum": ["COMPLETE", "CLAIM_ROW_MISSING", "ROLLBACK_DETECTED", "READ_UNKNOWN"]},
+    "claim_view": {"$ref": "#/$defs/claim_view"},
+    "stop_view": {"$ref": "#/$defs/stop_view"},
+    "revocation_view": {"$ref": "#/$defs/revocation_view"},
+    "freshness": {"$ref": "#/$defs/freshness"},
+    "result": {"$ref": "#/$defs/result"},
+    "control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+    "semantic_validation": {"$ref": "#/$defs/semantic_validation"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"test_only": {"const": true}}, "required": ["test_only"]},
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "snapshot_state": {"const": "SYNTHETIC_KAT_NON_LIVE_CONTROL_SNAPSHOT"},
+          "result": {"properties": {"next_action_allowed": {"const": false}}}
+        }
+      },
+      "else": {"properties": {"synthetic": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"snapshot_phase": {"const": "PREFLIGHT_BEFORE_CLAIM"}}, "required": ["snapshot_phase"]},
+      "then": {
+        "properties": {
+          "phase_parent": {
+            "properties": {
+              "parent_kind": {"const": "PREFLIGHT_CONTEXT"},
+              "final_preflight_receipt_referenced": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"snapshot_phase": {"const": "CAS_LINEARIZATION"}}, "required": ["snapshot_phase"]},
+      "then": {"properties": {"phase_parent": {"properties": {"parent_kind": {"const": "PREFLIGHT_RECEIPT"}}}}}
+    },
+    {
+      "if": {"properties": {"snapshot_phase": {"const": "POST_CLAIM_PRE_START"}}, "required": ["snapshot_phase"]},
+      "then": {"properties": {"phase_parent": {"properties": {"parent_kind": {"const": "CLAIM_RECEIPT"}}}}}
+    },
+    {
+      "if": {"properties": {"snapshot_phase": {"const": "RUNTIME_ACTION_BOUNDARY"}}, "required": ["snapshot_phase"]},
+      "then": {
+        "properties": {
+          "phase_parent": {"properties": {"parent_kind": {"enum": ["CLAIM_RECEIPT", "PREVIOUS_ACTION_START_RECEIPT"]}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"snapshot_state": {"const": "COMPLETE_ALLOW"}}, "required": ["snapshot_state"]},
+      "then": {
+        "properties": {
+          "read_outcome": {"const": "COMPLETE"},
+          "claim_view": {"properties": {"row_presence": {"const": "PRESENT"}}},
+          "stop_view": {"properties": {"read_state": {"const": "CLEAR"}}},
+          "revocation_view": {"properties": {"read_state": {"const": "EXACT"}, "rollback_detected": {"const": false}}},
+          "ledger_binding": {
+            "properties": {
+              "independent_checkpoint_current": {"const": true},
+              "independent_failure_domain_proved": {"const": true}
+            }
+          },
+          "result": {
+            "properties": {
+              "control_decision": {"const": "ALLOW_GUARDED_NEXT_ACTION"},
+              "next_action_allowed": {"const": true},
+              "terminal_hard_lock": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"snapshot_state": {"const": "DENY_STOP_TRIGGERED"}}, "required": ["snapshot_state"]},
+      "then": {
+        "properties": {
+          "stop_view": {"properties": {"read_state": {"const": "TRIGGERED"}}},
+          "result": {"properties": {"control_decision": {"const": "DENY_STOP_TRIGGERED"}, "next_action_allowed": {"const": false}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"snapshot_state": {"const": "DENY_REVOCATION_MISMATCH"}}, "required": ["snapshot_state"]},
+      "then": {
+        "properties": {
+          "revocation_view": {"properties": {"read_state": {"const": "MISMATCH"}}},
+          "result": {"properties": {"control_decision": {"const": "DENY_REVOCATION_MISMATCH"}, "next_action_allowed": {"const": false}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"snapshot_state": {"const": "DENY_ROLLBACK_TERMINAL_HARD_LOCK"}}, "required": ["snapshot_state"]},
+      "then": {
+        "properties": {
+          "read_outcome": {"const": "ROLLBACK_DETECTED"},
+          "revocation_view": {"properties": {"read_state": {"const": "ROLLBACK_DETECTED"}, "rollback_detected": {"const": true}}},
+          "result": {
+            "properties": {
+              "control_decision": {"const": "DENY_ROLLBACK"},
+              "next_action_allowed": {"const": false},
+              "terminal_hard_lock": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"snapshot_state": {"const": "DENY_UNKNOWN_TERMINAL_HARD_LOCK"}}, "required": ["snapshot_state"]},
+      "then": {
+        "properties": {
+          "read_outcome": {"const": "READ_UNKNOWN"},
+          "result": {
+            "properties": {
+              "control_decision": {"const": "DENY_UNKNOWN"},
+              "next_action_allowed": {"const": false},
+              "terminal_hard_lock": {"const": true}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullable_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+    "nullable_u64": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 18446744073709551615}, {"type": "null"}]},
+    "u64_nonzero": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash_algorithm", "canonicalization", "digest_domain", "digest_framing", "hash_scope",
+        "self_hash_field", "self_hash_field_excluded", "repository_framing_lf_excluded",
+        "cross_field_semantic_validation_required", "self_reported_match_fields_are_authoritative"
+      ],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S20B_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s20b/control-snapshot/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_CONTROL_SNAPSHOT_SHA256"},
+        "self_hash_field": {"const": "control_snapshot_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "self_reported_match_fields_are_authoritative": {"const": false}
+      }
+    },
+    "authorization_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256", "owner_envelope_sha256", "resource_scope_sha256",
+        "signed_revocation_epoch", "signed_payload_sha256", "subject_manifest_sha256",
+        "trust_anchor_document_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_scope_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "trust_anchor_document_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "run_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id_sha256", "capability_nonce_sha256", "claim_key_sha256",
+        "claim_namespace_sha256", "controller_binary_sha256", "run_assignment_id_sha256",
+        "run_id_sha256", "runner_binary_sha256"
+      ],
+      "properties": {
+        "attempt_id_sha256": {"$ref": "#/$defs/sha256"},
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "run_assignment_id_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "assignment_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assignment_set_sha256", "schedule_sha256", "assignment_record_sha256", "operation_descriptor_set_sha256"],
+      "properties": {
+        "assignment_set_sha256": {"$ref": "#/$defs/sha256"},
+        "schedule_sha256": {"$ref": "#/$defs/sha256"},
+        "assignment_record_sha256": {"$ref": "#/$defs/sha256"},
+        "operation_descriptor_set_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "phase_parent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent_kind", "parent_sha256", "final_preflight_receipt_referenced", "backward_edge_only"],
+      "properties": {
+        "parent_kind": {"enum": ["PREFLIGHT_CONTEXT", "PREFLIGHT_RECEIPT", "CLAIM_RECEIPT", "PREVIOUS_ACTION_START_RECEIPT"]},
+        "parent_sha256": {"$ref": "#/$defs/sha256"},
+        "final_preflight_receipt_referenced": {"type": "boolean"},
+        "backward_edge_only": {"const": true}
+      }
+    },
+    "ledger_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_control_schema_sha256", "database_identity_sha256", "sqlite_profile_sha256",
+        "transaction_sequence", "database_content_root_sha256", "content_root_profile",
+        "external_checkpoint_receipt_sha256", "checkpoint_provider_identity_sha256",
+        "checkpoint_monotonic_counter", "independent_checkpoint_current",
+        "independent_failure_domain_proved"
+      ],
+      "properties": {
+        "authority_control_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "database_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_profile_sha256": {"$ref": "#/$defs/sha256"},
+        "transaction_sequence": {"$ref": "#/$defs/u64_nonzero"},
+        "database_content_root_sha256": {"$ref": "#/$defs/sha256"},
+        "content_root_profile": {"const": "ORDERED_CANONICAL_BUSINESS_ROW_CORES_SCHEMA_DATABASE_IDENTITY_AND_GENERATION"},
+        "external_checkpoint_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "checkpoint_provider_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "checkpoint_monotonic_counter": {"$ref": "#/$defs/u64_nonzero"},
+        "independent_checkpoint_current": {"type": "boolean"},
+        "independent_failure_domain_proved": {"type": "boolean"}
+      }
+    },
+    "claim_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row_presence", "state", "revision", "row_core_sha256", "read_error_class"],
+      "properties": {
+        "row_presence": {"enum": ["PRESENT", "ROW_MISSING", "READ_UNKNOWN"]},
+        "state": {"oneOf": [{"enum": ["AUTHORIZED_UNCLAIMED", "CONSUMED_FOR_EXACT_RUN"]}, {"type": "null"}]},
+        "revision": {"$ref": "#/$defs/nullable_u64"},
+        "row_core_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "read_error_class": {"oneOf": [{"enum": ["MISSING", "IO_OR_INTEGRITY_UNKNOWN"]}, {"type": "null"}]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"row_presence": {"const": "PRESENT"}}, "required": ["row_presence"]},
+          "then": {
+            "properties": {
+              "state": {"enum": ["AUTHORIZED_UNCLAIMED", "CONSUMED_FOR_EXACT_RUN"]},
+              "revision": {"$ref": "#/$defs/u64_nonzero"},
+              "row_core_sha256": {"$ref": "#/$defs/sha256"},
+              "read_error_class": {"type": "null"}
+            }
+          },
+          "else": {
+            "properties": {
+              "state": {"type": "null"},
+              "revision": {"type": "null"},
+              "row_core_sha256": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"row_presence": {"const": "ROW_MISSING"}}, "required": ["row_presence"]},
+          "then": {"properties": {"read_error_class": {"const": "MISSING"}}}
+        },
+        {
+          "if": {"properties": {"row_presence": {"const": "READ_UNKNOWN"}}, "required": ["row_presence"]},
+          "then": {"properties": {"read_error_class": {"const": "IO_OR_INTEGRITY_UNKNOWN"}}}
+        }
+      ]
+    },
+    "stop_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read_state", "ledger_revision", "policy_identity_sha256", "trigger_receipt_sha256"],
+      "properties": {
+        "read_state": {"enum": ["CLEAR", "TRIGGERED", "READ_UNKNOWN"]},
+        "ledger_revision": {"$ref": "#/$defs/nullable_u64"},
+        "policy_identity_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "trigger_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"read_state": {"const": "CLEAR"}}, "required": ["read_state"]},
+          "then": {
+            "properties": {
+              "ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+              "policy_identity_sha256": {"$ref": "#/$defs/sha256"},
+              "trigger_receipt_sha256": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"read_state": {"const": "TRIGGERED"}}, "required": ["read_state"]},
+          "then": {
+            "properties": {
+              "ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+              "policy_identity_sha256": {"$ref": "#/$defs/sha256"},
+              "trigger_receipt_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"read_state": {"const": "READ_UNKNOWN"}}, "required": ["read_state"]},
+          "then": {
+            "properties": {
+              "ledger_revision": {"type": "null"},
+              "policy_identity_sha256": {"type": "null"},
+              "trigger_receipt_sha256": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "revocation_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "read_state", "anchor_key_version", "current_active_epoch", "envelope_epoch",
+        "ledger_revision", "policy_identity_sha256", "rollback_detected"
+      ],
+      "properties": {
+        "read_state": {"enum": ["EXACT", "MISMATCH", "ROLLBACK_DETECTED", "READ_UNKNOWN"]},
+        "anchor_key_version": {"$ref": "#/$defs/nullable_u64"},
+        "current_active_epoch": {"$ref": "#/$defs/nullable_u64"},
+        "envelope_epoch": {"$ref": "#/$defs/nullable_u64"},
+        "ledger_revision": {"$ref": "#/$defs/nullable_u64"},
+        "policy_identity_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "rollback_detected": {"oneOf": [{"type": "boolean"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"read_state": {"enum": ["EXACT", "MISMATCH", "ROLLBACK_DETECTED"]}}, "required": ["read_state"]},
+          "then": {
+            "properties": {
+              "anchor_key_version": {"$ref": "#/$defs/u64_nonzero"},
+              "current_active_epoch": {"$ref": "#/$defs/u64_nonzero"},
+              "envelope_epoch": {"$ref": "#/$defs/u64_nonzero"},
+              "ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+              "policy_identity_sha256": {"$ref": "#/$defs/sha256"},
+              "rollback_detected": {"type": "boolean"}
+            }
+          },
+          "else": {
+            "properties": {
+              "anchor_key_version": {"type": "null"},
+              "current_active_epoch": {"type": "null"},
+              "envelope_epoch": {"type": "null"},
+              "ledger_revision": {"type": "null"},
+              "policy_identity_sha256": {"type": "null"},
+              "rollback_detected": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boot_id_sha256", "challenge_nonce_sha256", "controller_pid", "controller_start_token_sha256", "trusted_wall_clock_used_as_freshness"],
+      "properties": {
+        "boot_id_sha256": {"$ref": "#/$defs/sha256"},
+        "challenge_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_pid": {"$ref": "#/$defs/u64_nonzero"},
+        "controller_start_token_sha256": {"$ref": "#/$defs/sha256"},
+        "trusted_wall_clock_used_as_freshness": {"const": false}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_decision", "next_action_allowed", "terminal_hard_lock", "automatic_retry_allowed"],
+      "properties": {
+        "control_decision": {
+          "enum": [
+            "SYNTHETIC_VALIDATION_ONLY", "ALLOW_GUARDED_NEXT_ACTION", "DENY_STOP_TRIGGERED",
+            "DENY_REVOCATION_MISMATCH", "DENY_CLAIM_STATE_MISMATCH", "DENY_ROLLBACK", "DENY_UNKNOWN"
+          ]
+        },
+        "next_action_allowed": {"type": "boolean"},
+        "terminal_hard_lock": {"type": "boolean"},
+        "automatic_retry_allowed": {"const": false}
+      }
+    },
+    "semantic_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["independent_validator_required", "candidate_match_fields_authoritative", "required_rules"],
+      "properties": {
+        "independent_validator_required": {"const": true},
+        "candidate_match_fields_authoritative": {"const": false},
+        "required_rules": {
+          "const": [
+            "PHASE_PARENT_DIGEST_RECOMPUTED_FROM_CANONICAL_PARENT_PACKET",
+            "PREFLIGHT_PHASE_PARENT_IS_CONTEXT_AND_NEVER_FINAL_PREFLIGHT",
+            "AUTHORIZATION_RUN_ASSIGNMENT_AND_OPERATION_BINDINGS_EXACT",
+            "DATABASE_CONTENT_ROOT_AND_EXTERNAL_CHECKPOINT_RECOMPUTED",
+            "MISSING_ROLLBACK_AND_UNKNOWN_VIEWS_HAVE_NO_FABRICATED_VALUES",
+            "ALLOW_REQUIRES_COMPLETE_CURRENT_PRESENT_CLEAR_AND_EXACT_STATE"
+          ]
+        }
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_is_owner_authority", "snapshot_is_execution_capability", "snapshot_mutates_control_state", "schema_conformance_authorizes_live_execution", "side_effects_unlocked"],
+      "properties": {
+        "snapshot_is_owner_authority": {"const": false},
+        "snapshot_is_execution_capability": {"const": false},
+        "snapshot_mutates_control_state": {"const": false},
+        "schema_conformance_authorizes_live_execution": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}

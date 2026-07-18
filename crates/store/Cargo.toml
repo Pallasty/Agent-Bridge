@@ -23,6 +23,7 @@ temporal-evidence-s16-recovered-envelope-durability-fault-model-synthetic = ["te
 temporal-evidence-s18-owned-lab-authorization-verifier-synthetic = ["temporal-evidence-s16-recovered-envelope-durability-fault-model-synthetic"]
 temporal-evidence-s19-owned-lab-source-bound-runner-synthetic = ["temporal-evidence-s18-owned-lab-authorization-verifier-synthetic"]
 temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic = ["temporal-evidence-s19-owned-lab-source-bound-runner-synthetic"]
+temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic = ["temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic"]
 
 [dependencies]
 ab-core.workspace = true

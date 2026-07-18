@@ -1,0 +1,134 @@
+{
+  "schema": "agent_bridge.memory_temporal_owned_lab_rich_packet_schema_replacements_contract_s20b.v0",
+  "status": "S20B_NON_LIVE_RICH_PACKET_VALIDATORS_COMPLETE",
+  "decision": "S21_BLOCKED_PENDING_FINAL_REFREEZE_NEW_OWNER_SIGNATURE_AND_INDEPENDENT_LIVE_INPUTS",
+  "implementation_mode": "PRIVATE_DEFAULT_OFF_SYNTHETIC_NON_LIVE_VALIDATION_ONLY",
+  "historical_boundary": {
+    "frozen_s19_s20_commits_modified": false,
+    "current_s20_parent_source_extended_by_s20b": true,
+    "existing_s19_owner_envelope_binds_s20b": false,
+    "replacement_strategy": "NEW_S20B_SCHEMA_IDS_NO_IN_PLACE_PREDECESSOR_MUTATION"
+  },
+  "replacement_schemas": {
+    "preflight": "agent_bridge.memory_temporal_owned_lab_preflight_receipt_s20b.v0",
+    "control_snapshot": "agent_bridge.memory_temporal_owned_lab_control_snapshot_s20b.v0",
+    "authority_control_claim": "agent_bridge.memory_temporal_owned_lab_authority_control_claim_s20b.v0",
+    "post_run_bundle": "agent_bridge.memory_temporal_owned_lab_post_run_receipt_bundle_s20b.v0",
+    "schema_count": 4,
+    "draft": "2020-12",
+    "external_schema_references_allowed": false,
+    "floating_point_values_allowed": false,
+    "additional_properties_allowed": false
+  },
+  "synthetic_fixture_chain": {
+    "fixture_count": 4,
+    "repository_bytes": "COMPACT_SORTED_ASCII_JSON_EXACTLY_ONE_TERMINAL_LF",
+    "digest_payload_excludes_repository_terminal_lf": true,
+    "parent_order": [
+      "PREFLIGHT_CONTEXT",
+      "PREFLIGHT_CONTROL_SNAPSHOT",
+      "FINAL_PREFLIGHT_RECEIPT",
+      "CLAIM_OUTCOME_RECEIPT",
+      "POST_RUN_RECEIPT_BUNDLE"
+    ],
+    "control_snapshot_fixture": "biocortex-ab-track-b-owned-lab-control-snapshot-synthetic-s20b-v0.json",
+    "preflight_fixture": "biocortex-ab-track-b-owned-lab-preflight-receipt-synthetic-s20b-v0.json",
+    "claim_fixture": "biocortex-ab-track-b-owned-lab-authority-control-claim-synthetic-s20b-v0.json",
+    "post_run_fixture": "biocortex-ab-track-b-owned-lab-post-run-receipt-bundle-synthetic-s20b-v0.json",
+    "live_authority_or_evidence": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "digest_contract": {
+    "algorithm": "SHA-256",
+    "canonicalization": "AB_RESTRICTED_CANONICAL_JSON_S20B_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT",
+    "framing": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD",
+    "unique_domain_per_packet_or_variant_required": true,
+    "exact_self_field_exclusion_required": true,
+    "repository_terminal_lf_excluded": true,
+    "candidate_reported_matches_authoritative": false,
+    "independent_cross_packet_recomputation_required": true
+  },
+  "parent_dag": [
+    "OWNER_BOUND_ASSIGNMENT_AND_OPERATION_DESCRIPTORS",
+    "REGISTRATION_AND_DURABLE_ATTEMPT_RESERVATION",
+    "PREFLIGHT_CONTEXT",
+    "PREFLIGHT_CONTROL_SNAPSHOT",
+    "FINAL_PREFLIGHT_RECEIPT",
+    "CAS_CONTROL_SNAPSHOT",
+    "CLAIM_TRANSITION_CORE",
+    "COMMITTED_DATABASE_CONTENT_ROOT",
+    "EXTERNAL_CHECKPOINT_COMMITMENT",
+    "CLAIM_AND_PROCESS_LOCAL_PERMIT_OUTCOME",
+    "ORDERED_ACTION_START_RECEIPTS",
+    "RAW_OBSERVATIONS_AND_POST_RUN_RECEIPTS",
+    "POST_RUN_BUNDLE"
+  ],
+  "mandatory_repairs": {
+    "preflight_control_cycle_removed": true,
+    "missing_claim_row_representable": true,
+    "rollback_representable": true,
+    "unknown_control_read_representable": true,
+    "unknown_commit_has_unknown_affected_rows_and_mutation": true,
+    "committed_pre_permit_crash_representable": true,
+    "permit_eligibility_distinct_from_actual_process_local_issuance": true,
+    "automatic_retry_allowed": false,
+    "full_24_parameter_claim_binding_required": true,
+    "exact_assignment_membership_required": true,
+    "concrete_operation_descriptors_required": true,
+    "authenticated_database_content_root_or_equivalent_closed_writer_proof_required": true,
+    "s17_32_rule_full_5639_row_validator_without_assignment_prefilter_required": true
+  },
+  "authorized_assignment_v2": {
+    "ordinal_profile": "ONE_BASED_CLOSED_RANGE_1_THROUGH_60",
+    "family_counts": "OL00_1_OL04_6_OL05_53",
+    "phase_count": 113,
+    "operand_types": [
+      "BOOLEAN",
+      "UNSIGNED_INTEGER",
+      "OCTAL_MODE",
+      "RELATIVE_PATH",
+      "SYMBOL"
+    ],
+    "assignment_set_sha256": "b3a7025a488e9aefc6724869f75ab76a482002224bee90c075e9379101ee7264",
+    "schedule_sha256": "8c0129d150d918523c122dbf3afb4e7c6abb3ce7ca957204252c115a7f1def15",
+    "assignment_record_set_sha256": "7a927eba7eb691990b32c7987bea5c0fdce15c51d37792f8ca45c3bddb556bc6",
+    "operation_descriptor_set_sha256": "a00feb5745c83fc20d5ad84f66877289c9108b29371697ceb8cf13e3fb142db0",
+    "first_assignment_record_sha256": "b9e38d17c7d6974b7fb49e0840bf2e431f60dc8bc309c31b6202c3b5bcbf41fc",
+    "last_assignment_record_sha256": "6bd2c6e3648030d1de1a3be795a6ad221887fc8e273c9c771024d85b9866f135",
+    "ol00_operation_set_sha256": "341fa260fcc7958e18891f4143fd33bcafb13efcfd6f4fd07a16058be16a654b",
+    "ol04_operation_set_sha256": "e6cc4cfe754e3d3e9b0e670cfdfb38ce065e4bf2ec157c092ae8bf75da586e94",
+    "synthetic_fixture_assignment_is_authority": false
+  },
+  "mechanical_completion": {
+    "schemas_defined": true,
+    "full_builders_implemented": true,
+    "closed_parsers_implemented": true,
+    "self_digest_recomputation_implemented": true,
+    "cross_packet_recomputation_implemented": true,
+    "exact_assignment_membership_validator_implemented": true,
+    "concrete_operation_descriptor_validator_implemented": true,
+    "database_content_root_implemented": true,
+    "s17_32_rule_full_catalog_validator_implemented": true,
+    "coherent_cross_packet_fixture_chain_present": true,
+    "negative_kat_suite_passed": true,
+    "s20b_complete": true
+  },
+  "current_authority_and_execution": {
+    "real_s20b_bound_subject_present": false,
+    "real_owner_signature_present": false,
+    "real_independent_checkpoint_provider_present": false,
+    "real_registration_present": false,
+    "real_observer_present": false,
+    "real_runner_present": false,
+    "live_execution_authorized": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "future_s21": {
+    "identity": "S21_NEW_OWNER_BOUND_TRUSTED_CONTROLLER_AND_EXACT_LIVE_CANARY",
+    "preapproved": false,
+    "contingent_on_completed_s20b": true,
+    "requires_final_integrated_s20a_s20b_refreeze": true,
+    "requires_new_canonical_subject_and_owner_signature": true,
+    "may_execute_live_now": false
+  }
+}
