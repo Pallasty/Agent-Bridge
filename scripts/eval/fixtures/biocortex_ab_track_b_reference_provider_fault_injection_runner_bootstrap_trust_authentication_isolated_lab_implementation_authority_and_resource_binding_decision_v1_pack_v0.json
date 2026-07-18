@@ -1,0 +1,203 @@
+{
+  "authorized_component_summary": {
+    "authorized_candidate_surface_component_count": 1,
+    "authorized_candidate_surface_components": [
+      "BOOTSTRAP_TRUST_AUTHENTICATION_SYNTHETIC_VERIFIER"
+    ],
+    "authorized_component_contract_sha256": "6982a387d0481c7603053971ce6b2b60bebadb32aea3eb2c22b1f2ae5bd73b3c",
+    "authorized_local_threat_specification_count": 1,
+    "authorized_local_threat_specifications": [
+      "T05"
+    ],
+    "bootstrap_trust_authentication_implemented": false,
+    "current_decision_candidate_surface_components_implemented": 0,
+    "distinct_synthetic_track_profiles": true,
+    "future_successor_minimum_independent_reviewer_lane_count": 2,
+    "required_reviewer_lanes": [
+      "CONTRACT_CONFORMANCE_REVIEW",
+      "SECURITY_AND_SOURCE_BOUND_GATE_REVIEW"
+    ],
+    "synthetic_track_profile_count": 2,
+    "synthetic_track_profiles": [
+      "MANAGED_SPANNER_CLOUD_KMS",
+      "SELF_HOSTED_ETCD_OPENBAO"
+    ],
+    "target_production_control": "BOOTSTRAP_TRUST_AUTHENTICATION"
+  },
+  "boundary": {
+    "authorization_effective_only_after_integrated_full_gate": true,
+    "bootstrap_trust_authentication_isolated_lab_implementation_authorized": true,
+    "bootstrap_trust_authentication_isolated_lab_implemented": false,
+    "downstream_gate_count": 4,
+    "downstream_gates_authorized": 0,
+    "implementation_authority_single_use_consumed": false,
+    "isolated_lab_predecessor_surface_components_implemented": 2,
+    "local_predecessor_threat_specifications_covered": 4,
+    "owner_handoff_eligible": false,
+    "predecessor_implementation_authority_consumed": true,
+    "production_environment_implementation_authorized": false,
+    "production_ingestion_control_count": 14,
+    "production_ingestion_controls_implemented": 0,
+    "production_ingestion_controls_runtime_exercised": 0,
+    "production_ingestion_enabled": false,
+    "production_ingestion_implemented": false,
+    "production_security_reviewer_bound": false,
+    "production_threat_case_count": 20,
+    "production_threat_cases_runtime_exercised": 0,
+    "production_validated_evidence_items": 0,
+    "provider_authority": false,
+    "real_evidence_items_present": 0,
+    "runtime_admission_granted": false,
+    "runtime_admission_ready": false,
+    "runtime_authority": false,
+    "runtime_evidence_accepted": 0,
+    "runtime_owner_decision_recorded": false,
+    "runtime_owner_identity_bound": false,
+    "runtime_prerequisite_count": 16,
+    "runtime_prerequisites_satisfied": 0,
+    "runtime_side_effects_unlocked": "NONE"
+  },
+  "date": "2026-07-17",
+  "decision": "AUTHORIZE_EXACT_BOUNDED_REVERSIBLE_BOOTSTRAP_TRUST_AUTHENTICATION_ISOLATED_LAB_COMPONENT_IMPLEMENTATION_ONLY_FAIL_CLOSED",
+  "evidence_sha256": {
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1.py": "f1168fad03ac6366e8d6501cbd4da3a2969d25cc6ef9f5bf85c0624de9ae545c",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.py": "7c5f1dcd53db8bdf9360e8e00a6495daa40b97d21fbf4efa1f9f3392bfbd6136",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "79502975f438ed644306a392131d102e2efadae37560b3489c91547a0125e43f",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "05f2fad20896cd108f0695253c617cd0c050e80ae947ec4c90f7d7684e3e344b"
+  },
+  "logical_baseline_commit": "d0356dbdbd7239ffab972ee21da81891210a055b",
+  "logical_baseline_parents": [
+    "3bf8ad3a67ff02a4e717db8e29e89079f66c01cf",
+    "20368c626bf34c5a1edd07391014ab8716536e7e"
+  ],
+  "logical_baseline_tree": "b40c36c5fe73af3079bf3a81d69480d2555271d8",
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_BOOTSTRAP_TRUST_AUTHENTICATION_SYNTHETIC_TRUST_CHAIN_EXACT_KEY_VERSION_DECLARED_ROLE_AND_REVOCATION_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+  "owner_semantics": {
+    "binding_basis": "ESTABLISHED_PROFILE_PLUS_CURRENT_SESSION_CONTINUITY",
+    "cryptographic_identity_verified": false,
+    "directive_observed_in_owner_session": true,
+    "directive_semantics": "CONTINUE_NEXT_BOUNDED_BOOTSTRAP_TRUST_AUTHENTICATION_DECISION_UNIT",
+    "implementation_authority_effective_only_after_integrated_full_gate": true,
+    "owner_supplied_numeric_budget_cap": false,
+    "runtime_owner_decision_recorded": false,
+    "runtime_owner_identity_bound": false,
+    "semantic_actor_binding_recorded": true,
+    "semantic_actor_label": "pallasting",
+    "semantic_actor_role": "PROJECT_OWNER",
+    "signature_observed": false,
+    "source_or_fast_replay_effective_authority": false
+  },
+  "packet": {
+    "all_add_required": true,
+    "modes": {
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-bootstrap-trust-authentication-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.md": "100644",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-bootstrap-trust-authentication-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.sh": "100755",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1.py": "100644",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.py": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "100644",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_v0.json": "100644"
+    },
+    "path_count": 7,
+    "paths": [
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1.py",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.py",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_v0.json",
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-bootstrap-trust-authentication-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.md",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-bootstrap-trust-authentication-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.sh"
+    ]
+  },
+  "predecessor": {
+    "artifact_raw_sha256": {
+      "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-production-evidence-envelope-v1.schema.json": "e8cb4964f86de39b16d553537467006454c720dc8bfa8d36e370189627328f55",
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-production-evidence-envelope-bounded-frame-parser-and-synthetic-mode-separation-isolated-lab-v1-pack.md": "a93fd00b9dc43f8b9d3717fd07bf3a2eef734724834d75d122d2e8bbbe6e3149",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-production-evidence-envelope-bounded-frame-parser-and-synthetic-mode-separation-isolated-lab-v1-pack.sh": "464b975d61403759221fd3aa41da4c38de12f4ec946b161100d23edadbc2b174",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1.py": "bfa3badbe2b467fbed610d5acb42ef21f1aec2ceb2d5ccf2c218fecfe438eed1",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1_pack.py": "76e0960cb9afa0e4e655ec122b600fe489a31acd5a7edf659d2fff4727ef0dcf",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1_pack.expected.v0.tsv": "775ecfa5169509a5fe0e5a900d8644f47b6b4cf64a1778c7d4ed52214115c847",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1_pack_synthetic_v0.json": "324379e6e4fcae9db3af3b55d9caacbcb77f56f6c57b110d0ced2987749910b9",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1_pack_v0.json": "9c7ba09368ebd610452ca2799226c1f57dcb63fedabb0319f4b39bc071277d04"
+    },
+    "authorization_consumption_state": "CONSUMED_SCOPE_COMPLETE",
+    "bootstrap_trust_authentication_authorized": false,
+    "bootstrap_trust_authentication_implemented": false,
+    "fast_stdout_line_count": 82,
+    "fast_stdout_sha256": "f20cbe534841e28c875020c15524ab58d6b6b073c9e3e4dc542ccb56876aa194",
+    "full_stdout_line_count": 83,
+    "full_stdout_sha256": "dc60317aa4b6048f3763145127bbffe5133e411cfee4ae1740cdf8bc431d8a6b",
+    "gate_path": "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-production-evidence-envelope-bounded-frame-parser-and-synthetic-mode-separation-isolated-lab-v1-pack.sh",
+    "gate_raw_sha256": "464b975d61403759221fd3aa41da4c38de12f4ec946b161100d23edadbc2b174",
+    "implementation_authority_single_use_consumed": true,
+    "integration_commit": "3bf8ad3a67ff02a4e717db8e29e89079f66c01cf",
+    "integration_parents": [
+      "7ef0f8e9b8048fbd1b308ca2a1d708138a615ed9",
+      "e5012eb3fd6742ceaecedf4b36adbee8ecfeb054"
+    ],
+    "integration_tree": "1bb4b0d851bb4c1ce8a7bf91cbc489168ae41433",
+    "manifest_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1_pack_v0.json",
+    "manifest_raw_sha256": "9c7ba09368ebd610452ca2799226c1f57dcb63fedabb0319f4b39bc071277d04",
+    "receipt_content_sha256": "4d5752110ebf0c11197bd8667fb9e79948724f5195465e41c6709d98d6177b8c",
+    "source_commit": "e5012eb3fd6742ceaecedf4b36adbee8ecfeb054",
+    "source_parent": "fa0cb9f088e0da2c55c92efde860d9521d4b7493",
+    "source_tree": "efcccdc55d11b0ba84bee37f891121ac987404d4"
+  },
+  "resource_binding": {
+    "allowed_resource_classes": [
+      "EXISTING_LOCAL_CPU_AND_MEMORY",
+      "ISOLATED_AGENT_BRIDGE_WORKTREE",
+      "PRIVATE_LOCAL_TEST_SCRATCH"
+    ],
+    "component_runtime_network": false,
+    "credential_handle_count": 0,
+    "credential_path_count": 0,
+    "currency_scope": "ALL_CURRENCIES_ZERO_ONLY",
+    "effective_external_paid_spend_cap": 0,
+    "max_private_scratch_checkpoint_bytes": 67108864,
+    "max_public_key_bytes": 32,
+    "max_signature_bytes": 64,
+    "owner_supplied_numeric_budget_cap": false,
+    "private_key_or_seed_material_authorized": false,
+    "production_resource_authority_bound": false,
+    "production_trust_root_binding": "NONE",
+    "provider_endpoint_count": 0,
+    "signing_or_key_generation_authorized": false,
+    "test_data_scope": "COMMITTED_NONSECRET_PUBLIC_ONLY_SYNTHETIC_KAT_NO_SEEDS_NO_PRIVATE_KEYS"
+  },
+  "results": {
+    "all_nonclaims_explicit": true,
+    "allowed_operation_count": 8,
+    "authorized_component_contract_sha256": "6982a387d0481c7603053971ce6b2b60bebadb32aea3eb2c22b1f2ae5bd73b3c",
+    "boundary_sha256": "ee43100a159b00f5e97c53b312e6d056e6e91cfcb908ff3acd52b35481f4cdc9",
+    "content_sha256": "b15c3a545502dcaf47e4c297d98cd90ce01dfe93c70b93a4cf3771c4b1a48315",
+    "decision_provenance_sha256": "645775c985782fcd1553b146094217bb2d4b6e1c6800aed7091103a078cb1237",
+    "decision_record_sha256": "ac37eb0c627512842a2e046dcba98b767ff7356dd7c728dc882e1e8baef35f0b",
+    "forbidden_operation_count": 28,
+    "implementation_authority_sha256": "8a1737328d04dd0b2d8178d745569d48c25926a47520187f62bd0fcb858a5eb7",
+    "nonclaim_field_count": 67,
+    "nonclaims_sha256": "8a1fdd31d740b46e2793e3218e14257ce8b6bf1a38cbeb389871c621fe797346",
+    "owner_implementation_actor_sha256": "6842a9cfc98d8c0b7e0189f10d41b1470d834cf1a77e7288ce27bed76edf3db7",
+    "resource_binding_sha256": "2e31bb0e743b776d69bafec4f22bd5b62c785e41c9568b1a0b92cd2caa5f61cf",
+    "rollback_sha256": "5a518dfaa3cd7cde371d07ad3ed100fdcecb0e0fbee283b5bd5445e50497395a",
+    "state_count": 5,
+    "state_machine_sha256": "8cd0bc5ff63ab8fa54510c92834481ce7fc64561398aa9427c6ad9f7423de0d3",
+    "transition_count": 4
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_manifest.v0",
+  "status": "REFERENCE_PROVIDER_FAULT_INJECTION_RUNNER_V1_BOOTSTRAP_TRUST_AUTHENTICATION_ISOLATED_LAB_IMPLEMENTATION_AUTHORITY_AND_RESOURCE_SCOPE_RECORDED_ZERO_EXTERNAL_SPEND_NO_RUNTIME_OR_PROVIDER_AUTHORITY",
+  "test_oracle": {
+    "closed_world_negative_tests": 40,
+    "directed_negative_tests": 555,
+    "grounding_matrix_negative_tests": 264,
+    "json_guard_negative_tests": 8,
+    "overclaim_negative_tests": 150,
+    "predecessor_artifact_hashes_frozen": 8,
+    "predecessor_exact_fast_receipt": "PASS",
+    "predecessor_exact_full_receipt": "PASS",
+    "receipt_negative_tests": 74,
+    "section_hash_negative_tests": 9,
+    "source_ast_negative_tests": 10,
+    "source_ast_purity": "PASS"
+  }
+}
