@@ -89,6 +89,32 @@ The audit consumes automated evidence rather than per-action prompts:
 | Secret-env probe | unrelated tokens absent; model-provider keys present |
 | Remote/cloud probe | explicit workspace policy is rejected before session launch |
 
+## P1 evidence accepted on the feature branch
+
+The following evidence was collected on 2026-07-17 before mainline promotion:
+
+- macOS: ten sandbox tests pass, including a process-isolated Seatbelt e2e that
+  writes the workspace and a synthetic cache, denies outside writes, denies an
+  exact credential nested under that writable cache, and executes a child.
+  A built-binary hidden-launcher smoke also confirmed control-token removal and
+  model-key preservation.
+- Linux aio2: Ubuntu kernel `7.0.0-27-generic`, bubblewrap `0.11.1`, and the
+  branch binary through `fd11f3b7` passed the full
+  `bwrap -> inner nono/Landlock -> target -> child` contract. Existing file and
+  directory secrets returned `EACCES`/read-only errors, workspace writes
+  persisted, a sibling host write was denied, host secret contents were
+  unchanged, and launcher-only env was absent.
+- Linux fail-closed: setting `AGENT_BRIDGE_BWRAP_BIN` to a missing executable
+  returned a non-zero launcher error before the target ran. Nine Linux sandbox
+  unit tests pass, including canonical-target handling for symlink aliases.
+- Cross-runtime regression: the local Agent and Bridge suites, all-target Bridge
+  check, touched-file rustfmt/diff checks, and strict Agent clippy gate pass;
+  only repository-pre-existing warnings and explicitly documented ignored real
+  provider probes remain.
+- Supply chain: all newly resolved packages expose license metadata through
+  `cargo metadata`; `nono` is Apache-2.0. `cargo audit`/`cargo deny` were not
+  installed, so an advisory scan remains part of the default-on promotion audit.
+
 ## Known P1 limits
 
 - Open network means a readable, non-denied secret can still be exfiltrated.
