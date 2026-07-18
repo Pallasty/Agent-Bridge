@@ -1,0 +1,363 @@
+{
+  "boundary": {
+    "application_claim_authorized": false,
+    "bootstrap_trust_verifier_implementation_authority_changed": false,
+    "bootstrap_trust_verifier_implementation_authority_remains_effective": true,
+    "bootstrap_trust_verifier_implementation_authority_single_use_consumed": false,
+    "candidate_surface_components_implemented": 0,
+    "fixture_generation_is_runtime_execution": false,
+    "fixture_generation_is_synthetic_nonproduction_preparation_only": true,
+    "production_ingestion_controls_implemented": 0,
+    "production_ingestion_controls_total": 14,
+    "production_threat_specifications_runtime_exercised": 0,
+    "production_threat_specifications_total": 20,
+    "production_validated_evidence_items": 0,
+    "provider_authority": false,
+    "real_evidence_items_present": 0,
+    "runtime_admission_granted": false,
+    "runtime_authority": false,
+    "runtime_prerequisites_satisfied": 0,
+    "runtime_prerequisites_total": 16
+  },
+  "date": "2026-07-17",
+  "decision": "AUTHORIZE_EXACT_ONE_SHOT_OFFLINE_NONPRODUCTION_FIXTURE_CUSTODIAN_PUBLIC_ONLY_BOOTSTRAP_TRUST_VECTOR_GENERATION_AMENDMENT",
+  "decision_provenance": {
+    "cryptographic_owner_identity_verified": false,
+    "directive_observed_in_owner_session": true,
+    "directive_text": "很好！我授权，按照你的思路走",
+    "explicit_fixture_generation_authority_observed": true,
+    "explicit_production_authority_observed": false,
+    "owner_semantic_actor_label": "pallasting",
+    "owner_semantic_actor_role": "PROJECT_OWNER",
+    "owner_signature_observed": false,
+    "trusted_decision_timestamp_observed": false
+  },
+  "fixture_custodian_authority": {
+    "allowed_dependency": {
+      "cargo_net_offline_required": true,
+      "crate": "ring",
+      "repository_cargo_files_may_change": false,
+      "version": "0.17.14"
+    },
+    "allowed_operations": [
+      "GENERATE_EXACTLY_SIX_EPHEMERAL_ED25519_KEYPAIRS",
+      "SIGN_EXACTLY_TWO_FROZEN_TRACK_MESSAGES_WITH_THEIR_ACTIVE_LEAF_KEYS",
+      "EMIT_EXACTLY_SIX_RAW_PUBLIC_KEYS_AND_TWO_RAW_SIGNATURES",
+      "EMIT_ONE_PUBLIC_GENERATION_PROVENANCE_RECEIPT",
+      "REMOVE_GENERATOR_SOURCE_EXECUTABLE_BUILD_OUTPUT_AND_PRIVATE_SCRATCH_NAMESPACE_AFTER_COMPLETION"
+    ],
+    "authority_class": "ONE_SHOT_OFFLINE_NONPRODUCTION_SYNTHETIC_FIXTURE_GENERATION_ONLY",
+    "authority_effective_only_after_integrated_full_gate": true,
+    "authority_single_use_consumed": false,
+    "consumption_event": "FIXTURE_CUSTODIAN_PROCESS_STARTED_BEFORE_RANDOMNESS_OR_KEYGEN",
+    "consumption_failure_semantics": "PROCESS_FAILURE_OR_CRASH_AFTER_MAIN_ENTRY_REMAINS_CONSUMED_NO_AUTOMATIC_RETRY",
+    "credential_authority": false,
+    "custodian_must_be_distinct_from_implementer_and_both_frozen_reviewers": true,
+    "effective_external_paid_spend_cap": 0,
+    "endpoint_authority": false,
+    "exact_keypair_generation_count": 6,
+    "exact_signature_generation_count": 2,
+    "generator_source_or_executable_may_be_committed": false,
+    "global_single_use_proved_by_external_ledger": false,
+    "local_os_csprng_allowed": true,
+    "ephemeral_generator_executable_mode": "0700",
+    "max_parallel_workers": 1,
+    "max_private_scratch_bytes": 67108864,
+    "network_allowed": false,
+    "non_transitive": true,
+    "private_material_storage": "PROCESS_MEMORY_ONLY_NEVER_FILES_ENVIRONMENT_LOGS_STDOUT_STDERR_OR_COMMITTED_OBJECTS",
+    "private_memory_zeroization_proved": false,
+    "production_root_or_key_material_allowed": false,
+    "provider_authority": false,
+    "retry_authorized": false,
+    "revoked_leaf_keypair_generation_count": 0,
+    "revoked_leaf_signature_generation_count": 0,
+    "scratch_directory_mode": "0700",
+    "scratch_non_executable_file_mode": "0600",
+    "scratch_namespace_cleanup_is_secure_erasure_claim": false,
+    "swap_exclusion_proved": false,
+    "subdelegation_authorized": false
+  },
+  "next_unit": "BOOTSTRAP_TRUST_PUBLIC_ONLY_VECTOR_SUPPLY_AND_GENERATION_PROVENANCE_RECEIPT_FREEZE",
+  "nonclaims": {
+    "application_claim_authorized": false,
+    "certificate_path_validation_defined": false,
+    "cryptographic_chain_link_signatures_defined": false,
+    "fixture_generation_is_production_key_provisioning": false,
+    "fixture_generation_is_runtime_runner_launch": false,
+    "generated_synthetic_root_is_production_trust": false,
+    "global_single_use_proved": false,
+    "implementation_authority_consumed_by_amendment": false,
+    "private_material_secure_erasure_proved": false,
+    "production_authentication_proved": false,
+    "production_security_approval": false,
+    "provider_cryptographic_compatibility_proved": false,
+    "real_evidence_authenticated": false,
+    "revocation_currentness_proved": false,
+    "role_scope_authorization_implemented": false,
+    "scientific_claim_authorized": false,
+    "track_subject_binding_implemented": false
+  },
+  "output_contract": {
+    "allowed_committed_artifact_classes": [
+      "RAW_PUBLIC_ED25519_KEY_32_BYTES",
+      "RAW_ED25519_SIGNATURE_64_BYTES",
+      "PUBLIC_NONSECRET_HASH_AND_COUNT_PROVENANCE_RECEIPT"
+    ],
+    "disallowed_committed_material": [
+      "PRIVATE_KEY",
+      "SEED",
+      "PKCS8",
+      "PEM",
+      "DER_PRIVATE_KEY",
+      "GENERATOR_SOURCE",
+      "GENERATOR_EXECUTABLE",
+      "CREDENTIAL",
+      "ENDPOINT",
+      "PRODUCTION_ROOT"
+    ],
+    "generation_receipt_required_fields": [
+      "authority_integration_commit",
+      "authority_gate_sha256",
+      "authority_state_before_process_entry",
+      "authority_consumption_event",
+      "authority_single_use_consumed",
+      "custodian_semantic_label",
+      "ephemeral_generator_source_sha256",
+      "generator_dependency",
+      "generator_runtime_pin",
+      "cargo_net_offline",
+      "process_entry_count",
+      "keypair_generation_count",
+      "signature_generation_count",
+      "retry_count",
+      "network_attempt_count",
+      "provider_call_count",
+      "credential_access_count",
+      "private_material_file_write_count",
+      "committed_private_material_count",
+      "public_key_count",
+      "signature_count",
+      "vector_bundle_sha256",
+      "generator_namespace_cleanup_complete",
+      "secure_erasure_claimed"
+    ],
+    "generation_receipt_serialization": "SORTED_KEYS_COMPACT_UTF8_SINGLE_TRAILING_LF",
+    "public_key_count": 6,
+    "signature_count": 2,
+    "vector_bundle_forbidden_fields": [
+      "seed",
+      "private_key",
+      "pkcs8",
+      "pem",
+      "credential",
+      "endpoint",
+      "active_now",
+      "current_revocation_state"
+    ],
+    "vector_bundle_serialization": {
+      "canonical_json_profile": "SORTED_KEYS_COMPACT_UTF8_SINGLE_TRAILING_LF",
+      "chain_entry_fields": [
+        "key_id",
+        "key_version",
+        "role",
+        "public_key_hex"
+      ],
+      "decoded_public_key_bytes": 32,
+      "decoded_signature_bytes": 64,
+      "lowercase_hex_required": true,
+      "public_key_hex_pattern": "^[0-9a-f]{64}$",
+      "revoked_leaf_fields": [
+        "key_id",
+        "key_version",
+        "state"
+      ],
+      "signature_hex_pattern": "^[0-9a-f]{128}$",
+      "top_level_fields": [
+        "schema",
+        "schema_version",
+        "authority_integration_commit",
+        "algorithm",
+        "signature_scheme",
+        "message_profile",
+        "tracks"
+      ],
+      "track_fields": [
+        "track_id",
+        "vector_set_id",
+        "policy_revision",
+        "revocation_snapshot_revision",
+        "signature_domain",
+        "canonical_frame_sha256",
+        "message_sha256",
+        "message_sha512",
+        "chain",
+        "revoked_leaf",
+        "signature_hex"
+      ],
+      "track_order": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ]
+    },
+    "vector_bundle_track_count": 2
+  },
+  "predecessor": {
+    "authority_artifact_raw_sha256": {
+      "docs/reports/goal-c-u/2026-07-17-biocortex-track-b-reference-provider-fault-injection-runner-bootstrap-trust-authentication-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.md": "841df2168eaaabfb4c17dcc15e5adfd5ed9c833eb6e40bc2bd9998833549a78b",
+      "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-bootstrap-trust-authentication-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.sh": "16fdb98784a567222e98a15cf9afc7947a70055957b1e8fc1735a9d03719daa5",
+      "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1.py": "f1168fad03ac6366e8d6501cbd4da3a2969d25cc6ef9f5bf85c0624de9ae545c",
+      "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.py": "7c5f1dcd53db8bdf9360e8e00a6495daa40b97d21fbf4efa1f9f3392bfbd6136",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "79502975f438ed644306a392131d102e2efadae37560b3489c91547a0125e43f",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "05f2fad20896cd108f0695253c617cd0c050e80ae947ec4c90f7d7684e3e344b",
+      "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_bootstrap_trust_authentication_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_v0.json": "e521a7aab3a3fa00dacade4da1bf88834680a878d4de425f77918734655e255e"
+    },
+    "authority_effective": true,
+    "authority_full_receipt_sha256": "ad5614db7653c4387f57c8e3d5bb52e40d2b21edeeecda7fc2c9bb5f2265dbb9",
+    "authority_integration_commit": "a18f0af7b4cbaa971143c71080a2b49786a7f7a3",
+    "authority_integration_parents": [
+      "f822f1d94d1327311d8c6443eb1c17a61de9663c",
+      "56b311418abc0b3461abe2a6582127f8927f9621"
+    ],
+    "authority_integration_tree": "8afca41122ee482493afec9c2c4aa32d600c175e",
+    "authority_single_use_consumed": false,
+    "exact_authorized_successor": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_BOOTSTRAP_TRUST_AUTHENTICATION_SYNTHETIC_TRUST_CHAIN_EXACT_KEY_VERSION_DECLARED_ROLE_AND_REVOCATION_VERIFIER_ISOLATED_LAB_IMPLEMENTATION"
+  },
+  "rollback": {
+    "authority_may_be_revoked_before_generator_main_entry": true,
+    "consumed_generation_authority_may_be_replenished_by_rollback": false,
+    "new_owner_decision_required_after_consumed_failure": true,
+    "published_public_only_fixture_revert_allowed": true,
+    "reversible_local_artifacts_only": true,
+    "runtime_disable_action_required": false
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b.bootstrap_trust_fixture_custodian_one_shot_authority_amendment.v1",
+  "schema_version": 1,
+  "semantic_amendment": {
+    "declared_role_mapping": {
+      "generic_declared_role_class": "SYNTHETIC_EVIDENCE_ENVELOPE_SIGNER_KAT_ONLY",
+      "mapping_is_role_scope_authorization": false,
+      "track_role_map": {
+        "MANAGED_SPANNER_CLOUD_KMS": "KAT_MANAGED_EVIDENCE_ENVELOPE_SIGNER",
+        "SELF_HOSTED_ETCD_OPENBAO": "KAT_SELF_HOSTED_EVIDENCE_ENVELOPE_SIGNER"
+      }
+    },
+    "trust_chain_semantics": {
+      "certificate_link_signature_count": 0,
+      "certificate_link_signature_subject_or_domain_defined": false,
+      "cryptographic_verification_count_on_positive_path": 1,
+      "cryptographically_verified_subject": "ACTIVE_LEAF_SIGNATURE_OVER_EXACT_FROZEN_FRAME_MESSAGE",
+      "exact_chain_entry_count": 3,
+      "exact_chain_order": [
+        "PINNED_SYNTHETIC_ROOT",
+        "PINNED_SYNTHETIC_ISSUER",
+        "PINNED_ACTIVE_LEAF"
+      ],
+      "policy_chain_binding": "SEPARATELY_INJECTED_FROZEN_STRUCTURAL_POLICY_CHAIN",
+      "pki_path_validation_claimed": false
+    }
+  },
+  "separation_of_duties": {
+    "contract_reviewer_lane": "CONTRACT_AND_PROVENANCE_REVIEW",
+    "crypto_reviewer_lane": "CRYPTO_AND_SECURITY_SOURCE_BOUND_REVIEW",
+    "fixture_custodian_lane": "FIXTURE_CUSTODIAN",
+    "implementer_lane": "BOOTSTRAP_TRUST_VERIFIER_IMPLEMENTER",
+    "minimum_distinct_semantic_actor_count": 4,
+    "pairwise_distinct_required": true,
+    "production_security_reviewer_binding": "NONE"
+  },
+  "state_machine": {
+    "current_state": "AUTHORIZED_PENDING_INTEGRATED_FULL_GATE",
+    "states": [
+      "UNRECORDED_NO_AUTHORITY",
+      "AUTHORIZED_PENDING_INTEGRATED_FULL_GATE",
+      "AUTHORIZED_ONE_SHOT_FIXTURE_CUSTODIAN_PENDING_PROCESS_START",
+      "CONSUMED_PROCESS_STARTED_OUTPUT_PENDING",
+      "CONSUMED_SCOPE_COMPLETE_PUBLIC_OUTPUT_AVAILABLE",
+      "CONSUMED_FAILED_NO_RETRY_REQUIRES_NEW_OWNER_DECISION",
+      "INVALIDATED_REQUIRES_NEW_DECISION"
+    ],
+    "transitions": [
+      {
+        "event": "OWNER_EXPLICITLY_AUTHORIZES_NARROW_AMENDMENT",
+        "from": "UNRECORDED_NO_AUTHORITY",
+        "to": "AUTHORIZED_PENDING_INTEGRATED_FULL_GATE"
+      },
+      {
+        "event": "AMENDMENT_INTEGRATED_FULL_GATE_PASSES",
+        "from": "AUTHORIZED_PENDING_INTEGRATED_FULL_GATE",
+        "to": "AUTHORIZED_ONE_SHOT_FIXTURE_CUSTODIAN_PENDING_PROCESS_START"
+      },
+      {
+        "event": "FIXTURE_CUSTODIAN_PROCESS_STARTED_BEFORE_RANDOMNESS_OR_KEYGEN",
+        "from": "AUTHORIZED_ONE_SHOT_FIXTURE_CUSTODIAN_PENDING_PROCESS_START",
+        "to": "CONSUMED_PROCESS_STARTED_OUTPUT_PENDING"
+      },
+      {
+        "event": "EXACT_PUBLIC_OUTPUTS_AND_RECEIPT_FROZEN_AND_REVIEWED",
+        "from": "CONSUMED_PROCESS_STARTED_OUTPUT_PENDING",
+        "to": "CONSUMED_SCOPE_COMPLETE_PUBLIC_OUTPUT_AVAILABLE"
+      },
+      {
+        "event": "PROCESS_FAILURE_OR_CONTRACT_DRIFT_AFTER_MAIN_ENTRY",
+        "from": "CONSUMED_PROCESS_STARTED_OUTPUT_PENDING",
+        "to": "CONSUMED_FAILED_NO_RETRY_REQUIRES_NEW_OWNER_DECISION"
+      },
+      {
+        "event": "OWNER_REVOKES_BEFORE_GENERATOR_MAIN_ENTRY",
+        "from": "AUTHORIZED_ONE_SHOT_FIXTURE_CUSTODIAN_PENDING_PROCESS_START",
+        "to": "INVALIDATED_REQUIRES_NEW_DECISION"
+      }
+    ]
+  },
+  "status": "OWNER_AUTHORIZED_NARROW_AMENDMENT_PENDING_SOURCE_BOUND_INTEGRATED_FULL_GATE",
+  "synthetic_vector_contract": {
+    "algorithm": "ED25519",
+    "message_profile": "U64BE_LENGTH_PREFIXED_ASCII_DOMAIN_AND_EXACT_RAW_CANONICAL_FRAME",
+    "signature_scheme": "ED25519_PURE_RFC8032_NO_CONTEXT_NO_PREHASH",
+    "tracks": [
+      {
+        "active_leaf_key_id": "KAT_MANAGED_EVIDENCE_ENVELOPE_SIGNER_V2",
+        "active_leaf_key_version": "KAT_MANAGED_LEAF_KEY_VERSION_2",
+        "canonical_frame_bytes": 659,
+        "canonical_frame_sha256": "e298865e753a96d58b6c23d49b58cb2c4b512a519a65666d31170325bd34d295",
+        "constructed_message_bytes": 754,
+        "constructed_message_sha256": "a52aa400add05bb7b545c9eddbf1f48e55befd393f07c5c6ba6baaefd4f5343b",
+        "constructed_message_sha512": "87ad26c16adb44af213047f0465f8e4217b0f71d69a12bdf0824ba67291df667f6ca5d5455195df526b62bf7d9bac4caeae5161cc518a12122e827a369d929fd",
+        "domain_ascii": "AB_TRACK_B_BOOTSTRAP_TRUST_AUTHENTICATION_ISOLATED_LAB_MANAGED_KAT_SIGNATURE_V1",
+        "domain_bytes": 79,
+        "issuer_key_id": "KAT_MANAGED_TRUST_POLICY_ISSUER_V1",
+        "issuer_key_version": "KAT_MANAGED_ISSUER_KEY_VERSION_1",
+        "policy_revision": "KAT_MANAGED_TRUST_POLICY_REVISION_1",
+        "revocation_snapshot_revision": "KAT_MANAGED_REVOCATION_SNAPSHOT_REVISION_1",
+        "revoked_leaf_key_generation_authorized": false,
+        "revoked_leaf_key_version": "KAT_MANAGED_LEAF_KEY_VERSION_1",
+        "root_key_id": "KAT_MANAGED_BOOTSTRAP_ROOT_V1",
+        "root_key_version": "KAT_MANAGED_ROOT_KEY_VERSION_1",
+        "track_id": "MANAGED_SPANNER_CLOUD_KMS",
+        "vector_set_id": "KAT_MANAGED_BOOTSTRAP_TRUST_PUBLIC_ONLY_PRECOMPUTED_VECTOR_SET_V1"
+      },
+      {
+        "active_leaf_key_id": "KAT_SELF_HOSTED_EVIDENCE_ENVELOPE_SIGNER_V2",
+        "active_leaf_key_version": "KAT_SELF_HOSTED_LEAF_KEY_VERSION_2",
+        "canonical_frame_bytes": 658,
+        "canonical_frame_sha256": "da147c9e4bcb4ac54e98209f5ea2970322726d3d851ac415903e1dbe311da69e",
+        "constructed_message_bytes": 757,
+        "constructed_message_sha256": "2eb3584afe6c8f18281224785ec083e531da37eed71524f2eedbf3a8225055ac",
+        "constructed_message_sha512": "ccd600e63a84e74c5c29c319486ec4333f85f465864cc3b3c8c7c90bb9ccb8c8b57d45e35c83c8bab66c4d95babda967daea12406de5684b1cee2433256207bb",
+        "domain_ascii": "AB_TRACK_B_BOOTSTRAP_TRUST_AUTHENTICATION_ISOLATED_LAB_SELF_HOSTED_KAT_SIGNATURE_V1",
+        "domain_bytes": 83,
+        "issuer_key_id": "KAT_SELF_HOSTED_TRUST_POLICY_ISSUER_V1",
+        "issuer_key_version": "KAT_SELF_HOSTED_ISSUER_KEY_VERSION_1",
+        "policy_revision": "KAT_SELF_HOSTED_TRUST_POLICY_REVISION_1",
+        "revocation_snapshot_revision": "KAT_SELF_HOSTED_REVOCATION_SNAPSHOT_REVISION_1",
+        "revoked_leaf_key_generation_authorized": false,
+        "revoked_leaf_key_version": "KAT_SELF_HOSTED_LEAF_KEY_VERSION_1",
+        "root_key_id": "KAT_SELF_HOSTED_BOOTSTRAP_ROOT_V1",
+        "root_key_version": "KAT_SELF_HOSTED_ROOT_KEY_VERSION_1",
+        "track_id": "SELF_HOSTED_ETCD_OPENBAO",
+        "vector_set_id": "KAT_SELF_HOSTED_BOOTSTRAP_TRUST_PUBLIC_ONLY_PRECOMPUTED_VECTOR_SET_V1"
+      }
+    ]
+  }
+}
