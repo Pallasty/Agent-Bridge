@@ -1,0 +1,103 @@
+{
+  "schema": "agent_bridge.memory_temporal_owned_lab_authorization_validator_contract_s18.v0",
+  "status": "S18_POSITIVE_OWNER_SCHEMA_AND_OFFLINE_SEMANTIC_SIGNATURE_VERIFIER_IMPLEMENTED_REAL_OWNER_AND_EXECUTION_STILL_BLOCKED",
+  "decision": "BLOCKED_PENDING_SOURCE_BOUND_RUNNER_REAL_OUT_OF_BAND_TRUST_ANCHOR_AND_OWNER_SIGNED_UNCLAIMED_ENVELOPE",
+  "baseline": {
+    "s17_source_commit": "20368c626bf34c5a1edd07391014ab8716536e7e",
+    "s17_integration_commit": "d0356dbdbd7239ffab972ee21da81891210a055b",
+    "s16_integration_commit": "d7f3e206169227905dbd320f1876de46e3facfea",
+    "s17_plan_sha256": "ca9769ff2b79e474999df6bb5096a3e062b5acf78fa23788f76ae44295531650",
+    "s17_observation_schema_sha256": "26a8cca9f9ca74ceb4b949a2e75d9282a6227623f5bd66cc3333fbff7441588d",
+    "s17_pending_owner_schema_sha256": "41426b240443672d7e83fc0a8781ddb79acd9beaab1c7f6e9eaf9270c1bdf608",
+    "s17_successor_gate_sha256": "6c35fc3684f7262a7eca2b8405e2c3a21b5ce2f7d282731824ceb67b0ea7163e"
+  },
+  "canonicalization": {
+    "profile": "AB_RESTRICTED_CANONICAL_JSON_S18_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT",
+    "maximum_document_bytes": 65536,
+    "maximum_nesting_depth": 16,
+    "allowed_value_types": ["OBJECT", "ARRAY", "ASCII_STRING", "NONNEGATIVE_INTEGER_U64", "BOOLEAN", "NULL"],
+    "duplicate_keys_allowed": false,
+    "unknown_fields_allowed": false,
+    "floating_point_allowed": false,
+    "nonfinite_number_allowed": false,
+    "noncanonical_input_allowed": false
+  },
+  "signature": {
+    "algorithm": "Ed25519",
+    "message_domain": "agent-bridge/biocortex/owned-lab/owner-authorization/s18/v1",
+    "message_profile": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_32_RAW_PAYLOAD_SHA256",
+    "message_formula": "U32BE(LEN(DOMAIN)) || DOMAIN || U64BE(32) || RAW_PAYLOAD_SHA256",
+    "public_key_source": "INDEPENDENT_OUT_OF_BAND_OWNER_TRUST_ANCHOR_ONLY",
+    "envelope_key_is_trust_anchor": false,
+    "signature_valid_boolean_is_cryptographic_proof": false,
+    "production_private_key_or_seed_in_repository": false
+  },
+  "authorization_id": {
+    "domain": "agent-bridge/biocortex/owned-lab/owner-authorization-id/s18/v1",
+    "formula": "SHA256(U32BE(LEN(ID_DOMAIN)) || ID_DOMAIN || U64BE(32) || SHA256(CANONICAL_PAYLOAD_WITHOUT_AUTHORIZATION_ID_SHA256))",
+    "self_field_excluded": "authorization_id_sha256",
+    "canonical_payload_profile": "AB_RESTRICTED_CANONICAL_JSON_S18_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+  },
+  "authorization_lifecycle": {
+    "owner_envelope_state": "AUTHORIZED_UNCLAIMED_OWNED_LAB_L1_OL00_OL04_OL05_CANARY",
+    "owner_envelope_is_execution_capability": false,
+    "owner_envelope_may_create_lab_root": false,
+    "owner_envelope_may_start_runner": false,
+    "future_atomic_transition": "UNCLAIMED_TO_CONSUMED_FOR_EXACT_RUN",
+    "future_successful_claim_limit": 1,
+    "failed_claim_grants_execution": false,
+    "failed_claim_mutates_unclaimed_state": false,
+    "failed_claim_allows_automatic_retry": false,
+    "successful_claim_then_crash_allows_retry": false,
+    "preflight_receipt_is_owner_envelope": false,
+    "post_run_cleanup_or_custody_receipt_is_owner_envelope": false,
+    "timestamps_are_audit_metadata_only": true,
+    "trusted_time_required_for_authorization": false,
+    "freshness_controls": ["SINGLE_USE_CAS", "REVOCATION_EPOCH", "ABSORBING_STOP"],
+    "signed_stop_state_is_use_time_stop_proof": false,
+    "use_time_stop_and_revocation_must_be_read_from_external_ledgers": true
+  },
+  "exact_canary_scope": {
+    "claim_level": "L1_PROCESS_CRASH_FRESH_PROCESS_RESTART_ONLY",
+    "family_ids": ["OL00", "OL04", "OL05"],
+    "family_scenario_counts": {"OL00": 1, "OL04": 6, "OL05": 53},
+    "canary_batch_count": 1,
+    "assigned_attempt_count": 60,
+    "planned_pidfd_sigkill_attempt_count": 59,
+    "planned_distinct_fresh_exec_read_count": 59,
+    "planned_total_s16_mapping_phase_record_count": 113,
+    "retry_or_implicit_rerun_allowed": false
+  },
+  "implementation": {
+    "positive_owner_schema_available": true,
+    "out_of_band_trust_anchor_schema_available": true,
+    "restricted_canonical_json_parser_implemented": true,
+    "owner_cross_field_semantic_validator_implemented": true,
+    "active_ed25519_signature_verifier_implemented": true,
+    "rfc8032_test_key_is_real_owner_authority": false,
+    "generic_external_cli_implemented": false,
+    "source_bound_runner_implemented": false,
+    "single_use_cas_ledger_implemented": false,
+    "execution_capability_type_implemented": false,
+    "live_observation_runtime_validator_implemented": false
+  },
+  "current_authority_and_execution": {
+    "real_trust_anchor_document_present": false,
+    "real_owner_decision_present": false,
+    "real_owner_signature_present": false,
+    "owner_identity_bound": false,
+    "cas_claimed": false,
+    "single_use_execution_capability_issued": false,
+    "owned_lab_execution_authorized": false,
+    "runner_launched": false,
+    "live_root_created": false,
+    "actual_assigned_attempt_count": 0,
+    "actual_sigkill_attempt_count": 0,
+    "actual_fresh_process_read_count": 0,
+    "actual_observation_count": 0,
+    "provider_or_production_authority": false,
+    "global_runtime_admission": false,
+    "currentness_or_output_permit": false,
+    "side_effects_unlocked": "NONE"
+  }
+}
