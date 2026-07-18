@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_preflight_receipt_s19.v0",
+  "title": "Agent-Bridge frozen S20 target contract for a fresh non-authorizing owned-lab preflight receipt",
+  "description": "S20_TARGET_SCHEMA_ONLY_NOT_EMITTED_OR_VALIDATED_BY_S19_RUST. Frozen S20 target JSON contract for a use-time read-only preflight bound to one owner envelope, frozen S19 subject, exact run, controller, runner, observer, environment, registered authorized-unclaimed row, and external control snapshot. S19 Rust uses compact internal synthetic structs and digests; it does not emit, parse, or validate this rich JSON packet. The future receipt is not owner authority or a capability.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "preflight_state",
+    "authorization_binding",
+    "run_binding",
+    "build_binding",
+    "environment_snapshot",
+    "control_snapshot_sha256",
+    "claim_registration",
+    "checks",
+    "freshness",
+    "preflight_receipt_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.memory_temporal_owned_lab_preflight_receipt_s19.v0"},
+    "packet_kind": {"const": "S19_OWNED_LAB_FRESH_PREFLIGHT_RECEIPT"},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S19_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "preflight_state": {"const": "READY_TO_ATTEMPT_SINGLE_CAS_NON_EXECUTING"},
+    "authorization_binding": {"$ref": "#/$defs/authorization_binding"},
+    "run_binding": {"$ref": "#/$defs/run_binding"},
+    "build_binding": {"$ref": "#/$defs/build_binding"},
+    "environment_snapshot": {"$ref": "#/$defs/environment_snapshot"},
+    "control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+    "claim_registration": {"$ref": "#/$defs/claim_registration"},
+    "checks": {"$ref": "#/$defs/checks"},
+    "freshness": {"$ref": "#/$defs/freshness"},
+    "preflight_receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "u64_nonzero": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "authorization_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "owner_envelope_sha256",
+        "resource_scope_sha256",
+        "revocation_epoch",
+        "signed_payload_sha256",
+        "subject_manifest_schema_sha256",
+        "subject_manifest_sha256",
+        "trust_anchor_document_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_scope_sha256": {"$ref": "#/$defs/sha256"},
+        "revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "trust_anchor_document_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "run_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_nonce_sha256",
+        "claim_key_sha256",
+        "claim_namespace_sha256",
+        "controller_binary_sha256",
+        "expected_unclaimed_revision",
+        "observer_binary_sha256",
+        "run_assignment_id_sha256",
+        "run_id_sha256",
+        "runner_binary_sha256"
+      ],
+      "properties": {
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "expected_unclaimed_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "observer_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "run_assignment_id_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "build_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controller_source_sha256",
+        "controller_toolchain_sha256",
+        "live_observation_validator_binary_sha256",
+        "owner_authorization_validator_binary_sha256",
+        "receipt_validator_binary_sha256",
+        "runner_source_sha256",
+        "runner_toolchain_sha256",
+        "s19_integration_commit"
+      ],
+      "properties": {
+        "controller_source_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_toolchain_sha256": {"$ref": "#/$defs/sha256"},
+        "live_observation_validator_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_authorization_validator_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_validator_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_source_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_toolchain_sha256": {"$ref": "#/$defs/sha256"},
+        "s19_integration_commit": {"$ref": "#/$defs/git_oid"}
+      }
+    },
+    "environment_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boot_id_sha256",
+        "candidate_device_identity_sha256",
+        "candidate_filesystem",
+        "candidate_root",
+        "credential_state_absent",
+        "effective_resource_limits_sha256",
+        "kernel_identity_sha256",
+        "mount_identity_sha256",
+        "mount_options_sha256",
+        "network_route_state_absent",
+        "root_parent_device_inode_sha256",
+        "run_root_derived_path_sha256",
+        "run_root_preexisting",
+        "same_boot_as_manifest"
+      ],
+      "properties": {
+        "boot_id_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_device_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_filesystem": {"const": "f2fs"},
+        "candidate_root": {"const": "/Data/CascadeProjects/.ab-owned-lab"},
+        "credential_state_absent": {"const": true},
+        "effective_resource_limits_sha256": {"$ref": "#/$defs/sha256"},
+        "kernel_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "mount_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "mount_options_sha256": {"$ref": "#/$defs/sha256"},
+        "network_route_state_absent": {"const": true},
+        "root_parent_device_inode_sha256": {"$ref": "#/$defs/sha256"},
+        "run_root_derived_path_sha256": {"$ref": "#/$defs/sha256"},
+        "run_root_preexisting": {"const": false},
+        "same_boot_as_manifest": {"const": true}
+      }
+    },
+    "claim_registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_binding_matches",
+        "claim_row_present",
+        "claim_state",
+        "manifest_binding_matches",
+        "registration_receipt_sha256",
+        "resource_binding_matches",
+        "revocation_binding_matches",
+        "row_revision",
+        "signed_payload_binding_matches"
+      ],
+      "properties": {
+        "authorization_binding_matches": {"const": true},
+        "claim_row_present": {"const": true},
+        "claim_state": {"const": "AUTHORIZED_UNCLAIMED"},
+        "manifest_binding_matches": {"const": true},
+        "registration_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_binding_matches": {"const": true},
+        "revocation_binding_matches": {"const": true},
+        "row_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "signed_payload_binding_matches": {"const": true}
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exact_assignment_and_schedule",
+        "exact_build_and_validator_bindings",
+        "exact_environment",
+        "exact_owner_authorization",
+        "exact_resource_and_safety_policy",
+        "external_revocation_current",
+        "external_stop_clear",
+        "no_side_effect_performed",
+        "path_isolation_clear",
+        "full_catalog_and_target_replay_passed"
+      ],
+      "properties": {
+        "exact_assignment_and_schedule": {"const": true},
+        "exact_build_and_validator_bindings": {"const": true},
+        "exact_environment": {"const": true},
+        "exact_owner_authorization": {"const": true},
+        "exact_resource_and_safety_policy": {"const": true},
+        "external_revocation_current": {"const": true},
+        "external_stop_clear": {"const": true},
+        "no_side_effect_performed": {"const": true},
+        "path_isolation_clear": {"const": true},
+        "full_catalog_and_target_replay_passed": {"const": true}
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "challenge_nonce_sha256",
+        "controller_pid",
+        "controller_start_token_sha256",
+        "revocation_ledger_revision",
+        "same_controller_required_for_cas",
+        "stop_ledger_revision",
+        "trusted_wall_clock_used_as_freshness"
+      ],
+      "properties": {
+        "challenge_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_pid": {"$ref": "#/$defs/u64_nonzero"},
+        "controller_start_token_sha256": {"$ref": "#/$defs/sha256"},
+        "revocation_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "same_controller_required_for_cas": {"const": true},
+        "stop_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "trusted_wall_clock_used_as_freshness": {"const": false}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "affine_permit_issued",
+        "cas_claimed",
+        "execution_start_permitted",
+        "owner_envelope_mutated",
+        "preflight_is_owner_authority",
+        "preflight_is_post_run_receipt",
+        "root_created",
+        "runner_launched",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "affine_permit_issued": {"const": false},
+        "cas_claimed": {"const": false},
+        "execution_start_permitted": {"const": false},
+        "owner_envelope_mutated": {"const": false},
+        "preflight_is_owner_authority": {"const": false},
+        "preflight_is_post_run_receipt": {"const": false},
+        "root_created": {"const": false},
+        "runner_launched": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}

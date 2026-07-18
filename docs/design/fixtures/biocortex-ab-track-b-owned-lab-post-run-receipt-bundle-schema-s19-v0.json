@@ -1,0 +1,374 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_post_run_receipt_bundle_s19.v0",
+  "title": "Agent-Bridge frozen S20 target contract for an evidence-only post-run receipt bundle",
+  "description": "S20_TARGET_SCHEMA_ONLY_NOT_EMITTED_OR_VALIDATED_BY_S19_RUST. Frozen S20 target JSON contract for the exact 60-attempt owned-lab canary denominator. Future retention, semantic, batch, optional STOP, cleanup, and custody receipts are hash-chained to the successful claim. S19 Rust validates only a compact internal synthetic bundle/digest set and does not emit, parse, or validate this rich JSON packet. The future bundle never grants authority, execution, or retry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "bundle_state",
+    "authorization_binding",
+    "execution_binding",
+    "assigned_denominator",
+    "observed_counts",
+    "control_outcome",
+    "receipt_chain",
+    "evidence_decision",
+    "post_run_bundle_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.memory_temporal_owned_lab_post_run_receipt_bundle_s19.v0"},
+    "packet_kind": {"const": "S19_OWNED_LAB_POST_RUN_RECEIPT_BUNDLE"},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S19_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "bundle_state": {"const": "POST_RUN_EVIDENCE_ONLY"},
+    "authorization_binding": {"$ref": "#/$defs/authorization_binding"},
+    "execution_binding": {"$ref": "#/$defs/execution_binding"},
+    "assigned_denominator": {"$ref": "#/$defs/assigned_denominator"},
+    "observed_counts": {"$ref": "#/$defs/observed_counts"},
+    "control_outcome": {"$ref": "#/$defs/control_outcome"},
+    "receipt_chain": {"$ref": "#/$defs/receipt_chain"},
+    "evidence_decision": {
+      "enum": [
+        "VALID_COMPLETE_EXACT_CANARY_EVIDENCE",
+        "INVALID_INCOMPLETE_OR_SEMANTIC_FAILURE",
+        "INDETERMINATE_CONTROL_OR_CUSTODY_FAILURE"
+      ]
+    },
+    "post_run_bundle_sha256": {"$ref": "#/$defs/sha256"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "control_outcome": {
+            "properties": {"stop_state_observed": {"const": "TRIGGERED"}},
+            "required": ["stop_state_observed"]
+          }
+        },
+        "required": ["control_outcome"]
+      },
+      "then": {
+        "properties": {
+          "receipt_chain": {
+            "properties": {"stop_receipt": {"$ref": "#/$defs/stop_receipt"}},
+            "required": ["stop_receipt"]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "receipt_chain": {
+            "properties": {"stop_receipt": {"type": "null"}},
+            "required": ["stop_receipt"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "u64_nonzero": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "authorization_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "owner_envelope_sha256",
+        "resource_scope_sha256",
+        "revocation_epoch",
+        "signed_payload_sha256",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_scope_sha256": {"$ref": "#/$defs/sha256"},
+        "revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "execution_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_nonce_sha256",
+        "claim_key_sha256",
+        "claim_namespace_sha256",
+        "claim_receipt_sha256",
+        "controller_binary_sha256",
+        "run_id_sha256",
+        "runner_binary_sha256"
+      ],
+      "properties": {
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_key_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_namespace_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "assigned_denominator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assigned_attempt_count",
+        "canary_batch_count",
+        "family_scenario_counts",
+        "planned_distinct_fresh_exec_read_count",
+        "planned_pidfd_sigkill_attempt_count",
+        "planned_total_s16_mapping_phase_record_count",
+        "retry_or_implicit_rerun_allowed"
+      ],
+      "properties": {
+        "assigned_attempt_count": {"const": 60},
+        "canary_batch_count": {"const": 1},
+        "family_scenario_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["OL00", "OL04", "OL05"],
+          "properties": {
+            "OL00": {"const": 1},
+            "OL04": {"const": 6},
+            "OL05": {"const": 53}
+          }
+        },
+        "planned_distinct_fresh_exec_read_count": {"const": 59},
+        "planned_pidfd_sigkill_attempt_count": {"const": 59},
+        "planned_total_s16_mapping_phase_record_count": {"const": 113},
+        "retry_or_implicit_rerun_allowed": {"const": false}
+      }
+    },
+    "observed_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actual_assigned_attempt_count",
+        "actual_distinct_fresh_exec_read_count",
+        "actual_observation_count",
+        "actual_pidfd_sigkill_attempt_count",
+        "actual_s16_mapping_phase_record_count",
+        "completed_attempt_count",
+        "failed_attempt_count"
+      ],
+      "properties": {
+        "actual_assigned_attempt_count": {"type": "integer", "minimum": 0, "maximum": 60},
+        "actual_distinct_fresh_exec_read_count": {"type": "integer", "minimum": 0, "maximum": 59},
+        "actual_observation_count": {"type": "integer", "minimum": 0, "maximum": 60},
+        "actual_pidfd_sigkill_attempt_count": {"type": "integer", "minimum": 0, "maximum": 59},
+        "actual_s16_mapping_phase_record_count": {"type": "integer", "minimum": 0, "maximum": 113},
+        "completed_attempt_count": {"type": "integer", "minimum": 0, "maximum": 60},
+        "failed_attempt_count": {"type": "integer", "minimum": 0, "maximum": 60}
+      }
+    },
+    "control_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "last_control_snapshot_sha256",
+        "last_revocation_ledger_revision",
+        "last_stop_ledger_revision",
+        "revocation_epoch_remained_exact",
+        "rollback_detected",
+        "stop_state_observed"
+      ],
+      "properties": {
+        "last_control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "last_revocation_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "last_stop_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "revocation_epoch_remained_exact": {"type": "boolean"},
+        "rollback_detected": {"type": "boolean"},
+        "stop_state_observed": {"enum": ["CLEAR", "TRIGGERED"]}
+      }
+    },
+    "retention_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "packet_kind",
+        "parent_receipt_sha256",
+        "receipt_sha256",
+        "retention_decision",
+        "run_id_sha256",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "packet_kind": {"const": "S19_RETENTION_RECEIPT"},
+        "parent_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "retention_decision": {"enum": ["RETAINED_COMPLETE", "RETAINED_INCOMPLETE", "RETENTION_FAILED"]},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "semantic_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "packet_kind",
+        "parent_receipt_sha256",
+        "receipt_sha256",
+        "run_id_sha256",
+        "semantic_decision",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "packet_kind": {"const": "S19_RUNTIME_SEMANTIC_RECEIPT"},
+        "parent_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "semantic_decision": {"enum": ["PASS", "FAIL", "INDETERMINATE"]},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "batch_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "batch_decision",
+        "packet_kind",
+        "parent_receipt_sha256",
+        "receipt_sha256",
+        "run_id_sha256",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "batch_decision": {"enum": ["COMPLETE_PASS", "COMPLETE_FAIL", "ABORTED_STOP", "INVALID_RESOURCE_OR_TIMEOUT"]},
+        "packet_kind": {"const": "S19_BATCH_RECEIPT"},
+        "parent_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "stop_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "packet_kind",
+        "parent_receipt_sha256",
+        "receipt_sha256",
+        "run_id_sha256",
+        "stop_ledger_revision",
+        "stop_state",
+        "stop_trigger_receipt_sha256",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "packet_kind": {"const": "S19_ABSORBING_STOP_RECEIPT"},
+        "parent_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "stop_ledger_revision": {"$ref": "#/$defs/u64_nonzero"},
+        "stop_state": {"const": "TRIGGERED"},
+        "stop_trigger_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "cleanup_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "cleanup_decision",
+        "packet_kind",
+        "parent_receipt_sha256",
+        "receipt_sha256",
+        "run_id_sha256",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "cleanup_decision": {"enum": ["CLEAN_COMPLETE", "QUARANTINED", "CLEANUP_FAILED"]},
+        "packet_kind": {"const": "S19_CLEANUP_RECEIPT"},
+        "parent_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "custody_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256",
+        "custody_decision",
+        "packet_kind",
+        "parent_receipt_sha256",
+        "receipt_sha256",
+        "run_id_sha256",
+        "subject_manifest_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "custody_decision": {"enum": ["CHAIN_COMPLETE", "CHAIN_INCOMPLETE", "HASH_OR_PARENT_MISMATCH"]},
+        "packet_kind": {"const": "S19_CUSTODY_RECEIPT"},
+        "parent_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "receipt_chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retention_receipt",
+        "semantic_receipt",
+        "batch_receipt",
+        "stop_receipt",
+        "cleanup_receipt",
+        "custody_receipt",
+        "all_parent_links_exact"
+      ],
+      "properties": {
+        "retention_receipt": {"$ref": "#/$defs/retention_receipt"},
+        "semantic_receipt": {"$ref": "#/$defs/semantic_receipt"},
+        "batch_receipt": {"$ref": "#/$defs/batch_receipt"},
+        "stop_receipt": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/stop_receipt"}]},
+        "cleanup_receipt": {"$ref": "#/$defs/cleanup_receipt"},
+        "custody_receipt": {"$ref": "#/$defs/custody_receipt"},
+        "all_parent_links_exact": {"type": "boolean"}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_grants_owner_authority",
+        "bundle_grants_execution",
+        "bundle_is_owner_envelope",
+        "bundle_permits_retry",
+        "cleanup_or_custody_receipt_is_owner_envelope",
+        "post_run_receipts_grant_authority",
+        "provider_or_production_authority",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "bundle_grants_owner_authority": {"const": false},
+        "bundle_grants_execution": {"const": false},
+        "bundle_is_owner_envelope": {"const": false},
+        "bundle_permits_retry": {"const": false},
+        "cleanup_or_custody_receipt_is_owner_envelope": {"const": false},
+        "post_run_receipts_grant_authority": {"const": false},
+        "provider_or_production_authority": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}
