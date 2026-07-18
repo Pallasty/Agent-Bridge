@@ -12904,6 +12904,31 @@ fn tool_atlas_schema_has_compact_controls_without_polluting_dispatch_audit() {
 }
 
 #[test]
+fn dispatch_telemetry_accepts_chatgpt_source_without_reclassifying_openai_codex() {
+    let p = ToolPolicy::from_values(Some("all-dev"), None, None, None);
+    let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+
+    for tool_name in [
+        "mcp_dispatch_audit",
+        "tool_atlas_snapshot",
+        "gos_lite_snapshot",
+    ] {
+        let schema = schemas
+            .iter()
+            .find(|schema| schema.name == tool_name)
+            .unwrap_or_else(|| panic!("{tool_name} schema"));
+        let sources = schema.input_schema["properties"]["source"]["enum"]
+            .as_array()
+            .expect("source enum");
+        assert!(sources.iter().any(|source| source == "chatgpt"));
+    }
+
+    assert_eq!(dispatch_normalize_source("chatgpt-read"), Some("chatgpt"));
+    assert_eq!(dispatch_normalize_source("ChatGPT"), Some("chatgpt"));
+    assert_eq!(dispatch_normalize_source("OpenAI Codex"), Some("codex"));
+}
+
+#[test]
 fn event_spine_schema_defaults_to_summary_projection() {
     let schema = EventSpineSnapshotTool::new(Hub::builder().build()).schema();
 

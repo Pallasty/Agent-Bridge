@@ -44,6 +44,7 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
   | env \
       AGENT_BRIDGE_CLIENT=chatgpt \
+      AGENT_BRIDGE_MCP_SOURCE=chatgpt \
       AGENT_BRIDGE_TOOLSET=chatgpt-read \
       AGENT_BRIDGE_TOOL_PROFILE=essential \
       ./target/release/agent-bridge mcp
@@ -72,11 +73,15 @@ tunnel-client init \
   --sample sample_mcp_stdio_local \
   --profile agent-bridge-chatgpt-read \
   --tunnel-id tunnel_0123456789abcdef0123456789abcdef \
-  --mcp-command "env AGENT_BRIDGE_CLIENT=chatgpt AGENT_BRIDGE_TOOLSET=chatgpt-read AGENT_BRIDGE_TOOL_PROFILE=essential /Users/you/.local/bin/agent-bridge mcp"
+  --mcp-command "env AGENT_BRIDGE_CLIENT=chatgpt AGENT_BRIDGE_MCP_SOURCE=chatgpt AGENT_BRIDGE_TOOLSET=chatgpt-read AGENT_BRIDGE_TOOL_PROFILE=essential /Users/you/.local/bin/agent-bridge mcp"
 
 tunnel-client doctor --profile agent-bridge-chatgpt-read --explain
 tunnel-client run --profile agent-bridge-chatgpt-read
 ```
+
+`AGENT_BRIDGE_MCP_SOURCE=chatgpt` keeps tunnel calls separate from native Codex
+traffic in `mcp_dispatch_audit`. This matters because the OpenAI gateway may
+identify itself with the transport-level client name `openai-mcp`.
 
 While the tunnel client is running, open ChatGPT Settings -> Plugins, create a
 Developer Mode App, select **Tunnel** as the connection type, and select the

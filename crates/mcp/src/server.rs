@@ -418,10 +418,7 @@ impl ConnectionTelemetry {
             .ok()
             .and_then(nonempty_string);
         let profile = mcp_profile_label_from_env().to_string();
-        let source = classify_mcp_source_from_client(client_name.as_deref())
-            .or_else(mcp_source_from_env)
-            .unwrap_or("other")
-            .to_string();
+        let source = mcp_connection_source_from_env(client_name.as_deref()).to_string();
         let model = std::env::var("AGENT_BRIDGE_MODEL")
             .ok()
             .and_then(nonempty_string);
@@ -451,10 +448,7 @@ impl ConnectionTelemetry {
             self.client_name = Some(name.to_string());
         }
         self.profile = mcp_profile_label_from_env().to_string();
-        self.source = classify_mcp_source_from_client(self.client_name.as_deref())
-            .or_else(mcp_source_from_env)
-            .unwrap_or("other")
-            .to_string();
+        self.source = mcp_connection_source_from_env(self.client_name.as_deref()).to_string();
         self.model = std::env::var("AGENT_BRIDGE_MODEL")
             .ok()
             .and_then(nonempty_string);
@@ -497,6 +491,9 @@ fn mcp_profile_label_from_values(toolset: Option<&str>, profile: Option<&str>) -
         | Some("codex-lean")
         | Some("codex-minimal")
         | Some("codex")
+        | Some("chatgpt-read")
+        | Some("chatgpt")
+        | Some("openai-chat")
         | Some("gemini-lean")
         | Some("gemini") => "essential",
         Some("all-dev") | Some("dev") | Some("full-dev") => "all",
@@ -532,16 +529,36 @@ fn normalize_mcp_env_value(value: &str) -> String {
         .replace(' ', "-")
 }
 
-fn mcp_source_from_env() -> Option<&'static str> {
-    if let Ok(value) = std::env::var("AGENT_BRIDGE_MCP_SOURCE") {
-        if let Some(source) = normalize_mcp_source(&value) {
-            return Some(source);
-        }
-    }
-    if std::env::vars().any(|(k, _)| k.starts_with("CODEX_")) {
-        return Some("codex");
-    }
-    None
+fn mcp_connection_source_from_env(client_name: Option<&str>) -> &'static str {
+    let source = std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok();
+    let client = std::env::var("AGENT_BRIDGE_CLIENT").ok();
+    let toolset = std::env::var("AGENT_BRIDGE_TOOLSET").ok();
+    let codex_context = std::env::vars().any(|(k, _)| k.starts_with("CODEX_"));
+    classify_mcp_connection_source(
+        client_name,
+        source.as_deref(),
+        client.as_deref(),
+        toolset.as_deref(),
+        codex_context,
+    )
+}
+
+fn classify_mcp_connection_source(
+    client_name: Option<&str>,
+    configured_source: Option<&str>,
+    configured_client: Option<&str>,
+    configured_toolset: Option<&str>,
+    codex_context: bool,
+) -> &'static str {
+    // Gateway names such as `openai-mcp` identify the transport, not the
+    // frontend. The configured Agent-Bridge client/source is authoritative.
+    configured_source
+        .and_then(normalize_mcp_source)
+        .or_else(|| configured_client.and_then(normalize_mcp_source))
+        .or_else(|| configured_toolset.and_then(normalize_mcp_source))
+        .or_else(|| classify_mcp_source_from_client(client_name))
+        .or_else(|| codex_context.then_some("codex"))
+        .unwrap_or("other")
 }
 
 fn classify_mcp_source_from_client(client_name: Option<&str>) -> Option<&'static str> {
@@ -557,6 +574,9 @@ fn classify_mcp_source_from_client(client_name: Option<&str>) -> Option<&'static
         || name.contains("stop")
     {
         return Some("hook");
+    }
+    if name.contains("chatgpt") {
+        return Some("chatgpt");
     }
     if name.contains("codex") || name.contains("openai") {
         return Some("codex");
@@ -574,11 +594,12 @@ fn classify_mcp_source_from_client(client_name: Option<&str>) -> Option<&'static
 }
 
 fn normalize_mcp_source(value: &str) -> Option<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "codex" => Some("codex"),
-        "hook" | "hooks" | "lifecycle" => Some("hook"),
-        "claude" | "claude-code" => Some("claude"),
-        "gemini" => Some("gemini"),
+    match normalize_mcp_env_value(value).as_str() {
+        "codex" | "codex-essential" | "codex-lean" | "codex-minimal" => Some("codex"),
+        "chatgpt" | "chatgpt-read" | "openai-chat" => Some("chatgpt"),
+        "hook" | "hooks" | "lifecycle" | "hook-lifecycle" => Some("hook"),
+        "claude" | "claude-code" | "claude-standard" => Some("claude"),
+        "gemini" | "gemini-lean" => Some("gemini"),
         "manual" | "smoke" | "audit" | "test" => Some("manual"),
         "legacy" => Some("legacy"),
         "other" => Some("other"),
@@ -1521,6 +1542,10 @@ mod tests {
             Some("codex")
         );
         assert_eq!(
+            classify_mcp_source_from_client(Some("ChatGPT")),
+            Some("chatgpt")
+        );
+        assert_eq!(
             classify_mcp_source_from_client(Some("Claude Code")),
             Some("claude")
         );
@@ -1532,6 +1557,45 @@ mod tests {
             classify_mcp_source_from_client(Some("unknown-client")),
             None
         );
+    }
+
+    #[test]
+    fn configured_chatgpt_source_wins_over_ambiguous_openai_gateway_name() {
+        assert_eq!(
+            classify_mcp_connection_source(
+                Some("openai-mcp"),
+                None,
+                Some("chatgpt"),
+                Some("chatgpt-read"),
+                true,
+            ),
+            "chatgpt"
+        );
+        assert_eq!(
+            classify_mcp_connection_source(Some("openai-mcp"), Some("chatgpt"), None, None, true),
+            "chatgpt"
+        );
+        assert_eq!(
+            classify_mcp_connection_source(Some("OpenAI Codex"), None, None, None, false),
+            "codex"
+        );
+        for (client, toolset, expected) in [
+            ("codex", "codex-lean", "codex"),
+            ("claude-code", "claude-standard", "claude"),
+            ("gemini", "gemini-lean", "gemini"),
+            ("hook", "hook-lifecycle", "hook"),
+        ] {
+            assert_eq!(
+                classify_mcp_connection_source(
+                    Some("unknown-gateway"),
+                    None,
+                    Some(client),
+                    Some(toolset),
+                    false,
+                ),
+                expected
+            );
+        }
     }
 
     #[test]
@@ -1552,6 +1616,10 @@ mod tests {
         );
         assert_eq!(
             mcp_profile_label_from_values(Some("codex-lean"), Some("all")),
+            "essential"
+        );
+        assert_eq!(
+            mcp_profile_label_from_values(Some("chatgpt-read"), Some("all")),
             "essential"
         );
         assert_eq!(

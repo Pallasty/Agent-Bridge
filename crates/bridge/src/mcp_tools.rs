@@ -20822,7 +20822,7 @@ impl McpTool for McpDispatchAuditTool {
                     },
                     "source": {
                         "type": "string",
-                        "enum": ["codex", "hook", "claude", "gemini", "manual", "other", "legacy"],
+                        "enum": ["codex", "chatgpt", "hook", "claude", "gemini", "manual", "other", "legacy"],
                         "description": "Optional caller-source filter. Omit for all traffic."
                     },
                     "client_name": {
@@ -21238,7 +21238,7 @@ impl McpTool for ToolAtlasSnapshotTool {
                     },
                     "source": {
                         "type": "string",
-                        "enum": ["codex", "hook", "claude", "gemini", "manual", "other", "legacy"],
+                        "enum": ["codex", "chatgpt", "hook", "claude", "gemini", "manual", "other", "legacy"],
                         "description": "Optional caller-source filter. Omit for all traffic."
                     },
                     "client_name": {
@@ -21536,7 +21536,7 @@ impl McpTool for GosLiteSnapshotTool {
                     },
                     "source": {
                         "type": "string",
-                        "enum": ["codex", "hook", "claude", "gemini", "manual", "other", "legacy"],
+                        "enum": ["codex", "chatgpt", "hook", "claude", "gemini", "manual", "other", "legacy"],
                         "description": "Optional caller-source filter. Omit for all traffic."
                     },
                     "client_name": {
@@ -22044,9 +22044,15 @@ fn mcp_lifecycle_telemetry_filter_from_env() -> McpToolCallFilter {
 }
 
 fn mcp_lifecycle_source_from_env() -> Option<String> {
-    if let Ok(source) = std::env::var("AGENT_BRIDGE_MCP_SOURCE") {
-        if let Some(source) = dispatch_normalize_source(&source) {
-            return Some(source.to_string());
+    for key in [
+        "AGENT_BRIDGE_MCP_SOURCE",
+        "AGENT_BRIDGE_CLIENT",
+        "AGENT_BRIDGE_TOOLSET",
+    ] {
+        if let Ok(value) = std::env::var(key) {
+            if let Some(source) = dispatch_normalize_source(&value) {
+                return Some(source.to_string());
+            }
         }
     }
     if let Ok(client_name) = std::env::var("AGENT_BRIDGE_CLIENT_NAME") {
@@ -22057,8 +22063,7 @@ fn mcp_lifecycle_source_from_env() -> Option<String> {
     if mcp_schema_codex_context() {
         return Some("codex".to_string());
     }
-    let client = std::env::var("AGENT_BRIDGE_CLIENT").ok()?;
-    dispatch_normalize_source(&client).map(ToString::to_string)
+    None
 }
 
 fn dispatch_normalize_source(value: &str) -> Option<&'static str> {
@@ -22071,6 +22076,9 @@ fn dispatch_normalize_source(value: &str) -> Option<&'static str> {
         || normalized.contains("stop")
     {
         return Some("hook");
+    }
+    if normalized.contains("chatgpt") || normalized == "openai-chat" {
+        return Some("chatgpt");
     }
     if normalized.contains("codex") || normalized.contains("openai") {
         return Some("codex");
