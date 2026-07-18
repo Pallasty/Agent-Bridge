@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P9-STEP3-E768-BITORDER-D1-COARSE-PHASE-V1",
+  "required_direct_parent_commit": "92629e3049ac0dfac12c390fc5ed499597076b7f",
+  "policy_role": "one_fresh_process_coarse_phase_only_diagnostic_of_the_frozen_P9_path_under_unchanged_admission",
+  "scientific_authority": "NONE",
+  "certificate_eligible": false,
+  "result_contract_eligible": false,
+  "hindsight_firewall": {
+    "classification": "P9_B1_RESULT_INFORMED_RESULT_UNPINNED_SCIENTIFIC_BLIND_COARSE_PHASE_DIAGNOSTIC",
+    "D1_result_unpinned_before_preprobe_commit": true,
+    "allowed_P9_B1_result_facts_are_exhaustive": [
+      "P9_B1_report_identity_and_scientific_authority_NONE",
+      "P9_B1_terminal_status_INDETERMINATE_HOST_OR_RUNTIME_FAILURE",
+      "P9_B1_resource_witness_is_null",
+      "P9_B1_S0_admission_is_not_established"
+    ],
+    "forbidden_P9_B1_inputs": [
+      "raw_report_bytes_after_identity_projection",
+      "observations_time_returncode_stdout_stderr_or_time_diagnostics",
+      "resource_counts_or_any_resource_witness",
+      "selected_masks_coefficients_ticks_budgets_or_final_state",
+      "any_output_used_to_change_candidate_caps_host_admission_or_fallback"
+    ],
+    "D1_does_not_rerun_D0": true,
+    "a_second_D1_execution_requires_a_new_precommitted_version": true
+  },
+  "phase_only_execution_contract": {
+    "fresh_O0_process_only": true,
+    "all_steps_share_one_live_process_until_the_coarse_terminal": true,
+    "checkpoint_or_serialized_resume_forbidden": true,
+    "P9_core_mode_is_exactly_E768_BITORDER_STEP3_V1": true,
+    "D1_stops_after_the_first_coarse_terminal_and_does_not_construct_or_emit_a_P9_D0_resource_witness": true,
+    "stdout_must_be_empty_and_resource_witness_must_be_null": true,
+    "only_fixed_outer_phase_events_are_allowed": true,
+    "term_count_index_mask_coefficient_tick_budget_cap_selector_callback_and_hot_loop_events_are_forbidden": true,
+    "D1_phase_IO_has_no_S0_admission_authority": true
+  },
+  "source_clone_contract": {
+    "frozen_P9_driver_git_commit": "92629e3049ac0dfac12c390fc5ed499597076b7f",
+    "frozen_P9_driver_relative_path": "docs/research/fermion-frontier/majorana_certificate_p9_bit_order_resource_probe/majorana_p9_bit_order_step3_resource_probe.jl",
+    "frozen_P9_driver_sha256": "f12ea9a93d4079792de8b5e8bae5b5ee0b45895a4399c19f41b7041034d3f14c",
+    "frozen_P9_driver_size_bytes": 78229,
+    "clone_driver_relative_path": "majorana_certificate_p9_d1_phase_probe/majorana_p9_bit_order_step3_phase_probe.jl",
+    "checker_owned_preamble_and_exact_marker_blocks_only": true,
+    "exact_marker_block_count": 8,
+    "forward_byte_construction_and_reverse_deletion_are_required": true,
+    "runtime_source_or_AST_transform_is_forbidden": true,
+    "nonmarker_source_difference_stops_without_execution": true
+  },
+  "phase_report_contract": {
+    "report_contains_only_phase_language_and_nonmathematical_host_status": true,
+    "no_D0_or_D1_timing_RSS_stderr_stdout_or_resource_measurement_is_persisted": true,
+    "resource_witness_is_always_null": true,
+    "if_STEP3_ENGINE_STARTED_without_STEP3_ENGINE_RETURNED_then_only_a_new_D2_schedule_level_DFA_may_be_precommitted": true,
+    "no_automatic_repeat_or_in_place_cap_relaxation_is_allowed": true
+  },
+  "staged_source_custody": {
+    "staged_path_order": [
+      "majorana_certificate_p0/Project.toml",
+      "majorana_certificate_p0/Manifest.toml",
+      "majorana_certificate_p2/majorana_p2_runner.jl",
+      "majorana_certificate_p3/majorana_p3_runner.jl",
+      "majorana_certificate_p4/majorana_p4_runner.jl",
+      "majorana_certificate_p6/majorana_p6_runner.jl",
+      "majorana_certificate_p2_fixture.json",
+      "majorana_certificate_p3_fixture.json",
+      "majorana_certificate_p4_fixture.json",
+      "majorana_certificate_p5_fixture.json",
+      "majorana_certificate_p6_fixture.json",
+      "majorana_certificate_p9_bit_order_resource_probe_fixture.json",
+      "majorana_certificate_p9_d1_phase_probe_fixture.json",
+      "majorana_certificate_p9_d1_phase_probe/majorana_p9_bit_order_step3_phase_probe.jl"
+    ],
+        "P9_B1_report_policy_Python_original_Julia_driver_and_runtime_lock_are_outer_checker_only_and_not_staged": true,
+    "all_staged_files_are_regular_nonsymlink_and_byte_pinned": true,
+    "one_exclusive_execution_claim_is_acquired_immediately_before_launch": true,
+    "abnormal_stop_before_a_canonical_report_retains_the_claim": true
+  },
+  "source_files": [
+    {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "size_bytes": 235,
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "size_bytes": 15336,
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406"
+    },
+    {
+      "relative_path": "majorana_certificate_p2/majorana_p2_runner.jl",
+      "size_bytes": 33888,
+      "sha256": "03edd9640bc3d83a61ea0c9c7d9e93af3fc683972c517af4a7691e21359e25ed"
+    },
+    {
+      "relative_path": "majorana_certificate_p3/majorana_p3_runner.jl",
+      "size_bytes": 59318,
+      "sha256": "958de8886bb8e56cda26eb6c45029c7016e886caae26c598c7e6b5c595257fe2"
+    },
+    {
+      "relative_path": "majorana_certificate_p4/majorana_p4_runner.jl",
+      "size_bytes": 24880,
+      "sha256": "f425dbab80d60c49fceefc2b3e805fd3a4b29037f0e95491c50891ed7b7b9f47"
+    },
+    {
+      "relative_path": "majorana_certificate_p6/majorana_p6_runner.jl",
+      "size_bytes": 74471,
+      "sha256": "b63143c066d3d258594e27ee4062632632030e9962a0fcd127fcd5000ff9cc1c"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_fixture.json",
+      "size_bytes": 5891,
+      "sha256": "252fa0c4ed26db5581bcd9ff0101d18d858faf6d31fb9b6cdcaa821bf318e82a"
+    },
+    {
+      "relative_path": "majorana_certificate_p3_fixture.json",
+      "size_bytes": 6033,
+      "sha256": "a478b783ae4005f7ef79572a4b34eee72299da262e439bdc35eca13496bdc236"
+    },
+    {
+      "relative_path": "majorana_certificate_p4_fixture.json",
+      "size_bytes": 17259,
+      "sha256": "b020b6bcc0ed56010af9ed3b1836469c084b9244a9303a8101cf7657adb79964"
+    },
+    {
+      "relative_path": "majorana_certificate_p5_fixture.json",
+      "size_bytes": 4763,
+      "sha256": "fd8b46c8761f548d615042b24f8ec85b32891e4f42dbafdd9bd70d58379a8afb"
+    },
+    {
+      "relative_path": "majorana_certificate_p6_fixture.json",
+      "size_bytes": 14267,
+      "sha256": "fb381c613d675551d33680484a88870020a494e4a356dafd9fd869714c9d475d"
+    },
+    {
+      "relative_path": "majorana_certificate_p9_bit_order_resource_probe_fixture.json",
+      "size_bytes": 21575,
+      "sha256": "8365f441765cc5dbe1658b8aba2e2371c1619a0894c73ad5c0b21f8bf74a1be8"
+    },
+    {
+      "relative_path": "majorana_certificate_p9_d1_phase_probe_fixture.json",
+      "size_bytes": 7213,
+      "sha256": "4e9bdf1d496e33e2f8aaae88ddae1fb793358da63bb3417034d457eabe67eacc"
+    },
+        {
+            "relative_path": "majorana_certificate_p9_d1_phase_probe/majorana_p9_bit_order_step3_phase_probe.jl",
+            "size_bytes": 83205,
+            "sha256": "23bd36e3c77fa742799b4e823105008efbae343d8d1b3e338357937838a9e524"
+        },
+        {
+            "relative_path": "majorana_certificate_p0_runtime_lock.json",
+            "size_bytes": 5281,
+            "sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17"
+        },
+        {
+            "relative_path": "majorana_certificate_p9_d1_phase_probe.py",
+            "size_bytes": 60119,
+            "sha256": "9d2c0a3d21b6141afa0369a1f8af395336148be1045ef16ebd5e6e0c6374925d"
+        },
+        {
+            "relative_path": "test_majorana_certificate_p9_d1_phase_probe.py",
+            "size_bytes": 6088,
+            "sha256": "6076b0b4bbdc6fe6cc8908edf6763272106c79855f960d07c5b7e845444732e2"
+        },
+    {
+      "relative_path": "majorana_certificate_p9_bit_order_resource_probe/majorana_p9_bit_order_step3_resource_probe.jl",
+      "size_bytes": 78229,
+      "sha256": "f12ea9a93d4079792de8b5e8bae5b5ee0b45895a4399c19f41b7041034d3f14c"
+    }
+  ]
+}
