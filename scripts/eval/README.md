@@ -101,6 +101,20 @@ execution, retrieval mutation, live writes, or promotion. See
 `docs/design/ENGRAM_G1_FREEZE_PREFLIGHT_2026_07_18.md` and run
 `scripts/check-engram-g1-freeze-preflight.sh`.
 
+`engram_g1_role_review.py` is the G1.2 appointment-review boundary. It binds
+the exact G1.1 role-packet bytes to separate application-owner and outside-
+auditor reviews, then binds a later owner decision to the completed review.
+The owner may equal only the consumer curator; the auditor must be outside all
+five role holders. Synthetic approvals always emit zero authority. A real
+approval chain must stay untracked under ignored `data/` and can authorize
+only curator-run private intake, read-only disposable-snapshot replay, and a
+hash-only manifest capped at 36 groups. It still cannot freeze a corpus,
+authorize candidate code or candidate-lane assembly, execute BioCortex, mutate
+retrieval, write live state, or promote runtime. The validator checks packet
+structure and commitments, not real identities or evidence truth. See
+`docs/design/ENGRAM_G1_ROLE_APPOINTMENT_REVIEW_2026_07_18.md` and run
+`scripts/check-engram-g1-role-review.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class

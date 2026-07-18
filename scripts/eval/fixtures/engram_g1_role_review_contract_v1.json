@@ -1,0 +1,85 @@
+{
+  "schema": "agent_bridge.engram_g1_role_review_contract.v1",
+  "contract_id": "engram_g1_role_review_20260718",
+  "stage": "g1_role_appointment_review_only",
+  "predecessor": {
+    "commit": "3256fe024c2a280bcd4ac0fee4ff79563c0cc36a",
+    "contract_id": "engram_g1_freeze_preflight_20260718",
+    "contract_sha256": "5d4835fa2aa404224b98e7a60574121118051d771079f5a0422ab5839564e94a",
+    "validator_sha256": "f276765f22ee5b2f69e24cf7a79bd9a30e8291f900973d89c06f17d1d0468cdc",
+    "immutable": true
+  },
+  "role_review": {
+    "packet_schema": "agent_bridge.engram_g1_role_review_packet.v1",
+    "evidence_classes": [
+      "synthetic_contract_test",
+      "consumer_owned_real"
+    ],
+    "reviewer_roles": [
+      "application_owner",
+      "independence_auditor"
+    ],
+    "application_owner_may_equal_consumer_curator": true,
+    "application_owner_may_equal_any_other_holder": false,
+    "independence_auditor_must_be_outside_all_role_holders": true,
+    "reviewer_commitments_require_private_salts": true,
+    "review_receipts_must_be_nonzero": true,
+    "review_must_follow_role_packet": true,
+    "candidate_may_author_or_approve_review": false,
+    "accepted_decisions": [
+      "approve",
+      "reject"
+    ],
+    "both_reviews_must_approve_for_owner_decision": true,
+    "validator_authenticates_real_world_identity": false
+  },
+  "owner_decision": {
+    "packet_schema": "agent_bridge.engram_g1_role_owner_decision_packet.v1",
+    "owner_commitment_must_match_review": true,
+    "decision_must_follow_completed_review": true,
+    "accepted_decisions": [
+      "approve_private_corpus_assembly",
+      "reject_role_roster"
+    ],
+    "approve_requires_both_reviews_approved": true,
+    "authorization_receipt_must_be_nonzero": true,
+    "candidate_may_author_owner_decision": false,
+    "validator_authenticates_owner_identity": false
+  },
+  "approved_assembly_scope": {
+    "authorized_executor_role": "consumer_curator",
+    "authorized_custody_role": "sealed_evaluator_custodian",
+    "permitted_actions": [
+      "create_private_corpus_intake_under_ignored_data",
+      "perform_read_only_baseline_replay_on_disposable_snapshots",
+      "prepare_hash_only_manifest_for_freeze_review"
+    ],
+    "maximum_intake_episode_groups": 36,
+    "candidate_lane_may_execute": false,
+    "writes_live_store": false,
+    "mutates_retrieval_order": false,
+    "grants_corpus_freeze": false,
+    "grants_candidate_implementation": false,
+    "grants_biocortex_execution": false,
+    "grants_runtime_promotion": false
+  },
+  "privacy": {
+    "real_packets_must_be_ignored_under_data": true,
+    "raw_identities_forbidden": true,
+    "raw_queries_forbidden": true,
+    "redacted_receipt_contains_holder_commitments": false,
+    "redacted_receipt_contains_reviewer_commitments": false,
+    "redacted_receipt_contains_appointment_or_review_receipts": false
+  },
+  "boundaries": {
+    "observes_real_role_evidence": false,
+    "assigns_real_role_holders": false,
+    "current_private_corpus_assembly_authority": false,
+    "g1_corpus_freeze_authority": false,
+    "candidate_implementation_authority": false,
+    "biocortex_experiment_execution_authority": false,
+    "retrieval_order_mutation_authority": false,
+    "live_store_write_authority": false,
+    "runtime_promotion_authority": false
+  }
+}
