@@ -1,20 +1,31 @@
-# Engram G1.3 Corpus-Freeze Review Gate Result
+# Engram G1.3 Structural Corpus-Freeze Review Gate Result
 
 Date: 2026-07-18
 
-Status: **PASS / PRIVATE FREEZE REVIEW ONLY**
+Status: **PASS / STRUCTURAL FREEZE REVIEW ONLY / SECURE CUSTODY REQUIRED / NO AUTHORITY**
 
 ## Result
 
-The G1.3 public contract, owner-to-manifest input-chain validator, two-reviewer
-freeze validator, custody validator, and synthetic negative suite pass. The
-gate fixes the future freeze decision before any new private corpus is
-assembled.
+The hardened G1.3 contract, input-chain validator, two-reviewer structural
+freeze validator, structural custody-attestation validator, and adversarial
+suite pass. The gate fixes the future freeze-review protocol while keeping every
+operational authority and candidate-protocol preregistration readiness false.
 
-No real role, review, owner-decision, corpus manifest, or freeze evidence was
-found or created. No raw query, target key, episode-group membership,
-partition membership, identity, or sealed material was read into the public
-artifacts.
+The imported G1.3 draft at `98fc4a64b5745e45a07285b0049c9daff89359ef`
+treated a caller-controlled `consumer_owned_real` label plus ignored-path
+placement as sufficient to set freeze authority and G1.4 readiness. This result
+supersedes that authority model. A claimed-real double endorsement can now only
+report structural completion while requiring a separately preregistered
+secure-custody and authenticated-authority adapter. It is not ready for
+authenticated review.
+
+The checker used no authenticated real-world role, review, owner-decision,
+corpus-manifest, or freeze evidence. It temporarily created synthetic packets
+relabeled claimed-real under ignored `data/`, exercised the laundering path,
+and removed them. In normal use the validator can structurally read
+caller-supplied claimed-real packets but does not authenticate their contents or
+path custody. No raw query, target key, episode-group membership, partition
+membership, identity, or sealed material entered public artifacts.
 
 ## Binding
 
@@ -24,49 +35,98 @@ artifacts.
   `5d4835fa2aa404224b98e7a60574121118051d771079f5a0422ab5839564e94a`;
 - G1.1 validator SHA-256:
   `f276765f22ee5b2f69e24cf7a79bd9a30e8291f900973d89c06f17d1d0468cdc`;
-- G1.2 role-review commit:
-  `426560f67369ec5851b4813fe31a3fe12ae4adde`;
+- hardened G1.2 commit:
+  `400550236a643867086464e681be1fd5d12e579f`;
 - G1.2 contract SHA-256:
-  `efb7464e2922d0dd2645698435272714316d07f786bd5a56114e900b99e31f6c`;
+  `f8c6cb0784b9981d5f9492bfa5d3539972e9eda2a0c28568ecda251c3f1c9e35`;
 - G1.2 validator SHA-256:
-  `5efe72815341492b84a4bd0dee487d1eb572e60e7938f3df7e5cb9710ef8706f`;
+  `98c71e96cfc05552ed5fecfb92f74066d3e0ddab173015f64abede730545a3a6`;
 - G1.3 contract SHA-256:
-  `885ad2c0a0590631b1a4c33e168bffd5e1153039a1b5325a24c343599c5c35b5`;
+  `5657ac8f4b6fd4f154de7285fd4a62125bf4ea15cba787d25da40701a3ac1504`;
 - G1.3 validator SHA-256:
-  `e018a1af2bb0aa93af4868787a0cc186164a5661cf306549a0dfe42aa6f9d657`;
+  `0b7cb3295bc3690bbfeee033de2ddf27a39eb71d0cec68f96e9b27b1a67ef089`;
 - G1.3 checker SHA-256:
-  `577a5e02e380858a452e8edb4c030c677d30cd53ceedaf86ab784f765ea194b6`.
+  `e56a6f50a2c0372d0d59390e8792bc4269c4f63e282d49cf1a1bfe1fdd463e39`.
 
-The predecessor files remain unchanged. G1.3 loads and hashes both predecessor
-validators before it accepts their packet types.
+The predecessor files remain unchanged. G1.3 hashes and invokes both exact
+predecessor validators before it evaluates a freeze-review packet.
 
 ## Structural proof
 
-The positive synthetic chain contains five distinct role holders, an
-application-owner approval, an outside independence audit, an owner assembly
-decision, a complete 30-group manifest with 540 baseline observations, two
-appointed freeze-review approvals, and matching sealed custody.
+The positive synthetic chain contains five distinct role holders, separate
+application-owner and independence-auditor approvals, a structural owner
+endorsement, a complete 30-group manifest with 540 baseline observations, two
+appointed freeze-review endorsements, and a matching structural custody
+attestation.
 
-Its final verdict is `SYNTHETIC_FREEZE_APPROVAL_VALID_NO_AUTHORITY`.
-Structural approvability is true while every operational authority remains
-false.
+Its final verdict is
+`SYNTHETIC_FREEZE_ENDORSEMENT_VALID_NO_AUTHORITY`. Structural validity is true,
+while assembly authority, freeze authority, all candidate/data/runtime
+authorities, and G1.4 readiness remain false.
 
 The mutation suite rejects:
 
-- contract relaxation and manifest substitution permission;
-- owner rejection and manifest assembly before owner authorization;
-- role, review, owner-decision, or manifest hash drift;
+- contract relaxation or manifest substitution permission;
+- owner rejection and manifest assembly before owner endorsement;
+- role, review, owner-decision, or manifest byte-binding drift;
 - freeze review starting before manifest assembly;
 - candidate, duplicate, or outsider reviewer commitments;
-- approval with an incomplete registered check;
+- endorsement with an incomplete registered check;
 - placeholder or duplicate review receipts;
 - wrong custodian, receipt reuse, or changed-manifest custody;
 - candidate-authored freeze review or raw identity fields;
-- real evidence packets outside ignored `data/`;
+- human-readable packet identifiers;
+- packet identifiers aliasing holder, prior-review, or custody SHA-256 values;
+- packet identifiers, owner/review/custody receipts, private group identifiers,
+  or other redacted SHA-256 values aliasing public contract, validator, or
+  whole-packet receipt digests;
+- claimed-real packets outside ignored `data/`;
 - duplicate JSON keys.
 
-One reviewer rejection is accepted as a valid rejection receipt and yields no
-freeze or next-stage authority.
+One reviewer rejection is accepted only as
+`SYNTHETIC_FREEZE_REJECTION_VALID_NO_AUTHORITY` and cannot advance any gate.
+
+## Laundering regression
+
+The checker copies the complete synthetic role, role-review, owner-endorsement,
+manifest, and freeze-review chain into ignored `data/`, relabels every packet
+`consumer_owned_real`, repairs all packet-byte hashes, and checks both the
+intermediate chain receipt and final freeze receipt. The validator may classify
+the result as
+`CLAIMED_REAL_FREEZE_ENDORSEMENT_REQUIRES_SECURE_CUSTODY_CAPTURE`, and explicitly
+keeps secure-custody verification and authenticated-review readiness false,
+along with all of the following:
+
+- authenticated freeze authority verified;
+- private-corpus assembly authority;
+- G1 corpus-freeze authority;
+- candidate-protocol preregistration readiness;
+- candidate manifest and FIT access;
+- candidate implementation;
+- BioCortex experiment execution;
+- retrieval-order mutation;
+- live-store writes;
+- runtime promotion.
+
+This proves that evidence-class relabeling, ignored-path placement, complete
+attestations, and local structural validation cannot mint authority.
+
+An independent review found that read-before-path-check handling of
+caller-controlled files could otherwise issue a misleading structural
+authentication-readiness receipt after a path swap. G1.3 closes that path
+fail-closed: it makes no secure-custody claim and emits no authentication
+readiness. Implementing no-follow retained-identity capture belongs to the
+separately preregistered successor adapter.
+
+The same review cycle found that a private value could have aliased a public
+receipt digest while the redacted receipt claimed that private value was absent.
+G1.3 now rejects that cross-namespace alias across the complete input chain and
+freeze packet. A table-driven nine-case matrix covers chain packet IDs, holder
+commitments, owner receipts, group IDs, query commitments, target commitments,
+current review receipts, custody receipts, and freeze packet IDs. Its targets
+span public contract, current and predecessor validator, and whole-packet
+digests, and every case must reach the dedicated alias guard rather than fail
+for an unrelated structural reason.
 
 ## Verification
 
@@ -79,33 +139,29 @@ Passed:
 - `scripts/check-engram-g1-corpus-freeze-review.sh`;
 - Python compile, Pyflakes, Black, and Bash syntax checks;
 - deterministic double-run and outside-working-directory checks;
-- redacted-receipt commitment exclusion checks;
-- scan of all six changed files against 12 protected G0 query/target literal
-  occurrences: zero matches;
+- redacted-receipt group/query/target, commitment, receipt, and packet-ID
+  exclusion checks, including cross-namespace public-digest alias regressions;
+- nine-case redacted/public SHA-256 alias matrix spanning contract, current and
+  predecessor validator, and whole-packet digest categories;
+- forged synthetic-to-claimed-real laundering regression under ignored
+  `data/`, with every authority field false;
 - changed-file scan for checked-in real evidence packets: zero files;
 - `git diff --check`.
 
 ## Authority boundary
 
-The checked-in contract and all synthetic evidence grant no authority. A
-future real double-review can freeze only the exact 30-group manifest bytes.
-Any addition, removal, substitution, repartition, relabel, or byte change
-requires a new review.
-
-Even a real freeze keeps the following false:
-
-- candidate manifest access;
-- candidate FIT access;
-- candidate implementation;
-- BioCortex experiment execution;
-- retrieval-order mutation;
-- live-store writes;
-- runtime promotion.
+G1.3 is a structural endorsement gate only. It does not authenticate people,
+appointments, signatures, review acts, custody, evidence truth, canonical-path
+identity, or authority. Its receipt is not secure-custody evidence. A future
+authenticated adapter must be independently preregistered and threat-reviewed,
+then securely reopen and revalidate the exact originals before any authority can
+become true.
 
 ## Next gate
 
-The next public design gate after a real freeze is candidate-protocol
-preregistration: source/configuration hash lock, permitted FIT/development
-interfaces, one-shot sealed execution, matched comparator budgets, and explicit
-falsifier execution. It must not expose the private manifest or grant code
-authority merely because G1.3 exists.
+G1.4 candidate-protocol preregistration remains closed. The next admissible work
+is design-only preregistration of the authenticated authority adapter itself,
+including trust anchors, domain-separated signatures, replay protection,
+canonical repository/path binding, no-follow file access, retained file
+identity, hardlink policy, and exact predecessor/scope binding. That design does
+not authorize implementing or enabling the adapter.

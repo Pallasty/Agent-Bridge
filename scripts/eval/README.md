@@ -121,14 +121,25 @@ identities, evidence truth, or signatures. See
 
 `engram_g1_corpus_freeze_review.py` is the G1.3 corpus-freeze boundary. It
 revalidates and byte-binds the G1.1 role/manifest packets and G1.2 role-review
-and owner-approval packets, requires manifest assembly after owner approval,
-then requires both appointed freeze reviewers plus the sealed custodian. The
-frozen object is the exact 30-group manifest bytes; any addition, removal,
-substitution, repartition, relabel, or byte change requires a new review.
-Synthetic approvals always emit zero authority. A future real pass may only
-record that exact manifest as frozen and open candidate-protocol
-preregistration. It grants no candidate manifest/FIT access, implementation,
-BioCortex execution, retrieval mutation, live writes, or promotion. See
+and structural owner-endorsement packets, requires manifest assembly after the
+endorsement, then requires both appointed freeze reviewers plus the sealed
+custodian. The proposed freeze object is the exact 30-group manifest bytes; any
+addition, removal, substitution, repartition, relabel, or byte change requires
+a new review. Synthetic and claimed-real passes always emit zero authority. A
+claimed-real double endorsement can only report structural completion while
+requiring a separately preregistered secure-custody and authenticated-authority
+adapter; it is not ready for authenticated review. The validator does not use
+no-follow retained-identity file capture and therefore cannot certify custody.
+It cannot freeze the manifest, open candidate-protocol preregistration, grant
+candidate manifest/FIT access or implementation, execute BioCortex, mutate
+retrieval, write live state, or promote runtime. Packet IDs are opaque,
+non-aliasing SHA-256 values omitted from redacted receipts. Every redacted
+SHA-256 value across the input chain and freeze packet must not alias a public
+contract, current or predecessor validator, or whole-packet receipt digest. The
+checker includes a nine-case table-driven matrix spanning chain IDs,
+commitments, receipts, group/query/target values, current review/custody values,
+and public contract, current and predecessor validator, and packet-digest
+targets. See
 `docs/design/ENGRAM_G1_CORPUS_FREEZE_REVIEW_2026_07_18.md` and run
 `scripts/check-engram-g1-corpus-freeze-review.sh`.
 

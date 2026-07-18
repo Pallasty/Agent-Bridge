@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.engram_g1_corpus_freeze_review_contract.v1",
   "contract_id": "engram_g1_corpus_freeze_review_20260718",
-  "stage": "g1_corpus_freeze_review_only",
+  "stage": "g1_corpus_freeze_structural_review_only",
   "predecessors": {
     "freeze_preflight": {
       "commit": "3256fe024c2a280bcd4ac0fee4ff79563c0cc36a",
@@ -11,10 +11,10 @@
       "immutable": true
     },
     "role_review": {
-      "commit": "426560f67369ec5851b4813fe31a3fe12ae4adde",
+      "commit": "400550236a643867086464e681be1fd5d12e579f",
       "contract_id": "engram_g1_role_review_20260718",
-      "contract_sha256": "efb7464e2922d0dd2645698435272714316d07f786bd5a56114e900b99e31f6c",
-      "validator_sha256": "5efe72815341492b84a4bd0dee487d1eb572e60e7938f3df7e5cb9710ef8706f",
+      "contract_sha256": "f8c6cb0784b9981d5f9492bfa5d3539972e9eda2a0c28568ecda251c3f1c9e35",
+      "validator_sha256": "98c71e96cfc05552ed5fecfb92f74066d3e0ddab173015f64abede730545a3a6",
       "immutable": true
     }
   },
@@ -29,9 +29,12 @@
     "manifest_schema": "agent_bridge.engram_g1_private_corpus_manifest.v1",
     "exact_packet_byte_binding_required": true,
     "all_evidence_classes_must_match": true,
-    "required_owner_decision": "approve_private_corpus_assembly",
-    "owner_decision_must_precede_manifest_assembly": true,
-    "real_owner_decision_must_grant_private_assembly": true,
+    "required_owner_decision": "endorse_private_corpus_assembly_for_authentication",
+    "owner_endorsement_must_precede_manifest_assembly": true,
+    "structural_endorsement_grants_private_assembly": false,
+    "authenticated_assembly_authority_verified_by_validator": false,
+    "secure_custody_capture_verified_by_validator": false,
+    "claimed_real_manifest_is_not_proof_of_authorized_assembly": true,
     "manifest_must_pass_freeze_preflight": true,
     "real_packets_must_be_ignored_under_data": true
   },
@@ -44,7 +47,7 @@
       "approve",
       "reject"
     ],
-    "both_reviewers_must_approve_for_freeze": true,
+    "both_reviewers_must_approve_for_freeze_endorsement": true,
     "review_must_follow_manifest_assembly": true,
     "review_must_follow_owner_decision": true,
     "review_receipts_must_be_nonzero_and_distinct": true,
@@ -63,7 +66,7 @@
     "candidate_receives_manifest_or_sealed_material": false,
     "freeze_reviewers_receive_sealed_raw_material": false
   },
-  "approved_freeze_scope": {
+  "proposed_freeze_scope": {
     "frozen_object": "exact_private_manifest_bytes",
     "frozen_episode_groups": 30,
     "permits_group_addition": false,
@@ -72,19 +75,26 @@
     "permits_repartition": false,
     "permits_relabel": false,
     "requires_new_review_for_any_manifest_change": true,
-    "permitted_next_action": "prepare_candidate_protocol_preregistration",
-    "grants_corpus_freeze": true,
+    "permitted_next_action": "preregister_secure_custody_and_authenticated_authority_adapter",
+    "requires_secure_custody_capture_before_authenticated_review": true,
+    "grants_corpus_freeze": false,
+    "grants_candidate_protocol_preregistration": false,
     "grants_candidate_manifest_access": false,
     "grants_candidate_fit_access": false,
     "grants_candidate_implementation": false,
     "grants_biocortex_execution": false,
     "mutates_retrieval_order": false,
     "writes_live_store": false,
-    "grants_runtime_promotion": false
+    "grants_runtime_promotion": false,
+    "requires_authenticated_freeze_authority_before_preregistration": true
   },
   "privacy": {
     "raw_identities_forbidden": true,
     "raw_queries_forbidden": true,
+    "freeze_review_packet_identifier_must_be_opaque_sha256": true,
+    "freeze_review_packet_identifier_must_not_alias_any_chain_sha256": true,
+    "freeze_review_private_sha256_values_must_not_alias_public_receipt_sha256": true,
+    "redacted_receipt_contains_freeze_review_packet_identifier": false,
     "redacted_receipt_contains_group_identifiers": false,
     "redacted_receipt_contains_partition_membership": false,
     "redacted_receipt_contains_holder_or_reviewer_commitments": false,
@@ -93,7 +103,12 @@
   "boundaries": {
     "observes_real_role_or_corpus_evidence": false,
     "freezes_real_corpus": false,
+    "current_private_corpus_assembly_authority": false,
     "current_g1_corpus_freeze_authority": false,
+    "authenticated_freeze_authority_verified": false,
+    "secure_custody_capture_verified": false,
+    "ready_for_authenticated_freeze_authority_review": false,
+    "ready_for_candidate_protocol_preregistration": false,
     "candidate_manifest_access_authority": false,
     "candidate_fit_access_authority": false,
     "candidate_implementation_authority": false,

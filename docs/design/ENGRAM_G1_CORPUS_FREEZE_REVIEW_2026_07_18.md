@@ -1,137 +1,166 @@
-# Engram G1.3 Corpus-Freeze Review
+# Engram G1.3 Structural Corpus-Freeze Review
 
 Date: 2026-07-18
 
-Status: **READY FOR PRIVATE FREEZE-REVIEW PACKETS / NO CURRENT AUTHORITY**
+Status: **READY FOR STRUCTURAL FREEZE-REVIEW PACKETS / SECURE CUSTODY REQUIRED / NO AUTHORITY**
 
 ## Decision
 
 G1.3 preregisters the corpus-freeze review before any private G1 corpus is
-assembled. This prevents the roster, partition, provenance, replay, or custody
-rules from being relaxed after reviewers have seen the proposed cohort.
+assembled. It fixes the manifest, reviewer, custody, redaction, and chronology
+rules before reviewers can see a proposed cohort.
 
-The registered public contract is
+This gate is deliberately non-authorizing. It can validate a synthetic or
+claimed-real packet chain and can report a structurally complete claimed-real
+double endorsement. That result still requires preregistration of a separate
+secure-custody and authenticated-authority adapter; it is not ready for
+authenticated review. G1.3 never freezes a corpus and never opens
+candidate-protocol preregistration.
+
+The registered contract is
 `scripts/eval/fixtures/engram_g1_corpus_freeze_review_contract_v1.json`,
 SHA-256
-`885ad2c0a0590631b1a4c33e168bffd5e1153039a1b5325a24c343599c5c35b5`.
+`5657ac8f4b6fd4f154de7285fd4a62125bf4ea15cba787d25da40701a3ac1504`.
 It binds two immutable predecessors:
 
-- G1.1 freeze preflight commit
+- G1.1 freeze-preflight commit
   `3256fe024c2a280bcd4ac0fee4ff79563c0cc36a`, contract SHA-256
   `5d4835fa2aa404224b98e7a60574121118051d771079f5a0422ab5839564e94a`,
   and validator SHA-256
   `f276765f22ee5b2f69e24cf7a79bd9a30e8291f900973d89c06f17d1d0468cdc`;
-- G1.2 role-review commit
-  `426560f67369ec5851b4813fe31a3fe12ae4adde`, contract SHA-256
-  `efb7464e2922d0dd2645698435272714316d07f786bd5a56114e900b99e31f6c`,
+- hardened G1.2 role-review commit
+  `400550236a643867086464e681be1fd5d12e579f`, contract SHA-256
+  `f8c6cb0784b9981d5f9492bfa5d3539972e9eda2a0c28568ecda251c3f1c9e35`,
   and validator SHA-256
-  `5efe72815341492b84a4bd0dee487d1eb572e60e7938f3df7e5cb9710ef8706f`.
-
-This public contract does not observe role evidence, assemble or freeze a
-corpus, or grant candidate access. It fixes only the later private review
-protocol.
+  `98c71e96cfc05552ed5fecfb92f74066d3e0ddab173015f64abede730545a3a6`.
 
 ## Exact input chain
 
-One freeze decision binds the exact bytes of:
+One structural freeze review binds the exact bytes of:
 
 1. the G1.1 role-commitment packet;
 2. the G1.2 application-owner and independence-auditor review packet;
-3. the G1.2 owner decision approving private corpus assembly;
+3. the G1.2 owner endorsement for later authentication;
 4. the G1.1 30-group private manifest;
 5. the G1.3 two-reviewer freeze packet.
 
-All packets must carry the same evidence class. A real chain must remain
-untracked under the repository's ignored `data/` tree.
+All packets must carry the same evidence class. A claimed-real chain must remain
+untracked under the canonical repository's ignored `data/` tree. Packet bytes
+are read once for structural validation and every later stage binds their
+SHA-256, but G1.3 does not securely capture or retain path identity.
 
-Chronology is fail-closed. The role review follows appointment, the owner
-decision follows the completed role review, manifest assembly follows the
-owner decision, and freeze review follows manifest assembly. Equal timestamps
-are rejected at every strict transition.
+Chronology is strict: role review follows appointment, owner endorsement follows
+the completed review, manifest assembly follows the endorsement, and freeze
+review follows manifest assembly. Equal timestamps are rejected.
 
-A manifest assembled before owner authorization cannot be repaired by adding
-an approval later. It must be discarded and assembled again under an approved
-chain.
+The chronology check does not turn the G1.2 endorsement into assembly
+permission. G1.2 keeps assembly authority false on every path. A claimed-real
+manifest is therefore evidence presented for structural review, not proof that
+its assembly was authorized. G1.3 cannot repair or legitimize an unauthorized
+assembly.
 
 ## Manifest invariants
 
-The manifest is revalidated by the exact G1.1 validator before freeze review.
-It must contain exactly 30 indivisible episode groups with the registered
-FIT/development/sealed counts, signature minima, one FIT-only admitted G0
-incident, two identical baseline replays, at least four application families,
-and no family above 10 groups.
+The exact G1.1 validator revalidates the manifest. It must contain 30 indivisible
+episode groups with the registered FIT/development/sealed counts, signature
+minimums, one FIT-only admitted G0 incident, two identical baseline replays, at
+least four application families, and no family above 10 groups.
 
-The freeze object is the exact manifest bytes, not a logical label or mutable
-database query. An approved freeze permits no group addition, removal,
-substitution, repartition, or relabeling. Any byte-level manifest change
-requires a new freeze review.
+The proposed freeze object is the exact manifest bytes, not a mutable label or
+database query. The structural endorsement permits no group addition, removal,
+substitution, repartition, or relabeling. Any byte change requires a new review.
+These invariants define a proposal only; `grants_corpus_freeze` is false.
 
-## Two independent freeze reviewers
+## Two reviewers and sealed custody
 
 The private packet uses schema
-`agent_bridge.engram_g1_corpus_freeze_review_packet.v1`. It must contain
-exactly two reviewer decisions. Their salted commitments must equal the two
-`freeze_reviewer` commitments in the bound role packet, each exactly once.
+`agent_bridge.engram_g1_corpus_freeze_review_packet.v1` and contains exactly two
+reviewer decisions. Their salted commitments must equal the two appointed
+`freeze_reviewer` commitments, each exactly once.
 
-Each approval attests that the reviewer checked:
+Each endorsement attests that the reviewer checked:
 
-- the exact manifest-byte binding;
+- exact manifest-byte binding;
 - roster and aggregate partition counts;
-- provenance receipts;
-- deterministic replay integrity;
-- the application-family cap;
-- the admitted G0 incident's FIT-only placement;
+- provenance receipts and deterministic replay integrity;
+- the application-family cap and admitted G0 FIT-only placement;
 - candidate-exclusion rules;
-- that the reviewer did not receive sealed raw material.
+- that sealed raw material was not received.
 
-Both reviewers must approve. A rejection is a valid structural result but
-produces no freeze authority. Review receipts must be non-placeholder and
+Both reviewers must endorse before the structural freeze endorsement is
+complete. That completion is not submission readiness for authenticated review;
+secure custody remains unverified. A rejection remains a valid structural
+result and cannot open any later gate. Review receipts are non-placeholder and
 distinct.
 
-## Sealed custody
-
-The custodian commitment must exactly match the sole
-`sealed_evaluator_custodian` in the role packet. The custodian attests that:
-
-- the exact manifest and private salts remain in custody;
-- manifest bytes did not change during review;
-- freeze reviewers received hash-only material;
-- the candidate received neither manifest nor sealed material;
-- sealed raw material, partition membership, and labels remain undisclosed;
-- freeze reviewers did not receive sealed raw material.
+The custodian commitment must match the sole
+`sealed_evaluator_custodian`. The custodian attests that the exact manifest and
+private salts remain in custody, bytes did not change during review, reviewers
+received hash-only material, and the candidate received neither the manifest
+nor sealed material. The custody receipt is non-placeholder and distinct from
+both review receipts.
 
 The validator checks commitment relationships and packet structure. It cannot
-authenticate a person, appointment, review act, receipt, or custody claim.
-The custody receipt must be non-placeholder and distinct from both freeze-
-review receipts.
+authenticate a person, appointment, review act, receipt, custody claim, or
+evidence truth.
 
-## Synthetic and real authority
+## Zero-authority state machine
 
-Synthetic packets exercise the complete chain but always emit zero authority.
-Even a two-approval synthetic packet returns
-`SYNTHETIC_FREEZE_APPROVAL_VALID_NO_AUTHORITY`.
-
-Only a structurally valid `consumer_owned_real` chain with prior real assembly
-authorization, a valid manifest, two freeze approvals, and matching custody can
-return `G1_CORPUS_FREEZE_AUTHORIZED_FOR_EXACT_MANIFEST`.
-
-That narrow result authorizes only recording the exact manifest hash as the G1
-freeze and preparing the next candidate-protocol preregistration. It does not
-give the candidate the manifest, FIT material, or sealed material. It does not
-authorize candidate implementation, BioCortex execution, retrieval-order
-mutation, live-store writes, or runtime promotion.
-
-| State | Structural result | G1 freeze authority | Candidate implementation |
+| State | Structural result | Freeze authority | G1.4 ready |
 | --- | --- | ---: | ---: |
-| Public contract only | private review may be prepared | false | false |
-| Synthetic full approval | contract path exercised | false | false |
-| Real chain with either rejection | freeze rejected | false | false |
-| Real double approval + custody | exact manifest may be frozen | true | false |
+| Public contract only | packet preparation allowed | false | false |
+| Synthetic double endorsement | contract path exercised | false | false |
+| Claimed-real chain with a rejection | review rejected | false | false |
+| Claimed-real double endorsement + custody claim | structural endorsement complete; secure custody required | false | false |
+
+Every receipt keeps the following false:
+
+- private-corpus assembly authority;
+- G1 corpus-freeze authority;
+- candidate manifest and FIT access;
+- candidate implementation;
+- BioCortex experiment execution;
+- retrieval-order mutation;
+- live-store writes;
+- runtime promotion;
+- candidate-protocol preregistration readiness.
+
+The `consumer_owned_real` label, placement under ignored `data/`, complete
+review flags, and successful local validation are caller-controlled structural
+claims. None can mint authority. The checker proves this with a complete
+synthetic chain relabeled as claimed-real under ignored `data/`; every authority
+field remains false.
+
+G1.3 does not implement no-follow, retained-identity file capture. Therefore a
+caller-controlled claimed-real path can never produce an authenticated-review
+readiness claim, even when every packet and custody attestation is structurally
+consistent. The only permitted successor action is preregistration of the
+separate secure-custody and authenticated-authority adapter.
+
+## Future authenticated adapter
+
+Any authority-bearing successor is a separate gate and requires its own
+preregistration and threat review. At minimum it must verify domain-separated
+signatures against independently configured owner, auditor, reviewer, and
+custodian trust anchors; bind the canonical repository and predecessor commits;
+walk private paths with no-follow directory descriptors; retain file identity
+through validation; define a hardlink policy; and reject replay or scope drift.
+
+No such adapter is implemented here. A G1.3 receipt is not admissible as secure
+custody evidence by itself: the successor must securely reopen the originals,
+retain their identity through revalidation, and prove that the authenticated
+bytes match the structural bindings. G1.4 remains closed until authenticated
+freeze authority exists through that separate mechanism.
 
 ## Redacted receipts
 
-Receipts contain whole-packet hashes and aggregate counts only. They omit group
-identifiers, partition membership, holder and reviewer commitments,
+G1.3 freeze-review `packet_id` values are non-placeholder SHA-256 values, cannot
+alias any SHA-256 value in the bound chain or current review packet, and are
+omitted from receipts. Every other redacted SHA-256 value in the bound input
+chain or freeze packet—including group, query, commitment, and private receipt
+values—must not alias a public contract, validator, or whole-packet receipt
+digest. Receipts contain public bindings and aggregate counts only. They omit
+group identifiers, partition membership, holder and reviewer commitments,
 appointment/review/custody receipts, raw identities, raw queries, and sealed
 material.
 
@@ -142,15 +171,6 @@ scripts/check-engram-g1-corpus-freeze-review.sh
 
 python3 scripts/eval/engram_g1_corpus_freeze_review.py validate-contract \
   --contract scripts/eval/fixtures/engram_g1_corpus_freeze_review_contract_v1.json
-
-python3 scripts/eval/engram_g1_corpus_freeze_review.py validate-chain \
-  --contract scripts/eval/fixtures/engram_g1_corpus_freeze_review_contract_v1.json \
-  --preflight-contract scripts/eval/fixtures/engram_g1_freeze_preflight_contract_v1.json \
-  --role-review-contract scripts/eval/fixtures/engram_g1_role_review_contract_v1.json \
-  --role-packet data/eval/engram-g1/ROLE_PACKET.private.json \
-  --role-review-packet data/eval/engram-g1/ROLE_REVIEW.private.json \
-  --owner-decision data/eval/engram-g1/OWNER_DECISION.private.json \
-  --manifest data/eval/engram-g1/CORPUS_MANIFEST.private.json
 
 python3 scripts/eval/engram_g1_corpus_freeze_review.py validate-freeze-review \
   --contract scripts/eval/fixtures/engram_g1_corpus_freeze_review_contract_v1.json \
@@ -163,13 +183,23 @@ python3 scripts/eval/engram_g1_corpus_freeze_review.py validate-freeze-review \
   --freeze-review data/eval/engram-g1/CORPUS_FREEZE_REVIEW.private.json
 ```
 
-The checker builds the full 30-group synthetic chain in a temporary directory
-and rejects contract relaxation, owner rejection, pre-authorization assembly,
-byte-binding drift, reviewer impersonation or duplication, incomplete
-approval, placeholder or duplicate receipts, custody mismatch, manifest drift,
-candidate involvement, raw identity fields, real packets outside ignored
-`data/`, and duplicate JSON keys.
+The checker builds the full 30-group synthetic chain and rejects contract
+relaxation, owner rejection, pre-endorsement assembly, byte-binding drift,
+reviewer impersonation or duplication, incomplete endorsements, placeholder or
+duplicate receipts, custody mismatch, manifest drift, candidate involvement,
+raw identity fields, non-opaque or aliasing packet identifiers, real packets
+outside ignored `data/`, redacted SHA-256 values aliasing public contract,
+validator, or packet digests, and duplicate JSON keys.
 
-No real role, review, owner-decision, manifest, or freeze packet is created by
-G1.3. Until that external evidence exists, current freeze authority remains
-false.
+Its table-driven alias matrix covers chain packet IDs, holder commitments,
+owner receipts, group IDs, query and target commitments, current review and
+custody receipts, and the freeze packet ID. The target categories span public
+contract, current and predecessor validator, and whole-packet digests. Each
+case repairs all downstream byte bindings and must fail at the dedicated alias
+guard.
+
+The checker creates temporary synthetic packets relabeled claimed-real under
+ignored `data/`, validates that laundering attempt, and removes them. In normal
+use G1.3 can structurally read caller-supplied claimed-real packets, but it does
+not authenticate their people, evidence, path custody, or authority. No
+authenticated real-world evidence was used for this gate result.
