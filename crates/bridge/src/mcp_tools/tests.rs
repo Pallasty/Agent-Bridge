@@ -7595,6 +7595,105 @@ async fn chatgpt_forum_search_and_fetch_enforce_tag_boundary_and_omit_refs() {
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
 
+#[tokio::test]
+async fn chatgpt_forum_search_and_fetch_keep_payloads_bounded() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.as_ref().expect("store").clone();
+    let allowed_tags = vec!["agent-bridge".to_string()];
+    let long_suffix = "x".repeat(2_000);
+    let first = store
+        .forum_post(
+            None,
+            Some("design"),
+            Some("Payload thread 00"),
+            "codex-test",
+            "finding",
+            &format!("payload oldest-marker {long_suffix}"),
+            Some(&json!({ "secret_path": "/private/never-return-this" })),
+            Some(&allowed_tags),
+        )
+        .await
+        .expect("first payload thread");
+
+    for index in 1..12 {
+        let marker = if index == 11 {
+            "newest-marker"
+        } else {
+            "middle"
+        };
+        store
+            .forum_post(
+                Some(first.thread_id),
+                None,
+                None,
+                "codex-test",
+                "finding",
+                &format!("payload post {index:02} {marker} {long_suffix}"),
+                Some(&json!({ "secret_path": "/private/never-return-this" })),
+                None,
+            )
+            .await
+            .expect("append payload post");
+    }
+    for index in 1..12 {
+        store
+            .forum_post(
+                None,
+                Some("design"),
+                Some(&format!("Payload thread {index:02}")),
+                "codex-test",
+                "finding",
+                &format!("payload search body {index:02} {long_suffix}"),
+                None,
+                Some(&allowed_tags),
+            )
+            .await
+            .expect("additional payload thread");
+    }
+
+    let search = ChatGptForumSearchTool::new(hub.clone(), allowed_tags.clone())
+        .execute(json!({ "query": "payload" }), &ToolContext::default())
+        .await
+        .expect("bounded forum search");
+    let search_structured = search
+        .structured_content
+        .as_ref()
+        .expect("structured search");
+    let results = search_structured["results"].as_array().expect("results");
+    assert_eq!(results.len(), CHATGPT_FORUM_SEARCH_LIMIT as usize);
+    assert!(results.iter().all(|result| {
+        result["preview"].as_str().expect("preview").chars().count()
+            <= CHATGPT_FORUM_PREVIEW_CHARS + 1
+    }));
+    assert!(
+        serde_json::to_vec(&search).expect("serialize search").len() < 16 * 1024,
+        "bounded search should stay below 16 KiB on the MCP wire"
+    );
+
+    let fetch = ChatGptForumFetchTool::new(hub, allowed_tags)
+        .execute(
+            json!({ "id": format!("forum-thread:{}", first.thread_id) }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("bounded forum fetch");
+    let fetched = fetch.structured_content.as_ref().expect("structured fetch");
+    let text = fetched["text"].as_str().expect("forum text");
+    assert!(text.contains("newest-marker"));
+    assert!(!text.contains("oldest-marker"));
+    assert!(!text.contains("never-return-this"));
+    assert_eq!(fetched["metadata"]["returned_posts"], "8");
+    assert_eq!(fetched["metadata"]["omitted_posts"], "4");
+    assert_eq!(fetched["metadata"]["body_truncated_posts"], "8");
+    assert_eq!(fetched["metadata"]["content_truncated"], "true");
+    assert!(
+        serde_json::to_vec(&fetch).expect("serialize fetch").len() < 28 * 1024,
+        "bounded fetch should stay below 28 KiB on the MCP wire"
+    );
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
 #[test]
 fn tool_policy_hook_lifecycle_is_allowlisted() {
     let p = ToolPolicy::from_values(Some("hook-lifecycle"), None, None, None);

@@ -23,12 +23,16 @@ By default that is the complete four-tool surface. Setting a non-empty,
 comma-separated `AGENT_BRIDGE_CHATGPT_FORUM_TAGS` adds two separately named
 forum tools:
 
-- `forum_search`: searches only threads carrying at least one allowed tag.
-- `forum_fetch`: reads a bounded recent slice of one returned thread.
+- `forum_search`: searches only threads carrying at least one allowed tag and
+  returns at most eight compact previews.
+- `forum_fetch`: reads the latest eight posts from one returned thread, with
+  per-post and total-text limits. Metadata reports omitted or truncated posts.
 
 The forum adapters never expose post `refs`, mutate subscription cursors, or
 change the behavior of memory `search`/`fetch`. An empty or missing tag
-allowlist keeps both forum tools unregistered.
+allowlist keeps both forum tools unregistered. These limits reduce duplicated
+ChatGPT text/structured-channel payload without changing the required dual-channel
+response contract.
 
 `search` and `fetch` have the exact single-field input schemas expected by
 ChatGPT company knowledge, declare `outputSchema`, and return the same JSON in
@@ -110,8 +114,9 @@ Secure MCP Tunnel avoids a public inbound listener, but fetched memory content
 still travels to the connected OpenAI product and workspace. Before enabling the
 App, confirm that the selected Agent-Bridge memory database is appropriate for
 that workspace. Treat each forum tag in `AGENT_BRIDGE_CHATGPT_FORUM_TAGS` as an
-explicit data-release decision: every matching thread body can be sent to the
-connected OpenAI product, while refs remain hidden. The profile is intentionally
+explicit data-release decision: bounded recent content from every matching
+thread can be sent to the connected OpenAI product, while refs remain hidden.
+The profile is intentionally
 read-only and has no memory, forum, shell, browser, device, or deployment
 mutation tools.
 
