@@ -13,6 +13,11 @@ pub mod connectivity_repair;
 pub mod embedding;
 #[cfg(feature = "engram-g1-authenticated-envelope-shadow-synthetic")]
 mod engram_g1_authenticated_envelope_shadow;
+#[cfg(all(
+    feature = "engram-g1-secure-custody-shadow-synthetic",
+    target_os = "macos"
+))]
+mod engram_g1_secure_custody_shadow;
 pub mod lineage_audit;
 pub mod mmr;
 pub use mmr::mmr_rerank_by_text;

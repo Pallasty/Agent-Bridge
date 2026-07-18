@@ -1,0 +1,249 @@
+{
+  "schema": "agent_bridge.engram_g1_secure_custody_retained_descriptor_shadow_contract.v0",
+  "contract_id": "engram_g1_secure_custody_retained_descriptor_shadow_20260718",
+  "stage": "g1_secure_custody_retained_descriptor_shadow_synthetic_disposable_only",
+  "predecessor": {
+    "stage": "g1_authenticated_freeze_authority_envelope_shadow_synthetic_only",
+    "commit": "2cca958844bc4ddf06954737775d40560119b8d1",
+    "contract_sha256": "066c77027635ef6f0ab388e9bee9cf094a597c7cc1a23cd867aa83d78d8bf6d7",
+    "validator_sha256": "57e0b30fb459c1ac3ec2d9a0eff9ee6673fbd704f2b94702d5a5ebc35df76fe0",
+    "module_sha256": "5f3285482c27a73b768ca3c0726031184cb022516d9d48c4abe4258c4ed117ef",
+    "checker_sha256": "8f602104ad6e6b35af4fe4e681f02c8303f3cc98256d119a0216e58cde24e6d4",
+    "immutable": true
+  },
+  "latest_master_integration": {
+    "gitlab_and_github_master": "1f44c69d31ae29d0cd6c90e84294b3ad0407d9a0",
+    "local_merge_commit": "242573aad4595d307af2d9ffd59052ac2dd63a74",
+    "merge_conflicts": false,
+    "predecessor_remains_ancestor": true
+  },
+  "implementation_surface": {
+    "crate": "ab-store",
+    "module_path": "crates/store/src/engram_g1_secure_custody_shadow.rs",
+    "module_source_sha256": "ef516c9e8784eac869de38aa11c217de1602f7a9d47719216b620b6401356b82",
+    "cargo_feature": "engram-g1-secure-custody-shadow-synthetic",
+    "feature_enabled_by_default": false,
+    "module_exported_publicly": false,
+    "runtime_entrypoint_present": false,
+    "mcp_tool_wiring_present": false,
+    "supported_os": "macos",
+    "supported_filesystem": "local_apfs_only",
+    "unsupported_platform_has_callable_surface": false,
+    "only_entry_permit_constructor_is_test_cfg": true,
+    "synthetic_disposable_tree_only": true,
+    "reads_real_private_corpus": false,
+    "loads_real_keys_or_trust_roots": false,
+    "reads_environment": false,
+    "reads_clock": false,
+    "uses_database": false,
+    "uses_network": false,
+    "spawns_processes": false,
+    "writes_runtime_state": false,
+    "test_setup_writes_only_under_disposable_private_tmp_tree": true,
+    "composes_with_authenticated_envelope_shadow": false
+  },
+  "implemented_shadow_checks": {
+    "absolute_root_opened_from_retained_slash_descriptor": true,
+    "absolute_root_components_opened_one_at_a_time": true,
+    "relative_components_supplied_as_literal_child_names": true,
+    "absolute_root_raw_dot_dotdot_repeated_or_trailing_separator_rejected": true,
+    "relative_empty_dot_dotdot_slash_nul_and_overlong_components_rejected": true,
+    "open_directory_flags": "O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK",
+    "open_file_flags": "O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK|DARWIN_O_UNIQUE",
+    "all_absolute_root_and_relative_parent_descriptors_retained_through_final_validation": true,
+    "file_descriptor_retained_through_read_hash_and_final_validation": true,
+    "synthetic_root_name_prefix_required": "agent-bridge-engram-g1-custody-shadow-",
+    "synthetic_root_and_relative_directory_owner": "effective_uid",
+    "synthetic_root_and_relative_directory_mode_octal": "0700",
+    "file_owner": "effective_uid",
+    "file_mode_octal": "0600",
+    "file_type": "regular",
+    "file_link_count": 1,
+    "darwin_o_unique_atomically_requires_single_link_at_open": true,
+    "maximum_absolute_components": 64,
+    "maximum_relative_components_including_file": 16,
+    "maximum_component_bytes": 255,
+    "maximum_synthetic_file_bytes": 1048576,
+    "file_path_metadata_checked_before_open": true,
+    "opened_file_must_match_preopen_name_metadata": true,
+    "file_metadata_compared_before_and_after_read_without_atime": true,
+    "private_custody_directory_metadata_compared_before_and_after_without_atime": true,
+    "system_ancestor_revalidation_is_device_inode_and_type_only": true,
+    "every_directory_name_revalidated_from_its_retained_parent": true,
+    "final_file_name_revalidated_from_retained_parent": true,
+    "final_name_must_match_retained_file_device_inode_and_type": true,
+    "same_device_required_below_synthetic_root": true,
+    "fstatfs_fingerprint_rechecked": true,
+    "fstatfs_fingerprint_fields": "device_fsid_type_flags_mount_on_mount_from",
+    "mnt_local_required": true,
+    "apfs_type_allowlist_required": true,
+    "unknown_network_and_fuse_filesystems_rejected": true,
+    "independent_expected_content_sha256_and_length_required": true,
+    "error_messages_emit_no_path_errno_uid_inode_or_content": true,
+    "result_emits_no_path_uid_inode_raw_descriptor_or_content": true,
+    "implemented_by_private_feature_gated_module": true
+  },
+  "deterministic_attack_tests": {
+    "required_test_count": 13,
+    "required_cases": [
+      "happy_path_retains_hashes_and_revalidates",
+      "component_escape_forms",
+      "directory_symlink_and_wrong_mode",
+      "root_symlink_wrong_mode_and_non_synthetic_name",
+      "file_symlink_nonregular_and_wrong_mode",
+      "fifo_and_oversized_file",
+      "hardlink_present_before_open",
+      "final_file_name_swap_after_read",
+      "in_place_file_mutation_after_read",
+      "hardlink_created_after_read",
+      "parent_directory_name_swap_after_read",
+      "wrong_independent_content_binding",
+      "nonlocal_nfs_fuse_and_local_apfs_policy"
+    ]
+  },
+  "synthetic_result_contract": {
+    "success_verdict": "SYNTHETIC_RETAINED_DESCRIPTOR_CUSTODY_CONFORMANCE_VERIFIED_NO_AUTHORITY",
+    "failure_verdict": "REJECTED_FAIL_CLOSED",
+    "emits_only_synthetic_content_and_descriptor_chain_digests_and_counts": true,
+    "synthetic_retained_descriptor_conformance_verified_may_be_true": true,
+    "component_by_component_nofollow_verified_may_be_true": true,
+    "effective_uid_and_exact_posix_modes_verified_may_be_true": true,
+    "single_link_regular_file_verified_may_be_true": true,
+    "same_local_apfs_mount_verified_may_be_true": true,
+    "before_after_identity_stability_verified_may_be_true": true,
+    "final_name_to_inode_revalidation_verified_may_be_true": true,
+    "secure_custody_capture_verified": false,
+    "authenticated_envelope_composed": false,
+    "durable_trust_ledger_verified": false,
+    "trusted_time_verified": false,
+    "durable_replay_claim_verified": false,
+    "capability_minted": false,
+    "freeze_authority_verified": false,
+    "ready_for_g1_4_candidate_protocol_preregistration": false,
+    "runtime_authority": false
+  },
+  "explicitly_missing_controls": {
+    "real_private_corpus_path_or_bytes": false,
+    "real_repository_identity_binding": false,
+    "real_manifest_membership_binding": false,
+    "darwin_extended_acl_absence_verified": false,
+    "apfs_clone_snapshot_or_backup_alias_absence_verified": false,
+    "owner_provisioned_private_trust_ledger": false,
+    "durable_monotonic_rollback_protected_trust_revision": false,
+    "authenticated_envelope_and_custody_atomic_composition": false,
+    "trusted_monotonic_time_boot_epoch_or_checkpoint_validation": false,
+    "durable_time_high_water_mark": false,
+    "durable_append_only_single_use_cas_claim": false,
+    "claim_time_key_currentness_recheck": false,
+    "consumer_key_and_process_bound_capability": false,
+    "production_adapter_or_runtime_integration": false
+  },
+  "state_machine": {
+    "current_state": "SYNTHETIC_RETAINED_DESCRIPTOR_SHADOW_IMPLEMENTED_NO_AUTHORITY",
+    "real_adapter_state": "PENDING_IMPLEMENTATION_PREREQUISITES",
+    "representable_states": [
+      "SYNTHETIC_RETAINED_DESCRIPTOR_SHADOW_IMPLEMENTED_NO_AUTHORITY",
+      "REJECTED_FAIL_CLOSED"
+    ],
+    "positive_secure_custody_state_representable": false,
+    "positive_freeze_authority_state_representable": false,
+    "g1_4_open_state_representable": false,
+    "runtime_authority_state_representable": false
+  },
+  "next_gate": {
+    "permitted_next_action": "preregister_separate_atomic_envelope_and_custody_composition_shadow_gate",
+    "implementation_in_this_stage_permitted": false,
+    "must_remain_synthetic_or_disposable": true,
+    "may_load_real_private_corpus": false,
+    "may_provision_real_trust_roots": false,
+    "may_claim_durable_time_or_replay": false,
+    "may_mint_capability": false,
+    "may_open_g1_4": false,
+    "requires_new_threat_review": true
+  },
+  "human_audit_boundary": {
+    "this_synthetic_reversible_shadow_requires_manual_audit": false,
+    "filesystem_policy_widening_still_requires_manual_audit": true,
+    "first_real_private_corpus_access_still_requires_manual_audit": true,
+    "initial_real_trust_root_provisioning_still_requires_manual_audit": true,
+    "first_production_adapter_enablement_still_requires_manual_audit": true,
+    "routine_fail_closed_test_rejection_requires_human_approval": false,
+    "rollback_failure_requires_durable_evidence_and_lesson": true
+  },
+  "threat_model": {
+    "required_cases": [
+      {
+        "threat": "symlinked_root_ancestor_parent_or_file",
+        "shadow_control": "component_by_component_openat_with_nofollow_and_retained_descriptors",
+        "residual": "macos_local_apfs_synthetic_profile_only"
+      },
+      {
+        "threat": "dot_separator_nul_or_component_escape",
+        "shadow_control": "literal_bounded_component_api_and_closed_component_validation",
+        "residual": "no_general_path_parser_or_unicode_normalization_support"
+      },
+      {
+        "threat": "preopen_name_to_inode_race",
+        "shadow_control": "nofollow_fstatat_then_openat_then_exact_descriptor_metadata_match",
+        "residual": "failure_is_rejection_without_authority"
+      },
+      {
+        "threat": "file_name_swap_after_read",
+        "shadow_control": "retained_file_descriptor_plus_final_fstatat_name_to_inode_revalidation",
+        "residual": "no_real_private_bytes_are_loaded"
+      },
+      {
+        "threat": "parent_or_root_name_swap_after_read",
+        "shadow_control": "every_retained_directory_name_revalidated_from_its_retained_parent",
+        "residual": "system_ancestor_metadata_is_identity_checked_not_owner_mode_constrained"
+      },
+      {
+        "threat": "hardlink_alias_before_or_during_capture",
+        "shadow_control": "st_nlink_equals_one_before_and_after_plus_darwin_o_unique_at_open",
+        "residual": "no_cross_host_or_snapshot_identity_claim"
+      },
+      {
+        "threat": "fifo_device_directory_oversize_or_permission_substitution",
+        "shadow_control": "nonblocking_open_plus_regular_type_size_owner_and_exact_mode_policy",
+        "residual": "owner_identity_is_local_effective_uid_and_extended_acl_absence_is_unverified"
+      },
+      {
+        "threat": "mount_crossing_network_fuse_or_mount_swap",
+        "shadow_control": "same_device_and_full_fstatfs_fingerprint_with_local_apfs_allowlist",
+        "residual": "filesystem_policy_widening_requires_a_new_manual_transition_audit"
+      },
+      {
+        "threat": "in_place_content_mutation_or_wrong_object_binding",
+        "shadow_control": "before_after_metadata_stability_plus_independent_sha256_and_length_binding",
+        "residual": "synthetic_sha256_binding_is_not_manifest_membership_or_signature_authority"
+      },
+      {
+        "threat": "synthetic_success_laundered_into_real_custody_or_freeze_authority",
+        "shadow_control": "test_only_permit_private_default_off_module_and_all_real_authority_fields_false",
+        "residual": "separate_atomic_composition_trust_time_replay_capability_and_production_gates_required"
+      }
+    ]
+  },
+  "boundaries": {
+    "observes_real_role_key_or_corpus_evidence": false,
+    "real_signature_authentication_verified": false,
+    "exact_real_manifest_bytes_verified": false,
+    "secure_custody_capture_verified": false,
+    "durable_trust_ledger_verified": false,
+    "trusted_time_verified": false,
+    "durable_replay_claim_verified": false,
+    "current_private_corpus_assembly_authority": false,
+    "current_g1_corpus_freeze_authority": false,
+    "authenticated_freeze_authority_verified": false,
+    "adapter_implementation_authority": false,
+    "ready_for_authenticated_freeze_authority_review": false,
+    "ready_for_g1_4_candidate_protocol_preregistration": false,
+    "candidate_manifest_access_authority": false,
+    "candidate_fit_access_authority": false,
+    "candidate_implementation_authority": false,
+    "biocortex_experiment_execution_authority": false,
+    "retrieval_order_mutation_authority": false,
+    "live_store_write_authority": false,
+    "runtime_promotion_authority": false
+  }
+}
