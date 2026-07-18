@@ -1469,3 +1469,56 @@ be rerun or relaxed in place.  A continuation should instead use a separately
 versioned algorithm/proof decomposition, or a separately precommitted
 scientific-blind design that tests cross-run repeatability without treating
 host timing or marker reach as scientific evidence.
+
+## Majorana P9 G0 closes the post-D4 diagnostic route without a review target
+
+P9 tested the separately frozen `E768-BITORDER-STEP3-V1` resource path after
+the positive P6 two-step prefix.  Its D0 result commit
+`92629e3049ac0dfac12c390fc5ed499597076b7f` produced an indeterminate
+host/runtime report, not a resource witness or S0 result.  D1 through D4 then
+added progressively finer, scientific-blind control-flow markers under the
+same 2 GiB, zero-swap and 1,800-second admission.  Their result commits are
+`47a34a4a0b39c616419c542a4c1b151f4aa9f8cc`,
+`770076085452822a0128a5898042d986b5c2ec36`,
+`e1f3d12bfaa51076ffea4ed43752c664970a4c92` and
+`1bfdf15c553c6d4934ce4395114458dcda1be4f9` respectively.
+
+The D4 canonical report is 8,283 bytes with SHA-256
+`46aa8ea40a96f84e091de039cbb7212e4d165ef1c3a36cee43038a59736c9142`.
+It contains a 22-event `LEGAL_PREFIX_INTERRUPTED` trace: segments A through C
+returned and segment D started, but D checkpoint 1, ALPHA and the fixed
+KAPPA/LAMBDA/MU/NU per-composite markers were not reached.  It has no
+diagnostic terminal branch or resource witness, and S0 remains
+`NOT_ESTABLISHED_BY_P9_D4_SEGMENT_D_PER_COMPOSITE_DIAGNOSTIC`.
+
+The frozen post-D4 contract permits a review target only when one single D4
+trace enters the selected ordinals 21--24 partition.  The actual D4 trace
+stops before that partition.  D3's separately observed ALPHA marker cannot be
+combined with D4's missing KAPPA marker: progress across fresh processes is
+not assumed monotonic.  The G0 decision therefore evaluates all four review
+predicates to false and closes with
+`CLOSED_NO_POST_D4_REVIEW_TARGET`.  It authorizes no D5, repeat, finer marker,
+candidate change, cap relaxation, resource no-go, S0 result or execution.
+
+The accompanying source-only decomposition also records why more markers are
+not the next proof step.  The frozen Step3 schedule has 9 stages, 512
+composites, 1,152 constituents and 768 truncation boundaries; its logical
+term cap is `M=2^20` and BigInt bit cap is 2,048.  These facts bound element
+and abstract-operation counts, but not process bytes or wall-clock time.  At a
+boundary, the live cache may overlap snapshot rows, a coefficient-bits
+dictionary, selected and callback-seen sets, ranked rows, dropped rows and
+persistent transition/boundary/stage records.  Julia object headers, capacity,
+boxing, GMP limbs, GC/JIT state and allocator retention are not covered by the
+logical term counters.  Likewise the current counters do not by themselves
+bound every sort comparison or pinned-package primitive cost.
+
+The only open gate is now a separately versioned, proof-only static resource
+envelope design proposal.  It must source-pin allocation sites and types,
+close alias/ownership/lifetime overlap, derive capacity-aware byte formulae,
+bound runtime overhead, close uncounted operation costs and mechanically
+compare a peak integer bound to the unchanged `2^31` byte cap.  A design
+proposal is not an execution; any later run still requires a new independent
+governance decision.  `ASSESSED_NOT_ESTABLISHED` may close the assessment but
+never passes admission: all seven obligations must be positively verified and
+the static peak must be established strictly below `2^31` before a later
+governance review may even consider execution.

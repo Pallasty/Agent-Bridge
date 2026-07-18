@@ -1,0 +1,254 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P9-POST-D4-G0-GOVERNANCE-CLOSURE-V1",
+  "contract_role": "result_informed_nonexecuting_post_D4_governance_closure_for_the_frozen_P9_step3_route",
+  "self_relative_path": "majorana_certificate_p9_g0_post_d4_governance_closure_contract.json",
+  "required_direct_parent_commit": "1bfdf15c553c6d4934ce4395114458dcda1be4f9",
+  "scientific_authority": "NONE",
+  "execution_authority": false,
+  "candidate_selection_authority": false,
+  "candidate_or_cap_change_authority": false,
+  "resource_or_no_go_authority": false,
+  "S0_authority": false,
+  "certificate_eligible": false,
+  "result_contract_eligible": false,
+  "d4_result_custody": {
+    "result_commit_sha": "1bfdf15c553c6d4934ce4395114458dcda1be4f9",
+    "preprobe_commit_sha": "ed1955fbddde3f8d6edc6745293b47659f0dd615",
+    "preprobe_changed_paths": [
+      "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe.py",
+      "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe/majorana_p9_bit_order_step3_segment_d_per_composite_probe.jl",
+      "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe_fixture.json",
+      "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe_policy.json",
+      "docs/research/fermion-frontier/test_majorana_certificate_p9_d4_segment_d_per_composite_probe.py"
+    ],
+    "preprobe_source_pins": [
+      {
+        "relative_path": "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe.py",
+        "size_bytes": 103885,
+        "sha256": "a7a483d2b2258541e3e238839330060d8c3e59cccc18895e45fcf2505bd6f58d"
+      },
+      {
+        "relative_path": "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe/majorana_p9_bit_order_step3_segment_d_per_composite_probe.jl",
+        "size_bytes": 89655,
+        "sha256": "6a2ad035cbb777323594803f801b6a0fb394704b6159bd902de7339692ac9bf4"
+      },
+      {
+        "relative_path": "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe_fixture.json",
+        "size_bytes": 18991,
+        "sha256": "c5ca2f312163ae6e602f9946e9ccdd88ae24062f3be397995221c59b7fe3e32c"
+      },
+      {
+        "relative_path": "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe_policy.json",
+        "size_bytes": 13768,
+        "sha256": "1b0a2089c309609c7756ddec4cfe9ab85361fb84b71e76ca78e87791da5e9f1b"
+      },
+      {
+        "relative_path": "docs/research/fermion-frontier/test_majorana_certificate_p9_d4_segment_d_per_composite_probe.py",
+        "size_bytes": 30730,
+        "sha256": "a2c1066e87b8c5e80ae87fdfa41458531fa17f279583c9b4a0c33874f3f22302"
+      }
+    ],
+    "report_relative_path": "docs/research/fermion-frontier/majorana_certificate_p9_d4_segment_d_per_composite_probe_report.json",
+    "report_size_bytes": 8283,
+    "report_sha256": "46aa8ea40a96f84e091de039cbb7212e4d165ef1c3a36cee43038a59736c9142",
+    "report_type": "majorana_p9_step3_e768_bitorder_segment_d_per_composite_report_d4_v1",
+    "report_schema_version": 1,
+    "policy_id": "MAJORANA-P9-STEP3-E768-BITORDER-D4-SEGMENT-D-PER-COMPOSITE-V1",
+    "policy_sha256": "1b0a2089c309609c7756ddec4cfe9ab85361fb84b71e76ca78e87791da5e9f1b",
+    "fixture_id": "MAJORANA-P9-STEP3-E768-BITORDER-D4-SEGMENT-D-PER-COMPOSITE-V1",
+    "fixture_sha256": "c5ca2f312163ae6e602f9946e9ccdd88ae24062f3be397995221c59b7fe3e32c",
+    "fixture_canonical_sha256": "c8f241e681bb34577b1fd338a5a1cad55899e76c418e724ba2046d24d301a606",
+    "D3_B1_parent_commit_sha": "e1f3d12bfaa51076ffea4ed43752c664970a4c92",
+    "D3_B1_parent_report_sha256": "61cebcf8553333449927147640e5fed278e0156befa8d66c2cb68df13bf5f2ea",
+    "D4_B1_changed_path_is_exactly_the_canonical_report": true,
+    "report_Git_blob_and_clean_worktree_bytes_must_match": true,
+    "report_must_pass_the_frozen_D4_validator_and_canonical_JSON_check": true
+  },
+  "allowed_D4_governance_projection": {
+    "projection_is_exhaustive_for_G0": true,
+    "raw_report_bytes_do_not_cross_the_projection_after_validation": true,
+    "full_phase_event_array_and_phase_digest_do_not_enter_any_future_runner": true,
+    "report_identity": {
+      "schema_version": 1,
+      "report_type": "majorana_p9_step3_e768_bitorder_segment_d_per_composite_report_d4_v1",
+      "policy_id": "MAJORANA-P9-STEP3-E768-BITORDER-D4-SEGMENT-D-PER-COMPOSITE-V1",
+      "fixture_id": "MAJORANA-P9-STEP3-E768-BITORDER-D4-SEGMENT-D-PER-COMPOSITE-V1",
+      "preprobe_commit_sha": "ed1955fbddde3f8d6edc6745293b47659f0dd615",
+      "scientific_authority": "NONE",
+      "certificate_eligible": false,
+      "result_contract_eligible": false
+    },
+    "observation": {
+      "status": "INDETERMINATE_HOST_OR_RUNTIME_FAILURE",
+      "phase_trace_status": "LEGAL_PREFIX_INTERRUPTED",
+      "phase_event_count": 22,
+      "last_phase_event": "STEP3_SEGMENT_D_STARTED",
+      "diagnostic_terminal_branch": null,
+      "resource_witness": null,
+      "host_failure_has_no_mathematical_authority": true
+    },
+    "marker_projection": {
+      "P6_prefix_resource_conformance_passed_marker_reached": true,
+      "step3_engine_started_marker_reached": true,
+      "step3_state_initialized_marker_reached": true,
+      "step3_schedule_entered_marker_reached": true,
+      "segments_A_through_C_returned_markers_reached": true,
+      "segment_D_started_marker_reached": true,
+      "segment_D_checkpoint_1_marker_reached": false,
+      "segment_D_subgrid_ALPHA_marker_reached": false,
+      "segment_D_composite_KAPPA_marker_reached": false,
+      "segment_D_composite_LAMBDA_marker_reached": false,
+      "segment_D_composite_MU_marker_reached": false,
+      "segment_D_composite_NU_marker_reached": false,
+      "segment_D_subgrid_BETA_marker_reached": false,
+      "segment_D_subgrid_BETA_is_absent_from_the_D4_wire_vocabulary": true,
+      "segment_D_subgrid_GAMMA_marker_reached": false,
+      "segment_D_checkpoint_2_marker_reached": false,
+      "segment_D_returned_marker_reached": false,
+      "later_schedule_markers_reached": false,
+      "step3_schedule_returned_marker_reached": false,
+      "step3_engine_returned_marker_reached": false,
+      "D4_diagnostic_completed_marker_reached": false
+    },
+    "S0_admission": {
+      "status": "NOT_ESTABLISHED_BY_P9_D4_SEGMENT_D_PER_COMPOSITE_DIAGNOSTIC",
+      "derived_from_D4": false,
+      "D3_B1_status_unchanged": "NOT_ESTABLISHED_BY_P9_D3_SEGMENT_D_SUBGRID_DIAGNOSTIC",
+      "same_host_admission_as_P9_D0": true
+    }
+  },
+  "review_target_predicates": [
+    {
+      "predicate_id": "POST_D4_KAPPA_REVIEW_TARGET",
+      "last_reached_boundary": "STEP3_SEGMENT_D_SUBGRID_ALPHA_REACHED",
+      "required_absent_next_boundary": "STEP3_SEGMENT_D_COMPOSITE_KAPPA_REACHED",
+      "review_target": "SEGMENT_D_COMPOSITE_KAPPA_STATIC_INTERVAL",
+      "same_single_D4_trace_required": true
+    },
+    {
+      "predicate_id": "POST_D4_LAMBDA_REVIEW_TARGET",
+      "last_reached_boundary": "STEP3_SEGMENT_D_COMPOSITE_KAPPA_REACHED",
+      "required_absent_next_boundary": "STEP3_SEGMENT_D_COMPOSITE_LAMBDA_REACHED",
+      "review_target": "SEGMENT_D_COMPOSITE_LAMBDA_STATIC_INTERVAL",
+      "same_single_D4_trace_required": true
+    },
+    {
+      "predicate_id": "POST_D4_MU_REVIEW_TARGET",
+      "last_reached_boundary": "STEP3_SEGMENT_D_COMPOSITE_LAMBDA_REACHED",
+      "required_absent_next_boundary": "STEP3_SEGMENT_D_COMPOSITE_MU_REACHED",
+      "review_target": "SEGMENT_D_COMPOSITE_MU_STATIC_INTERVAL",
+      "same_single_D4_trace_required": true
+    },
+    {
+      "predicate_id": "POST_D4_NU_REVIEW_TARGET",
+      "last_reached_boundary": "STEP3_SEGMENT_D_COMPOSITE_MU_REACHED",
+      "required_absent_next_boundary": "STEP3_SEGMENT_D_COMPOSITE_NU_REACHED",
+      "review_target": "SEGMENT_D_COMPOSITE_NU_STATIC_INTERVAL",
+      "same_single_D4_trace_required": true
+    }
+  ],
+  "decision_rules": {
+    "review_target_requires_a_legal_interrupted_prefix_inside_the_selected_ordinals_21_through_24_partition": true,
+    "predicate_last_reached_and_required_absent_boundaries_must_come_from_the_same_D4_trace": true,
+    "D3_marker_facts_must_not_be_spliced_with_D4_absence_facts": true,
+    "zero_matched_predicates_disposition": "CLOSED_NO_POST_D4_REVIEW_TARGET",
+    "one_matched_predicate_may_create_only_a_nonexecuting_governance_review_target": true,
+    "more_than_one_matched_predicate_is_invalid": true,
+    "complete_invalid_or_outside_target_D4_traces_create_no_review_target": true,
+    "current_required_matched_target_count": 0,
+    "current_required_disposition": "CLOSED_NO_POST_D4_REVIEW_TARGET"
+  },
+  "proof_obligation_ledger": {
+    "ledger_scope": "proof_only_source_pinned_static_resource_envelope_design",
+    "status": "OPEN_PROOF_ONLY_DESIGN_REQUIRED",
+    "execution_gate": "CLOSED",
+    "assessment_and_admission_are_distinct": true,
+    "NOT_ESTABLISHED_never_unlocks_execution": true,
+    "D4_host_timing_RSS_returncode_stderr_and_marker_reach_are_not_static_resource_envelope_proof": true,
+    "obligations": [
+      {
+        "obligation_id": "LSB-01-SOURCE-TYPE-ALLOCATION-CLOSURE",
+        "required_evidence": "source_pin_every_allocation_site_container_type_capacity_rule_copy_and_deallocation_relevant_to_the_step3_live_set",
+        "forbidden_substitute": "observed_D4_RSS_cgroup_memory_or_host_failure",
+        "exit_condition": "every_live_set_component_has_one_source_anchor_type_layout_and_exact_capacity_formula"
+      },
+      {
+        "obligation_id": "LSB-02-ALIAS-OWNERSHIP-LIFETIME-GRAPH",
+        "required_evidence": "prove_alias_ownership_copy_and_lifetime_intervals_at_each_static_program_boundary_without_double_counting_or_omission",
+        "forbidden_substitute": "phase_marker_timing_or_cross_run_progress",
+        "exit_condition": "a_closed_overlap_graph_identifies_every_simultaneously_live_component"
+      },
+      {
+        "obligation_id": "LSB-03-EXACT-PAYLOAD-AND-CAPACITY-BYTES",
+        "required_evidence": "derive_exact_integer_byte_formulas_from_allocated_capacity_element_width_headers_alignment_and_backing_storage_not_logical_length_only",
+        "forbidden_substitute": "term_count_scaling_guess_or_sampled_heap_size",
+        "exit_condition": "all_component_byte_formulas_are_exact_integer_expressions_with_overflow_checks"
+      },
+      {
+        "obligation_id": "LSB-04-RUNTIME-OVERHEAD-ENVELOPE",
+        "required_evidence": "independently_bound_allocator_GC_JIT_native_code_task_thread_library_and_transport_overheads_needed_for_a_total_process_live_set_claim",
+        "forbidden_substitute": "the_2GiB_host_cap_minus_an_observed_payload_estimate",
+        "exit_condition": "runtime_overhead_is_source_or_runtime_contract_bound_without_using_the_D4_outcome"
+      },
+      {
+        "obligation_id": "LSB-05-PEAK-COMPOSITION-AND-FIXED-CAP-COMPARISON",
+        "required_evidence": "maximize_the_exact_sum_over_all_static_overlap_boundaries_and_compare_by_strict_integer_arithmetic_to_the_unchanged_2147483648_byte_cap",
+        "forbidden_substitute": "cap_relaxation_fallback_or_average_memory",
+        "exit_condition": "classify_the_assessment_as_either_ADMISSION_BOUND_ESTABLISHED_STRICTLY_BELOW_FIXED_CAP_or_ASSESSED_NOT_ESTABLISHED_and_only_the_first_classification_can_satisfy_a_future_execution_prerequisite"
+      },
+      {
+        "obligation_id": "LSB-06-INDEPENDENT-CHECKER-AND-ADVERSARIAL-MUTATIONS",
+        "required_evidence": "an_independent_checker_rederives_the_live_set_bound_and_rejects_missing_alias_capacity_header_alignment_runtime_overhead_and_boundary_rows",
+        "forbidden_substitute": "self_attestation_by_the_design_proposal",
+        "exit_condition": "all_positive_and_required_fail_closed_mutation_tests_pass"
+      },
+      {
+        "obligation_id": "RSE-07-OPERATION-COST-CLOSURE",
+        "required_evidence": "source_pin_and_bound_sort_comparisons_package_primitives_BigInt_hashing_stringification_container_resize_and_all_other_work_not_dominated_by_the_existing_counters",
+        "forbidden_substitute": "D4_elapsed_time_marker_reach_or_an_assumed_constant_time_per_abstract_operation",
+        "exit_condition": "the_design_states_exactly_which_operation_counts_are_proved_and_keeps_wall_clock_admission_not_established_without_an_independent_machine_cost_contract"
+      }
+    ]
+  },
+  "next_gate_contract": {
+    "only_allowed_next_gate": "P10-A-STATIC-RESOURCE-ENVELOPE-PROOF-DESIGN-V1",
+    "next_gate_is_a_design_proposal_not_an_execution": true,
+    "next_gate_has_no_candidate_selection_resource_scientific_or_S0_authority": true,
+    "next_gate_must_not_be_named_D5": true,
+    "next_gate_must_not_import_the_D4_phase_trace_into_a_runner": true,
+    "all_seven_obligations_must_be_positively_verified_before_future_execution_governance": true,
+    "static_resource_envelope_must_be_established_with_peak_strictly_below_2147483648_bytes_before_future_execution_governance": true,
+    "ASSESSED_NOT_ESTABLISHED_keeps_the_execution_gate_closed": true,
+    "a_positive_static_envelope_still_does_not_authorize_execution_without_a_new_independent_governance_decision": true,
+    "any_later_execution_requires_a_new_independent_governance_decision": true
+  },
+  "forbidden_actions": [
+    "splice_D3_reached_markers_with_D4_absent_markers_to_create_a_review_target",
+    "rerun_or_repeat_the_frozen_D4_execution",
+    "name_or_treat_the_next_stage_as_D5",
+    "authorize_any_candidate_or_scientific_execution",
+    "relax_or_change_candidate_algorithm_anchor_cadence_caps_host_admission_or_fallback",
+    "create_constituent_callback_selection_or_hot_loop_instrumentation",
+    "use_D4_host_failure_timing_RSS_returncode_stdout_stderr_or_marker_reach_as_scientific_or_live_set_byte_evidence",
+    "carry_the_D4_phase_trace_raw_channel_or_event_array_into_a_future_runner",
+    "claim_a_deterministic_cap_resource_no_go_S0_READY_certificate_or_physical_result",
+    "amend_rewrite_or_add_paths_to_the_frozen_D4_B1_result_commit"
+  ],
+  "closure_lifecycle": {
+    "G0_is_a_direct_child_of_the_frozen_D4_B1_result": true,
+    "G0_is_result_informed_and_needs_no_execution_precommit": true,
+    "G0_creates_no_execution_claim_runner_clone_fixture_or_scientific_report": true,
+    "G0_exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p9_g0_post_d4_governance_closure_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p9_g0_post_d4_governance_closure_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p9_g0_post_d4_governance_closure_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p9_g0_post_d4_governance_closure.py"
+    ],
+    "the_record_must_pin_the_contract_raw_and_canonical_SHA256": true,
+    "any_validator_or_test_is_read_only_and_must_not_launch_the_candidate": true,
+    "AB_memory_or_documentation_may_only_be_an_advisory_pointer_to_the_Git_anchored_closure": true
+  }
+}

@@ -1416,3 +1416,41 @@ so they are versioned normally and are not added to the preservation-only
   FSN theorem from dynamic-JW Fig. 15 standard/ladder candidate fits.
 - `NATIVE_SOURCE_EVIDENCE.md`: primary-source ledger separating the PNAS proposal,
   2026 local collisional-gate experiment, and 2026 global-control proposal.
+
+## Majorana P9 post-D4 governance closure
+
+- `majorana_certificate_p9_g0_post_d4_governance_closure_contract.json`:
+  result-informed, nonexecuting G0 contract pinned to D4 B1
+  `1bfdf15c553c6d4934ce4395114458dcda1be4f9`.  It binds the five D4 B0
+  source blobs, the 8,283-byte D4 report and its SHA-256
+  `46aa8ea40a96f84e091de039cbb7212e4d165ef1c3a36cee43038a59736c9142`,
+  permits only a minimal D4 governance projection, and requires each review
+  predicate to use one and the same D4 trace.  It forbids D3/D4 marker
+  splicing, a D4 repeat, D5, finer instrumentation, in-place cap or candidate
+  changes, and any scientific/resource/S0 authority.
+- `majorana_certificate_p9_g0_post_d4_governance_closure_record.json`:
+  canonical governance decision.  All KAPPA/LAMBDA/MU/NU target predicates
+  are false because the verified D4 legal prefix ends at
+  `STEP3_SEGMENT_D_STARTED`, before checkpoint 1 and ALPHA.  Its disposition
+  is `CLOSED_NO_POST_D4_REVIEW_TARGET`; matched targets are empty and all
+  execution, candidate-selection, resource/no-go and scientific authority
+  flags are false.
+- `majorana_certificate_p9_g0_post_d4_governance_closure_validator.py`:
+  read-only fail-closed validator for strict JSON, D4 B0/B1 Git topology,
+  source pins, canonical D4 report bytes, minimal projection, same-trace
+  predicate evaluation, exact record reconstruction and the six-path G0
+  staged/committed lifecycle.  It contains no candidate launcher.
+- `test_majorana_certificate_p9_g0_post_d4_governance_closure.py`:
+  positive and adversarial static coverage for duplicate keys, source/report
+  drift, forbidden host-field projection, cross-run marker splicing, false
+  review targets, authority flags and exact Git path gates.
+- G0 leaves seven proof-only static resource-envelope obligations open:
+  source/type/allocation closure; alias/ownership/lifetime overlap; exact
+  payload/capacity bytes; runtime/GC/JIT/allocator overhead; peak composition
+  against the unchanged 2 GiB cap; an independent checker with adversarial
+  mutations; and complete accounting for sorting, package primitives, BigInt,
+  hashing, stringification and container-resize work.  This ledger is a design
+  queue only and does not authorize an execution.  An
+  `ASSESSED_NOT_ESTABLISHED` outcome keeps admission closed; only a positive
+  seven-obligation result with a peak strictly below `2^31` can become input
+  to a separate future execution-governance decision.
