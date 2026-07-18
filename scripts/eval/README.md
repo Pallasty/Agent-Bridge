@@ -166,6 +166,23 @@ mutation, write, promotion, and G1.4 readiness fields false. See
 and run
 `scripts/check-engram-g1-authenticated-freeze-authority-adapter-preregistration.sh`.
 
+`engram_g1_authenticated_freeze_authority_envelope_shadow.py` validates the
+public contract for the first implementation-prerequisite shadow. The actual
+Rust module is private, feature-disabled by default, and synthetic-only. It
+verifies five role/domain-separated Ed25519 signatures against an independently
+expected commitment over the complete in-memory synthetic anchor set, checks a
+project-specific RFC 8785-compatible ASCII/safe-integer canonical subset, and
+rehashes bounded synthetic manifest bytes. It has no filesystem, real-key,
+clock, database, network, process, MCP, or runtime surface. A passing test means
+only synthetic envelope conformance: secure custody, durable trust, trusted
+time, replay consumption, capability minting, corpus freeze, G1.4 readiness,
+and every access/write/execution/promotion authority remain false. Its only
+successor is a separately threat-reviewed retained-descriptor secure-custody
+shadow. See
+`docs/design/ENGRAM_G1_AUTHENTICATED_FREEZE_AUTHORITY_ENVELOPE_SHADOW_2026_07_18.md`
+and run
+`scripts/check-engram-g1-authenticated-freeze-authority-envelope-shadow.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class
