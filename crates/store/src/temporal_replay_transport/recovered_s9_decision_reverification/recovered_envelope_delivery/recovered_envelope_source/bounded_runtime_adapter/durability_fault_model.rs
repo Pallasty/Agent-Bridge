@@ -9,6 +9,9 @@
 use sha2::{Digest, Sha256};
 use std::fmt;
 
+#[cfg(feature = "temporal-evidence-s18-owned-lab-authorization-verifier-synthetic")]
+mod owned_lab_owner_resource_authorization;
+
 const POLICY_ID: &str = "agent-bridge/track-b/recovered-envelope-durability-fault-model/v1";
 const PROFILE: &str = "DETERMINISTIC_SYNTHETIC_OBJECT_RECEIPT_WITNESS_FAULT_MODEL_HISTORICAL_ONLY";
 const RECEIPT_DOMAIN: &[u8] =

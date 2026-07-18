@@ -20,6 +20,7 @@ temporal-evidence-s13-recovered-envelope-delivery-synthetic = ["temporal-evidenc
 temporal-evidence-s14-recovered-envelope-source-synthetic = ["temporal-evidence-s13-recovered-envelope-delivery-synthetic"]
 temporal-evidence-s15-recovered-envelope-bounded-runtime-adapter-synthetic = ["temporal-evidence-s14-recovered-envelope-source-synthetic"]
 temporal-evidence-s16-recovered-envelope-durability-fault-model-synthetic = ["temporal-evidence-s15-recovered-envelope-bounded-runtime-adapter-synthetic"]
+temporal-evidence-s18-owned-lab-authorization-verifier-synthetic = ["temporal-evidence-s16-recovered-envelope-durability-fault-model-synthetic"]
 
 [dependencies]
 ab-core.workspace = true
