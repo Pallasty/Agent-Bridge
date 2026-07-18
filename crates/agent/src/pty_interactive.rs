@@ -189,6 +189,13 @@ pub async fn spawn_interactive(
     cfg: SpawnConfig,
     submit: SubmitProfile,
 ) -> Result<AgentSession> {
+    let launch = crate::sandbox::wrap_local_command(
+        runtime_id,
+        &cfg.cwd,
+        &cfg.env,
+        binary,
+        interactive_args,
+    )?;
     let session_id = SessionId::new();
     let cwd = cfg.cwd.clone();
 
@@ -216,11 +223,17 @@ pub async fn spawn_interactive(
         }
     }
 
-    let (session, exit_rx) = PtySession::spawn(binary, interactive_args, &cwd, &cfg.env)?;
+    let (session, exit_rx) = PtySession::spawn(
+        &launch.program,
+        &launch.args,
+        &cwd,
+        &cfg.env,
+        launch.sandboxed,
+    )?;
     let session = Arc::new(session);
     let pid = session.pid();
     interactive.insert(session_id.as_str().to_string(), session.clone());
-    info!(session = %session_id, runtime = %runtime_id, pid, cwd = %cwd, "interactive (PTY) session started");
+    info!(session = %session_id, runtime = %runtime_id, pid, cwd = %cwd, sandboxed = launch.sandboxed, "interactive (PTY) session started");
 
     // v41: stamp the child's process identity onto the session row so the
     // orphan reaper can later kill a proven-abandoned process group even
@@ -300,6 +313,7 @@ pub async fn spawn_interactive(
         id: session_id,
         runtime_id: runtime_id.into(),
         cwd,
+        sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
     })
 }
 

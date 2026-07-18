@@ -40,7 +40,6 @@ use ab_core::{Error, Result, SessionId};
 use ab_store::{StateStore, StoredSession};
 use async_trait::async_trait;
 use dashmap::DashMap;
-use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -114,6 +113,14 @@ impl AgentRuntime for AuggieRuntime {
                 "auggie: 'initial_prompt' is required for one-shot spawn".into(),
             ));
         }
+        let launch_args = vec!["--print".to_string(), "--quiet".to_string(), prompt.clone()];
+        let launch = crate::sandbox::wrap_local_command(
+            self.id(),
+            &cfg.cwd,
+            &cfg.env,
+            &self.binary,
+            &launch_args,
+        )?;
 
         let session_id = SessionId::new();
         let cwd = cfg.cwd.clone();
@@ -142,15 +149,13 @@ impl AgentRuntime for AuggieRuntime {
             }
         }
 
-        let mut cmd = Command::new(&self.binary);
-        cmd.arg("--print")
-            .arg("--quiet")
-            .arg(&prompt)
+        let mut cmd = Command::new(&launch.program);
+        cmd.args(&launch.args)
             .current_dir(&cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        apply_env(&mut cmd, &cfg.env);
+        crate::sandbox::configure_command_env(&mut cmd, &cfg.env, launch.sandboxed)?;
 
         let child = cmd
             .spawn()
@@ -159,7 +164,7 @@ impl AgentRuntime for AuggieRuntime {
         if pid != 0 {
             self.children.insert(session_id.as_str().to_string(), pid);
         }
-        info!(session = %session_id, pid, cwd = %cwd, "auggie session started");
+        info!(session = %session_id, pid, cwd = %cwd, sandboxed = launch.sandboxed, "auggie session started");
 
         let sid_bg = session_id.clone();
         let store_bg = self.store.clone();
@@ -223,6 +228,7 @@ impl AgentRuntime for AuggieRuntime {
             id: session_id,
             runtime_id: self.id().into(),
             cwd,
+            sandbox_profile_requested: launch.sandboxed.then(|| "workspace".into()),
         })
     }
 
@@ -273,12 +279,6 @@ impl AgentRuntime for AuggieRuntime {
     }
 }
 
-fn apply_env(cmd: &mut Command, env: &HashMap<String, String>) {
-    for (k, v) in env {
-        cmd.env(k, v);
-    }
-}
-
 fn truncate(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
@@ -296,6 +296,7 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn id_is_auggie() {

@@ -73,7 +73,7 @@ async fn configured_runtime_interactive_submit_profile_probe() {
     );
 
     let (sess, _exit_rx) =
-        match PtySession::spawn(&cfg.binary, &cfg.args, &cfg.cwd, &HashMap::new()) {
+        match PtySession::spawn(&cfg.binary, &cfg.args, &cfg.cwd, &HashMap::new(), false) {
             Ok(pair) => pair,
             Err(e) => {
                 eprintln!("SKIP: {} not spawnable ({e})", cfg.binary);

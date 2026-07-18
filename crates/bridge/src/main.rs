@@ -4295,6 +4295,15 @@ fn which_in_path(bin: &str) -> bool {
 }
 
 fn main() -> Result<()> {
+    // A sandbox launcher must run before this process creates the Tokio runtime,
+    // loads bridge credentials, or starts worker threads. Successful launchers
+    // `exec` the target and never return; malformed/unsupported requests fail
+    // closed.
+    if let Some(result) = ab_agent::sandbox::run_internal_launcher_if_requested() {
+        result?;
+        return Ok(());
+    }
+
     // TD-02: bound the tokio blocking-thread pool. `#[tokio::main]` uses the
     // default cap of 512, which in practice let blocked `spawn_blocking` tasks
     // (sqlite / pty / a hung host call) accumulate threads (observed 83 -> 242,

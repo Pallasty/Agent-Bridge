@@ -9784,7 +9784,9 @@ impl McpTool for AgentSpawnTool {
                  over policy; both omitted = the configured primary-to-backup fallback chain \
                  (AGENT_BRIDGE_AGENT_FALLBACK_CHAIN; just the daemon default when unset). Set `node` (+`user`) to dispatch \
                  a kilo/opencode run to a tailnet host via ssh — it stays free yet is recorded \
-                 in agent_sessions; `cwd` is then a remote-absolute path."
+                 in agent_sessions; `cwd` is then a remote-absolute path. Set \
+                 env.AGENT_BRIDGE_AGENT_SANDBOX=workspace for the opt-in local \
+                 Landlock/Seatbelt workspace boundary; remote/cloud runs fail closed."
                 .into(),
             input_schema: json!({
                 "type": "object",

@@ -26,6 +26,7 @@ pub mod opencode_family;
 pub mod oz;
 pub mod pty_interactive;
 pub mod pty_session;
+pub mod sandbox;
 pub mod worktree;
 
 pub use acp::AcpRuntime;
@@ -90,6 +91,11 @@ pub struct AgentSession {
     pub id: SessionId,
     pub runtime_id: String,
     pub cwd: String,
+    /// Requested child sandbox profile. This is launch intent rather than a
+    /// synchronous enforcement attestation; a fail-closed launcher can still
+    /// exit before the underlying executor starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_profile_requested: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
