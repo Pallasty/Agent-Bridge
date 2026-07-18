@@ -119,6 +119,19 @@ identities, evidence truth, or signatures. See
 `docs/design/ENGRAM_G1_ROLE_APPOINTMENT_REVIEW_2026_07_18.md` and run
 `scripts/check-engram-g1-role-review.sh`.
 
+`engram_g1_corpus_freeze_review.py` is the G1.3 corpus-freeze boundary. It
+revalidates and byte-binds the G1.1 role/manifest packets and G1.2 role-review
+and owner-approval packets, requires manifest assembly after owner approval,
+then requires both appointed freeze reviewers plus the sealed custodian. The
+frozen object is the exact 30-group manifest bytes; any addition, removal,
+substitution, repartition, relabel, or byte change requires a new review.
+Synthetic approvals always emit zero authority. A future real pass may only
+record that exact manifest as frozen and open candidate-protocol
+preregistration. It grants no candidate manifest/FIT access, implementation,
+BioCortex execution, retrieval mutation, live writes, or promotion. See
+`docs/design/ENGRAM_G1_CORPUS_FREEZE_REVIEW_2026_07_18.md` and run
+`scripts/check-engram-g1-corpus-freeze-review.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class
