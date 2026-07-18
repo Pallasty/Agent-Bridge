@@ -1,0 +1,734 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BioCortex Track B bootstrap-trust authentication isolated-lab synthetic KAT pack v1",
+  "description": "Closed-world schema for the public-only, two-track bootstrap-trust authentication KAT wrapper, its separately injected frozen trust policy, detached authentication bundles, and component-only receipts. Conformance never grants production, provider, runtime, evidence-acceptance, fault-injection, role/scope, track-subject, custody, or downstream-gate authority.",
+  "$comment": "The verifier independently enforces compact canonical UTF-8 JSON bytes, duplicate-key rejection, signed-int64-only numeric input, depth/node/member/item/byte bounds, exact track ordering and frozen values, six distinct strict Ed25519 public points, strict R/S handling, and exactly one active-leaf signature equation per accepted case.",
+  "type": "object",
+  "required": [
+    "canonical_json_profile",
+    "contains_private_or_seed_material",
+    "date",
+    "execution_mode",
+    "expected_receipts",
+    "public_only",
+    "schema",
+    "separately_injected_synthetic_trust_policy",
+    "source_bindings",
+    "valid_cases"
+  ],
+  "properties": {
+    "canonical_json_profile": {
+      "const": "SORTED_KEYS_COMPACT_UTF8_NO_TRAILING_BYTES"
+    },
+    "contains_private_or_seed_material": {
+      "const": false
+    },
+    "date": {
+      "const": "2026-07-17"
+    },
+    "execution_mode": {
+      "const": "SYNTHETIC_KAT"
+    },
+    "expected_receipts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/receipt" },
+            {
+              "properties": {
+                "track_id": { "const": "MANAGED_SPANNER_CLOUD_KMS" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/receipt" },
+            {
+              "properties": {
+                "track_id": { "const": "SELF_HOSTED_ETCD_OPENBAO" }
+              }
+            }
+          ]
+        }
+      ],
+      "items": false
+    },
+    "public_only": {
+      "const": true
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.bootstrap_trust_authentication_synthetic_trust_chain_exact_key_version_declared_role_and_revocation_verifier_isolated_lab_v1_pack.synthetic.v0"
+    },
+    "separately_injected_synthetic_trust_policy": {
+      "$ref": "#/$defs/trustPolicy"
+    },
+    "source_bindings": {
+      "$ref": "#/$defs/sourceBindings"
+    },
+    "valid_cases": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/validCase" },
+            {
+              "properties": {
+                "case_id": { "const": "VALID_MANAGED_BOOTSTRAP_TRUST_AUTHENTICATION_V1" },
+                "track_id": { "const": "MANAGED_SPANNER_CLOUD_KMS" },
+                "detached_authentication_bundle": {
+                  "properties": {
+                    "track_id": { "const": "MANAGED_SPANNER_CLOUD_KMS" }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/validCase" },
+            {
+              "properties": {
+                "case_id": { "const": "VALID_SELF_HOSTED_BOOTSTRAP_TRUST_AUTHENTICATION_V1" },
+                "track_id": { "const": "SELF_HOSTED_ETCD_OPENBAO" },
+                "detached_authentication_bundle": {
+                  "properties": {
+                    "track_id": { "const": "SELF_HOSTED_ETCD_OPENBAO" }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "items": false
+    }
+  },
+  "additionalProperties": false,
+  "unevaluatedProperties": false,
+  "minProperties": 10,
+  "maxProperties": 10,
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sha512": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    },
+    "trackId": {
+      "type": "string",
+      "enum": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ]
+    },
+    "sourceBindings": {
+      "type": "object",
+      "required": [
+        "authority_integration_commit",
+        "predecessor_frame_fixture_path",
+        "predecessor_frame_fixture_sha256",
+        "public_vector_bundle_bytes",
+        "public_vector_bundle_path",
+        "public_vector_bundle_sha256",
+        "public_vector_source_is_public_only",
+        "public_vector_supply_integration_commit"
+      ],
+      "properties": {
+        "authority_integration_commit": {
+          "const": "b4126a4192137e741e32ebb86170884b81185cbf"
+        },
+        "predecessor_frame_fixture_path": {
+          "const": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_production_evidence_envelope_bounded_frame_parser_and_synthetic_mode_separation_isolated_lab_v1_pack_synthetic_v0.json"
+        },
+        "predecessor_frame_fixture_sha256": {
+          "const": "324379e6e4fcae9db3af3b55d9caacbcb77f56f6c57b110d0ced2987749910b9"
+        },
+        "public_vector_bundle_bytes": {
+          "const": 3784
+        },
+        "public_vector_bundle_path": {
+          "const": "scripts/eval/fixtures/biocortex_ab_track_b_bootstrap_trust_public_only_vector_supply_and_generation_provenance_receipt_freeze_v1_pack_public_vector_bundle_v0.json"
+        },
+        "public_vector_bundle_sha256": {
+          "const": "a87e0883a42ca69fe3a0348b4ffe44c153882f8dcc93eb67db1ea048d53851d7"
+        },
+        "public_vector_source_is_public_only": {
+          "const": true
+        },
+        "public_vector_supply_integration_commit": {
+          "const": "61585e655f7bfd537f8a123141e4e39a590a66d8"
+        }
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "minProperties": 8,
+      "maxProperties": 8
+    },
+    "keyEntry": {
+      "type": "object",
+      "required": [
+        "key_id",
+        "key_version",
+        "public_key_hex",
+        "role"
+      ],
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_BOOTSTRAP_ROOT_V1",
+            "KAT_MANAGED_TRUST_POLICY_ISSUER_V1",
+            "KAT_MANAGED_EVIDENCE_ENVELOPE_SIGNER_V2",
+            "KAT_SELF_HOSTED_BOOTSTRAP_ROOT_V1",
+            "KAT_SELF_HOSTED_TRUST_POLICY_ISSUER_V1",
+            "KAT_SELF_HOSTED_EVIDENCE_ENVELOPE_SIGNER_V2"
+          ]
+        },
+        "key_version": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_ROOT_KEY_VERSION_1",
+            "KAT_MANAGED_ISSUER_KEY_VERSION_1",
+            "KAT_MANAGED_LEAF_KEY_VERSION_2",
+            "KAT_SELF_HOSTED_ROOT_KEY_VERSION_1",
+            "KAT_SELF_HOSTED_ISSUER_KEY_VERSION_1",
+            "KAT_SELF_HOSTED_LEAF_KEY_VERSION_2"
+          ]
+        },
+        "public_key_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_BOOTSTRAP_ROOT",
+            "KAT_MANAGED_TRUST_POLICY_ISSUER",
+            "KAT_MANAGED_EVIDENCE_ENVELOPE_SIGNER",
+            "KAT_SELF_HOSTED_BOOTSTRAP_ROOT",
+            "KAT_SELF_HOSTED_TRUST_POLICY_ISSUER",
+            "KAT_SELF_HOSTED_EVIDENCE_ENVELOPE_SIGNER"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "minProperties": 4,
+      "maxProperties": 4
+    },
+    "revokedLeaf": {
+      "type": "object",
+      "required": [
+        "key_id",
+        "key_version",
+        "state"
+      ],
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_EVIDENCE_ENVELOPE_SIGNER_V2",
+            "KAT_SELF_HOSTED_EVIDENCE_ENVELOPE_SIGNER_V2"
+          ]
+        },
+        "key_version": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_LEAF_KEY_VERSION_1",
+            "KAT_SELF_HOSTED_LEAF_KEY_VERSION_1"
+          ]
+        },
+        "state": {
+          "const": "REVOKED_AT_OR_BEFORE_EXACT_FROZEN_SYNTHETIC_REVISION"
+        }
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "minProperties": 3,
+      "maxProperties": 3
+    },
+    "trustTrack": {
+      "type": "object",
+      "required": [
+        "active_leaf_state",
+        "canonical_frame_sha256",
+        "chain",
+        "frozen_snapshot_is_currentness",
+        "message_sha256",
+        "message_sha512",
+        "policy_revision",
+        "revocation_snapshot_revision",
+        "revoked_leaf",
+        "signature_domain",
+        "track_id",
+        "vector_set_id"
+      ],
+      "properties": {
+        "active_leaf_state": {
+          "const": "ACTIVE_AT_EXACT_FROZEN_SYNTHETIC_REVISION"
+        },
+        "canonical_frame_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "chain": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/keyEntry"
+          }
+        },
+        "frozen_snapshot_is_currentness": {
+          "const": false
+        },
+        "message_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "message_sha512": {
+          "$ref": "#/$defs/sha512"
+        },
+        "policy_revision": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_TRUST_POLICY_REVISION_1",
+            "KAT_SELF_HOSTED_TRUST_POLICY_REVISION_1"
+          ]
+        },
+        "revocation_snapshot_revision": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_REVOCATION_SNAPSHOT_REVISION_1",
+            "KAT_SELF_HOSTED_REVOCATION_SNAPSHOT_REVISION_1"
+          ]
+        },
+        "revoked_leaf": {
+          "$ref": "#/$defs/revokedLeaf"
+        },
+        "signature_domain": {
+          "type": "string",
+          "enum": [
+            "AB_TRACK_B_BOOTSTRAP_TRUST_AUTHENTICATION_ISOLATED_LAB_MANAGED_KAT_SIGNATURE_V1",
+            "AB_TRACK_B_BOOTSTRAP_TRUST_AUTHENTICATION_ISOLATED_LAB_SELF_HOSTED_KAT_SIGNATURE_V1"
+          ]
+        },
+        "track_id": {
+          "$ref": "#/$defs/trackId"
+        },
+        "vector_set_id": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_BOOTSTRAP_TRUST_PUBLIC_ONLY_PRECOMPUTED_VECTOR_SET_V1",
+            "KAT_SELF_HOSTED_BOOTSTRAP_TRUST_PUBLIC_ONLY_PRECOMPUTED_VECTOR_SET_V1"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "minProperties": 12,
+      "maxProperties": 12
+    },
+    "trustPolicy": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "declared_role_mapping",
+        "message_profile",
+        "schema",
+        "schema_version",
+        "signature_scheme",
+        "tracks",
+        "trust_domain_family"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "ED25519"
+        },
+        "declared_role_mapping": {
+          "type": "object",
+          "required": [
+            "generic_declared_role_class",
+            "mapping_is_role_scope_authorization",
+            "track_role_map"
+          ],
+          "properties": {
+            "generic_declared_role_class": {
+              "const": "SYNTHETIC_EVIDENCE_ENVELOPE_SIGNER_KAT_ONLY"
+            },
+            "mapping_is_role_scope_authorization": {
+              "const": false
+            },
+            "track_role_map": {
+              "type": "object",
+              "required": [
+                "MANAGED_SPANNER_CLOUD_KMS",
+                "SELF_HOSTED_ETCD_OPENBAO"
+              ],
+              "properties": {
+                "MANAGED_SPANNER_CLOUD_KMS": {
+                  "const": "KAT_MANAGED_EVIDENCE_ENVELOPE_SIGNER"
+                },
+                "SELF_HOSTED_ETCD_OPENBAO": {
+                  "const": "KAT_SELF_HOSTED_EVIDENCE_ENVELOPE_SIGNER"
+                }
+              },
+              "additionalProperties": false,
+              "unevaluatedProperties": false,
+              "minProperties": 2,
+              "maxProperties": 2
+            }
+          },
+          "additionalProperties": false,
+          "unevaluatedProperties": false,
+          "minProperties": 3,
+          "maxProperties": 3
+        },
+        "message_profile": {
+          "const": "U64BE_LENGTH_PREFIXED_ASCII_DOMAIN_AND_EXACT_PREDECESSOR_CANONICAL_FRAME_BYTES_NO_PARSE_RESERIALIZE"
+        },
+        "schema": {
+          "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.bootstrap_trust_authentication_synthetic_trust_policy_isolated_lab_kat.v1"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "signature_scheme": {
+          "const": "ED25519_PURE_RFC8032_NO_CONTEXT_NO_PREHASH"
+        },
+        "tracks": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/trustTrack" },
+                {
+                  "properties": {
+                    "track_id": { "const": "MANAGED_SPANNER_CLOUD_KMS" }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/trustTrack" },
+                {
+                  "properties": {
+                    "track_id": { "const": "SELF_HOSTED_ETCD_OPENBAO" }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        },
+        "trust_domain_family": {
+          "const": "AB_TRACK_B_BOOTSTRAP_TRUST_AUTHENTICATION_ISOLATED_LAB_KAT_SIGNATURE_FAMILY_V1"
+        }
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "minProperties": 8,
+      "maxProperties": 8
+    },
+    "detachedBundle": {
+      "type": "object",
+      "required": [
+        "declared_role",
+        "policy_revision",
+        "revocation_snapshot_revision",
+        "schema",
+        "schema_version",
+        "signature_hex",
+        "signer_key_id",
+        "signer_key_version",
+        "track_id",
+        "vector_set_id"
+      ],
+      "properties": {
+        "declared_role": {
+          "const": "SYNTHETIC_EVIDENCE_ENVELOPE_SIGNER_KAT_ONLY"
+        },
+        "policy_revision": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_TRUST_POLICY_REVISION_1",
+            "KAT_SELF_HOSTED_TRUST_POLICY_REVISION_1"
+          ]
+        },
+        "revocation_snapshot_revision": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_REVOCATION_SNAPSHOT_REVISION_1",
+            "KAT_SELF_HOSTED_REVOCATION_SNAPSHOT_REVISION_1"
+          ]
+        },
+        "schema": {
+          "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.bootstrap_trust_authentication_detached_bundle_isolated_lab_kat.v1"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "signature_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{128}$"
+        },
+        "signer_key_id": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_EVIDENCE_ENVELOPE_SIGNER_V2",
+            "KAT_SELF_HOSTED_EVIDENCE_ENVELOPE_SIGNER_V2"
+          ]
+        },
+        "signer_key_version": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_LEAF_KEY_VERSION_2",
+            "KAT_SELF_HOSTED_LEAF_KEY_VERSION_2"
+          ]
+        },
+        "track_id": {
+          "$ref": "#/$defs/trackId"
+        },
+        "vector_set_id": {
+          "type": "string",
+          "enum": [
+            "KAT_MANAGED_BOOTSTRAP_TRUST_PUBLIC_ONLY_PRECOMPUTED_VECTOR_SET_V1",
+            "KAT_SELF_HOSTED_BOOTSTRAP_TRUST_PUBLIC_ONLY_PRECOMPUTED_VECTOR_SET_V1"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "minProperties": 10,
+      "maxProperties": 10
+    },
+    "validCase": {
+      "type": "object",
+      "required": [
+        "case_id",
+        "detached_authentication_bundle",
+        "frame_utf8",
+        "track_id"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "enum": [
+            "VALID_MANAGED_BOOTSTRAP_TRUST_AUTHENTICATION_V1",
+            "VALID_SELF_HOSTED_BOOTSTRAP_TRUST_AUTHENTICATION_V1"
+          ]
+        },
+        "detached_authentication_bundle": {
+          "$ref": "#/$defs/detachedBundle"
+        },
+        "frame_utf8": {
+          "type": "string",
+          "minLength": 658,
+          "maxLength": 659
+        },
+        "track_id": {
+          "$ref": "#/$defs/trackId"
+        }
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "minProperties": 4,
+      "maxProperties": 4
+    },
+    "receipt": {
+      "type": "object",
+      "required": [
+        "active_leaf_key_id",
+        "active_leaf_key_version",
+        "active_leaf_state",
+        "algorithm",
+        "authentication_metadata_detached",
+        "boundary_threat_specifications_locally_kat_covered",
+        "canonical_frame_sha256",
+        "certificate_link_signature_verification_count",
+        "chain_entry_count",
+        "component_state",
+        "condition_output_authorized",
+        "content_sha256",
+        "declared_role",
+        "declared_role_cryptographically_authenticated_in_kat",
+        "declared_role_is_role_scope_authorization",
+        "declared_role_mapping_verified",
+        "detached_authentication_bundle_sha256",
+        "downstream_gate_count",
+        "downstream_gates_authorized",
+        "evidence_acceptance_authorized",
+        "execution_mode",
+        "fault_injection_authorized",
+        "frame_bytes",
+        "frame_sha256",
+        "frozen_revocation_snapshot_is_currentness",
+        "isolated_lab_candidate_surface_component_total",
+        "isolated_lab_candidate_surface_components_implemented",
+        "isolated_lab_candidate_surface_components_locally_kat_exercised",
+        "issuer_key_id",
+        "issuer_key_version",
+        "local_t05_specification_exercised",
+        "local_t06_specification_exercised",
+        "local_t07_specification_exercised",
+        "local_threat_specifications_covered",
+        "mapped_policy_leaf_role",
+        "message_bytes",
+        "message_profile",
+        "message_sha256",
+        "message_sha512",
+        "policy_revision",
+        "policy_role_map_entry_count",
+        "policy_root_count",
+        "policy_structural_chain_entry_count",
+        "policy_track_count",
+        "predecessor_frame_review_count",
+        "predecessor_receipt_content_sha256",
+        "production_admissible",
+        "production_ingestion_control_count",
+        "production_ingestion_controls_implemented",
+        "production_ingestion_controls_runtime_exercised",
+        "production_threat_specification_count",
+        "production_threat_specifications_runtime_exercised",
+        "production_validated_evidence_items",
+        "provider_authority",
+        "public_key_count",
+        "public_vector_bundle_sha256",
+        "real_evidence_items_present",
+        "revocation_snapshot_revision",
+        "revoked_leaf_key_id",
+        "revoked_leaf_key_version",
+        "revoked_leaf_state",
+        "role_scope_authorization_implemented",
+        "root_key_id",
+        "root_key_version",
+        "runtime_authority",
+        "runtime_prerequisite_count",
+        "runtime_prerequisites_satisfied",
+        "schema",
+        "schema_version",
+        "selected_revocation_entry_count",
+        "separately_injected_trust_policy",
+        "side_effects_unlocked",
+        "signature_domain",
+        "signature_scheme",
+        "signature_verification_count",
+        "signer_role_scope_authorization_implemented",
+        "status",
+        "strict_public_key_point_validation_count",
+        "strict_signature_r_point_validation_count",
+        "synthetic_fixture",
+        "threat_case_count",
+        "track_id",
+        "track_leaf_role",
+        "track_subject_binding_implemented",
+        "trust_policy_sha256",
+        "trust_root_count",
+        "vector_set_id"
+      ],
+      "properties": {
+        "active_leaf_key_id": { "type": "string" },
+        "active_leaf_key_version": { "type": "string" },
+        "active_leaf_state": { "const": "ACTIVE_AT_EXACT_FROZEN_SYNTHETIC_REVISION" },
+        "algorithm": { "const": "ED25519" },
+        "authentication_metadata_detached": { "const": true },
+        "boundary_threat_specifications_locally_kat_covered": { "const": 5 },
+        "canonical_frame_sha256": { "$ref": "#/$defs/sha256" },
+        "certificate_link_signature_verification_count": { "const": 0 },
+        "chain_entry_count": { "const": 3 },
+        "component_state": { "const": "AUTHENTICATED_SYNTHETIC_KAT_AGAINST_FROZEN_BOOTSTRAP_TRUST_SNAPSHOT_COMPONENT_ONLY" },
+        "condition_output_authorized": { "const": false },
+        "content_sha256": { "$ref": "#/$defs/sha256" },
+        "declared_role": { "const": "SYNTHETIC_EVIDENCE_ENVELOPE_SIGNER_KAT_ONLY" },
+        "declared_role_cryptographically_authenticated_in_kat": { "const": true },
+        "declared_role_is_role_scope_authorization": { "const": false },
+        "declared_role_mapping_verified": { "const": true },
+        "detached_authentication_bundle_sha256": { "$ref": "#/$defs/sha256" },
+        "downstream_gate_count": { "const": 4 },
+        "downstream_gates_authorized": { "const": 0 },
+        "evidence_acceptance_authorized": { "const": false },
+        "execution_mode": { "const": "SYNTHETIC_KAT" },
+        "fault_injection_authorized": { "const": false },
+        "frame_bytes": { "type": "integer", "enum": [658, 659] },
+        "frame_sha256": { "$ref": "#/$defs/sha256" },
+        "frozen_revocation_snapshot_is_currentness": { "const": false },
+        "isolated_lab_candidate_surface_component_total": { "const": 3 },
+        "isolated_lab_candidate_surface_components_implemented": { "const": 3 },
+        "isolated_lab_candidate_surface_components_locally_kat_exercised": { "const": 3 },
+        "issuer_key_id": { "type": "string" },
+        "issuer_key_version": { "type": "string" },
+        "local_t05_specification_exercised": { "const": true },
+        "local_t06_specification_exercised": { "const": false },
+        "local_t07_specification_exercised": { "const": false },
+        "local_threat_specifications_covered": { "const": 5 },
+        "mapped_policy_leaf_role": { "type": "string" },
+        "message_bytes": { "type": "integer", "enum": [754, 757] },
+        "message_profile": { "const": "U64BE_LENGTH_PREFIXED_ASCII_DOMAIN_AND_EXACT_PREDECESSOR_CANONICAL_FRAME_BYTES_NO_PARSE_RESERIALIZE" },
+        "message_sha256": { "$ref": "#/$defs/sha256" },
+        "message_sha512": { "$ref": "#/$defs/sha512" },
+        "policy_revision": { "type": "string" },
+        "policy_role_map_entry_count": { "const": 2 },
+        "policy_root_count": { "const": 2 },
+        "policy_structural_chain_entry_count": { "const": 6 },
+        "policy_track_count": { "const": 2 },
+        "predecessor_frame_review_count": { "const": 1 },
+        "predecessor_receipt_content_sha256": { "$ref": "#/$defs/sha256" },
+        "production_admissible": { "const": false },
+        "production_ingestion_control_count": { "const": 14 },
+        "production_ingestion_controls_implemented": { "const": 0 },
+        "production_ingestion_controls_runtime_exercised": { "const": 0 },
+        "production_threat_specification_count": { "const": 20 },
+        "production_threat_specifications_runtime_exercised": { "const": 0 },
+        "production_validated_evidence_items": { "const": 0 },
+        "provider_authority": { "const": false },
+        "public_key_count": { "const": 6 },
+        "public_vector_bundle_sha256": { "const": "a87e0883a42ca69fe3a0348b4ffe44c153882f8dcc93eb67db1ea048d53851d7" },
+        "real_evidence_items_present": { "const": 0 },
+        "revocation_snapshot_revision": { "type": "string" },
+        "revoked_leaf_key_id": { "type": "string" },
+        "revoked_leaf_key_version": { "type": "string" },
+        "revoked_leaf_state": { "const": "REVOKED_AT_OR_BEFORE_EXACT_FROZEN_SYNTHETIC_REVISION" },
+        "role_scope_authorization_implemented": { "const": false },
+        "root_key_id": { "type": "string" },
+        "root_key_version": { "type": "string" },
+        "runtime_authority": { "const": false },
+        "runtime_prerequisite_count": { "const": 16 },
+        "runtime_prerequisites_satisfied": { "const": 0 },
+        "schema": { "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.bootstrap_trust_authentication_synthetic_trust_chain_exact_key_version_declared_role_and_revocation_verifier_isolated_lab_v1.receipt.v0" },
+        "schema_version": { "const": 1 },
+        "selected_revocation_entry_count": { "const": 2 },
+        "separately_injected_trust_policy": { "const": true },
+        "side_effects_unlocked": { "const": "NONE" },
+        "signature_domain": { "type": "string" },
+        "signature_scheme": { "const": "ED25519_PURE_RFC8032_NO_CONTEXT_NO_PREHASH" },
+        "signature_verification_count": { "const": 1 },
+        "signer_role_scope_authorization_implemented": { "const": false },
+        "status": { "const": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_BOOTSTRAP_TRUST_AUTHENTICATION_SYNTHETIC_TRUST_CHAIN_EXACT_KEY_VERSION_DECLARED_ROLE_AND_REVOCATION_VERIFIED_ISOLATED_LAB_COMPONENT_ONLY_NO_PRODUCTION_AUTHORITY" },
+        "strict_public_key_point_validation_count": { "const": 6 },
+        "strict_signature_r_point_validation_count": { "const": 1 },
+        "synthetic_fixture": { "const": true },
+        "threat_case_count": { "const": 20 },
+        "track_id": { "$ref": "#/$defs/trackId" },
+        "track_leaf_role": { "type": "string" },
+        "track_subject_binding_implemented": { "const": false },
+        "trust_policy_sha256": { "$ref": "#/$defs/sha256" },
+        "trust_root_count": { "const": 2 },
+        "vector_set_id": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "minProperties": 87,
+      "maxProperties": 87
+    }
+  }
+}
