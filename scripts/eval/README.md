@@ -242,6 +242,24 @@ worktree. The postcommit phase rejects an unchanged base HEAD, any tracked,
 indexed, or untracked residue, and any base-to-HEAD path outside the exact
 seven-path design set.
 
+`engram_g14_native_sandbox_adapter_kat.py` implements that successor only as a
+default-off public-synthetic native viability KAT. It compiles and launches one
+fixed closed-output clock probe in a fresh synthetic root, persists a one-shot
+claim and unauthenticated expected-chain anchor before probe launch, and emits
+the 11 preregistered phase receipts. Real Darwin evidence shows that Seatbelt
+can deny the direct clock syscall while libc/commpage clock paths remain, and
+that a symbolic `system-clock` rule does not compile. The Linux probe likewise
+tests direct seccomp denial separately from residual libc/vDSO access. Either
+residual path is terminal `WALL_CLOCK_UNCONFINED`, so policy application,
+active attestation, and the full 14-canary run stay false; no fallback is
+allowed. Cleanup failure writes a create-new, fsynced, reopened minimal lesson
+before claims are unblocked, while lesson failure leaves an absorbing
+interlock. This is a validated negative result, not a native adapter or G1.4
+authority. See
+`docs/design/ENGRAM_G1_4_NATIVE_SANDBOX_ADAPTER_KAT_2026_07_18.md` and run
+`scripts/check-engram-g14-native-sandbox-adapter-kat.sh --phase precommit`
+before commit, then `--phase postcommit` from the clean committed worktree.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class
