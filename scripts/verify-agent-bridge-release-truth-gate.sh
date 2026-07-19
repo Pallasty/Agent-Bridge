@@ -70,7 +70,7 @@ assert cargo["binary_name"] == "agent-bridge"
 assert cargo["binary_expected_version"] == "0.14.0"
 assert cargo["mcp_expected_version"] == "0.14.0"
 assert cargo["capability_expected_version"] == "0.14.0"
-assert len(cargo["workspace_member_version_inheritance"]) == 13
+assert len(cargo["workspace_member_version_inheritance"]) == 14
 assert all(cargo["workspace_member_version_inheritance"].values())
 
 binary = packet["binary_observation"]

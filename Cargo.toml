@@ -13,6 +13,7 @@ members = [
     "crates/ab-tts",
     "crates/oob-alert",
     "crates/memory-columnar",
+    "crates/owned-lab-role-artifacts",
     "bin/agent-cli",
 ]
 

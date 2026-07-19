@@ -1,0 +1,1769 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_role_build_receipt_s21b_a1.v0",
+  "title": "Agent-Bridge S21B-A1 external role-build closure receipt",
+  "description": "Closed non-authorizing receipt for a future post-integration clean-archive double rebuild of the four exact identity-only owned-lab role binaries. The repository KAT is blocked and contains no fabricated build output.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "stage",
+    "status",
+    "decision",
+    "hashing_contract",
+    "receipt_state",
+    "test_only",
+    "synthetic",
+    "target_binding",
+    "closure_bindings",
+    "rebuilds",
+    "role_artifacts",
+    "forbidden_outputs",
+    "result",
+    "role_build_receipt_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.memory_temporal_owned_lab_role_build_receipt_s21b_a1.v0"
+    },
+    "packet_kind": {
+      "const": "S21B_A1_ROLE_BUILD_CLOSURE_RECEIPT"
+    },
+    "canonicalization": {
+      "const": "AB_RESTRICTED_CANONICAL_JSON_S21B_A1_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+    },
+    "stage": {
+      "const": "S21B_A1_DEFINE_AND_BUILD_FOUR_NAMED_NON_LIVE_ROLE_ARTIFACTS_AND_REPRODUCIBLE_CLOSURES"
+    },
+    "status": {
+      "enum": [
+        "S21B_A1_TOOLING_COMPLETE_PENDING_POST_INTEGRATION_DOUBLE_REBUILD",
+        "S21B_A1_POST_INTEGRATION_ROLE_BUILD_CLOSURE_VERIFIED_NON_LIVE"
+      ]
+    },
+    "decision": {
+      "const": "S21B_A1_ADVANCE_ONLY_TO_SEPARATE_UNSIGNED_SUBJECT_CONTRACT_REBINDING_AND_GENERATION_REVIEW_NO_OWNER_SIGNING_REQUEST"
+    },
+    "hashing_contract": {
+      "$ref": "#/$defs/hashing_contract"
+    },
+    "receipt_state": {
+      "enum": [
+        "SYNTHETIC_KAT_TOOLING_COMPLETE_PENDING_POST_INTEGRATION_DOUBLE_REBUILD",
+        "POST_INTEGRATION_DOUBLE_REBUILD_VERIFIED_NON_LIVE"
+      ]
+    },
+    "test_only": {
+      "type": "boolean"
+    },
+    "synthetic": {
+      "type": "boolean"
+    },
+    "target_binding": {
+      "$ref": "#/$defs/target_binding"
+    },
+    "closure_bindings": {
+      "$ref": "#/$defs/closure_bindings"
+    },
+    "rebuilds": {
+      "$ref": "#/$defs/rebuilds"
+    },
+    "role_artifacts": {
+      "$ref": "#/$defs/role_artifacts"
+    },
+    "forbidden_outputs": {
+      "$ref": "#/$defs/forbidden_outputs"
+    },
+    "result": {
+      "$ref": "#/$defs/result"
+    },
+    "role_build_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "nonclaims": {
+      "$ref": "#/$defs/nonclaims"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "test_only": {
+            "const": true
+          }
+        },
+        "required": [
+          "test_only"
+        ]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "S21B_A1_TOOLING_COMPLETE_PENDING_POST_INTEGRATION_DOUBLE_REBUILD"
+          },
+          "synthetic": {
+            "const": true
+          },
+          "receipt_state": {
+            "const": "SYNTHETIC_KAT_TOOLING_COMPLETE_PENDING_POST_INTEGRATION_DOUBLE_REBUILD"
+          },
+          "target_binding": {
+            "$ref": "#/$defs/pending_target_binding"
+          },
+          "closure_bindings": {
+            "$ref": "#/$defs/pending_closure_bindings"
+          },
+          "rebuilds": {
+            "$ref": "#/$defs/pending_rebuilds"
+          },
+          "role_artifacts": {
+            "$ref": "#/$defs/pending_role_artifacts"
+          },
+          "result": {
+            "$ref": "#/$defs/pending_result"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "status": {
+            "const": "S21B_A1_POST_INTEGRATION_ROLE_BUILD_CLOSURE_VERIFIED_NON_LIVE"
+          },
+          "synthetic": {
+            "const": false
+          },
+          "receipt_state": {
+            "const": "POST_INTEGRATION_DOUBLE_REBUILD_VERIFIED_NON_LIVE"
+          },
+          "target_binding": {
+            "$ref": "#/$defs/complete_target_binding"
+          },
+          "closure_bindings": {
+            "$ref": "#/$defs/complete_closure_bindings"
+          },
+          "rebuilds": {
+            "$ref": "#/$defs/complete_rebuilds"
+          },
+          "role_artifacts": {
+            "$ref": "#/$defs/complete_role_artifacts"
+          },
+          "result": {
+            "$ref": "#/$defs/complete_result"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^(?!0{64}$)[0-9a-f]{64}$"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "git_oid": {
+      "type": "string",
+      "pattern": "^(?!0{40}$)[0-9a-f]{40}$"
+    },
+    "nullable_git_oid": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/git_oid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_positive_integer": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash_algorithm",
+        "canonicalization",
+        "digest_domain",
+        "digest_framing",
+        "hash_scope",
+        "self_hash_field",
+        "self_hash_field_excluded",
+        "repository_framing_lf_excluded",
+        "cross_field_semantic_validation_required",
+        "candidate_reported_matches_authoritative"
+      ],
+      "properties": {
+        "hash_algorithm": {
+          "const": "SHA-256"
+        },
+        "canonicalization": {
+          "const": "AB_RESTRICTED_CANONICAL_JSON_S21B_A1_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+        },
+        "digest_domain": {
+          "const": "agent-bridge/biocortex/owned-lab/s21b-a1/role-build-receipt/v1"
+        },
+        "digest_framing": {
+          "const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"
+        },
+        "hash_scope": {
+          "const": "ENTIRE_PACKET_EXCEPT_ROLE_BUILD_RECEIPT_SHA256"
+        },
+        "self_hash_field": {
+          "const": "role_build_receipt_sha256"
+        },
+        "self_hash_field_excluded": {
+          "const": true
+        },
+        "repository_framing_lf_excluded": {
+          "const": true
+        },
+        "cross_field_semantic_validation_required": {
+          "const": true
+        },
+        "candidate_reported_matches_authoritative": {
+          "const": false
+        }
+      }
+    },
+    "target_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_remote",
+        "remote_ref",
+        "a0_integration_commit",
+        "a0_integration_tree",
+        "a0_integration_first_parent",
+        "a0_integration_second_parent",
+        "a0_archive_sha256",
+        "a0_archive_byte_count",
+        "a0_cargo_lock_sha256",
+        "archive_profile",
+        "target_refrozen",
+        "source_commit",
+        "source_tree",
+        "source_parent_commit",
+        "source_parent_tree",
+        "integration_commit",
+        "integration_tree",
+        "integration_first_parent",
+        "integration_second_parent",
+        "target_committer_epoch",
+        "integrated_archive_sha256",
+        "integrated_archive_byte_count",
+        "cargo_lock_sha256",
+        "candidate_supplied_target_used"
+      ],
+      "properties": {
+        "canonical_remote": {
+          "const": "git@github.com:pallasting/Agent-Bridge.git"
+        },
+        "remote_ref": {
+          "const": "refs/heads/master"
+        },
+        "a0_integration_commit": {
+          "const": "d677e923442661a1d896185923b244d22b726319"
+        },
+        "a0_integration_tree": {
+          "const": "4534149eb9c8057d4980f008897c9587bd253c7f"
+        },
+        "a0_integration_first_parent": {
+          "const": "908412b8209056a90b3be5c2f93896c763d31311"
+        },
+        "a0_integration_second_parent": {
+          "const": "4f627b0f1be2c858615906e5170055d92b5632b3"
+        },
+        "a0_archive_sha256": {
+          "const": "6d2163035d98bb64a76fcbcb1c725d315cada415814f7a0cf82c7afc89c1cac8"
+        },
+        "a0_archive_byte_count": {
+          "const": 48793600
+        },
+        "a0_cargo_lock_sha256": {
+          "const": "a0ba6e432b188cbd0e3157693cb586bb950584860f036f83ee535fe67284b709"
+        },
+        "archive_profile": {
+          "const": "git -c tar.umask=0022 archive --format=tar <commit>"
+        },
+        "target_refrozen": {
+          "type": "boolean"
+        },
+        "source_commit": {
+          "$ref": "#/$defs/nullable_git_oid"
+        },
+        "source_tree": {
+          "$ref": "#/$defs/nullable_git_oid"
+        },
+        "source_parent_commit": {
+          "$ref": "#/$defs/nullable_git_oid"
+        },
+        "source_parent_tree": {
+          "$ref": "#/$defs/nullable_git_oid"
+        },
+        "integration_commit": {
+          "$ref": "#/$defs/nullable_git_oid"
+        },
+        "integration_tree": {
+          "$ref": "#/$defs/nullable_git_oid"
+        },
+        "integration_first_parent": {
+          "$ref": "#/$defs/nullable_git_oid"
+        },
+        "integration_second_parent": {
+          "$ref": "#/$defs/nullable_git_oid"
+        },
+        "target_committer_epoch": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "integrated_archive_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "integrated_archive_byte_count": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "cargo_lock_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "candidate_supplied_target_used": {
+          "const": false
+        }
+      }
+    },
+    "pending_target_binding": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/target_binding"
+        },
+        {
+          "properties": {
+            "target_refrozen": {
+              "const": false
+            },
+            "source_commit": {
+              "type": "null"
+            },
+            "source_tree": {
+              "type": "null"
+            },
+            "source_parent_commit": {
+              "type": "null"
+            },
+            "source_parent_tree": {
+              "type": "null"
+            },
+            "integration_commit": {
+              "type": "null"
+            },
+            "integration_tree": {
+              "type": "null"
+            },
+            "integration_first_parent": {
+              "type": "null"
+            },
+            "integration_second_parent": {
+              "type": "null"
+            },
+            "target_committer_epoch": {
+              "type": "null"
+            },
+            "integrated_archive_sha256": {
+              "type": "null"
+            },
+            "integrated_archive_byte_count": {
+              "type": "null"
+            },
+            "cargo_lock_sha256": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "complete_target_binding": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/target_binding"
+        },
+        {
+          "properties": {
+            "target_refrozen": {
+              "const": true
+            },
+            "source_commit": {
+              "$ref": "#/$defs/git_oid"
+            },
+            "source_tree": {
+              "$ref": "#/$defs/git_oid"
+            },
+            "source_parent_commit": {
+              "$ref": "#/$defs/git_oid"
+            },
+            "source_parent_tree": {
+              "$ref": "#/$defs/git_oid"
+            },
+            "integration_commit": {
+              "$ref": "#/$defs/git_oid"
+            },
+            "integration_tree": {
+              "$ref": "#/$defs/git_oid"
+            },
+            "integration_first_parent": {
+              "$ref": "#/$defs/git_oid"
+            },
+            "integration_second_parent": {
+              "$ref": "#/$defs/git_oid"
+            },
+            "target_committer_epoch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "integrated_archive_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "integrated_archive_byte_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "cargo_lock_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      ]
+    },
+    "closure_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "definition_path",
+        "definition_present",
+        "manifest_digest_profile",
+        "manifest_sha256",
+        "independently_recomputed_in_build_a",
+        "independently_recomputed_in_build_b",
+        "rebuild_values_equal"
+      ],
+      "properties": {
+        "definition_path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]{1,512}$"
+        },
+        "definition_present": {
+          "const": true
+        },
+        "manifest_digest_profile": {
+          "const": "SHA256_EXACT_CANONICAL_REPOSITORY_FILE_BYTES_INCLUDING_ONE_TERMINAL_LF_NO_DOMAIN_NO_FRAMING_NO_SELF_FIELD"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "content_set_digest_profile": {
+          "const": "U32BE_DOMAIN_LENGTH_DOMAIN_THEN_FOR_EACH_BYTEWISE_ASCII_PATH_SORTED_MEMBER_U64BE_PATH_LENGTH_PATH_ASCII_OCTAL_GIT_MODE_TO_U32_THEN_U32BE_U64BE_CONTENT_LENGTH_CONTENT"
+        },
+        "content_set_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "independently_recomputed_in_build_a": {
+          "type": "boolean"
+        },
+        "independently_recomputed_in_build_b": {
+          "type": "boolean"
+        },
+        "rebuild_values_equal": {
+          "type": "boolean"
+        }
+      }
+    },
+    "closure_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "toolchain_manifest",
+        "feature_set",
+        "schema_set",
+        "build_recipes",
+        "candidate_supplied_expected_digests_used"
+      ],
+      "properties": {
+        "toolchain_manifest": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/closure_record"
+            },
+            {
+              "properties": {
+                "definition_path": {
+                  "const": "docs/design/fixtures/biocortex-ab-track-b-owned-lab-role-build-toolchain-manifest-s21b-a1-v0.json"
+                },
+                "content_set_digest_profile": false,
+                "content_set_sha256": false
+              }
+            }
+          ]
+        },
+        "feature_set": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/closure_record"
+            },
+            {
+              "properties": {
+                "definition_path": {
+                  "const": "docs/design/fixtures/biocortex-ab-track-b-owned-lab-role-build-feature-set-s21b-a1-v0.json"
+                },
+                "content_set_digest_profile": false,
+                "content_set_sha256": false
+              }
+            }
+          ]
+        },
+        "schema_set": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/closure_record"
+            },
+            {
+              "required": [
+                "content_set_digest_profile",
+                "content_set_sha256"
+              ],
+              "properties": {
+                "definition_path": {
+                  "const": "docs/design/fixtures/biocortex-ab-track-b-owned-lab-role-build-schema-set-s21b-a1-v0.json"
+                }
+              }
+            }
+          ]
+        },
+        "build_recipes": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/closure_record"
+            },
+            {
+              "properties": {
+                "definition_path": {
+                  "const": "docs/design/fixtures/biocortex-ab-track-b-owned-lab-role-build-recipes-s21b-a1-v0.json"
+                },
+                "content_set_digest_profile": false,
+                "content_set_sha256": false
+              }
+            }
+          ]
+        },
+        "candidate_supplied_expected_digests_used": {
+          "const": false
+        }
+      }
+    },
+    "pending_closure_bindings": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/closure_bindings"
+        },
+        {
+          "properties": {
+            "toolchain_manifest": {
+              "$ref": "#/$defs/pending_closure_record"
+            },
+            "feature_set": {
+              "$ref": "#/$defs/pending_closure_record"
+            },
+            "schema_set": {
+              "$ref": "#/$defs/pending_schema_set_closure_record"
+            },
+            "build_recipes": {
+              "$ref": "#/$defs/pending_closure_record"
+            }
+          }
+        }
+      ]
+    },
+    "complete_closure_bindings": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/closure_bindings"
+        },
+        {
+          "properties": {
+            "toolchain_manifest": {
+              "$ref": "#/$defs/complete_closure_record"
+            },
+            "feature_set": {
+              "$ref": "#/$defs/complete_closure_record"
+            },
+            "schema_set": {
+              "$ref": "#/$defs/complete_schema_set_closure_record"
+            },
+            "build_recipes": {
+              "$ref": "#/$defs/complete_closure_record"
+            }
+          }
+        }
+      ]
+    },
+    "pending_closure_record": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/closure_record"
+        },
+        {
+          "properties": {
+            "manifest_sha256": {
+              "type": "null"
+            },
+            "independently_recomputed_in_build_a": {
+              "const": false
+            },
+            "independently_recomputed_in_build_b": {
+              "const": false
+            },
+            "rebuild_values_equal": {
+              "const": false
+            }
+          }
+        }
+      ]
+    },
+    "complete_closure_record": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/closure_record"
+        },
+        {
+          "properties": {
+            "manifest_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "independently_recomputed_in_build_a": {
+              "const": true
+            },
+            "independently_recomputed_in_build_b": {
+              "const": true
+            },
+            "rebuild_values_equal": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "pending_schema_set_closure_record": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/pending_closure_record"
+        },
+        {
+          "required": [
+            "content_set_digest_profile",
+            "content_set_sha256"
+          ],
+          "properties": {
+            "content_set_sha256": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "complete_schema_set_closure_record": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/complete_closure_record"
+        },
+        {
+          "required": [
+            "content_set_digest_profile",
+            "content_set_sha256"
+          ],
+          "properties": {
+            "content_set_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      ]
+    },
+    "rebuild": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "build_label",
+        "completed",
+        "clean_archive_root_fresh",
+        "target_directory_fresh",
+        "incremental_state_shared",
+        "network_disabled",
+        "source_archive_sha256",
+        "source_archive_byte_count",
+        "cargo_lock_sha256",
+        "toolchain_manifest_sha256",
+        "feature_set_sha256",
+        "schema_set_sha256",
+        "schema_content_set_sha256",
+        "build_recipes_sha256",
+        "candidate_supplied_expected_digests_used"
+      ],
+      "properties": {
+        "build_label": {
+          "enum": [
+            "A",
+            "B"
+          ]
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "clean_archive_root_fresh": {
+          "type": "boolean"
+        },
+        "target_directory_fresh": {
+          "type": "boolean"
+        },
+        "incremental_state_shared": {
+          "const": false
+        },
+        "network_disabled": {
+          "type": "boolean"
+        },
+        "source_archive_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "source_archive_byte_count": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "cargo_lock_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "toolchain_manifest_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "feature_set_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "schema_set_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "schema_content_set_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "build_recipes_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "candidate_supplied_expected_digests_used": {
+          "const": false
+        }
+      }
+    },
+    "pending_rebuild": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/rebuild"
+        },
+        {
+          "properties": {
+            "completed": {
+              "const": false
+            },
+            "clean_archive_root_fresh": {
+              "const": false
+            },
+            "target_directory_fresh": {
+              "const": false
+            },
+            "network_disabled": {
+              "const": false
+            },
+            "source_archive_sha256": {
+              "type": "null"
+            },
+            "source_archive_byte_count": {
+              "type": "null"
+            },
+            "cargo_lock_sha256": {
+              "type": "null"
+            },
+            "toolchain_manifest_sha256": {
+              "type": "null"
+            },
+            "feature_set_sha256": {
+              "type": "null"
+            },
+            "schema_set_sha256": {
+              "type": "null"
+            },
+            "schema_content_set_sha256": {
+              "type": "null"
+            },
+            "build_recipes_sha256": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "complete_rebuild": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/rebuild"
+        },
+        {
+          "properties": {
+            "completed": {
+              "const": true
+            },
+            "clean_archive_root_fresh": {
+              "const": true
+            },
+            "target_directory_fresh": {
+              "const": true
+            },
+            "network_disabled": {
+              "const": true
+            },
+            "source_archive_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "source_archive_byte_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "cargo_lock_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "toolchain_manifest_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "feature_set_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "schema_set_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "schema_content_set_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "build_recipes_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      ]
+    },
+    "rebuilds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "build_a",
+        "build_b",
+        "build_roots_distinct",
+        "target_directories_distinct",
+        "all_closure_digests_equal",
+        "schema_content_set_digests_equal",
+        "all_role_outputs_byte_equal"
+      ],
+      "properties": {
+        "build_a": {
+          "$ref": "#/$defs/rebuild"
+        },
+        "build_b": {
+          "$ref": "#/$defs/rebuild"
+        },
+        "build_roots_distinct": {
+          "type": "boolean"
+        },
+        "target_directories_distinct": {
+          "type": "boolean"
+        },
+        "all_closure_digests_equal": {
+          "type": "boolean"
+        },
+        "schema_content_set_digests_equal": {
+          "type": "boolean"
+        },
+        "all_role_outputs_byte_equal": {
+          "type": "boolean"
+        }
+      }
+    },
+    "pending_rebuilds": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/rebuilds"
+        },
+        {
+          "properties": {
+            "build_a": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pending_rebuild"
+                },
+                {
+                  "properties": {
+                    "build_label": {
+                      "const": "A"
+                    }
+                  }
+                }
+              ]
+            },
+            "build_b": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pending_rebuild"
+                },
+                {
+                  "properties": {
+                    "build_label": {
+                      "const": "B"
+                    }
+                  }
+                }
+              ]
+            },
+            "build_roots_distinct": {
+              "const": false
+            },
+            "target_directories_distinct": {
+              "const": false
+            },
+            "all_closure_digests_equal": {
+              "const": false
+            },
+            "schema_content_set_digests_equal": {
+              "const": false
+            },
+            "all_role_outputs_byte_equal": {
+              "const": false
+            }
+          }
+        }
+      ]
+    },
+    "complete_rebuilds": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/rebuilds"
+        },
+        {
+          "properties": {
+            "build_a": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/complete_rebuild"
+                },
+                {
+                  "properties": {
+                    "build_label": {
+                      "const": "A"
+                    }
+                  }
+                }
+              ]
+            },
+            "build_b": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/complete_rebuild"
+                },
+                {
+                  "properties": {
+                    "build_label": {
+                      "const": "B"
+                    }
+                  }
+                }
+              ]
+            },
+            "build_roots_distinct": {
+              "const": true
+            },
+            "target_directories_distinct": {
+              "const": true
+            },
+            "all_closure_digests_equal": {
+              "const": true
+            },
+            "schema_content_set_digests_equal": {
+              "const": true
+            },
+            "all_role_outputs_byte_equal": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "build_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_present",
+        "regular_file",
+        "executable",
+        "observed_mode_octal",
+        "byte_count",
+        "raw_sha256",
+        "identity_sha256",
+        "identity_packet_kind",
+        "identity_terminal_lf_count",
+        "build_recipe_sha256"
+      ],
+      "properties": {
+        "artifact_present": {
+          "type": "boolean"
+        },
+        "regular_file": {
+          "type": "boolean"
+        },
+        "executable": {
+          "type": "boolean"
+        },
+        "observed_mode_octal": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^0[0-7]{3}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "byte_count": {
+          "$ref": "#/$defs/nullable_positive_integer"
+        },
+        "raw_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "identity_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        },
+        "identity_packet_kind": {
+          "oneOf": [
+            {
+              "const": "S21B_A1_NON_LIVE_ROLE_ARTIFACT_IDENTITY"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "identity_terminal_lf_count": {
+          "oneOf": [
+            {
+              "const": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "build_recipe_sha256": {
+          "$ref": "#/$defs/nullable_sha256"
+        }
+      }
+    },
+    "pending_build_observation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/build_observation"
+        },
+        {
+          "properties": {
+            "artifact_present": {
+              "const": false
+            },
+            "regular_file": {
+              "const": false
+            },
+            "executable": {
+              "const": false
+            },
+            "observed_mode_octal": {
+              "type": "null"
+            },
+            "byte_count": {
+              "type": "null"
+            },
+            "raw_sha256": {
+              "type": "null"
+            },
+            "identity_sha256": {
+              "type": "null"
+            },
+            "identity_packet_kind": {
+              "type": "null"
+            },
+            "identity_terminal_lf_count": {
+              "type": "null"
+            },
+            "build_recipe_sha256": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "complete_build_observation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/build_observation"
+        },
+        {
+          "properties": {
+            "artifact_present": {
+              "const": true
+            },
+            "regular_file": {
+              "const": true
+            },
+            "executable": {
+              "const": true
+            },
+            "observed_mode_octal": {
+              "const": "0755"
+            },
+            "byte_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "raw_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "identity_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "identity_packet_kind": {
+              "const": "S21B_A1_NON_LIVE_ROLE_ARTIFACT_IDENTITY"
+            },
+            "identity_terminal_lf_count": {
+              "const": 1
+            },
+            "build_recipe_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      ]
+    },
+    "role_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "cargo_binary_target",
+        "source_relative_path",
+        "output_relative_path",
+        "expected_mode_octal",
+        "identity_digest_profile",
+        "build_recipe_digest_profile",
+        "build_recipe_digest_domain",
+        "build_recipe_digest_framing",
+        "build_a",
+        "build_b",
+        "raw_bytes_equal",
+        "raw_sha256_equal",
+        "identity_sha256_equal",
+        "build_recipe_sha256_equal"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "controller",
+            "observer",
+            "runner",
+            "validator"
+          ]
+        },
+        "cargo_binary_target": {
+          "pattern": "^ab-owned-lab-(controller|observer|runner|validator)$"
+        },
+        "source_relative_path": {
+          "pattern": "^crates/owned-lab-role-artifacts/src/bin/(controller|observer|runner|validator)\\.rs$"
+        },
+        "output_relative_path": {
+          "pattern": "^x86_64-unknown-linux-gnu/release/ab-owned-lab-(controller|observer|runner|validator)$"
+        },
+        "expected_mode_octal": {
+          "const": "0755"
+        },
+        "identity_digest_profile": {
+          "const": "SHA256_RAW_CANONICAL_IDENTITY_BYTES_EXCLUDING_SINGLE_TERMINAL_LF"
+        },
+        "build_recipe_digest_profile": {
+          "const": "SHA256_DOMAIN_SEPARATED_EXACT_MATCHING_RECIPES_ARRAY_OBJECT_AB_RESTRICTED_COMPACT_SORTED_KEYS_UTF8_WITHOUT_TERMINAL_LF"
+        },
+        "build_recipe_digest_domain": {
+          "type": "string",
+          "pattern": "^agent-bridge/biocortex/owned-lab/s21b-a1/build-recipe/(controller|observer|runner|validator)/v1$"
+        },
+        "build_recipe_digest_framing": {
+          "const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"
+        },
+        "build_a": {
+          "$ref": "#/$defs/build_observation"
+        },
+        "build_b": {
+          "$ref": "#/$defs/build_observation"
+        },
+        "raw_bytes_equal": {
+          "type": "boolean"
+        },
+        "raw_sha256_equal": {
+          "type": "boolean"
+        },
+        "identity_sha256_equal": {
+          "type": "boolean"
+        },
+        "build_recipe_sha256_equal": {
+          "type": "boolean"
+        }
+      }
+    },
+    "pending_role_artifact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/role_artifact"
+        },
+        {
+          "properties": {
+            "build_a": {
+              "$ref": "#/$defs/pending_build_observation"
+            },
+            "build_b": {
+              "$ref": "#/$defs/pending_build_observation"
+            },
+            "raw_bytes_equal": {
+              "const": false
+            },
+            "raw_sha256_equal": {
+              "const": false
+            },
+            "identity_sha256_equal": {
+              "const": false
+            },
+            "build_recipe_sha256_equal": {
+              "const": false
+            }
+          }
+        }
+      ]
+    },
+    "complete_role_artifact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/role_artifact"
+        },
+        {
+          "properties": {
+            "build_a": {
+              "$ref": "#/$defs/complete_build_observation"
+            },
+            "build_b": {
+              "$ref": "#/$defs/complete_build_observation"
+            },
+            "raw_bytes_equal": {
+              "const": true
+            },
+            "raw_sha256_equal": {
+              "const": true
+            },
+            "identity_sha256_equal": {
+              "const": true
+            },
+            "build_recipe_sha256_equal": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "role_artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_role_count",
+        "completed_role_count",
+        "controller",
+        "observer",
+        "runner",
+        "validator",
+        "raw_sha256_pairwise_distinct",
+        "identity_sha256_pairwise_distinct",
+        "build_recipe_sha256_pairwise_distinct",
+        "private_library_or_test_binary_used",
+        "arbitrary_digest_substitution_used"
+      ],
+      "properties": {
+        "required_role_count": {
+          "const": 4
+        },
+        "completed_role_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "controller": {
+          "$ref": "#/$defs/role_artifact"
+        },
+        "observer": {
+          "$ref": "#/$defs/role_artifact"
+        },
+        "runner": {
+          "$ref": "#/$defs/role_artifact"
+        },
+        "validator": {
+          "$ref": "#/$defs/role_artifact"
+        },
+        "raw_sha256_pairwise_distinct": {
+          "type": "boolean"
+        },
+        "identity_sha256_pairwise_distinct": {
+          "type": "boolean"
+        },
+        "build_recipe_sha256_pairwise_distinct": {
+          "type": "boolean"
+        },
+        "private_library_or_test_binary_used": {
+          "const": false
+        },
+        "arbitrary_digest_substitution_used": {
+          "const": false
+        }
+      }
+    },
+    "pending_role_artifacts": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/role_artifacts"
+        },
+        {
+          "properties": {
+            "completed_role_count": {
+              "const": 0
+            },
+            "controller": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pending_role_artifact"
+                },
+                {
+                  "$ref": "#/$defs/controller_identity"
+                }
+              ]
+            },
+            "observer": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pending_role_artifact"
+                },
+                {
+                  "$ref": "#/$defs/observer_identity"
+                }
+              ]
+            },
+            "runner": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pending_role_artifact"
+                },
+                {
+                  "$ref": "#/$defs/runner_identity"
+                }
+              ]
+            },
+            "validator": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pending_role_artifact"
+                },
+                {
+                  "$ref": "#/$defs/validator_identity"
+                }
+              ]
+            },
+            "raw_sha256_pairwise_distinct": {
+              "const": false
+            },
+            "identity_sha256_pairwise_distinct": {
+              "const": false
+            },
+            "build_recipe_sha256_pairwise_distinct": {
+              "const": false
+            }
+          }
+        }
+      ]
+    },
+    "complete_role_artifacts": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/role_artifacts"
+        },
+        {
+          "properties": {
+            "completed_role_count": {
+              "const": 4
+            },
+            "controller": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/complete_role_artifact"
+                },
+                {
+                  "$ref": "#/$defs/controller_identity"
+                }
+              ]
+            },
+            "observer": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/complete_role_artifact"
+                },
+                {
+                  "$ref": "#/$defs/observer_identity"
+                }
+              ]
+            },
+            "runner": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/complete_role_artifact"
+                },
+                {
+                  "$ref": "#/$defs/runner_identity"
+                }
+              ]
+            },
+            "validator": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/complete_role_artifact"
+                },
+                {
+                  "$ref": "#/$defs/validator_identity"
+                }
+              ]
+            },
+            "raw_sha256_pairwise_distinct": {
+              "const": true
+            },
+            "identity_sha256_pairwise_distinct": {
+              "const": true
+            },
+            "build_recipe_sha256_pairwise_distinct": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "controller_identity": {
+      "properties": {
+        "role": {
+          "const": "controller"
+        },
+        "cargo_binary_target": {
+          "const": "ab-owned-lab-controller"
+        },
+        "source_relative_path": {
+          "const": "crates/owned-lab-role-artifacts/src/bin/controller.rs"
+        },
+        "output_relative_path": {
+          "const": "x86_64-unknown-linux-gnu/release/ab-owned-lab-controller"
+        },
+        "build_recipe_digest_domain": {
+          "const": "agent-bridge/biocortex/owned-lab/s21b-a1/build-recipe/controller/v1"
+        }
+      }
+    },
+    "observer_identity": {
+      "properties": {
+        "role": {
+          "const": "observer"
+        },
+        "cargo_binary_target": {
+          "const": "ab-owned-lab-observer"
+        },
+        "source_relative_path": {
+          "const": "crates/owned-lab-role-artifacts/src/bin/observer.rs"
+        },
+        "output_relative_path": {
+          "const": "x86_64-unknown-linux-gnu/release/ab-owned-lab-observer"
+        },
+        "build_recipe_digest_domain": {
+          "const": "agent-bridge/biocortex/owned-lab/s21b-a1/build-recipe/observer/v1"
+        }
+      }
+    },
+    "runner_identity": {
+      "properties": {
+        "role": {
+          "const": "runner"
+        },
+        "cargo_binary_target": {
+          "const": "ab-owned-lab-runner"
+        },
+        "source_relative_path": {
+          "const": "crates/owned-lab-role-artifacts/src/bin/runner.rs"
+        },
+        "output_relative_path": {
+          "const": "x86_64-unknown-linux-gnu/release/ab-owned-lab-runner"
+        },
+        "build_recipe_digest_domain": {
+          "const": "agent-bridge/biocortex/owned-lab/s21b-a1/build-recipe/runner/v1"
+        }
+      }
+    },
+    "validator_identity": {
+      "properties": {
+        "role": {
+          "const": "validator"
+        },
+        "cargo_binary_target": {
+          "const": "ab-owned-lab-validator"
+        },
+        "source_relative_path": {
+          "const": "crates/owned-lab-role-artifacts/src/bin/validator.rs"
+        },
+        "output_relative_path": {
+          "const": "x86_64-unknown-linux-gnu/release/ab-owned-lab-validator"
+        },
+        "build_recipe_digest_domain": {
+          "const": "agent-bridge/biocortex/owned-lab/s21b-a1/build-recipe/validator/v1"
+        }
+      }
+    },
+    "forbidden_outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unsigned_final_subject_present",
+        "unsigned_final_subject_sha256",
+        "owner_signing_request_present",
+        "owner_signing_message_sha256",
+        "owner_anchor_present",
+        "owner_private_key_read",
+        "owner_signature_present",
+        "owner_signature_sha256",
+        "owner_authorization_envelope_present",
+        "external_input_admission_present",
+        "execution_capability_present",
+        "live_adapter_present",
+        "live_action_count"
+      ],
+      "properties": {
+        "unsigned_final_subject_present": {
+          "const": false
+        },
+        "unsigned_final_subject_sha256": {
+          "type": "null"
+        },
+        "owner_signing_request_present": {
+          "const": false
+        },
+        "owner_signing_message_sha256": {
+          "type": "null"
+        },
+        "owner_anchor_present": {
+          "const": false
+        },
+        "owner_private_key_read": {
+          "const": false
+        },
+        "owner_signature_present": {
+          "const": false
+        },
+        "owner_signature_sha256": {
+          "type": "null"
+        },
+        "owner_authorization_envelope_present": {
+          "const": false
+        },
+        "external_input_admission_present": {
+          "const": false
+        },
+        "execution_capability_present": {
+          "const": false
+        },
+        "live_adapter_present": {
+          "const": false
+        },
+        "live_action_count": {
+          "const": 0
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role_build_closure_complete",
+        "terminal_hard_lock",
+        "next_action",
+        "owner_interaction_required_now",
+        "separate_unsigned_subject_contract_stage_may_begin",
+        "unsigned_final_subject_may_be_generated_by_this_stage",
+        "owner_signature_may_be_requested",
+        "live_execution_may_begin",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "role_build_closure_complete": {
+          "type": "boolean"
+        },
+        "terminal_hard_lock": {
+          "type": "boolean"
+        },
+        "next_action": {
+          "enum": [
+            "INTEGRATE_THEN_RUN_TWO_CLEAN_ARCHIVE_REBUILDS",
+            "BEGIN_SEPARATE_UNSIGNED_SUBJECT_CONTRACT_REBINDING_AND_GENERATION_REVIEW"
+          ]
+        },
+        "owner_interaction_required_now": {
+          "const": false
+        },
+        "separate_unsigned_subject_contract_stage_may_begin": {
+          "type": "boolean"
+        },
+        "unsigned_final_subject_may_be_generated_by_this_stage": {
+          "const": false
+        },
+        "owner_signature_may_be_requested": {
+          "const": false
+        },
+        "live_execution_may_begin": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      }
+    },
+    "pending_result": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/result"
+        },
+        {
+          "properties": {
+            "role_build_closure_complete": {
+              "const": false
+            },
+            "terminal_hard_lock": {
+              "const": true
+            },
+            "next_action": {
+              "const": "INTEGRATE_THEN_RUN_TWO_CLEAN_ARCHIVE_REBUILDS"
+            },
+            "separate_unsigned_subject_contract_stage_may_begin": {
+              "const": false
+            }
+          }
+        }
+      ]
+    },
+    "complete_result": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/result"
+        },
+        {
+          "properties": {
+            "role_build_closure_complete": {
+              "const": true
+            },
+            "terminal_hard_lock": {
+              "const": false
+            },
+            "next_action": {
+              "const": "BEGIN_SEPARATE_UNSIGNED_SUBJECT_CONTRACT_REBINDING_AND_GENERATION_REVIEW"
+            },
+            "separate_unsigned_subject_contract_stage_may_begin": {
+              "const": true
+            }
+          }
+        }
+      ]
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_is_unsigned_final_subject",
+        "receipt_is_owner_signing_request",
+        "receipt_is_owner_authority",
+        "receipt_is_execution_capability",
+        "identity_only_binaries_are_operational_roles",
+        "build_equality_proves_behavioral_correctness",
+        "build_equality_proves_cross_host_reproducibility",
+        "build_equality_proves_complete_supply_chain_provenance",
+        "synthetic_fixture_is_real_build_evidence",
+        "provider_or_production_authority",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "receipt_is_unsigned_final_subject": {
+          "const": false
+        },
+        "receipt_is_owner_signing_request": {
+          "const": false
+        },
+        "receipt_is_owner_authority": {
+          "const": false
+        },
+        "receipt_is_execution_capability": {
+          "const": false
+        },
+        "identity_only_binaries_are_operational_roles": {
+          "const": false
+        },
+        "build_equality_proves_behavioral_correctness": {
+          "const": false
+        },
+        "build_equality_proves_cross_host_reproducibility": {
+          "const": false
+        },
+        "build_equality_proves_complete_supply_chain_provenance": {
+          "const": false
+        },
+        "synthetic_fixture_is_real_build_evidence": {
+          "const": false
+        },
+        "provider_or_production_authority": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      }
+    }
+  }
+}
