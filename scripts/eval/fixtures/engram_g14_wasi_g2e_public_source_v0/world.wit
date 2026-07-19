@@ -1,0 +1,15 @@
+package agent-bridge:g14-clock-probe@0.1.0;
+
+world probe {
+  import wasi:clocks/wall-clock@0.2.12;
+  import wasi:clocks/monotonic-clock@0.2.12;
+  import wasi:io/poll@0.2.12;
+
+  record typed-report {
+    wall-epoch-seconds: u64,
+    logical-nanoseconds: u64,
+    quantum-nanoseconds: u64,
+  }
+
+  export typed-report: func() -> typed-report;
+}

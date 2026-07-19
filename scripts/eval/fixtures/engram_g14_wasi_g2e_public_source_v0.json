@@ -1,0 +1,63 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2e_public_source.v0",
+  "gate": "G2E_PUBLIC_SYNTHETIC_SOURCE_AUTHORING",
+  "date": "2026-07-19",
+  "mode": "PUBLIC_SYNTHETIC_SOURCE_ONLY_NO_DEPENDENCY_NO_BUILD_NO_RUN",
+  "status": "POST_SOURCE_PRE_BUILD_EVIDENCE_COMPLETE_AWAITING_OWNER_BUILD_AUTHORIZATION_NO_AUTHORITY",
+  "predecessor": {
+    "gate": "G2D_PUBLIC_SOURCE_AUTHORIZATION_DECISION",
+    "integration_commit": "32c9edcd982bfd4989562c12d83206913c6452e1",
+    "integration_tree": "f04f57225d7679a9ee20c76c42f8bf0192b4c1e0",
+    "owner_authorization_post": 4759,
+    "G2D_closure_post": 4763
+  },
+  "supersedes_withdrawn_candidate": {
+    "commit": "b4cbfeda5d1e6446e7796cf37c12ce7683a83ce9",
+    "withdrawal_post": 4768,
+    "reason": "generic_precommit_attempted_cargo_check_outside_source_only_boundary",
+    "evidence_status": "withdrawn_not_used_for_G2E_acceptance"
+  },
+  "source_paths_in_order": [
+    "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit",
+    "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/component/src/lib.rs",
+    "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/host/src/lib.rs"
+  ],
+  "source_sha256": {
+    "world_wit": "d47b294dc4c7ee3f48d7af8a6233022a75e79533a2f554ec1299639ba3e142be",
+    "component_lib_rs": "bc8b079493025691273b08ac6681f5e98b565160a508cf6a4473d2c8fcbff9a7",
+    "host_lib_rs": "52f5f2adeed96e4d70b3ddb03d7793bac6f142b7eb8e125eb591eec4f1207343"
+  },
+  "source_level_claims": {
+    "exact_three_interface_WIT_world": true,
+    "direct_single_logical_clock_host_model": true,
+    "direct_wall_monotonic_subscription_and_poll_methods_present": true,
+    "forbidden_symbol_scan_pass": true,
+    "compiled_bindings_or_import_manifest_proven": false,
+    "built_linker_timer_isolation_proven": false,
+    "component_built_or_run": false
+  },
+  "scope": {
+    "Cargo_toml_or_lockfile_changed": false,
+    "dependency_installed_promoted_or_compiled": false,
+    "downloaded_binary_executed": false,
+    "candidate_private_or_capability_accessed": false,
+    "runtime_store_MCP_policy_deploy_canary_or_G1_4_changed": false,
+    "native_or_QEMU_fallback_allowed": false
+  },
+  "B1": {
+    "complete": true,
+    "state": "POST_SOURCE_PRE_BUILD_EVIDENCE_COMPLETE_AWAITING_OWNER_BUILD_AUTHORIZATION",
+    "completion_authorizes_build": false,
+    "next_action_requires": "G2F_PUBLIC_SYNTHETIC_BUILD_AUTHORIZATION_DECISION"
+  },
+  "decision": {
+    "verdict": "G2E_B1_SOURCE_EVIDENCE_COMPLETE_NO_BUILD_NO_RUN",
+    "only_permitted_successor": "G2F_PUBLIC_SYNTHETIC_BUILD_AUTHORIZATION_DECISION"
+  },
+  "acceptance_integrity": {
+    "checker_self_authenticating": false,
+    "directed_semantic_mutations_required": true,
+    "independent_clean_tree_review_required": true,
+    "out_of_band_commit_tree_checker_and_all_path_hash_manifest_required": true
+  }
+}
