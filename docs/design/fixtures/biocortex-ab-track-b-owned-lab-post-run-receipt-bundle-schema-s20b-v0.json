@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_post_run_receipt_bundle_s20b.v0",
+  "title": "Agent-Bridge S20B digest-chained owned-lab post-run receipt bundle",
+  "description": "Closed non-live replacement for the frozen S19 post-run target. Every parent edge points to an already finalized packet; synthetic KAT bundles contain no runtime observations or action-start receipts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "packet_kind", "canonicalization", "hashing_contract", "test_only",
+    "synthetic", "bundle_state", "authorization_binding", "execution_binding",
+    "assignment_binding", "assigned_denominator", "observed_counts", "validator_binding",
+    "control_outcome", "receipt_chain", "evidence_outcome", "post_run_bundle_sha256",
+    "semantic_validation", "nonclaims"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.memory_temporal_owned_lab_post_run_receipt_bundle_s20b.v0"},
+    "packet_kind": {"const": "S20B_OWNED_LAB_POST_RUN_RECEIPT_BUNDLE"},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S20B_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "test_only": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "bundle_state": {
+      "enum": [
+        "SYNTHETIC_KAT_NON_LIVE_POST_RUN_BUNDLE",
+        "VALID_COMPLETE_EXACT_CANARY_EVIDENCE",
+        "INVALID_OR_INCOMPLETE_TERMINAL",
+        "UNKNOWN_OUTCOME_TERMINAL_HARD_LOCK"
+      ]
+    },
+    "authorization_binding": {"$ref": "#/$defs/authorization_binding"},
+    "execution_binding": {"$ref": "#/$defs/execution_binding"},
+    "assignment_binding": {"$ref": "#/$defs/assignment_binding"},
+    "assigned_denominator": {"$ref": "#/$defs/assigned_denominator"},
+    "observed_counts": {"$ref": "#/$defs/observed_counts"},
+    "validator_binding": {"$ref": "#/$defs/validator_binding"},
+    "control_outcome": {"$ref": "#/$defs/control_outcome"},
+    "receipt_chain": {"$ref": "#/$defs/receipt_chain"},
+    "evidence_outcome": {"$ref": "#/$defs/evidence_outcome"},
+    "post_run_bundle_sha256": {"$ref": "#/$defs/sha256"},
+    "semantic_validation": {"$ref": "#/$defs/semantic_validation"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"test_only": {"const": true}}, "required": ["test_only"]},
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "bundle_state": {"const": "SYNTHETIC_KAT_NON_LIVE_POST_RUN_BUNDLE"},
+          "observed_counts": {
+            "properties": {
+              "claim_commits": {"const": 0},
+              "assigned_attempts": {"const": 0},
+              "pidfd_sigkill_attempts": {"const": 0},
+              "fresh_exec_reads": {"const": 0},
+              "phase_records": {"const": 0},
+              "raw_observations": {"const": 0},
+              "action_start_receipts": {"const": 0},
+              "automatic_retries": {"const": 0}
+            }
+          },
+          "receipt_chain": {
+            "properties": {
+              "raw_observation_set_sha256": {"type": "null"},
+              "action_start_receipt_set_sha256": {"type": "null"},
+              "action_start_receipt_count": {"const": 0},
+              "nested_receipts": {"maxItems": 0},
+              "all_parent_links_recomputed": {"const": true}
+            }
+          },
+          "evidence_outcome": {"properties": {"evidence_state": {"const": "SYNTHETIC_KAT_NO_SCIENTIFIC_EVIDENCE"}}}
+        }
+      },
+      "else": {"properties": {"synthetic": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"bundle_state": {"const": "VALID_COMPLETE_EXACT_CANARY_EVIDENCE"}}, "required": ["bundle_state"]},
+      "then": {
+        "properties": {
+          "assigned_denominator": {
+            "properties": {
+              "ol00_count": {"const": 1}, "ol04_count": {"const": 6},
+              "ol05_count": {"const": 53}, "total_count": {"const": 60}
+            }
+          },
+          "observed_counts": {
+            "properties": {
+              "claim_commits": {"const": 1}, "assigned_attempts": {"const": 60},
+              "pidfd_sigkill_attempts": {"const": 59}, "fresh_exec_reads": {"const": 59},
+              "phase_records": {"const": 113}, "raw_observations": {"const": 60},
+              "action_start_receipts": {"const": 60}, "automatic_retries": {"const": 0}
+            }
+          },
+          "validator_binding": {
+            "properties": {
+              "s17_rule_count": {"const": 32}, "frozen_catalog_row_count": {"const": 5639},
+              "assignment_prefilter_allowed": {"const": false}, "validation_state": {"const": "PASS_FULL_CATALOG"}
+            }
+          },
+          "receipt_chain": {
+            "properties": {
+              "raw_observation_set_sha256": {"$ref": "#/$defs/sha256"},
+              "action_start_receipt_set_sha256": {"$ref": "#/$defs/sha256"},
+              "action_start_receipt_count": {"const": 60},
+              "all_parent_links_recomputed": {"const": true}
+            }
+          },
+          "evidence_outcome": {"properties": {"evidence_state": {"const": "VALID_COMPLETE_EXACT_CANARY_EVIDENCE"}}}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullable_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+    "u64_nonzero": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "hashing_contract": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "hash_algorithm", "canonicalization", "digest_domain", "digest_framing",
+        "hash_scope", "self_hash_field", "self_hash_field_excluded",
+        "repository_framing_lf_excluded", "cross_field_semantic_validation_required",
+        "self_reported_match_fields_are_authoritative"
+      ],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S20B_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s20b/post-run-bundle/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_POST_RUN_BUNDLE_SHA256"},
+        "self_hash_field": {"const": "post_run_bundle_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "self_reported_match_fields_are_authoritative": {"const": false}
+      }
+    },
+    "authorization_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "authorization_id_sha256", "owner_envelope_sha256", "resource_scope_sha256",
+        "signed_revocation_epoch", "signed_payload_sha256", "subject_manifest_sha256",
+        "trust_anchor_document_sha256"
+      ],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_scope_sha256": {"$ref": "#/$defs/sha256"},
+        "signed_revocation_epoch": {"$ref": "#/$defs/u64_nonzero"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "trust_anchor_document_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "execution_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "run_id_sha256", "attempt_id_sha256", "run_assignment_id_sha256",
+        "capability_nonce_sha256", "claim_packet_sha256", "external_checkpoint_receipt_sha256",
+        "controller_binary_sha256", "runner_binary_sha256", "attempt_tombstone_sha256",
+        "final_database_content_root_sha256"
+      ],
+      "properties": {
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_id_sha256": {"$ref": "#/$defs/sha256"},
+        "run_assignment_id_sha256": {"$ref": "#/$defs/sha256"},
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_packet_sha256": {"$ref": "#/$defs/sha256"},
+        "external_checkpoint_receipt_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_tombstone_sha256": {"$ref": "#/$defs/sha256"},
+        "final_database_content_root_sha256": {"$ref": "#/$defs/nullable_sha256"}
+      }
+    },
+    "assignment_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "assignment_set_sha256", "schedule_sha256", "assignment_record_set_sha256",
+        "operation_descriptor_set_sha256", "assignment_record_count", "membership_profile"
+      ],
+      "properties": {
+        "assignment_set_sha256": {"$ref": "#/$defs/sha256"},
+        "schedule_sha256": {"$ref": "#/$defs/sha256"},
+        "assignment_record_set_sha256": {"$ref": "#/$defs/sha256"},
+        "operation_descriptor_set_sha256": {"$ref": "#/$defs/sha256"},
+        "assignment_record_count": {"const": 60},
+        "membership_profile": {"const": "EXACT_CANONICAL_60_RECORD_SET_RECOMPUTATION_NO_CALLER_ASSERTION"}
+      }
+    },
+    "assigned_denominator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ol00_count", "ol04_count", "ol05_count", "total_count"],
+      "properties": {
+        "ol00_count": {"type": "integer", "minimum": 0, "maximum": 1},
+        "ol04_count": {"type": "integer", "minimum": 0, "maximum": 6},
+        "ol05_count": {"type": "integer", "minimum": 0, "maximum": 53},
+        "total_count": {"type": "integer", "minimum": 0, "maximum": 60}
+      }
+    },
+    "observed_counts": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "claim_commits", "assigned_attempts", "pidfd_sigkill_attempts", "fresh_exec_reads",
+        "phase_records", "raw_observations", "action_start_receipts", "automatic_retries"
+      ],
+      "properties": {
+        "claim_commits": {"type": "integer", "minimum": 0, "maximum": 1},
+        "assigned_attempts": {"type": "integer", "minimum": 0, "maximum": 60},
+        "pidfd_sigkill_attempts": {"type": "integer", "minimum": 0, "maximum": 59},
+        "fresh_exec_reads": {"type": "integer", "minimum": 0, "maximum": 59},
+        "phase_records": {"type": "integer", "minimum": 0, "maximum": 113},
+        "raw_observations": {"type": "integer", "minimum": 0, "maximum": 60},
+        "action_start_receipts": {"type": "integer", "minimum": 0, "maximum": 60},
+        "automatic_retries": {"const": 0}
+      }
+    },
+    "validator_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "validator_source_sha256", "validator_binary_sha256", "validator_toolchain_sha256",
+        "ruleset_sha256", "s17_rule_count", "frozen_catalog_row_count",
+        "frozen_catalog_sha256", "expected_phase_record_count",
+        "assignment_prefilter_allowed", "validation_state"
+      ],
+      "properties": {
+        "validator_source_sha256": {"$ref": "#/$defs/sha256"},
+        "validator_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "validator_toolchain_sha256": {"$ref": "#/$defs/sha256"},
+        "ruleset_sha256": {"$ref": "#/$defs/sha256"},
+        "s17_rule_count": {"const": 32},
+        "frozen_catalog_row_count": {"const": 5639},
+        "frozen_catalog_sha256": {"$ref": "#/$defs/sha256"},
+        "expected_phase_record_count": {"const": 113},
+        "assignment_prefilter_allowed": {"const": false},
+        "validation_state": {"enum": ["SYNTHETIC_KAT_NOT_RUN", "PASS_FULL_CATALOG", "FAIL_OR_INDETERMINATE"]}
+      }
+    },
+    "control_outcome": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "stop_ledger_revision", "revocation_ledger_revision", "terminal_hard_lock"],
+      "properties": {
+        "state": {"enum": ["SYNTHETIC_NOT_READ", "CLEAR", "STOP_TRIGGERED", "REVOCATION_MISMATCH", "ROLLBACK_DETECTED", "READ_UNKNOWN"]},
+        "stop_ledger_revision": {"oneOf": [{"$ref": "#/$defs/u64_nonzero"}, {"type": "null"}]},
+        "revocation_ledger_revision": {"oneOf": [{"$ref": "#/$defs/u64_nonzero"}, {"type": "null"}]},
+        "terminal_hard_lock": {"type": "boolean"}
+      }
+    },
+    "receipt_node": {
+      "type": "object", "additionalProperties": false,
+      "required": ["receipt_kind", "digest_domain", "parent_sha256", "receipt_sha256", "hash_scope", "authorization_id_sha256", "run_id_sha256", "subject_sha256"],
+      "properties": {
+        "receipt_kind": {"enum": ["ACTION_START", "RAW_OBSERVATION", "RETENTION", "SEMANTIC", "BATCH", "STOP", "CLEANUP", "CUSTODY"]},
+        "digest_domain": {"type": "string", "pattern": "^agent-bridge/biocortex/owned-lab/s20b/[a-z0-9-]+/v1$"},
+        "parent_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "hash_scope": {"const": "ENTIRE_RECEIPT_EXCEPT_RECEIPT_SHA256"},
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "run_id_sha256": {"$ref": "#/$defs/sha256"},
+        "subject_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "receipt_chain": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "control_snapshot_sha256", "preflight_receipt_sha256", "claim_packet_sha256",
+        "raw_observation_set_sha256", "action_start_receipt_set_sha256",
+        "action_start_receipt_count", "nested_receipts", "all_parent_links_recomputed"
+      ],
+      "properties": {
+        "control_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "preflight_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "claim_packet_sha256": {"$ref": "#/$defs/sha256"},
+        "raw_observation_set_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "action_start_receipt_set_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "action_start_receipt_count": {"type": "integer", "minimum": 0, "maximum": 60},
+        "nested_receipts": {"type": "array", "maxItems": 127, "items": {"$ref": "#/$defs/receipt_node"}},
+        "all_parent_links_recomputed": {"type": "boolean"}
+      }
+    },
+    "evidence_outcome": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_state", "scientific_result_claimed", "favorable_result_claimed", "zero_or_multiple_catalog_matches_indeterminate"],
+      "properties": {
+        "evidence_state": {"enum": ["SYNTHETIC_KAT_NO_SCIENTIFIC_EVIDENCE", "VALID_COMPLETE_EXACT_CANARY_EVIDENCE", "INVALID_OR_INCOMPLETE", "INDETERMINATE"]},
+        "scientific_result_claimed": {"const": false},
+        "favorable_result_claimed": {"const": false},
+        "zero_or_multiple_catalog_matches_indeterminate": {"const": true}
+      }
+    },
+    "semantic_validation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["independent_validator_required", "candidate_match_fields_authoritative", "required_rules"],
+      "properties": {
+        "independent_validator_required": {"const": true},
+        "candidate_match_fields_authoritative": {"const": false},
+        "required_rules": {
+          "const": [
+            "SELF_AND_ALL_PARENT_DIGESTS_RECOMPUTED_FROM_CANONICAL_BYTES",
+            "AUTHORIZATION_RUN_ASSIGNMENT_OPERATION_AND_CLAIM_BINDINGS_EXACT",
+            "RECEIPT_CHAIN_IS_BACKWARD_ONLY_AND_DOMAIN_SEPARATED",
+            "VALID_COMPLETE_REQUIRES_EXACT_DENOMINATOR_AND_OBSERVED_COUNTS",
+            "S17_32_RULE_CLASSIFICATION_SEARCHES_ALL_5639_ROWS_WITHOUT_ASSIGNMENT_PREFILTER",
+            "ZERO_OR_MULTIPLE_CATALOG_MATCHES_REMAIN_INDETERMINATE",
+            "VALID_EVIDENCE_DOES_NOT_IMPLY_FAVORABLE_SCIENTIFIC_RESULT"
+          ]
+        }
+      }
+    },
+    "nonclaims": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "bundle_is_owner_authority", "bundle_is_bearer_capability", "bundle_authorizes_retry",
+        "schema_conformance_authorizes_live_execution", "provider_or_production_authority",
+        "s21_admitted", "side_effects_unlocked"
+      ],
+      "properties": {
+        "bundle_is_owner_authority": {"const": false},
+        "bundle_is_bearer_capability": {"const": false},
+        "bundle_authorizes_retry": {"const": false},
+        "schema_conformance_authorizes_live_execution": {"const": false},
+        "provider_or_production_authority": {"const": false},
+        "s21_admitted": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}

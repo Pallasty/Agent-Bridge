@@ -651,6 +651,18 @@ struct VerifiedS19SubjectV1 {
     claim_namespace_sha256: [u8; 32],
     claim_key_sha256: [u8; 32],
     expected_unclaimed_revision: u64,
+    assignment_set_sha256: [u8; 32],
+    schedule_sha256: [u8; 32],
+    catalog_row_count: u64,
+    catalog_sha256: [u8; 32],
+    classifier_binary_sha256: [u8; 32],
+    classifier_source_sha256: [u8; 32],
+    expected_oracle_sha256: [u8; 32],
+    s17_observation_schema_sha256: [u8; 32],
+    s17_plan_sha256: [u8; 32],
+    target_phase_count: u64,
+    target_phase_unique_match_count: u64,
+    allowed_operation_ids: Vec<String>,
 }
 
 impl fmt::Debug for VerifiedS19SubjectV1 {
@@ -983,6 +995,45 @@ fn verify_subject_manifest_v1(
         expected_unclaimed_revision: independent_inputs
             .claim_protocol
             .expected_unclaimed_revision,
+        assignment_set_sha256: decode_hex_fixed::<32>(
+            &independent_inputs.artifact_bindings.assignment_set_sha256,
+        )?,
+        schedule_sha256: decode_hex_fixed::<32>(
+            &independent_inputs.artifact_bindings.schedule_sha256,
+        )?,
+        catalog_row_count: independent_inputs.artifact_bindings.catalog_row_count,
+        catalog_sha256: decode_hex_fixed::<32>(
+            &independent_inputs.artifact_bindings.catalog_sha256,
+        )?,
+        classifier_binary_sha256: decode_hex_fixed::<32>(
+            &independent_inputs
+                .artifact_bindings
+                .classifier_binary_sha256,
+        )?,
+        classifier_source_sha256: decode_hex_fixed::<32>(
+            &independent_inputs
+                .artifact_bindings
+                .classifier_source_sha256,
+        )?,
+        expected_oracle_sha256: decode_hex_fixed::<32>(
+            &independent_inputs.artifact_bindings.expected_oracle_sha256,
+        )?,
+        s17_observation_schema_sha256: decode_hex_fixed::<32>(
+            &independent_inputs
+                .artifact_bindings
+                .s17_observation_schema_sha256,
+        )?,
+        s17_plan_sha256: decode_hex_fixed::<32>(
+            &independent_inputs.artifact_bindings.s17_plan_sha256,
+        )?,
+        target_phase_count: independent_inputs.artifact_bindings.target_phase_count,
+        target_phase_unique_match_count: independent_inputs
+            .artifact_bindings
+            .target_phase_unique_match_count,
+        allowed_operation_ids: independent_inputs
+            .safety_policy
+            .allowed_operation_ids
+            .clone(),
     })
 }
 
