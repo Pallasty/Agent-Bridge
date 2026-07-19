@@ -1635,3 +1635,20 @@ including a 64 MiB unproved kernel/cgroup-accounting reserve. Its
 The result is `PREIMPLEMENTATION_CONTRACT_PACK_DEFINED_NOT_IMPLEMENTATION_AUTHORITY`;
 implementation and execution remain closed pending new governance and the
 listed toolchain, kernel-accounting, checker, equivalence and exact-peak proofs.
+
+## Majorana P11-G2 opens only contract-level static proof artifacts
+
+P11-G2 validates P11-B as a preimplementation contract result rather than an
+implementation, exact peak, headroom, or semantic-equivalence proof. It opens
+only `P11-C-STATIC-PROOF-ARTIFACT-PACK-V1`: an independent, nonimplementing
+rederivation of slot padding, arena intervals, arithmetic widths, target-sum
+arithmetic, and frozen prelude checkpoints, together with adversarial contract
+mutation vectors.
+
+P11-C may not write C, assembly, object, or runnable linker-script source;
+compile, link, execute, benchmark, install, download, use the network, run
+Julia/candidates, change semantics, or relax the 2 GiB cap. A positive result
+can close only contract-level static-artifact readiness. Toolchain source
+custody, postlink/stack evidence, kernel accounting, implementation semantics,
+and an exact process peak remain outside this gate and require later evidence
+and fresh governance.

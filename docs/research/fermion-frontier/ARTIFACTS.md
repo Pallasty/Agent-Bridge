@@ -1551,3 +1551,17 @@ so they are versioned normally and are not added to the preservation-only
 - P6 has no serialized two-step term state; future source must reconstruct the
   frozen Step1/Step2 prelude before Step3. No source, compile, link or candidate
   execution is authorized by P11-B.
+
+## Majorana P11-G2 proof-artifact governance
+
+- `majorana_certificate_p11_g2_proof_artifact_governance_contract.json` and
+  `majorana_certificate_p11_g2_proof_artifact_governance_record.json`: validate
+  P11-B custody and authorize only a nonimplementing P11-C static proof pack.
+- `majorana_certificate_p11_g2_proof_artifact_governance_validator.py` and
+  `test_majorana_certificate_p11_g2_proof_artifact_governance.py`: read-only
+  Git topology, blob custody, canonical-record, authority, and exact-lifecycle
+  checks.
+- P11-C may independently derive and mutate contract-level layouts, arena,
+  arithmetic, target-total, and prelude artifacts. Candidate source, linker
+  scripts, compilation, execution, network acquisition, peak/headroom claims,
+  and semantic-equivalence claims remain forbidden.
