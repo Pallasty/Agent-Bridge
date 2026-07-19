@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "fixture_id": "MAJORANA-P10-A-STATIC-RESOURCE-ENVELOPE-PROOF-DESIGN-V1",
+  "gate_id": "P10-A-STATIC-RESOURCE-ENVELOPE-PROOF-DESIGN-V1",
+  "required_direct_parent_commit": "7650fc4beb042571477bca43eb7f62c7beab0368",
+  "scope": {
+    "assessment_kind": "source_pinned_proof_only_static_resource_envelope_design",
+    "candidate_execution_performed": false,
+    "Julia_execution_performed": false,
+    "D4_host_observation_used_as_byte_or_cost_evidence": false,
+    "candidate_algorithm_or_cap_changed": false,
+    "assessment_and_admission_are_distinct": true
+  },
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "fixed_cap_contract": {
+    "fixed_process_cap_bytes": 2147483648,
+    "fixed_process_cap_power_of_two": 31,
+    "comparison_operator_for_positive_envelope": "STRICTLY_LESS_THAN",
+    "cap_relaxation_allowed": false,
+    "unknown_peak_is_not_a_positive_comparison": true
+  },
+  "declared_static_facts": {
+    "schedule": {
+      "stage_count": 9,
+      "composite_count": 512,
+      "constituent_count": 1152,
+      "truncation_boundary_count": 768
+    },
+    "segment_D": {
+      "stage_index": 3,
+      "group": "H3",
+      "composite_count": 48,
+      "constituent_count": 96,
+      "truncation_boundary_count": 48
+    },
+    "static_prefix_before_segment_D": {
+      "completed_stage_count": 3,
+      "transition_record_count": 416,
+      "boundary_record_count": 304,
+      "stage_record_count": 3
+    },
+    "cardinality_and_arithmetic_caps": {
+      "logical_term_cap_M": 1048576,
+      "logical_term_cap_log2": 20,
+      "maximum_BigInt_bit_length_L": 2048,
+      "frozen_step2_final_retained_term_count_N0": 284847,
+      "configured_total_selection_work_cap": 4294967296
+    },
+    "abstract_work_bounds": {
+      "full_schedule_selection_work_units": 3221225472,
+      "full_schedule_sort_scale_coefficient": 4608,
+      "full_schedule_sort_scale_units": 96636764160,
+      "segment_D_sort_scale_coefficient": 336,
+      "segment_D_sort_scale_units": 7046430720,
+      "sort_scale_definition": "coefficient_times_M_times_log2_M",
+      "selection_work_definition": "four_selection_counter_components_times_boundary_count_times_M"
+    }
+  },
+  "count_relation_contract": {
+    "per_constituent_symbols": {
+      "n_i": "input_main_term_count",
+      "a_i": "anticommuting_source_count",
+      "c_i": "merge_collision_count",
+      "p_i": "postmerge_unique_term_count"
+    },
+    "per_boundary_symbols": {
+      "ell_j": "lazy_tick_evaluation_count",
+      "k_j": "selected_drop_count"
+    },
+    "proved_integer_relations": [
+      "0 <= n_i <= M",
+      "0 <= a_i <= n_i",
+      "n_i + a_i <= M",
+      "0 <= c_i <= min(n_i, a_i)",
+      "0 <= p_i <= M",
+      "0 <= k_j <= ell_j <= p_i <= M"
+    ],
+    "relations_bound_logical_counts_not_allocated_capacity_or_bytes": true
+  },
+  "live_set_component_model": {
+    "status": "COUNT_ENVELOPE_ONLY_NOT_AN_EXACT_BYTE_ENVELOPE",
+    "persistent_components": [
+      "runtime_and_loaded_code",
+      "schedule_512_composites_1152_constituents",
+      "step3_input_cache_N0_terms",
+      "transition_records_up_to_1152",
+      "boundary_records_up_to_768",
+      "stage_records_up_to_9",
+      "canonical_hashers_and_BigInt_ledgers"
+    ],
+    "per_constituent_components": [
+      "main_and_aux_cache",
+      "source_masks",
+      "actions",
+      "collision_masks",
+      "collision_inputs",
+      "temporary_BigInt_tick_values",
+      "canonical_row_encoding_buffers"
+    ],
+    "boundary_selection_components": [
+      "snapshot_rows",
+      "snapshot_coefficient_bits_dict",
+      "selected_rank_rows",
+      "selected_masks_set",
+      "callback_seen_masks_set",
+      "dropped_vector",
+      "validation_actual_masks_set"
+    ],
+    "finalizer_components": [
+      "final_rows_sorted_collection",
+      "FockState_checkerboard_state",
+      "exact_center_rationals_and_BigInt_ticks",
+      "expectation_SHA_context",
+      "expectation_canonical_hasher",
+      "formatted_BigInt_and_rational_strings"
+    ],
+    "serialization_and_hash_components": [
+      "canonical_JSON_IOBuffer_and_String",
+      "SHA_context_and_digest_buffers",
+      "object_key_sort_temporaries",
+      "stdout_or_transport_buffer"
+    ],
+    "reachable_peak_skeleton": "R_runtime + S_schedule + S_input + S_records + max_i(S_constituent_i, boundary_i*S_selection_i)",
+    "rss_completion_terms": [
+      "R_JIT_and_native_code",
+      "R_sysimage_and_shared_libraries",
+      "R_allocator_fragmentation_and_arenas",
+      "R_GC_unreclaimed_and_mark_state",
+      "R_tasks_threads_stacks_and_transport"
+    ],
+    "Julia_liveness_may_extend_beyond_lexical_last_use": true,
+    "component_overlap_graph_closed": false,
+    "exact_component_capacity_bytes_closed": false,
+    "total_RSS_peak_bytes_closed": false
+  },
+  "proof_obligation_ledger": [
+    {
+      "obligation_id": "LSB-01-SOURCE-TYPE-ALLOCATION-CLOSURE",
+      "current_status": "NOT_ESTABLISHED",
+      "mechanically_checked_here": "core_runner_fixture_and_governance_sources_are_byte_pinned_and_selected_allocation_anchors_are_checked",
+      "missing_evidence": "transitive_package_runtime_and_all_allocation_sites_with_type_capacity_copy_and_release_rules"
+    },
+    {
+      "obligation_id": "LSB-02-ALIAS-OWNERSHIP-LIFETIME-GRAPH",
+      "current_status": "NOT_ESTABLISHED",
+      "mechanically_checked_here": "named_live_set_components_and_static_count_relations_are_enumerated",
+      "missing_evidence": "closed_alias_ownership_copy_and_simultaneous_lifetime_graph_at_every_peak_boundary"
+    },
+    {
+      "obligation_id": "LSB-03-EXACT-PAYLOAD-AND-CAPACITY-BYTES",
+      "current_status": "NOT_ESTABLISHED",
+      "mechanically_checked_here": "logical_cardinality_and_BigInt_bit_length_caps_are_rederived",
+      "missing_evidence": "exact_headers_alignment_boxing_backing_capacity_resize_slack_and_GMP_limb_bytes"
+    },
+    {
+      "obligation_id": "LSB-04-RUNTIME-OVERHEAD-ENVELOPE",
+      "current_status": "NOT_ESTABLISHED",
+      "mechanically_checked_here": "required_runtime_RSS_completion_terms_are_explicit",
+      "missing_evidence": "independent_allocator_GC_JIT_sysimage_library_thread_stack_and_transport_upper_bounds"
+    },
+    {
+      "obligation_id": "LSB-05-PEAK-COMPOSITION-AND-FIXED-CAP-COMPARISON",
+      "current_status": "NOT_ESTABLISHED",
+      "mechanically_checked_here": "fixed_2147483648_byte_cap_and_strict_integer_decision_rule_are_frozen",
+      "missing_evidence": "an_exact_integer_peak_sum_over_a_closed_overlap_graph"
+    },
+    {
+      "obligation_id": "LSB-06-INDEPENDENT-CHECKER-AND-ADVERSARIAL-MUTATIONS",
+      "current_status": "NOT_ESTABLISHED",
+      "mechanically_checked_here": "the_assessment_validator_has_fail_closed_source_fact_formula_lifecycle_and_report_mutation_tests",
+      "missing_evidence": "a_separately_implemented_checker_that_rederives_a_complete_exact_byte_envelope"
+    },
+    {
+      "obligation_id": "RSE-07-OPERATION-COST-CLOSURE",
+      "current_status": "NOT_ESTABLISHED",
+      "mechanically_checked_here": "selection_counter_and_sort_scale_integer_bounds_are_rederived",
+      "missing_evidence": "source_closed_sort_comparisons_BigInt_hashing_stringification_resize_and_machine_cost_contract"
+    }
+  ],
+  "outcome_contract": {
+    "assessment_lifecycle_status": "CLOSED",
+    "outcome_classification": "ASSESSED_NOT_ESTABLISHED",
+    "admission_status": "NOT_ESTABLISHED_BY_P10_A_STATIC_RESOURCE_ENVELOPE_PROOF_DESIGN",
+    "execution_gate": "CLOSED",
+    "exact_static_peak_bytes": null,
+    "strictly_below_fixed_cap": null,
+    "all_seven_obligations_positive": false,
+    "future_execution_prerequisite_satisfied": false,
+    "positive_static_envelope_would_still_require_independent_governance": true
+  },
+  "forbidden_evidence_or_inference": [
+    "D3_or_D4_elapsed_time_RSS_return_code_stderr_stdout_or_marker_reach_as_static_byte_evidence",
+    "logical_term_count_times_an_assumed_bytes_per_term",
+    "configured_counter_cap_as_a_memory_or_wall_clock_bound",
+    "sort_scale_units_as_an_actual_comparison_count_or_seconds_bound",
+    "unknown_peak_as_evidence_of_strictly_below_the_fixed_cap",
+    "host_failure_as_an_OOM_or_resource_no_go_attribution",
+    "cap_relaxation_candidate_change_or_repeat_execution"
+  ]
+}
