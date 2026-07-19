@@ -1,0 +1,58 @@
+{
+  "authorized_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_CLOCK_SKEW_SYNTHETIC_EXACT_T10_RECEIPT_TRACK_VALIDATION_REFERENCE_TIME_DECISION_RECHECK_REFERENCE_TIME_AND_MAXIMUM_CLOCK_SKEW_SECONDS_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+  "authority": {
+    "decision_integration_commit": "66f4754fd871169f50f345e5c023c94466f8ffd4",
+    "decision_source_commit": "e867ac4169ce4c4d1ae3dbe2dc6b12ad38ffad72",
+    "effective_state_at_source_baseline": "AUTHORIZED_T11_CLOCK_SKEW_ISOLATED_LAB_EXACT_UNIT",
+    "source_fast_consumes_authority": false,
+    "successor_integrated_full_consumes_authority": true
+  },
+  "boundary": {
+    "future_component_total": 9,
+    "production_ingestion_controls_implemented": 0,
+    "runtime_authority": false,
+    "t10_freshness_implemented": true,
+    "t11_clock_skew_implemented_after_integrated_full": true,
+    "t12_owner_toctou_implemented": false
+  },
+  "date": "2026-07-19",
+  "expected": {
+    "checker_stdout_line_count": 54,
+    "directed_negative_test_count": 99,
+    "fixture_schema_guard_count": 20,
+    "public_input_count": 16,
+    "source_ast_guard_count": 12
+  },
+  "packet_path_modes": {
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-clock-skew-synthetic-exact-t10-receipt-track-validation-reference-time-decision-recheck-reference-time-and-maximum-clock-skew-seconds-verifier-isolated-lab-v1.schema.json": "100644",
+    "docs/reports/goal-c-u/2026-07-19-biocortex-track-b-reference-provider-fault-injection-runner-clock-skew-synthetic-exact-t10-receipt-track-validation-reference-time-decision-recheck-reference-time-and-maximum-clock-skew-seconds-verifier-isolated-lab-v1-pack.md": "100644",
+    "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-clock-skew-synthetic-exact-t10-receipt-track-validation-reference-time-decision-recheck-reference-time-and-maximum-clock-skew-seconds-verifier-isolated-lab-v1-pack.sh": "100755",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1.py": "100644",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1_pack.py": "100644",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1_pack.expected.v0.tsv": "100644",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1_pack_synthetic_v0.json": "100644",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1_pack_v0.json": "100644"
+  },
+  "raw_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-clock-skew-synthetic-exact-t10-receipt-track-validation-reference-time-decision-recheck-reference-time-and-maximum-clock-skew-seconds-verifier-isolated-lab-v1.schema.json": "f5d40ffc468ef27a999b0ad80efce3cb880366bdaba61871c6af07601e35f95f",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1.py": "e3c8a210430ad9e81c408de0bc2e5764600b0b814df43d689cd3ef4abca331f9",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1_pack.py": "f8aba9687a0833aa2bbb00b2c961cb80d2e802f5a4338b28cbfbaaa76371f434",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1_pack.expected.v0.tsv": "4e0f92616a451e2b517f1ecf8b5407e97671c1aa07f09ab7ede28a1086ac79fa",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1_pack_synthetic_v0.json": "f5fb39e4f619cf0b3bf3d36b2eebd4357bd15a5c4114216d10445dbdccfa772f"
+  },
+  "resource_limits": {
+    "max_clock_skew_policy_bytes": 65536,
+    "max_clock_skew_request_bytes": 16384,
+    "max_parallel_workers": 1,
+    "max_predecessor_review_calls": 1,
+    "max_private_scratch_bytes": 67108864,
+    "network": false
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1_pack_manifest.v1",
+  "schema_version": 1,
+  "source_baseline": {
+    "commit": "66f4754fd871169f50f345e5c023c94466f8ffd4",
+    "tree": "1b37dce3077ccd47a91f830a97d4f6f93f722883"
+  },
+  "status": "FROZEN_IMPLEMENTATION_CANDIDATE_PENDING_EXACT_SOURCE_FAST_AND_ORDINARY_INTEGRATION_FULL_GATE"
+}

@@ -1,0 +1,660 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "maxProperties": 98,
+  "minProperties": 98,
+  "properties": {
+    "action_or_resource_capability_authorized": {
+      "const": false,
+      "type": "boolean"
+    },
+    "authority_decision_exact_source_commit": {
+      "const": "e867ac4169ce4c4d1ae3dbe2dc6b12ad38ffad72",
+      "type": "string"
+    },
+    "authority_decision_release_commit": {
+      "const": "66f4754fd871169f50f345e5c023c94466f8ffd4",
+      "type": "string"
+    },
+    "authorized_unit": {
+      "const": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_CLOCK_SKEW_SYNTHETIC_EXACT_T10_RECEIPT_TRACK_VALIDATION_REFERENCE_TIME_DECISION_RECHECK_REFERENCE_TIME_AND_MAXIMUM_CLOCK_SKEW_SECONDS_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+      "type": "string"
+    },
+    "binding_match_count": {
+      "const": 1,
+      "type": "integer"
+    },
+    "binding_policy_match_dimension_count": {
+      "const": 5,
+      "type": "integer"
+    },
+    "binding_policy_match_fields": {
+      "const": [
+        "t10_receipt_content_sha256",
+        "track_id",
+        "validation_reference_time_unix_seconds",
+        "decision_recheck_reference_time_unix_seconds",
+        "maximum_clock_skew_seconds"
+      ],
+      "type": "array"
+    },
+    "binding_profile_count": {
+      "const": 2,
+      "type": "integer"
+    },
+    "binding_request_field_count": {
+      "const": 3,
+      "type": "integer"
+    },
+    "binding_request_fields": {
+      "const": [
+        "validation_reference_time_unix_seconds",
+        "decision_recheck_reference_time_unix_seconds",
+        "maximum_clock_skew_seconds"
+      ],
+      "type": "array"
+    },
+    "caller_supplied_predecessor_receipt_accepted": {
+      "const": false,
+      "type": "boolean"
+    },
+    "clock_skew_arithmetic_relation": {
+      "const": "VALIDATION_REFERENCE_LE_DECISION_REFERENCE_AND_ABSOLUTE_T10_VALIDATION_AND_DECISION_LABEL_SKEW_LE_MAXIMUM_AND_POSITIVE_FUTURE_OBSERVATION_OFFSETS_LE_MAXIMUM",
+      "type": "string"
+    },
+    "clock_skew_integer_labels_are_trusted_time": {
+      "const": false,
+      "type": "boolean"
+    },
+    "clock_skew_policy_is_production_policy": {
+      "const": false,
+      "type": "boolean"
+    },
+    "clock_skew_policy_separately_injected": {
+      "const": true,
+      "type": "boolean"
+    },
+    "clock_skew_policy_sha256": {
+      "const": "9019a4b449b55ffdddd3d8de045559b9cf261c5cf17f4bf3f7fc618f41cab775",
+      "type": "string"
+    },
+    "clock_skew_request_detached": {
+      "const": true,
+      "type": "boolean"
+    },
+    "clock_skew_request_observed_after_policy": {
+      "const": true,
+      "type": "boolean"
+    },
+    "clock_skew_request_sha256": {
+      "enum": [
+        "864b1d3217a962427a51e62a042bc9ed9be25bafef5a44648f329c49097b5b1e",
+        "95ac838d7f6a84c11ea3de94c2685b4d20b5a4a499cc3ef4c6c1f4680f64c680"
+      ],
+      "type": "string"
+    },
+    "component_state": {
+      "const": "BOUND_SYNTHETIC_CLOCK_SKEW_LABELS_TO_EXACT_T10_RECEIPT_CHAIN_ONLY",
+      "type": "string"
+    },
+    "condition_output_authorized": {
+      "const": false,
+      "type": "boolean"
+    },
+    "content_sha256": {
+      "enum": [
+        "63f0c26f10f42c923b55c4e651c001f7c38c42d9e25d7db772b4abbeadbe2ed8",
+        "ce5af4f0ada753ed9a526909d071e5cb14959a6183f9169e67854d9ebcc4aee1"
+      ],
+      "type": "string"
+    },
+    "decision_clock_skew_seconds": {
+      "const": 5,
+      "type": "integer"
+    },
+    "decision_recheck_reference_time_unix_seconds": {
+      "enum": [
+        2000000115,
+        2100000125
+      ],
+      "type": "integer"
+    },
+    "default_disposition": {
+      "const": "REJECTED_FAIL_CLOSED",
+      "type": "string"
+    },
+    "downstream_gate_count": {
+      "const": 4,
+      "type": "integer"
+    },
+    "downstream_gates_authorized": {
+      "const": 0,
+      "type": "integer"
+    },
+    "durable_custody_implemented": {
+      "const": false,
+      "type": "boolean"
+    },
+    "durable_replay_cas_implemented": {
+      "const": false,
+      "type": "boolean"
+    },
+    "evidence_acceptance_authorized": {
+      "const": false,
+      "type": "boolean"
+    },
+    "execution_mode": {
+      "const": "SYNTHETIC_KAT",
+      "type": "string"
+    },
+    "fault_injection_authorized": {
+      "const": false,
+      "type": "boolean"
+    },
+    "future_date_offsets_within_maximum_clock_skew": {
+      "const": true,
+      "type": "boolean"
+    },
+    "implementation_authority_single_use_consumed": {
+      "const": true,
+      "type": "boolean"
+    },
+    "isolated_lab_candidate_surface_component_total": {
+      "const": 9,
+      "type": "integer"
+    },
+    "isolated_lab_candidate_surface_components_implemented": {
+      "const": 9,
+      "type": "integer"
+    },
+    "isolated_lab_candidate_surface_components_locally_kat_exercised": {
+      "const": 9,
+      "type": "integer"
+    },
+    "local_t09_specification_exercised": {
+      "const": true,
+      "type": "boolean"
+    },
+    "local_t10_specification_exercised": {
+      "const": true,
+      "type": "boolean"
+    },
+    "local_t11_specification_exercised": {
+      "const": true,
+      "type": "boolean"
+    },
+    "local_threat_specifications_covered": {
+      "const": 11,
+      "type": "integer"
+    },
+    "local_threat_specifications_covered_ids": {
+      "const": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09",
+        "T10",
+        "T11"
+      ],
+      "type": "array"
+    },
+    "matching_profile": {
+      "const": "EXACT_ALL_FIELDS_AND_SIGNED_INT64_VALUES_EQUAL",
+      "type": "string"
+    },
+    "maximum_clock_skew_seconds": {
+      "const": 90,
+      "type": "integer"
+    },
+    "maximum_clock_skew_seconds_upper_bound": {
+      "const": 300,
+      "type": "integer"
+    },
+    "network_time_accessed": {
+      "const": false,
+      "type": "boolean"
+    },
+    "observation_future_of_decision_reference_seconds": {
+      "const": 0,
+      "type": "integer"
+    },
+    "observation_future_of_validation_reference_seconds": {
+      "enum": [
+        5,
+        0
+      ],
+      "type": "integer"
+    },
+    "output_or_claim_authorized": {
+      "const": false,
+      "type": "boolean"
+    },
+    "predecessor_receipt_and_track_non_substitutable": {
+      "const": true,
+      "type": "boolean"
+    },
+    "predecessor_receipt_content_sha256": {
+      "enum": [
+        "620dc08e2f8b41cac5bf0944b50ecc9d2435e59fb5c01e68544270ca94d03714",
+        "16c7b9228bf36329723376aba4f273f9356759037b4f31ca5a4adbf810bee14d"
+      ],
+      "type": "string"
+    },
+    "predecessor_receipt_schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.freshness_synthetic_exact_t09_receipt_track_observed_at_validation_checked_at_decision_recheck_at_expires_at_and_max_age_seconds_verifier_isolated_lab_v1.receipt.v0",
+      "type": "string"
+    },
+    "predecessor_review_count": {
+      "const": 1,
+      "type": "integer"
+    },
+    "production_admissible": {
+      "const": false,
+      "type": "boolean"
+    },
+    "production_currentness_proved": {
+      "const": false,
+      "type": "boolean"
+    },
+    "production_ingestion_control_count": {
+      "const": 14,
+      "type": "integer"
+    },
+    "production_ingestion_controls_implemented": {
+      "const": 0,
+      "type": "integer"
+    },
+    "production_ingestion_controls_runtime_exercised": {
+      "const": 0,
+      "type": "integer"
+    },
+    "production_threat_specification_count": {
+      "const": 20,
+      "type": "integer"
+    },
+    "production_threat_specifications_runtime_exercised": {
+      "const": 0,
+      "type": "integer"
+    },
+    "production_trusted_time_implemented": {
+      "const": false,
+      "type": "boolean"
+    },
+    "production_validated_evidence_items": {
+      "const": 0,
+      "type": "integer"
+    },
+    "provider_authority": {
+      "const": false,
+      "type": "boolean"
+    },
+    "public_input_count": {
+      "const": 16,
+      "type": "integer"
+    },
+    "real_evidence_items_present": {
+      "const": 0,
+      "type": "integer"
+    },
+    "reference_time_order_valid": {
+      "const": true,
+      "type": "boolean"
+    },
+    "reject_on_multiple_matches": {
+      "const": true,
+      "type": "boolean"
+    },
+    "reject_on_zero_matches": {
+      "const": true,
+      "type": "boolean"
+    },
+    "retention_record_implemented": {
+      "const": false,
+      "type": "boolean"
+    },
+    "runtime_authority": {
+      "const": false,
+      "type": "boolean"
+    },
+    "runtime_evidence_accepted": {
+      "const": 0,
+      "type": "integer"
+    },
+    "runtime_prerequisite_count": {
+      "const": 16,
+      "type": "integer"
+    },
+    "runtime_prerequisites_satisfied": {
+      "const": 0,
+      "type": "integer"
+    },
+    "schema": {
+      "const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.clock_skew_synthetic_exact_t10_receipt_track_validation_reference_time_decision_recheck_reference_time_and_maximum_clock_skew_seconds_verifier_isolated_lab_v1.receipt.v0",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "side_effects_unlocked": {
+      "const": "NONE",
+      "type": "string"
+    },
+    "signed_trusted_time_bound": {
+      "const": false,
+      "type": "boolean"
+    },
+    "status": {
+      "const": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_CLOCK_SKEW_SYNTHETIC_EXACT_T10_RECEIPT_TRACK_VALIDATION_REFERENCE_TIME_DECISION_RECHECK_REFERENCE_TIME_AND_MAXIMUM_CLOCK_SKEW_SECONDS_VERIFIED_ISOLATED_LAB_COMPONENT_ONLY_NO_PRODUCTION_AUTHORITY",
+      "type": "string"
+    },
+    "symmetric_clock_skew_within_maximum": {
+      "const": true,
+      "type": "boolean"
+    },
+    "synthetic_fixture": {
+      "const": true,
+      "type": "boolean"
+    },
+    "synthetic_reference_time_labels_are_trusted_time": {
+      "const": false,
+      "type": "boolean"
+    },
+    "t09_content_identity_and_quarantine_custody_implemented": {
+      "const": true,
+      "type": "boolean"
+    },
+    "t10_decision_recheck_at_unix_seconds": {
+      "enum": [
+        2000000120,
+        2100000120
+      ],
+      "type": "integer"
+    },
+    "t10_freshness_implemented": {
+      "const": true,
+      "type": "boolean"
+    },
+    "t10_observed_at_unix_seconds": {
+      "enum": [
+        2000000000,
+        2100000000
+      ],
+      "type": "integer"
+    },
+    "t10_validation_checked_at_unix_seconds": {
+      "enum": [
+        2000000060,
+        2100000060
+      ],
+      "type": "integer"
+    },
+    "t11_clock_skew_implemented": {
+      "const": true,
+      "type": "boolean"
+    },
+    "t12_owner_toctou_implemented": {
+      "const": false,
+      "type": "boolean"
+    },
+    "target_production_control": {
+      "const": "TRUSTED_TIME_FRESHNESS",
+      "type": "string"
+    },
+    "target_production_failure_code": {
+      "const": "E_PRODUCTION_FRESHNESS_FAILED",
+      "type": "string"
+    },
+    "tombstone_record_implemented": {
+      "const": false,
+      "type": "boolean"
+    },
+    "track_id": {
+      "enum": [
+        "MANAGED_SPANNER_CLOUD_KMS",
+        "SELF_HOSTED_ETCD_OPENBAO"
+      ],
+      "type": "string"
+    },
+    "track_identity_source": {
+      "const": "T10_PREDECESSOR_RECEIPT_ONLY",
+      "type": "string"
+    },
+    "trusted_time_source_accessed": {
+      "const": false,
+      "type": "boolean"
+    },
+    "validation_clock_skew_seconds": {
+      "enum": [
+        65,
+        5
+      ],
+      "type": "integer"
+    },
+    "validation_reference_time_unix_seconds": {
+      "enum": [
+        1999999995,
+        2100000065
+      ],
+      "type": "integer"
+    },
+    "wall_or_monotonic_clock_accessed": {
+      "const": false,
+      "type": "boolean"
+    },
+    "wildcard_prefix_hierarchy_or_inheritance_authorization_implemented": {
+      "const": false,
+      "type": "boolean"
+    }
+  },
+  "propertyNames": {
+    "enum": [
+      "action_or_resource_capability_authorized",
+      "authority_decision_exact_source_commit",
+      "authority_decision_release_commit",
+      "authorized_unit",
+      "binding_match_count",
+      "binding_policy_match_dimension_count",
+      "binding_policy_match_fields",
+      "binding_profile_count",
+      "binding_request_field_count",
+      "binding_request_fields",
+      "caller_supplied_predecessor_receipt_accepted",
+      "clock_skew_arithmetic_relation",
+      "clock_skew_integer_labels_are_trusted_time",
+      "clock_skew_policy_is_production_policy",
+      "clock_skew_policy_separately_injected",
+      "clock_skew_policy_sha256",
+      "clock_skew_request_detached",
+      "clock_skew_request_observed_after_policy",
+      "clock_skew_request_sha256",
+      "component_state",
+      "condition_output_authorized",
+      "content_sha256",
+      "decision_clock_skew_seconds",
+      "decision_recheck_reference_time_unix_seconds",
+      "default_disposition",
+      "downstream_gate_count",
+      "downstream_gates_authorized",
+      "durable_custody_implemented",
+      "durable_replay_cas_implemented",
+      "evidence_acceptance_authorized",
+      "execution_mode",
+      "fault_injection_authorized",
+      "future_date_offsets_within_maximum_clock_skew",
+      "implementation_authority_single_use_consumed",
+      "isolated_lab_candidate_surface_component_total",
+      "isolated_lab_candidate_surface_components_implemented",
+      "isolated_lab_candidate_surface_components_locally_kat_exercised",
+      "local_t09_specification_exercised",
+      "local_t10_specification_exercised",
+      "local_t11_specification_exercised",
+      "local_threat_specifications_covered",
+      "local_threat_specifications_covered_ids",
+      "matching_profile",
+      "maximum_clock_skew_seconds",
+      "maximum_clock_skew_seconds_upper_bound",
+      "network_time_accessed",
+      "observation_future_of_decision_reference_seconds",
+      "observation_future_of_validation_reference_seconds",
+      "output_or_claim_authorized",
+      "predecessor_receipt_and_track_non_substitutable",
+      "predecessor_receipt_content_sha256",
+      "predecessor_receipt_schema",
+      "predecessor_review_count",
+      "production_admissible",
+      "production_currentness_proved",
+      "production_ingestion_control_count",
+      "production_ingestion_controls_implemented",
+      "production_ingestion_controls_runtime_exercised",
+      "production_threat_specification_count",
+      "production_threat_specifications_runtime_exercised",
+      "production_trusted_time_implemented",
+      "production_validated_evidence_items",
+      "provider_authority",
+      "public_input_count",
+      "real_evidence_items_present",
+      "reference_time_order_valid",
+      "reject_on_multiple_matches",
+      "reject_on_zero_matches",
+      "retention_record_implemented",
+      "runtime_authority",
+      "runtime_evidence_accepted",
+      "runtime_prerequisite_count",
+      "runtime_prerequisites_satisfied",
+      "schema",
+      "schema_version",
+      "side_effects_unlocked",
+      "signed_trusted_time_bound",
+      "status",
+      "symmetric_clock_skew_within_maximum",
+      "synthetic_fixture",
+      "synthetic_reference_time_labels_are_trusted_time",
+      "t09_content_identity_and_quarantine_custody_implemented",
+      "t10_decision_recheck_at_unix_seconds",
+      "t10_freshness_implemented",
+      "t10_observed_at_unix_seconds",
+      "t10_validation_checked_at_unix_seconds",
+      "t11_clock_skew_implemented",
+      "t12_owner_toctou_implemented",
+      "target_production_control",
+      "target_production_failure_code",
+      "tombstone_record_implemented",
+      "track_id",
+      "track_identity_source",
+      "trusted_time_source_accessed",
+      "validation_clock_skew_seconds",
+      "validation_reference_time_unix_seconds",
+      "wall_or_monotonic_clock_accessed",
+      "wildcard_prefix_hierarchy_or_inheritance_authorization_implemented"
+    ]
+  },
+  "required": [
+    "action_or_resource_capability_authorized",
+    "authority_decision_exact_source_commit",
+    "authority_decision_release_commit",
+    "authorized_unit",
+    "binding_match_count",
+    "binding_policy_match_dimension_count",
+    "binding_policy_match_fields",
+    "binding_profile_count",
+    "binding_request_field_count",
+    "binding_request_fields",
+    "caller_supplied_predecessor_receipt_accepted",
+    "clock_skew_arithmetic_relation",
+    "clock_skew_integer_labels_are_trusted_time",
+    "clock_skew_policy_is_production_policy",
+    "clock_skew_policy_separately_injected",
+    "clock_skew_policy_sha256",
+    "clock_skew_request_detached",
+    "clock_skew_request_observed_after_policy",
+    "clock_skew_request_sha256",
+    "component_state",
+    "condition_output_authorized",
+    "content_sha256",
+    "decision_clock_skew_seconds",
+    "decision_recheck_reference_time_unix_seconds",
+    "default_disposition",
+    "downstream_gate_count",
+    "downstream_gates_authorized",
+    "durable_custody_implemented",
+    "durable_replay_cas_implemented",
+    "evidence_acceptance_authorized",
+    "execution_mode",
+    "fault_injection_authorized",
+    "future_date_offsets_within_maximum_clock_skew",
+    "implementation_authority_single_use_consumed",
+    "isolated_lab_candidate_surface_component_total",
+    "isolated_lab_candidate_surface_components_implemented",
+    "isolated_lab_candidate_surface_components_locally_kat_exercised",
+    "local_t09_specification_exercised",
+    "local_t10_specification_exercised",
+    "local_t11_specification_exercised",
+    "local_threat_specifications_covered",
+    "local_threat_specifications_covered_ids",
+    "matching_profile",
+    "maximum_clock_skew_seconds",
+    "maximum_clock_skew_seconds_upper_bound",
+    "network_time_accessed",
+    "observation_future_of_decision_reference_seconds",
+    "observation_future_of_validation_reference_seconds",
+    "output_or_claim_authorized",
+    "predecessor_receipt_and_track_non_substitutable",
+    "predecessor_receipt_content_sha256",
+    "predecessor_receipt_schema",
+    "predecessor_review_count",
+    "production_admissible",
+    "production_currentness_proved",
+    "production_ingestion_control_count",
+    "production_ingestion_controls_implemented",
+    "production_ingestion_controls_runtime_exercised",
+    "production_threat_specification_count",
+    "production_threat_specifications_runtime_exercised",
+    "production_trusted_time_implemented",
+    "production_validated_evidence_items",
+    "provider_authority",
+    "public_input_count",
+    "real_evidence_items_present",
+    "reference_time_order_valid",
+    "reject_on_multiple_matches",
+    "reject_on_zero_matches",
+    "retention_record_implemented",
+    "runtime_authority",
+    "runtime_evidence_accepted",
+    "runtime_prerequisite_count",
+    "runtime_prerequisites_satisfied",
+    "schema",
+    "schema_version",
+    "side_effects_unlocked",
+    "signed_trusted_time_bound",
+    "status",
+    "symmetric_clock_skew_within_maximum",
+    "synthetic_fixture",
+    "synthetic_reference_time_labels_are_trusted_time",
+    "t09_content_identity_and_quarantine_custody_implemented",
+    "t10_decision_recheck_at_unix_seconds",
+    "t10_freshness_implemented",
+    "t10_observed_at_unix_seconds",
+    "t10_validation_checked_at_unix_seconds",
+    "t11_clock_skew_implemented",
+    "t12_owner_toctou_implemented",
+    "target_production_control",
+    "target_production_failure_code",
+    "tombstone_record_implemented",
+    "track_id",
+    "track_identity_source",
+    "trusted_time_source_accessed",
+    "validation_clock_skew_seconds",
+    "validation_reference_time_unix_seconds",
+    "wall_or_monotonic_clock_accessed",
+    "wildcard_prefix_hierarchy_or_inheritance_authorization_implemented"
+  ],
+  "title": "BioCortex Track B T11 clock-skew isolated-lab receipt",
+  "type": "object"
+}
+
