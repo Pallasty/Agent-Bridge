@@ -1596,3 +1596,21 @@ so they are versioned normally and are not added to the preservation-only
 - Official documentation and existing local package/kernel/cgroup metadata may
   be read. Archive download, package mutation, candidate source, compile/link,
   execution, exact-peak, headroom, and semantic claims remain forbidden.
+
+## Majorana P11-D source/runtime evidence-feasibility audit
+
+- `majorana_certificate_p11d_source_runtime_evidence_feasibility_contract.json`:
+  P11-G3 authority, exact local package/kernel/cgroup receipts, six official
+  primary-source pointers, seven evidence-class dispositions, source-custody
+  route, and static-kernel-accounting gap ledger.
+- `majorana_certificate_p11d_source_runtime_evidence_feasibility_report.json`:
+  canonical result
+  `SOURCE_CUSTODY_ROUTE_IDENTIFIED_STATIC_KERNEL_ACCOUNTING_NOT_ESTABLISHED`.
+- `majorana_certificate_p11d_source_runtime_evidence_feasibility_validator.py`
+  and `test_majorana_certificate_p11d_source_runtime_evidence_feasibility.py`:
+  exact Git/source custody, local command/file digest, package-to-source,
+  `deb-src`, visible-cache, kernel-config, cgroup-interface, canonical-report,
+  authority mutation, and exact-lifecycle checks.
+- No archive was downloaded and no cgroup usage value was admitted. Exact
+  source bytes and complete version-specific kernel bounds require separate
+  future governance.

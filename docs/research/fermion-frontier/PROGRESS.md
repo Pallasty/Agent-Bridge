@@ -1691,3 +1691,31 @@ routes exist. It may not update package indexes, install or download archives,
 write candidate or linker-script source, compile, execute, benchmark, run
 Julia/candidates, change semantics, or relax the 2 GiB cap. All possible audit
 outcomes keep implementation and execution closed.
+
+## Majorana P11-D finds a source-custody route but no static kernel bound
+
+P11-D reads only the P11-G3/P11-C chain, installed package metadata, existing
+APT indexes and configuration, the host kernel configuration, cgroup interface
+presence, and official Debian, Ubuntu, and Linux documentation. GCC 15.2.0
+maps to source package `gcc-15=15.2.0-16ubuntu1`; Binutils 2.46 maps to
+`binutils=2.46-3ubuntu2`. Debian policy and APT's signed Release/index chain
+provide an auditable exact-version `.dsc` plus source-part SHA-256 route.
+
+That route is not current custody. The host has only `deb` entries, no
+`deb-src` indexes, `apt-cache showsrc` fails, and no matching source archive is
+visible in the allowed top-level APT cache. Acquiring and pinning the exact
+GCC, Binutils, Linux, and linux-signed source bytes requires new governance.
+
+The host is Linux 7.0.0-28 with MEMCG/cgroup-v2 configuration and the expected
+non-root `memory.current`, `memory.peak`, `memory.max`, `memory.stat`, event,
+and swap interfaces. No dynamic values are used. Kernel documentation says
+memory accounting is stateful and not completely watertight, tracked charge
+types may expand, `memory.peak` is a runtime record, and `memory.max` may be
+temporarily exceeded. Page-table, kernel-stack, slab/per-CPU/vmalloc, transport,
+file-cache, hierarchy, and transient-overage bounds therefore remain absent.
+
+The outcome is
+`SOURCE_CUSTODY_ROUTE_IDENTIFIED_STATIC_KERNEL_ACCOUNTING_NOT_ESTABLISHED`.
+It is not source custody, a global impossibility result, a peak/headroom proof,
+resource no-go, or execution authority. All implementation, execution,
+equivalence, S0, and scientific gates remain closed.

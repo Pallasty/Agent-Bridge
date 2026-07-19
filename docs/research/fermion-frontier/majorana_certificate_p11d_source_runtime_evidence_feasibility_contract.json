@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-D-SOURCE-CUSTODY-AND-STATIC-RUNTIME-EVIDENCE-FEASIBILITY-AUDIT-V1",
+  "contract_role": "read_only_nonimplementing_source_custody_and_static_kernel_cgroup_evidence_feasibility_audit",
+  "self_relative_path": "majorana_certificate_p11d_source_runtime_evidence_feasibility_contract.json",
+  "required_direct_parent_commit": "0960ff5b1e7d1b1d2922e18eb7d5b71cd44a6a30",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "implementation_authority": false,
+    "prototype_or_compilation_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "scope": {
+    "gate_id": "P11-D-SOURCE-CUSTODY-AND-STATIC-RUNTIME-EVIDENCE-FEASIBILITY-AUDIT-V1",
+    "candidate_source_allowed": false,
+    "C_assembly_or_linker_script_source_allowed": false,
+    "compilation_or_linking_allowed": false,
+    "Julia_or_candidate_execution_allowed": false,
+    "benchmark_or_dynamic_memory_measurement_allowed": false,
+    "package_index_update_installation_or_environment_mutation_allowed": false,
+    "binary_or_source_archive_download_allowed": false,
+    "scientific_schedule_semantics_or_cap_change_allowed": false,
+    "fixed_process_cap_bytes": 2147483648,
+    "missing_source_or_kernel_evidence_is_unknown_not_zero_and_not_cap_exceedance": true
+  },
+  "source_inputs": [
+    {"relative_path": "majorana_certificate_p11_g3_evidence_feasibility_governance_contract.json", "sha256": "d350c4c29e7f5c88f859ca2754be9456a2002ddadffeeaa63def210c7e742022", "role": "sole_P11_D_authority"},
+    {"relative_path": "majorana_certificate_p11_g3_evidence_feasibility_governance_record.json", "sha256": "197df6d35c7e86c2cd14db6728b49f5e897ac5454384f190aac02fe93d5af8f0", "role": "canonical_P11_G3_decision"},
+    {"relative_path": "majorana_certificate_p11c_static_proof_artifact_report.json", "sha256": "c4c95d4e06825e9f85185d5859b2d97548a367831839360490667d2394eec968", "role": "P11_C_partial_static_artifact_result"}
+  ],
+  "local_read_only_snapshot": {
+    "observation_date": "2026-07-18",
+    "snapshot_role": "version_bound_local_identity_and_presence_receipt_not_archive_custody_or_dynamic_measurement",
+    "command_receipts": [
+      {"receipt_id": "UNAME", "argv": ["uname", "-srvmo"], "returncode": 0, "stdout_sha256": "7d48c4537eae3bd49828f4ee3d2f0d928e52de44cb255120cfc0637364c3bf6b", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+      {"receipt_id": "DPKG_TOOLCHAIN_KERNEL", "argv": ["dpkg-query", "-W", "-f=${Package}\\t${Version}\\t${Source}\\t${Status}\\n", "binutils", "gcc-15", "linux-image-7.0.0-28-generic"], "returncode": 0, "stdout_sha256": "19af7aa40529647939da0779c64f257f4cc6dd804019092078f504e7514fb4c9", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+      {"receipt_id": "APT_SHOW_GCC15", "argv": ["apt-cache", "show", "gcc-15"], "returncode": 0, "stdout_sha256": "8224221bd66005f9e9e7b100fc0347f713dbc7817d7e75fdc812af2bd8159cfc", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+      {"receipt_id": "APT_SHOW_BINUTILS", "argv": ["apt-cache", "show", "binutils"], "returncode": 0, "stdout_sha256": "7bab053e43ba1c680e5844f61326e2dfdf695bd70c451f830dfbdbc67d2dc3f0", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+      {"receipt_id": "APT_SHOW_SIGNED_KERNEL", "argv": ["apt-cache", "show", "linux-image-7.0.0-28-generic"], "returncode": 0, "stdout_sha256": "15fa4d5b5af31638ac627d3ad9ec7f429a3ab219b70ac37f8d4d1a492f648840", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+      {"receipt_id": "APT_SHOW_UNSIGNED_KERNEL", "argv": ["apt-cache", "show", "linux-image-unsigned-7.0.0-28-generic"], "returncode": 0, "stdout_sha256": "82c1ed9ff7a79f2992ecb80ac1309703ec564a28257d873849d6cd7b54cdf4d9", "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+      {"receipt_id": "APT_SHOWSRC_DISABLED", "argv": ["apt-cache", "showsrc", "gcc-15", "binutils"], "returncode": 100, "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "stderr_sha256": "3daea040d9e693092ca9b56a109333d051c421cb5b5b8b03eb56c4a3a9f48464"}
+    ],
+    "file_receipts": [
+      {"path": "/etc/apt/sources.list.d/ubuntu.sources", "size_bytes": 398, "sha256": "fed487471405064cd4f7fa3e780aafaa637178c3098d045f815ba3b7b4659afd", "role": "configured_Ubuntu_binary_only_sources"},
+      {"path": "/var/lib/dpkg/status", "size_bytes": 2258968, "sha256": "a3b6f8fc525dcf1d66e5600ba76d715f78084e9ddc5255b9448cd8f83b442bf9", "role": "installed_package_status_snapshot"},
+      {"path": "/boot/config-7.0.0-28-generic", "size_bytes": 308473, "sha256": "477f43bb49f449541e644cb697c2447bfe45629d2c0cd2a1324d8dbb16607a67", "role": "host_kernel_config"},
+      {"path": "/usr/share/doc/gcc-15/copyright", "size_bytes": 73793, "sha256": "41a2d69df964174fb042b6513e99b72177318e94ca0c29a813e6f3155a9c5048", "role": "installed_GCC_documentation_not_source_archive"},
+      {"path": "/usr/share/doc/binutils/copyright", "size_bytes": 1795, "sha256": "20a9818b14f941467bcc0f459a1b1951e3bfecc1cc259e5004f8b9a80d7dc804", "role": "installed_Binutils_documentation_not_source_archive"},
+      {"path": "/var/lib/apt/lists/cn.archive.ubuntu.com_ubuntu_dists_resolute_InRelease", "sha256": "45f95ce276cdba3e41870516a130e03c58b8b7a79e9546b0efe9e526d255740c", "role": "local_signed_release_metadata_not_source_index"},
+      {"path": "/var/lib/apt/lists/cn.archive.ubuntu.com_ubuntu_dists_resolute-updates_InRelease", "sha256": "fc75aa0bd236a5d4f1741a822748395c5c9a286caab737c005a1ae876d0f5806", "role": "local_signed_updates_metadata_not_source_index"}
+    ],
+    "package_identity_rows": [
+      {"binary_package": "gcc-15", "installed_version": "15.2.0-16ubuntu1", "source_package": "gcc-15", "source_version": "15.2.0-16ubuntu1", "source_field_absent_same_name_and_version_rule_applies": true, "binary_archive_path": "pool/main/g/gcc-15/gcc-15_15.2.0-16ubuntu1_amd64.deb", "binary_archive_sha256_from_Packages_index": "28da225c111d3ce9d230209cca24db46ec645f631f593f188bef718d8a1e4711"},
+      {"binary_package": "binutils", "installed_version": "2.46-3ubuntu2", "source_package": "binutils", "source_version": "2.46-3ubuntu2", "source_field_absent_same_name_and_version_rule_applies": true, "binary_archive_path": "pool/main/b/binutils/binutils_2.46-3ubuntu2_amd64.deb", "binary_archive_sha256_from_Packages_index": "d14fc7bf644b495083f77c99ff168f1a2215c8b3b7ad5202e0345dc1092002b0"},
+      {"binary_package": "linux-image-7.0.0-28-generic", "installed_version": "7.0.0-28.28", "source_package": "linux-signed", "source_version": "7.0.0-28.28", "underlying_unsigned_image_source_package": "linux", "underlying_unsigned_image_source_version": "7.0.0-28.28"}
+    ],
+    "source_index_and_cache_observation": {
+      "configured_Ubuntu_Types_values": ["deb", "deb"],
+      "deb_src_enabled": false,
+      "apt_cache_showsrc_returncode": 100,
+      "source_index_files_visible_under_var_lib_apt_lists": 0,
+      "matching_source_archive_files_visible_at_var_cache_apt_archives_top_level": [],
+      "var_cache_apt_archives_partial_not_inspected": true,
+      "local_source_archive_custody_established": false
+    },
+    "host_kernel_and_cgroup_identity": {
+      "kernel_release": "7.0.0-28-generic",
+      "kernel_version_string": "Linux 7.0.0-28-generic #28-Ubuntu SMP PREEMPT_DYNAMIC Sun Jun 21 01:01:36 UTC 2026 x86_64 GNU/Linux",
+      "required_kernel_config_rows": {"CONFIG_CGROUPS": "y", "CONFIG_PAGE_COUNTER": "y", "CONFIG_MEMCG": "y", "CONFIG_MEMCG_V1": "not_set", "CONFIG_PROC_PAGE_MONITOR": "y", "CONFIG_IKCONFIG": "not_set"},
+      "cgroup_filesystem": "cgroup2",
+      "cgroup_mountpoint": "/sys/fs/cgroup",
+      "observed_membership_path": "/user.slice/user-1000.slice/session-3.scope",
+      "required_nonroot_interface_files_present": ["cgroup.type", "memory.current", "memory.peak", "memory.max", "memory.stat", "memory.events", "memory.swap.current"],
+      "dynamic_interface_values_read_or_used": false,
+      "kernel_source_archive_custody_established": false
+    }
+  },
+  "official_primary_sources": [
+    {"url": "https://www.debian.org/doc/debian-policy/ch-controlfields.html", "supports": "binary_Source_field_omission_means_same_source_name_and_version_and_dsc_has_mandatory_SHA256", "byte_pinned": false},
+    {"url": "https://www.debian.org/doc/debian-policy/ch-source.html", "supports": "source_package_consists_of_dsc_and_compressed_source_parts", "byte_pinned": false},
+    {"url": "https://manpages.ubuntu.com/manpages/resolute/man8/apt-secure.8.html", "supports": "signed_Release_to_index_to_package_checksum_chain", "byte_pinned": false},
+    {"url": "https://manpages.ubuntu.com/manpages/resolute/man5/sources.list.5.html", "supports": "deb_src_is_required_to_fetch_source_indexes", "byte_pinned": false},
+    {"url": "https://manpages.ubuntu.com/manpages/resolute/man8/apt-get.8.html", "supports": "exact_source_version_and_download_only_route_but_source_is_not_dpkg_installed", "byte_pinned": false},
+    {"url": "https://docs.kernel.org/admin-guide/cgroup-v2.html", "supports": "stateful_non_watertight_memory_accounting_dynamic_current_peak_and_kernel_component_interfaces", "byte_pinned": false}
+  ],
+  "source_custody_route": {
+    "status": "FEASIBLE_AUTHENTICATED_EXACT_VERSION_ROUTE_IDENTIFIED_NOT_ACQUIRED",
+    "required_future_steps_under_new_governance": [
+      "enable_matching_resolute_deb_src_entries_without_disabling_apt_secure",
+      "refresh_and_pin_signed_InRelease_and_Source_index_bytes",
+      "download_only_exact_gcc_15_15_2_0_16ubuntu1_binutils_2_46_3ubuntu2_linux_7_0_0_28_28_and_linux_signed_7_0_0_28_28_source_packages",
+      "retain_each_dsc_and_every_referenced_source_part",
+      "verify_dsc_OpenPGP_or_archive_chain_and_mandatory_SHA256_fields",
+      "hash_all_archive_bytes_and_bind_reproduction_to_the_P11_B_binary_receipt"
+    ],
+    "current_web_metadata_local_version_strings_and_binary_index_hashes_are_not_source_archive_custody": true,
+    "source_archive_custody_established": false
+  },
+  "static_kernel_accounting_assessment": {
+    "status": "NOT_ESTABLISHED_FROM_CURRENT_FROZEN_INPUTS",
+    "official_documentation_findings": [
+      "memory_controller_is_stateful_and_not_completely_watertight",
+      "tracked_memory_types_include_userland_kernel_data_structures_and_TCP_socket_buffers_and_may_expand",
+      "memory_current_is_a_runtime_current_usage_observation",
+      "memory_peak_is_a_resettable_runtime_maximum_observation",
+      "memory_max_may_be_temporarily_exceeded_under_certain_circumstances",
+      "memory_stat_exposes_kernel_stack_pagetables_percpu_vmalloc_slab_and_sock_components"
+    ],
+    "missing_static_bounds": ["page_table_allocation_and_hugepage_configuration_effects", "kernel_stack_charge_per_task_and_kernel_path", "slab_percpu_vmalloc_and_other_kernel_charges", "pipe_or_socket_transport_charge_and_ownership", "file_cache_reclaim_and_executable_fault_residency", "ancestor_descendant_and_concurrent_cgroup_charge_isolation", "kernel_version_specific_rounding_reclaim_and_transient_overage"],
+    "memory_current_or_memory_peak_measurement_would_not_by_itself_prove_a_static_all_execution_peak": true,
+    "static_kernel_cgroup_accounting_bound_established": false,
+    "exact_static_process_peak_bytes": null
+  },
+  "evidence_class_disposition": [
+    {"class_id": "selected_toolchain_binary_to_source_package_identity", "status": "IDENTITY_ESTABLISHED_FROM_LOCAL_BINARY_METADATA_AND_DEBIAN_POLICY"},
+    {"class_id": "source_archive_authenticity_byte_pinning_and_reproduction_route", "status": "FEASIBLE_SIGNED_INDEX_DSC_SHA256_ROUTE_IDENTIFIED_NOT_ACQUIRED"},
+    {"class_id": "local_source_archive_custody_presence_or_absence", "status": "NOT_ESTABLISHED_DEB_SRC_DISABLED_AND_NO_VISIBLE_MATCHING_SOURCE_ARCHIVES"},
+    {"class_id": "host_kernel_config_and_cgroup_v2_identity_custody", "status": "PARTIAL_LOCAL_CONFIG_AND_INTERFACE_IDENTITY_SOURCE_ARCHIVES_MISSING"},
+    {"class_id": "cgroup_v2_memory_charge_semantics_and_observable_components", "status": "OFFICIAL_DYNAMIC_OBSERVATION_INTERFACES_IDENTIFIED_NOT_STATIC_BOUND"},
+    {"class_id": "static_bounds_for_page_tables_kernel_stack_pipe_transport_and_other_accounted_kernel_memory", "status": "NOT_ESTABLISHED_KERNEL_VERSION_STATE_AND_OWNERSHIP_DEPENDENT"},
+    {"class_id": "exact_process_peak_and_strict_cap_proof_closure_route", "status": "NOT_ESTABLISHED_REQUIRES_COMPLETE_KERNEL_BOUND_AND_FUTURE_CANDIDATE_POSTLINK_STACK_EVIDENCE"}
+  ],
+  "outcome": "SOURCE_CUSTODY_ROUTE_IDENTIFIED_STATIC_KERNEL_ACCOUNTING_NOT_ESTABLISHED",
+  "unresolved_after_audit": [
+    "acquire_and_byte_pin_exact_toolchain_and_kernel_source_archives_under_new_governance",
+    "derive_version_and_config_specific_bounds_for_every_memcg_charged_kernel_component",
+    "define_transport_and_cgroup_isolation_ownership_without_shared_ancestor_noise",
+    "produce_future_candidate_postlink_section_stack_syscall_and_dependency_evidence",
+    "prove_future_candidate_arithmetic_paths_and_full_step1_step2_step3_semantic_equivalence",
+    "derive_an_exact_integer_total_process_peak_strictly_below_2147483648"
+  ],
+  "nonclaims": ["no_source_archive_download_or_custody", "no_candidate_source_compile_link_or_execution", "no_dynamic_memory_measurement", "no_static_kernel_accounting_bound", "no_exact_process_peak_or_proven_headroom", "no_semantic_equivalence", "no_resource_no_go_or_OOM_attribution", "no_S0_or_scientific_result"],
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11d_source_runtime_evidence_feasibility_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11d_source_runtime_evidence_feasibility_report.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11d_source_runtime_evidence_feasibility_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11d_source_runtime_evidence_feasibility.py"
+    ],
+    "report_must_be_canonical_JSON_and_reconstructed_from_contract_sources_and_local_receipts": true,
+    "validator_may_only_run_git_and_exact_allowlisted_read_only_identity_commands": true,
+    "validator_must_not_update_install_download_compile_link_or_execute_a_candidate": true
+  }
+}
