@@ -1719,3 +1719,28 @@ The outcome is
 It is not source custody, a global impossibility result, a peak/headroom proof,
 resource no-go, or execution authority. All implementation, execution,
 equivalence, S0, and scientific gates remain closed.
+
+## Majorana P11-G4 orders source custody before kernel-bound design
+
+P11-G4 validates the exact P11-D result and splits the two unresolved evidence
+routes instead of treating them as one permission. The source-custody route is
+the dependency: a version-bound kernel-accounting design must bind the actual
+Linux and linux-signed source archive bytes, while generic documentation and
+dynamic cgroup interfaces cannot supply that binding.
+
+The only opened successor is
+`P11-E0-SOURCE-ARCHIVE-ACQUISITION-CONTRACT-PACK-V1`. It must pin four exact
+source identities (`gcc-15=15.2.0-16ubuntu1`, `binutils=2.46-3ubuntu2`,
+`linux=7.0.0-28.28`, and `linux-signed=7.0.0-28.28`) and define, without
+executing, the isolated custody root, signed InRelease/Sources receipts,
+exact-version download-only commands, `.dsc` authentication and SHA-256 rules,
+complete referenced-part manifest, partial-failure cleanup, and the boundary
+against unpacking or building.
+
+Actual source configuration mutation, index refresh, download, unpacking, and
+source-tree materialization remain closed until a later independent P11-E1
+authorization. `P11-E2-KERNEL-ACCOUNTING-BOUND-FEASIBILITY-DESIGN-V1` is
+deferred until verified P11-E1 source custody and another governance decision.
+This dependency sequence grants no permission to skip a gate. Candidate source,
+compilation, execution, dynamic measurement, exact peak/headroom, resource
+no-go, semantic-equivalence, S0, and scientific authority all remain closed.

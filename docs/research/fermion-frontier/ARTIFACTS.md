@@ -1614,3 +1614,20 @@ so they are versioned normally and are not added to the preservation-only
 - No archive was downloaded and no cgroup usage value was admitted. Exact
   source bytes and complete version-specific kernel bounds require separate
   future governance.
+
+## Majorana P11-G4 split governance
+
+- `majorana_certificate_p11_g4_split_governance_contract.json` and
+  `majorana_certificate_p11_g4_split_governance_record.json`: validate P11-D
+  custody, order the source-custody and kernel-bound routes, open only a
+  nonexecuting P11-E0 source-acquisition contract pack, and defer P11-E2.
+- `majorana_certificate_p11_g4_split_governance_validator.py` and
+  `test_majorana_certificate_p11_g4_split_governance.py`: read-only Git
+  topology, P11-D blob custody, canonical-record, exact source-identity,
+  dependency-order, authority-mutation, and exact-lifecycle checks.
+- P11-E0 may specify an isolated custody root, exact `deb-src`/APT commands,
+  signed-index and `.dsc` verification, complete source-part receipts, and
+  failure cleanup, but it may not run those commands. Package configuration,
+  index refresh, archive download/unpack, source-tree materialization,
+  candidate implementation, compilation, execution, and kernel-bound design
+  remain forbidden pending their own independent governance.
