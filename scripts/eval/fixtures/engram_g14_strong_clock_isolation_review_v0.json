@@ -1,0 +1,296 @@
+{
+  "schema": "agent_bridge.engram_g14_strong_clock_isolation_review.v0",
+  "mode": "PUBLIC_STATIC_DESIGN_SECURITY_REVIEW",
+  "date": "2026-07-18",
+  "status": "COMPLETE_NO_AUTHORITY",
+  "predecessor": {
+    "accepted_feature_commit": "7cd6fe023cd88ae2a816f8b10bc6ce05084f240d",
+    "integrated_master_commit": "92fe2facf6f27c85ec0a34a8c46e045b1aaf67e1",
+    "terminal_verdict": "REJECTED_FAIL_CLOSED_WALL_CLOCK_UNCONFINED_NO_AUTHORITY",
+    "only_permitted_successor": "separate_design_and_security_review_for_stronger_clock_isolation_primitive"
+  },
+  "scope": {
+    "public_sources_only": true,
+    "static_review_only": true,
+    "native_policy_compiled_or_applied": false,
+    "native_probe_or_candidate_launched": false,
+    "candidate_private_or_capability_material_accessed": false,
+    "runtime_store_mcp_or_deploy_changed": false,
+    "production_admissible": false,
+    "g1_4_execution_open": false,
+    "authority_class": "NONE_DESIGN_REVIEW_ONLY"
+  },
+  "acceptance_integrity": {
+    "checker_self_authenticating": false,
+    "standalone_checker_result_is_acceptance_authority": false,
+    "independent_out_of_band_commit_and_file_hash_pin_required": true,
+    "accepted_pin_channel": "agent_bridge_forum_independent_review_manifest",
+    "pin_verification_is_external_to_this_contract": true,
+    "required_pin_contents_in_order": [
+      "reviewer_session_id",
+      "review_verdict_pass",
+      "reviewed_feature_commit_sha",
+      "reviewed_tree_sha",
+      "semantic_checker_sha256",
+      "sha256_for_each_exact_feature_path"
+    ],
+    "exact_feature_paths_in_order": [
+      "docs/design/ENGRAM_G1_4_STRONG_CLOCK_ISOLATION_PRIMITIVE_REVIEW_2026_07_18.md",
+      "docs/design/ENGRAM_G1_4_STRONG_CLOCK_ISOLATION_PRIMITIVE_REVIEW_RESULT_2026_07_18.md",
+      "scripts/check-engram-g14-strong-clock-isolation-review.sh",
+      "scripts/eval/README.md",
+      "scripts/eval/check_engram_g14_strong_clock_isolation_review.py",
+      "scripts/eval/engram_g14_strong_clock_isolation_review.py",
+      "scripts/eval/fixtures/engram_g14_strong_clock_isolation_review_v0.json"
+    ],
+    "no_authority_before_verified_pin": true
+  },
+  "security_objective": {
+    "host_wall_clock_must_be_unobservable": true,
+    "candidate_visible_time_must_be_absent_or_supervisor_defined_deterministic": true,
+    "candidate_time_must_never_be_authoritative": true,
+    "supervisor_exclusively_owns_authenticated_time": true,
+    "external_time_channels_must_be_closed": [
+      "network",
+      "shared_host_services",
+      "host_filesystem_timestamps",
+      "unregistered_inherited_descriptors",
+      "external_entropy_devices"
+    ],
+    "equal_clock_policy_across_arms": true,
+    "identical_public_replay_required": true
+  },
+  "evidence_pins": {
+    "nono_version": "0.53.0",
+    "nono_crates_io_checksum": "ae7eb523cc2036e9ad6527411c3da5dc2172dc454cc3447a03b910420a39bfee",
+    "grok_build_reference_commit": "8adf9013a0929e5c7f1d4e849492d2387837a28d",
+    "predecessor_file_sha256": {
+      "docs/design/ENGRAM_G1_4_NATIVE_SANDBOX_ADAPTER_KAT_2026_07_18.md": "572aa46366fc641801a6a5b20a62a636b9ebf69595f95122bf8fdf644395923d",
+      "docs/design/ENGRAM_G1_4_NATIVE_SANDBOX_ADAPTER_KAT_RESULT_2026_07_18.md": "b86fa8de658d40ba974d1ffe60327d9a68fae464a472ba078047a4d70d71548a",
+      "scripts/eval/fixtures/engram_g14_native_sandbox_adapter_probe_v0.c": "0824beab20f922548f0033910e1ad3eb55695c0bb802488d0e9e531279199d12",
+      "scripts/eval/engram_g14_native_sandbox_adapter_kat.py": "1f79379ef480c3f0c21b901b292990460cd330ee2a627082ed2a94b8094e7c1f",
+      "scripts/eval/check_engram_g14_native_sandbox_adapter_kat.py": "d20e681f9824d0cd561f9e3d311cfc129aed1a7fe0f24b9eb6a2785fe79ab41e"
+    },
+    "primary_sources_in_order": [
+      {
+        "id": "linux_vdso_man_pages_6_18",
+        "url": "https://man7.org/linux/man-pages/man7/vdso.7.html",
+        "locked_claim": "vDSO clock functions execute without a syscall and are not visible to seccomp filters"
+      },
+      {
+        "id": "linux_time_namespaces_man_pages_6_18",
+        "url": "https://man7.org/linux/man-pages/man7/time_namespaces.7.html",
+        "locked_claim": "time namespaces virtualize monotonic and boottime but do not virtualize realtime"
+      },
+      {
+        "id": "linux_pr_set_tsc_man_pages_6_18",
+        "url": "https://man7.org/linux/man-pages/man2/PR_SET_TSC.2const.html",
+        "locked_claim": "PR_SET_TSC can fault timestamp-counter reads on x86 only"
+      },
+      {
+        "id": "linux_seccomp_unotify_man_pages_6_18",
+        "url": "https://man7.org/linux/man-pages/man2/seccomp_unotify.2.html",
+        "locked_claim": "seccomp user notification mediates system calls and is explicitly not itself a complete security policy"
+      },
+      {
+        "id": "wasi_capabilities",
+        "url": "https://github.com/WebAssembly/WASI/blob/main/docs/Capabilities.md",
+        "locked_claim": "WASI interfaces can be supplied as link-time capabilities including clocks"
+      },
+      {
+        "id": "wasmtime_wasi_46_0_1_context_builder",
+        "url": "https://docs.rs/wasmtime-wasi/46.0.1/wasmtime_wasi/struct.WasiCtxBuilder.html",
+        "locked_claim": "Wasmtime permits custom wall and monotonic clocks but defaults to host clocks"
+      },
+      {
+        "id": "apple_virtualization_framework",
+        "url": "https://developer.apple.com/documentation/virtualization",
+        "locked_claim": "Virtualization framework creates macOS or Linux VMs but publishes no custom deterministic clock contract"
+      },
+      {
+        "id": "qemu_tcg_icount",
+        "url": "https://www.qemu.org/docs/master/devel/tcg-icount.html",
+        "locked_claim": "TCG instruction counting can derive a deterministic virtual clock and is incompatible with multi-threaded TCG"
+      },
+      {
+        "id": "qemu_record_replay",
+        "url": "https://www.qemu.org/docs/master/system/replay.html",
+        "locked_claim": "record replay captures nondeterministic events including hardware clocks and requires icount"
+      },
+      {
+        "id": "qemu_rtc_invocation",
+        "url": "https://qemu.readthedocs.io/en/v7.2.19/system/invocation.html",
+        "locked_claim": "fixed RTC base with clock vm is recommended with icount for determinism"
+      }
+    ]
+  },
+  "candidate_matrix_in_order": [
+    {
+      "id": "nono_seatbelt_host_native",
+      "class": "host_native_policy",
+      "host_wall_clock_isolated": false,
+      "arbitrary_native_binary_compatible": true,
+      "deterministic_candidate_time": false,
+      "cross_platform": false,
+      "decision": "REJECT_AS_CLOCK_BOUNDARY",
+      "blocking_reason": "accepted Darwin KAT left libc and commpage clock paths readable"
+    },
+    {
+      "id": "landlock_seccomp_host_native",
+      "class": "host_native_policy",
+      "host_wall_clock_isolated": false,
+      "arbitrary_native_binary_compatible": true,
+      "deterministic_candidate_time": false,
+      "cross_platform": false,
+      "decision": "REJECT_AS_CLOCK_BOUNDARY",
+      "blocking_reason": "Landlock has no clock control and vDSO clock paths bypass seccomp"
+    },
+    {
+      "id": "linux_time_namespace_seccomp_pr_set_tsc",
+      "class": "host_native_composite",
+      "host_wall_clock_isolated": false,
+      "arbitrary_native_binary_compatible": true,
+      "deterministic_candidate_time": false,
+      "cross_platform": false,
+      "decision": "REJECT_AS_COMPLETE_BOUNDARY",
+      "blocking_reason": "realtime is not namespaced and timestamp-counter trapping is x86 only"
+    },
+    {
+      "id": "dynamic_loader_clock_interposition",
+      "class": "user_space_interposition",
+      "host_wall_clock_isolated": false,
+      "arbitrary_native_binary_compatible": false,
+      "deterministic_candidate_time": false,
+      "cross_platform": false,
+      "decision": "REJECT_SECURITY_CLAIM",
+      "blocking_reason": "static binaries direct syscalls vDSO commpage and hardware counters bypass interposition"
+    },
+    {
+      "id": "ptrace_or_seccomp_user_notification",
+      "class": "supervised_syscall_interposition",
+      "host_wall_clock_isolated": false,
+      "arbitrary_native_binary_compatible": true,
+      "deterministic_candidate_time": false,
+      "cross_platform": false,
+      "decision": "REJECT_AS_COMPLETE_BOUNDARY",
+      "blocking_reason": "only syscall entries are mediated while memory and hardware clock paths remain"
+    },
+    {
+      "id": "apple_virtualization_framework_default_vm",
+      "class": "hardware_accelerated_vm",
+      "host_wall_clock_isolated": false,
+      "arbitrary_native_binary_compatible": true,
+      "deterministic_candidate_time": false,
+      "cross_platform": false,
+      "decision": "REJECT_WITHOUT_CLOCK_CONTRACT",
+      "blocking_reason": "a VM boundary alone does not prove a fixed or host-independent guest clock"
+    },
+    {
+      "id": "wasi_component_custom_clocks",
+      "class": "capability_runtime",
+      "host_wall_clock_isolated": true,
+      "arbitrary_native_binary_compatible": false,
+      "deterministic_candidate_time": true,
+      "cross_platform": true,
+      "decision": "PRIMARY_SYNTHETIC_FEASIBILITY_CANDIDATE",
+      "blocking_reason": "requires a component-compatible candidate ABI and explicit replacement of default host clocks"
+    },
+    {
+      "id": "qemu_tcg_icount_fixed_rtc",
+      "class": "full_system_emulation",
+      "host_wall_clock_isolated": true,
+      "arbitrary_native_binary_compatible": true,
+      "deterministic_candidate_time": true,
+      "cross_platform": true,
+      "decision": "NATIVE_COMPATIBILITY_FALLBACK_CANDIDATE",
+      "blocking_reason": "requires pinned TCG single-vCPU machine image device set and replay policy with high cost"
+    },
+    {
+      "id": "supervisor_owned_authoritative_time",
+      "class": "authority_overlay",
+      "host_wall_clock_isolated": false,
+      "arbitrary_native_binary_compatible": true,
+      "deterministic_candidate_time": false,
+      "cross_platform": true,
+      "decision": "MANDATORY_OVERLAY_NOT_STANDALONE_ISOLATION",
+      "blocking_reason": "protects authority but does not stop candidate clock-dependent behavior"
+    }
+  ],
+  "decision": {
+    "host_native_nono_landlock_seatbelt_path": "REJECTED_FOR_G1_4_CLOCK_ISOLATION",
+    "primary_candidate": "wasi_component_custom_clocks",
+    "native_compatibility_fallback": "qemu_tcg_icount_fixed_rtc",
+    "mandatory_overlay": "supervisor_owned_authoritative_time",
+    "apple_virtualization_framework_default_vm": "INSUFFICIENT_WITHOUT_A_CUSTOM_CLOCK_CONTRACT",
+    "current_wall_clock_deny_canary": "REMAINS_FROZEN_AND_UNSATISFIED",
+    "proposed_future_semantic_change": "replace_api_denial_with_no_host_clock_plus_supervisor_defined_deterministic_time",
+    "semantic_change_requires_human_security_audit": true,
+    "implementation_authorized": false,
+    "synthetic_feasibility_run_authorized": false,
+    "g1_4_execution_open": false,
+    "verdict": "DESIGN_ROUTE_SELECTED_NO_AUTHORITY"
+  },
+  "future_gates_in_order": [
+    {
+      "id": "G2_WASI_PREREGISTRATION",
+      "status": "NOT_STARTED",
+      "requirements": [
+        "pin Wasmtime and WASI component ABI with dependency and advisory review",
+        "define a public component probe with no ambient host imports",
+        "replace default wall and monotonic clocks with deterministic supervisor clocks",
+        "omit network and host entropy and expose only registered filesystem capabilities",
+        "prove identical outputs and clock transcripts across fresh replays",
+        "retain supervisor-owned authenticated time outside the component"
+      ]
+    },
+    {
+      "id": "G2_QEMU_TCG_PREREGISTRATION",
+      "status": "NOT_STARTED",
+      "requirements": [
+        "pin QEMU source binary machine CPU firmware kernel initramfs and disk digests",
+        "use TCG not HVF or KVM with one vCPU and no multi-threaded TCG",
+        "use fixed RTC base clock vm and registered icount configuration",
+        "remove network entropy shared-folder audio input and unregistered devices",
+        "start from a read-only image with a fresh bounded scratch overlay",
+        "prove RTC vDSO hardware-counter and replay behavior with public canaries"
+      ]
+    },
+    {
+      "id": "G3_HUMAN_SECURITY_AUDIT",
+      "status": "REQUIRED_BEFORE_ADOPTION",
+      "requirements": [
+        "review any promotion from wall-clock denial to deterministic virtual time",
+        "review first Wasmtime or QEMU dependency promoted beyond public-synthetic feasibility",
+        "review first native policy widening or custom clock implementation",
+        "review first candidate private capability or real protocol run"
+      ]
+    }
+  ],
+  "human_audit_policy": {
+    "not_required_for": [
+      "static public design validation",
+      "unchanged reversible public checker rerun",
+      "separately preregistered reversible public-synthetic feasibility run",
+      "fail_closed_rejection",
+      "successful automatic cleanup"
+    ],
+    "required_before": [
+      "promoting a stronger clock primitive beyond public-synthetic feasibility",
+      "changing the frozen wall_clock_read canary semantics for candidate private or runtime admission",
+      "promoting Wasmtime QEMU nono or native policy dependencies into runtime or a real candidate path",
+      "first candidate private capability or real G1_4 run",
+      "policy widening unblinding rerun or suspected exposure"
+    ],
+    "rollback_failure_rule": "persist_and_verify_a_minimal_durable_lesson_before_any_fresh_attempt"
+  },
+  "nonclaims": {
+    "wasi_selected_or_implemented": false,
+    "qemu_selected_or_implemented": false,
+    "clock_isolation_verified": false,
+    "native_adapter_implemented": false,
+    "full_fourteen_canary_run_executed": false,
+    "candidate_or_private_material_authorized": false,
+    "production_or_deployment_authorized": false,
+    "g1_4_execution_open": false
+  }
+}
