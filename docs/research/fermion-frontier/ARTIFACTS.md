@@ -1631,3 +1631,21 @@ so they are versioned normally and are not added to the preservation-only
   index refresh, archive download/unpack, source-tree materialization,
   candidate implementation, compilation, execution, and kernel-bound design
   remain forbidden pending their own independent governance.
+
+## Majorana P11-E0 source-archive acquisition contract pack
+
+- `majorana_certificate_p11e0_source_archive_acquisition_contract.json`:
+  nonexecuting contract for four exact source identities, a P11-D-time Ubuntu
+  snapshot, isolated APT state, signed-index/`.dsc` authentication, complete
+  part-set equality, transactional acceptance, receipts, and retry cleanup.
+- `majorana_certificate_p11e0_source_archive_acquisition_record.json`:
+  canonical result
+  `SOURCE_ARCHIVE_ACQUISITION_CONTRACT_PACK_ESTABLISHED_AWAITING_INDEPENDENT_AUTHORIZATION`.
+- `majorana_certificate_p11e0_source_archive_acquisition_validator.py` and
+  `test_majorana_certificate_p11e0_source_archive_acquisition.py`: Git-only
+  P11-G4/P11-D custody, snapshot derivation, exact template/command,
+  authentication-chain, transaction, authority, canonical-record, and
+  exact-lifecycle checks.
+- The five APT commands are future declarative argv only. P11-E0 performs no
+  snapshot availability query, DNS/network access, package mutation, index
+  refresh, download, unpack, source materialization, build, or candidate run.

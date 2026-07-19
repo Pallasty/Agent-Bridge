@@ -1744,3 +1744,36 @@ deferred until verified P11-E1 source custody and another governance decision.
 This dependency sequence grants no permission to skip a gate. Candidate source,
 compilation, execution, dynamic measurement, exact peak/headroom, resource
 no-go, semantic-equivalence, S0, and scientific authority all remain closed.
+
+## Majorana P11-E0 defines acquisition without performing it
+
+P11-E0 turns P11-G4's Route A into a deterministic future acquisition
+contract. It fixes the Ubuntu snapshot to `20260719T064131Z`, the UTC instant
+of the P11-D result commit, and pins the four source requests exactly:
+`gcc-15=15.2.0-16ubuntu1`, `binutils=2.46-3ubuntu2`,
+`linux=7.0.0-28.28`, and `linux-signed=7.0.0-28.28`. A missing snapshot or
+version must fail closed; substitution by a newer package or another snapshot
+is forbidden.
+
+The future P11-E1 recipe uses a new non-symlink custody root outside Git,
+isolated source-list, lists, cache and empty dpkg-status paths, two `deb-src`
+stanzas, the Ubuntu archive keyring, and five exact `apt-get --snapshot`
+commands. The four source commands require `--download-only --only-source` and
+may not compile or unpack. P11-E0 records these argv but does not run them.
+
+Acceptance requires the full authenticated chain: pinned keyring bytes,
+successful InRelease verification, InRelease-bound Sources indexes,
+Sources-bound `.dsc` and source-part size/SHA-256 rows, `.dsc`
+`Checksums-Sha256`, and recomputed local hashes. The Sources, `.dsc`, and local
+file sets must agree exactly; missing, extra, duplicate, malformed, conflicting,
+or hash-mismatched inputs fail closed. Each package is atomically accepted only
+as a complete set with a canonical receipt, and retries may delete only their
+current unaccepted directory.
+
+The outcome is
+`SOURCE_ARCHIVE_ACQUISITION_CONTRACT_PACK_ESTABLISHED_AWAITING_INDEPENDENT_AUTHORIZATION`.
+The next gate is `P11-G5-SOURCE-ARCHIVE-ACQUISITION-AUTHORIZATION-V1`.
+P11-E0 itself establishes neither snapshot availability nor source custody and
+does not authorize APT mutation, network acquisition, unpacking, kernel-bound
+design, candidate implementation, execution, peak/headroom, equivalence,
+resource no-go, S0, or scientific claims.
