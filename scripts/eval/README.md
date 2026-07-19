@@ -514,6 +514,37 @@ The only successor is the separate public-static, no-run
 gate authorizes neither component source/build/run nor any QEMU/native,
 candidate/private, dependency/runtime, deployment, canary, or G1.4 action.
 
+## G2A artifact compatibility and ordering review
+
+`check-engram-g14-wasi-g2a-artifact-compatibility.sh` validates the public,
+static, no-source/no-build/no-run G2A evidence contract and its complete
+resolver-only Cargo lockfile. It checks immutable Wasmtime release metadata,
+three independently matched crate payloads, the minimal feature graph, Rust
+1.94.0 host/guest target pins, a pinned bounded RustSec scan receipt, exact-world
+binding evidence, and the source-level Tokio timer finding.
+
+The result is deliberately fail closed:
+`G2A_FAIL_CLOSED_UNSATISFIABLE_ARTIFACT_ORDER_NO_SOURCE_NO_BUILD_NO_RUN`.
+G2 requires source digests before source and binary/import-manifest digests
+before build, while the accepted Wasmtime release has no matching prebuilt
+custom-clock component. The only successor is the separate public-static,
+no-run `G2B_PUBLIC_WASI_ARTIFACT_ORDERING_REPAIR_PREREGISTRATION`; it may repair
+the pre-source, pre-build, and pre-run barrier order but authorizes none of the
+later actions.
+
+The bounded scan is not an official `cargo-audit` receipt. Advisory and yanked
+package review must be repeated before dependency promotion.
+
+```bash
+scripts/check-engram-g14-wasi-g2a-artifact-compatibility.sh --phase precommit
+scripts/check-engram-g14-wasi-g2a-artifact-compatibility.sh --phase postcommit
+```
+
+A passing checker is not acceptance authority. Independent read-only review
+and an out-of-band feature commit/tree/checker/all-path hash manifest remain
+required. No source, build, run, dependency/runtime promotion,
+candidate/private access, deployment, canary change, or G1.4 authority exists.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
