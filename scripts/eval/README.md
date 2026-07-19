@@ -202,6 +202,20 @@ G1.4 unrepresentable. See
 and run
 `scripts/check-engram-g1-authenticated-freeze-authority-adapter-isolated-lab.sh`.
 
+`engram_g1_custody_cross_implementation_reconciliation.py` validates the
+design-only, source-pinned comparison between the private Rust
+retained-descriptor shadow and that broader Python isolated lab. Its 28 rows
+register shared intent, one-sided strictness or scope, noncomparable controls,
+and shared gaps without claiming any exact-equivalence row. Eighteen future
+synthetic probes are preregistered, including path normalization, ancestor and
+parent swaps, `O_UNIQUE` and FIFO races, mount-policy drift, SQLite pathname
+reopening, precommit-to-commit mutation, and explicit ACL/clone gaps. No
+differential harness, source modification, private input, authority, or G1.4
+surface is introduced. See
+`docs/design/ENGRAM_G1_CUSTODY_CROSS_IMPLEMENTATION_RECONCILIATION_PREREGISTRATION_2026_07_18.md`
+and run
+`scripts/check-engram-g1-custody-cross-implementation-reconciliation.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class
