@@ -1,0 +1,33 @@
+[package]
+name = "ab-owned-lab-role-artifacts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+
+[features]
+default = []
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ab-owned-lab-controller"
+path = "src/bin/controller.rs"
+
+[[bin]]
+name = "ab-owned-lab-observer"
+path = "src/bin/observer.rs"
+
+[[bin]]
+name = "ab-owned-lab-runner"
+path = "src/bin/runner.rs"
+
+[[bin]]
+name = "ab-owned-lab-validator"
+path = "src/bin/validator.rs"
