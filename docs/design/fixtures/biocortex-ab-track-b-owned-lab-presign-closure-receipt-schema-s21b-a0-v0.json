@@ -1,0 +1,538 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_presign_closure_receipt_s21b_a0.v0",
+  "title": "Agent-Bridge S21B-A0 blocked presign closure audit receipt",
+  "description": "Closed, non-authorizing receipt proving that missing named role artifacts and reproducible closures remain explicit blockers before any unsigned owner-review subject or signing request may exist.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "hashing_contract",
+    "receipt_state",
+    "test_only",
+    "synthetic",
+    "target_binding",
+    "target_verification",
+    "role_artifact_audit",
+    "reproducible_closure_audit",
+    "forbidden_outputs",
+    "result",
+    "presign_closure_receipt_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.memory_temporal_owned_lab_presign_closure_receipt_s21b_a0.v0"
+    },
+    "packet_kind": {
+      "const": "S21B_A0_PRESIGN_CLOSURE_RECEIPT"
+    },
+    "canonicalization": {
+      "const": "AB_RESTRICTED_CANONICAL_JSON_S21B_A0_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+    },
+    "hashing_contract": {
+      "$ref": "#/$defs/hashing_contract"
+    },
+    "receipt_state": {
+      "enum": [
+        "SYNTHETIC_KAT_BLOCKED_MISSING_FOUR_ROLE_ARTIFACTS_AND_REBUILD_CLOSURES",
+        "BLOCKED_MISSING_FOUR_ROLE_ARTIFACTS_AND_REBUILD_CLOSURES"
+      ]
+    },
+    "test_only": {
+      "type": "boolean"
+    },
+    "synthetic": {
+      "type": "boolean"
+    },
+    "target_binding": {
+      "$ref": "#/$defs/target_binding"
+    },
+    "target_verification": {
+      "$ref": "#/$defs/target_verification"
+    },
+    "role_artifact_audit": {
+      "$ref": "#/$defs/role_artifact_audit"
+    },
+    "reproducible_closure_audit": {
+      "$ref": "#/$defs/reproducible_closure_audit"
+    },
+    "forbidden_outputs": {
+      "$ref": "#/$defs/forbidden_outputs"
+    },
+    "result": {
+      "$ref": "#/$defs/result"
+    },
+    "presign_closure_receipt_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "nonclaims": {
+      "$ref": "#/$defs/nonclaims"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "test_only": {
+            "const": true
+          }
+        },
+        "required": [
+          "test_only"
+        ]
+      },
+      "then": {
+        "properties": {
+          "synthetic": {
+            "const": true
+          },
+          "receipt_state": {
+            "const": "SYNTHETIC_KAT_BLOCKED_MISSING_FOUR_ROLE_ARTIFACTS_AND_REBUILD_CLOSURES"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthetic": {
+            "const": false
+          },
+          "receipt_state": {
+            "const": "BLOCKED_MISSING_FOUR_ROLE_ARTIFACTS_AND_REBUILD_CLOSURES"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^(?!0{64}$)[0-9a-f]{64}$"
+    },
+    "nullable_sha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "git_oid": {
+      "type": "string",
+      "pattern": "^(?!0{40}$)[0-9a-f]{40}$"
+    },
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hash_algorithm",
+        "canonicalization",
+        "digest_domain",
+        "digest_framing",
+        "hash_scope",
+        "self_hash_field",
+        "self_hash_field_excluded",
+        "repository_framing_lf_excluded",
+        "candidate_reported_matches_authoritative"
+      ],
+      "properties": {
+        "hash_algorithm": {
+          "const": "SHA-256"
+        },
+        "canonicalization": {
+          "const": "AB_RESTRICTED_CANONICAL_JSON_S21B_A0_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"
+        },
+        "digest_domain": {
+          "const": "agent-bridge/biocortex/owned-lab/s21b-a0/presign-closure-receipt/v1"
+        },
+        "digest_framing": {
+          "const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"
+        },
+        "hash_scope": {
+          "const": "ENTIRE_PACKET_EXCEPT_PRESIGN_CLOSURE_RECEIPT_SHA256"
+        },
+        "self_hash_field": {
+          "const": "presign_closure_receipt_sha256"
+        },
+        "self_hash_field_excluded": {
+          "const": true
+        },
+        "repository_framing_lf_excluded": {
+          "const": true
+        },
+        "candidate_reported_matches_authoritative": {
+          "const": false
+        }
+      }
+    },
+    "target_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_remote",
+        "remote_ref",
+        "s21a_source_commit",
+        "s21a_source_tree",
+        "s21a_integration_commit",
+        "s21a_integration_tree",
+        "integration_first_parent",
+        "integration_second_parent",
+        "archive_profile",
+        "observed_integrated_archive_sha256",
+        "cargo_lock_sha256"
+      ],
+      "properties": {
+        "canonical_remote": {
+          "const": "git@github.com:pallasting/Agent-Bridge.git"
+        },
+        "remote_ref": {
+          "const": "refs/heads/master"
+        },
+        "s21a_source_commit": {
+          "const": "ed5d959489f88d0eead21b604d03a142e0584982"
+        },
+        "s21a_source_tree": {
+          "const": "7d1db2c9eb04d75cc980ea83d369b9129155252f"
+        },
+        "s21a_integration_commit": {
+          "const": "34b1c7e6ca9c2b75fd2ef3cf418a444353059511"
+        },
+        "s21a_integration_tree": {
+          "const": "00bbf534c33ecfa56d05579d8a7f4c83e60b208e"
+        },
+        "integration_first_parent": {
+          "const": "8521ff6a9784a6d74be2b8ee0e02f3aba6b9f8a5"
+        },
+        "integration_second_parent": {
+          "const": "ed5d959489f88d0eead21b604d03a142e0584982"
+        },
+        "archive_profile": {
+          "const": "git -c tar.umask=0022 archive --format=tar <commit>"
+        },
+        "observed_integrated_archive_sha256": {
+          "const": "d45312d5b343dd036ef6906af0abe9f59da8220cf6ef16fb87caf8c1265c0bb5"
+        },
+        "cargo_lock_sha256": {
+          "const": "408e0aa5e6bc3f2a318719c57419ece60b507df0a11c1738fd40dda66aac1f59"
+        }
+      }
+    },
+    "target_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "remote_ref_reobserved",
+        "git_commit_tree_relationships_independently_verified",
+        "two_parent_topology_independently_verified",
+        "archive_recomputed_from_exact_integration_commit",
+        "cargo_lock_recomputed_from_exact_archive",
+        "candidate_values_used_as_expected"
+      ],
+      "properties": {
+        "remote_ref_reobserved": {
+          "const": false
+        },
+        "git_commit_tree_relationships_independently_verified": {
+          "const": false
+        },
+        "two_parent_topology_independently_verified": {
+          "const": false
+        },
+        "archive_recomputed_from_exact_integration_commit": {
+          "const": false
+        },
+        "cargo_lock_recomputed_from_exact_archive": {
+          "const": false
+        },
+        "candidate_values_used_as_expected": {
+          "const": false
+        }
+      }
+    },
+    "role_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_artifact_name",
+        "cargo_binary_declared",
+        "declared_cargo_target",
+        "exact_artifact_path",
+        "artifact_exists",
+        "artifact_sha256",
+        "build_recipe_sha256",
+        "independent_rebuild_count"
+      ],
+      "properties": {
+        "required_artifact_name": {
+          "type": "string",
+          "pattern": "^(controller|observer|runner|validator)$"
+        },
+        "cargo_binary_declared": {
+          "const": false
+        },
+        "declared_cargo_target": {
+          "type": "null"
+        },
+        "exact_artifact_path": {
+          "type": "null"
+        },
+        "artifact_exists": {
+          "const": false
+        },
+        "artifact_sha256": {
+          "type": "null"
+        },
+        "build_recipe_sha256": {
+          "type": "null"
+        },
+        "independent_rebuild_count": {
+          "const": 0
+        }
+      }
+    },
+    "role_artifact_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_role_artifact_count",
+        "existing_required_role_artifact_count",
+        "controller",
+        "observer",
+        "runner",
+        "validator",
+        "unrelated_backfill_embeddings_is_role_artifact",
+        "private_library_or_test_binary_is_role_artifact",
+        "arbitrary_nonzero_digest_may_substitute_for_missing_artifact"
+      ],
+      "properties": {
+        "required_role_artifact_count": {
+          "const": 4
+        },
+        "existing_required_role_artifact_count": {
+          "const": 0
+        },
+        "controller": {
+          "$ref": "#/$defs/role_artifact"
+        },
+        "observer": {
+          "$ref": "#/$defs/role_artifact"
+        },
+        "runner": {
+          "$ref": "#/$defs/role_artifact"
+        },
+        "validator": {
+          "$ref": "#/$defs/role_artifact"
+        },
+        "unrelated_backfill_embeddings_is_role_artifact": {
+          "const": false
+        },
+        "private_library_or_test_binary_is_role_artifact": {
+          "const": false
+        },
+        "arbitrary_nonzero_digest_may_substitute_for_missing_artifact": {
+          "const": false
+        }
+      }
+    },
+    "reproducible_closure_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "toolchain_manifest_definition_present",
+        "toolchain_manifest_sha256",
+        "feature_set_definition_present",
+        "feature_set_sha256",
+        "schema_set_membership_definition_present",
+        "schema_set_sha256",
+        "deterministic_role_build_recipes_present",
+        "first_clean_archive_rebuild_completed",
+        "second_clean_archive_rebuild_completed",
+        "independent_rebuild_outputs_match",
+        "candidate_supplied_expected_digests_used"
+      ],
+      "properties": {
+        "toolchain_manifest_definition_present": {
+          "const": false
+        },
+        "toolchain_manifest_sha256": {
+          "type": "null"
+        },
+        "feature_set_definition_present": {
+          "const": false
+        },
+        "feature_set_sha256": {
+          "type": "null"
+        },
+        "schema_set_membership_definition_present": {
+          "const": false
+        },
+        "schema_set_sha256": {
+          "type": "null"
+        },
+        "deterministic_role_build_recipes_present": {
+          "const": false
+        },
+        "first_clean_archive_rebuild_completed": {
+          "const": false
+        },
+        "second_clean_archive_rebuild_completed": {
+          "const": false
+        },
+        "independent_rebuild_outputs_match": {
+          "const": false
+        },
+        "candidate_supplied_expected_digests_used": {
+          "const": false
+        }
+      }
+    },
+    "forbidden_outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "final_unsigned_subject_present",
+        "final_unsigned_subject_sha256",
+        "owner_signing_request_present",
+        "owner_signing_message_sha256",
+        "owner_anchor_present",
+        "owner_anchor_document_sha256",
+        "owner_private_key_present",
+        "detached_owner_signature_present",
+        "detached_owner_signature_sha256",
+        "external_input_admission_present",
+        "live_adapter_present",
+        "execution_capability_present"
+      ],
+      "properties": {
+        "final_unsigned_subject_present": {
+          "const": false
+        },
+        "final_unsigned_subject_sha256": {
+          "type": "null"
+        },
+        "owner_signing_request_present": {
+          "const": false
+        },
+        "owner_signing_message_sha256": {
+          "type": "null"
+        },
+        "owner_anchor_present": {
+          "const": false
+        },
+        "owner_anchor_document_sha256": {
+          "type": "null"
+        },
+        "owner_private_key_present": {
+          "const": false
+        },
+        "detached_owner_signature_present": {
+          "const": false
+        },
+        "detached_owner_signature_sha256": {
+          "type": "null"
+        },
+        "external_input_admission_present": {
+          "const": false
+        },
+        "live_adapter_present": {
+          "const": false
+        },
+        "execution_capability_present": {
+          "const": false
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage_status",
+        "presign_closure_complete",
+        "terminal_hard_lock",
+        "next_action",
+        "owner_interaction_required_now",
+        "unsigned_final_subject_may_be_generated",
+        "owner_signature_may_be_requested",
+        "live_execution_may_begin",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "stage_status": {
+          "const": "S21B_A0_BLOCKED_MISSING_ROLE_ARTIFACTS_AND_REPRODUCIBLE_CLOSURES"
+        },
+        "presign_closure_complete": {
+          "const": false
+        },
+        "terminal_hard_lock": {
+          "const": true
+        },
+        "next_action": {
+          "const": "DEFINE_AND_BUILD_FOUR_NAMED_NON_LIVE_ROLE_ARTIFACTS_AND_REPRODUCIBLE_CLOSURES"
+        },
+        "owner_interaction_required_now": {
+          "const": false
+        },
+        "unsigned_final_subject_may_be_generated": {
+          "const": false
+        },
+        "owner_signature_may_be_requested": {
+          "const": false
+        },
+        "live_execution_may_begin": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_is_unsigned_final_subject",
+        "receipt_is_owner_signing_request",
+        "receipt_is_owner_authority",
+        "receipt_is_execution_capability",
+        "known_git_archive_identity_completes_presign_closure",
+        "schema_conformance_proves_missing_artifact_exists",
+        "synthetic_fixture_is_real_build_evidence",
+        "provider_or_production_authority",
+        "side_effects_unlocked"
+      ],
+      "properties": {
+        "receipt_is_unsigned_final_subject": {
+          "const": false
+        },
+        "receipt_is_owner_signing_request": {
+          "const": false
+        },
+        "receipt_is_owner_authority": {
+          "const": false
+        },
+        "receipt_is_execution_capability": {
+          "const": false
+        },
+        "known_git_archive_identity_completes_presign_closure": {
+          "const": false
+        },
+        "schema_conformance_proves_missing_artifact_exists": {
+          "const": false
+        },
+        "synthetic_fixture_is_real_build_evidence": {
+          "const": false
+        },
+        "provider_or_production_authority": {
+          "const": false
+        },
+        "side_effects_unlocked": {
+          "const": "NONE"
+        }
+      }
+    }
+  }
+}
