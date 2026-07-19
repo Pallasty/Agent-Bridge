@@ -1541,3 +1541,20 @@ route identifier or a closure that no independent static-byte contract route
 is available. Neither outcome is a byte proof, resource no-go or execution
 authorization; any later proof or execution still requires independent
 governance.
+
+## Majorana P10-B closes the frozen source/runtime contract inventory
+
+P10-B read only the four source-pinned inputs authorized by P10-G1. They
+identify Julia executable/sysimage and package source-tree custody, but P10-A
+still records selected rather than transitive allocation closure and seven
+missing byte-proof contracts. No independent static contract for object
+layout/capacity, ownership lifetime, BigInt/GMP and resize costs,
+GC/JIT/allocator/library/stack overhead, an envelope checker, or machine cost
+is present in that frozen inventory.
+
+The scoped outcome is `CLOSED_NO_INDEPENDENT_STATIC_BYTE_CONTRACT_ROUTE`.
+It is not a global impossibility claim, resource no-go, OOM attribution, byte
+bound, or execution authorization. The exact peak and strict comparison to
+the unchanged `2^31` cap remain unknown; all seven obligations and execution
+remain closed. Any new evidence acquisition, byte proof, or execution review
+requires independent governance.

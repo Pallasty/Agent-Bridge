@@ -1474,3 +1474,21 @@ so they are versioned normally and are not added to the preservation-only
   independent source/layout/capacity/lifetime/runtime/machine-cost evidence;
   it must not run Julia or the candidate, change caps, infer resource no-go or
   authorize execution.
+
+## Majorana P10-B source/runtime contract-feasibility audit
+
+- `majorana_certificate_p10_b_source_runtime_contract_feasibility_contract.json`:
+  P10-G1-authorized read-only audit contract; pins four frozen source inputs,
+  seven evidence classes, the unchanged 2 GiB cap, and authority exclusions.
+- `majorana_certificate_p10_b_source_runtime_contract_feasibility_record.json`:
+  canonical result. Every class is
+  `NO_INDEPENDENT_STATIC_CONTRACT_IN_FROZEN_INVENTORY`, producing the scoped
+  outcome `CLOSED_NO_INDEPENDENT_STATIC_BYTE_CONTRACT_ROUTE`.
+- `majorana_certificate_p10_b_source_runtime_contract_feasibility_validator.py`
+  and `test_majorana_certificate_p10_b_source_runtime_contract_feasibility.py`:
+  read-only source-digest, P10-A obligation-ledger, P10-G1 authority,
+  canonical-reconstruction and staged-lifecycle checks.
+- This is not a global impossibility claim, byte proof, resource no-go, OOM
+  attribution, or permission to execute Julia/the candidate. It leaves peak
+  bytes and strict cap comparison unknown; any future evidence or execution
+  needs fresh independent governance.
