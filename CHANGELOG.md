@@ -8,6 +8,18 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Default-off ChatGPT P2B provider-backed OAuth candidate.** A separate
+  `mcp-http-auth-candidate` command keeps the one-tool, non-executing boundary
+  while adding provider discovery, PKCE and client-registration capability
+  checks, bounded remote JWKS caching, serialized and rate-bounded key-rotation
+  refresh, exact external-resource audience binding, and fail-closed `503`
+  behavior when an expired or unknown key cannot be refreshed. Secret-free
+  Auth0 Free and separate Secure MCP Tunnel templates document the live path
+  without changing
+  the production `chatgpt-read` profile. Provider KATs use a real loopback fake
+  IdP to cover initial discovery, rotation, outage, subject binding, and unsafe
+  config rejection. Real ChatGPT login/tunnel acceptance and all execution
+  authority remain pending.
 - **Default-off ChatGPT P2B synthetic HTTP/OAuth lab.** A separate
   `mcp-http-auth-lab` command now provides a loopback-only, non-production
   Streamable HTTP resource-server harness using MCP 2025-11-25 semantics,
