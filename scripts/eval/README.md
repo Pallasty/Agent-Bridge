@@ -216,6 +216,16 @@ surface is introduced. See
 and run
 `scripts/check-engram-g1-custody-cross-implementation-reconciliation.sh`.
 
+`engram_g1_custody_cross_implementation_differential_harness.py` is the
+separate, source-pinned public-synthetic successor to that preregistration. It
+does not alter either source profile: it calls the existing Rust test-only
+suite and Python disposable isolated lab, then emits 18 redacted probe records
+labelled `DYNAMIC`, `STATIC_WITNESS`, or `UNRESOLVED_SHARED_GAP`. It reports
+observations only: no exact equivalence, policy selection, real custody,
+authority, runtime surface, or G1.4 opening is representable. See
+`docs/design/ENGRAM_G1_CUSTODY_CROSS_IMPLEMENTATION_DIFFERENTIAL_HARNESS_2026_07_18.md`
+and run `scripts/check-engram-g1-custody-cross-implementation-differential-harness.sh`.
+
 `engram_g14_candidate_protocol_preregistration.py` freezes the design-only G1.4
 candidate protocol without implementing a candidate, runner, sandbox, corpus
 access, experiment, unblinding, retrieval mutation, live write, or promotion.

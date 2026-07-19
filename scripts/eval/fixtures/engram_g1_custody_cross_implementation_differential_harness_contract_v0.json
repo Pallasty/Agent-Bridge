@@ -1,0 +1,51 @@
+{
+  "schema": "agent_bridge.engram_g1_custody_cross_implementation_differential_harness_contract.v0",
+  "contract_id": "engram_g1_custody_cross_implementation_differential_harness_20260718",
+  "date": "2026-07-18",
+  "verdict": "SYNTHETIC_CROSS_IMPLEMENTATION_DIFFERENTIAL_OBSERVATION_CONTRACT_NO_AUTHORITY",
+  "checker_sha256": "8e1349160a0d56b2a553f72fbba51c81cf2bbc767c95071e0b848776e5c7461d",
+  "predecessor": {
+    "commit": "382f94e597c9ccad748a271665973e01d7c78f9c",
+    "contract_sha256": "d0ea62745ff239c988e5725240e0a0e44796cbce5c1b5e5a4dc499c7afa84fbc",
+    "validator_sha256": "1ec29777abe0d6ed5624f654aad5c685196f1a30b451241470714319c5c78c38",
+    "checker_sha256": "a8bef61838c664c48ec7db84c4025cb222084a2003d31da4eec9cb1ac66d9cbb"
+  },
+  "execution": {
+    "public_synthetic_only": true,
+    "uses_existing_test_only_rust_permit": true,
+    "uses_disposable_python_isolated_lab": true,
+    "modifies_frozen_rust_source": false,
+    "modifies_frozen_python_source": false,
+    "implementation_equivalence_claimed": false,
+    "production_custody_claimed": false,
+    "authority_claimed": false
+  },
+  "probe_plan": [
+    {"id": "P01_RAW_PATH_SPELLING", "phase": "open", "rust_mode": "DYNAMIC", "python_mode": "DYNAMIC", "classification": "RUST_STRICTER"},
+    {"id": "P02_ABSOLUTE_ANCESTOR_SWAP", "phase": "revalidate", "rust_mode": "STATIC_WITNESS", "python_mode": "STATIC_WITNESS", "classification": "RUST_STRICTER"},
+    {"id": "P03_PRIVATE_PARENT_SWAP", "phase": "revalidate", "rust_mode": "DYNAMIC", "python_mode": "DYNAMIC", "classification": "RUST_STRICTER"},
+    {"id": "P04_PRIVATE_DIRECTORY_METADATA_DRIFT", "phase": "revalidate", "rust_mode": "STATIC_WITNESS", "python_mode": "DYNAMIC", "classification": "RUST_STRICTER"},
+    {"id": "P05_HARDLINK_BEFORE_OPEN", "phase": "open", "rust_mode": "DYNAMIC", "python_mode": "DYNAMIC", "classification": "SHARED_INTENT_DIFFERENT_MECHANISM"},
+    {"id": "P06_HARDLINK_OPEN_RACE", "phase": "open", "rust_mode": "STATIC_WITNESS", "python_mode": "STATIC_WITNESS", "classification": "RUST_STRICTER"},
+    {"id": "P07_FIFO_OR_DEVICE_SUBSTITUTION", "phase": "open", "rust_mode": "DYNAMIC", "python_mode": "STATIC_WITNESS", "classification": "RUST_STRICTER"},
+    {"id": "P08_FILE_REBIND_AFTER_READ", "phase": "revalidate", "rust_mode": "DYNAMIC", "python_mode": "DYNAMIC", "classification": "SHARED_INTENT_DIFFERENT_MECHANISM"},
+    {"id": "P09_IN_PLACE_BYTE_MUTATION", "phase": "revalidate", "rust_mode": "DYNAMIC", "python_mode": "DYNAMIC", "classification": "SHARED_INTENT_DIFFERENT_MECHANISM"},
+    {"id": "P10_LOCAL_NON_APFS_FILESYSTEM", "phase": "mount_policy", "rust_mode": "DYNAMIC", "python_mode": "DYNAMIC", "classification": "RUST_STRICTER"},
+    {"id": "P11_MOUNT_FINGERPRINT_DRIFT", "phase": "revalidate", "rust_mode": "STATIC_WITNESS", "python_mode": "DYNAMIC", "classification": "RUST_STRICTER"},
+    {"id": "P12_EXTENDED_METADATA_DRIFT", "phase": "revalidate", "rust_mode": "STATIC_WITNESS", "python_mode": "STATIC_WITNESS", "classification": "RUST_STRICTER"},
+    {"id": "P13_PUBLIC_ARTIFACT_NAME_REBIND", "phase": "precommit", "rust_mode": "STATIC_WITNESS", "python_mode": "STATIC_WITNESS", "classification": "PYTHON_BROADER_SCOPE"},
+    {"id": "P14_SQLITE_PATH_REOPEN_SWAP", "phase": "ledger_open", "rust_mode": "STATIC_WITNESS", "python_mode": "STATIC_WITNESS", "classification": "NONCOMPARABLE"},
+    {"id": "P15_AFTER_PRECOMMIT_BEFORE_COMMIT_MUTATION", "phase": "linearization", "rust_mode": "STATIC_WITNESS", "python_mode": "STATIC_WITNESS", "classification": "SHARED_GAP"},
+    {"id": "P16_POSTCOMMIT_FILESYSTEM_MUTATION", "phase": "linearization", "rust_mode": "STATIC_WITNESS", "python_mode": "STATIC_WITNESS", "classification": "SHARED_GAP"},
+    {"id": "P17_DARWIN_ACL_PRESENT", "phase": "shared_gap", "rust_mode": "UNRESOLVED_SHARED_GAP", "python_mode": "UNRESOLVED_SHARED_GAP", "classification": "SHARED_GAP"},
+    {"id": "P18_APFS_COPY_ALIAS", "phase": "shared_gap", "rust_mode": "UNRESOLVED_SHARED_GAP", "python_mode": "UNRESOLVED_SHARED_GAP", "classification": "SHARED_GAP"}
+  ],
+  "boundaries": {
+    "real_private_input_permitted": false,
+    "real_key_or_trust_root_permitted": false,
+    "runtime_or_mcp_registration_permitted": false,
+    "production_promotion_permitted": false,
+    "g1_4_open_permitted": false,
+    "runtime_authority": false
+  }
+}
