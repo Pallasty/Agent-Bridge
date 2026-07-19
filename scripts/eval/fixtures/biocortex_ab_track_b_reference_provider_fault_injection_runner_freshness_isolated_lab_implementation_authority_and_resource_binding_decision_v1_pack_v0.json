@@ -1,0 +1,79 @@
+{
+  "authorized_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_FRESHNESS_SYNTHETIC_EXACT_T09_RECEIPT_TRACK_OBSERVED_AT_VALIDATION_CHECKED_AT_DECISION_RECHECK_AT_EXPIRES_AT_AND_MAX_AGE_SECONDS_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+  "boundary": {
+    "current_released_component_total": 7,
+    "decision_implements_component_count": 0,
+    "future_component_total_after_exact_integrated_full_gate": 8,
+    "production_ingestion_controls_implemented": 0,
+    "provider_authority": false,
+    "runtime_authority": false,
+    "t10_implemented": false,
+    "t11_authorized": false,
+    "t12_authorized": false
+  },
+  "date": "2026-07-19",
+  "decision": "AUTHORIZE_EXACT_BOUNDED_REVERSIBLE_T10_FRESHNESS_ISOLATED_LAB_COMPONENT_IMPLEMENTATION_ONLY_FAIL_CLOSED",
+  "expected": {
+    "binding_profile_count": 2,
+    "checker_self_test_stdout_line_count": 16,
+    "checker_stdout_line_count": 55,
+    "directed_negative_test_count": 49,
+    "policy_match_dimension_count": 7,
+    "public_input_count": 14,
+    "request_field_count": 5,
+    "source_ast_guard_count": 12
+  },
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_FRESHNESS_SYNTHETIC_EXACT_T09_RECEIPT_TRACK_OBSERVED_AT_VALIDATION_CHECKED_AT_DECISION_RECHECK_AT_EXPIRES_AT_AND_MAX_AGE_SECONDS_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+  "packet_path_modes": {
+    "docs/reports/goal-c-u/2026-07-19-biocortex-track-b-reference-provider-fault-injection-runner-freshness-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.md": "100644",
+    "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-freshness-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.sh": "100755",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1.py": "100644",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.py": "100644",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "100644",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "100644",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_v0.json": "100644"
+  },
+  "predecessor_artifact_raw_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-content-identity-and-quarantine-custody-synthetic-exact-t08-receipt-five-identity-verifier-isolated-lab-v1.schema.json": "37cce4e99d612a4e7540c957489e77d3671e19e611a8f558d9566b5072d370cc",
+    "docs/reports/goal-c-u/2026-07-18-biocortex-track-b-reference-provider-fault-injection-runner-content-identity-and-quarantine-custody-synthetic-exact-t08-receipt-five-identity-verifier-isolated-lab-v1-pack.md": "87d2cb58dc98519d82f67e681cbad4ec387d3eb77bcfe9dc2ad87af2c569130b",
+    "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-content-identity-and-quarantine-custody-synthetic-exact-t08-receipt-five-identity-verifier-isolated-lab-v1-pack.sh": "5f4c5dae0a6f0db88f7b653d68a3ff46ed1d493c70d2defe4985ec5682d585e3",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_content_identity_and_quarantine_custody_synthetic_exact_t08_receipt_five_identity_verifier_isolated_lab_v1.py": "ff5aae17b727b70430235294d5ec8101fb44f88bde743b05fe2ea12850f4e68e",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_content_identity_and_quarantine_custody_synthetic_exact_t08_receipt_five_identity_verifier_isolated_lab_v1_pack.py": "57c4c9c79caf2ad42a33a813c795d13fa58a08a7f81dfded00b1981ca679fb1e",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_content_identity_and_quarantine_custody_synthetic_exact_t08_receipt_five_identity_verifier_isolated_lab_v1_pack.expected.v0.tsv": "9652f827b10e748e596f9032198c0af7a7e25c809f8869583f02fa9526d6a713",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_content_identity_and_quarantine_custody_synthetic_exact_t08_receipt_five_identity_verifier_isolated_lab_v1_pack_synthetic_v0.json": "5575b982e0e0da0130ff2dfcba2f3fc3c7198644fe2db960432d3b8ae31fe5e4",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_content_identity_and_quarantine_custody_synthetic_exact_t08_receipt_five_identity_verifier_isolated_lab_v1_pack_v0.json": "879bf18c29ccd7c93661e4344dba37d529fab61182af0868b961400c4ba0e923"
+  },
+  "raw_sha256": {
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1.py": "5c538a27636014ba7660437be9a01d9e8643a0e3f2e74488545e99824ce2d16d",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.py": "d7154d0f4acea62c82ca8d8fcf5b7815cef80ba05169a7c20d6860b1ba80f63e",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "66c3819a558632ed9e75bcea89a80dec891de4ed3599341a51ea82d660006a9f",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "c4344cec98344f717fd78253e2dd70c04b9cbeb6895cb3a58652e4f6260bcfa1"
+  },
+  "resource_limits": {
+    "effective_external_paid_spend_cap": 0,
+    "max_freshness_entries": 2,
+    "max_freshness_policy_bytes": 65536,
+    "max_freshness_request_bytes": 16384,
+    "max_parallel_workers": 1,
+    "max_predecessor_review_calls": 1,
+    "max_private_scratch_bytes": 67108864,
+    "network": false,
+    "public_input_count": 14
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_manifest.v1",
+  "schema_version": 1,
+  "semantic_specification_raw_sha256": "3aee2bc2f27290e9a57789d434f4373609b720f7ee1d963871fd99a613f55ff6",
+  "source_baseline": {
+    "commit": "80d78735ebda85c62be0af82c0afb18b23bed975",
+    "parents": ["92fe2facf6f27c85ec0a34a8c46e045b1aaf67e1", "43a8d3bf88ac4e6b9271d5c9bda6766d867879a6"],
+    "tree": "3f40474c9fcb40eb596b6dbf8537e27d9ac0bd06"
+  },
+  "state": {
+    "after_decision_integrated_full": "AUTHORIZED_T10_FRESHNESS_ISOLATED_LAB_EXACT_UNIT",
+    "before_decision_integrated_full": "UNRECORDED_NO_AUTHORITY",
+    "decision_full_gate_consumes_new_authority": false,
+    "future_successor_integrated_full_consumes_authority": true,
+    "global_single_use_proved": false
+  },
+  "status": "FROZEN_T10_FRESHNESS_AUTHORITY_DECISION_CANDIDATE_PENDING_SOURCE_FAST_AND_INTEGRATED_FULL_GATE"
+}
