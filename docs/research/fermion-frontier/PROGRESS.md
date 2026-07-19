@@ -1573,3 +1573,25 @@ workspace bounds, runtime terms, lifetime overlap, and an independent checker.
 It may not implement, compile, benchmark, execute, acquire external sources,
 or change the frozen scientific schedule. Any implementation requires another
 independent governance decision.
+
+## Majorana P11-A identifies an explicit-memory design route
+
+P11-A source-pins the frozen P3/P6/P9 semantics, P10-A gap ledger, and P10-G2
+authority. It identifies a single-threaded ahead-of-time route with no GC/JIT,
+one fixed arena, fixed-capacity term tables and workspaces, 256-bit masks,
+stored 2048-bit ticks, streamed records, and a separately implemented layout
+checker. No language or toolchain is selected in this phase.
+
+The conservative all-regions-reserved design ledger totals 872,415,232 bytes
+(832 MiB): two overprovisioned term tables plus snapshot, ranking, action,
+collision, drop, and index/membership workspaces. The remaining 1,275,068,416
+bytes below the unchanged 2 GiB cap is unassigned difference, not proven
+runtime headroom. Exact arithmetic scratch width, slot layout, phase overlap,
+toolchain/link map, static libraries, stack/TLS/transport, semantic equivalence,
+and an independent peak checker are still unresolved.
+
+The result is
+`FEASIBLE_EXPLICIT_MEMORY_ROUTE_IDENTIFIED_NOT_IMPLEMENTATION_AUTHORITY`.
+Implementation, compilation and execution gates remain closed; exact process
+peak and strict cap admission remain unknown. New independent implementation
+governance is required before any prototype or executable source is written.

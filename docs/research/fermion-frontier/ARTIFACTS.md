@@ -1505,3 +1505,20 @@ so they are versioned normally and are not added to the preservation-only
   checks.
 - P11-A has no implementation, compilation, external acquisition, benchmark,
   Julia/candidate execution, cap-change, or scientific-result authority.
+
+## Majorana P11-A explicit-memory kernel feasibility design
+
+- `majorana_certificate_p11a_explicit_memory_kernel_design_contract.json`:
+  source-pinned nonexecuting design for an AOT, no-GC/JIT, fixed-arena Step3
+  route that preserves frozen mask, Float64, ranking, drop, and hash semantics.
+- `majorana_certificate_p11a_explicit_memory_kernel_design_report.json`:
+  canonical design result. It rederives an 872,415,232-byte provisional
+  explicit-region subtotal and classifies all seven questions as
+  `ROUTE_IDENTIFIED_CONTRACT_REQUIRED`.
+- `majorana_certificate_p11a_explicit_memory_kernel_design_validator.py` and
+  `test_majorana_certificate_p11a_explicit_memory_kernel_design.py`:
+  frozen-source anchors, exact integer region arithmetic, P10-G2 custody,
+  canonical reconstruction, authority mutations, and exact-lifecycle checks.
+- The subtotal is a design budget, not an implemented layout, process peak or
+  cap-admission result. Implementation, compilation, semantic equivalence,
+  resource/no-go, execution and scientific authority remain absent.
