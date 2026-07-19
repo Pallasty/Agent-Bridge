@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P10-G1-POST-ASSESSMENT-GOVERNANCE-CLOSURE-V1",
+  "contract_role": "result_informed_nonexecuting_governance_closure_after_the_frozen_P10_A_static_resource_envelope_assessment",
+  "self_relative_path": "majorana_certificate_p10_g1_post_assessment_governance_contract.json",
+  "required_direct_parent_commit": "7ee0aca97233d2fd83d5e150f13c87e6e7379032",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "p10_a_result_custody": {
+    "result_commit_sha": "7ee0aca97233d2fd83d5e150f13c87e6e7379032",
+    "preprobe_commit_sha": "63ae7e485724ff7a208e3e369c43a8b1933c5e2e",
+    "G0_parent_commit_sha": "7650fc4beb042571477bca43eb7f62c7beab0368",
+    "preprobe_changed_paths": [
+      "docs/research/fermion-frontier/majorana_certificate_p10a_static_resource_envelope_fixture.json",
+      "docs/research/fermion-frontier/majorana_certificate_p10a_static_resource_envelope_policy.json",
+      "docs/research/fermion-frontier/majorana_certificate_p10a_static_resource_envelope.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p10a_static_resource_envelope.py"
+    ],
+    "report_relative_path": "docs/research/fermion-frontier/majorana_certificate_p10a_static_resource_envelope_report.json",
+    "report_sha256": "a842b2b4776ef545e914df1e57f3c5c92859e59c8c9fdca0c6285950bf9a054e",
+    "report_type": "majorana_p10_a_static_resource_envelope_proof_design_report_v1",
+    "report_status": "ASSESSED_STATIC_RESOURCE_ENVELOPE_NOT_ESTABLISHED",
+    "report_must_be_canonical_JSON": true,
+    "preprobe_source_blobs_must_remain_identical_at_the_result_commit": true,
+    "P10_A_result_changed_path_is_exactly_the_canonical_report": true
+  },
+  "allowed_P10_A_governance_projection": {
+    "projection_is_exhaustive_for_P10_G1": true,
+    "raw_report_bytes_do_not_cross_the_projection_after_validation": true,
+    "identity": {
+      "schema_version": 1,
+      "gate_id": "P10-A-STATIC-RESOURCE-ENVELOPE-PROOF-DESIGN-V1",
+      "report_type": "majorana_p10_a_static_resource_envelope_proof_design_report_v1",
+      "status": "ASSESSED_STATIC_RESOURCE_ENVELOPE_NOT_ESTABLISHED",
+      "preprobe_commit": "63ae7e485724ff7a208e3e369c43a8b1933c5e2e"
+    },
+    "authority": {
+      "scientific_authority": "NONE",
+      "execution_authority": false,
+      "candidate_selection_authority": false,
+      "candidate_or_cap_change_authority": false,
+      "resource_no_go_authority": false,
+      "S0_authority": false,
+      "certificate_eligible": false,
+      "result_contract_eligible": false
+    },
+    "assessment": {
+      "assessment_lifecycle_status": "CLOSED",
+      "outcome_classification": "ASSESSED_NOT_ESTABLISHED",
+      "fixed_process_cap_bytes": 2147483648,
+      "exact_static_peak_bytes": null,
+      "strict_integer_peak_less_than_cap": null,
+      "comparison_status": "NOT_EVALUABLE_WITHOUT_EXACT_PEAK_BYTES",
+      "resource_no_go_inference": false,
+      "obligation_count": 7,
+      "verified_obligation_count": 0,
+      "all_seven_obligations_positive": false,
+      "admission_status": "NOT_ESTABLISHED_BY_P10_A_STATIC_RESOURCE_ENVELOPE_PROOF_DESIGN",
+      "execution_gate": "CLOSED",
+      "future_execution_prerequisite_satisfied": false
+    }
+  },
+  "decision_rules": {
+    "P10_A_closed_negative_assessment_is_not_invalid_and_is_not_a_resource_no_go": true,
+    "P10_A_ASSESSED_NOT_ESTABLISHED_never_unlocks_execution": true,
+    "P10_G1_may_authorize_only_a_nonexecuting_evidence_feasibility_audit": true,
+    "P10_G1_must_not_claim_that_any_required_contract_is_available_before_P10_B": true,
+    "P10_G1_must_not_treat_missing_contracts_as_zero_bytes_or_as_a_peak_exceedance": true,
+    "P10_G1_must_not_use_D3_or_D4_host_timing_RSS_returncode_stdout_stderr_or_markers": true,
+    "P10_G1_must_not_relax_the_fixed_2147483648_byte_cap": true,
+    "P10_G1_must_not_name_or_treat_the_next_gate_as_D5": true
+  },
+  "proof_obligation_disposition": {
+    "ordered_obligation_ids": [
+      "LSB-01-SOURCE-TYPE-ALLOCATION-CLOSURE",
+      "LSB-02-ALIAS-OWNERSHIP-LIFETIME-GRAPH",
+      "LSB-03-EXACT-PAYLOAD-AND-CAPACITY-BYTES",
+      "LSB-04-RUNTIME-OVERHEAD-ENVELOPE",
+      "LSB-05-PEAK-COMPOSITION-AND-FIXED-CAP-COMPARISON",
+      "LSB-06-INDEPENDENT-CHECKER-AND-ADVERSARIAL-MUTATIONS",
+      "RSE-07-OPERATION-COST-CLOSURE"
+    ],
+    "P10_A_verified_obligation_count": 0,
+    "P10_G1_status_for_every_obligation": "NOT_ESTABLISHED",
+    "all_seven_positive_is_required_before_any_future_execution_governance": true,
+    "peak_strictly_below_2147483648_bytes_is_required_before_any_future_execution_governance": true
+  },
+  "P10_B_feasibility_audit_contract": {
+    "only_allowed_next_gate": "P10-B-SOURCE-RUNTIME-CONTRACT-FEASIBILITY-AUDIT-V1",
+    "next_gate_role": "nonexecuting_inventory_of_whether_independent_source_layout_capacity_lifetime_runtime_and_machine_cost_contracts_can_be_obtained",
+    "candidate_execution_allowed": false,
+    "Julia_execution_allowed": false,
+    "candidate_or_cap_change_allowed": false,
+    "resource_no_go_allowed": false,
+    "scientific_or_S0_result_allowed": false,
+    "required_evidence_classes_to_inventory": [
+      "source_pinned_transitive_allocation_and_container_type_closure",
+      "stable_Julia_and_package_object_layout_header_alignment_and_capacity_contracts",
+      "alias_ownership_copy_and_lifetime_boundary_contracts",
+      "BigInt_GMP_string_hash_and_container_resize_byte_contracts",
+      "allocator_GC_JIT_sysimage_library_thread_stack_and_transport_upper_bound_contracts",
+      "independent_checker_implementation_separation_and_adversarial_mutation_plan",
+      "sort_package_primitive_and_machine_cost_contracts"
+    ],
+    "allowed_outcomes": [
+      "EVIDENCE_ROUTE_IDENTIFIED_NOT_A_BYTE_PROOF",
+      "CLOSED_NO_INDEPENDENT_STATIC_BYTE_CONTRACT_ROUTE"
+    ],
+    "both_allowed_outcomes_keep_execution_gate_closed": true,
+    "neither_allowed_outcome_is_a_resource_no_go": true,
+    "a_later_byte_proof_requires_a_new_independent_governance_decision": true
+  },
+  "forbidden_actions": [
+    "run_or_repeat_the_P9_candidate_or_any_Julia_execution",
+    "name_or_treat_a_followup_as_D5",
+    "relax_or_change_candidate_algorithm_anchor_cadence_caps_host_admission_or_fallback",
+    "use_D3_or_D4_host_observations_as_static_byte_or_machine_cost_evidence",
+    "claim_an_OOM_resource_no_go_S0_READY_certificate_or_physical_result",
+    "treat_a_missing_contract_as_zero_bytes_or_as_proof_of_cap_exceedance",
+    "treat_P10_A_ASSESSED_NOT_ESTABLISHED_as_execution_permission",
+    "amend_rewrite_or_add_paths_to_the_frozen_P10_A_B1_result_commit"
+  ],
+  "closure_lifecycle": {
+    "P10_G1_is_a_direct_child_of_the_frozen_P10_A_B1_result": true,
+    "P10_G1_is_result_informed_and_needs_no_execution_precommit": true,
+    "P10_G1_creates_no_runner_candidate_clone_or_scientific_report": true,
+    "P10_G1_exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p10_g1_post_assessment_governance_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p10_g1_post_assessment_governance_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p10_g1_post_assessment_governance_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p10_g1_post_assessment_governance.py"
+    ],
+    "the_record_must_pin_the_contract_raw_and_canonical_SHA256": true,
+    "any_validator_or_test_is_read_only_and_must_not_launch_the_candidate": true,
+    "AB_memory_or_documentation_may_only_be_an_advisory_pointer_to_the_Git_anchored_closure": true
+  }
+}

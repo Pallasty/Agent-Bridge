@@ -1522,3 +1522,22 @@ governance decision.  `ASSESSED_NOT_ESTABLISHED` may close the assessment but
 never passes admission: all seven obligations must be positively verified and
 the static peak must be established strictly below `2^31` before a later
 governance review may even consider execution.
+
+## Majorana P10-G1 opens only a nonexecuting contract-feasibility audit
+
+P10-A's B0/B1 chain (`63ae7e485724ff7a208e3e369c43a8b1933c5e2e` then
+`7ee0aca97233d2fd83d5e150f13c87e6e7379032`) completed a valid static
+assessment with outcome `ASSESSED_NOT_ESTABLISHED`. This is not a resource
+no-go: the exact process peak remains unknown, no strict comparison to the
+unchanged `2^31`-byte cap is available, and all seven proof obligations remain
+not established. Execution, Julia invocation, candidate/cap change and S0
+authority remain closed.
+
+P10-G1 therefore authorizes only
+`P10-B-SOURCE-RUNTIME-CONTRACT-FEASIBILITY-AUDIT-V1`: a source-only inventory
+of whether independent allocation/type/layout/capacity, lifetime, runtime and
+machine-cost contracts can be obtained. P10-B may return either an evidence
+route identifier or a closure that no independent static-byte contract route
+is available. Neither outcome is a byte proof, resource no-go or execution
+authorization; any later proof or execution still requires independent
+governance.

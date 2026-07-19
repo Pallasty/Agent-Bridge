@@ -1454,3 +1454,23 @@ so they are versioned normally and are not added to the preservation-only
   `ASSESSED_NOT_ESTABLISHED` outcome keeps admission closed; only a positive
   seven-obligation result with a peak strictly below `2^31` can become input
   to a separate future execution-governance decision.
+
+## Majorana P10-G1 post-assessment governance closure
+
+- `majorana_certificate_p10_g1_post_assessment_governance_contract.json`:
+  direct-child, result-informed and nonexecuting closure for P10-A B1. It
+  projects only P10-A identity, authority-false fields and the closed negative
+  assessment; it excludes D3/D4 diagnostics and does not claim an exact byte
+  envelope.
+- `majorana_certificate_p10_g1_post_assessment_governance_record.json`:
+  canonical decision record with disposition
+  `OPEN_NONEXECUTING_P10_B_CONTRACT_FEASIBILITY_AUDIT_ONLY`.
+- `majorana_certificate_p10_g1_post_assessment_governance_validator.py` and
+  `test_majorana_certificate_p10_g1_post_assessment_governance.py`:
+  read-only validators for P10-A B0/B1 custody, the minimal projection,
+  canonical record reconstruction and exact G1 direct-child lifecycle.
+- The only allowed followup is
+  `P10-B-SOURCE-RUNTIME-CONTRACT-FEASIBILITY-AUDIT-V1`. It may inventory
+  independent source/layout/capacity/lifetime/runtime/machine-cost evidence;
+  it must not run Julia or the candidate, change caps, infer resource no-go or
+  authorize execution.
