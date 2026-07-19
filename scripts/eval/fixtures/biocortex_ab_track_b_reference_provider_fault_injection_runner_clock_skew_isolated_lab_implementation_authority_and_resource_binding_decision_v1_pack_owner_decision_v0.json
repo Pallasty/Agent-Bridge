@@ -1,0 +1,231 @@
+{
+  "authorized_component_contract": {
+    "binding_model": {
+      "matching_profile": "EXACT_ALL_FIELDS_AND_SIGNED_INT64_VALUES_EQUAL",
+      "policy_match_dimension_count": 5,
+      "policy_match_fields": [
+        "t10_receipt_content_sha256",
+        "track_id",
+        "validation_reference_time_unix_seconds",
+        "decision_recheck_reference_time_unix_seconds",
+        "maximum_clock_skew_seconds"
+      ],
+      "profile_order": ["MANAGED_SPANNER_CLOUD_KMS", "SELF_HOSTED_ETCD_OPENBAO"],
+      "profiles": [
+        {
+          "t10_receipt_content_sha256": "620dc08e2f8b41cac5bf0944b50ecc9d2435e59fb5c01e68544270ca94d03714",
+          "track_id": "MANAGED_SPANNER_CLOUD_KMS",
+          "validation_reference_time_unix_seconds": 1999999995,
+          "decision_recheck_reference_time_unix_seconds": 2000000115,
+          "maximum_clock_skew_seconds": 90
+        },
+        {
+          "t10_receipt_content_sha256": "16c7b9228bf36329723376aba4f273f9356759037b4f31ca5a4adbf810bee14d",
+          "track_id": "SELF_HOSTED_ETCD_OPENBAO",
+          "validation_reference_time_unix_seconds": 2100000065,
+          "decision_recheck_reference_time_unix_seconds": 2100000125,
+          "maximum_clock_skew_seconds": 90
+        }
+      ],
+      "reject_on_multiple_matches": true,
+      "reject_on_zero_matches": true,
+      "request_field_count": 3,
+      "request_fields": [
+        "validation_reference_time_unix_seconds",
+        "decision_recheck_reference_time_unix_seconds",
+        "maximum_clock_skew_seconds"
+      ]
+    },
+    "clock_skew_arithmetic": {
+      "ambient_clock_allowed": false,
+      "future_date_relation": "OBSERVED_AT_MINUS_REFERENCE_TIME_WHEN_POSITIVE_LE_MAXIMUM_CLOCK_SKEW",
+      "maximum_clock_skew_seconds_upper_bound": 300,
+      "production_trusted_time_claimed": false,
+      "reference_time_order": "VALIDATION_REFERENCE_TIME_LE_DECISION_RECHECK_REFERENCE_TIME",
+      "signed_trusted_time_bound": false,
+      "symmetric_skew_relation": "ABS(T10_CHECK_TIME_MINUS_REFERENCE_TIME)_LE_MAXIMUM_CLOCK_SKEW_AT_VALIDATION_AND_DECISION_RECHECK",
+      "synthetic_reference_time_labels_are_trusted_time": false
+    },
+    "input_topology": {
+      "predecessor_review_count_per_success": 1,
+      "public_input_count": 16,
+      "public_input_tuple": [
+        "frame",
+        "detached_authentication_bundle",
+        "separately_injected_synthetic_trust_policy",
+        "separately_injected_synthetic_signer_authorization_policy",
+        "detached_authorization_request",
+        "separately_injected_synthetic_track_profile_binding_policy",
+        "detached_track_profile_binding_request",
+        "separately_injected_synthetic_end_to_end_subject_binding_policy",
+        "detached_end_to_end_subject_binding_request",
+        "separately_injected_synthetic_content_identity_and_quarantine_custody_policy",
+        "detached_content_identity_and_quarantine_custody_request",
+        "separately_injected_synthetic_freshness_policy",
+        "detached_freshness_request",
+        "separately_injected_synthetic_clock_skew_policy",
+        "detached_clock_skew_request",
+        "mode"
+      ],
+      "review_order": [
+        "MODE_PREOBSERVATION_GUARD",
+        "T10_FRESHNESS_REVIEW_EXACTLY_ONCE",
+        "SEPARATE_CLOCK_SKEW_POLICY_REVIEW",
+        "DETACHED_CLOCK_SKEW_REQUEST_REVIEW_LAST",
+        "EXACT_SINGLE_PROFILE_MATCH",
+        "BOUNDED_FUTURE_DATE_AND_SYMMETRIC_CLOCK_SKEW_ARITHMETIC"
+      ],
+      "track_and_time_subject_source": "T10_PREDECESSOR_RECEIPT_ONLY"
+    },
+    "local_scope": {
+      "authorized_candidate_surface_component_count": 1,
+      "authorized_candidate_surface_components": ["CLOCK_SKEW_SYNTHETIC_VERIFIER"],
+      "authorized_local_threat_specifications": ["T11"],
+      "candidate_surface_components_implemented_by_decision": 0,
+      "target_production_control": "TRUSTED_TIME_FRESHNESS"
+    },
+    "output_boundary": {
+      "evidence_acceptance_authorized": false,
+      "output_or_claim_authorized": false,
+      "successful_component_state": "BOUND_SYNTHETIC_REFERENCE_TIME_AND_SKEW_LABELS_TO_EXACT_T10_RECEIPT_CHAIN_ONLY"
+    },
+    "reviewer_topology": {
+      "minimum_independent_reviewer_lane_count": 2,
+      "required_reviewer_lanes": ["CONTRACT_CONFORMANCE_REVIEW", "SECURITY_AND_SOURCE_BOUND_GATE_REVIEW"]
+    }
+  },
+  "boundary": {
+    "current_released_component_total": 8,
+    "current_released_local_threat_specifications": ["T01", "T02", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10"],
+    "future_successor_component_total_after_exact_integrated_full_gate": 9,
+    "future_successor_local_threat_specifications": ["T01", "T02", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11"],
+    "production_ingestion_control_count": 14,
+    "production_ingestion_controls_implemented": 0,
+    "production_threat_specification_count": 20,
+    "production_threat_specifications_runtime_exercised": 0,
+    "production_validated_evidence_items": 0,
+    "provider_authority": false,
+    "real_evidence_items_present": 0,
+    "runtime_authority": false,
+    "runtime_prerequisite_count": 16,
+    "runtime_prerequisites_satisfied": 0
+  },
+  "date": "2026-07-19",
+  "decision": "AUTHORIZE_EXACT_BOUNDED_REVERSIBLE_T11_CLOCK_SKEW_ISOLATED_LAB_COMPONENT_IMPLEMENTATION_ONLY_FAIL_CLOSED",
+  "implementation_authority": {
+    "allowed_operations": [
+      "ADD_CLOSED_WORLD_SYNTHETIC_CLOCK_SKEW_POLICY_REQUEST_AND_RECEIPT_SCHEMAS",
+      "ADD_EXACT_TWO_PROFILE_DEFAULT_REJECT_CLOCK_SKEW_REGISTRY_KATS",
+      "ADD_PURE_INTEGER_FUTURE_DATE_AND_SYMMETRIC_SKEW_REFERENCE_VERIFIER_FOR_FIXED_PUBLIC_ONLY_KATS",
+      "COMPOSE_EXACTLY_ONCE_WITH_FROZEN_T10_PREDECESSOR_PUBLIC_REVIEW_API",
+      "ADD_MODE_PREOBSERVATION_AND_DETACHED_REQUEST_LAST_GUARDS",
+      "ADD_DETERMINISTIC_PUBLIC_ONLY_ADVERSARIAL_KATS",
+      "ADD_INDEPENDENT_CONTRACT_AND_SECURITY_SOURCE_BOUND_GATE_LANES"
+    ],
+    "authority_class": "REVERSIBLE_CODE_SCHEMA_TEST_DOCUMENTATION_ONLY",
+    "current_state": "AUTHORIZED_T11_CLOCK_SKEW_ISOLATED_LAB_EXACT_UNIT",
+    "default_off_required": true,
+    "effective_only_after_integrated_full_gate": true,
+    "exact_next_unit_authorized": true,
+    "forbidden_operations": [
+      "ACCESS_CREDENTIAL_OR_SECRET_MATERIAL",
+      "ACCEPT_CALLER_SUPPLIED_PREDECESSOR_RECEIPT",
+      "ACCEPT_OR_PERSIST_REAL_EVIDENCE",
+      "ACCESS_AMBIENT_SYSTEM_OR_PROVIDER_CLOCK",
+      "AUTHORIZE_OR_INJECT_FAULT",
+      "AUTHORIZE_OUTPUT_OR_CLAIM",
+      "BIND_OR_CLAIM_SIGNED_TRUSTED_TIME",
+      "CLAIM_PRODUCTION_FRESHNESS_CURRENTNESS_OR_CLOCK_TRUTH",
+      "CLAIM_T12_OWNER_TOCTOU_COVERAGE",
+      "IMPLEMENT_DURABLE_REPLAY_CAS_OR_CUSTODY",
+      "LAUNCH_RUNNER_OR_BACKGROUND_DAEMON",
+      "PERSIST_POLICY_REQUEST_RESULT_OR_TIME_STATE",
+      "PROVISION_PAID_OR_EXTERNAL_RESOURCE",
+      "REGISTER_OR_IMPORT_INTO_PRODUCTION_RUNTIME",
+      "USE_WALL_MONOTONIC_NETWORK_PROVIDER_SIGNED_OR_TRUSTED_TIME"
+    ],
+    "implementation_scope": "T11_CLOCK_SKEW_ISOLATED_LAB_CODE_ONLY_EXACT_NEXT_UNIT_SINGLE_USE_NON_TRANSITIVE",
+    "mode": "ISOLATED_LAB_FIRST",
+    "non_transitive": true,
+    "production_environment_implementation_authorized": false,
+    "runtime_import_authorized": false,
+    "single_successor_intent": true,
+    "single_use_enforced_by_external_ledger": false,
+    "subdelegation_authorized": false
+  },
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_CLOCK_SKEW_SYNTHETIC_EXACT_T10_RECEIPT_TRACK_VALIDATION_REFERENCE_TIME_DECISION_RECHECK_REFERENCE_TIME_AND_MAXIMUM_CLOCK_SKEW_SECONDS_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+  "nonclaims": {
+    "ambient_clock_access_authorized": false,
+    "decision_implements_successor": false,
+    "durable_custody_or_replay_implemented": false,
+    "global_single_use_proved": false,
+    "owner_signature_observed": false,
+    "production_clock_skew_proved": false,
+    "production_currentness_proved": false,
+    "signed_trusted_time_bound": false,
+    "synthetic_reference_time_is_trusted_time": false,
+    "t10_implemented": true,
+    "t11_implemented": false,
+    "t12_authorized": false
+  },
+  "owner_implementation_actor": {
+    "actor_class": "PROJECT_OWNER",
+    "actor_id": "pallasting",
+    "actor_source": "PROJECT_PROFILE_AND_CURRENT_SESSION_CONTINUITY",
+    "cryptographic_identity_proof_observed": false,
+    "runtime_owner_decision_observed": false,
+    "semantic_owner_directive": "CONTINUE_NEXT_BOUNDED_UNIT_USING_AGENT_RECOMMENDED_ORDER"
+  },
+  "predecessor": {
+    "exact_release_commit": "135904ab64d369e5953ff5948a8c4231bf1eccf1",
+    "exact_release_parents": ["60e5c0f1bbfc15349b8e0c18d32fde594eeafac4", "6727ef20372557ce240ccb1f1a4e2a22bcd2bea8"],
+    "exact_release_tree": "b0f63ed0bcc5faf2243cd181f3bcca658bc5abdf",
+    "implementation_authority_consumed": true,
+    "released_component_total": 8,
+    "released_through_threat": "T10",
+    "source_commit": "6727ef20372557ce240ccb1f1a4e2a22bcd2bea8",
+    "source_tree": "fa0caf6356d9ccdffd171e4351c9b37fd0cfca19"
+  },
+  "resource_binding": {
+    "allowed_resource_classes": ["EXISTING_LOCAL_CPU_AND_MEMORY", "ISOLATED_AGENT_BRIDGE_WORKTREE", "PRIVATE_LOCAL_TEST_SCRATCH"],
+    "component_limits": {
+      "max_array_items": 64,
+      "max_clock_skew_entries": 2,
+      "max_clock_skew_policy_bytes": 65536,
+      "max_clock_skew_request_bytes": 16384,
+      "max_input_frame_bytes": 1048576,
+      "max_json_depth": 32,
+      "max_json_nodes": 4096,
+      "max_object_members": 256,
+      "max_parallel_workers": 1,
+      "max_predecessor_review_calls": 1,
+      "max_private_scratch_bytes": 67108864,
+      "public_input_count": 16
+    },
+    "dependency_scope": "PYTHON_STANDARD_LIBRARY_REFERENCE_KAT_ONLY_NO_FETCH",
+    "effective_external_paid_spend_cap": 0,
+    "network": false,
+    "private_key_or_seed_material_authorized": false,
+    "production_resource_authority_bound": false,
+    "real_evidence_input_authorized": false,
+    "test_data_scope": "COMMITTED_NONSECRET_PUBLIC_ONLY_SYNTHETIC_INTEGER_REFERENCE_TIME_LABEL_KAT"
+  },
+  "rollback": {
+    "reversible_local_artifacts_only": true,
+    "revert_restores_authority": false,
+    "runtime_or_external_cleanup_required": false
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.clock_skew_isolated_lab_implementation_authority_and_resource_binding_decision.v1",
+  "schema_version": 1,
+  "state_machine": {
+    "current_state": "AUTHORIZED_T11_CLOCK_SKEW_ISOLATED_LAB_EXACT_UNIT",
+    "decision_full_gate_consumes_new_authority": false,
+    "states": ["UNRECORDED_NO_AUTHORITY", "AUTHORIZED_T11_CLOCK_SKEW_ISOLATED_LAB_EXACT_UNIT", "REJECTED_FAIL_CLOSED", "CONSUMED_SCOPE_COMPLETE", "INVALIDATED_REQUIRES_NEW_DECISION"],
+    "transitions": [
+      {"event": "OWNER_CONTINUES_NEXT_BOUNDED_T11_CLOCK_SKEW_DECISION_PATH", "from_state": "UNRECORDED_NO_AUTHORITY", "to_state": "AUTHORIZED_T11_CLOCK_SKEW_ISOLATED_LAB_EXACT_UNIT"},
+      {"event": "EXACT_AUTHORIZED_T11_SUCCESSOR_INTEGRATED_AND_FULL_GATE_PASSES", "from_state": "AUTHORIZED_T11_CLOCK_SKEW_ISOLATED_LAB_EXACT_UNIT", "to_state": "CONSUMED_SCOPE_COMPLETE"},
+      {"event": "OWNER_REVOKES_OR_SCOPE_POLICY_RESOURCE_OR_REVIEWER_TOPOLOGY_DRIFTS", "from_state": "AUTHORIZED_T11_CLOCK_SKEW_ISOLATED_LAB_EXACT_UNIT", "to_state": "INVALIDATED_REQUIRES_NEW_DECISION"}
+    ]
+  },
+  "status": "T11_CLOCK_SKEW_ISOLATED_LAB_IMPLEMENTATION_AUTHORITY_AND_RESOURCE_SCOPE_RECORDED_ZERO_EXTERNAL_SPEND_NO_RUNTIME_PROVIDER_OR_TRUSTED_TIME_AUTHORITY"
+}
