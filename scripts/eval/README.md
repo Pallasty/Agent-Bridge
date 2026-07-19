@@ -62,6 +62,12 @@ and bootstrap calls cannot be counted as organic telemetry.
 
 ## Sibling probes (not benchmark components)
 
+`engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
+decision. It does not invoke Cargo. It authorizes only a later G2G offline,
+zero-dependency compile of the existing logical-clock host source, never a run,
+component/linker build, dependency fetch, or G1.4 action. See
+`docs/design/ENGRAM_G1_4_WASI_G2F_PUBLIC_SYNTHETIC_BUILD_AUTHORIZATION_2026_07_19.md`.
+
 `engram_g14_wasi_g2e_public_source.py` is the G2E public synthetic source-only
 receipt. It binds exactly three source files (a WIT world, component model, and
 direct logical-clock host model) to hashes and does not invoke Cargo, compile,

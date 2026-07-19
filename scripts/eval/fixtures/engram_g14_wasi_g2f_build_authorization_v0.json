@@ -1,0 +1,62 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2f_build_authorization.v0",
+  "gate": "G2F_PUBLIC_SYNTHETIC_BUILD_AUTHORIZATION_DECISION",
+  "date": "2026-07-19",
+  "mode": "PUBLIC_DECISION_NO_MANIFEST_NO_BUILD_NO_RUN",
+  "status": "G2G_OFFLINE_ZERO_DEPENDENCY_HOST_BUILD_AUTHORIZED",
+  "predecessor": {
+    "gate": "G2E_PUBLIC_SYNTHETIC_SOURCE_AUTHORING",
+    "integration_commit": "bae7bb7edb845ab477acf031582d6a8f61446597",
+    "integration_tree": "adfd0fb2421687d7b60301ea3c79d76f95050469",
+    "closure_post": 4773,
+    "owner_authorization_post": 4774
+  },
+  "current_gate_scope": {
+    "cargo_manifest_or_lockfile_changed": false,
+    "dependency_resolved_installed_promoted_or_compiled": false,
+    "fixture_or_component_built_or_run": false,
+    "candidate_private_or_capability_accessed": false,
+    "runtime_store_mcp_policy_deploy_canary_or_g1_4_changed": false,
+    "native_or_qemu_fallback_allowed": false
+  },
+  "authorized_successor": {
+    "id": "G2G_PUBLIC_SYNTHETIC_HOST_BUILD",
+    "build_authorized": true,
+    "run_authorized": false,
+    "network_authorized": false,
+    "dependency_authorized": false,
+    "allowed_paths_in_order": [
+      "scripts/eval/fixtures/engram_g14_wasi_g2g_host_build_v0/Cargo.toml",
+      "scripts/eval/fixtures/engram_g14_wasi_g2g_host_build_v0/Cargo.lock",
+      "scripts/eval/fixtures/engram_g14_wasi_g2g_host_build_v0/src/lib.rs"
+    ],
+    "required_manifest": {
+      "package_name": "engram-g14-wasi-g2g-host-build",
+      "package_version": "0.1.0",
+      "edition": "2021",
+      "rust_version": "1.85",
+      "isolated_workspace": true,
+      "dependency_count": 0
+    },
+    "required_source": {
+      "reexport_target": "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/host/src/lib.rs",
+      "sha256": "52f5f2adeed96e4d70b3ddb03d7793bac6f142b7eb8e125eb591eec4f1207343"
+    },
+    "required_command_tokens": ["CARGO_NET_OFFLINE=true", "cargo build", "--offline", "--locked", "--manifest-path", "--target-dir"],
+    "required_receipt_fields": ["toolchain_identity", "manifest_sha256", "lockfile_sha256", "reexported_source_sha256", "command", "artifact_sha256", "temporary_target_removed"],
+    "forbidden": ["dependency", "network", "test", "run", "component", "wasmtime", "wasmtime-wasi", "WasiCtx", "Tokio", "native", "QEMU"]
+  },
+  "transition_rules": {
+    "G2F_authorizes_only_G2G_host_compile": true,
+    "G2G_success_authorizes_execution": false,
+    "G2G_success_authorizes_WIT_component_or_linker_dependency": false,
+    "source_hash_mismatch_or_lock_mutation": "FAIL_CLOSED_STOP_AND_PRESERVE_BRANCH",
+    "missing_or_ambiguous_build_receipt": "FAIL_CLOSED_NO_TRANSITION"
+  },
+  "acceptance_integrity": {
+    "checker_self_authenticating": false,
+    "directed_semantic_mutations_required": true,
+    "independent_clean_tree_review_required": true,
+    "out_of_band_commit_tree_checker_and_all_path_hash_manifest_required": true
+  }
+}
