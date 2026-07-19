@@ -1608,3 +1608,30 @@ P11-B may not write implementation source, prototype, compile, link, install,
 benchmark, run Julia/candidates, change semantics or relax the 2 GiB cap. Both
 allowed P11-B outcomes keep implementation and execution closed; a new
 independent decision is required before source implementation.
+
+## Majorana P11-B defines the preimplementation contract pack
+
+P11-B selects a freestanding C17/GNU x86-64 static-ELF contract target without
+writing or compiling source. Local GCC 15.2.0 and Binutils 2.46 executable
+identities are recorded as a read-only observation; their source archive is
+not yet pinned, so they are not implementation custody. GNU primary metadata
+supports the freestanding, floating-point and linker-script mechanisms but is
+identified rather than byte-pinned.
+
+The pack fixes byte offsets for seven slot layouts, two half-full 2^21-slot
+term tables, a contiguous nonaliasing 872,415,232-byte arena, and 2048-bit
+magnitude storage with a reusable 2112-bit overflow scratch. It also fixes the
+compile/link flag contract, static ELF and syscall restrictions, stack/map
+proof inputs, independent-checker mutations, and frozen semantic checkpoints.
+
+P6 contains only the two-step state count and stream hash, not serialized term
+rows. A future implementation must therefore reconstruct frozen Step1 and
+Step2 in the same explicit-memory process before Step3 and match the 42,704 and
+284,847-term checkpoint hashes.
+
+The full preimplementation target ledger is 1,028,653,056 bytes (981 MiB),
+including a 64 MiB unproved kernel/cgroup-accounting reserve. Its
+1,118,830,592-byte difference to the fixed 2 GiB cap is not proven headroom.
+The result is `PREIMPLEMENTATION_CONTRACT_PACK_DEFINED_NOT_IMPLEMENTATION_AUTHORITY`;
+implementation and execution remain closed pending new governance and the
+listed toolchain, kernel-accounting, checker, equivalence and exact-peak proofs.

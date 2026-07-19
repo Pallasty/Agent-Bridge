@@ -1534,3 +1534,20 @@ so they are versioned normally and are not added to the preservation-only
 - Local toolchain identity and official metadata may be read; implementation,
   compilation, downloads, installation, benchmark and candidate execution are
   forbidden.
+
+## Majorana P11-B preimplementation contract pack
+
+- `majorana_certificate_p11b_preimplementation_contract_pack_contract.json`:
+  selected freestanding C17 static-ELF target, local GCC/Binutils identity
+  receipt, official metadata pointers, byte layouts, contiguous arena,
+  2112-bit scratch derivation, full-prefix semantics and runtime targets.
+- `majorana_certificate_p11b_preimplementation_contract_pack_report.json`:
+  canonical result with a 1,028,653,056-byte preimplementation target, closed
+  implementation/execution gates, and explicit non-headroom/non-peak status.
+- `majorana_certificate_p11b_preimplementation_contract_pack_validator.py`
+  and `test_majorana_certificate_p11b_preimplementation_contract_pack.py`:
+  source/Git custody, slot overlap, arena contiguity, exact arithmetic, local
+  toolchain identity, report reconstruction and adversarial gate checks.
+- P6 has no serialized two-step term state; future source must reconstruct the
+  frozen Step1/Step2 prelude before Step3. No source, compile, link or candidate
+  execution is authorized by P11-B.
