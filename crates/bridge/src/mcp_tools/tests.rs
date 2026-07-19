@@ -15373,10 +15373,9 @@ impl Drop for EnvVarGuard {
 }
 
 fn context_with_session(raw: &str) -> ToolContext {
-    ToolContext {
-        session_id: Some(SessionId::from_raw(raw.to_string())),
-        extras: HashMap::new(),
-    }
+    let mut context = ToolContext::default();
+    context.session_id = Some(SessionId::from_raw(raw.to_string()));
+    context
 }
 
 static SESSION_IDENTITY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

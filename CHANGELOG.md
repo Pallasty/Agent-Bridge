@@ -8,6 +8,15 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **ChatGPT authenticated-subject P2A trust boundary.** MCP tool context now
+  records its server-owned transport kind and reserves a transport-constructed
+  `VerifiedOAuthSubject` for future cryptographically verified HTTP calls.
+  Stdio always leaves that subject absent, with a negative regression proving
+  forged bearer/issuer/subject/scope values in caller `_meta` remain untrusted
+  hints. The accompanying feasibility and threat-model document requires a
+  separate loopback Streamable HTTP MCP OAuth 2.1 resource server for P2B.
+  No OAuth verifier, executor, production profile change, or ChatGPT canonical
+  write capability is included.
 - **Default-off ChatGPT collaboration control plane (P1).** The explicit
   `chatgpt-collab` toolset preserves scoped read/search/forum adapters and
   adds task-contract preview plus private `operator_request_stage/get`

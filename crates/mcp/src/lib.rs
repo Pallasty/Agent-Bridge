@@ -9,7 +9,7 @@ use ab_core::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 pub mod protocol;
@@ -87,12 +87,98 @@ pub fn default_tool_title(name: &str) -> String {
     title
 }
 
+/// Transport selected for an MCP invocation.
+///
+/// The transport is server-owned context. It must never be inferred from
+/// JSON-RPC arguments or client-provided `_meta` hints.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum McpTransportKind {
+    #[default]
+    Unknown,
+    Stdio,
+    StreamableHttp,
+}
+
+impl McpTransportKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Stdio => "stdio",
+            Self::StreamableHttp => "streamable_http",
+        }
+    }
+}
+
+/// OAuth subject claims accepted by a transport after cryptographic token
+/// verification.
+///
+/// Fields are intentionally private. Code outside `ab-mcp` may inspect a
+/// verified subject but cannot construct one from caller-controlled metadata.
+/// A future authenticated HTTP transport will populate this only after issuer,
+/// audience, expiry, signature, and scope verification succeeds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedOAuthSubject {
+    issuer: String,
+    subject: String,
+    audiences: BTreeSet<String>,
+    scopes: BTreeSet<String>,
+    expires_at_unix: u64,
+    client_id: Option<String>,
+    token_fingerprint: String,
+}
+
+impl VerifiedOAuthSubject {
+    pub fn issuer(&self) -> &str {
+        &self.issuer
+    }
+
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    pub fn audiences(&self) -> &BTreeSet<String> {
+        &self.audiences
+    }
+
+    pub fn scopes(&self) -> &BTreeSet<String> {
+        &self.scopes
+    }
+
+    pub const fn expires_at_unix(&self) -> u64 {
+        self.expires_at_unix
+    }
+
+    pub fn client_id(&self) -> Option<&str> {
+        self.client_id.as_deref()
+    }
+
+    pub fn token_fingerprint(&self) -> &str {
+        &self.token_fingerprint
+    }
+}
+
 /// Per-invocation context passed to every tool. Lets tools reach into shared
 /// state without each tool importing every backend trait directly.
+///
+/// `session_id` and `extras` may contain caller-provided hints. They are not
+/// authorization evidence. Only `verified_oauth_subject`, populated by the
+/// transport after token verification, may carry an authenticated principal.
 #[derive(Default)]
 pub struct ToolContext {
     pub session_id: Option<ab_core::SessionId>,
     pub extras: HashMap<String, Value>,
+    transport_kind: McpTransportKind,
+    verified_oauth_subject: Option<VerifiedOAuthSubject>,
+}
+
+impl ToolContext {
+    pub const fn transport_kind(&self) -> McpTransportKind {
+        self.transport_kind
+    }
+
+    pub fn verified_oauth_subject(&self) -> Option<&VerifiedOAuthSubject> {
+        self.verified_oauth_subject.as_ref()
+    }
 }
 
 /// One block in an MCP tool result. Per the MCP spec the wire-format `type`

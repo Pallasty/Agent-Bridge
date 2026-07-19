@@ -12,7 +12,9 @@ use crate::protocol::{
 };
 #[cfg(test)]
 use crate::{default_tool_title, ToolSchema};
-use crate::{ContentBlock, ToolContext, ToolDescriptor, ToolRegistry, ToolResult};
+use crate::{
+    ContentBlock, McpTransportKind, ToolContext, ToolDescriptor, ToolRegistry, ToolResult,
+};
 use ab_core::SessionId;
 use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
 use serde_json::{json, Value};
@@ -124,6 +126,10 @@ fn tool_context_from_call(params: &Value, args: &Value) -> ToolContext {
     ToolContext {
         session_id: raw_session_id.map(SessionId::from_raw),
         extras,
+        transport_kind: McpTransportKind::Stdio,
+        // Stdio carries JSON-RPC only. Caller-provided `_meta` and arguments
+        // cannot be promoted into authenticated OAuth identity evidence.
+        verified_oauth_subject: None,
     }
 }
 
@@ -1377,6 +1383,42 @@ mod tests {
         assert_eq!(
             ctx.extras.get("_meta").and_then(|v| v.get("client")),
             Some(&json!("codex"))
+        );
+        assert_eq!(ctx.transport_kind, McpTransportKind::Stdio);
+        assert!(ctx.verified_oauth_subject.is_none());
+    }
+
+    #[test]
+    fn stdio_context_never_promotes_spoofed_meta_to_verified_subject() {
+        let params = json!({
+            "_meta": {
+                "session_id": "attacker-controlled-session",
+                "authorization": "Bearer not-a-real-token",
+                "issuer": "https://attacker.invalid",
+                "sub": "local-owner",
+                "aud": "agent-bridge",
+                "scope": "agent-bridge:write",
+                "openai/userAgent": "ChatGPT",
+                "authenticated_subject": {
+                    "subject": "local-owner",
+                    "identity_strength": "oauth_verified"
+                }
+            },
+            "name": "any_tool",
+            "arguments": {}
+        });
+
+        let ctx = tool_context_from_call(&params, &json!({}));
+
+        assert_eq!(ctx.transport_kind, McpTransportKind::Stdio);
+        assert!(ctx.verified_oauth_subject.is_none());
+        assert_eq!(
+            ctx.session_id.as_ref().map(|id| id.as_str()),
+            Some("attacker-controlled-session")
+        );
+        assert_eq!(
+            ctx.extras.get("_meta").and_then(|meta| meta.get("sub")),
+            Some(&json!("local-owner"))
         );
     }
 

@@ -347,10 +347,8 @@ mod tests {
             "chatgpt-desktop".to_string(),
             BTreeSet::from([OperatorCapability::ProjectWrite]),
         );
-        let ctx = ToolContext {
-            session_id: Some(SessionId::from_raw("conversation-1")),
-            ..ToolContext::default()
-        };
+        let mut ctx = ToolContext::default();
+        ctx.session_id = Some(SessionId::from_raw("conversation-1"));
         let staged = stage.execute(request_args(), &ctx).await.unwrap();
         assert!(!staged.is_error);
         let payload = staged.structured_content.unwrap();

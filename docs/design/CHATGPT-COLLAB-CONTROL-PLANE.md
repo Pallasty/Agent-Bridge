@@ -1,6 +1,6 @@
 # ChatGPT collaboration control plane
 
-**Status:** P1 implemented, default off, non-executing
+**Status:** P1 implemented; P2A trust boundary implemented; default off and non-executing
 **Date:** 2026-07-18
 **Production tunnel:** remains `chatgpt-read`
 
@@ -147,6 +147,12 @@ keeps mutation structurally unreachable while producing bounded review
 evidence.
 
 ## Conditions for an execution plane
+
+The P2 authenticated-subject feasibility result and threat model are recorded in
+[ChatGPT collaboration P2 authenticated subject binding](CHATGPT-COLLAB-P2-SUBJECT-BINDING.md).
+The current stdio tunnel cannot satisfy authenticated subject binding; production
+therefore remains on `chatgpt-read` while a separate HTTP/OAuth transport is a
+prerequisite.
 
 P2 may add one narrowly scoped executor only after all of these exist:
 
