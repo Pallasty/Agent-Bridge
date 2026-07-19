@@ -1,0 +1,80 @@
+{
+  "canonical_json_profile": "RFC8259_STRICT_COMPACT_SORTED_KEYS_UTF8_NO_DUPLICATES_NO_FLOATS_SIGNED_INT64",
+  "contains_private_or_seed_material": false,
+  "date": "2026-07-19",
+  "execution_mode": "SYNTHETIC_KAT",
+  "expected_receipt_content_sha256": {
+    "MANAGED_SPANNER_CLOUD_KMS": "620dc08e2f8b41cac5bf0944b50ecc9d2435e59fb5c01e68544270ca94d03714",
+    "SELF_HOSTED_ETCD_OPENBAO": "16c7b9228bf36329723376aba4f273f9356759037b4f31ca5a4adbf810bee14d"
+  },
+  "public_only": true,
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.freshness_synthetic_exact_t09_receipt_track_observed_at_validation_checked_at_decision_recheck_at_expires_at_and_max_age_seconds_verifier_isolated_lab_v1_pack.synthetic.v0",
+  "separately_injected_synthetic_freshness_policy": {
+    "default_disposition": "REJECTED_FAIL_CLOSED",
+    "matching_profile": "EXACT_ALL_FIELDS_AND_SIGNED_INT64_VALUES_EQUAL",
+    "profiles": [
+      {
+        "decision_recheck_at_unix_seconds": 2000000120,
+        "expires_at_unix_seconds": 2000000300,
+        "max_age_seconds": 300,
+        "observed_at_unix_seconds": 2000000000,
+        "t09_receipt_content_sha256": "707017354e9943d9049acf546124e5c2115b49258420fa83c3e9c1e681024953",
+        "track_id": "MANAGED_SPANNER_CLOUD_KMS",
+        "validation_checked_at_unix_seconds": 2000000060
+      },
+      {
+        "decision_recheck_at_unix_seconds": 2100000120,
+        "expires_at_unix_seconds": 2100000300,
+        "max_age_seconds": 300,
+        "observed_at_unix_seconds": 2100000000,
+        "t09_receipt_content_sha256": "e7fb01f915b6436f2503be78cac1957d93197e8e1dd4ca336a711c5ec08e7ed6",
+        "track_id": "SELF_HOSTED_ETCD_OPENBAO",
+        "validation_checked_at_unix_seconds": 2100000060
+      }
+    ],
+    "reject_on_multiple_matches": true,
+    "reject_on_zero_matches": true,
+    "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.freshness_synthetic_policy_isolated_lab_kat.v1",
+    "schema_version": 1
+  },
+  "source_bindings": {
+    "authority_decision_gate_path": "scripts/check-biocortex-ab-track-b-reference-provider-fault-injection-runner-freshness-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.sh",
+    "authority_decision_gate_sha256": "9979e715cb7f5b4c22c9a5b2abf9046300f13841a23e791ee869ec7dd39bb932",
+    "authority_decision_integration_commit": "7873f24dddb6ed96e9ae9cb0358f6c5ff030a00d",
+    "authority_decision_source_commit": "7f35c89329cc423c65a12176e8c10e3e9815782b",
+    "owner_decision_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_freshness_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json",
+    "owner_decision_sha256": "c4344cec98344f717fd78253e2dd70c04b9cbeb6895cb3a58652e4f6260bcfa1",
+    "predecessor_fixture_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_content_identity_and_quarantine_custody_synthetic_exact_t08_receipt_five_identity_verifier_isolated_lab_v1_pack_synthetic_v0.json",
+    "predecessor_fixture_sha256": "5575b982e0e0da0130ff2dfcba2f3fc3c7198644fe2db960432d3b8ae31fe5e4",
+    "predecessor_source_path": "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_content_identity_and_quarantine_custody_synthetic_exact_t08_receipt_five_identity_verifier_isolated_lab_v1.py",
+    "predecessor_source_sha256": "ff5aae17b727b70430235294d5ec8101fb44f88bde743b05fe2ea12850f4e68e",
+    "semantic_specification_path": "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_synthetic_v0.json",
+    "semantic_specification_sha256": "3aee2bc2f27290e9a57789d434f4373609b720f7ee1d963871fd99a613f55ff6"
+  },
+  "valid_cases": [
+    {
+      "case_id": "VALID_MANAGED_FRESHNESS_V1",
+      "detached_freshness_request": {
+        "decision_recheck_at_unix_seconds": 2000000120,
+        "expires_at_unix_seconds": 2000000300,
+        "max_age_seconds": 300,
+        "observed_at_unix_seconds": 2000000000,
+        "validation_checked_at_unix_seconds": 2000000060
+      },
+      "predecessor_case_id": "VALID_MANAGED_CONTENT_IDENTITY_V1",
+      "track_id": "MANAGED_SPANNER_CLOUD_KMS"
+    },
+    {
+      "case_id": "VALID_SELF_HOSTED_FRESHNESS_V1",
+      "detached_freshness_request": {
+        "decision_recheck_at_unix_seconds": 2100000120,
+        "expires_at_unix_seconds": 2100000300,
+        "max_age_seconds": 300,
+        "observed_at_unix_seconds": 2100000000,
+        "validation_checked_at_unix_seconds": 2100000060
+      },
+      "predecessor_case_id": "VALID_SELF_HOSTED_CONTENT_IDENTITY_V1",
+      "track_id": "SELF_HOSTED_ETCD_OPENBAO"
+    }
+  ]
+}
