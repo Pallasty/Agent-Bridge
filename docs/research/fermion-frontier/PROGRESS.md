@@ -1777,3 +1777,32 @@ P11-E0 itself establishes neither snapshot availability nor source custody and
 does not authorize APT mutation, network acquisition, unpacking, kernel-bound
 design, candidate implementation, execution, peak/headroom, equivalence,
 resource no-go, S0, or scientific claims.
+
+## Majorana P11-G5 authorizes only exact isolated source acquisition
+
+P11-G5 independently reconstructs the P11-E0 result and records ten passing
+readiness checks: topology and blob custody, exact identities and snapshot,
+fail-closed substitution policy, external non-symlink root, isolated APT state,
+five download-only commands, the signed authentication chain, strict three-way
+part-set equality, transactional receipts and cleanup, and closed candidate and
+scientific gates.
+
+The disposition is
+`AUTHORIZE_P11_E1_EXACT_ISOLATED_SOURCE_ARCHIVE_ACQUISITION_AND_BYTE_CUSTODY_ONLY`.
+P11-E1 may create and write only
+`/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e1-source-custody`,
+contact the three declared Ubuntu origins and their snapshot redirects, run
+the exact P11-E0 update plus four source argv, and implement the operational
+runner, hashing, parsing, authentication, receipt and atomic-acceptance logic.
+APT update is limited to one attempt; each exact source package gets at most
+two attempts with internal APT retries disabled.
+
+The authorization is unconsumed in P11-G5. P11-E1 must run unprivileged with a
+direct argv and cleared allowlisted environment. It may not write host APT or
+dpkg state, use credentials/proxies/private mirrors/third-party keys, change
+the snapshot or versions, reuse unaccepted partial bytes, commit archive bytes,
+unpack or read sources, derive kernel bounds, build or execute candidates, or
+measure memory. Complete, partial, unavailable, and verification-failure
+outcomes all proceed to `P11-G6-POST-SOURCE-CUSTODY-GOVERNANCE-V1`; none opens
+candidate implementation, execution, static peak/headroom, equivalence,
+resource no-go, S0, or scientific authority.

@@ -1649,3 +1649,19 @@ so they are versioned normally and are not added to the preservation-only
 - The five APT commands are future declarative argv only. P11-E0 performs no
   snapshot availability query, DNS/network access, package mutation, index
   refresh, download, unpack, source materialization, build, or candidate run.
+
+## Majorana P11-G5 source-archive acquisition governance
+
+- `majorana_certificate_p11_g5_source_acquisition_governance_contract.json`
+  and `majorana_certificate_p11_g5_source_acquisition_governance_record.json`:
+  validate P11-E0 custody and authorize only bounded P11-E1 acquisition into
+  one exact external root under the frozen snapshot and four source versions.
+- `majorana_certificate_p11_g5_source_acquisition_governance_validator.py`
+  and `test_majorana_certificate_p11_g5_source_acquisition_governance.py`:
+  Git-only topology, blob, readiness, authority, network/root, retry, outcome,
+  canonical-record, and exact-lifecycle checks.
+- P11-E1 may implement an operational runner, use the five exact APT commands,
+  write isolated evidence bytes outside Git, authenticate and receipt them,
+  and publish only hashes/manifests to the repository. Host APT/dpkg writes,
+  privilege escalation, credentials, substitution, unpacking, source reading,
+  builds, candidates, measurement, and scientific claims remain forbidden.
