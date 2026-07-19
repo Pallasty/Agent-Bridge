@@ -1,0 +1,340 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_clock_preregistration.v0",
+  "gate": "G2_WASI_PREREGISTRATION",
+  "date": "2026-07-19",
+  "mode": "PUBLIC_STATIC_PREREGISTRATION_ONLY",
+  "status": "STATIC_CONTRACT_COMPLETE_PENDING_EXTERNAL_PIN",
+  "predecessor": {
+    "accepted_review_feature_commit": "3ba3a2a6e166f9272acdf48e5bc6d19779a6b3ac",
+    "accepted_review_feature_tree": "b56b317d6af4e9eaaa95f98188b2d97a4c1fabb0",
+    "integrated_master_commit": "d59ea47c66387720ebb016e0c61b6e9c84faeaae",
+    "accepted_review_verdict": "DESIGN_ROUTE_SELECTED_NO_AUTHORITY",
+    "only_permitted_successor": "G2_WASI_PREREGISTRATION"
+  },
+  "scope": {
+    "public_sources_only": true,
+    "static_preregistration_only": true,
+    "review_targets_pinned": true,
+    "runtime_dependency_selected_or_installed": false,
+    "component_source_authored": false,
+    "component_built_or_executed": false,
+    "custom_clock_or_poll_host_implemented": false,
+    "host_policy_applied": false,
+    "candidate_private_or_capability_material_accessed": false,
+    "runtime_store_mcp_or_deploy_changed": false,
+    "frozen_wall_clock_deny_canary_changed": false,
+    "g1_4_execution_open": false,
+    "authority_class": "NONE_STATIC_PREREGISTRATION_ONLY"
+  },
+  "acceptance_integrity": {
+    "checker_self_authenticating": false,
+    "standalone_checker_result_is_acceptance_authority": false,
+    "independent_read_only_review_required": true,
+    "independent_out_of_band_commit_and_file_hash_pin_required": true,
+    "accepted_pin_channel": "agent_bridge_forum_independent_review_manifest",
+    "pin_verification_is_external_to_this_contract": true,
+    "required_pin_contents_in_order": [
+      "reviewer_session_id",
+      "review_verdict_pass",
+      "reviewed_feature_commit_sha",
+      "reviewed_tree_sha",
+      "semantic_checker_sha256",
+      "sha256_for_each_exact_feature_path"
+    ],
+    "exact_feature_paths_in_order": [
+      "docs/design/ENGRAM_G1_4_WASI_CLOCK_PREREGISTRATION_2026_07_19.md",
+      "docs/design/ENGRAM_G1_4_WASI_CLOCK_PREREGISTRATION_RESULT_2026_07_19.md",
+      "scripts/check-engram-g14-wasi-clock-preregistration.sh",
+      "scripts/eval/README.md",
+      "scripts/eval/check_engram_g14_wasi_clock_preregistration.py",
+      "scripts/eval/engram_g14_wasi_clock_preregistration.py",
+      "scripts/eval/fixtures/engram_g14_wasi_clock_preregistration_v0.json"
+    ],
+    "no_authority_before_verified_pin": true
+  },
+  "security_objective": {
+    "host_wall_clock_must_be_unobservable": true,
+    "host_monotonic_clock_must_be_unobservable": true,
+    "timer_readiness_must_not_use_host_elapsed_time": true,
+    "candidate_visible_time_must_be_supervisor_defined_and_deterministic": true,
+    "candidate_time_must_never_be_protocol_authority": true,
+    "outer_supervisor_exclusively_owns_authenticated_time": true,
+    "equal_clock_policy_across_experiment_arms": true,
+    "fresh_instance_replay_count": 3,
+    "frozen_wall_clock_deny_canary": "REMAINS_FROZEN_AND_UNSATISFIED"
+  },
+  "public_review_target_pins": {
+    "classification": "REVIEW_TARGETS_ONLY_NOT_CARGO_ADOPTION",
+    "wasmtime_release": {
+      "version": "46.0.1",
+      "git_tag": "v46.0.1",
+      "git_commit": "823d1b8f251494a06288194d0df746191f535ff7",
+      "minimum_rust_version": "1.94.0"
+    },
+    "crates_io_rows_in_order": [
+      {
+        "name": "wasmtime",
+        "version": "46.0.1",
+        "sha256": "c4213d2f019a5e44aa8a61d8826dd33a505bff79f749b14a8bafd67321cb9351",
+        "yanked": false
+      },
+      {
+        "name": "wasmtime-wasi",
+        "version": "46.0.1",
+        "sha256": "e9f65ef30a2c5478873cdb619085a7a649d3ce41cc3eaf298a7ce3dee96a8e11",
+        "yanked": false
+      },
+      {
+        "name": "wasmtime-wasi-io",
+        "version": "46.0.1",
+        "sha256": "cee57d5fef4976b1ab542615f4cef2c43278eb549d8078939668ea0f13d5c696",
+        "yanked": false
+      }
+    ],
+    "vendored_wit_packages_in_order": [
+      "wasi:clocks@0.2.12",
+      "wasi:io@0.2.12"
+    ],
+    "source_rows_in_order": [
+      {
+        "id": "wasmtime_wasi_ctx_46_0_1",
+        "url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/v46.0.1/crates/wasi/src/ctx.rs",
+        "sha256": "2d26a093c6026a7026b0713e97128f4aa2d004bd06797947617bbc581bc2193c",
+        "locked_claim": "WasiCtxBuilder defaults to ambient host clocks and broader WASI state"
+      },
+      {
+        "id": "wasmtime_wasi_clock_traits_46_0_1",
+        "url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/v46.0.1/crates/wasi/src/clocks.rs",
+        "sha256": "4d440ae5eabf6e3ce63342c88b5fdc417f421a5e63c54edfe57808b807f5bb9a",
+        "locked_claim": "HostWallClock and HostMonotonicClock replace now and resolution only"
+      },
+      {
+        "id": "wasmtime_wasi_p2_linker_46_0_1",
+        "url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/v46.0.1/crates/wasi/src/p2/mod.rs",
+        "sha256": "1149c1e55d6d58b147b44595c38fd979be2e6d1a51e8429e91ab5eb4db4885f7",
+        "locked_claim": "top-level add_to_linker helpers install broad WASI interfaces while individual bindings can be linked directly"
+      },
+      {
+        "id": "wasmtime_wasi_p2_clock_host_46_0_1",
+        "url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/v46.0.1/crates/wasi/src/p2/host/clocks.rs",
+        "sha256": "d1ba7a7b0a823d173d86e39cb7de6b91c87560a33d73696c77e51a9ddb9bb77b",
+        "locked_claim": "built-in monotonic subscriptions use Tokio Instant and sleep_until independently of the custom monotonic now provider"
+      },
+      {
+        "id": "wasmtime_vendored_wasi_clocks_wit_0_2_12",
+        "url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/v46.0.1/crates/wasi/src/p2/wit/deps/clocks.wit",
+        "sha256": "6ed8aa65bb8cbe224a0b2cbac9fc1b3bd25bdb17eda5ae0d23c983ed31c447cc",
+        "locked_claim": "the pinned clocks package exposes wall now resolution plus monotonic now resolution subscribe-instant and subscribe-duration"
+      },
+      {
+        "id": "wasmtime_vendored_wasi_io_wit_0_2_12",
+        "url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/v46.0.1/crates/wasi/src/p2/wit/deps/io.wit",
+        "sha256": "96e206d00076fa0480df32c5bcf255a3fa4862805ac2f6b8537a781cce54f433",
+        "locked_claim": "the pinned poll interface returns ready input indices for a non-empty list of pollables"
+      }
+    ],
+    "advisory_review": {
+      "status": "NOT_EXECUTED_NO_DEPENDENCY_PROMOTION",
+      "wasmtime_security_source": "https://github.com/bytecodealliance/wasmtime/security/advisories",
+      "rustsec_database_source": "https://github.com/RustSec/advisory-db",
+      "future_review_requires_database_commit_and_utc_timestamp": true,
+      "future_review_requires_full_lockfile_and_raw_audit_receipt_hash": true,
+      "no_current_safety_claim": true
+    }
+  },
+  "component_abi_template": {
+    "component_model": "WASIP2_COMPONENT",
+    "probe_world": "agent-bridge:g14-clock-probe/probe@0.1.0",
+    "allowed_imports_in_exact_order": [
+      "wasi:clocks/wall-clock@0.2.12",
+      "wasi:clocks/monotonic-clock@0.2.12",
+      "wasi:io/poll@0.2.12"
+    ],
+    "sole_export": "agent-bridge:g14-clock-probe/probe.run@0.1.0",
+    "sole_export_result": "deterministic-clock-report-v0",
+    "component_import_graph_must_exactly_equal_allowlist": true,
+    "component_import_export_manifest_sha256_required_before_run": true,
+    "unknown_or_transitive_runtime_imports_fail_closed": true,
+    "forbidden_import_prefixes_in_order": [
+      "wasi:cli/",
+      "wasi:filesystem/",
+      "wasi:http/",
+      "wasi:random/",
+      "wasi:sockets/",
+      "wasi:clocks/timezone@"
+    ],
+    "core_wasm_wasi_p1_allowed": false,
+    "stdio_or_preopens_allowed": false,
+    "native_or_host_process_fallback_allowed": false
+  },
+  "linker_and_host_contract": {
+    "generated_bindings_for_exact_probe_world_required": true,
+    "broad_wasi_context_or_view_allowed": false,
+    "wasmtime_wasi_ctx_builder_allowed": false,
+    "top_level_wasmtime_wasi_p2_add_to_linker_helpers_allowed": false,
+    "proxy_world_add_to_linker_helpers_allowed": false,
+    "built_in_wasmtime_wasi_monotonic_subscription_host_allowed": false,
+    "direct_wall_clock_host_trait_implementation_required": true,
+    "direct_monotonic_clock_host_trait_implementation_required": true,
+    "direct_io_poll_host_trait_implementation_required": true,
+    "single_shared_logical_clock_state_required": true,
+    "tokio_instant_sleep_or_interval_allowed": false,
+    "ambient_host_clock_fallback_allowed": false
+  },
+  "deterministic_clock_state_machine": {
+    "wall_epoch_seconds": 946684800,
+    "wall_epoch_nanoseconds": 0,
+    "logical_initial_nanoseconds": 0,
+    "quantum_nanoseconds": 1000000,
+    "wall_and_monotonic_resolution_nanoseconds": 1000000,
+    "resolution_calls_advance_logical_time": false,
+    "wall_now_rule": "return_epoch_plus_current_logical_then_checked_advance_one_quantum",
+    "monotonic_now_rule": "return_current_logical_then_checked_advance_one_quantum",
+    "subscribe_duration_rule": "deadline_is_checked_current_logical_plus_duration_without_advancing",
+    "subscribe_instant_rule": "deadline_is_requested_instant_without_advancing",
+    "poll_ready_rule": "if_any_deadline_lte_current_return_all_ready_input_indices_in_input_order_without_advancing",
+    "poll_wait_rule": "otherwise_set_logical_to_minimum_deadline_then_return_all_ready_input_indices_in_input_order",
+    "poll_input_must_be_nonempty": true,
+    "only_registered_timer_pollables_allowed": true,
+    "pollable_ids_are_monotonic_creation_order_u64": true,
+    "checked_u64_arithmetic_required": true,
+    "overflow_unknown_or_mixed_pollable_result": "FAIL_CLOSED_TRAP_NO_RECEIPT",
+    "host_wall_clock_reads_allowed": false,
+    "host_monotonic_clock_reads_allowed": false,
+    "host_sleep_or_timer_reads_allowed": false,
+    "host_entropy_reads_allowed": false,
+    "candidate_time_has_protocol_authority": false,
+    "outer_supervisor_protocol_time_only": true
+  },
+  "fixed_public_probe": {
+    "source_status": "FUTURE_PUBLIC_SYNTHETIC_SOURCE_NOT_AUTHORED",
+    "public_input": "agent-bridge-g14-wasi-clock-probe-v0",
+    "call_sequence_in_order": [
+      "wall-clock.resolution",
+      "wall-clock.now",
+      "monotonic-clock.resolution",
+      "monotonic-clock.now",
+      "monotonic-clock.subscribe-duration(3000000)",
+      "monotonic-clock.subscribe-instant(2000000)",
+      "io-poll.poll([pollable-0,pollable-1])",
+      "io-poll.poll([pollable-0])",
+      "wall-clock.now",
+      "monotonic-clock.now",
+      "monotonic-clock.subscribe-duration(0)",
+      "io-poll.poll([pollable-2])"
+    ],
+    "expected_observations_in_order": [
+      "resolution=1000000;logical=0",
+      "datetime=946684800:0;logical_after=1000000",
+      "resolution=1000000;logical=1000000",
+      "instant=1000000;logical_after=2000000",
+      "pollable=0;deadline=5000000;logical=2000000",
+      "pollable=1;deadline=2000000;logical=2000000",
+      "ready_indices=[1];logical=2000000",
+      "ready_indices=[0];logical=5000000",
+      "datetime=946684800:5000000;logical_after=6000000",
+      "instant=6000000;logical_after=7000000",
+      "pollable=2;deadline=7000000;logical=7000000",
+      "ready_indices=[0];logical=7000000"
+    ],
+    "final_logical_nanoseconds": 7000000
+  },
+  "transcript_and_replay_contract": {
+    "event_schema": "agent_bridge.engram_g14_clock_event.v0",
+    "event_fields_in_order": [
+      "sequence",
+      "operation",
+      "arguments",
+      "result",
+      "logical_before_nanoseconds",
+      "logical_after_nanoseconds"
+    ],
+    "event_encoding": "UTF8_CANONICAL_JSON_SORTED_KEYS_NO_WHITESPACE_NO_FLOATS",
+    "hash_chain_initial": "SHA256(UTF8(agent-bridge:g14-clock-transcript:init:v0))",
+    "hash_chain_step": "SHA256(UTF8(agent-bridge:g14-clock-transcript:event:v0)+NUL+previous_hash_32_bytes+event_length_u64_be+event_bytes)",
+    "typed_report_required": true,
+    "stdout_stderr_as_report_channel_allowed": false,
+    "fresh_instance_count": 3,
+    "required_byte_equal_artifacts_in_order": [
+      "component_sha256",
+      "import_export_manifest_bytes",
+      "typed_report_bytes",
+      "event_transcript_bytes",
+      "transcript_root_sha256"
+    ],
+    "any_difference_result": "FAIL_CLOSED_NO_FEASIBILITY_RECEIPT"
+  },
+  "resource_bounds": {
+    "maximum_component_bytes": 262144,
+    "maximum_linear_memory_bytes": 16777216,
+    "maximum_table_elements": 1024,
+    "maximum_instances": 8,
+    "maximum_clock_events": 64,
+    "maximum_live_pollables": 16,
+    "maximum_typed_report_bytes": 16384,
+    "maximum_fuel": 2000000,
+    "outer_supervisor_timeout_milliseconds": 5000,
+    "supervisor_timeout_is_component_visible": false,
+    "timeout_or_resource_exhaustion_result": "FAIL_CLOSED_NO_RECEIPT"
+  },
+  "future_artifact_review_interlock": {
+    "only_permitted_successor": "G2A_PUBLIC_WASI_ARTIFACT_AND_COMPONENT_COMPATIBILITY_EVIDENCE_REVIEW",
+    "successor_is_public_static_and_no_run": true,
+    "before_any_component_source_build_or_run_require_in_order": [
+      "verified_release_archive_and_crate_payload_digests",
+      "minimal_exact_crate_feature_graph",
+      "complete_Cargo_lock_and_all_transitive_checksums",
+      "target_triples_and_rust_toolchain_digest",
+      "pinned_RustSec_database_commit_timestamp_and_raw_audit_receipt_hash",
+      "exact_WIT_world_and_binding_generator_compatibility",
+      "proof_that_direct_clock_and_poll_traits_bypass_all_builtin_host_timer_paths",
+      "fixed_public_component_source_binary_and_import_manifest_digests",
+      "custom_clock_and_poll_host_source_digest"
+    ],
+    "missing_or_drifted_requirement": "FAIL_CLOSED_NO_SOURCE_NO_BUILD_NO_RUN",
+    "silent_native_or_qemu_fallback_allowed": false
+  },
+  "human_audit_boundary": {
+    "human_approval_required_for_this_static_gate": false,
+    "human_approval_required_for_separately_authorized_reversible_public_synthetic_work": false,
+    "independent_read_only_review_still_required": true,
+    "human_security_audit_required_before_in_order": [
+      "promoting_any_Wasmtime_or_WASI_dependency_into_Agent_Bridge_runtime",
+      "changing_wall_clock_read_deny_semantics_beyond_public_synthetic_harness",
+      "candidate_private_or_capability_material_access",
+      "runtime_or_deployment_enablement",
+      "first_real_G1_4_execution"
+    ]
+  },
+  "rollback_lesson_interlock": {
+    "rollback_or_cleanup_failure_requires_durable_lesson_before_retry": true,
+    "lesson_must_be_create_new_not_overwrite": true,
+    "lesson_must_be_fsynced_reopened_and_hash_verified": true,
+    "lesson_failure_leaves_absorbing_interlock": true
+  },
+  "decision": {
+    "verdict": "WASI_CUSTOM_CLOCK_ROUTE_PREREGISTERED_NO_BUILD_NO_RUN_NO_AUTHORITY",
+    "preferred_route": "wasi_component_custom_clocks",
+    "built_in_wasmtime_timer_host_acceptable": false,
+    "runtime_or_dependency_adopted": false,
+    "component_or_host_implemented": false,
+    "build_or_run_authorized": false,
+    "candidate_or_private_authorized": false,
+    "runtime_or_deployment_authorized": false,
+    "g1_4_execution_open": false,
+    "only_permitted_successor": "G2A_PUBLIC_WASI_ARTIFACT_AND_COMPONENT_COMPATIBILITY_EVIDENCE_REVIEW"
+  },
+  "nonclaims": {
+    "host_clock_isolation_verified": false,
+    "timer_poll_isolation_verified": false,
+    "runtime_supply_chain_review_complete": false,
+    "dependency_advisory_review_complete": false,
+    "component_abi_compiled": false,
+    "component_import_graph_observed": false,
+    "custom_clock_or_poll_host_implemented": false,
+    "public_synthetic_run_executed": false,
+    "candidate_compatibility_proven": false,
+    "candidate_private_or_capability_authorized": false,
+    "runtime_deployment_or_g1_4_authority": false
+  }
+}
