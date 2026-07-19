@@ -1665,3 +1665,19 @@ so they are versioned normally and are not added to the preservation-only
   and publish only hashes/manifests to the repository. Host APT/dpkg writes,
   privilege escalation, credentials, substitution, unpacking, source reading,
   builds, candidates, measurement, and scientific claims remain forbidden.
+
+## Majorana P11-E1 bounded source-archive custody result
+
+- `majorana_certificate_p11e1_source_archive_acquisition_runner.py` and
+  `test_majorana_certificate_p11e1_source_archive_custody.py`: the bounded
+  direct-argv runner and offline synthetic checks for the frozen root,
+  identities, source-control parser, environment, and publication shape.
+- `majorana_certificate_p11e1_source_archive_custody_manifest.json`,
+  `majorana_certificate_p11e1_source_archive_custody_report.json`, and
+  `majorana_certificate_p11e1_source_archive_custody_validator.py`: canonical
+  hashes plus an independent offline rehash of all accepted bytes, logs and
+  indexes. The result is partial: gcc-15 and binutils were retained, while
+  linux exhausted two authorized attempts and linux-signed was not run.
+- This does not establish complete four-package custody. The report preserves
+  the stale pre-rename receipt paths and the APT configuration warning for
+  P11-G6; it makes no candidate, execution, measurement, or scientific claim.

@@ -1806,3 +1806,22 @@ measure memory. Complete, partial, unavailable, and verification-failure
 outcomes all proceed to `P11-G6-POST-SOURCE-CUSTODY-GOVERNANCE-V1`; none opens
 candidate implementation, execution, static peak/headroom, equivalence,
 resource no-go, S0, or scientific authority.
+
+## Majorana P11-E1 records a partial, verified archive result
+
+P11-E1 consumed the bounded G5 acquisition authority at the frozen snapshot.
+It atomically retained the complete authenticated source-file sets for
+`gcc-15=15.2.0-16ubuntu1` and `binutils=2.46-3ubuntu2`. The exact Linux source
+request returned code 100 twice while fetching its orig tarball, exhausting the
+two-attempt limit; therefore `linux-signed=7.0.0-28.28` was not attempted.
+The only valid result is
+`PARTIAL_VERIFIED_SOURCE_ARCHIVES_RETAINED_COMPLETE_SET_CUSTODY_NOT_ESTABLISHED`.
+
+The independent offline verifier rehashes the retained bytes, the transaction
+logs, and the signed-index receipts. It also preserves two audit findings for
+the next governance gate: individual receipt paths name pre-rename `incoming/`
+locations despite hashes being independently verified in `accepted/`, and APT
+emitted an `/etc/apt/-/` readability warning. P11-G6 must decide any repair or
+future acquisition policy. No retry, unpacking, source reading, build,
+execution, resource measurement, equivalence, S0, or scientific conclusion is
+authorized by this partial result.
