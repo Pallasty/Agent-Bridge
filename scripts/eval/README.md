@@ -564,6 +564,28 @@ only successor is public/static/no-run
 `G2C_PRE_SOURCE_EVIDENCE_COMPLETION_REVIEW`, which may close B0 evidence only
 and cannot authorize source.
 
+## G2C WASI pre-source evidence
+
+`check-engram-g14-wasi-g2c-pre-source-evidence.sh` validates the public/static
+closure of all seven `B0_PRE_SOURCE` requirements: full release-archive bytes,
+the inherited crate/graph/lock/toolchain pins, a pinned fail-closed RustSec
+accepted-equivalent static scan, exact WIT/bindgen static compatibility, and a
+single-logical-clock exact-world timer-host design. It does not compile or run
+anything and does not claim an official `cargo-audit` receipt.
+
+```bash
+scripts/check-engram-g14-wasi-g2c-pre-source-evidence.sh --phase precommit
+scripts/check-engram-g14-wasi-g2c-pre-source-evidence.sh --phase postcommit
+```
+
+For byte-level independent reproduction, also pass `--release-archive` and
+`--rustsec-db` with the exact pinned public artifacts. The result is
+`PRE_SOURCE_EVIDENCE_COMPLETE_AWAITING_OWNER_SOURCE_AUTHORIZATION`; No
+authority. The only successor is the separate owner decision
+`G2D_PUBLIC_SOURCE_AUTHORIZATION_DECISION`. It is not automatic and cannot
+silently authorize source, build, run, dependency promotion, private input,
+deployment, canary, G1.4, or fallback.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
