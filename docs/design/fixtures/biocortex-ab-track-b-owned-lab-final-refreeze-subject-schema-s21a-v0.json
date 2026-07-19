@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_final_refreeze_subject_s21a.v0",
+  "title": "Agent-Bridge S21A final-refreeze subject",
+  "description": "Closed unsigned subject contract. A real subject is generated outside the repository only after S21A integration; the repository fixture is synthetic, incomplete, non-signable, and non-authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "canonicalization",
+    "hashing_contract",
+    "subject_state",
+    "test_only",
+    "synthetic",
+    "parent_bindings",
+    "post_integration_refreeze",
+    "build_bindings",
+    "artifact_bindings",
+    "subject_sha256",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.memory_temporal_owned_lab_final_refreeze_subject_s21a.v0"},
+    "packet_kind": {"const": "S21A_FINAL_REFREEZE_SUBJECT"},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S21A_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "subject_state": {
+      "enum": [
+        "SYNTHETIC_KAT_NON_LIVE_UNSIGNED_NOT_FINAL",
+        "FINAL_POST_INTEGRATION_UNSIGNED_SUBJECT"
+      ]
+    },
+    "test_only": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "parent_bindings": {"$ref": "#/$defs/parent_bindings"},
+    "post_integration_refreeze": {"$ref": "#/$defs/post_integration_refreeze"},
+    "build_bindings": {"$ref": "#/$defs/build_bindings"},
+    "artifact_bindings": {"$ref": "#/$defs/artifact_bindings"},
+    "subject_sha256": {"$ref": "#/$defs/sha256"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"test_only": {"const": true}}, "required": ["test_only"]},
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "subject_state": {"const": "SYNTHETIC_KAT_NON_LIVE_UNSIGNED_NOT_FINAL"},
+          "post_integration_refreeze": {
+            "properties": {
+              "generated_outside_repository_after_s21a_integration": {"const": false},
+              "s21a_source_commit": {"type": "null"},
+              "s21a_source_tree": {"type": "null"},
+              "s21a_integration_commit": {"type": "null"},
+              "s21a_integration_tree": {"type": "null"}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthetic": {"const": false},
+          "subject_state": {"const": "FINAL_POST_INTEGRATION_UNSIGNED_SUBJECT"},
+          "post_integration_refreeze": {
+            "properties": {
+              "generated_outside_repository_after_s21a_integration": {"const": true},
+              "s21a_source_commit": {"$ref": "#/$defs/git_oid"},
+              "s21a_source_tree": {"$ref": "#/$defs/git_oid"},
+              "s21a_integration_commit": {"$ref": "#/$defs/git_oid"},
+              "s21a_integration_tree": {"$ref": "#/$defs/git_oid"}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^(?!0{40}$)[0-9a-f]{40}$"},
+    "nullable_git_oid": {"oneOf": [{"$ref": "#/$defs/git_oid"}, {"type": "null"}]},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "digest_framing", "hash_scope", "self_hash_field", "self_hash_field_excluded", "repository_framing_lf_excluded", "cross_field_semantic_validation_required", "candidate_reported_matches_authoritative"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S21A_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s21a/final-refreeze-subject/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_SUBJECT_SHA256"},
+        "self_hash_field": {"const": "subject_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "candidate_reported_matches_authoritative": {"const": false}
+      }
+    },
+    "parent_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backward_edges_only", "s20b_integration_commit", "s20b_integration_tree", "s20b_integrated_archive_sha256", "s20b_source_commit", "s20b_source_tree", "s20b_successor_gate_sha256"],
+      "properties": {
+        "backward_edges_only": {"const": true},
+        "s20b_integration_commit": {"const": "33c2c4df78ef302fd0538986b95fa40a3711ba86"},
+        "s20b_integration_tree": {"const": "6f92c687b61e1433e693ca6cd1bc6390dda97f29"},
+        "s20b_integrated_archive_sha256": {"const": "cde7d7e71591265cc26f57e378448fa066b0083ef4b32cbebd3ec8ca27a8b43e"},
+        "s20b_source_commit": {"const": "a1948daaf466563358fcbf054b2bebef8e966777"},
+        "s20b_source_tree": {"const": "eca0de065221621fcc70941adaefac1f4315bd3e"},
+        "s20b_successor_gate_sha256": {"const": "4381feec604a16c99c87e95c6a81370fa138fe75a528855b71a52f9f911e23a7"}
+      }
+    },
+    "post_integration_refreeze": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generated_outside_repository_after_s21a_integration", "post_integration_refreeze_required", "s21a_source_commit", "s21a_source_tree", "s21a_integration_commit", "s21a_integration_tree", "any_post_freeze_change_requires_new_subject_and_owner_decision"],
+      "properties": {
+        "generated_outside_repository_after_s21a_integration": {"type": "boolean"},
+        "post_integration_refreeze_required": {"const": true},
+        "s21a_source_commit": {"$ref": "#/$defs/nullable_git_oid"},
+        "s21a_source_tree": {"$ref": "#/$defs/nullable_git_oid"},
+        "s21a_integration_commit": {"$ref": "#/$defs/nullable_git_oid"},
+        "s21a_integration_tree": {"$ref": "#/$defs/nullable_git_oid"},
+        "any_post_freeze_change_requires_new_subject_and_owner_decision": {"const": true}
+      }
+    },
+    "build_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exact_integrated_archive_sha256", "cargo_lock_sha256", "controller_binary_sha256", "observer_binary_sha256", "runner_binary_sha256", "validator_binary_sha256", "toolchain_manifest_sha256", "feature_set_sha256", "candidate_supplied_expected_digest_used"],
+      "properties": {
+        "exact_integrated_archive_sha256": {"$ref": "#/$defs/sha256"},
+        "cargo_lock_sha256": {"const": "408e0aa5e6bc3f2a318719c57419ece60b507df0a11c1738fd40dda66aac1f59"},
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "observer_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "validator_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "toolchain_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "feature_set_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_supplied_expected_digest_used": {"const": false}
+      }
+    },
+    "artifact_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_set_sha256", "assignment_set_sha256", "schedule_sha256", "assignment_record_set_sha256", "operation_descriptor_set_sha256", "catalog_row_count", "catalog_sha256", "validator_rule_count", "validator_ruleset_sha256", "target_phase_count", "s20b_gate_sha256", "s20b_checker_sha256", "s20b_report_sha256", "s20b_source_delta_file_count"],
+      "properties": {
+        "schema_set_sha256": {"$ref": "#/$defs/sha256"},
+        "assignment_set_sha256": {"const": "b3a7025a488e9aefc6724869f75ab76a482002224bee90c075e9379101ee7264"},
+        "schedule_sha256": {"const": "8c0129d150d918523c122dbf3afb4e7c6abb3ce7ca957204252c115a7f1def15"},
+        "assignment_record_set_sha256": {"const": "7a927eba7eb691990b32c7987bea5c0fdce15c51d37792f8ca45c3bddb556bc6"},
+        "operation_descriptor_set_sha256": {"const": "a00feb5745c83fc20d5ad84f66877289c9108b29371697ceb8cf13e3fb142db0"},
+        "catalog_row_count": {"const": 5639},
+        "catalog_sha256": {"const": "44d9f48318e221d961819f9f189c2b355a4fce42351844d7cd5b4a84e72b1f0d"},
+        "validator_rule_count": {"const": 32},
+        "validator_ruleset_sha256": {"const": "84b374eaadc65610fbfc660b5fe69f840229a03c39b196414b7300ec045b705d"},
+        "target_phase_count": {"const": 113}
+        ,"s20b_gate_sha256": {"const": "85453f80c4e095ceb39abecc8c654a3cc660261e957db7e00848502a099802d8"}
+        ,"s20b_checker_sha256": {"const": "d4e3b789f03fdfb1190006629fdf2acc17ebbddebf13ebb20cdf2e03d3ed2a6d"}
+        ,"s20b_report_sha256": {"const": "12bb0f4902c01564904b8b03633ba788bf7587f043c5fd8b82c7fc961ef36ff1"}
+        ,"s20b_source_delta_file_count": {"const": 23}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_is_owner_authority", "subject_is_owner_signature", "subject_is_execution_capability", "schema_conformance_authorizes_live_execution", "synthetic_fixture_is_signable_final_subject", "side_effects_unlocked"],
+      "properties": {
+        "subject_is_owner_authority": {"const": false},
+        "subject_is_owner_signature": {"const": false},
+        "subject_is_execution_capability": {"const": false},
+        "schema_conformance_authorizes_live_execution": {"const": false},
+        "synthetic_fixture_is_signable_final_subject": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}

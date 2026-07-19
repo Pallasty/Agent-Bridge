@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_external_input_admission_s21a.v0",
+  "title": "Agent-Bridge S21A external-input admission result",
+  "description": "Closed non-executing validation result for independently supplied S21B inputs. Even the complete state requires separate review and grants no permit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "packet_kind", "canonicalization", "hashing_contract", "admission_state", "test_only", "synthetic", "subject_binding", "owner_binding", "checkpoint_input", "external_registration", "runtime_inputs", "policy_bindings", "result", "admission_packet_sha256", "nonclaims"],
+  "properties": {
+    "schema": {"const": "agent_bridge.memory_temporal_owned_lab_external_input_admission_s21a.v0"},
+    "packet_kind": {"const": "S21A_EXTERNAL_INPUT_ADMISSION_RESULT"},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S21A_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "admission_state": {"enum": ["SYNTHETIC_KAT_BLOCKED_NON_LIVE", "BLOCKED_FAIL_CLOSED", "INPUTS_COMPLETE_PENDING_SEPARATE_REVIEW_NON_EXECUTING"]},
+    "test_only": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "subject_binding": {"$ref": "#/$defs/subject_binding"},
+    "owner_binding": {"$ref": "#/$defs/owner_binding"},
+    "checkpoint_input": {"$ref": "#/$defs/checkpoint_input"},
+    "external_registration": {"$ref": "#/$defs/external_registration"},
+    "runtime_inputs": {"$ref": "#/$defs/runtime_inputs"},
+    "policy_bindings": {"$ref": "#/$defs/policy_bindings"},
+    "result": {"$ref": "#/$defs/result"},
+    "admission_packet_sha256": {"$ref": "#/$defs/sha256"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"test_only": {"const": true}}, "required": ["test_only"]},
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "admission_state": {"const": "SYNTHETIC_KAT_BLOCKED_NON_LIVE"},
+          "result": {
+            "properties": {
+              "all_external_inputs_validated": {"const": false},
+              "terminal_hard_lock": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"admission_state": {"const": "INPUTS_COMPLETE_PENDING_SEPARATE_REVIEW_NON_EXECUTING"}}, "required": ["admission_state"]},
+      "then": {
+        "properties": {
+          "test_only": {"const": false},
+          "synthetic": {"const": false},
+          "subject_binding": {
+            "properties": {
+              "final_post_integration_subject_validated": {"const": true},
+              "exact_s21a_commit_tree_and_build_bound": {"const": true}
+            }
+          },
+          "owner_binding": {
+            "properties": {
+              "new_owner_signature_valid": {"const": true},
+              "trust_anchor_installed_and_pinned": {"const": true}
+            }
+          },
+          "checkpoint_input": {
+            "properties": {
+              "checkpoint_state": {"const": "COMMITTED_CURRENT"},
+              "provider_present": {"const": true},
+              "independent_failure_domain_proved": {"const": true},
+              "same_failure_domain_as_database": {"const": false},
+              "acknowledgement_semantics_validated": {"const": true},
+              "observed_revocation_epoch": {"type": "integer", "minimum": 1}
+            }
+          },
+          "external_registration": {
+            "properties": {
+              "registration_state": {"const": "AUTHORIZED_UNCLAIMED_PRESENT"},
+              "binding_validated": {"const": true},
+              "created_by_runner": {"const": false},
+              "registered_by_external_control_plane": {"const": true},
+              "successful_claim_count": {"const": 0},
+              "claimed_run_id_sha256": {"type": "null"}
+            }
+          },
+          "runtime_inputs": {
+            "properties": {
+              "fresh_observer_present_and_bound": {"const": true},
+              "real_runner_present_and_bound": {"const": true},
+              "exact_environment_present_and_bound": {"const": true},
+              "exact_canary_inputs_present_and_bound": {"const": true},
+              "stop_and_revocation_fresh_and_exact": {"const": true}
+            }
+          },
+          "result": {
+            "properties": {
+              "all_external_inputs_validated": {"const": true},
+              "terminal_hard_lock": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checkpoint_input": {
+            "properties": {"monotonic_counter": {"const": 1}},
+            "required": ["monotonic_counter"]
+          }
+        },
+        "required": ["checkpoint_input"]
+      },
+      "then": {
+        "properties": {
+          "checkpoint_input": {
+            "properties": {"previous_checkpoint_sha256": {"type": "null"}}
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "checkpoint_input": {
+            "properties": {"previous_checkpoint_sha256": {"$ref": "#/$defs/sha256"}}
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "digest_framing", "hash_scope", "self_hash_field", "self_hash_field_excluded", "repository_framing_lf_excluded", "cross_field_semantic_validation_required", "candidate_reported_matches_authoritative"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S21A_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s21a/external-input-admission/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_ADMISSION_PACKET_SHA256"},
+        "self_hash_field": {"const": "admission_packet_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "candidate_reported_matches_authoritative": {"const": false}
+      }
+    },
+    "subject_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["final_refreeze_subject_sha256", "final_post_integration_subject_validated", "exact_s21a_commit_tree_and_build_bound", "any_post_freeze_change_observed"],
+      "properties": {
+        "final_refreeze_subject_sha256": {"$ref": "#/$defs/sha256"},
+        "final_post_integration_subject_validated": {"type": "boolean"},
+        "exact_s21a_commit_tree_and_build_bound": {"type": "boolean"},
+        "any_post_freeze_change_observed": {"const": false}
+      }
+    },
+    "owner_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor_document_sha256", "owner_envelope_sha256", "audience", "signature_domain", "new_owner_signature_valid", "trust_anchor_installed_and_pinned", "legacy_s19_signature_or_envelope_reused"],
+      "properties": {
+        "anchor_document_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "audience": {"const": "agent-bridge/biocortex/owned-lab/s21a/final-refreeze-owner-review/v1"},
+        "signature_domain": {"const": "agent-bridge/biocortex/owned-lab/s21a/owner-authorization-signature/v1"},
+        "new_owner_signature_valid": {"type": "boolean"},
+        "trust_anchor_installed_and_pinned": {"type": "boolean"},
+        "legacy_s19_signature_or_envelope_reused": {"const": false}
+      }
+    },
+    "checkpoint_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorization_id_sha256", "final_refreeze_subject_sha256", "owner_envelope_sha256", "provider_identity_sha256", "provider_trust_anchor_sha256", "provider_policy_sha256", "provider_failure_domain_sha256", "database_failure_domain_sha256", "checkpoint_receipt_sha256", "checkpoint_head_sha256", "committed_content_root_sha256", "monotonic_counter", "previous_checkpoint_sha256", "observed_revocation_epoch", "checkpoint_state", "provider_present", "independent_failure_domain_proved", "same_failure_domain_as_database", "acknowledgement_semantics_validated"],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "final_refreeze_subject_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "provider_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "provider_trust_anchor_sha256": {"$ref": "#/$defs/sha256"},
+        "provider_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "provider_failure_domain_sha256": {"$ref": "#/$defs/sha256"},
+        "database_failure_domain_sha256": {"$ref": "#/$defs/sha256"},
+        "checkpoint_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "checkpoint_head_sha256": {"$ref": "#/$defs/sha256"},
+        "committed_content_root_sha256": {"$ref": "#/$defs/sha256"},
+        "monotonic_counter": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+        "previous_checkpoint_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "observed_revocation_epoch": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "checkpoint_state": {"enum": ["MISSING", "PREPARED", "COMMITTED_CURRENT", "STALE", "FORKED", "ROLLBACK_DETECTED", "ACKNOWLEDGEMENT_UNKNOWN"]},
+        "provider_present": {"type": "boolean"},
+        "independent_failure_domain_proved": {"type": "boolean"},
+        "same_failure_domain_as_database": {"type": "boolean"},
+        "acknowledgement_semantics_validated": {"type": "boolean"}
+      }
+    },
+    "external_registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorization_id_sha256", "final_refreeze_subject_sha256", "owner_envelope_sha256", "capability_nonce_sha256", "registrar_identity_sha256", "external_control_plane_identity_sha256", "provenance_receipt_sha256", "creator_binary_sha256", "expected_unclaimed_revision", "previous_revision", "registration_revision", "successful_claim_count", "claimed_run_id_sha256", "registration_receipt_sha256", "registration_state", "binding_validated", "registered_by_external_control_plane", "created_by_runner"],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "final_refreeze_subject_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "registrar_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "external_control_plane_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "provenance_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "creator_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "expected_unclaimed_revision": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+        "previous_revision": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+        "registration_revision": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+        "successful_claim_count": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+        "claimed_run_id_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "registration_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "registration_state": {"enum": ["MISSING", "AUTHORIZED_UNCLAIMED_PRESENT", "CONSUMED", "UNKNOWN"]},
+        "binding_validated": {"type": "boolean"},
+        "registered_by_external_control_plane": {"type": "boolean"},
+        "created_by_runner": {"type": "boolean"}
+      }
+    },
+    "runtime_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["controller_binary_sha256", "observer_source_sha256", "observer_binary_sha256", "observer_toolchain_sha256", "observer_measurement_receipt_sha256", "runner_source_sha256", "runner_binary_sha256", "runner_toolchain_sha256", "runner_operation_manifest_sha256", "environment_observation_receipt_sha256", "canary_input_pack_sha256", "stop_snapshot_sha256", "revocation_snapshot_sha256", "fresh_observer_present_and_bound", "real_runner_present_and_bound", "exact_environment_present_and_bound", "exact_canary_inputs_present_and_bound", "stop_and_revocation_fresh_and_exact", "live_action_count"],
+      "properties": {
+        "controller_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "observer_source_sha256": {"$ref": "#/$defs/sha256"},
+        "observer_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "observer_toolchain_sha256": {"$ref": "#/$defs/sha256"},
+        "observer_measurement_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_source_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_binary_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_toolchain_sha256": {"$ref": "#/$defs/sha256"},
+        "runner_operation_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "environment_observation_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "canary_input_pack_sha256": {"$ref": "#/$defs/sha256"},
+        "stop_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "revocation_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "fresh_observer_present_and_bound": {"type": "boolean"},
+        "real_runner_present_and_bound": {"type": "boolean"},
+        "exact_environment_present_and_bound": {"type": "boolean"},
+        "exact_canary_inputs_present_and_bound": {"type": "boolean"},
+        "stop_and_revocation_fresh_and_exact": {"type": "boolean"},
+        "live_action_count": {"const": 0}
+      }
+    },
+    "policy_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lab_environment_sha256", "stop_policy_sha256", "revocation_policy_sha256", "retention_policy_sha256", "cleanup_policy_sha256", "custody_policy_sha256", "review_policy_sha256", "independent_review_receipt_sha256", "current_revocation_epoch", "automatic_or_implicit_retry_allowed"],
+      "properties": {
+        "lab_environment_sha256": {"$ref": "#/$defs/sha256"},
+        "stop_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "revocation_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "retention_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "cleanup_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "custody_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "review_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "independent_review_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "current_revocation_epoch": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "automatic_or_implicit_retry_allowed": {"const": false}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all_external_inputs_validated", "terminal_hard_lock", "separate_review_required", "may_execute_live", "execution_capability_issued", "side_effects_unlocked"],
+      "properties": {
+        "all_external_inputs_validated": {"type": "boolean"},
+        "terminal_hard_lock": {"type": "boolean"},
+        "separate_review_required": {"const": true},
+        "may_execute_live": {"const": false},
+        "execution_capability_issued": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["admission_packet_is_owner_authority", "admission_packet_is_execution_capability", "complete_inputs_preapprove_s21b", "synthetic_fixture_is_live_input", "valid_evidence_implies_favorable_result", "side_effects_unlocked"],
+      "properties": {
+        "admission_packet_is_owner_authority": {"const": false},
+        "admission_packet_is_execution_capability": {"const": false},
+        "complete_inputs_preapprove_s21b": {"const": false},
+        "synthetic_fixture_is_live_input": {"const": false},
+        "valid_evidence_implies_favorable_result": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}

@@ -11,6 +11,9 @@
 #[cfg(feature = "temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic")]
 mod rich_packet_validators;
 
+#[cfg(feature = "temporal-evidence-s21a-owned-lab-final-refreeze-admission-synthetic")]
+mod final_refreeze_admission;
+
 use super::*;
 use serde_json::Value;
 
