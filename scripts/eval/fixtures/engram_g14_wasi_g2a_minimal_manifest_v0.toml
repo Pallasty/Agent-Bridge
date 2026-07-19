@@ -1,0 +1,11 @@
+[package]
+name = "engram-g14-wasi-g2a-host"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+wasmtime = { version = "=46.0.1", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }

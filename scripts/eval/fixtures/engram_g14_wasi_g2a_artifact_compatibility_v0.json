@@ -1,0 +1,177 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2a_artifact_compatibility.v0",
+  "date": "2026-07-19",
+  "gate": "G2A_PUBLIC_WASI_ARTIFACT_AND_COMPONENT_COMPATIBILITY_EVIDENCE_REVIEW",
+  "predecessor": {
+    "gate": "G2_WASI_CUSTOM_CLOCK_PREREGISTRATION",
+    "feature_commit": "1f3f1d6a5f8873351b3483cea8cd4f8e3a1e86eb",
+    "integration_commit": "30da86c37caff6c2a3ca18cf2dcd564bdf750063",
+    "requirements_in_order": [
+      "verified_release_archive_and_crate_payload_digests",
+      "minimal_exact_crate_feature_graph",
+      "complete_Cargo_lock_and_all_transitive_checksums",
+      "target_triples_and_rust_toolchain_digest",
+      "pinned_RustSec_database_commit_timestamp_and_raw_audit_receipt_hash",
+      "exact_WIT_world_and_binding_generator_compatibility",
+      "proof_that_direct_clock_and_poll_traits_bypass_all_builtin_host_timer_paths",
+      "fixed_public_component_source_binary_and_import_manifest_digests",
+      "custom_clock_and_poll_host_source_digest"
+    ],
+    "missing_or_drifted_requirement": "FAIL_CLOSED_NO_SOURCE_NO_BUILD_NO_RUN"
+  },
+  "mode": "PUBLIC_STATIC_NO_SOURCE_NO_BUILD_NO_RUN",
+  "status": "FAIL_CLOSED_UNSATISFIABLE_ARTIFACT_ORDER_NO_AUTHORITY",
+  "scope": {
+    "authority_class": "NONE",
+    "component_source_present": false,
+    "custom_host_source_present": false,
+    "component_built_or_run": false,
+    "candidate_private_or_capability_accessed": false,
+    "runtime_or_dependency_adopted": false,
+    "deployment_or_canary_changed": false,
+    "g1_4_open": false
+  },
+  "official_release_evidence": {
+    "repository": "bytecodealliance/wasmtime",
+    "tag": "v46.0.1",
+    "git_commit": "823d1b8f251494a06288194d0df746191f535ff7",
+    "github_release_id": 344307162,
+    "immutable": true,
+    "published_at": "2026-06-24T18:51:42Z",
+    "asset_count": 38,
+    "source_archive": {
+      "name": "wasmtime-v46.0.1-src.tar.gz",
+      "size": 152108252,
+      "official_sha256": "7c61526bc1b4099d8ac80a03d32e738387e7d76877321e473b8e6d5c82320532",
+      "official_digest_observed": true,
+      "local_complete_payload_sha256_verified": false,
+      "local_transfer_result": "INTERRUPTED_INCOMPLETE_NO_MATCH_CLAIM"
+    },
+    "matching_custom_clock_component_asset_count": 0,
+    "official_prebuilt_component_closes_gap": false
+  },
+  "crate_payload_evidence": [
+    {"name": "wasmtime", "version": "46.0.1", "sha256": "c4213d2f019a5e44aa8a61d8826dd33a505bff79f749b14a8bafd67321cb9351", "local_payload_verified": true},
+    {"name": "wasmtime-wasi", "version": "46.0.1", "sha256": "e9f65ef30a2c5478873cdb619085a7a649d3ce41cc3eaf298a7ce3dee96a8e11", "local_payload_verified": true},
+    {"name": "wasmtime-wasi-io", "version": "46.0.1", "sha256": "cee57d5fef4976b1ab542615f4cef2c43278eb549d8078939668ea0f13d5c696", "local_payload_verified": true}
+  ],
+  "dependency_resolution_evidence": {
+    "resolver_only_no_compile": true,
+    "manifest_dependency": "wasmtime = { version = \"=46.0.1\", default-features = false, features = [\"component-model\", \"cranelift\", \"runtime\", \"std\"] }",
+    "manifest_path": "scripts/eval/fixtures/engram_g14_wasi_g2a_minimal_manifest_v0.toml",
+    "manifest_sha256": "ec21411297f03e4c46d1c6520b86f2dca6309abc03069cf885ea9300a030dc54",
+    "resolved_wasmtime_features_in_order": ["component-model", "cranelift", "once_cell", "runtime", "std", "wasmtime-jit-icache-coherence"],
+    "lockfile_path": "scripts/eval/fixtures/engram_g14_wasi_g2a_minimal_Cargo.lock",
+    "lockfile_sha256": "ad53efcd1ac44e8fa10e5943c873bc02cdceeae12d34784fbf60a6c81793db6d",
+    "package_stanza_count": 115,
+    "registry_dependency_count": 114,
+    "all_registry_packages_have_checksums": true,
+    "forbidden_resolved_packages": ["wasmtime-wasi", "wasmtime-wasi-io", "tokio", "cap-time-ext", "system-interface"],
+    "forbidden_resolved_package_count": 0,
+    "agent_bridge_cargo_metadata_changed": false
+  },
+  "toolchain_evidence": {
+    "rust_release": "1.94.0",
+    "rustc_commit": "4a4ef493e3a1488c6e321570238084b38948f6db",
+    "channel_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.94.0.toml",
+    "channel_manifest_sha256": "aaa177def36e01d539bee6bde95295230b9ce378f81057845db8d0ebe97898ee",
+    "host_target": "aarch64-apple-darwin",
+    "guest_target": "wasm32-wasip2",
+    "guest_target_installed": false,
+    "payload_sha256": {
+      "rust_host": "94903e93a4334d42bb6d92377a39903349c07f3709c792864bcdf7959f3c8c7d",
+      "rustc_host": "5be5bfd855ceaf741c7d9996940690a0a2958e5e44365bb63122d865ee6a9d2b",
+      "cargo_host": "8091cb41d6b7fc27478cc0a51266231f41938be53b1cab5da8ab93d07e6f796f",
+      "rust_std_host": "5fa2aab3f8b11563fde18acafcb1444ac1a398d333950835dbe328c0335e8636",
+      "rust_std_guest": "1a544ad7b2c86dc0353cd07995112f976e2bb179279fff34a064f93ff7987444"
+    },
+    "payloads_installed_by_this_review": false
+  },
+  "rustsec_evidence": {
+    "advisory_db_commit": "b5fc89b8be99e96f79194d8a6f11e9b4143b99f0",
+    "advisory_db_committer_timestamp": "2026-07-17T15:52:38Z",
+    "receipt_path": "scripts/eval/fixtures/engram_g14_wasi_g2a_rustsec_bounded_receipt_v0.json",
+    "raw_bounded_receipt_sha256": "176434aad971db6ea455a4834c0e6a08dcf4c45c87a4b9e6bbb373d12b8fdb36",
+    "scanner": "bounded_ruby_rustsec_frontmatter_v0",
+    "advisory_count": 1146,
+    "audited_dependency_count": 115,
+    "matched_advisory_file_count": 59,
+    "vulnerability_count": 0,
+    "warning_count": 0,
+    "parse_error_count": 0,
+    "cargo_audit_executed": false,
+    "official_cargo_audit_receipt_claimed": false,
+    "dependency_advisory_review_complete_for_pinned_db": false,
+    "package_yank_review_complete": false
+  },
+  "wit_and_timer_path_evidence": {
+    "world": "agent-bridge:g14-clock-probe/probe@0.1.0",
+    "exact_imports_in_order": [
+      "wasi:clocks/wall-clock@0.2.12",
+      "wasi:clocks/monotonic-clock@0.2.12",
+      "wasi:io/poll@0.2.12"
+    ],
+    "exact_world_bindgen_public_api_source_verified": true,
+    "bindings_compiled": false,
+    "component_import_graph_observed": false,
+    "broad_wasmtime_wasi_host_uses_tokio_timer_paths": true,
+    "minimal_graph_excludes_broad_wasi_host": true,
+    "actual_custom_host_direct_trait_bypass_verified": false
+  },
+  "causal_order_audit": {
+    "component_source_digest_requires_component_source": true,
+    "component_binary_and_observed_import_manifest_require_build_or_accepted_prebuilt": true,
+    "custom_host_source_digest_requires_custom_host_source": true,
+    "accepted_matching_prebuilt_exists": false,
+    "ordered_gate_satisfiable_before_source": false,
+    "missing_evidence_may_be_replaced_with_placeholder_digest": false
+  },
+  "ordered_requirement_review": [
+    {"requirement": "verified_release_archive_and_crate_payload_digests", "state": "PARTIAL", "reason": "CRATES_VERIFIED_SOURCE_ARCHIVE_OFFICIAL_DIGEST_ONLY_LOCAL_TRANSFER_INCOMPLETE"},
+    {"requirement": "minimal_exact_crate_feature_graph", "state": "CLOSED_STATIC", "reason": "RESOLVER_ONLY_GRAPH_PINNED_NO_COMPILE"},
+    {"requirement": "complete_Cargo_lock_and_all_transitive_checksums", "state": "CLOSED_STATIC", "reason": "RAW_LOCKFILE_CHECKED_IN_AND_HASHED"},
+    {"requirement": "target_triples_and_rust_toolchain_digest", "state": "CLOSED_STATIC", "reason": "OFFICIAL_CHANNEL_AND_PAYLOAD_DIGESTS_PINNED_NO_INSTALL"},
+    {"requirement": "pinned_RustSec_database_commit_timestamp_and_raw_audit_receipt_hash", "state": "PARTIAL", "reason": "PINNED_BOUNDED_SCAN_ZERO_FINDINGS_OFFICIAL_CARGO_AUDIT_NOT_EXECUTED"},
+    {"requirement": "exact_WIT_world_and_binding_generator_compatibility", "state": "PARTIAL", "reason": "EXACT_WORLD_API_STATICALLY_SUPPORTED_BINDINGS_NOT_COMPILED"},
+    {"requirement": "proof_that_direct_clock_and_poll_traits_bypass_all_builtin_host_timer_paths", "state": "CONDITIONAL", "reason": "GRAPH_AND_UPSTREAM_PATHS_SUPPORT_DESIGN_NO_CUSTOM_HOST_SOURCE_EXISTS"},
+    {"requirement": "fixed_public_component_source_binary_and_import_manifest_digests", "state": "MISSING", "reason": "CAUSALLY_REQUIRES_FORBIDDEN_SOURCE_AND_BUILD_NO_ACCEPTED_PREBUILT"},
+    {"requirement": "custom_clock_and_poll_host_source_digest", "state": "MISSING", "reason": "CAUSALLY_REQUIRES_FORBIDDEN_HOST_SOURCE"}
+  ],
+  "ordering_repair_contract": {
+    "successor_is_public_static_and_no_run": true,
+    "barriers_in_order": [
+      "PRE_SOURCE_STATIC_SUPPLY_CHAIN_EXACT_WORLD_AND_TIMER_PATH_DESIGN_EVIDENCE",
+      "POST_AUTHORIZED_SOURCE_PRE_BUILD_COMPONENT_AND_HOST_SOURCE_DIGESTS",
+      "POST_AUTHORIZED_BUILD_PRE_RUN_COMPONENT_BINARY_AND_OBSERVED_IMPORT_EXPORT_MANIFEST_DIGESTS"
+    ],
+    "g2b_authorizes_later_barrier_actions": false,
+    "missing_or_drifted_barrier": "FAIL_CLOSED_NO_NEXT_ACTION",
+    "silent_native_or_qemu_fallback_allowed": false
+  },
+  "decision": {
+    "verdict": "G2A_FAIL_CLOSED_UNSATISFIABLE_ARTIFACT_ORDER_NO_SOURCE_NO_BUILD_NO_RUN",
+    "g2a_passed": false,
+    "source_build_or_run_authorized": false,
+    "dependency_runtime_or_deployment_authorized": false,
+    "candidate_private_or_capability_authorized": false,
+    "g1_4_execution_open": false,
+    "only_permitted_successor": "G2B_PUBLIC_WASI_ARTIFACT_ORDERING_REPAIR_PREREGISTRATION"
+  },
+  "acceptance_integrity": {
+    "checker_self_authenticating": false,
+    "independent_read_only_review_required": true,
+    "independent_out_of_band_commit_tree_checker_and_all_path_hash_manifest_required": true,
+    "no_authority_before_verified_pin": true
+  },
+  "nonclaims": {
+    "source_archive_local_byte_match": false,
+    "package_yank_review_complete": false,
+    "component_abi_compiled": false,
+    "component_import_graph_observed": false,
+    "custom_clock_or_poll_host_implemented": false,
+    "host_timer_isolation_verified": false,
+    "component_source_build_or_run_exists": false,
+    "runtime_dependency_or_deployment_authority": false,
+    "candidate_private_or_g1_4_authority": false
+  }
+}
