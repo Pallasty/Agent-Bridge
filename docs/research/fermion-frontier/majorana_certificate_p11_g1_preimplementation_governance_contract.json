@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G1-PREIMPLEMENTATION-GOVERNANCE-CLOSURE-V1",
+  "contract_role": "result_informed_nonexecuting_governance_after_P11_A",
+  "self_relative_path": "majorana_certificate_p11_g1_preimplementation_governance_contract.json",
+  "required_direct_parent_commit": "71967df1b328cc40ad28c555f0c6ff9152f87774",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "implementation_authority": false,
+    "prototype_or_compilation_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "P11_A_custody": {
+    "result_commit_sha": "71967df1b328cc40ad28c555f0c6ff9152f87774",
+    "contract_relative_path": "majorana_certificate_p11a_explicit_memory_kernel_design_contract.json",
+    "contract_raw_sha256": "197e47da37556e6b21284e2dea8f3d808c033bbfafe88a03aadf37f2260a0636",
+    "report_relative_path": "majorana_certificate_p11a_explicit_memory_kernel_design_report.json",
+    "report_raw_sha256": "58ee4bc7a80af5b25f23f31023615633697756317b4b73907155551f2692f4c2",
+    "expected_outcome": "FEASIBLE_EXPLICIT_MEMORY_ROUTE_IDENTIFIED_NOT_IMPLEMENTATION_AUTHORITY",
+    "expected_explicit_region_subtotal_bytes": 872415232,
+    "expected_implementation_gate": "CLOSED",
+    "expected_execution_gate": "CLOSED"
+  },
+  "decision": {
+    "disposition": "OPEN_NONEXECUTING_P11_B_PREIMPLEMENTATION_CONTRACT_PACK_ONLY",
+    "P11_A_positive_route_is_not_an_implementation_or_peak_proof": true,
+    "fixed_process_cap_bytes": 2147483648,
+    "exact_static_process_peak_bytes": null,
+    "strict_integer_peak_less_than_fixed_cap": null,
+    "implementation_gate": "CLOSED",
+    "execution_gate": "CLOSED",
+    "resource_no_go_inference": false
+  },
+  "P11_B_authorization": {
+    "only_allowed_next_gate": "P11-B-PREIMPLEMENTATION-CONTRACT-PACK-V1",
+    "role": "nonexecuting_definition_and_static_validation_of_layout_arithmetic_lifetime_toolchain_runtime_and_checker_contracts",
+    "implementation_source_allowed": false,
+    "prototype_allowed": false,
+    "compilation_or_linking_allowed": false,
+    "Julia_or_candidate_execution_allowed": false,
+    "benchmark_or_host_measurement_allowed": false,
+    "package_installation_or_environment_mutation_allowed": false,
+    "read_only_local_toolchain_identity_inspection_allowed": true,
+    "read_only_official_primary_metadata_retrieval_allowed": true,
+    "binary_or_source_archive_download_allowed": false,
+    "scientific_schedule_semantics_or_cap_change_allowed": false,
+    "required_contract_sections": [
+      "byte_level_slot_layout_alignment_capacity_load_and_overflow_rules",
+      "per_operation_integer_width_and_reused_scratch_derivation_contract",
+      "arena_partition_phase_lifetime_alias_and_peak_overlap_contract",
+      "AOT_toolchain_target_flags_link_map_and_dependency_custody_contract",
+      "code_rodata_data_stack_TLS_library_and_transport_bound_contract",
+      "independent_checker_input_separation_and_adversarial_mutation_contract",
+      "frozen_semantics_equivalence_obligation_and_vector_contract"
+    ],
+    "allowed_outcomes": [
+      "PREIMPLEMENTATION_CONTRACT_PACK_DEFINED_NOT_IMPLEMENTATION_AUTHORITY",
+      "CLOSED_NO_AUDITABLE_PREIMPLEMENTATION_CONTRACT_ROUTE"
+    ],
+    "both_outcomes_keep_implementation_and_execution_closed": true,
+    "any_source_implementation_requires_a_new_independent_governance_decision": true
+  },
+  "forbidden_actions": [
+    "write_compile_link_or_execute_candidate_or_prototype_source",
+    "install_or_update_a_compiler_linker_library_package_or_environment",
+    "download_a_binary_or_source_archive",
+    "run_Julia_or_any_P9_candidate",
+    "claim_the_832_MiB_design_subtotal_is_a_process_peak_or_runtime_headroom_proof",
+    "relax_the_2147483648_byte_cap_or_change_frozen_scientific_semantics",
+    "claim_semantic_equivalence_resource_no_go_OOM_attribution_S0_or_scientific_result"
+  ],
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g1_preimplementation_governance_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g1_preimplementation_governance_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g1_preimplementation_governance_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11_g1_preimplementation_governance.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

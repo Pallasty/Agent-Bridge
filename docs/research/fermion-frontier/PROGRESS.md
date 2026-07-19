@@ -1595,3 +1595,16 @@ The result is
 Implementation, compilation and execution gates remain closed; exact process
 peak and strict cap admission remain unknown. New independent implementation
 governance is required before any prototype or executable source is written.
+
+## Majorana P11-G1 opens only a preimplementation contract pack
+
+P11-G1 validates the P11-A design result and retains its design-only meaning.
+It authorizes only `P11-B-PREIMPLEMENTATION-CONTRACT-PACK-V1`: byte layout,
+wide arithmetic, arena lifetime, AOT toolchain/runtime, independent checker,
+and frozen-semantics vector contracts. Read-only local toolchain identity and
+official primary metadata may be inspected, but archives may not be downloaded.
+
+P11-B may not write implementation source, prototype, compile, link, install,
+benchmark, run Julia/candidates, change semantics or relax the 2 GiB cap. Both
+allowed P11-B outcomes keep implementation and execution closed; a new
+independent decision is required before source implementation.

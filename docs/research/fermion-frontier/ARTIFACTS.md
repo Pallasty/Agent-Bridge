@@ -1522,3 +1522,15 @@ so they are versioned normally and are not added to the preservation-only
 - The subtotal is a design budget, not an implemented layout, process peak or
   cap-admission result. Implementation, compilation, semantic equivalence,
   resource/no-go, execution and scientific authority remain absent.
+
+## Majorana P11-G1 preimplementation governance
+
+- `majorana_certificate_p11_g1_preimplementation_governance_contract.json`
+  and `majorana_certificate_p11_g1_preimplementation_governance_record.json`:
+  validate P11-A custody and authorize only a nonexecuting P11-B contract pack.
+- `majorana_certificate_p11_g1_preimplementation_governance_validator.py` and
+  `test_majorana_certificate_p11_g1_preimplementation_governance.py`:
+  read-only topology, blob, canonical-record, authority and lifecycle checks.
+- Local toolchain identity and official metadata may be read; implementation,
+  compilation, downloads, installation, benchmark and candidate execution are
+  forbidden.
