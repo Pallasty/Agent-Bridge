@@ -1,0 +1,35 @@
+{
+  "mode": "provider_candidate",
+  "listen": "127.0.0.1:18792",
+  "resource": "https://api.openai.com/v1/mcp/tunnel_REPLACE_WITH_SEPARATE_TUNNEL_ID",
+  "issuer": "https://REPLACE_WITH_AUTH0_TENANT.us.auth0.com/",
+  "authorization_servers": [
+    "https://REPLACE_WITH_AUTH0_TENANT.us.auth0.com/"
+  ],
+  "required_scopes": [
+    "agent-bridge:subject.read"
+  ],
+  "allowed_origins": [
+    "https://chatgpt.com"
+  ],
+  "expected_audiences": [
+    "https://api.openai.com/v1/mcp/tunnel_REPLACE_WITH_SEPARATE_TUNNEL_ID"
+  ],
+  "provider": {
+    "discovery_url": "https://REPLACE_WITH_AUTH0_TENANT.us.auth0.com/.well-known/openid-configuration",
+    "client_registration": "cimd",
+    "jwks_cache_ttl_secs": 300,
+    "http_timeout_secs": 5
+  },
+  "subjects": [
+    {
+      "subject": "REPLACE_WITH_EXACT_PROVIDER_SUBJECT",
+      "local_subject": "owner",
+      "allowed_client_ids": [
+        "REPLACE_WITH_EXACT_CHATGPT_CLIENT_ID"
+      ]
+    }
+  ],
+  "clock_skew_secs": 30,
+  "max_token_lifetime_secs": 900
+}

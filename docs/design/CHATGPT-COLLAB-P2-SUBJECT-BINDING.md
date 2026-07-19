@@ -1,6 +1,6 @@
 # ChatGPT collaboration P2 authenticated subject binding
 
-**Status:** P2A complete; P2B synthetic lab complete; live OAuth/tunnel acceptance pending
+**Status:** P2A complete; P2B provider candidate implemented; live OAuth/tunnel acceptance pending
 **Date:** 2026-07-19
 **Production tunnel:** unchanged on `chatgpt-read`
 **Execution plane:** absent
@@ -13,10 +13,11 @@ resource server that verifies OAuth 2.1 bearer tokens before it constructs an
 authenticated tool context.
 
 P2A establishes the internal trust boundary and stdio negative regression test.
-P2B now includes a default-off loopback synthetic lab with static public JWKS
-verification and exact local-subject mapping. It is not an authorization server,
-does not connect a real identity provider, and does not change the production
-tunnel or add any execution capability.
+P2B now includes both the synthetic lab and a default-off provider candidate.
+The candidate performs remote discovery, bounded rotating-JWKS verification,
+and exact local-subject mapping, but it still does not change the production
+tunnel or add any execution capability. Real ChatGPT login and public tunnel
+acceptance remain pending.
 
 ## Verified current state
 
@@ -154,6 +155,27 @@ discovery refresh, key rotation, revocation, authorization code + PKCE, client
 registration, real ChatGPT callbacks, public HTTPS, tunnel forwarding, or live
 identity-provider failure handling. No bearer token is logged or returned.
 
+## P2B provider candidate
+
+The second default-off entry point is:
+
+```bash
+agent-bridge mcp-http-auth-candidate --config /path/to/provider-config.json
+```
+
+It retains the synthetic lab's one-tool, non-executing boundary while adding
+provider discovery, PKCE/client-registration metadata checks, bounded remote
+JWKS caching, serialized refresh on key rotation, and fail-closed provider
+outage behavior. The exact external resource URL must also be present in the
+accepted audience set. Expired cached keys are never used during an outage.
+
+The provider KAT runs a real loopback fake IdP and proves initial discovery,
+key rotation, unknown-key refresh, exact subject binding, external-resource
+metadata shaping, and `503 jwks_unavailable` on refresh failure. See
+[`CHATGPT-COLLAB-P2B-PROVIDER-CANDIDATE.md`](CHATGPT-COLLAB-P2B-PROVIDER-CANDIDATE.md)
+for the secret-free templates, Auth0 Free candidate boundary, live acceptance
+gates, and rollback.
+
 ## Required P2B subject contract
 
 Any HTTP transport may populate a verified subject only after all checks pass:
@@ -186,7 +208,7 @@ The external `sub` value is not itself a local owner ID.
 | Same-user local process edits queue files | Signed/MACed records or protected broker plus atomic consume | Required before executor |
 | Approval replay or double execution | One-time digest consumption under an atomic lock | Required before executor |
 | Partial mutation or failed rollback | Pre-recorded rollback handle and outcome receipt | Required before executor |
-| Authorization service outage | Fail closed; read-only production profile remains available | Static lab fails closed; live provider outage pending |
+| Authorization service outage | Fail closed; read-only production profile remains available | Provider KAT fails closed; live outage acceptance pending |
 
 ## Phased implementation
 
@@ -208,17 +230,23 @@ Completed synthetic prerequisites:
 4. Expose only a read-only authentication diagnostic.
 5. Pass synthetic invalid-token, policy, Origin, and `_meta` spoof tests.
 
+Provider-candidate prerequisites now completed:
+
+1. Add remote discovery and bounded JWKS cache/rotation with outage behavior.
+2. Keep the provider implementation neutral across CIMD, DCR, and predefined
+   client-registration modes.
+3. Select Auth0 Free as the first no-cost live candidate without committing
+   tenant data or secrets.
+
 Still required for live P2B:
 
-1. Select and configure one established OAuth 2.1 authorization server without
-   committing secrets or selecting a paid service implicitly.
-2. Add remote JWKS discovery/cache/rotation or standards-compliant token
-   introspection with outage behavior.
-3. Expose the existing non-executing P1 request tools only after an independent
+1. Configure a provider tenant, resource, scope, client flow, and exact subject
+   policy without committing credentials or tokens.
+2. Expose the existing non-executing P1 request tools only after an independent
    threat review of the authenticated transport.
-4. Route the HTTP resource server through a separate tunnel profile and run a
+3. Route the HTTP resource server through a separate tunnel profile and run a
    real ChatGPT authorization-code + PKCE acceptance test.
-5. Prove logs/support exports contain no tokens and exercise process/profile
+4. Prove logs/support exports contain no tokens and exercise process/profile
    rollback.
 
 The authorization server must be reachable by the user's browser and ChatGPT.
