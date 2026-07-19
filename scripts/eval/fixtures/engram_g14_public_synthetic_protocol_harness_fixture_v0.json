@@ -1,0 +1,331 @@
+{
+  "schema": "agent_bridge.engram_g1_4_public_synthetic_protocol_harness_fixture.v0",
+  "fixture_id": "PUBLIC_SYNTHETIC_G1_4_PROTOCOL_HARNESS_KAT_V0",
+  "mode": "PUBLIC_SYNTHETIC_PROTOCOL_KAT",
+  "public_synthetic_fixture": true,
+  "production_admissible": false,
+  "candidate_artifact": {
+    "development_lock": {
+      "source_tree_sha256": "2b53ce69f74962d0ab1433ff048e208590cd0dbbc16520a0cadca7887e8bcbfe",
+      "configuration_sha256": "ffa4d271b4cbaee8b46ebd44351000399afa2ca57d10be720c878e12552d9b3a",
+      "dependency_lock_sha256": "0d2fb6175e257f5d96605fcb8ca8eaf1f70e8dbd8fe366ea34ee3075e1dde2fa"
+    },
+    "development_feedback_rounds": [
+      {
+        "round": 1,
+        "aggregate_receipt_sha256": "cad0a603528d2310f127bbe6830af1799bcee20ab9275efe70d2cd58516f0b5d",
+        "aggregate_only": true,
+        "raw_probe_or_partition_material_present": false
+      },
+      {
+        "round": 2,
+        "aggregate_receipt_sha256": "b3f07d74601da96a95dd7c32ccfbf15a8c2a529c55513acfa2af31801eb6d0fe",
+        "aggregate_only": true,
+        "raw_probe_or_partition_material_present": false
+      }
+    ],
+    "final_lock": {
+      "source_tree_sha256": "fb1eab2e96cac504c989bfd3dcb427b5ebbd7b911192f30d5f56462b97ef1b05",
+      "configuration_sha256": "22a63b067a0a7e2f0604ef00d915c3e8d4d5183045f964dfba8287ee8a638dc4",
+      "dependency_lock_sha256": "3f6d3017bef8cac7fccad9f47acd0f31bc984585d50e285b8a0bd2c31a24e8b9",
+      "toolchain_and_build_flags_sha256": "7c6885e11f2deb86dfdcd2eea856cd5618d2a260f80971d6ddefbb063dfd936a",
+      "feature_flags_and_model_assets_sha256": "05e2e4d7855b5b3c387f7952c04d27d4d08e6d0416b5df18c5c8276633f9c308",
+      "environment_allowlist_sha256": "9a9c981fe68043cdaa5255729ebca61ea01b1b1cc34b560914c6a9476c64e029",
+      "sandbox_profile_sha256": "539127a12f9a67700e75111f3a00b6382d6100d0fa96f49db7ae4f2e3a502c95",
+      "output_schema_sha256": "1351c3b0333f3d54b733aae1ea58b1785cccce002910a048267198fdf1a6a193",
+      "resource_budget_sha256": "239b3f80dbc3f273f301182c863e27d71171208eb01f35f2b3d589c6ab041228",
+      "protocol_contract_and_runner_version_sha256": "b88534a42dc7cf288ee73fdeee36292f6c4756ebf6ae67c73e4a94108917be75"
+    }
+  },
+  "blinding": {
+    "predecision": {
+      "arm_mapping_commitment_sha256": "0bc6335f13971c6fa61ef674fa1a52a729aa590e978d469092b7486a23446f8c",
+      "opaque_arm_ids_in_execution_order": [
+        "arm_0",
+        "arm_1",
+        "arm_2",
+        "arm_3",
+        "arm_4"
+      ],
+      "scorer_visible_arm_ids": [
+        "arm_0",
+        "arm_1",
+        "arm_2",
+        "arm_3",
+        "arm_4"
+      ],
+      "mapping_reveal_available_to_scorer_before_decision": false
+    },
+    "postdecision_reveal": {
+      "arm_0": "stable_control",
+      "arm_1": "density_only",
+      "arm_2": "clustered_reorganization",
+      "arm_3": "mechanism_off",
+      "arm_4": "cluster_shuffled"
+    }
+  },
+  "sandbox_attestation": {
+    "evidence_kind": "public_synthetic_policy_attestation_not_kernel_enforcement",
+    "platform": "public_synthetic_cross_platform_policy_model",
+    "profile": "nono_landlock_or_seatbelt_deny_by_default_offline_runner_v1",
+    "support_reported": true,
+    "policy_apply_reported": true,
+    "active_reported": true,
+    "native_enforcement_observed": false,
+    "environment_allowlist_sha256": "9a9c981fe68043cdaa5255729ebca61ea01b1b1cc34b560914c6a9476c64e029",
+    "mount_set_sha256": "1c90135ed7bdcd973510956af09e0e8c9b37566efdf4d54a30b9a5c63a789977",
+    "output_schema_sha256": "1351c3b0333f3d54b733aae1ea58b1785cccce002910a048267198fdf1a6a193",
+    "resource_budget_sha256": "239b3f80dbc3f273f301182c863e27d71171208eb01f35f2b3d589c6ab041228",
+    "runner_sha256": "36a4c7feffc3b13c51fef78567d69824965633a703441b4664594aa32617fb61",
+    "resource_ceilings": {
+      "cpu_millis": 500,
+      "memory_bytes": 67108864,
+      "wall_time_millis": 1000,
+      "file_count": 16,
+      "writable_bytes": 1048576,
+      "output_bytes": 4096
+    },
+    "canaries": [
+      {
+        "name": "candidate_code_read",
+        "expected": "allow",
+        "observed": "allow"
+      },
+      {
+        "name": "dependency_read",
+        "expected": "allow",
+        "observed": "allow"
+      },
+      {
+        "name": "ephemeral_scratch_write",
+        "expected": "allow",
+        "observed": "allow"
+      },
+      {
+        "name": "repository_metadata_read",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "private_manifest_read",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "live_store_read",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "network_connect",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "subprocess_spawn",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "dynamic_plugin_load",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "non_scratch_write",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "wall_clock_read",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "external_entropy_read",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "extra_inherited_fd_use",
+        "expected": "deny",
+        "observed": "deny"
+      },
+      {
+        "name": "free_form_output",
+        "expected": "deny",
+        "observed": "deny"
+      }
+    ]
+  },
+  "qualification": {
+    "seed_schedule_commitment_sha256": "23cffbc665172c0cfc36a2ace9f2c4ecb88ba49179b81a0f6644e45c38e5ae1c",
+    "replays": [
+      {
+        "replay": 1,
+        "invocation_ids": [
+          "f7c4958d6bf269cdbdc11066dcaf3ad794623111760cd3b34e1a2e2db36d3336",
+          "357d4492d6461ad077de6c5b8a1bff0ea2bef9ea028c48be1cbe9118559df26a",
+          "ad96021913819f1865f4cf6982b118de81a6f5720240b78dee095b91fa6e1e93",
+          "8b7d440b1475278eb4c1eb228a01eaf2f058db3dfea7d05e27221f5b7dfe8948",
+          "289306861c02cd23dcb0f3cf5fe10843c6a2e7e6cafb71cb4d4b925e3e9c7a1f"
+        ],
+        "ranked_output_commitments_by_opaque_arm": {
+          "arm_0": [
+            "40d14259591a58a4f18836ef97cd893c60a31f0c8e49b3314f36f98df871d74a",
+            "7311b4dd3b2f1ecca4980f9bfc5bdb826e4952a0820ad62a44d0e51948ff3d89"
+          ],
+          "arm_1": [
+            "e313863068357d507ad4002a08256fcbd977fb9a4709505070aab771bf1a42e8",
+            "e5d871381796c557270f6d681bd46bf3da00fc85158c6b212a80a9bf918036ad"
+          ],
+          "arm_2": [
+            "f3ef4fe841831e397d26ffa2e8ba9ada06e4299b3cf8b50aa91675c27f643235",
+            "75e1d72f4a93a2fbc39bb29c01f6f118c504015bcbda7fac3d48156caae50eb1"
+          ],
+          "arm_3": [
+            "273d0a0750433d19ce31124f2cbe575b21d04c3ef9c33ceb6685e559aa8733cb",
+            "b8fb22f612ac7429bb0bf4fa2a6084356168bef5cdddb895f6f0805994a84d02"
+          ],
+          "arm_4": [
+            "c02741128f62a2679acd48138124ac8385403478d186de62c4048daaefc4d5d3",
+            "0954bb5b3a1a14ccd7b9ff74e9d61b36bd356e79f8908e0af74f89261105fe17"
+          ]
+        }
+      },
+      {
+        "replay": 2,
+        "invocation_ids": [
+          "a7c4d661efd15dc73de0c21a1c31918195d8fbd4e3100c7f20f2fcbea8a5b4b7",
+          "9876db6f970349633db2956b3c88def011c8486c35e93247cafe4bb8785052b8",
+          "861243601874965b63d6c781b791f6a7672a1b4a0a0d9f2905ad821e0fd09814",
+          "a1ecd53212c978b10b38f2fcbf708059ab3f1d0a3571a14fd989a310baf160cf",
+          "ddc47df15e45e0d26cd8ea0d4adcce72ec34476ecb6b7276d1236a1d94f8ef5f"
+        ],
+        "ranked_output_commitments_by_opaque_arm": {
+          "arm_0": [
+            "40d14259591a58a4f18836ef97cd893c60a31f0c8e49b3314f36f98df871d74a",
+            "7311b4dd3b2f1ecca4980f9bfc5bdb826e4952a0820ad62a44d0e51948ff3d89"
+          ],
+          "arm_1": [
+            "e313863068357d507ad4002a08256fcbd977fb9a4709505070aab771bf1a42e8",
+            "e5d871381796c557270f6d681bd46bf3da00fc85158c6b212a80a9bf918036ad"
+          ],
+          "arm_2": [
+            "f3ef4fe841831e397d26ffa2e8ba9ada06e4299b3cf8b50aa91675c27f643235",
+            "75e1d72f4a93a2fbc39bb29c01f6f118c504015bcbda7fac3d48156caae50eb1"
+          ],
+          "arm_3": [
+            "273d0a0750433d19ce31124f2cbe575b21d04c3ef9c33ceb6685e559aa8733cb",
+            "b8fb22f612ac7429bb0bf4fa2a6084356168bef5cdddb895f6f0805994a84d02"
+          ],
+          "arm_4": [
+            "c02741128f62a2679acd48138124ac8385403478d186de62c4048daaefc4d5d3",
+            "0954bb5b3a1a14ccd7b9ff74e9d61b36bd356e79f8908e0af74f89261105fe17"
+          ]
+        }
+      }
+    ]
+  },
+  "synthetic_run": {
+    "run_id": "public_synthetic_g14_run_v0",
+    "synthetic_capability_sha256": "84e6c05abaf44fbeb6f458fd47cd53b39a81ab04fa31c6fbe505aa64933bf799",
+    "real_freeze_capability_present": false,
+    "partition_shape": "public_synthetic_sealed_shape_only",
+    "one_shot": true,
+    "invocations": [
+      {
+        "ordinal": 1,
+        "opaque_arm_id": "arm_0",
+        "invocation_id": "2b14020d7d5d14105b373bb10383d3d405e54558b8a8a9dac765bf9d51c56368",
+        "status": "ok",
+        "output_schema_valid": true,
+        "scratch_destroyed": true,
+        "resource_budget_match": true
+      },
+      {
+        "ordinal": 2,
+        "opaque_arm_id": "arm_1",
+        "invocation_id": "7b66c3b0357536f773ba1f2d6b916ba453ee8338417cbb735d5c4928c5066c16",
+        "status": "ok",
+        "output_schema_valid": true,
+        "scratch_destroyed": true,
+        "resource_budget_match": true
+      },
+      {
+        "ordinal": 3,
+        "opaque_arm_id": "arm_2",
+        "invocation_id": "90169c3fad4eacc76190a414e4b8fc3ba137216d8b1d8a434d0e0b3037112905",
+        "status": "ok",
+        "output_schema_valid": true,
+        "scratch_destroyed": true,
+        "resource_budget_match": true
+      },
+      {
+        "ordinal": 4,
+        "opaque_arm_id": "arm_3",
+        "invocation_id": "5c718b4e858938fcfa42f3f739bd42fee09d20d91605d4c20c41204caff81e4c",
+        "status": "ok",
+        "output_schema_valid": true,
+        "scratch_destroyed": true,
+        "resource_budget_match": true
+      },
+      {
+        "ordinal": 5,
+        "opaque_arm_id": "arm_4",
+        "invocation_id": "453f23694ca05151bbf944d9bb7ff0e7d28ebfa8cdf32a1848941310e354377d",
+        "status": "ok",
+        "output_schema_valid": true,
+        "scratch_destroyed": true,
+        "resource_budget_match": true
+      }
+    ]
+  },
+  "decision_input": {
+    "candidate_comparisons": [
+      {
+        "comparator": "stable_control",
+        "candidate_primary_repairs": 3,
+        "new_exact_misses": 0,
+        "new_related_misses": 0,
+        "no_relevant_gap_regressions": 0,
+        "per_mode_unrelated_intrusion_increases": 0,
+        "exact_mrr_absolute_loss": "0.01",
+        "related_mrr_absolute_loss": "0.02"
+      },
+      {
+        "comparator": "density_only",
+        "candidate_primary_repairs": 2,
+        "new_exact_misses": 0,
+        "new_related_misses": 0,
+        "no_relevant_gap_regressions": 0,
+        "per_mode_unrelated_intrusion_increases": 0,
+        "exact_mrr_absolute_loss": "0.02",
+        "related_mrr_absolute_loss": "0.01"
+      }
+    ],
+    "falsifier_comparisons": [
+      {
+        "falsifier": "mechanism_off",
+        "repairs_vs_stable_control": 1,
+        "repairs_vs_density_only": 1
+      },
+      {
+        "falsifier": "cluster_shuffled",
+        "repairs_vs_stable_control": 0,
+        "repairs_vs_density_only": 1
+      }
+    ],
+    "paired_by_episode_group": true,
+    "sealed_shape_is_decisive": true,
+    "fit_or_development_used_for_final_verdict": false
+  },
+  "expected": {
+    "verdict": "PASS_PUBLIC_SYNTHETIC_PROTOCOL_HARNESS_NO_AUTHORITY",
+    "decision": "SYNTHETIC_CANDIDATE_RULE_PASS_NO_EXPERIMENT_AUTHORITY",
+    "receipt_count": 14,
+    "native_sandbox_enforcement_verified": false,
+    "g1_4_execution_open": false,
+    "production_admissible": false
+  }
+}

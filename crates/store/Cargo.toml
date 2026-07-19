@@ -26,6 +26,7 @@ engram-g1-authenticated-envelope-shadow-synthetic = ["dep:ring"]
 temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic = ["temporal-evidence-s19-owned-lab-source-bound-runner-synthetic"]
 engram-g1-secure-custody-shadow-synthetic = ["dep:libc"]
 temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic = ["temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic"]
+temporal-evidence-s21a-owned-lab-final-refreeze-admission-synthetic = ["temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic"]
 
 [dependencies]
 ab-core.workspace = true

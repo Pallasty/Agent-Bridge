@@ -244,6 +244,23 @@ harness implementation review and grants no authority. See
 `docs/design/ENGRAM_G1_4_CANDIDATE_PROTOCOL_PREREGISTRATION_2026_07_18.md` and
 run `scripts/check-engram-g14-candidate-protocol-preregistration.sh`.
 
+`engram_g14_public_synthetic_protocol_harness.py` is the only implementation
+gate opened by that preregistration. It is a default-off, standard-library-only,
+in-memory state machine over one pinned public fixture. It exercises the
+two-phase candidate lock, two aggregate feedback rounds, opaque arm plan,
+split scorer/custodian decision-before-reveal ordering, synthetic
+support/apply/active and 14-canary sandbox attestation, deterministic
+qualification, globally unique invocation IDs, one-shot whole-run invalidation,
+fixed decision guards, a predecision-frozen scoring-chain head, 14-event
+embedded-payload hash chain, and rollback-failure lesson shape. It does not
+launch a process, call
+`nono`, apply or verify Seatbelt/Landlock, read a corpus, accept a real freeze
+capability, execute G1.4, mutate retrieval, write the store, or register a
+runtime surface. A passing receipt proves only the public protocol interface;
+all production and native-enforcement authority remains false. See
+`docs/design/ENGRAM_G1_4_PUBLIC_SYNTHETIC_PROTOCOL_HARNESS_2026_07_18.md` and
+run `scripts/check-engram-g14-public-synthetic-protocol-harness.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class
