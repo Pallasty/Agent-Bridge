@@ -62,6 +62,14 @@ and bootstrap calls cannot be counted as organic telemetry.
 
 ## Sibling probes (not benchmark components)
 
+`engram_g14_wasi_g2e_public_source.py` is the G2E public synthetic source-only
+receipt. It binds exactly three source files (a WIT world, component model, and
+direct logical-clock host model) to hashes and does not invoke Cargo, compile,
+link, or run them. `check-engram-g14-wasi-g2e-public-synthetic-source.sh`
+checks the same static boundary and directed semantic mutations. Its PASS is
+not build evidence and grants no build authority; G2F requires a separate owner
+authorization. See `docs/design/ENGRAM_G1_4_WASI_G2E_PUBLIC_SYNTHETIC_SOURCE_2026_07_19.md`.
+
 `engram_g0_failure_intake.py` — live-store-read-only G0 intake and baseline replay for a
 consumer-owned precision/generalization failure. Real private specs stay under
 ignored `data/`; capture runs FTS/hybrid/semantic searches only against a
