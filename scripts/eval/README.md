@@ -220,6 +220,28 @@ all production and native-enforcement authority remains false. See
 `docs/design/ENGRAM_G1_4_PUBLIC_SYNTHETIC_PROTOCOL_HARNESS_2026_07_18.md` and
 run `scripts/check-engram-g14-public-synthetic-protocol-harness.sh`.
 
+`engram_g14_native_sandbox_adapter_preregistration.py` freezes the only
+successor opened by that harness: a design-only, default-off interface for a
+future public-synthetic native sandbox KAT. It divides proof responsibility
+between native-kernel controls, a closed launch boundary, and supervisor
+mediation; requires registered liveness controls plus the same 14 ordered
+allow/deny canaries; and treats support, compile, apply, active, canary, and
+cleanup evidence as distinct. The exact `nono = 0.53.0` package and checksum are
+bound as a reviewed dependency reference, but the existing workspace sandbox
+is not admissible evidence. In particular, nono-only filesystem/network
+coverage cannot satisfy process, clock, entropy, plugin, inherited-FD, or
+bounded-output claims. Missing supplementary control on Darwin or Linux is
+`UNSUPPORTED_FAIL_CLOSED`; unsandboxed fallback is forbidden. This gate does
+not launch a probe, apply Seatbelt/Landlock/seccomp/bwrap policy, read candidate
+or private material, or change any runtime crate. See
+`docs/design/ENGRAM_G1_4_NATIVE_SANDBOX_ADAPTER_PREREGISTRATION_2026_07_18.md`
+and run
+`scripts/check-engram-g14-native-sandbox-adapter-preregistration.sh --phase precommit`
+before commit, then rerun with `--phase postcommit` from the clean committed
+worktree. The postcommit phase rejects an unchanged base HEAD, any tracked,
+indexed, or untracked residue, and any base-to-HEAD path outside the exact
+seven-path design set.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class

@@ -1,0 +1,594 @@
+{
+  "schema": "agent_bridge.engram_g1_4_native_sandbox_adapter_preregistration_contract.v0",
+  "contract_id": "engram_g14_native_sandbox_adapter_preregistration_20260718",
+  "stage": "g1_4_public_synthetic_native_sandbox_adapter_preregistration_design_review_only",
+  "predecessor_harness": {
+    "commit": "41bf1b9e33b73e61adc567b668cbf2ed4cb7867c",
+    "contract_id": "engram_g14_public_synthetic_protocol_harness_20260718",
+    "implementation_sha256": "52cc851419880f93d8585fee1a4378788564bbcadbeb84161d4e40e67c51ed05",
+    "checker_sha256": "bc896b9d284cc644be965dcb7fa20ea80ff5629783922ce7b54bfedd3ed9df10",
+    "contract_sha256": "6fae57e239594978810d03d2aee33133d3af8439527dd6aadef6884d5bba1b9d",
+    "fixture_sha256": "477cf9b326f52fc3f8ce9138346bb55e2692e5b473ac5f0c5d9b24e457350607",
+    "shell_entrypoint_sha256": "c236e05e22413a0cf0027a2b40e556deec7fb3c6a8319ec04d8c7d7919927425",
+    "immutable": true
+  },
+  "scope": {
+    "artifact_kind": "public_synthetic_native_sandbox_adapter_preregistration_design",
+    "future_exact_mode": "PUBLIC_SYNTHETIC_NATIVE_SANDBOX_ADAPTER_KAT",
+    "authority_class": "NONE_DESIGN_VALIDATION_ONLY",
+    "admission_effect": "NO_EXECUTION_OR_DATA_AUTHORITY",
+    "permitted_output": "closed_design_validation_receipt_no_authority",
+    "design_base_commit": "36d3e8a4f05caa2731dc8224b035e2f1ac4f4d73",
+    "permitted_changed_paths_in_order": [
+      "docs/design/ENGRAM_G1_4_NATIVE_SANDBOX_ADAPTER_PREREGISTRATION_2026_07_18.md",
+      "docs/design/ENGRAM_G1_4_NATIVE_SANDBOX_ADAPTER_PREREGISTRATION_RESULT_2026_07_18.md",
+      "scripts/check-engram-g14-native-sandbox-adapter-preregistration.sh",
+      "scripts/eval/README.md",
+      "scripts/eval/check_engram_g14_native_sandbox_adapter_preregistration.py",
+      "scripts/eval/engram_g14_native_sandbox_adapter_preregistration.py",
+      "scripts/eval/fixtures/engram_g14_native_sandbox_adapter_preregistration_contract_v0.json"
+    ],
+    "change_scope_verification_phases_in_order": [
+      "precommit",
+      "postcommit"
+    ],
+    "precommit_phase_compares_base_to_current_tree_index_worktree_and_untracked": true,
+    "postcommit_phase_requires_head_not_equal_base": true,
+    "postcommit_phase_requires_clean_tracked_index_worktree_and_untracked": true,
+    "postcommit_phase_compares_base_to_head": true,
+    "both_phases_require_exact_permitted_path_set": true,
+    "enabled_by_default": false,
+    "design_contract_only": true,
+    "public_synthetic_only": true,
+    "production_admissible": false,
+    "accepts_candidate_source_configuration_or_binary": false,
+    "accepts_fit_development_sealed_or_private_material": false,
+    "accepts_real_freeze_capability_or_run_plan": false,
+    "launches_any_process": false,
+    "compiles_or_applies_native_policy": false,
+    "observes_native_enforcement": false,
+    "modifies_workspace_sandbox_runtime": false,
+    "registers_mcp_tool_or_runtime_surface": false,
+    "touches_live_store_retrieval_or_database": false,
+    "only_permitted_successor": "separate_public_synthetic_native_sandbox_adapter_kat_implementation_gate",
+    "opens_candidate_implementation": false,
+    "opens_private_data_access": false,
+    "opens_g1_4_execution": false
+  },
+  "dependency_and_reference_lock": {
+    "adapter_dependency": "nono",
+    "exact_version": "0.53.0",
+    "cargo_manifest_requirement": "nono = { version = \"=0.53.0\", default-features = false }",
+    "cargo_lock_source": "registry+https://github.com/rust-lang/crates.io-index",
+    "cargo_lock_checksum": "ae7eb523cc2036e9ad6527411c3da5dc2172dc454cc3447a03b910420a39bfee",
+    "default_features_enabled": false,
+    "validator_helper_path": "scripts/eval/engram_g1_corpus_design.py",
+    "validator_helper_sha256": "2a408d64b34605f434377b3c11f71807f6c81068aa7bcba069c8d3a6dc44cb91",
+    "validator_helper_byte_pin_required_before_validation": true,
+    "workspace_sandbox_design_reference": "docs/design/AGENT_RUNTIME_WORKSPACE_SANDBOX_P1.md",
+    "workspace_sandbox_runtime_is_evidence_for_this_kat": false,
+    "existing_workspace_network_open_profile_is_admissible": false,
+    "existing_workspace_child_exec_success_is_admissible": false,
+    "nono_only_satisfies_all_required_canaries": false,
+    "macos_nono_profile_process_exec_and_fork_allow_is_accepted": false,
+    "dependency_source_rule_order_and_transitive_review_required_before_implementation": true,
+    "version_checksum_feature_or_rule_order_drift_requires_new_revision": true,
+    "this_gate_installs_vendors_upgrades_or_executes_dependency": false
+  },
+  "future_kat_interface": {
+    "mode": "PUBLIC_SYNTHETIC_NATIVE_SANDBOX_ADAPTER_KAT",
+    "explicit_boolean_enable_required": true,
+    "public_synthetic_fixture_marker_required": true,
+    "fixed_public_probe_required": true,
+    "probe_source_and_build_artifacts_sha256_required": true,
+    "probe_accepts_arbitrary_path_argument": false,
+    "probe_accepts_arbitrary_command_or_environment": false,
+    "probe_contains_candidate_or_private_material": false,
+    "synthetic_temporary_roots_and_sentinels_only": true,
+    "external_network_target_allowed": false,
+    "local_supervisor_endpoint_for_network_canary_only": true,
+    "required_phases_in_order": [
+      "artifact_preflight",
+      "one_shot_claim",
+      "platform_support",
+      "policy_compile",
+      "policy_apply",
+      "active_attestation",
+      "negative_controls",
+      "allowed_canaries",
+      "denied_canaries",
+      "cleanup",
+      "receipt_finalize"
+    ],
+    "phase_order_is_closed": true,
+    "out_of_order_transition_fails_closed": true,
+    "terminal_failure_is_absorbing": true
+  },
+  "enforcement_responsibility_model": {
+    "classes_in_order": [
+      "native_kernel",
+      "launch_boundary",
+      "supervisor_mediation"
+    ],
+    "native_kernel_responsibilities": [
+      "filesystem_allow_and_deny",
+      "network_deny",
+      "subprocess_creation_deny",
+      "dynamic_plugin_open_deny",
+      "wall_clock_read_deny",
+      "external_entropy_read_deny"
+    ],
+    "launch_boundary_responsibilities": [
+      "fixed_executable_and_argv",
+      "closed_environment_allowlist",
+      "close_unregistered_inherited_file_descriptors",
+      "synthetic_mount_and_scratch_binding",
+      "working_directory_binding"
+    ],
+    "supervisor_mediation_responsibilities": [
+      "closed_bounded_output_schema",
+      "stdout_stderr_and_log_capture_policy",
+      "resource_and_timeout_accounting",
+      "one_shot_attempt_registry",
+      "receipt_order_and_cleanup_accounting"
+    ],
+    "support_apply_active_and_canary_evidence_are_distinct": true,
+    "active_report_alone_is_sufficient": false,
+    "one_class_may_claim_another_class_without_evidence": false,
+    "missing_required_control_means_platform_supported": false,
+    "unsupported_platform_verdict": "REJECTED_FAIL_CLOSED"
+  },
+  "platform_adapter_plans": {
+    "darwin": {
+      "platform": "darwin",
+      "planned_primitives_in_order": [
+        "nono_0_53_0_seatbelt_filesystem_and_network",
+        "reviewed_seatbelt_or_stronger_process_creation_deny",
+        "reviewed_native_clock_and_entropy_deny",
+        "launch_boundary_fd_environment_mount_and_argv_closure",
+        "supervisor_bounded_output_resource_and_receipt_mediation"
+      ],
+      "nono_filesystem_and_network_is_sufficient_for_full_adapter": false,
+      "nono_generated_process_exec_and_fork_allow_must_be_overridden_or_replaced": true,
+      "private_var_tmp_etc_alias_order_review_required": true,
+      "network_mdns_and_local_ipc_exceptions_review_required": true,
+      "process_clock_entropy_and_plugin_canaries_required": true,
+      "supplementary_control_absent_verdict": "UNSUPPORTED_FAIL_CLOSED",
+      "fallback_to_unsandboxed_execution_allowed": false
+    },
+    "linux": {
+      "platform": "linux",
+      "planned_primitives_in_order": [
+        "outer_bwrap_mount_namespace_overlays",
+        "inner_nono_0_53_0_landlock_filesystem",
+        "nono_landlock_network_or_seccomp_network_fallback",
+        "reviewed_seccomp_or_stronger_process_clock_and_entropy_deny",
+        "launch_boundary_fd_environment_mount_and_argv_closure",
+        "supervisor_bounded_output_resource_and_receipt_mediation"
+      ],
+      "landlock_alone_is_sufficient_for_full_adapter": false,
+      "nested_outer_and_inner_filesystem_denial_required": true,
+      "landlock_abi_and_network_support_report_required": true,
+      "seccomp_fallback_semantics_and_rule_order_review_required": true,
+      "process_clock_entropy_and_plugin_canaries_required": true,
+      "supplementary_control_absent_verdict": "UNSUPPORTED_FAIL_CLOSED",
+      "fallback_to_unsandboxed_execution_allowed": false
+    }
+  },
+  "canary_matrix": {
+    "required_canaries_in_order": [
+      {
+        "name": "candidate_code_read",
+        "expected": "allow",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "registered_public_probe_source_root"
+      },
+      {
+        "name": "dependency_read",
+        "expected": "allow",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "registered_public_probe_dependency_root"
+      },
+      {
+        "name": "ephemeral_scratch_write",
+        "expected": "allow",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "per_attempt_ephemeral_scratch_root"
+      },
+      {
+        "name": "repository_metadata_read",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "synthetic_repository_metadata_sentinel"
+      },
+      {
+        "name": "private_manifest_read",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "synthetic_private_manifest_sentinel"
+      },
+      {
+        "name": "live_store_read",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "synthetic_live_store_sentinel"
+      },
+      {
+        "name": "network_connect",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "loopback_supervisor_canary_endpoint"
+      },
+      {
+        "name": "subprocess_spawn",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "fixed_inert_public_helper"
+      },
+      {
+        "name": "dynamic_plugin_load",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "fixed_public_plugin_sentinel"
+      },
+      {
+        "name": "non_scratch_write",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "synthetic_non_scratch_write_sentinel"
+      },
+      {
+        "name": "wall_clock_read",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "fixed_public_clock_probe"
+      },
+      {
+        "name": "external_entropy_read",
+        "expected": "deny",
+        "evidence_owner": "native_kernel",
+        "synthetic_target": "fixed_public_entropy_probe"
+      },
+      {
+        "name": "extra_inherited_fd_use",
+        "expected": "deny",
+        "evidence_owner": "launch_boundary",
+        "synthetic_target": "registered_extra_pipe_descriptor"
+      },
+      {
+        "name": "free_form_output",
+        "expected": "deny",
+        "evidence_owner": "supervisor_mediation",
+        "synthetic_target": "fixed_oversized_or_unknown_field_output"
+      }
+    ],
+    "exact_order_required": true,
+    "every_observation_must_equal_expected": true,
+    "allow_canary_count": 3,
+    "deny_canary_count": 11,
+    "all_fourteen_required_for_platform_support": true,
+    "partial_canary_pass_is_success": false
+  },
+  "negative_control_model": {
+    "every_canary_requires_registered_liveness_control": true,
+    "allowed_canary_control_removes_exact_registered_grant_and_must_deny": true,
+    "denied_canary_control_runs_outside_target_enforcement_only": true,
+    "denied_canary_control_must_succeed_before_enforced_denial_is_admissible": true,
+    "control_attempt_ids_are_distinct_and_bound_to_parent_run": true,
+    "control_execution_is_never_subject_execution_or_unsandboxed_fallback": true,
+    "negative_controls_use_synthetic_temporary_resources_only": true,
+    "negative_controls_may_read_real_repository_private_or_live_store": false,
+    "negative_controls_may_contact_external_network": false,
+    "network_control_uses_loopback_supervisor_endpoint_only": true,
+    "subprocess_control_uses_fixed_inert_public_helper_only": true,
+    "output_control_uses_fixed_public_payload_only": true,
+    "control_failure_or_ambiguity_invalidates_entire_attempt": true,
+    "negative_control_success_is_native_enforcement_proof": false
+  },
+  "run_lifecycle_model": {
+    "one_shot_run_id_required": true,
+    "run_id_claimed_before_attempt_specific_validation": true,
+    "fresh_synthetic_root_per_attempt_required": true,
+    "fixed_probe_fresh_process_required": true,
+    "support_compile_apply_active_canary_and_cleanup_receipts_required": true,
+    "timeout_crash_signal_schema_resource_or_policy_fault_is_failure": true,
+    "any_fault_invalidates_entire_attempt": true,
+    "selective_retry_or_partial_rerun_forbidden": true,
+    "invalidated_run_id_cannot_be_reused": true,
+    "automatic_cleanup_and_rollback_required": true,
+    "cleanup_failure_requires_minimal_durable_lesson": true,
+    "cleanup_failure_blocks_new_run_claim_until_lesson_is_durable_and_verified": true,
+    "partial_or_intermediate_results_released": false
+  },
+  "future_receipt_state_machine": {
+    "phase_receipts_in_order": [
+      {
+        "phase": "artifact_preflight",
+        "schema": "agent_bridge.engram_g1_4_native_kat_artifact_preflight_receipt.v0",
+        "evidence_source": "supervisor_prelaunch_verifier",
+        "required_payload_fields_in_order": [
+          "contract_sha256",
+          "probe_source_sha256",
+          "probe_build_sha256",
+          "dependency_lock_sha256",
+          "fixture_sha256"
+        ]
+      },
+      {
+        "phase": "one_shot_claim",
+        "schema": "agent_bridge.engram_g1_4_native_kat_one_shot_claim_receipt.v0",
+        "evidence_source": "supervisor_attempt_registry",
+        "required_payload_fields_in_order": [
+          "run_id_commitment_sha256",
+          "claim_sequence",
+          "claim_consumed"
+        ]
+      },
+      {
+        "phase": "platform_support",
+        "schema": "agent_bridge.engram_g1_4_native_kat_platform_support_receipt.v0",
+        "evidence_source": "supervisor_captured_platform_probe",
+        "required_payload_fields_in_order": [
+          "platform",
+          "kernel_and_abi_commitment_sha256",
+          "primitive_support_matrix_sha256",
+          "all_required_controls_supported"
+        ]
+      },
+      {
+        "phase": "policy_compile",
+        "schema": "agent_bridge.engram_g1_4_native_kat_policy_compile_receipt.v0",
+        "evidence_source": "supervisor_captured_policy_compiler",
+        "required_payload_fields_in_order": [
+          "policy_input_sha256",
+          "generated_policy_sha256",
+          "dependency_and_rule_order_sha256",
+          "compile_succeeded"
+        ]
+      },
+      {
+        "phase": "policy_apply",
+        "schema": "agent_bridge.engram_g1_4_native_kat_policy_apply_receipt.v0",
+        "evidence_source": "native_apply_boundary_captured_by_supervisor",
+        "required_payload_fields_in_order": [
+          "generated_policy_sha256",
+          "subject_process_identity_commitment_sha256",
+          "apply_result_code",
+          "apply_succeeded"
+        ]
+      },
+      {
+        "phase": "active_attestation",
+        "schema": "agent_bridge.engram_g1_4_native_kat_active_attestation_receipt.v0",
+        "evidence_source": "native_subject_boundary_captured_by_supervisor",
+        "required_payload_fields_in_order": [
+          "support_receipt_sha256",
+          "apply_receipt_sha256",
+          "subject_process_identity_commitment_sha256",
+          "active_reported"
+        ]
+      },
+      {
+        "phase": "negative_controls",
+        "schema": "agent_bridge.engram_g1_4_native_kat_negative_controls_receipt.v0",
+        "evidence_source": "supervisor_control_runner",
+        "required_payload_fields_in_order": [
+          "control_fixture_sha256",
+          "control_attempt_set_sha256",
+          "live_control_count",
+          "all_controls_unambiguous"
+        ]
+      },
+      {
+        "phase": "allowed_canaries",
+        "schema": "agent_bridge.engram_g1_4_native_kat_allowed_canaries_receipt.v0",
+        "evidence_source": "sandboxed_probe_captured_by_supervisor",
+        "required_payload_fields_in_order": [
+          "subject_process_identity_commitment_sha256",
+          "allowed_canary_observations_sha256",
+          "allowed_canary_count",
+          "all_allowed_canaries_matched"
+        ]
+      },
+      {
+        "phase": "denied_canaries",
+        "schema": "agent_bridge.engram_g1_4_native_kat_denied_canaries_receipt.v0",
+        "evidence_source": "sandboxed_probe_captured_by_supervisor",
+        "required_payload_fields_in_order": [
+          "subject_process_identity_commitment_sha256",
+          "denied_canary_observations_sha256",
+          "denied_canary_count",
+          "all_denied_canaries_matched"
+        ]
+      },
+      {
+        "phase": "cleanup",
+        "schema": "agent_bridge.engram_g1_4_native_kat_cleanup_receipt.v0",
+        "evidence_source": "supervisor_cleanup_verifier",
+        "required_payload_fields_in_order": [
+          "synthetic_root_commitment_sha256",
+          "cleanup_target_set_sha256",
+          "residue_count",
+          "cleanup_verified"
+        ]
+      },
+      {
+        "phase": "receipt_finalize",
+        "schema": "agent_bridge.engram_g1_4_native_kat_final_receipt.v0",
+        "evidence_source": "supervisor_receipt_finalizer",
+        "required_payload_fields_in_order": [
+          "previous_event_sha256",
+          "expected_chain_head_sha256",
+          "authority_class",
+          "production_admissible",
+          "g1_4_execution_open",
+          "verdict"
+        ]
+      }
+    ],
+    "each_phase_emits_exactly_one_receipt": true,
+    "every_phase_schema_is_distinct": true,
+    "receipt_sequence_exactly_matches_phase_order": true,
+    "every_receipt_binds_run_contract_and_previous_event": true,
+    "evidence_source_identity_commitment_required": true,
+    "phase_receipt_may_substitute_for_another_phase": false,
+    "aggregate_all_true_report_is_admissible": false,
+    "missing_duplicate_reordered_or_source_unbound_receipt_invalidates_attempt": true
+  },
+  "rollback_lesson_model": {
+    "schema": "agent_bridge.engram_g1_4_native_kat_rollback_failure_lesson.v0",
+    "writer": "supervisor_only",
+    "durable_store_location_class": "agent_bridge_state_dir/engram_g14_public_synthetic_native_kat/rollback_lessons_v0",
+    "storage_profile": "versioned_one_record_per_file_create_new_fsync_file_and_directory",
+    "required_payload_fields_in_order": [
+      "lesson_id_sha256",
+      "parent_run_id_commitment_sha256",
+      "failure_phase",
+      "reason_code",
+      "cleanup_target_set_sha256",
+      "residue_count",
+      "lesson_sequence",
+      "previous_lesson_sha256",
+      "lesson_sha256"
+    ],
+    "raw_paths_candidate_private_logs_or_free_form_text_allowed": false,
+    "writer_reopens_and_verifies_durable_bytes_before_acknowledgement": true,
+    "new_run_claim_blocked_until_required_lesson_is_durable_and_verified": true,
+    "lesson_write_or_integrity_failure_is_absorbing": true,
+    "lesson_store_implemented_or_written_by_this_gate": false
+  },
+  "receipt_and_anchor_model": {
+    "closed_receipt_schema_required": true,
+    "bounded_output_required": true,
+    "receipt_binds_predecessor_contract_probe_build_platform_dependency_policy_mount_environment_output_resource_and_run": true,
+    "support_compile_apply_active_negative_control_canary_cleanup_and_verdict_fields_required": true,
+    "append_only_sequence_and_hash_chain_required": true,
+    "payload_embedded_and_commitment_recomputed_on_verify": true,
+    "expected_chain_head_frozen_before_untrusted_probe_launch": true,
+    "independent_checker_constructs_expected_chain": true,
+    "process_local_self_consistent_chain_is_authenticity_proof": false,
+    "durable_authenticated_prelaunch_anchor_required_before_real_candidate_runner": true,
+    "durable_authenticated_anchor_implemented_by_this_gate": false,
+    "raw_paths_logs_environment_values_or_free_form_probe_text_in_public_receipt": false,
+    "successful_kat_receipt_authorizes_candidate_or_private_execution": false
+  },
+  "human_audit_policy": {
+    "routine_design_validation_requires_human_approval": false,
+    "unchanged_public_synthetic_kat_requires_per_run_human_approval": false,
+    "fail_closed_denial_requires_human_approval": false,
+    "reversible_failure_requires_automatic_rollback": true,
+    "rollback_failure_requires_durable_lesson": true,
+    "manual_safety_audit_is_a_per_run_gate": false,
+    "manual_safety_audit_required_for": [
+      "first_real_freeze_capability_consumption_or_private_run_plan_open",
+      "candidate_or_runner_source_config_dependency_or_toolchain_change_after_final_lock",
+      "fit_development_sealed_or_partition_access_policy_widening",
+      "metric_threshold_arm_resource_retry_or_missingness_policy_change_after_any_observation",
+      "sealed_partition_unblinding_selective_retry_or_rerun",
+      "sandbox_filesystem_network_subprocess_log_output_or_side_channel_policy_widening_after_preregistration_or_any_real_runner_policy_change",
+      "first_real_protocol_runner_enablement",
+      "suspected_secret_privacy_identity_corpus_or_result_exposure"
+    ],
+    "manual_audit_outcome_may_be_inferred_by_validator": false
+  },
+  "threat_model": {
+    "all_controls_are_future_requirements_not_current_implementation": true,
+    "unimplemented_control_verdict": "REJECTED_FAIL_CLOSED",
+    "required_threats": [
+      {
+        "threat": "synthetic_kat_evidence_laundered_into_candidate_authority",
+        "required_control": "closed_no_authority_receipt_and_separate_successor_gate",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "nono_active_flag_misrepresented_as_complete_enforcement",
+        "required_control": "separate_support_apply_active_negative_control_and_fourteen_canary_evidence",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "macos_process_exec_or_fork_escape",
+        "required_control": "reviewed_process_creation_deny_plus_subprocess_canary",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "linux_mount_or_landlock_layer_bypass",
+        "required_control": "outer_bwrap_inner_landlock_and_nested_denial_canaries",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "network_mdns_loopback_or_seccomp_exception",
+        "required_control": "exact_rule_review_and_loopback_supervisor_deny_canary",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "clock_entropy_or_plugin_side_channel",
+        "required_control": "separate_native_controls_and_dedicated_canaries",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "inherited_fd_environment_mount_or_argv_smuggling",
+        "required_control": "closed_launch_boundary_and_extra_fd_canary",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "stdout_stderr_log_or_schema_exfiltration",
+        "required_control": "closed_bounded_supervisor_output_and_free_form_output_canary",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "dead_or_vacuous_canary_false_pass",
+        "required_control": "registered_synthetic_liveness_negative_control_for_every_canary",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "selective_retry_or_partial_pass_bias",
+        "required_control": "prevalidation_one_shot_claim_and_whole_attempt_invalidation",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "cleanup_rollback_or_sentinel_residue",
+        "required_control": "verified_cleanup_receipt_durable_failure_lesson_and_new_run_interlock",
+        "current_status": "preregistered_unimplemented"
+      },
+      {
+        "threat": "self_consistent_but_forged_receipt_chain",
+        "required_control": "prelaunch_expected_head_independent_checker_and_future_durable_authenticated_anchor",
+        "current_status": "preregistered_unimplemented"
+      }
+    ]
+  },
+  "state_machine": {
+    "current_state": "PUBLIC_SYNTHETIC_NATIVE_SANDBOX_ADAPTER_PREREGISTERED_DESIGN_ONLY",
+    "representable_states": [
+      "DESIGN_VALIDATED_NO_AUTHORITY",
+      "REJECTED_FAIL_CLOSED"
+    ],
+    "native_adapter_preregistration_present": true,
+    "native_adapter_implementation_present": false,
+    "native_policy_execution_present": false,
+    "public_probe_implementation_present": false,
+    "candidate_implementation_present": false,
+    "real_freeze_capability_present": false,
+    "private_run_plan_present": false,
+    "positive_execution_or_data_authority_state_representable": false
+  },
+  "boundaries": {
+    "predecessor_harness_bound": true,
+    "native_adapter_design_preregistered": true,
+    "native_adapter_implemented": false,
+    "native_enforcement_verified": false,
+    "public_native_kat_executed": false,
+    "candidate_manifest_access_authority": false,
+    "candidate_fit_access_authority": false,
+    "candidate_development_access_authority": false,
+    "candidate_sealed_access_authority": false,
+    "candidate_implementation_authority": false,
+    "protocol_execution_authority": false,
+    "sealed_evaluation_authority": false,
+    "result_unblinding_or_release_authority": false,
+    "biocortex_experiment_execution_authority": false,
+    "retrieval_order_mutation_authority": false,
+    "live_store_write_authority": false,
+    "runtime_promotion_authority": false
+  }
+}
