@@ -1558,3 +1558,18 @@ bound, or execution authorization. The exact peak and strict comparison to
 the unchanged `2^31` cap remain unknown; all seven obligations and execution
 remain closed. Any new evidence acquisition, byte proof, or execution review
 requires independent governance.
+
+## Majorana P10-G2 closes the current Julia byte-proof route
+
+P10-G2 validates P10-B directly and closes the attempt to derive a static
+process-byte proof from the current frozen Julia/runtime inventory. This is a
+scoped route closure, not a global impossibility or resource no-go. Peak bytes
+and the strict comparison to the unchanged `2^31` cap remain unknown.
+
+The only successor is the nonexecuting
+`P11-A-EXPLICIT-MEMORY-KERNEL-FEASIBILITY-DESIGN-V1`. It may assess fixed
+capacity/arena ownership, fixed-width 2048-bit arithmetic, deterministic
+workspace bounds, runtime terms, lifetime overlap, and an independent checker.
+It may not implement, compile, benchmark, execute, acquire external sources,
+or change the frozen scientific schedule. Any implementation requires another
+independent governance decision.

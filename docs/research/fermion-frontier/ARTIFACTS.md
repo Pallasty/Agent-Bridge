@@ -1492,3 +1492,16 @@ so they are versioned normally and are not added to the preservation-only
   attribution, or permission to execute Julia/the candidate. It leaves peak
   bytes and strict cap comparison unknown; any future evidence or execution
   needs fresh independent governance.
+
+## Majorana P10-G2 post-audit governance closure
+
+- `majorana_certificate_p10_g2_post_audit_governance_contract.json` and
+  `majorana_certificate_p10_g2_post_audit_governance_record.json`: validate
+  P10-B custody, close the current frozen Julia static-byte route, and open
+  only nonexecuting P11-A explicit-memory design work.
+- `majorana_certificate_p10_g2_post_audit_governance_validator.py` and
+  `test_majorana_certificate_p10_g2_post_audit_governance.py`: read-only Git
+  topology, blob custody, canonical decision, authority, and exact-lifecycle
+  checks.
+- P11-A has no implementation, compilation, external acquisition, benchmark,
+  Julia/candidate execution, cap-change, or scientific-result authority.
