@@ -1582,3 +1582,17 @@ so they are versioned normally and are not added to the preservation-only
   standard-library rederivation plus overlap, shrink, capacity, load-factor,
   scratch, arena, target-total, headroom, and checkpoint mutation checks. They
   do not import the P11-B validator/report or execute candidate code.
+
+## Majorana P11-G3 evidence-feasibility governance
+
+- `majorana_certificate_p11_g3_evidence_feasibility_governance_contract.json`
+  and `majorana_certificate_p11_g3_evidence_feasibility_governance_record.json`:
+  validate P11-C custody and authorize only a read-only P11-D source-custody
+  and static-runtime evidence-feasibility audit.
+- `majorana_certificate_p11_g3_evidence_feasibility_governance_validator.py`
+  and `test_majorana_certificate_p11_g3_evidence_feasibility_governance.py`:
+  read-only Git topology, three-blob custody, canonical-record, authority, and
+  exact-lifecycle checks.
+- Official documentation and existing local package/kernel/cgroup metadata may
+  be read. Archive download, package mutation, candidate source, compile/link,
+  execution, exact-peak, headroom, and semantic claims remain forbidden.

@@ -1676,3 +1676,18 @@ contract-level artifact readiness only. There is still no candidate source,
 toolchain source archive, postlink/stack proof, kernel accounting bound,
 implementation-path arithmetic proof, semantic equivalence, or exact process
 peak; implementation and execution remain closed.
+
+## Majorana P11-G3 opens only an evidence-feasibility audit
+
+P11-G3 validates the P11-C partial static-artifact closure without treating it
+as toolchain-source custody, kernel-accounting, exact-peak, headroom, or
+semantic-equivalence evidence. It opens only
+`P11-D-SOURCE-CUSTODY-AND-STATIC-RUNTIME-EVIDENCE-FEASIBILITY-AUDIT-V1`.
+
+P11-D may read existing package-manager, documentation, kernel, procfs and
+cgroup metadata and retrieve official primary documentation. It may classify
+whether auditable source-archive pinning and static kernel/cgroup accounting
+routes exist. It may not update package indexes, install or download archives,
+write candidate or linker-script source, compile, execute, benchmark, run
+Julia/candidates, change semantics, or relax the 2 GiB cap. All possible audit
+outcomes keep implementation and execution closed.
