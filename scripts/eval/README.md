@@ -468,6 +468,34 @@ The score claim is not an operator argument. V3 derives one fixed private
 claim path from the frozen contract hash before unblinding, so changing the
 score output path cannot create another allowance.
 
+## Engram G1.4 stronger clock-isolation primitive review
+
+`engram_g14_strong_clock_isolation_review.py` renders a bounded deterministic
+public receipt from the fixed static review contract. The semantic checker
+locks the accepted negative-KAT lineage, nono 0.53.0 metadata, primary-source
+claims, the ordered candidate matrix, the WASI-primary/QEMU-fallback decision,
+the supervisor-authority overlay, future gates, human-audit transition, and
+all nonclaims. It applies no policy and starts no sandbox, component, VM,
+candidate, private evaluator, or capability path.
+
+```bash
+scripts/check-engram-g14-strong-clock-isolation-review.sh --phase precommit
+# After committing the exact seven-path design-only change:
+scripts/check-engram-g14-strong-clock-isolation-review.sh --phase postcommit
+```
+
+The checker is deliberately not self-authenticating and a passing run is not
+acceptance authority. An independent read-only reviewer must produce a
+manifest pinning its session and PASS verdict to the exact feature commit,
+tree, checker hash, and SHA-256 of all seven feature paths. That manifest must
+be published and verified out of band in the Agent-Bridge forum. Until then,
+no implementation, run, candidate/private, runtime, deployment, or G1.4
+authority exists.
+
+The selected next route is a separate static `G2_WASI_PREREGISTRATION`; this
+review itself authorizes neither that feasibility run nor any QEMU/native,
+candidate/private, runtime, deployment, or G1.4 action.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
