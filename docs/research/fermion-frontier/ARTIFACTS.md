@@ -1565,3 +1565,20 @@ so they are versioned normally and are not added to the preservation-only
   arithmetic, target-total, and prelude artifacts. Candidate source, linker
   scripts, compilation, execution, network acquisition, peak/headroom claims,
   and semantic-equivalence claims remain forbidden.
+
+## Majorana P11-C static proof artifacts
+
+- `majorana_certificate_p11c_static_proof_artifact_contract.json`: P11-G2
+  authority, frozen inputs, proof scope, nine adversarial mutations, partial
+  section dispositions, and exact seven-path lifecycle.
+- `majorana_certificate_p11c_static_proof_artifact_manifest.json`: canonical,
+  independently derived slot/padding, term-table, arena-interval, arithmetic,
+  runtime-target, and prelude-checkpoint manifest.
+- `majorana_certificate_p11c_static_proof_artifact_report.json`: canonical
+  partial-closure result with implementation, execution, equivalence,
+  headroom, exact-peak, resource/no-go, S0, and scientific claims closed.
+- `majorana_certificate_p11c_static_proof_artifact_independent_checker.py` and
+  `test_majorana_certificate_p11c_static_proof_artifact.py`: standalone
+  standard-library rederivation plus overlap, shrink, capacity, load-factor,
+  scratch, arena, target-total, headroom, and checkpoint mutation checks. They
+  do not import the P11-B validator/report or execute candidate code.

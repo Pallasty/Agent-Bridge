@@ -1652,3 +1652,27 @@ can close only contract-level static-artifact readiness. Toolchain source
 custody, postlink/stack evidence, kernel accounting, implementation semantics,
 and an exact process peak remain outside this gate and require later evidence
 and fresh governance.
+
+## Majorana P11-C establishes contract-level static proof artifacts
+
+P11-C independently parses the raw P11-B contract without importing its
+validator or report. The canonical manifest rederives seven slot layouts,
+including the three unassigned bytes at TERM offsets 49--51 and one at RANK
+offset 305; all four are now explicit zero-padding obligations. It also
+rederives the half-full term-table equation, eight contiguous 64-byte-aligned
+arena intervals totaling 872,415,232 bytes, 2048-bit storage and a 2112-bit
+scratch with 62 bits above the largest 2050-bit contract row.
+
+The independent checker confirms that the eight target components sum to
+1,028,653,056 bytes and leave a numerical difference of 1,118,830,592 bytes
+to the fixed 2 GiB cap, while rejecting any headroom or exact-peak inference.
+It also pins the Step1, Step2 and trigonometric checkpoint custody and rejects
+nine adversarial layout, capacity, arithmetic, arena, runtime and checkpoint
+mutations.
+
+The scoped outcome is
+`STATIC_PROOF_ARTIFACTS_ESTABLISHED_PARTIAL_OBLIGATION_CLOSURE`. This closes
+contract-level artifact readiness only. There is still no candidate source,
+toolchain source archive, postlink/stack proof, kernel accounting bound,
+implementation-path arithmetic proof, semantic equivalence, or exact process
+peak; implementation and execution remain closed.
