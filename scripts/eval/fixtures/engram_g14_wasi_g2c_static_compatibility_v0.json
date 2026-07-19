@@ -1,0 +1,86 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2c_static_compatibility.v0",
+  "mode": "PUBLIC_STATIC_NO_SOURCE_NO_BUILD_NO_RUN",
+  "upstream": {
+    "repository": "bytecodealliance/wasmtime",
+    "tag": "v46.0.1",
+    "commit": "823d1b8f251494a06288194d0df746191f535ff7"
+  },
+  "binding_generator": {
+    "api": "wasmtime::component::bindgen!",
+    "source_path": "crates/component-macro/src/bindgen.rs",
+    "git_blob": "b651b867f34e408b46e5574b021f9521378a2fda",
+    "raw_sha256": "24322565687cf99d6272b01fc887edc5b6cd58a8a012076029fd4c9e81e02cc7",
+    "static_public_api_compatible": true,
+    "bindings_compiled": false
+  },
+  "wit_packages": [
+    {
+      "package": "wasi:clocks@0.2.12",
+      "source_path": "crates/wasi/src/p2/wit/deps/clocks.wit",
+      "git_blob": "06b7d8b2579e4d1aae4b0a8a90b61adc001236f7",
+      "raw_sha256": "6ed8aa65bb8cbe224a0b2cbac9fc1b3bd25bdb17eda5ae0d23c983ed31c447cc"
+    },
+    {
+      "package": "wasi:io@0.2.12",
+      "source_path": "crates/wasi/src/p2/wit/deps/io.wit",
+      "git_blob": "543cbfc62cfa3712628dc0adad54318a3f82cd48",
+      "raw_sha256": "96e206d00076fa0480df32c5bcf255a3fa4862805ac2f6b8537a781cce54f433"
+    }
+  ],
+  "exact_world_design": {
+    "future_world": "agent-bridge:g14-clock-probe/probe@0.1.0",
+    "imports_in_order": [
+      "wasi:clocks/wall-clock@0.2.12",
+      "wasi:clocks/monotonic-clock@0.2.12",
+      "wasi:io/poll@0.2.12"
+    ],
+    "custom_wit_authored": false,
+    "component_or_host_source_authored": false,
+    "compiled_import_graph_observed": false
+  },
+  "minimal_graph": {
+    "manifest_sha256": "ec21411297f03e4c46d1c6520b86f2dca6309abc03069cf885ea9300a030dc54",
+    "lockfile_sha256": "ad53efcd1ac44e8fa10e5943c873bc02cdceeae12d34784fbf60a6c81793db6d",
+    "wasmtime_features_in_order": [
+      "component-model",
+      "cranelift",
+      "once_cell",
+      "runtime",
+      "std",
+      "wasmtime-jit-icache-coherence"
+    ],
+    "excluded_packages": [
+      "wasmtime-wasi",
+      "wasmtime-wasi-io",
+      "tokio",
+      "cap-time-ext",
+      "system-interface"
+    ],
+    "resolver_only_no_compile": true
+  },
+  "direct_timer_host_design": {
+    "single_logical_clock_authority": true,
+    "wall_clock_now_and_resolution": "DIRECT_LOGICAL_CLOCK_READ",
+    "monotonic_now_resolution_and_deadline_subscription": "DIRECT_LOGICAL_CLOCK_READ_AND_DEADLINE_REGISTRATION",
+    "poll_readiness": "DIRECT_SAME_LOGICAL_CLOCK_DEADLINE_EVALUATION",
+    "exact_world_linker_only": true,
+    "forbidden_paths": [
+      "wasmtime_wasi_broad_linker",
+      "wasmtime_wasi_io_broad_linker",
+      "tokio_time_sleep_or_instant",
+      "ambient_host_clock_fallback",
+      "native_or_qemu_fallback"
+    ],
+    "design_complete": true,
+    "source_level_bypass_proven": false,
+    "built_linker_bypass_proven": false
+  },
+  "claim_boundary": {
+    "B0_static_WIT_bindgen_compatibility_complete": true,
+    "B0_direct_timer_design_complete": true,
+    "B1_source_proof_required_after_separate_source_authorization": true,
+    "B2_compiled_compatibility_and_linker_proof_required_after_separate_build_authorization": true,
+    "source_build_run_or_dependency_promotion_authority": false
+  }
+}

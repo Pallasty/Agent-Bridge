@@ -1,0 +1,43 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2c_release_archive_receipt.v0",
+  "repository": "bytecodealliance/wasmtime",
+  "tag": "v46.0.1",
+  "git_commit": "823d1b8f251494a06288194d0df746191f535ff7",
+  "github_release_id": 344307162,
+  "asset_name": "wasmtime-v46.0.1-src.tar.gz",
+  "asset_url": "https://github.com/bytecodealliance/wasmtime/releases/download/v46.0.1/wasmtime-v46.0.1-src.tar.gz",
+  "expected_size": 152108252,
+  "observed_size": 152108252,
+  "official_sha256": "7c61526bc1b4099d8ac80a03d32e738387e7d76877321e473b8e6d5c82320532",
+  "observed_sha256": "7c61526bc1b4099d8ac80a03d32e738387e7d76877321e473b8e6d5c82320532",
+  "verification": {
+    "node": "aio2",
+    "transport": "HTTPS_LOCATION_FOLLOWED",
+    "size_tool": "stat",
+    "digest_tool": "sha256sum",
+    "completed_utc_date": "2026-07-19"
+  },
+  "complete_payload_verified": true,
+  "archive_executed_or_extracted": false,
+  "inherited_crate_payloads": [
+    {
+      "name": "wasmtime",
+      "version": "46.0.1",
+      "sha256": "c4213d2f019a5e44aa8a61d8826dd33a505bff79f749b14a8bafd67321cb9351",
+      "locally_verified_in_G2A": true
+    },
+    {
+      "name": "wasmtime-wasi",
+      "version": "46.0.1",
+      "sha256": "e9f65ef30a2c5478873cdb619085a7a649d3ce41cc3eaf298a7ce3dee96a8e11",
+      "locally_verified_in_G2A": true
+    },
+    {
+      "name": "wasmtime-wasi-io",
+      "version": "46.0.1",
+      "sha256": "cee57d5fef4976b1ab542615f4cef2c43278eb549d8078939668ea0f13d5c696",
+      "locally_verified_in_G2A": true
+    }
+  ],
+  "source_or_build_authority": false
+}
