@@ -545,6 +545,25 @@ and an out-of-band feature commit/tree/checker/all-path hash manifest remain
 required. No source, build, run, dependency/runtime promotion,
 candidate/private access, deployment, canary change, or G1.4 authority exists.
 
+## G2B WASI artifact ordering repair
+
+`check-engram-g14-wasi-g2b-ordering-repair.sh` validates the static repair that
+splits G2's impossible one-shot artifact gate into `B0_PRE_SOURCE`,
+`B1_POST_SOURCE_PRE_BUILD`, and `B2_POST_BUILD_PRE_RUN`. Evidence is required
+after it can causally exist and before the next risk-increasing action. Every
+barrier is fail closed, ordered, drift-invalidated, and incapable of granting
+source/build/run authority by itself.
+
+```bash
+scripts/check-engram-g14-wasi-g2b-ordering-repair.sh --phase precommit
+scripts/check-engram-g14-wasi-g2b-ordering-repair.sh --phase postcommit
+```
+
+The current state remains `PRE_SOURCE_EVIDENCE_INCOMPLETE`; No authority. The
+only successor is public/static/no-run
+`G2C_PRE_SOURCE_EVIDENCE_COMPLETION_REVIEW`, which may close B0 evidence only
+and cannot authorize source.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
