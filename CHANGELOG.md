@@ -8,6 +8,16 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Default-off ChatGPT P2B synthetic HTTP/OAuth lab.** A separate
+  `mcp-http-auth-lab` command now provides a loopback-only, non-production
+  Streamable HTTP resource-server harness using MCP 2025-11-25 semantics,
+  RFC 9728 metadata/challenges, static public RSA JWKS verification, exact
+  issuer/audience/time/scope/client/subject policy, Origin validation, and one
+  read-only authenticated-subject diagnostic. Negative KATs cover missing or
+  forged tokens, claim/policy mismatches, and caller `_meta` spoofing. The lab
+  is hard-coded non-executing, requires `mode=synthetic_lab`, and does not add
+  an authorization server, live identity provider, tunnel/profile change,
+  production deployment, request executor, or ChatGPT write capability.
 - **ChatGPT authenticated-subject P2A trust boundary.** MCP tool context now
   records its server-owned transport kind and reserves a transport-constructed
   `VerifiedOAuthSubject` for future cryptographically verified HTTP calls.

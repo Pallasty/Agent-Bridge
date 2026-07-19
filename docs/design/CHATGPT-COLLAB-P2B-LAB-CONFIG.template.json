@@ -1,0 +1,38 @@
+{
+  "mode": "synthetic_lab",
+  "listen": "127.0.0.1:18789",
+  "resource": "http://127.0.0.1:18789/mcp",
+  "issuer": "https://replace-with-test-issuer.example",
+  "authorization_servers": [
+    "https://replace-with-test-issuer.example"
+  ],
+  "required_scopes": [
+    "agent-bridge:subject.read"
+  ],
+  "allowed_origins": [
+    "https://chatgpt.com"
+  ],
+  "clock_skew_secs": 30,
+  "max_token_lifetime_secs": 900,
+  "jwks": {
+    "keys": [
+      {
+        "kty": "RSA",
+        "kid": "replace-with-test-key-id",
+        "alg": "RS256",
+        "use": "sig",
+        "n": "replace-with-base64url-rsa-modulus",
+        "e": "AQAB"
+      }
+    ]
+  },
+  "subjects": [
+    {
+      "subject": "replace-with-external-test-subject",
+      "local_subject": "replace-with-local-policy-subject",
+      "allowed_client_ids": [
+        "replace-with-test-oauth-client-id"
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 //! We deliberately keep these minimal: only the fields the server needs to
 //! parse from clients, plus the fields we emit. Unknown fields are tolerated.
 
-use crate::ToolAnnotations;
+use crate::{ToolAnnotations, ToolSecurityScheme};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -133,6 +133,8 @@ pub struct ToolDefinition {
     pub annotations: Option<ToolAnnotations>,
     #[serde(rename = "outputSchema", skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
+    #[serde(rename = "securitySchemes", skip_serializing_if = "Option::is_none")]
+    pub security_schemes: Option<Vec<ToolSecurityScheme>>,
 }
 
 #[derive(Debug, Clone, Serialize)]

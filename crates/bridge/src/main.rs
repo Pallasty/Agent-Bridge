@@ -87,6 +87,16 @@ enum Cmd {
     Daemon,
     /// Run as an MCP stdio server (for `claude mcp add agent-bridge ...`).
     Mcp,
+    /// Run the synthetic loopback HTTP/OAuth MCP lab.
+    ///
+    /// This is a default-off verification surface, not a production server.
+    /// The config must explicitly declare `mode: "synthetic_lab"`; the
+    /// listener and resource URL must both resolve to the same loopback socket.
+    McpHttpAuthLab {
+        /// Synthetic lab JSON config containing public JWKS and subject policy.
+        #[arg(long)]
+        config: PathBuf,
+    },
     /// Deployment self-check: verify the wrapper is intact (not clobbered by a
     /// direct binary), agent-bridge.real exists, the SVD projection env is
     /// injected + its artifact resolvable, the running daemon carries the SVD
@@ -4407,6 +4417,21 @@ async fn dim_guard_strict_preflight(store: &Arc<dyn StateStore>) {
 }
 
 async fn real_main() -> Result<()> {
+    let cli = Cli::parse();
+    let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
+
+    // The synthetic auth lab is intentionally isolated from every Agent-Bridge
+    // backend. Handle it before loading the credential notebook, optional Seed
+    // substrate, SQLite store, browser, terminal, or agent runtime.
+    if let Cmd::McpHttpAuthLab { config } = &cmd {
+        tracing_subscriber::registry()
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+        ab_mcp::http_auth_lab::serve_from_path(config.clone()).await?;
+        return Ok(());
+    }
+
     // Load API tokens from the user's plaintext creds notebook before any
     // worker thread can read env. Self-heals after a `cargo install` that
     // overwrites the shell wrapper. See `creds.rs` for resolution order.
@@ -4424,9 +4449,6 @@ async fn real_main() -> Result<()> {
             tracing::info!("seed-bridge installed (v22 phase 2.2)");
         }
     }
-
-    let cli = Cli::parse();
-    let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
 
     // Setup runs synchronously, no async runtime needed beyond tokio's shell.
     if let Cmd::Setup {
@@ -7735,6 +7757,7 @@ async fn real_main() -> Result<()> {
             }
             serve(&socket, Router::new(hub)).await
         }
+        Cmd::McpHttpAuthLab { .. } => unreachable!("synthetic auth lab handled before Hub setup"),
         Cmd::Mcp => {
             let tool_backend_id = json!({
                 "terminal": hub.terminal.as_ref().map(|t| t.id()).unwrap_or("none"),

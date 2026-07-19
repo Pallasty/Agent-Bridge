@@ -678,6 +678,7 @@ fn tools_list_result_from_schemas(
             schema,
             annotations: None,
             output_schema: None,
+            security_schemes: None,
         })
         .collect();
     tools_list_result_from_descriptors(&descriptors, params, page_size)
@@ -701,6 +702,7 @@ fn tools_list_result_from_descriptors(
             input_schema: t.schema.input_schema.clone(),
             annotations: t.annotations,
             output_schema: t.output_schema.clone(),
+            security_schemes: t.security_schemes.clone(),
         })
         .collect();
 

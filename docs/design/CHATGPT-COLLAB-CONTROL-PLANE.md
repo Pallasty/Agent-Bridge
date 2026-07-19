@@ -1,6 +1,6 @@
 # ChatGPT collaboration control plane
 
-**Status:** P1 implemented; P2A trust boundary implemented; default off and non-executing
+**Status:** P1 and P2A implemented; P2B synthetic lab implemented; production remains read-only
 **Date:** 2026-07-18
 **Production tunnel:** remains `chatgpt-read`
 
@@ -150,9 +150,11 @@ evidence.
 
 The P2 authenticated-subject feasibility result and threat model are recorded in
 [ChatGPT collaboration P2 authenticated subject binding](CHATGPT-COLLAB-P2-SUBJECT-BINDING.md).
-The current stdio tunnel cannot satisfy authenticated subject binding; production
-therefore remains on `chatgpt-read` while a separate HTTP/OAuth transport is a
-prerequisite.
+The current stdio tunnel cannot satisfy authenticated subject binding;
+production therefore remains on `chatgpt-read`. A separate default-off
+loopback HTTP/OAuth synthetic lab now proves the transport-owned subject path
+and negative token/policy cases, but a real authorization server, key rotation,
+public HTTPS tunnel path, and live ChatGPT OAuth acceptance remain prerequisites.
 
 P2 may add one narrowly scoped executor only after all of these exist:
 

@@ -8,7 +8,20 @@ license.workspace = true
 ab-core.workspace = true
 ab-store.workspace = true
 async-trait.workspace = true
+axum = "0.7"
+bytes.workspace = true
+hex = "0.4"
+jsonwebtoken = { version = "9.3", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 tokio.workspace = true
 tracing.workspace = true
+url = "2"
+
+[dev-dependencies]
+base64.workspace = true
+jsonwebtoken = { version = "9.3", features = ["use_pem"] }
+rand = "0.8"
+rsa = { version = "0.9", features = ["pem"] }
+tower = { version = "0.5", features = ["util"] }

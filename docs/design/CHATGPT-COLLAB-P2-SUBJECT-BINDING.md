@@ -1,6 +1,6 @@
 # ChatGPT collaboration P2 authenticated subject binding
 
-**Status:** P2A implemented; P2B blocked on authenticated HTTP/OAuth transport
+**Status:** P2A complete; P2B synthetic lab complete; live OAuth/tunnel acceptance pending
 **Date:** 2026-07-19
 **Production tunnel:** unchanged on `chatgpt-read`
 **Execution plane:** absent
@@ -12,9 +12,11 @@ stdio tunnel profile. P2 must use a separate loopback Streamable HTTP MCP
 resource server that verifies OAuth 2.1 bearer tokens before it constructs an
 authenticated tool context.
 
-P2A establishes the internal trust boundary and negative regression test. It
-does not add an HTTP listener, OAuth verifier, local-subject policy, executor,
-or production write capability.
+P2A establishes the internal trust boundary and stdio negative regression test.
+P2B now includes a default-off loopback synthetic lab with static public JWKS
+verification and exact local-subject mapping. It is not an authorization server,
+does not connect a real identity provider, and does not change the production
+tunnel or add any execution capability.
 
 ## Verified current state
 
@@ -45,6 +47,8 @@ and location are not authorization evidence.
 
 References:
 
+- <https://modelcontextprotocol.io/specification/2025-11-25/basic/transports>
+- <https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization>
 - <https://developers.openai.com/apps-sdk/build/auth>
 - <https://developers.openai.com/apps-sdk/build/mcp-server>
 - <https://developers.openai.com/api/docs/guides/secure-mcp-tunnels>
@@ -95,12 +99,64 @@ The stdio server always sets `transport_kind=stdio` and
 claims and a fake bearer token through `_meta` and proves that none are promoted
 to authenticated identity.
 
-This is a type and regression boundary, not proof that OAuth is implemented.
+P2A alone is a type and regression boundary. The P2B synthetic lab exercises
+the positive transport-owned construction path without weakening that boundary.
+
+## P2B synthetic lab
+
+The separate command is explicit and default off:
+
+```bash
+agent-bridge mcp-http-auth-lab --config /path/to/lab-config.json
+```
+
+The JSON config must declare `"mode": "synthetic_lab"`. Validation requires:
+
+- the listener and canonical resource to name the same numeric loopback socket;
+- resource path `/mcp` with no credentials, query, or fragment;
+- exact issuer membership in `authorization_servers`;
+- HTTPS authorization-server URLs, except loopback HTTP for isolated tests;
+- one or more exact required scopes and allowed browser origins;
+- public RSA/RS256/signing JWKS entries with unique key IDs;
+- explicit external-subject to local-subject mappings, optionally bound to an
+  exact OAuth client ID;
+- at most 300 seconds of clock skew and at most one hour of token lifetime.
+
+[`CHATGPT-COLLAB-P2B-LAB-CONFIG.template.json`](CHATGPT-COLLAB-P2B-LAB-CONFIG.template.json)
+documents the complete shape. Its placeholder JWKS is intentionally not
+runnable and must be replaced with public material from an isolated test issuer.
+
+The lab serves RFC 9728 protected-resource metadata at
+`/.well-known/oauth-protected-resource` and a stateless Streamable HTTP endpoint
+at `/mcp`. It authenticates before buffering the bounded request body, validates
+Origin when present, requires Bearer authentication on every MCP request, and
+accepts MCP protocol versions 2025-03-26, 2025-06-18, and 2025-11-25. Invalid
+or expired tokens return 401; insufficient scope returns 403 with a scope
+challenge; local subject/client policy denials return 403 without suggesting a
+scope escalation.
+
+Only `oauth_subject_diagnostic` is registered. It is read-only, advertises its
+OAuth scope through `securitySchemes`, returns a shortened token fingerprint,
+and always reports `synthetic_lab=true` and `execution_allowed=false`.
+
+The synthetic known-answer tests prove:
+
+- missing bearer, bad signature/key, wrong issuer/audience, expiry, future
+  validity, invalid lifetime, and malformed token claims fail closed;
+- missing scope, unknown subject, and unexpected OAuth client fail closed;
+- an invalid Origin is rejected before token processing;
+- forged issuer, subject, local subject, or bearer values in JSON-RPC `_meta`
+  cannot alter the transport-verified subject;
+- valid RSA-signed JWT claims bind the expected exact local subject.
+
+This is resource-server verification evidence only. Static JWKS do not test
+discovery refresh, key rotation, revocation, authorization code + PKCE, client
+registration, real ChatGPT callbacks, public HTTPS, tunnel forwarding, or live
+identity-provider failure handling. No bearer token is logged or returned.
 
 ## Required P2B subject contract
 
-The future HTTP transport may populate a verified subject only after all checks
-pass:
+Any HTTP transport may populate a verified subject only after all checks pass:
 
 | Field | Required check |
 |---|---|
@@ -123,14 +179,14 @@ The external `sub` value is not itself a local owner ID.
 | Threat | Required control | P2A state |
 |---|---|---|
 | Forged identity in JSON-RPC `_meta` | Transport-owned authenticated subject slot and negative KAT | Implemented |
-| Stolen or replayed access token | Short expiry, audience binding, optional `jti` replay cache, TLS, no token logging | P2B required |
+| Stolen or replayed access token | Short expiry, audience binding, optional `jti` replay cache, TLS, no token logging | Lifetime/audience/no-log lab checks implemented; live TLS/revocation pending |
 | Confused deputy across projects | Exact subject + capability + target policy | P2B required |
 | Prompt injection requests a mutation | Fresh local human gate independent of model intent | Required before executor |
 | Tunnel credential mistaken for user identity | Keep control-plane authentication separate from app OAuth | Documented |
 | Same-user local process edits queue files | Signed/MACed records or protected broker plus atomic consume | Required before executor |
 | Approval replay or double execution | One-time digest consumption under an atomic lock | Required before executor |
 | Partial mutation or failed rollback | Pre-recorded rollback handle and outcome receipt | Required before executor |
-| Authorization service outage | Fail closed; read-only production profile remains available | P2B required |
+| Authorization service outage | Fail closed; read-only production profile remains available | Static lab fails closed; live provider outage pending |
 
 ## Phased implementation
 
@@ -143,13 +199,27 @@ The external `sub` value is not itself a local owner ID.
 
 ### P2B: authenticated request control plane
 
-1. Add a separate loopback-only Streamable HTTP MCP command or process.
-2. Serve MCP protected-resource metadata through the tunnel path.
-3. Integrate one OAuth 2.1 authorization server without committing secrets.
-4. Verify tokens on every request and map claims through an exact local policy.
-5. Expose only a read-only authentication diagnostic and the existing
-   non-executing P1 request tools.
-6. Run synthetic invalid-token tests before any live ChatGPT test.
+Completed synthetic prerequisites:
+
+1. Add a separate loopback-only Streamable HTTP MCP command.
+2. Serve protected-resource metadata and OAuth challenges locally.
+3. Verify static-JWKS tokens on every request and map claims through exact
+   local policy.
+4. Expose only a read-only authentication diagnostic.
+5. Pass synthetic invalid-token, policy, Origin, and `_meta` spoof tests.
+
+Still required for live P2B:
+
+1. Select and configure one established OAuth 2.1 authorization server without
+   committing secrets or selecting a paid service implicitly.
+2. Add remote JWKS discovery/cache/rotation or standards-compliant token
+   introspection with outage behavior.
+3. Expose the existing non-executing P1 request tools only after an independent
+   threat review of the authenticated transport.
+4. Route the HTTP resource server through a separate tunnel profile and run a
+   real ChatGPT authorization-code + PKCE acceptance test.
+5. Prove logs/support exports contain no tokens and exercise process/profile
+   rollback.
 
 The authorization server must be reachable by the user's browser and ChatGPT.
 The Secure MCP Tunnel can forward resource-server discovery, but does not make a
@@ -169,7 +239,8 @@ Direct ChatGPT project/shell/browser/deployment tools remain a P3 question.
 
 ## Acceptance gates
 
-P2B is not complete until all of these are independently evidenced:
+Live P2B is not complete until all of these are independently evidenced. Gates
+1-4 currently pass only in the synthetic lab:
 
 1. unauthenticated HTTP MCP calls return an OAuth challenge;
 2. bad signature, wrong issuer, wrong audience, missing scope, expired token,
@@ -183,5 +254,7 @@ P2B is not complete until all of these are independently evidenced:
 9. stopping the new HTTP process or restoring the stdio profile is a tested
    rollback.
 
-Until then, `authenticated_subject_binding=false` and `execution_allowed=false`
-remain the only accurate production claims.
+Until live acceptance passes, `authenticated_subject_binding=false` and
+`execution_allowed=false` remain the only accurate production claims. The lab
+may report an authenticated synthetic subject, but that claim must never be
+projected onto the production `chatgpt-read` tunnel.

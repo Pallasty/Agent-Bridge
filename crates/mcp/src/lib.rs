@@ -12,6 +12,7 @@ use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
+pub mod http_auth_lab;
 pub mod protocol;
 pub mod server;
 
@@ -77,6 +78,15 @@ pub struct ToolDescriptor {
     pub title: String,
     pub annotations: Option<ToolAnnotations>,
     pub output_schema: Option<Value>,
+    pub security_schemes: Option<Vec<ToolSecurityScheme>>,
+}
+
+/// Authentication requirements advertised for one MCP tool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ToolSecurityScheme {
+    NoAuth,
+    Oauth2 { scopes: Vec<String> },
 }
 
 pub fn default_tool_title(name: &str) -> String {
@@ -114,12 +124,14 @@ impl McpTransportKind {
 ///
 /// Fields are intentionally private. Code outside `ab-mcp` may inspect a
 /// verified subject but cannot construct one from caller-controlled metadata.
-/// A future authenticated HTTP transport will populate this only after issuer,
-/// audience, expiry, signature, and scope verification succeeds.
+/// An authenticated HTTP transport may populate this only after issuer,
+/// audience, expiry, signature, scope, and local-subject policy verification
+/// succeeds. The default-off synthetic HTTP lab exercises that boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedOAuthSubject {
     issuer: String,
     subject: String,
+    local_subject: String,
     audiences: BTreeSet<String>,
     scopes: BTreeSet<String>,
     expires_at_unix: u64,
@@ -134,6 +146,10 @@ impl VerifiedOAuthSubject {
 
     pub fn subject(&self) -> &str {
         &self.subject
+    }
+
+    pub fn local_subject(&self) -> &str {
+        &self.local_subject
     }
 
     pub fn audiences(&self) -> &BTreeSet<String> {
@@ -304,6 +320,9 @@ pub trait McpTool: Send + Sync {
     fn output_schema(&self) -> Option<Value> {
         None
     }
+    fn security_schemes(&self) -> Option<Vec<ToolSecurityScheme>> {
+        None
+    }
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult>;
 }
 
@@ -340,6 +359,7 @@ impl ToolRegistry {
                 title: tool.title(),
                 annotations: tool.annotations(),
                 output_schema: tool.output_schema(),
+                security_schemes: tool.security_schemes(),
             })
             .collect();
         v.sort_by(|a, b| a.schema.name.cmp(&b.schema.name));
