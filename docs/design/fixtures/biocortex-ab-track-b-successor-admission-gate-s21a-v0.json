@@ -1,0 +1,74 @@
+{
+  "schema": "agent_bridge.memory_temporal_successor_admission_gate_s21a.v0",
+  "status": "S21A_NON_LIVE_REFREEZE_AND_EXTERNAL_INPUT_ADMISSION_TOOLING_COMPLETE",
+  "decision": "S21B_BLOCKED_PENDING_POST_INTEGRATION_UNSIGNED_FINAL_SUBJECT_NEW_OWNER_SIGNATURE_INSTALLED_TRUST_ANCHOR_AND_INDEPENDENT_LIVE_INPUTS",
+  "completed_s21a_boundary": {
+    "four_closed_draft_2020_12_contracts_present": true,
+    "four_synthetic_non_live_kats_present": true,
+    "distinct_subject_anchor_envelope_and_admission_digest_domains": true,
+    "new_s21a_audience_and_signature_domain_frozen": true,
+    "legacy_s19_signature_reuse_forbidden": true,
+    "repository_public_kat_key_id_and_material_denied_for_real_anchor": true,
+    "post_integration_refreeze_contract_defined": true,
+    "typed_builders_parsers_and_semantic_validators_complete": true,
+    "candidate_supplied_expected_values_authoritative": false,
+    "live_adapter_present": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "admission_decision": {
+    "s21a_mechanically_complete": true,
+    "post_integration_unsigned_subject_generation_may_begin": true,
+    "owner_signature_may_be_requested_before_subject_validation": false,
+    "s21b_review_may_begin_now": false,
+    "live_execution_may_begin": false,
+    "provider_or_production_authority": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "future_s21b_requirements": {
+    "identity": "S21B_NEW_OWNER_BOUND_INDEPENDENT_INPUT_REVIEW_AND_EXACT_LIVE_CANARY",
+    "preapproved": false,
+    "requires_post_integration_unsigned_final_subject": true,
+    "requires_exact_s21a_source_integration_archive_binary_toolchain_feature_and_ruleset_bindings": true,
+    "requires_new_owner_signature_under_s21a_domain": true,
+    "requires_independently_installed_and_caller_pinned_owner_anchor": true,
+    "forbids_repository_public_kat_key_id_or_material_as_real_owner_anchor": true,
+    "requires_real_out_of_band_monotonic_checkpoint_provider": true,
+    "requires_external_authorized_unclaimed_registration_not_created_by_runner": true,
+    "requires_fresh_observer_real_runner_exact_environment_and_canary_input_pack": true,
+    "requires_fresh_stop_and_revocation_snapshots": true,
+    "requires_zero_automatic_or_implicit_retry": true,
+    "requires_separate_review": true,
+    "may_execute_live_now": false
+  },
+  "fail_closed_conditions": [
+    "POST_INTEGRATION_UNSIGNED_FINAL_SUBJECT_ABSENT_OR_NOT_INDEPENDENTLY_RECOMPUTED",
+    "SOURCE_TREE_ARCHIVE_BINARY_TOOLCHAIN_FEATURE_SCHEMA_OR_RULESET_DRIFT",
+    "NEW_OWNER_SIGNATURE_ABSENT_INVALID_OR_USING_LEGACY_S19_DOMAIN",
+    "OWNER_TRUST_ANCHOR_ABSENT_SELF_ASSERTED_OR_NOT_CALLER_PINNED",
+    "OWNER_TRUST_ANCHOR_USES_REPOSITORY_PUBLIC_KAT_KEY_ID_OR_KEY_MATERIAL",
+    "CHECKPOINT_PROVIDER_ABSENT_SAME_FAILURE_DOMAIN_STALE_FORKED_PREPARED_ROLLED_BACK_OR_UNKNOWN",
+    "EXTERNAL_AUTHORIZED_UNCLAIMED_REGISTRATION_ABSENT_UNKNOWN_OR_CREATED_BY_RUNNER",
+    "OBSERVER_RUNNER_ENVIRONMENT_CANARY_STOP_OR_REVOCATION_INPUT_ABSENT_STALE_OR_MISMATCHED",
+    "RETENTION_CLEANUP_CUSTODY_OR_REVIEW_BINDING_MISMATCH",
+    "ANY_AUTOMATIC_OR_IMPLICIT_RETRY",
+    "ANY_CANDIDATE_SUPPLIED_EXPECTED_DIGEST_TREATED_AS_AUTHORITATIVE"
+  ],
+  "current_missing_external_inputs": {
+    "post_integration_unsigned_final_subject": true,
+    "new_owner_signature": true,
+    "independently_installed_owner_trust_anchor": true,
+    "real_independent_checkpoint_provider": true,
+    "external_authorized_unclaimed_registration": true,
+    "fresh_observer": true,
+    "real_runner": true,
+    "exact_canary_input_pack": true
+  },
+  "nonclaims": {
+    "s21a_contract_grants_s21b_admission": false,
+    "synthetic_fixture_is_real_external_input": false,
+    "repository_public_kat_is_s21_authority": false,
+    "owner_envelope_is_execution_capability": false,
+    "complete_external_inputs_imply_favorable_scientific_result": false,
+    "side_effects_unlocked": "NONE"
+  }
+}

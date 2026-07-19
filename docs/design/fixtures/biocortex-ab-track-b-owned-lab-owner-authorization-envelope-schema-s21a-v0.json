@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_owner_authorization_envelope_s21a.v0",
+  "title": "Agent-Bridge S21A detached owner authorization envelope",
+  "description": "Closed detached-signature envelope for the new S21A subject and audience. It cannot reuse S19 signatures and is not an execution capability.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "packet_kind", "canonicalization", "hashing_contract", "envelope_state", "test_only", "synthetic", "audience", "anchor_binding", "signed_payload", "signature_binding", "owner_decision", "owner_envelope_sha256", "nonclaims"],
+  "properties": {
+    "schema": {"const": "agent_bridge.memory_temporal_owned_lab_owner_authorization_envelope_s21a.v0"},
+    "packet_kind": {"const": "S21A_OWNER_AUTHORIZATION_ENVELOPE"},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S21A_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "envelope_state": {"enum": ["SYNTHETIC_KAT_NON_LIVE", "OWNER_SIGNED_FINAL_SUBJECT_PENDING_EXTERNAL_INPUT_REVIEW"]},
+    "test_only": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "audience": {"const": "agent-bridge/biocortex/owned-lab/s21a/final-refreeze-owner-review/v1"},
+    "anchor_binding": {"$ref": "#/$defs/anchor_binding"},
+    "signed_payload": {"$ref": "#/$defs/signed_payload"},
+    "signature_binding": {"$ref": "#/$defs/signature_binding"},
+    "owner_decision": {"$ref": "#/$defs/owner_decision"},
+    "owner_envelope_sha256": {"$ref": "#/$defs/sha256"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"test_only": {"const": true}}, "required": ["test_only"]},
+      "then": {
+        "properties": {
+          "synthetic": {"const": true},
+          "envelope_state": {"const": "SYNTHETIC_KAT_NON_LIVE"},
+          "anchor_binding": {
+            "properties": {
+              "anchor_installed_out_of_band": {"const": false},
+              "anchor_pinned_by_independent_caller": {"const": false}
+            }
+          },
+          "signature_binding": {"properties": {"signature_verified": {"const": false}}},
+          "owner_decision": {
+            "properties": {
+              "decision": {"const": "SYNTHETIC_KAT_NO_AUTHORITY"},
+              "owner_authority_established": {"const": false}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthetic": {"const": false},
+          "envelope_state": {"const": "OWNER_SIGNED_FINAL_SUBJECT_PENDING_EXTERNAL_INPUT_REVIEW"},
+          "anchor_binding": {
+            "properties": {
+              "anchor_installed_out_of_band": {"const": true},
+              "anchor_pinned_by_independent_caller": {"const": true}
+            }
+          },
+          "signature_binding": {"properties": {"signature_verified": {"const": true}}},
+          "owner_decision": {
+            "properties": {
+              "decision": {"const": "OWNER_SIGNED_FINAL_SUBJECT_PENDING_EXTERNAL_INPUT_REVIEW"},
+              "owner_authority_established": {"const": true}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "digest_framing", "hash_scope", "self_hash_field", "self_hash_field_excluded", "repository_framing_lf_excluded", "cross_field_semantic_validation_required", "candidate_reported_matches_authoritative"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S21A_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s21a/owner-authorization-envelope/v1"},
+        "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_OWNER_ENVELOPE_SHA256"},
+        "self_hash_field": {"const": "owner_envelope_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "repository_framing_lf_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "candidate_reported_matches_authoritative": {"const": false}
+      }
+    },
+    "anchor_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor_document_sha256", "anchor_key_id", "anchor_key_version", "anchor_installed_out_of_band", "anchor_pinned_by_independent_caller", "candidate_carried_key_used"],
+      "properties": {
+        "anchor_document_sha256": {"$ref": "#/$defs/sha256"},
+        "anchor_key_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,96}$"},
+        "anchor_key_version": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "anchor_installed_out_of_band": {"type": "boolean"},
+        "anchor_pinned_by_independent_caller": {"type": "boolean"},
+        "candidate_carried_key_used": {"const": false}
+      }
+    },
+    "signed_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audience", "final_refreeze_subject_sha256", "anchor_document_sha256", "s20b_integration_commit", "s20b_integration_tree", "challenge_nonce_sha256", "capability_nonce_sha256", "revocation_epoch", "single_use", "automatic_retry_allowed"],
+      "properties": {
+        "audience": {"const": "agent-bridge/biocortex/owned-lab/s21a/final-refreeze-owner-review/v1"},
+        "final_refreeze_subject_sha256": {"$ref": "#/$defs/sha256"},
+        "anchor_document_sha256": {"$ref": "#/$defs/sha256"},
+        "s20b_integration_commit": {"const": "33c2c4df78ef302fd0538986b95fa40a3711ba86"},
+        "s20b_integration_tree": {"const": "6f92c687b61e1433e693ca6cd1bc6390dda97f29"},
+        "challenge_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "capability_nonce_sha256": {"$ref": "#/$defs/sha256"},
+        "revocation_epoch": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "single_use": {"const": true},
+        "automatic_retry_allowed": {"const": false}
+      }
+    },
+    "signature_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "signed_payload_digest_domain", "signed_payload_digest_framing", "signature_domain", "message_framing", "signed_payload_sha256", "signature_hex", "detached_signature_sha256", "detached_signature_digest_profile", "signature_verified", "legacy_s19_signature_or_envelope_reuse_allowed"],
+      "properties": {
+        "algorithm": {"const": "Ed25519"},
+        "signed_payload_digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s21a/owner-authorization-signed-payload/v1"},
+        "signed_payload_digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"},
+        "signature_domain": {"const": "agent-bridge/biocortex/owned-lab/s21a/owner-authorization-signature/v1"},
+        "message_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_32_RAW_SIGNED_PAYLOAD_SHA256"},
+        "signed_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "signature_hex": {"type": "string", "pattern": "^(?!0{128}$)[0-9a-f]{128}$"},
+        "detached_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "detached_signature_digest_profile": {"const": "SHA256_RAW_64_BYTE_ED25519_SIGNATURE"},
+        "signature_verified": {"type": "boolean"},
+        "legacy_s19_signature_or_envelope_reuse_allowed": {"const": false}
+      }
+    },
+    "owner_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorization_id_sha256", "authorization_id_domain", "authorization_id_framing", "decision", "owner_authority_established", "execution_start_permitted", "single_use_execution_capability_issued", "separate_external_input_review_required"],
+      "properties": {
+        "authorization_id_sha256": {"$ref": "#/$defs/sha256"},
+        "authorization_id_domain": {"const": "agent-bridge/biocortex/owned-lab/s21a/owner-authorization-id/v1"},
+        "authorization_id_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_THREE_U64BE_32_RAW_SHA256"},
+        "decision": {"enum": ["SYNTHETIC_KAT_NO_AUTHORITY", "OWNER_SIGNED_FINAL_SUBJECT_PENDING_EXTERNAL_INPUT_REVIEW"]},
+        "owner_authority_established": {"type": "boolean"},
+        "execution_start_permitted": {"const": false},
+        "single_use_execution_capability_issued": {"const": false},
+        "separate_external_input_review_required": {"const": true}
+      }
+    },
+    "nonclaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["envelope_is_execution_capability", "envelope_preapproves_s21b", "schema_conformance_proves_signature", "synthetic_envelope_is_owner_authority", "old_s19_signature_authorizes_s21a", "side_effects_unlocked"],
+      "properties": {
+        "envelope_is_execution_capability": {"const": false},
+        "envelope_preapproves_s21b": {"const": false},
+        "schema_conformance_proves_signature": {"const": false},
+        "synthetic_envelope_is_owner_authority": {"const": false},
+        "old_s19_signature_authorizes_s21a": {"const": false},
+        "side_effects_unlocked": {"const": "NONE"}
+      }
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "schema": "agent_bridge.memory_temporal_owned_lab_final_refreeze_external_input_admission_status_s21a.v0",
+  "status": "S21A_NON_LIVE_REFREEZE_AND_EXTERNAL_INPUT_ADMISSION_TOOLING_COMPLETE",
+  "decision": "S21B_BLOCKED_PENDING_POST_INTEGRATION_UNSIGNED_FINAL_SUBJECT_NEW_OWNER_SIGNATURE_INSTALLED_TRUST_ANCHOR_AND_INDEPENDENT_LIVE_INPUTS",
+  "implementation": {
+    "implementation_mode": "PRIVATE_DEFAULT_OFF_SYNTHETIC_NON_LIVE_REFREEZE_AND_ADMISSION_VALIDATION_ONLY",
+    "closed_schema_count": 4,
+    "synthetic_fixture_count": 4,
+    "typed_subject_builder_parser_validator": true,
+    "typed_anchor_parser_validator": true,
+    "typed_envelope_parser_signature_validator": true,
+    "typed_external_input_admission_parser_validator": true,
+    "self_parent_and_cross_binding_recomputation": true,
+    "nonzero_security_digest_and_identity_forms_enforced": true,
+    "real_anchor_repository_public_kat_key_id_and_material_denylist_enforced": true,
+    "rich_checkpoint_registration_and_independent_review_bindings_complete": true,
+    "catalog_ruleset_key_version_and_revocation_schema_rust_alignment_complete": true,
+    "real_live_adapter_present": false,
+    "executor_present": false
+  },
+  "synthetic_kat_states": {
+    "subject": "SYNTHETIC_KAT_NON_LIVE_UNSIGNED_NOT_FINAL",
+    "anchor": "SYNTHETIC_PUBLIC_KAT_NOT_INSTALLED",
+    "owner_envelope": "SYNTHETIC_KAT_NON_LIVE",
+    "external_input_admission": "SYNTHETIC_KAT_BLOCKED_NON_LIVE",
+    "live_action_count": 0,
+    "side_effects_unlocked": "NONE"
+  },
+  "current_authority_and_execution": {
+    "post_integration_unsigned_final_subject_present": false,
+    "new_owner_signature_present": false,
+    "independently_installed_owner_trust_anchor_present": false,
+    "real_checkpoint_provider_present": false,
+    "external_authorized_unclaimed_registration_present": false,
+    "fresh_observer_present": false,
+    "real_runner_present": false,
+    "exact_canary_inputs_present": false,
+    "claim_or_permit_present": false,
+    "runner_launched": false,
+    "live_canary_run": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "next_required_work": {
+    "identity": "S21B_POST_INTEGRATION_UNSIGNED_FINAL_SUBJECT_AND_INDEPENDENT_EXTERNAL_INPUTS",
+    "preapproved": false,
+    "may_execute_live": false,
+    "post_integration_subject_must_be_generated_outside_repository": true,
+    "new_owner_signature_required": true,
+    "independent_live_inputs_required": true,
+    "separate_review_required": true
+  },
+  "nonclaims": {
+    "tooling_completion_is_final_subject": false,
+    "synthetic_signature_is_owner_authority": false,
+    "repository_test_vector_is_s21_authority": false,
+    "validated_inputs_are_execution_capability": false,
+    "s21b_admitted": false,
+    "side_effects_unlocked": "NONE"
+  }
+}

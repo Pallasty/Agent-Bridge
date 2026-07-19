@@ -24,6 +24,7 @@ temporal-evidence-s18-owned-lab-authorization-verifier-synthetic = ["temporal-ev
 temporal-evidence-s19-owned-lab-source-bound-runner-synthetic = ["temporal-evidence-s18-owned-lab-authorization-verifier-synthetic"]
 temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic = ["temporal-evidence-s19-owned-lab-source-bound-runner-synthetic"]
 temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic = ["temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic"]
+temporal-evidence-s21a-owned-lab-final-refreeze-admission-synthetic = ["temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic"]
 
 [dependencies]
 ab-core.workspace = true
