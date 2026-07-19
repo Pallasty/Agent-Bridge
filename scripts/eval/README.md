@@ -484,6 +484,23 @@ scripts/check-engram-g14-strong-clock-isolation-review.sh --phase precommit
 scripts/check-engram-g14-strong-clock-isolation-review.sh --phase postcommit
 ```
 
+## Engram G1.4 G2 WASI clock preregistration
+
+`engram_g14_wasi_clock_preregistration.py` emits only a deterministic static
+receipt. It does not select/install a runtime dependency, create/build/run a
+component, or grant G1.4 authority. The contract pins Wasmtime 46.0.1 and its
+vendored clocks/poll WIT as review targets. It requires exact-world generated
+bindings and direct deterministic wall-clock, monotonic subscription, and poll
+hosts: replacing only `now()` is insufficient because Wasmtime's built-in
+subscriptions use Tokio host time. Broad WASI contexts/linker helpers, ambient
+imports, stdio, host timers, and native fallback are forbidden.
+
+```bash
+scripts/check-engram-g14-wasi-clock-preregistration.sh --phase precommit
+# After committing the exact seven-path design-only change:
+scripts/check-engram-g14-wasi-clock-preregistration.sh --phase postcommit
+```
+
 The checker is deliberately not self-authenticating and a passing run is not
 acceptance authority. An independent read-only reviewer must produce a
 manifest pinning its session and PASS verdict to the exact feature commit,
@@ -492,9 +509,10 @@ be published and verified out of band in the Agent-Bridge forum. Until then,
 no implementation, run, candidate/private, runtime, deployment, or G1.4
 authority exists.
 
-The selected next route is a separate static `G2_WASI_PREREGISTRATION`; this
-review itself authorizes neither that feasibility run nor any QEMU/native,
-candidate/private, runtime, deployment, or G1.4 action.
+The only successor is the separate public-static, no-run
+`G2A_PUBLIC_WASI_ARTIFACT_AND_COMPONENT_COMPATIBILITY_EVIDENCE_REVIEW`. This
+gate authorizes neither component source/build/run nor any QEMU/native,
+candidate/private, dependency/runtime, deployment, canary, or G1.4 action.
 
 ## Baselines
 
