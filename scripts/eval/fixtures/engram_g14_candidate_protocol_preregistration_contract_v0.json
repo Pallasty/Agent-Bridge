@@ -1,0 +1,351 @@
+{
+  "schema": "agent_bridge.engram_g1_4_candidate_protocol_preregistration_contract.v0",
+  "contract_id": "engram_g14_candidate_protocol_preregistration_20260718",
+  "stage": "g1_4_candidate_protocol_preregistration_design_only",
+  "predecessor": {
+    "stage": "g1_authenticated_freeze_authority_adapter_synthetic_isolated_lab_implementation_gate_only",
+    "commit": "bdd0b07b5e9afcc20d030e7e3dcfd404d44e8d54",
+    "contract_id": "engram_g1_authenticated_freeze_authority_adapter_isolated_lab_20260718",
+    "implementation_version": "engram_g1_authenticated_freeze_authority_adapter_isolated_lab_v0",
+    "contract_sha256": "f9b913c50eaf477c58a11bbf9526070c43137fe91098388d8260f84eb51a3b14",
+    "implementation_sha256": "50e35469af07a81b6eef85fba5c83c92076efe1931b2ee932d8e2d05907ebc94",
+    "checker_sha256": "e9aec0676148591e44181b36bf6f0a3ad62f130e1c92ed88bdd3cf7519b4c69e",
+    "shell_entrypoint_sha256": "6f81855d87d348e1e096adad9df2b271385edea3eed52695532155bac06e4895",
+    "synthetic_only": true,
+    "production_authority": false,
+    "immutable": true
+  },
+  "transitive_bindings": {
+    "adapter_preregistration_commit": "632918db75f65030d3ac15bc991b51a9c938cba6",
+    "adapter_preregistration_contract_sha256": "a9d267056fac1662b478d929b011ef971b309db60182f0f1c7563624571945c0",
+    "adapter_preregistration_validator_sha256": "632f93b9c9bfcedeca81916ed34be6b4ce8b7b03b916c060b2d1999d06597fde",
+    "adapter_preregistration_checker_sha256": "ea8ac0126306de517175a3dffa2a3722439b93b10a3d9d112ca1732f553e6f29",
+    "g1_3_commit": "7062869196d1a3ff8bb72572a39700e65130cde4",
+    "g1_3_contract_sha256": "5657ac8f4b6fd4f154de7285fd4a62125bf4ea15cba787d25da40701a3ac1504",
+    "g1_3_validator_sha256": "0b7cb3295bc3690bbfeee033de2ddf27a39eb71d0cec68f96e9b27b1a67ef089",
+    "g1_3_checker_sha256": "e56a6f50a2c0372d0d59390e8792bc4269c4f63e282d49cf1a1bfe1fdd463e39"
+  },
+  "scope": {
+    "artifact_kind": "public_design_contract_only",
+    "loads_private_manifest_fit_development_or_sealed_material": false,
+    "loads_real_freeze_capability": false,
+    "loads_candidate_source_or_configuration": false,
+    "implements_candidate": false,
+    "implements_protocol_runner": false,
+    "implements_sandbox": false,
+    "executes_experiment": false,
+    "registers_mcp_or_runtime_surface": false,
+    "touches_live_store_or_retrieval": false,
+    "observes_real_evidence_or_results": false,
+    "permitted_output": "deterministic_public_design_receipt_no_authority",
+    "only_permitted_successor": "separate_public_synthetic_g1_4_protocol_harness_implementation_gate",
+    "opens_candidate_implementation": false,
+    "opens_private_data_access": false,
+    "opens_g1_4_execution": false
+  },
+  "frozen_experiment_question": {
+    "question": "can_clustered_reorganization_reduce_unrelated_target_intrusion_without_materially_degrading_exact_or_related_retrieval",
+    "candidate_arm": "clustered_reorganization",
+    "comparator_arms_in_order": [
+      "stable_control",
+      "density_only"
+    ],
+    "mechanism_falsifier_arms_in_order": [
+      "mechanism_off",
+      "cluster_shuffled"
+    ],
+    "retrieval_modes_in_order": [
+      "fts",
+      "hybrid",
+      "semantic"
+    ],
+    "top_k": 10,
+    "decisive_unit": "paired_episode_group",
+    "decisive_partition": "sealed",
+    "primary_stratum": "overgeneralization_gap",
+    "fit_development_or_sealed_results_may_be_pooled": false,
+    "rates_are_diagnostics_not_decision_authority": true,
+    "population_neuroscience_product_or_runtime_claims_forbidden": true
+  },
+  "frozen_corpus_profile": {
+    "total_groups": 30,
+    "fit_groups": 12,
+    "development_groups": 8,
+    "sealed_groups": 10,
+    "probes_per_group": 3,
+    "probe_classes_in_order": [
+      "exact",
+      "related",
+      "unrelated"
+    ],
+    "minimum_overgeneralization_gap_groups": 15,
+    "minimum_no_relevant_gap_groups": 9,
+    "exact_ordinary_retrieval_gap_groups": 3,
+    "minimum_sealed_primary_groups": 5,
+    "minimum_application_families": 4,
+    "maximum_groups_per_application_family": 10,
+    "admitted_g0_incident_partition": "fit_only",
+    "group_split_is_indivisible": true,
+    "candidate_may_change_group_membership_or_partition": false,
+    "implemented_by_this_gate": false
+  },
+  "future_candidate_artifact_lock": {
+    "two_phase_lock_profile": "development_lock_then_final_sealed_lock_v1",
+    "development_lock_required_before_development_feedback": true,
+    "final_lock_required_before_any_sealed_access": true,
+    "maximum_reviewer_mediated_development_feedback_rounds": 2,
+    "final_lock_binds_source_tree_sha256": true,
+    "final_lock_binds_configuration_sha256": true,
+    "final_lock_binds_dependency_lock_sha256": true,
+    "final_lock_binds_toolchain_and_build_flags_sha256": true,
+    "final_lock_binds_feature_flags_and_model_assets_sha256": true,
+    "final_lock_binds_environment_allowlist_sha256": true,
+    "final_lock_binds_sandbox_profile_sha256": true,
+    "final_lock_binds_output_schema_sha256": true,
+    "final_lock_binds_resource_budget_sha256": true,
+    "final_lock_binds_protocol_contract_and_runner_version": true,
+    "post_final_lock_source_config_dependency_or_policy_change_forbidden": true,
+    "candidate_self_approval_forbidden": true,
+    "implemented_by_this_gate": false
+  },
+  "future_access_and_blinding": {
+    "candidate_author_may_access_fit": true,
+    "candidate_author_may_access_raw_development": false,
+    "candidate_author_may_access_raw_sealed": false,
+    "candidate_author_may_access_partition_membership_outside_fit": false,
+    "development_feedback_profile": "reviewer_mediated_predeclared_aggregate_only",
+    "development_feedback_round_limit_enforced": true,
+    "sealed_custodian_alone_may_open_sealed_material": true,
+    "arm_mapping_committed_before_execution": true,
+    "scorer_receives_opaque_arm_ids_until_decision_frozen": true,
+    "arm_mapping_reveal_only_after_append_only_decision_receipt": true,
+    "candidate_or_runner_may_author_expected_targets": false,
+    "candidate_or_runner_may_score_own_outputs": false,
+    "candidate_process_has_no_private_corpus_path_access": true,
+    "probe_delivery_profile": "bounded_evaluator_pipe_without_manifest_path_or_group_identifier",
+    "implemented_by_this_gate": false
+  },
+  "future_execution_sandbox": {
+    "profile": "nono_landlock_or_seatbelt_deny_by_default_offline_runner_v1",
+    "operating_system_policy_selected_before_real_enablement": true,
+    "network_access_denied": true,
+    "subprocess_spawn_denied": true,
+    "dynamic_plugin_loading_denied": true,
+    "environment_is_explicit_allowlist_only": true,
+    "candidate_code_and_dependencies_read_only": true,
+    "ephemeral_scratch_is_only_writable_filesystem": true,
+    "repository_git_metadata_and_live_store_not_visible": true,
+    "private_manifest_and_partition_paths_not_visible": true,
+    "wall_clock_external_entropy_and_unregistered_randomness_denied": true,
+    "stdout_stderr_and_free_form_logs_not_released_to_candidate_author": true,
+    "output_schema_is_fixed_bounded_and_non_free_form": true,
+    "fixed_output_cardinality_and_size_required": true,
+    "cpu_memory_wall_time_file_count_and_byte_ceilings_equal_across_arms": true,
+    "sandbox_profile_and_mount_set_equal_across_arms": true,
+    "sandbox_escape_or_policy_drift_invalidates_run": true,
+    "implemented_by_this_gate": false
+  },
+  "future_determinism_and_state_isolation": {
+    "registered_seed_schedule_required": true,
+    "seed_schedule_hidden_from_candidate_author_for_sealed_run": true,
+    "two_identical_fit_qualification_replays_required": true,
+    "all_ranked_outputs_must_match_across_qualification_replays": true,
+    "fresh_process_per_arm_and_episode_group_required": true,
+    "cross_group_cross_arm_and_cross_partition_state_forbidden": true,
+    "ephemeral_scratch_destroyed_after_each_invocation": true,
+    "arm_execution_order_precommitted_and_blinded": true,
+    "cache_warmth_and_resource_budget_normalization_required": true,
+    "nondeterminism_or_hidden_state_fails_closed": true,
+    "implemented_by_this_gate": false
+  },
+  "future_run_lifecycle": {
+    "real_authenticated_freeze_capability_required": true,
+    "synthetic_predecessor_capability_is_not_real_authority": true,
+    "capability_must_bind_repository_scope_manifest_protocol_runner_and_final_candidate_lock": true,
+    "capability_consumed_atomically_before_private_run_plan_open": true,
+    "append_only_run_plan_receipt_required": true,
+    "append_only_per_invocation_receipts_required": true,
+    "append_only_decision_receipt_required": true,
+    "sealed_execution_is_one_shot": true,
+    "selective_retry_or_partial_rerun_forbidden": true,
+    "infrastructure_fault_invalidates_entire_sealed_run": true,
+    "sealed_rerun_requires_new_protocol_revision_fresh_capability_and_manual_safety_audit": true,
+    "partial_or_intermediate_sealed_results_not_released": true,
+    "decision_receipt_frozen_before_arm_mapping_reveal": true,
+    "live_store_write_retrieval_mutation_and_runtime_promotion_forbidden": true,
+    "implemented_by_this_gate": false
+  },
+  "future_decision_rule": {
+    "candidate_minimum_paired_primary_repairs_vs_each_comparator": 2,
+    "maximum_new_exact_misses": 0,
+    "maximum_new_related_misses": 0,
+    "maximum_no_relevant_gap_regressions": 0,
+    "maximum_per_mode_unrelated_intrusion_increases": 0,
+    "maximum_exact_mrr_absolute_loss": "0.05",
+    "maximum_related_mrr_absolute_loss": "0.05",
+    "maximum_primary_repairs_for_each_falsifier_vs_each_comparator": 1,
+    "candidate_repairs_must_exceed_each_falsifier_vs_each_comparator": true,
+    "all_comparisons_are_paired_by_episode_group": true,
+    "missing_timeout_crash_or_schema_invalid_invocation_is_failure": true,
+    "all_guards_apply_simultaneously": true,
+    "fit_and_development_cannot_decide_final_verdict": true,
+    "post_observation_threshold_arm_metric_or_retry_change_forbidden": true,
+    "implemented_by_this_gate": false
+  },
+  "future_receipts_and_redaction": {
+    "schemas_in_order": [
+      "agent_bridge.engram_g1_4_candidate_artifact_lock_receipt.v0",
+      "agent_bridge.engram_g1_4_blinded_run_plan_receipt.v0",
+      "agent_bridge.engram_g1_4_invocation_receipt.v0",
+      "agent_bridge.engram_g1_4_decision_receipt.v0"
+    ],
+    "receipts_bind_contract_candidate_runner_sandbox_resources_and_predecessor": true,
+    "receipts_bind_monotonic_sequence_nonce_and_trusted_time": true,
+    "receipts_are_append_only_and_hash_chained": true,
+    "public_receipt_contains_raw_query_target_manifest_group_family_partition_or_identity": false,
+    "public_receipt_contains_candidate_authored_free_form_text": false,
+    "private_and_public_digest_namespaces_disjoint": true,
+    "low_entropy_private_values_require_salted_commitments": true,
+    "aggregate_counts_below_disclosure_floor_are_suppressed": true,
+    "result_release_requires_redaction_review": true,
+    "implemented_by_this_gate": false
+  },
+  "human_audit_policy": {
+    "routine_public_contract_validation_requires_human_approval": false,
+    "unchanged_public_synthetic_harness_validation_requires_per_run_human_approval": false,
+    "fail_closed_denial_requires_human_approval": false,
+    "reversible_failure_requires_automatic_rollback": true,
+    "rollback_failure_requires_durable_lesson": true,
+    "manual_safety_audit_is_a_per_run_gate": false,
+    "manual_safety_audit_required_for": [
+      "first_real_freeze_capability_consumption_or_private_run_plan_open",
+      "candidate_or_runner_source_config_dependency_or_toolchain_change_after_final_lock",
+      "fit_development_sealed_or_partition_access_policy_widening",
+      "metric_threshold_arm_resource_retry_or_missingness_policy_change_after_any_observation",
+      "sealed_partition_unblinding_selective_retry_or_rerun",
+      "sandbox_filesystem_network_subprocess_log_output_or_side_channel_policy_change",
+      "first_real_protocol_runner_enablement",
+      "suspected_secret_privacy_identity_corpus_or_result_exposure"
+    ],
+    "manual_audit_outcome_may_be_inferred_by_structural_validator": false
+  },
+  "threat_model": {
+    "all_controls_are_future_requirements_not_current_implementation": true,
+    "unimplemented_control_verdict": "REJECTED_FAIL_CLOSED",
+    "required_threats": [
+      {
+        "threat": "predecessor_capability_laundering",
+        "required_control": "real_single_use_authenticated_freeze_capability_exactly_bound_to_protocol_and_final_candidate_lock",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "candidate_source_config_dependency_or_runner_drift",
+        "required_control": "two_phase_hash_lock_with_final_sealed_lock_and_claim_time_recheck",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "arm_substitution_or_mapping_manipulation",
+        "required_control": "precommitted_arm_mapping_opaque_scoring_and_post_decision_reveal",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "private_corpus_membership_label_or_target_leakage",
+        "required_control": "role_separation_bounded_pipe_delivery_no_manifest_paths_and_redacted_receipts",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "network_subprocess_plugin_or_filesystem_exfiltration",
+        "required_control": "deny_by_default_nono_landlock_or_seatbelt_offline_sandbox",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "stdout_log_output_timing_or_resource_covert_channel",
+        "required_control": "fixed_bounded_output_no_released_logs_equal_resource_ceilings_and_redaction_review",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "cross_arm_group_or_partition_state_contamination",
+        "required_control": "fresh_process_per_invocation_and_destroyed_ephemeral_scratch",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "nondeterminism_external_entropy_or_clock_dependence",
+        "required_control": "registered_hidden_seed_schedule_two_identical_qualification_replays_and_no_external_entropy",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "adaptive_development_tuning_or_feedback_budget_overrun",
+        "required_control": "two_phase_lock_and_two_reviewer_mediated_aggregate_feedback_round_limit",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "selective_retry_timeout_missingness_or_partial_rerun_bias",
+        "required_control": "one_shot_sealed_run_whole_run_invalidation_and_no_selective_retry",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "post_observation_metric_threshold_arm_or_resource_drift",
+        "required_control": "exact_preregistered_decision_rule_and_versioned_manual_transition_audit",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "fit_development_pooling_or_sealed_early_peeking",
+        "required_control": "partition_separation_no_pooling_no_partial_release_and_decision_before_reveal",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "resource_budget_or_cache_asymmetry",
+        "required_control": "equal_precommitted_ceilings_mounts_sandbox_and_cache_normalization_across_arms",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "candidate_authored_targets_scoring_or_receipts",
+        "required_control": "custodian_owned_targets_independent_scorer_and_append_only_receipts",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "receipt_privacy_echo_digest_alias_or_free_form_exfiltration",
+        "required_control": "disjoint_digest_namespaces_salted_commitments_closed_schemas_and_no_candidate_text",
+        "current_status": "unimplemented_fail_closed"
+      },
+      {
+        "threat": "cross_stage_scope_repository_manifest_or_protocol_replay",
+        "required_control": "exact_predecessor_repository_scope_manifest_protocol_runner_candidate_nonce_sequence_and_time_binding",
+        "current_status": "unimplemented_fail_closed"
+      }
+    ]
+  },
+  "state_machine": {
+    "current_state": "G1_4_CANDIDATE_PROTOCOL_PREREGISTERED_DESIGN_ONLY",
+    "representable_current_states": [
+      "G1_4_CANDIDATE_PROTOCOL_PREREGISTERED_DESIGN_ONLY",
+      "REJECTED_FAIL_CLOSED"
+    ],
+    "design_preregistration_present": true,
+    "synthetic_harness_implementation_present": false,
+    "candidate_implementation_present": false,
+    "real_freeze_capability_present": false,
+    "private_run_plan_present": false,
+    "sealed_run_present": false,
+    "positive_execution_or_data_authority_state_representable": false
+  },
+  "boundaries": {
+    "observes_real_role_corpus_candidate_or_result_evidence": false,
+    "authenticated_freeze_authority_verified_for_real_use": false,
+    "g1_4_design_preregistered": true,
+    "ready_for_public_synthetic_harness_implementation_review": false,
+    "candidate_manifest_access_authority": false,
+    "candidate_fit_access_authority": false,
+    "candidate_development_access_authority": false,
+    "candidate_sealed_access_authority": false,
+    "candidate_implementation_authority": false,
+    "protocol_runner_implementation_authority": false,
+    "protocol_execution_authority": false,
+    "sealed_evaluation_authority": false,
+    "result_unblinding_or_release_authority": false,
+    "biocortex_experiment_execution_authority": false,
+    "retrieval_order_mutation_authority": false,
+    "live_store_write_authority": false,
+    "runtime_promotion_authority": false
+  }
+}

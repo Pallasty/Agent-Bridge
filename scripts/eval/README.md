@@ -216,6 +216,24 @@ surface is introduced. See
 and run
 `scripts/check-engram-g1-custody-cross-implementation-reconciliation.sh`.
 
+`engram_g14_candidate_protocol_preregistration.py` freezes the design-only G1.4
+candidate protocol without implementing a candidate, runner, sandbox, corpus
+access, experiment, unblinding, retrieval mutation, live write, or promotion.
+It fixes the candidate/comparator/falsifier arms, 30-group partition contract,
+two-phase candidate lock, two-round aggregate development budget, opaque arm
+mapping, one-shot sealed lifecycle, paired integer decision guards, append-only
+redacted receipts, and a future deny-by-default offline runner. The sandbox
+profile borrows nono/Landlock/Seatbelt's irreversible capability shape but
+rejects graceful unsandboxed fallback: every platform must prove filesystem,
+network, subprocess, plugin, entropy, output, state-isolation, and resource
+canaries or fail closed. Routine public/synthetic reversible checks need no
+human approval; real/private enablement, post-lock or post-observation policy
+changes, unblinding/rerun, and suspected exposure require transition-specific
+manual safety audit. A valid receipt opens only a separate public-synthetic
+harness implementation review and grants no authority. See
+`docs/design/ENGRAM_G1_4_CANDIDATE_PROTOCOL_PREREGISTRATION_2026_07_18.md` and
+run `scripts/check-engram-g14-candidate-protocol-preregistration.sh`.
+
 `ambient_gate.py` — ambient stage-2 data-gate probe: is the explicitly organic
 `mode=bootstrap` telemetry slice ripe enough to calibrate an ambient-specific
 reinforce rule? Eval and historical unknown rows are excluded. A missing class
