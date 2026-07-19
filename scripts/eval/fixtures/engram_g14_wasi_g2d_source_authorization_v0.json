@@ -1,0 +1,95 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2d_source_authorization.v0",
+  "gate": "G2D_PUBLIC_SOURCE_AUTHORIZATION_DECISION",
+  "date": "2026-07-19",
+  "mode": "PUBLIC_DECISION_NO_SOURCE_NO_BUILD_NO_RUN",
+  "status": "SOURCE_AUTHORIZED_FOR_G2E_PUBLIC_SYNTHETIC_SOURCE_ONLY",
+  "predecessor": {
+    "gate": "G2C_PRE_SOURCE_EVIDENCE_COMPLETION_REVIEW",
+    "integration_commit": "dd7b31d61c4d286e9d2076409db19051e0126907",
+    "integration_tree": "5e806654b3a5c8ba41710e61a52e6198bfd07bc3",
+    "closure_post": 4758,
+    "owner_authorization_post": 4759
+  },
+  "current_gate_scope": {
+    "component_or_custom_host_source_authored": false,
+    "custom_WIT_authored": false,
+    "cargo_workspace_or_manifest_changed": false,
+    "dependency_installed_promoted_or_compiled": false,
+    "component_built_or_run": false,
+    "downloaded_binary_executed": false,
+    "candidate_private_or_capability_accessed": false,
+    "runtime_store_mcp_policy_deploy_canary_or_g1_4_changed": false,
+    "native_or_qemu_fallback_allowed": false
+  },
+  "authorized_successor": {
+    "id": "G2E_PUBLIC_SYNTHETIC_SOURCE_AUTHORING",
+    "source_authoring_authorized": true,
+    "public_synthetic_only": true,
+    "allowed_source_paths_in_order": [
+      "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit",
+      "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/component/src/lib.rs",
+      "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/host/src/lib.rs"
+    ],
+    "allowed_non_source_artifact_classes": [
+      "bounded_static_checker",
+      "deterministic_receipt_producer",
+      "design_and_result_docs",
+      "README_entry"
+    ],
+    "forbidden_actions": [
+      "Cargo_toml_or_lockfile_change",
+      "dependency_install_promotion_or_compile",
+      "component_build_or_run",
+      "downloaded_binary_execution",
+      "candidate_private_or_capability_access",
+      "runtime_store_MCP_policy_deploy_canary_or_G1_4_change",
+      "native_or_QEMU_fallback"
+    ]
+  },
+  "frozen_world": {
+    "name": "agent-bridge:g14-clock-probe/probe@0.1.0",
+    "imports_in_order": [
+      "wasi:clocks/wall-clock@0.2.12",
+      "wasi:clocks/monotonic-clock@0.2.12",
+      "wasi:io/poll@0.2.12"
+    ],
+    "forbidden_import_families": [
+      "wasi:cli",
+      "wasi:filesystem",
+      "wasi:random",
+      "wasi:http",
+      "wasi:sockets",
+      "wasi:io/streams",
+      "wasi_snapshot_preview1"
+    ]
+  },
+  "B1_source_evidence_requirements": [
+    "fixed_SHA256_for_each_allowed_source_path",
+    "exact_WIT_world_and_three_import_allowlist",
+    "direct_logical_wall_monotonic_subscription_and_poll_source_markers",
+    "forbidden_symbol_scan_for_broad_WASI_Tokio_ambient_and_fallback_paths",
+    "no_manifest_lockfile_or_runtime_path_change",
+    "public_synthetic_provenance_only"
+  ],
+  "transition_rules": {
+    "G2D_authorizes_only_G2E_source_authoring": true,
+    "G2E_success_authorizes_build": false,
+    "build_authorization_authorizes_run": false,
+    "source_change_invalidates_B1_and_B2": true,
+    "unknown_or_missing_static_evidence": "FAIL_CLOSED_NO_TRANSITION",
+    "forbidden_action_or_path": "FAIL_CLOSED_STOP_AND_PRESERVE_BRANCH"
+  },
+  "next_gate": {
+    "id": "G2E_PUBLIC_SYNTHETIC_SOURCE_AUTHORING",
+    "build_or_run_authorized": false,
+    "automatic_build_transition": false,
+    "subsequent_build_gate": "G2F_PUBLIC_SYNTHETIC_BUILD_AUTHORIZATION_DECISION"
+  },
+  "acceptance_integrity": {
+    "checker_self_authenticating": false,
+    "directed_semantic_mutations_required": true,
+    "independent_clean_tree_review_required": true,
+    "out_of_band_commit_tree_checker_and_all_path_hash_manifest_required": true
+  }
+}
