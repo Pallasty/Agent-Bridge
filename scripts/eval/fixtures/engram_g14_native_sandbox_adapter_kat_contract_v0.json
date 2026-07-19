@@ -1,0 +1,183 @@
+{
+  "schema": "agent_bridge.engram_g1_4_native_sandbox_adapter_kat_contract.v0",
+  "contract_id": "engram_g14_native_sandbox_adapter_kat_20260718",
+  "date": "2026-07-18",
+  "predecessor": {
+    "contract_id": "engram_g14_native_sandbox_adapter_preregistration_20260718",
+    "contract_sha256": "075dd9be4f6097e539db62025e6420b9add0efc030c528c065b612a77f5d78e0",
+    "integration_commit": "908412b8209056a90b3be5c2f93896c763d31311"
+  },
+  "scope": {
+    "mode": "PUBLIC_SYNTHETIC_NATIVE_SANDBOX_ADAPTER_KAT",
+    "enabled_by_default": false,
+    "public_synthetic_only": true,
+    "fixed_probe_only": true,
+    "purpose": "native_wall_clock_confinement_viability",
+    "successful_native_adapter_claim_representable": false,
+    "unsupported_platform_fails_closed": true,
+    "unsandboxed_fallback_allowed": false
+  },
+  "dependency_lock": {
+    "crate": "nono",
+    "version": "0.53.0",
+    "crates_io_checksum_sha256": "ae7eb523cc2036e9ad6527411c3da5dc2172dc454cc3447a03b910420a39bfee",
+    "agent_cargo_toml_sha256": "64bcf1afb4d3982ac6205b1c74bea322dbe58b61079e44dcc0bce1fd7c976c02",
+    "existing_workspace_sandbox_is_admissible_evidence": false
+  },
+  "probe": {
+    "source_path": "scripts/eval/fixtures/engram_g14_native_sandbox_adapter_probe_v0.c",
+    "source_sha256": "0824beab20f922548f0033910e1ad3eb55695c0bb802488d0e9e531279199d12",
+    "compiler_argv": [
+      "/usr/bin/cc",
+      "-std=c11",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror"
+    ],
+    "accepted_probe_argv_in_order": [
+      "clock-control",
+      "clock-filtered"
+    ],
+    "output_schema": "clock_mask_equals_unsigned_decimal_lf",
+    "max_stdout_bytes": 64,
+    "max_stderr_bytes": 4096,
+    "timeout_seconds": 5,
+    "accepts_arbitrary_path_command_or_environment": false
+  },
+  "platform_expectations": {
+    "darwin": {
+      "primitive": "seatbelt_sandbox_exec",
+      "control_mask_nonzero": true,
+      "direct_syscall_filter_effective": true,
+      "residual_libc_or_commpage_clock_path": true,
+      "symbolic_system_clock_rule_compiles": false,
+      "all_required_controls_supported": false,
+      "failure_code": "WALL_CLOCK_UNCONFINED"
+    },
+    "linux": {
+      "primitive": "seccomp_bpf_direct_syscall_filter",
+      "control_mask_nonzero": true,
+      "direct_syscall_filter_effective": true,
+      "residual_libc_or_vdso_clock_path": true,
+      "all_required_controls_supported": false,
+      "failure_code": "WALL_CLOCK_UNCONFINED"
+    }
+  },
+  "phases_in_order": [
+    {
+      "phase": "artifact_preflight",
+      "schema": "agent_bridge.engram_g1_4_native_kat_artifact_preflight_receipt.v0",
+      "evidence_source": "supervisor_prelaunch_verifier",
+      "payload_fields_in_order": ["contract_sha256", "probe_source_sha256", "probe_build_sha256", "dependency_lock_sha256", "fixture_sha256"]
+    },
+    {
+      "phase": "one_shot_claim",
+      "schema": "agent_bridge.engram_g1_4_native_kat_one_shot_claim_receipt.v0",
+      "evidence_source": "supervisor_attempt_registry",
+      "payload_fields_in_order": ["run_id_commitment_sha256", "claim_sequence", "claim_consumed"]
+    },
+    {
+      "phase": "platform_support",
+      "schema": "agent_bridge.engram_g1_4_native_kat_platform_support_receipt.v0",
+      "evidence_source": "supervisor_captured_platform_probe",
+      "payload_fields_in_order": ["platform", "kernel_and_abi_commitment_sha256", "primitive_support_matrix_sha256", "all_required_controls_supported"]
+    },
+    {
+      "phase": "policy_compile",
+      "schema": "agent_bridge.engram_g1_4_native_kat_policy_compile_receipt.v0",
+      "evidence_source": "supervisor_captured_policy_compiler",
+      "payload_fields_in_order": ["policy_input_sha256", "generated_policy_sha256", "dependency_and_rule_order_sha256", "compile_succeeded"]
+    },
+    {
+      "phase": "policy_apply",
+      "schema": "agent_bridge.engram_g1_4_native_kat_policy_apply_receipt.v0",
+      "evidence_source": "native_apply_boundary_captured_by_supervisor",
+      "payload_fields_in_order": ["generated_policy_sha256", "subject_process_identity_commitment_sha256", "apply_result_code", "apply_succeeded"]
+    },
+    {
+      "phase": "active_attestation",
+      "schema": "agent_bridge.engram_g1_4_native_kat_active_attestation_receipt.v0",
+      "evidence_source": "native_subject_boundary_captured_by_supervisor",
+      "payload_fields_in_order": ["support_receipt_sha256", "apply_receipt_sha256", "subject_process_identity_commitment_sha256", "active_reported"]
+    },
+    {
+      "phase": "negative_controls",
+      "schema": "agent_bridge.engram_g1_4_native_kat_negative_controls_receipt.v0",
+      "evidence_source": "supervisor_control_runner",
+      "payload_fields_in_order": ["control_fixture_sha256", "control_attempt_set_sha256", "live_control_count", "all_controls_unambiguous"]
+    },
+    {
+      "phase": "allowed_canaries",
+      "schema": "agent_bridge.engram_g1_4_native_kat_allowed_canaries_receipt.v0",
+      "evidence_source": "sandboxed_probe_captured_by_supervisor",
+      "payload_fields_in_order": ["subject_process_identity_commitment_sha256", "allowed_canary_observations_sha256", "allowed_canary_count", "all_allowed_canaries_matched"]
+    },
+    {
+      "phase": "denied_canaries",
+      "schema": "agent_bridge.engram_g1_4_native_kat_denied_canaries_receipt.v0",
+      "evidence_source": "sandboxed_probe_captured_by_supervisor",
+      "payload_fields_in_order": ["subject_process_identity_commitment_sha256", "denied_canary_observations_sha256", "denied_canary_count", "all_denied_canaries_matched"]
+    },
+    {
+      "phase": "cleanup",
+      "schema": "agent_bridge.engram_g1_4_native_kat_cleanup_receipt.v0",
+      "evidence_source": "supervisor_cleanup_verifier",
+      "payload_fields_in_order": ["synthetic_root_commitment_sha256", "cleanup_target_set_sha256", "residue_count", "cleanup_verified"]
+    },
+    {
+      "phase": "receipt_finalize",
+      "schema": "agent_bridge.engram_g1_4_native_kat_final_receipt.v0",
+      "evidence_source": "supervisor_receipt_finalizer",
+      "payload_fields_in_order": ["previous_event_sha256", "expected_chain_head_sha256", "authority_class", "production_admissible", "g1_4_execution_open", "verdict"]
+    }
+  ],
+  "canaries_in_order": [
+    {"name": "candidate_code_read", "expected": "allow", "owner": "native_kernel"},
+    {"name": "dependency_read", "expected": "allow", "owner": "native_kernel"},
+    {"name": "ephemeral_scratch_write", "expected": "allow", "owner": "native_kernel"},
+    {"name": "repository_metadata_read", "expected": "deny", "owner": "native_kernel"},
+    {"name": "private_manifest_read", "expected": "deny", "owner": "native_kernel"},
+    {"name": "live_store_read", "expected": "deny", "owner": "native_kernel"},
+    {"name": "network_connect", "expected": "deny", "owner": "native_kernel"},
+    {"name": "subprocess_spawn", "expected": "deny", "owner": "native_kernel"},
+    {"name": "dynamic_plugin_load", "expected": "deny", "owner": "native_kernel"},
+    {"name": "non_scratch_write", "expected": "deny", "owner": "native_kernel"},
+    {"name": "wall_clock_read", "expected": "deny", "owner": "native_kernel"},
+    {"name": "external_entropy_read", "expected": "deny", "owner": "native_kernel"},
+    {"name": "extra_inherited_fd_use", "expected": "deny", "owner": "launch_boundary"},
+    {"name": "free_form_output", "expected": "deny", "owner": "supervisor_mediation"}
+  ],
+  "durability": {
+    "state_namespace": "engram_g14_public_synthetic_native_kat",
+    "claim_store": "attempt_claims_v0",
+    "prelaunch_anchor_store": "prelaunch_anchors_v0",
+    "rollback_obligation_store": "rollback_obligations_v0",
+    "rollback_lesson_store": "rollback_lessons_v0",
+    "writes_use_create_new_fsync_file_and_directory_reopen_verify": true,
+    "unresolved_rollback_obligation_blocks_new_claim": true,
+    "durable_verified_lesson_allows_obligation_clear": true,
+    "historical_valid_lesson_permanently_blocks_new_claim": false,
+    "lesson_integrity_failure_is_absorbing": true,
+    "lesson_writer_reopens_and_verifies_before_acknowledgement": true,
+    "lesson_schema": "agent_bridge.engram_g1_4_native_kat_rollback_failure_lesson.v0"
+  },
+  "expected_result": {
+    "verdict": "REJECTED_FAIL_CLOSED_WALL_CLOCK_UNCONFINED_NO_AUTHORITY",
+    "receipt_count": 11,
+    "native_adapter_implemented": false,
+    "native_enforcement_verified": false,
+    "production_admissible": false,
+    "g1_4_execution_open": false,
+    "only_permitted_next_action": "separate_design_and_security_review_for_stronger_clock_isolation_primitive"
+  },
+  "nonclaims": {
+    "candidate_source_accessed": false,
+    "private_material_accessed": false,
+    "full_fourteen_canary_run_executed": false,
+    "nono_policy_applied": false,
+    "workspace_sandbox_modified": false,
+    "runtime_or_mcp_surface_added": false,
+    "deployment_performed": false
+  }
+}

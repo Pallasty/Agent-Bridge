@@ -1,0 +1,16 @@
+{
+  "schema": "agent_bridge.engram_g1_4_native_sandbox_adapter_kat_fixture.v0",
+  "fixture_id": "engram_g14_public_synthetic_native_clock_viability_v0",
+  "mode": "PUBLIC_SYNTHETIC_NATIVE_SANDBOX_ADAPTER_KAT",
+  "public_synthetic_fixture": true,
+  "contains_candidate_or_private_material": false,
+  "run_id": "public-synthetic-native-clock-viability-20260718-v0",
+  "probe_cases_in_order": [
+    "clock_control",
+    "direct_syscall_clock_filter",
+    "symbolic_full_clock_filter"
+  ],
+  "expected_terminal_state": "REJECTED_FAIL_CLOSED",
+  "expected_failure_code": "WALL_CLOCK_UNCONFINED",
+  "expected_verdict": "REJECTED_FAIL_CLOSED_WALL_CLOCK_UNCONFINED_NO_AUTHORITY"
+}
