@@ -46,6 +46,7 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions,
 };
 use ab_bridge::lswr_interaction_feedback::build_interaction_feedback_packet_consumption_preflight;
+use ab_bridge::operator_request::{OperatorDecision, OperatorRequestStore, OperatorRequestView};
 use ab_bridge::seed_substrate as ab_seed_bridge;
 use ab_bridge::shadow_cortex as ab_shadow_cortex;
 use ab_bridge::warp_scheme;
@@ -160,6 +161,15 @@ enum Cmd {
         /// Verbose logging on the default `sync` action.
         #[arg(long, short = 'v')]
         verbose: bool,
+    },
+    /// Review the private ChatGPT collaboration request queue.
+    ///
+    /// This local-only CLI can append one approve/reject evidence record.
+    /// Approval never executes a request and never authorizes canonical writes;
+    /// a separate executor gate would still be required.
+    OperatorRequest {
+        #[command(subcommand)]
+        op: OperatorRequestOp,
     },
     /// Index third-party Claude Code skill libraries into memory.
     ///
@@ -3942,6 +3952,47 @@ enum SyncOp {
     Status,
 }
 
+#[derive(Subcommand, Debug)]
+enum OperatorRequestOp {
+    /// List recent staged requests without changing them.
+    List {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one exact request and any local decision evidence.
+    Show {
+        request_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record approval evidence for separate executor review.
+    Approve {
+        request_id: String,
+        /// Human/operator identifier to record with the decision.
+        #[arg(long)]
+        operator: String,
+        /// Why this exact request digest is approved for executor review.
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reject a pending request. Rejected requests cannot be revived.
+    Reject {
+        request_id: String,
+        /// Human/operator identifier to record with the decision.
+        #[arg(long)]
+        operator: String,
+        /// Why this exact request digest is rejected.
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum SyncProvider {
     /// Use `gh` CLI to host on GitHub (legacy default).
@@ -4402,6 +4453,12 @@ async fn real_main() -> Result<()> {
             }
             Some(SyncOp::Status) => sync::run_status(),
         };
+    }
+
+    // Operator requests are a local file-backed control plane. They do not
+    // need the daemon Hub, and decisions never invoke an executor.
+    if let Cmd::OperatorRequest { op } = &cmd {
+        return run_operator_request_cli(op);
     }
 
     // Skills subcommand: short-lived; no daemon hub needed.
@@ -7756,6 +7813,7 @@ async fn real_main() -> Result<()> {
         }
         Cmd::Setup { .. }
         | Cmd::Sync { .. }
+        | Cmd::OperatorRequest { .. }
         | Cmd::Skills { .. }
         | Cmd::BrowserLite { .. }
         | Cmd::Avatar { .. }
@@ -7778,6 +7836,96 @@ async fn real_main() -> Result<()> {
         | Cmd::WorkflowFeedbackPromotionRecord { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
+}
+
+fn run_operator_request_cli(op: &OperatorRequestOp) -> Result<()> {
+    let store = OperatorRequestStore::default();
+    match op {
+        OperatorRequestOp::List { limit, json } => {
+            let views = store.list(*limit)?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "schema": "agent_bridge.operator_request_list.v0",
+                        "store": store.root(),
+                        "requests": views,
+                    }))?
+                );
+            } else if views.is_empty() {
+                println!("No staged operator requests in {}.", store.root().display());
+            } else {
+                println!(
+                    "{:<38}  {:<28}  {:<20}  DIGEST",
+                    "REQUEST ID", "STATUS", "CAPABILITY"
+                );
+                for view in views {
+                    println!(
+                        "{:<38}  {:<28}  {:<20}  {}",
+                        view.request.request_id,
+                        view.status,
+                        view.request.requested_capability.as_str(),
+                        &view.request.request_digest[..12]
+                    );
+                }
+            }
+        }
+        OperatorRequestOp::Show { request_id, json } => {
+            print_operator_request_view(&store.get(request_id)?, *json)?;
+        }
+        OperatorRequestOp::Approve {
+            request_id,
+            operator,
+            reason,
+            json,
+        } => {
+            let view = store.decide(request_id, OperatorDecision::Approve, operator, reason)?;
+            print_operator_request_view(&view, *json)?;
+        }
+        OperatorRequestOp::Reject {
+            request_id,
+            operator,
+            reason,
+            json,
+        } => {
+            let view = store.decide(request_id, OperatorDecision::Reject, operator, reason)?;
+            print_operator_request_view(&view, *json)?;
+        }
+    }
+    Ok(())
+}
+
+fn print_operator_request_view(view: &OperatorRequestView, as_json: bool) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(view)?);
+        return Ok(());
+    }
+    println!("Request: {}", view.request.request_id);
+    println!("Status: {}", view.status);
+    println!("Digest: {}", view.request.request_digest);
+    println!("Capability: {}", view.request.requested_capability.as_str());
+    println!("Target: {}", view.request.target);
+    println!("Channel: {}", view.request.channel_id);
+    println!("Identity strength: {}", view.request.identity_strength);
+    println!("Created: {}", view.request.created_at);
+    println!("Expires: {}", view.request.expires_at);
+    println!("Execution allowed: {}", view.execution_allowed);
+    println!(
+        "Canonical write performed: {}",
+        view.request.canonical_write_performed
+    );
+    if let Some(decision) = &view.decision {
+        println!("Decision: {}", decision.decision.as_str());
+        println!("Operator: {}", decision.operator_id);
+        println!("Reason: {}", decision.reason);
+        println!("Approval scope: {}", decision.approval_scope);
+        println!(
+            "Separate executor gate required: {}",
+            decision.requires_separate_executor_gate
+        );
+    }
+    println!("Next step: {}", view.next_step);
+    Ok(())
 }
 
 /// Goal C standing continuity `U` report: build the store-side embedding-space

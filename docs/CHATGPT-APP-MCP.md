@@ -10,7 +10,7 @@ The unified ChatGPT desktop application contains two different execution paths:
 Use the existing Codex setup for the first path. Use a Developer Mode App plus
 OpenAI Secure MCP Tunnel for the second path.
 
-## Read-only contract
+## Production read-only contract
 
 Set `AGENT_BRIDGE_TOOLSET=chatgpt-read`. This profile exposes exactly:
 
@@ -41,9 +41,26 @@ both `structuredContent` and the text compatibility block. They return an empty
 HTTP URL; ChatGPT should treat them as ordinary tool results rather than false
 citations.
 
-The generic `search` and `fetch` names are registered only for `chatgpt-read`.
-Existing Codex, Claude, Gemini, hook, standard, and development profiles retain
-their existing tool membership.
+The generic `search` and `fetch` names are registered only for the
+`chatgpt-read` and explicit `chatgpt-collab` profiles. Existing Codex,
+Claude, Gemini, hook, standard, and development profiles retain their existing
+tool membership.
+
+## Collaboration control plane (P1, default off)
+
+Source builds also contain an explicit `chatgpt-collab` profile. It adds a
+read-only task-contract preview and, with an explicit channel configuration,
+private request staging/query tools. These tools cannot approve or execute
+requests and cannot write canonical memory, forum, project, external-service,
+or runtime state. Local approval records evidence only and always reports
+`execution_allowed=false`.
+
+The generic `chatgpt` and `openai-chat` aliases remain mapped to
+`chatgpt-read`; P1 cannot be enabled accidentally through those names.
+Production should stay on `chatgpt-read` until a separately reviewed executor
+gate exists. See
+[ChatGPT collaboration control plane](design/CHATGPT-COLLAB-CONTROL-PLANE.md)
+for the contract, CLI, limitations, and P2 conditions.
 
 ## Local verification
 
@@ -121,7 +138,8 @@ read-only and has no memory, forum, shell, browser, device, or deployment
 mutation tools.
 
 Do not replace `chatgpt-read` with `all-dev`, `claude-standard`,
-`codex-essential`, or `codex-lean` in the tunnel profile.
+`codex-essential`, `codex-lean`, or `chatgpt-collab` in the production
+tunnel profile during P1.
 
 Official references:
 

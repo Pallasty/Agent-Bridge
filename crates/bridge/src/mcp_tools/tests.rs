@@ -7448,6 +7448,109 @@ fn chatgpt_forum_surface_requires_explicit_normalized_tags() {
     }
 }
 
+#[test]
+fn tool_policy_chatgpt_collab_is_explicit_bounded_and_default_off() {
+    let policy = ToolPolicy::from_values(Some("chatgpt-collab"), None, None, Some("all"));
+    assert_eq!(policy.label(), "chatgpt-collab");
+    assert_eq!(policy.profile().label(), "essential");
+    assert_eq!(
+        ToolPolicy::from_values(Some("chatgpt"), None, None, Some("all")).label(),
+        "chatgpt-read",
+        "the generic ChatGPT alias must remain read-only"
+    );
+    assert_eq!(
+        ToolPolicy::from_values(Some("openai-collab"), None, None, None).label(),
+        "chatgpt-collab"
+    );
+
+    let hub = Hub::builder().build();
+    let mut without_channel = build_registry_with_policy(hub.clone(), policy);
+    register_chatgpt_forum_tools(
+        &mut without_channel,
+        &hub,
+        policy,
+        vec!["agent-bridge".into()],
+    );
+    register_chatgpt_collab_tools_with(
+        &mut without_channel,
+        policy,
+        None,
+        BTreeSet::new(),
+        OperatorRequestStore::new(std::env::temp_dir().join("unused-operator-requests")),
+    );
+    let without_channel_names: Vec<_> = without_channel
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    assert!(!without_channel_names
+        .iter()
+        .any(|name| name.starts_with("operator_request_")));
+
+    let temp = tempfile::tempdir().unwrap();
+    let mut registry = build_registry_with_policy(hub.clone(), policy);
+    register_chatgpt_forum_tools(&mut registry, &hub, policy, vec!["agent-bridge".into()]);
+    register_chatgpt_collab_tools_with(
+        &mut registry,
+        policy,
+        Some("chatgpt-desktop".into()),
+        BTreeSet::from([crate::operator_request::OperatorCapability::ProjectWrite]),
+        OperatorRequestStore::new(temp.path().join("queue")),
+    );
+    let descriptors = registry.descriptors();
+    let names: Vec<_> = descriptors
+        .iter()
+        .map(|descriptor| descriptor.schema.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "agent_task_contract_preview",
+            "capabilities",
+            "context_governor_snapshot",
+            "fetch",
+            "forum_fetch",
+            "forum_search",
+            "operator_request_get",
+            "operator_request_stage",
+            "search",
+        ]
+    );
+    for forbidden in [
+        "memory_save",
+        "work_memory",
+        "forum_post",
+        "shell_exec",
+        "agent_spawn",
+        "browser_navigate",
+        "github_create_issue",
+        "ide_command",
+    ] {
+        assert!(
+            !names.contains(&forbidden),
+            "{forbidden} must not enter the ChatGPT collaboration control plane"
+        );
+    }
+
+    let stage = descriptors
+        .iter()
+        .find(|descriptor| descriptor.schema.name == "operator_request_stage")
+        .expect("stage descriptor");
+    let annotations = stage.annotations.expect("stage annotations");
+    assert!(!annotations.read_only_hint);
+    assert!(!annotations.destructive_hint);
+    assert!(!annotations.open_world_hint);
+    assert_eq!(annotations.idempotent_hint, Some(false));
+    assert!(stage.output_schema.is_some());
+
+    let get = descriptors
+        .iter()
+        .find(|descriptor| descriptor.schema.name == "operator_request_get")
+        .expect("get descriptor");
+    assert!(get.annotations.expect("get annotations").read_only_hint);
+    assert!(get.output_schema.is_some());
+}
+
 #[tokio::test]
 async fn chatgpt_search_and_fetch_return_structured_results_without_access_mutation() {
     let (hub, temp_dir) = mk_test_hub_with_store().await;
@@ -13157,6 +13260,7 @@ fn dispatch_telemetry_accepts_chatgpt_source_without_reclassifying_openai_codex(
     }
 
     assert_eq!(dispatch_normalize_source("chatgpt-read"), Some("chatgpt"));
+    assert_eq!(dispatch_normalize_source("chatgpt-collab"), Some("chatgpt"));
     assert_eq!(dispatch_normalize_source("ChatGPT"), Some("chatgpt"));
     assert_eq!(dispatch_normalize_source("OpenAI Codex"), Some("codex"));
 }

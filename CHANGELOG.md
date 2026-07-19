@@ -8,6 +8,16 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Default-off ChatGPT collaboration control plane (P1).** The explicit
+  `chatgpt-collab` toolset preserves scoped read/search/forum adapters and
+  adds task-contract preview plus private `operator_request_stage/get`
+  tools. Requests are API-single-write, TTL/rate/record capped,
+  channel-scoped, capability/authority matched, and digest-validated on every
+  read. A local-only CLI can append one approve/reject evidence record, but
+  approval always remains `execution_allowed=false` and requires a separate,
+  not-yet-implemented executor gate. Generic ChatGPT aliases and the production
+  tunnel remain `chatgpt-read`; no canonical write or execution tool is
+  exposed.
 - **ChatGPT read-only MCP compatibility.** MCP tool descriptors now support
   non-empty titles, explicit safety annotations, optional `outputSchema`, and
   `structuredContent`. The isolated `chatgpt-read`

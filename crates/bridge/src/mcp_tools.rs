@@ -2,6 +2,9 @@
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
 use crate::agent_task_contract::{preview_agent_task_contract, AgentTaskContract};
+use crate::operator_request::{
+    configured_chatgpt_collab_capabilities, configured_chatgpt_collab_channel, OperatorRequestStore,
+};
 use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use crate::trigger_recall_opt_in::{
     trigger_recall_enforce_hold_approval_packet_validator,
@@ -68,6 +71,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
+
+mod operator_request;
+use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
 
 use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
@@ -693,7 +699,10 @@ fn compact_mcp_output_default() -> bool {
 fn compact_mcp_output_default_for_policy(policy: ToolPolicy) -> bool {
     matches!(
         policy.set,
-        ToolSet::CodexEssential | ToolSet::CodexLean | ToolSet::ChatGptRead
+        ToolSet::CodexEssential
+            | ToolSet::CodexLean
+            | ToolSet::ChatGptRead
+            | ToolSet::ChatGptCollab
     ) || matches!(policy.profile(), ToolProfile::Compact)
 }
 
@@ -23433,6 +23442,7 @@ fn readiness_profile_rows(hub: &Hub) -> Vec<Value> {
         ("codex-essential", Some("codex-essential"), None, None),
         ("codex-lean", Some("codex-lean"), None, None),
         ("chatgpt-read", Some("chatgpt-read"), None, None),
+        ("chatgpt-collab-base", Some("chatgpt-collab"), None, None),
         ("claude-standard", Some("claude-standard"), None, None),
         ("gemini-lean", Some("gemini-lean"), None, None),
         ("hook-lifecycle", Some("hook-lifecycle"), None, None),
@@ -39436,6 +39446,7 @@ enum ToolSet {
     CodexEssential,
     CodexLean,
     ChatGptRead,
+    ChatGptCollab,
     ClaudeStandard,
     GeminiLean,
     HookLifecycle,
@@ -39449,6 +39460,7 @@ impl ToolSet {
             Self::CodexEssential => "codex-essential",
             Self::CodexLean => "codex-lean",
             Self::ChatGptRead => "chatgpt-read",
+            Self::ChatGptCollab => "chatgpt-collab",
             Self::ClaudeStandard => "claude-standard",
             Self::GeminiLean => "gemini-lean",
             Self::HookLifecycle => "hook-lifecycle",
@@ -39462,6 +39474,7 @@ impl ToolSet {
             Some("codex-essential") | Some("codex") => Some(Self::CodexEssential),
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
             Some("chatgpt-read") | Some("chatgpt") | Some("openai-chat") => Some(Self::ChatGptRead),
+            Some("chatgpt-collab") | Some("openai-collab") => Some(Self::ChatGptCollab),
             Some("claude-standard") | Some("claude-code") | Some("claude") => {
                 Some(Self::ClaudeStandard)
             }
@@ -39516,9 +39529,10 @@ impl ToolPolicy {
         let profile = match set {
             ToolSet::Profile => legacy_profile,
             ToolSet::CodexEssential => ToolProfile::Compact,
-            ToolSet::CodexLean | ToolSet::ChatGptRead | ToolSet::GeminiLean => {
-                ToolProfile::Essential
-            }
+            ToolSet::CodexLean
+            | ToolSet::ChatGptRead
+            | ToolSet::ChatGptCollab
+            | ToolSet::GeminiLean => ToolProfile::Essential,
             ToolSet::ClaudeStandard | ToolSet::HookLifecycle => ToolProfile::Standard,
             ToolSet::AllDev => ToolProfile::All,
         };
@@ -39551,6 +39565,7 @@ impl ToolPolicy {
             ToolSet::CodexEssential => codex_essential_tool(tier, tool_name),
             ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::ChatGptRead => chatgpt_read_tool(tool_name),
+            ToolSet::ChatGptCollab => chatgpt_collab_tool(tool_name),
             ToolSet::GeminiLean => gemini_lean_tool(tool_name),
             ToolSet::HookLifecycle => hook_lifecycle_tool(tool_name),
         }
@@ -39821,13 +39836,23 @@ fn chatgpt_read_tool(tool_name: &str) -> bool {
     )
 }
 
+fn chatgpt_collab_tool(tool_name: &str) -> bool {
+    chatgpt_read_tool(tool_name)
+        || matches!(
+            tool_name,
+            "agent_task_contract_preview" | "operator_request_stage" | "operator_request_get"
+        )
+}
+
 fn register_chatgpt_forum_tools(
     registry: &mut ToolRegistry,
     hub: &Hub,
     policy: ToolPolicy,
     allowed_tags: Vec<String>,
 ) {
-    if !matches!(policy.set, ToolSet::ChatGptRead) || allowed_tags.is_empty() {
+    if !matches!(policy.set, ToolSet::ChatGptRead | ToolSet::ChatGptCollab)
+        || allowed_tags.is_empty()
+    {
         return;
     }
     registry.register(Arc::new(ChatGptForumSearchTool::new(
@@ -39838,6 +39863,40 @@ fn register_chatgpt_forum_tools(
         hub.clone(),
         allowed_tags,
     )));
+}
+
+fn register_chatgpt_collab_tools_with(
+    registry: &mut ToolRegistry,
+    policy: ToolPolicy,
+    channel_id: Option<String>,
+    capabilities: BTreeSet<crate::operator_request::OperatorCapability>,
+    store: OperatorRequestStore,
+) {
+    if !matches!(policy.set, ToolSet::ChatGptCollab) {
+        return;
+    }
+    let Some(channel_id) = channel_id else {
+        tracing::warn!(
+            "chatgpt-collab request tools hidden: set AGENT_BRIDGE_CHATGPT_COLLAB_CHANNEL"
+        );
+        return;
+    };
+    registry.register(Arc::new(OperatorRequestStageTool::new(
+        store.clone(),
+        channel_id.clone(),
+        capabilities,
+    )));
+    registry.register(Arc::new(OperatorRequestGetTool::new(store, channel_id)));
+}
+
+fn register_chatgpt_collab_tools(registry: &mut ToolRegistry, policy: ToolPolicy) {
+    register_chatgpt_collab_tools_with(
+        registry,
+        policy,
+        configured_chatgpt_collab_channel(),
+        configured_chatgpt_collab_capabilities(),
+        OperatorRequestStore::default(),
+    );
 }
 
 fn gemini_lean_tool(tool_name: &str) -> bool {
@@ -41489,6 +41548,7 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     let mut reg = build_registry_with_policy_surface(hub.clone(), policy, surface, ceremony);
     let chatgpt_forum_tags = configured_chatgpt_forum_tags();
     register_chatgpt_forum_tools(&mut reg, &hub, policy, chatgpt_forum_tags.clone());
+    register_chatgpt_collab_tools(&mut reg, policy);
     tracing::info!(
         profile = policy.profile().label(),
         toolset = policy.label(),
@@ -42659,7 +42719,7 @@ pub(crate) fn build_registry_with_policy_surface(
     // Generic names are reserved for ChatGPT company-knowledge discovery.
     // Keep them out of every existing client profile to avoid collisions with
     // native search/fetch tools and preserve current Codex/Claude surfaces.
-    if matches!(policy.set, ToolSet::ChatGptRead) {
+    if matches!(policy.set, ToolSet::ChatGptRead | ToolSet::ChatGptCollab) {
         reg.register(Arc::new(ChatGptSearchTool::new(hub.clone())));
         reg.register(Arc::new(ChatGptFetchTool::new(hub.clone())));
     }
@@ -44703,6 +44763,7 @@ pub(crate) fn build_registry_current_view(policy: ToolPolicy) -> ToolRegistry {
         ceremony_tools_exposed(policy),
     );
     register_chatgpt_forum_tools(&mut registry, &hub, policy, configured_chatgpt_forum_tags());
+    register_chatgpt_collab_tools(&mut registry, policy);
     registry
 }
 

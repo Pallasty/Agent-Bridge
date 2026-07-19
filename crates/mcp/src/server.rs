@@ -492,6 +492,8 @@ fn mcp_profile_label_from_values(toolset: Option<&str>, profile: Option<&str>) -
         | Some("codex-minimal")
         | Some("codex")
         | Some("chatgpt-read")
+        | Some("chatgpt-collab")
+        | Some("openai-collab")
         | Some("chatgpt")
         | Some("openai-chat")
         | Some("gemini-lean")
@@ -596,7 +598,9 @@ fn classify_mcp_source_from_client(client_name: Option<&str>) -> Option<&'static
 fn normalize_mcp_source(value: &str) -> Option<&'static str> {
     match normalize_mcp_env_value(value).as_str() {
         "codex" | "codex-essential" | "codex-lean" | "codex-minimal" => Some("codex"),
-        "chatgpt" | "chatgpt-read" | "openai-chat" => Some("chatgpt"),
+        "chatgpt" | "chatgpt-read" | "chatgpt-collab" | "openai-chat" | "openai-collab" => {
+            Some("chatgpt")
+        }
         "hook" | "hooks" | "lifecycle" | "hook-lifecycle" => Some("hook"),
         "claude" | "claude-code" | "claude-standard" => Some("claude"),
         "gemini" | "gemini-lean" => Some("gemini"),
@@ -1622,6 +1626,11 @@ mod tests {
             mcp_profile_label_from_values(Some("chatgpt-read"), Some("all")),
             "essential"
         );
+        assert_eq!(
+            mcp_profile_label_from_values(Some("chatgpt-collab"), Some("all")),
+            "essential"
+        );
+        assert_eq!(normalize_mcp_source("openai-collab"), Some("chatgpt"));
         assert_eq!(
             mcp_profile_label_from_values(Some("all_dev"), Some("essential")),
             "all"
