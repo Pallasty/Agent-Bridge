@@ -1,0 +1,65 @@
+{
+  "schema": "agent_bridge.memory_temporal_owned_lab_presign_closure_status_s21b_a0.v0",
+  "stage": "S21B_A0_NON_LIVE_PRESIGN_CLOSURE_AND_ROLE_ARTIFACT_EXISTENCE_AUDIT",
+  "status": "S21B_A0_BLOCKED_MISSING_ROLE_ARTIFACTS_AND_REPRODUCIBLE_CLOSURES",
+  "decision": "S21B_A0_REMAINS_BLOCKED_NO_UNSIGNED_SUBJECT_OR_OWNER_SIGNING_REQUEST",
+  "target_observation": {
+    "s21a_source_commit_and_tree_known": true,
+    "s21a_integration_commit_tree_and_parents_known": true,
+    "exact_archive_profile_and_observed_digest_known": true,
+    "cargo_lock_digest_known": true,
+    "values_are_independently_recomputable": true,
+    "values_alone_complete_presign_closure": false
+  },
+  "current_blockers": {
+    "controller_named_role_binary_missing": true,
+    "observer_named_role_binary_missing": true,
+    "runner_named_role_binary_missing": true,
+    "validator_named_role_binary_missing": true,
+    "toolchain_manifest_closure_missing": true,
+    "feature_set_closure_missing": true,
+    "schema_set_closure_missing": true,
+    "deterministic_role_build_recipes_missing": true,
+    "two_independent_rebuild_receipts_missing": true,
+    "independent_rebuild_equality_receipt_missing": true
+  },
+  "current_outputs": {
+    "real_presign_closure_receipt_present": false,
+    "unsigned_final_subject_present": false,
+    "owner_signing_request_present": false,
+    "owner_signing_message_present": false,
+    "owner_anchor_present": false,
+    "owner_private_key_present": false,
+    "owner_signature_present": false,
+    "external_input_admission_present": false,
+    "execution_capability_present": false,
+    "live_action_count": 0,
+    "side_effects_unlocked": "NONE"
+  },
+  "implemented_a0_boundary": {
+    "closed_draft_2020_12_receipt_schema_present": true,
+    "synthetic_blocked_receipt_present": true,
+    "role_artifact_existence_is_explicit": true,
+    "missing_digest_cannot_be_replaced_by_zero_or_synthetic_value": true,
+    "subject_and_signing_outputs_forbidden_while_blocked": true,
+    "owner_interaction_required_now": false,
+    "live_adapter_present": false
+  },
+  "next_required_work": {
+    "identity": "S21B_A1_DEFINE_AND_BUILD_FOUR_NAMED_NON_LIVE_ROLE_ARTIFACTS_AND_REPRODUCIBLE_CLOSURES",
+    "requires_repository_change": true,
+    "new_integration_identity_must_be_refrozen_after_change": true,
+    "owner_signature_may_be_requested_before_completion": false,
+    "may_generate_unsigned_final_subject_now": false,
+    "may_execute_live_now": false
+  },
+  "nonclaims": {
+    "a0_completion_means_presign_closure_complete": false,
+    "synthetic_receipt_is_real_build_evidence": false,
+    "known_archive_digest_is_reproducible_build_receipt": false,
+    "private_modules_are_named_role_binaries": false,
+    "owner_authority_established": false,
+    "provider_or_production_authority": false,
+    "side_effects_unlocked": "NONE"
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "schema": "agent_bridge.memory_temporal_owned_lab_presign_closure_contract_s21b_a0.v0",
+  "stage": "S21B_A0_NON_LIVE_PRESIGN_CLOSURE_AND_ROLE_ARTIFACT_EXISTENCE_AUDIT",
+  "status": "S21B_A0_BLOCKED_MISSING_ROLE_ARTIFACTS_AND_REPRODUCIBLE_CLOSURES",
+  "decision": "S21B_A0_REMAINS_BLOCKED_NO_UNSIGNED_SUBJECT_OR_OWNER_SIGNING_REQUEST",
+  "implementation_mode": "READ_ONLY_IDENTITY_AND_EXISTENCE_AUDIT_WITH_SYNTHETIC_BLOCKED_RECEIPT_ONLY",
+  "target_binding": {
+    "canonical_remote": "git@github.com:pallasting/Agent-Bridge.git",
+    "remote_ref": "refs/heads/master",
+    "s21a_source_commit": "ed5d959489f88d0eead21b604d03a142e0584982",
+    "s21a_source_tree": "7d1db2c9eb04d75cc980ea83d369b9129155252f",
+    "s21a_integration_commit": "34b1c7e6ca9c2b75fd2ef3cf418a444353059511",
+    "s21a_integration_tree": "00bbf534c33ecfa56d05579d8a7f4c83e60b208e",
+    "integration_first_parent": "8521ff6a9784a6d74be2b8ee0e02f3aba6b9f8a5",
+    "integration_second_parent": "ed5d959489f88d0eead21b604d03a142e0584982",
+    "archive_profile": "git -c tar.umask=0022 archive --format=tar <commit>",
+    "observed_integrated_archive_sha256": "d45312d5b343dd036ef6906af0abe9f59da8220cf6ef16fb87caf8c1265c0bb5",
+    "cargo_lock_sha256": "408e0aa5e6bc3f2a318719c57419ece60b507df0a11c1738fd40dda66aac1f59"
+  },
+  "receipt_contract": {
+    "draft": "2020-12",
+    "schema_id": "agent_bridge.memory_temporal_owned_lab_presign_closure_receipt_s21b_a0.v0",
+    "packet_kind": "S21B_A0_PRESIGN_CLOSURE_RECEIPT",
+    "canonicalization": "AB_RESTRICTED_CANONICAL_JSON_S21B_A0_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT",
+    "digest_domain": "agent-bridge/biocortex/owned-lab/s21b-a0/presign-closure-receipt/v1",
+    "digest_framing": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD",
+    "self_hash_field": "presign_closure_receipt_sha256",
+    "additional_properties_allowed": false,
+    "external_schema_references_allowed": false,
+    "candidate_supplied_expected_values_authoritative": false
+  },
+  "existence_audit": {
+    "required_role_artifact_count": 4,
+    "required_roles": [
+      "controller",
+      "observer",
+      "runner",
+      "validator"
+    ],
+    "declared_required_role_artifact_count": 0,
+    "existing_required_role_artifact_count": 0,
+    "unrelated_backfill_embeddings_is_role_artifact": false,
+    "private_library_or_test_binary_is_role_artifact": false,
+    "arbitrary_nonzero_digest_may_substitute_for_missing_artifact": false
+  },
+  "missing_reproducible_closures": {
+    "toolchain_manifest_definition_missing": true,
+    "feature_set_definition_missing": true,
+    "schema_set_membership_definition_missing": true,
+    "deterministic_role_build_recipes_missing": true,
+    "first_clean_archive_rebuild_missing": true,
+    "second_clean_archive_rebuild_missing": true,
+    "independent_rebuild_output_equality_missing": true
+  },
+  "forbidden_outputs": {
+    "unsigned_final_subject_may_be_emitted": false,
+    "owner_signing_request_may_be_emitted": false,
+    "owner_signing_message_may_be_emitted": false,
+    "owner_anchor_may_be_installed": false,
+    "owner_private_key_may_be_requested_or_stored": false,
+    "owner_signature_may_be_requested": false,
+    "external_input_admission_may_be_emitted": false,
+    "execution_capability_may_be_issued": false,
+    "live_execution_may_begin": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "exit_conditions": {
+    "four_named_non_live_role_artifacts_exist": false,
+    "toolchain_feature_and_schema_set_closures_defined": false,
+    "two_independent_clean_archive_rebuilds_match": false,
+    "final_target_includes_all_presign_closure_changes": false,
+    "independent_review_complete": false,
+    "may_advance_to_unsigned_subject_generation": false
+  },
+  "nonclaims": {
+    "contract_is_unsigned_final_subject": false,
+    "contract_is_owner_authority": false,
+    "contract_is_execution_capability": false,
+    "known_git_archive_identity_completes_presign_closure": false,
+    "schema_conformance_proves_role_artifact_existence": false,
+    "owner_interaction_required_now": false,
+    "provider_or_production_authority": false,
+    "side_effects_unlocked": "NONE"
+  }
+}

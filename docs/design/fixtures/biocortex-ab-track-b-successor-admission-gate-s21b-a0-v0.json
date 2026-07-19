@@ -1,0 +1,83 @@
+{
+  "schema": "agent_bridge.memory_temporal_successor_admission_gate_s21b_a0.v0",
+  "stage": "S21B_A0_NON_LIVE_PRESIGN_CLOSURE_AND_ROLE_ARTIFACT_EXISTENCE_AUDIT",
+  "status": "S21B_A0_BLOCKED_MISSING_ROLE_ARTIFACTS_AND_REPRODUCIBLE_CLOSURES",
+  "decision": "S21B_A0_REMAINS_BLOCKED_NO_UNSIGNED_SUBJECT_OR_OWNER_SIGNING_REQUEST",
+  "completed_a0_boundary": {
+    "exact_s21a_target_identity_frozen_for_audit": true,
+    "archive_and_cargo_lock_recomputation_profile_explicit": true,
+    "four_required_role_artifacts_enumerated": true,
+    "role_artifact_absence_explicit": true,
+    "missing_reproducible_closures_enumerated": true,
+    "closed_draft_2020_12_blocked_receipt_schema_present": true,
+    "synthetic_blocked_kat_present": true,
+    "arbitrary_nonzero_digest_substitution_allowed": false,
+    "subject_or_signing_output_present": false,
+    "live_adapter_present": false,
+    "side_effects_unlocked": "NONE"
+  },
+  "admission_decision": {
+    "a0_audit_contract_complete": true,
+    "presign_closure_complete": false,
+    "unsigned_final_subject_generation_may_begin": false,
+    "owner_anchor_provisioning_may_begin": false,
+    "owner_signature_may_be_requested": false,
+    "external_input_admission_may_begin": false,
+    "live_execution_may_begin": false,
+    "provider_or_production_authority": false,
+    "terminal_hard_lock": true,
+    "side_effects_unlocked": "NONE"
+  },
+  "a1_requirements": {
+    "identity": "S21B_A1_DEFINE_AND_BUILD_FOUR_NAMED_NON_LIVE_ROLE_ARTIFACTS_AND_REPRODUCIBLE_CLOSURES",
+    "controller_named_role_binary_required": true,
+    "observer_named_role_binary_required": true,
+    "runner_named_role_binary_required": true,
+    "validator_named_role_binary_required": true,
+    "canonical_toolchain_manifest_required": true,
+    "canonical_feature_set_required": true,
+    "canonical_schema_set_membership_required": true,
+    "exact_deterministic_build_recipes_required": true,
+    "two_independent_clean_archive_rebuilds_required": true,
+    "all_role_and_closure_digests_must_match_across_rebuilds": true,
+    "candidate_supplied_expected_digests_allowed": false,
+    "new_integration_identity_after_role_artifact_changes_required": true,
+    "separate_review_before_subject_generation_required": true
+  },
+  "fail_closed_conditions": [
+    "ANY_REQUIRED_NAMED_ROLE_BINARY_ABSENT_OR_UNDECLARED",
+    "PRIVATE_LIBRARY_OR_TEST_EXECUTABLE_RELABELLED_AS_ROLE_BINARY",
+    "ARBITRARY_NONZERO_OR_SYNTHETIC_DIGEST_SUBSTITUTED_FOR_MISSING_ARTIFACT",
+    "TOOLCHAIN_MANIFEST_MEMBERSHIP_ENCODING_OR_DIGEST_PROFILE_UNDEFINED",
+    "FEATURE_SET_MEMBERSHIP_ENCODING_OR_DIGEST_PROFILE_UNDEFINED",
+    "SCHEMA_SET_MEMBERSHIP_ORDERING_FRAMING_OR_DIGEST_PROFILE_UNDEFINED",
+    "DETERMINISTIC_ROLE_BUILD_RECIPE_ABSENT",
+    "FEWER_THAN_TWO_INDEPENDENT_CLEAN_ARCHIVE_REBUILDS",
+    "INDEPENDENT_REBUILD_OUTPUT_MISMATCH",
+    "CANDIDATE_SUPPLIED_EXPECTED_VALUE_TREATED_AS_AUTHORITATIVE",
+    "POST_FREEZE_REPOSITORY_CHANGE_NOT_BOUND_TO_NEW_INTEGRATION_IDENTITY",
+    "UNSIGNED_SUBJECT_SIGNING_MESSAGE_ANCHOR_KEY_SIGNATURE_OR_LIVE_AUTHORITY_EMITTED_DURING_A0"
+  ],
+  "current_missing_requirements": {
+    "controller_role_artifact": true,
+    "observer_role_artifact": true,
+    "runner_role_artifact": true,
+    "validator_role_artifact": true,
+    "toolchain_manifest_closure": true,
+    "feature_set_closure": true,
+    "schema_set_closure": true,
+    "first_independent_rebuild": true,
+    "second_independent_rebuild": true,
+    "rebuild_equality_receipt": true
+  },
+  "nonclaims": {
+    "a0_gate_admits_unsigned_subject_generation": false,
+    "a0_gate_requests_owner_signature": false,
+    "a0_gate_installs_owner_anchor": false,
+    "a0_gate_admits_external_inputs": false,
+    "a0_gate_issues_execution_capability": false,
+    "owner_interaction_required_now": false,
+    "provider_or_production_authority": false,
+    "side_effects_unlocked": "NONE"
+  }
+}
