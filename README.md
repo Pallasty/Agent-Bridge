@@ -969,7 +969,14 @@ cross-platform evidence and trust-boundary audit described in
 `docs/design/AGENT_RUNTIME_WORKSPACE_SANDBOX_P1.md`.
 Successful `agent_spawn` responses include `sandbox_profile_requested` when a
 profile was requested; this is launch intent, while launcher failures remain
-visible through the finalized session exit/output.
+visible through the finalized session exit/output. After the outer policy is
+actually applied, the hidden launcher emits a closed, path-free receipt.
+`agent_session_wait` and `agent_session_output` parse that receipt as
+`sandbox_attestation.state="applied"`; the latter removes the receipt from the
+user transcript. Executor-native diagnostics such as Codex's own sandbox mode
+describe a separate inner layer and do not override this outer attestation.
+The receipt is process-local and non-cryptographic; it improves observability
+but cannot itself authorize runtime promotion or replace adversarial canaries.
 
 ### Cloud Agent Lifecycle (warp-oz)
 
