@@ -1803,3 +1803,10 @@ so they are versioned normally and are not added to the preservation-only
 - Canonical tree manifests cover 130,694 entries. Bounded query receipts contain
   63 path/line hashes. No build, execution, measurement or scientific claim is
   admitted before P11-G13.
+
+## Majorana P11-G13 post-inspection governance
+
+- G13 accepts E3R as version-bound source-location evidence while explicitly
+  rejecting semantic or kernel-bound inference from line hashes alone.
+- It opens only P11-E4 source-evidence analysis contract design; additional
+  reading, builds, execution, measurement and science remain closed.

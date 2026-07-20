@@ -1942,6 +1942,14 @@ entries, and bounded searches yield 20 GCC, 20 binutils, 20 Linux and 3
 linux-signed receipts. These are source-location observations only; P11-G13
 must govern any semantic, kernel-bound or candidate inference.
 
+## Majorana P11-G13 admits locations, not conclusions
+
+G13 records five passing findings and closes E3R as source-location evidence.
+Tree manifests and line hashes can anchor a future analysis, but they do not by
+themselves establish compiler, linker, kernel-accounting or memory-bound
+semantics. Only P11-E4 analysis-contract design opens; no additional read or
+downstream technical/scientific authority is granted.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new
