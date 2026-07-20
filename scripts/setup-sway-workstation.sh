@@ -101,7 +101,7 @@ if command -v warp-cli >/dev/null 2>&1 && warp-cli --version >/dev/null 2>&1; th
     done
 fi
 
-as_user mkdir -p "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd/user" "$target_home/.config/Thunar" "$target_home/.local/bin"
+as_user mkdir -p "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd/user" "$target_home/.config/Thunar" "$target_home/.config/wireplumber/wireplumber.conf.d" "$target_home/.local/bin"
 
 if [ -f "$target_home/.config/sway/config" ] && \
    ! grep -q "agent-bridge-sway-workstation" "$target_home/.config/sway/config"; then
@@ -134,6 +134,8 @@ exec_always dbus-update-activation-environment --systemd GTK_IM_MODULE=fcitx QT_
 exec_always env GTK_IM_MODULE=fcitx QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx INPUT_METHOD=fcitx SDL_IM_MODULE=fcitx GLFW_IM_MODULE=ibus fcitx5 -d --replace
 exec_always systemctl --user start mako.service
 exec_always sh -c 'pkill -x swayidle 2>/dev/null || true; exec ~/.local/bin/sway-idle-display'
+# Apply WirePlumber's speaker/headphone auto-switch policy at session start.
+exec ~/.local/bin/sway-audio-autoswitch
 bindswitch --reload --locked lid:on exec ~/.local/bin/sway-lid-display off
 bindswitch --reload --locked lid:off exec ~/.local/bin/sway-lid-display on
 bindsym --release --locked XF86PowerOff exec ~/.local/bin/sway-power-button
@@ -186,6 +188,55 @@ bindsym --release --locked F13 exec ~/.local/bin/sway-screenshot region
 bindsym --release --locked F14 exec ~/.local/bin/sway-screenshot region
 # END local-hotkeys managed by setup-sway-workstation
 SWAY_CONFIG
+
+cat > "$target_home/.config/wireplumber/wireplumber.conf.d/51-alsa-auto-switch.conf" <<'WIREPLUMBER_ALSA_AUTO_SWITCH'
+# Enable automatic speaker/headphone profile and port switching for the
+# integrated Realtek ALC257 device.
+monitor.alsa.rules = [
+  {
+    matches = [
+      { device.name = "alsa_card.pci-0000_00_1f.3-platform-skl_hda_dsp_generic" }
+    ]
+    actions = {
+      update-props = {
+        api.acp.auto-profile = true
+        api.acp.auto-port = true
+      }
+    }
+  }
+]
+WIREPLUMBER_ALSA_AUTO_SWITCH
+
+cat > "$target_home/.local/bin/sway-audio-autoswitch" <<'SWAY_AUDIO_AUTOSWITCH'
+#!/bin/sh
+# Apply the user WirePlumber headphone/speaker auto-switch policy at Sway
+# session startup. The policy itself lives in wireplumber.conf.d.
+
+set -eu
+
+CARD='alsa_card.pci-0000_00_1f.3-platform-skl_hda_dsp_generic'
+CONF="$HOME/.config/wireplumber/wireplumber.conf.d/51-alsa-auto-switch.conf"
+
+[ -r "$CONF" ] || exit 0
+
+# Reload the session manager so a newly installed/changed rule is effective.
+systemctl --user try-restart wireplumber.service
+
+# Give WirePlumber a moment to recreate the ALSA card before checking it.
+sleep 1
+
+# If headphones are currently inserted, select the headphones-capable profile
+# immediately. Future insert/remove events are handled by auto-profile and
+# auto-port above; this only avoids waiting for the next jack event at login.
+if pactl list cards 2>/dev/null | awk '
+  /Name: alsa_card\./ { card=$2 }
+  card == "'"$CARD"'" && /Headphones.*available/ { found=1 }
+  END { exit(found ? 0 : 1) }
+'; then
+  pactl set-card-profile "$CARD" \
+    'HiFi (HDMI1, HDMI2, HDMI3, Headphones, Mic1, Mic2)' 2>/dev/null || true
+fi
+SWAY_AUDIO_AUTOSWITCH
 
 cat > "$target_home/.local/bin/sway-status" <<'SWAY_STATUS'
 #!/usr/bin/env bash
@@ -1817,6 +1868,7 @@ doctor() {
         sway-idle-display \
         sway-lid-display \
         sway-power-button \
+        sway-audio-autoswitch \
         sway-desktop-doctor \
         sway-desktop-watchdog
     do
@@ -1832,6 +1884,7 @@ doctor() {
             "status_command ~/.local/bin/sway-status" \
             "status_command $home_dir/.local/bin/sway-status"
         check_config_contains "idle_display" "sway-idle-display"
+        check_config_contains "audio_autoswitch" "sway-audio-autoswitch"
         check_config_any "lid_on" "rerun setup-sway-workstation.sh and swaymsg reload" \
             "bindswitch --reload --locked lid:on exec ~/.local/bin/sway-lid-display off" \
             "bindswitch --reload --locked lid:on exec $home_dir/.local/bin/sway-lid-display off"
@@ -1851,6 +1904,12 @@ doctor() {
 
     check_logind_rule "power_ignore" "/etc/systemd/logind.conf.d/90-local-power-button.conf" "HandlePowerKey=ignore"
     check_logind_rule "lid_ignore" "/etc/systemd/logind.conf.d/90-local-lid-display-only.conf" "HandleLidSwitch=ignore"
+    if grep -Fq 'api.acp.auto-profile = true' "$home_dir/.config/wireplumber/wireplumber.conf.d/51-alsa-auto-switch.conf" 2>/dev/null && \
+       grep -Fq 'api.acp.auto-port = true' "$home_dir/.config/wireplumber/wireplumber.conf.d/51-alsa-auto-switch.conf" 2>/dev/null; then
+        add_check "wireplumber.audio_autoswitch" "ok" "WirePlumber speaker/headphone auto-switch rule present"
+    else
+        add_check "wireplumber.audio_autoswitch" "warn" "WirePlumber speaker/headphone auto-switch rule missing" "rerun setup-sway-workstation.sh"
+    fi
     check_user_unit "sway-desktop-watchdog.timer"
 
     if [ -r "$setup_script" ]; then
@@ -2927,7 +2986,7 @@ for brightness_node in /sys/class/backlight/*/brightness; do
     need_sudo chmod 0666 "$brightness_node" || true
 done
 
-need_sudo chown -R "$target_user:$target_user" "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd" "$target_home/.config/Thunar"
+need_sudo chown -R "$target_user:$target_user" "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd" "$target_home/.config/Thunar" "$target_home/.config/wireplumber"
 need_sudo chown "$target_user:$target_user" \
     "$target_home/.local/bin/ab-system-control" \
     "$target_home/.local/bin/sway-status" \
@@ -2946,8 +3005,9 @@ need_sudo chown "$target_user:$target_user" \
     "$target_home/.local/bin/sway-power-button" \
     "$target_home/.local/bin/sway-battery-charge-limit" \
     "$target_home/.local/bin/sway-battery-menu" \
-    "$target_home/.local/bin/thunar-copy-file-address"
-need_sudo chmod 755 "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/Thunar"
+    "$target_home/.local/bin/thunar-copy-file-address" \
+    "$target_home/.local/bin/sway-audio-autoswitch"
+need_sudo chmod 755 "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/Thunar" "$target_home/.config/wireplumber" "$target_home/.config/wireplumber/wireplumber.conf.d"
 need_sudo chmod 755 \
     "$target_home/.local/bin/ab-system-control" \
     "$target_home/.local/bin/sway-status" \
@@ -2966,8 +3026,10 @@ need_sudo chmod 755 \
     "$target_home/.local/bin/sway-power-button" \
     "$target_home/.local/bin/sway-battery-charge-limit" \
     "$target_home/.local/bin/sway-battery-menu" \
-    "$target_home/.local/bin/thunar-copy-file-address"
+    "$target_home/.local/bin/thunar-copy-file-address" \
+    "$target_home/.local/bin/sway-audio-autoswitch"
 need_sudo chmod 644 "$target_home/.config/sway/config"
+need_sudo chmod 644 "$target_home/.config/wireplumber/wireplumber.conf.d/51-alsa-auto-switch.conf"
 need_sudo chmod 644 "$target_home/.config/mako/config"
 need_sudo chmod 644 "$target_home/.config/Thunar/uca.xml"
 need_sudo chmod 644 \
@@ -2991,6 +3053,7 @@ as_user bash -n "$target_home/.local/bin/sway-battery-charge-limit"
 as_user bash -n "$target_home/.local/bin/sway-battery-menu"
 as_user bash -n "$target_home/.local/bin/thunar-copy-file-address"
 as_user bash -n "$target_home/.local/bin/sway-wifi-menu"
+as_user sh -n "$target_home/.local/bin/sway-audio-autoswitch"
 as_user python3 -m py_compile "$target_home/.local/bin/sway-display-cycle"
 
 if as_user systemctl --user daemon-reload >/dev/null 2>&1; then
