@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+import hashlib,json,sys
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[2];OWNER="scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_set_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json";SEMANTIC="scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_runtime_prerequisite_evidence_packet_offline_integration_and_production_evidence_ingestion_boundary_review_v1_pack_synthetic_v0.json";T15="scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_set_completeness_synthetic_exact_t14_receipt_track_and_ordered_validated_entry_t01_through_t14_verifier_isolated_lab_v1_pack_v0.json";DOMAIN="AB_T16_OWNER_SET_AUTHORITY_V1";UNIT="REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_OWNER_SET_SYNTHETIC_EXACT_T15_RECEIPT_TRACK_AND_ORDERED_OWNER_ENTRY_T01_THROUGH_T15_VERIFIER_ISOLATED_LAB_IMPLEMENTATION";ORDER=("MANAGED_SPANNER_CLOUD_KMS","SELF_HOSTED_ETCD_OPENBAO");RECEIPTS=("ef7e1cecb967a4d8240839319e65fa1030bed9acee6c1a29a85a9a73f1ff1d70","33e7774c242ecc6fc0c5e94bd42148a50abcff986d79c36ad0c2d7151822a0da");DOMAIN_ID="AB_T16_OWNER_SET_SYNTHETIC_ENTRY_V1"
+def path(x):
+ p=ROOT.joinpath(*x.split('/'));r=p.resolve(strict=True);assert ROOT in r.parents and p.is_file()and not p.is_symlink();return p
+def load(x):return json.loads(path(x).read_text())
+def sha(x):return hashlib.sha256(path(x).read_bytes()).hexdigest()
+def validate(o,s,m):
+ assert o["decision"]=="AUTHORIZE_EXACT_BOUNDED_REVERSIBLE_T16_OWNER_SET_ISOLATED_LAB_COMPONENT_IMPLEMENTATION_ONLY_FAIL_CLOSED" and o["next_unit"]==UNIT and o["actor"]=={"class":"PROJECT_OWNER","id":"pallasting","directive":"CONTINUE_NEXT_STEP_USING_AGENT_RECOMMENDED_ORDER"}
+ assert o["predecessor"]=={"exact_release_commit":"c954424bfd17c142a548eecd702a8886488dc6af","t15_implemented":True,"authority_consumed":True}
+ c=o["contract"];assert c["public_input_count"]==26 and tuple(c["request_fields"])==("ordered_owner_entries",) and tuple(c["entry_fields"])==("ordinal","case_id","validated_receipt_content_sha256") and tuple(c["match_fields"])==("t15_receipt_content_sha256","track_id","entry_domain","entry_count") and tuple(c["profile_order"])==ORDER and c["review_order"]==["MODE_FIRST","T15_EXACTLY_ONCE","POLICY_NEXT","REQUEST_LAST","EXACT_PROFILE_MATCH","EXACT_ORDERED_T01_THROUGH_T15_OWNER_SET"]
+ for p,t,h in zip(c["profiles"],ORDER,RECEIPTS,strict=True):assert p=={"t15_receipt_content_sha256":h,"track_id":t,"entry_domain":DOMAIN_ID,"entry_count":15}
+ assert o["authority"]=={"state":"AUTHORIZED_T16_OWNER_SET_ISOLATED_LAB_EXACT_UNIT","non_transitive":True,"consumed":False,"forbidden":["CLAIM_OWNER_IDENTITY_OR_DECISION","USE_SYNTHETIC_SET_AS_PRODUCTION_OWNER_HANDOFF","PERFORM_NETWORK_PROVIDER_RUNTIME_OR_PRODUCTION_ACTION"]}
+ assert o["boundary"]=={"current_component_total":13,"future_component_total":14,"decision_implements_components":0,"t16_implemented":False,"t17_authorized":False,"runtime_authority":False,"provider_authority":False} and o["resources"]=={"network":False,"spend":0,"workers":1,"predecessor_calls":1,"scratch_bytes":67108864,"policy_bytes":65536,"request_bytes":65536} and o["state_machine"]=={"decision_consumes_authority":False,"future_integrated_full_consumes_authority":True}
+ assert m["boundary"]["t15_implemented_after_integrated_full"]is True and m["boundary"]["component_total_after_integrated_full"]==13 and m["authority"]["implementation_consumes_authority_after_integrated_full"]is True
+ t=next(x for x in s["threat_cases"]if x["case_id"]=="T16");assert t=={"case_id":"T16","expected_disposition":"REJECTED_FAIL_CLOSED","expected_reason_code":"E_PRODUCTION_OWNER_SET_FAILED","mutation":"Owner handoff omits, duplicates, reorders, or changes validated entry 1-15","threat_class":"OWNER_SET"}
+ td=next(x for x in s["trust_domains"]if x["domain_id"]=="AB_TRACK_B_RUNTIME_PREREQUISITE_PRODUCTION_OWNER_HANDOFF_SET_V1");assert td["offline_usable"]is False and td["production_implemented"]is False and td["cross_domain_substitution_allowed"]is False
+ r={"schema":"agent_bridge.biocortex.owner_set_authority.receipt.v0","status":"APPROVE_T16_OWNER_SET_AUTHORITY_DECISION","authorized_unit":UNIT,"public_input_count":26,"profile_count":2,"ordered_entry_count":15,"entry_field_count":3,"match_dimension_count":4,"t15_implemented":True,"t16_implemented":False,"authority_consumed":False,"future_component_total":14,"runtime_authority":False,"provider_authority":False,"owner_raw_sha256":sha(OWNER),"semantic_raw_sha256":sha(SEMANTIC),"t15_manifest_raw_sha256":sha(T15),"content_sha256":"0"*64};x=dict(r);del x["content_sha256"];r["content_sha256"]=hashlib.sha256(DOMAIN.encode()+b"\0"+json.dumps(x,sort_keys=True,separators=(',',':')).encode()).hexdigest();return r
+def main():
+ try:
+  for k,v in validate(load(OWNER),load(SEMANTIC),load(T15)).items():print(f"{k}\t{str(v).lower()if type(v)is bool else v}")
+  return 0
+ except Exception as e:print(f"review_error\t{e}",file=sys.stderr);return 1
+if __name__=="__main__":raise SystemExit(main())
