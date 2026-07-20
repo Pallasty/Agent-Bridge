@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-E1R-REMEDIAL-ACQUISITION-GOVERNANCE-DESIGN-V1",
+  "contract_role": "nonexecuting_remedial_governance_design_after_P11_G6",
+  "required_direct_parent_commit": "536350075da41ffc1af1ecb053334233c00da48b",
+  "P11_G6_custody": {
+    "record_relative_path": "majorana_certificate_p11_g6_post_source_custody_governance_record.json",
+    "record_raw_sha256": "5202cafef7ccded0d8f871a54aecbe3a3b66e7edf3fb47b06610bc10bea4253e",
+    "expected_disposition": "CLOSE_P11_E1_AS_PARTIAL_RETAINED_EVIDENCE_AND_AUTHORIZE_ONLY_REMEDIAL_ACQUISITION_GOVERNANCE_DESIGN",
+    "expected_next_gate": "P11-E1R-REMEDIAL-ACQUISITION-GOVERNANCE-DESIGN-V1",
+    "P11_E1_network_authority_consumed": true
+  },
+  "authority": {
+    "network_or_archive_acquisition_authorized": false,
+    "external_evidence_mutation_authorized": false,
+    "source_unpack_or_reading_authorized": false,
+    "candidate_implementation_or_execution_authorized": false,
+    "kernel_accounting_bound_design_authorized": false,
+    "scientific_authority": "NONE"
+  },
+  "remedial_preconditions_for_any_future_operational_gate": [
+    {
+      "precondition_id": "NEW_INDEPENDENT_AUTHORITY_AND_EMPTY_NON_SYMLINK_ROOT",
+      "requirement": "Use a new explicit authority and a distinct empty non-symlink external root; P11-G5 counters and P11-E1 incoming bytes are never reused."
+    },
+    {
+      "precondition_id": "FINAL_PATH_RECEIPT_IDENTITY",
+      "requirement": "Create each file receipt only after atomic acceptance, or rewrite and authenticate a final-path receipt in the same transaction; incoming paths cannot identify accepted files."
+    },
+    {
+      "precondition_id": "FAIL_CLOSED_APT_CONFIGURATION_ISOLATION",
+      "requirement": "The future runner must preflight and reject any host /etc/apt path warning or configuration read; its isolation proof must be independently receipted."
+    },
+    {
+      "precondition_id": "FRESH_SNAPSHOT_IDENTITY_AND_AUTHENTICATION_REVIEW",
+      "requirement": "A future governance gate must freshly pin snapshot, exact versions, origins, keyring, InRelease/Sources/dsc chain, space budget, and retry limits; it may not inherit availability from P11-E1."
+    },
+    {
+      "precondition_id": "IMMUTABLE_PARTIAL_EVIDENCE_DISPOSITION",
+      "requirement": "Existing P11-E1 accepted bytes remain immutable external evidence, excluded from future package completion and not unpacked or read."
+    }
+  ],
+  "future_gate_constraints": {
+    "may_authorize_only_after_independent_governance": true,
+    "must_not_authorize_network_in_this_contract": true,
+    "must_not_treat_P11_E1_partial_bytes_as_complete_custody": true,
+    "must_keep_source_use_kernel_work_candidates_execution_measurement_S0_and_science_closed": true,
+    "only_allowed_next_gate": "P11-G7-REMEDIAL-ACQUISITION-AUTHORIZATION-REVIEW-V1"
+  },
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11e1r_remedial_acquisition_governance_design_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e1r_remedial_acquisition_governance_design_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e1r_remedial_acquisition_governance_design_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11e1r_remedial_acquisition_governance_design.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

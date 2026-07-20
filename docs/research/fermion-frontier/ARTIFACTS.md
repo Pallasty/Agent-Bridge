@@ -1695,3 +1695,12 @@ so they are versioned normally and are not added to the preservation-only
 - The only proposed successor is a remedial-acquisition governance *design*
   gate. It does not authorize a retry, source use, kernel-bound work, build,
   execution, or scientific conclusion.
+
+## Majorana P11-E1R remedial-acquisition governance design
+
+- The E1R contract, canonical record, Git-only validator and tests define five
+  mandatory repair preconditions: new authority/root, final-path receipts,
+  fail-closed APT isolation, fresh authentication review, and immutable
+  disposition of the existing partial evidence.
+- It is a design only. No network, archive, external evidence mutation, source
+  use, candidate work, execution, measurement, or scientific authority opens.

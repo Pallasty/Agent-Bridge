@@ -1840,3 +1840,10 @@ configuration warning, fresh identity/authentication review, and disposition of
 the retained evidence. It authorizes none of those future operations, and keeps
 source use, kernel accounting, candidates, execution, measurement, S0, and
 scientific authority closed.
+
+## Majorana P11-E1R designs, but does not authorize, remediation
+
+P11-E1R converts the G6 closure findings into five auditable preconditions for
+any later operational proposal. It introduces no new network authority and does
+not modify external evidence. An independent P11-G7 review is required before
+any operational authorization can even be considered.
