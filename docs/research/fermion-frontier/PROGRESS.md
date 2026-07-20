@@ -1902,6 +1902,14 @@ and excerpt hashes for the E3 topics. It permits read-only access to E2R custody
 bytes but no custody mutation, network, package action, patch, build, execution,
 measurement, kernel-bound derivation, candidate decision or scientific claim.
 
+## Majorana P11-E3 stops before extraction on a link entry
+
+The authorized E3 run reverified custody bytes, then rejected the symbolic-link
+member `linux-7.0/Documentation/Changes` in `linux_7.0.0.orig.tar.gz` under the
+contract's all-links-forbidden rule. No tree was materialized and no source text
+was read. P11-G11 must govern whether a separately designed confined-link rule
+is admissible; the failed run cannot be retried or relaxed in place.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

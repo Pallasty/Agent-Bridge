@@ -1764,3 +1764,11 @@ so they are versioned normally and are not added to the preservation-only
 - Network/package mutation, custody-root writes, source changes, builds,
   execution, measurement, candidate/kernel-bound derivation and science remain
   forbidden.
+
+## Majorana P11-E3 fail-closed inspection result
+
+- The E3 runner rejected the Linux archive's `Documentation/Changes` symbolic
+  link during pre-extraction member validation.
+- No package was materialized and no source text was read. The manifest,
+  report, offline validator and tests preserve the exact negative result for
+  P11-G11 governance.
