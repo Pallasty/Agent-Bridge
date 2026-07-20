@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.memory_temporal_owned_lab_refrozen_unsigned_subject_s21b_a4.v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "packet_kind", "canonicalization", "subject_state", "test_only", "synthetic", "target_binding", "receipt_binding", "closure_bindings", "role_artifacts", "signing_boundary", "hashing_contract", "subject_sha256", "nonclaims"],
+  "properties": {
+    "schema": {"const": "agent_bridge.memory_temporal_owned_lab_refrozen_unsigned_subject_s21b_a4.v0"},
+    "packet_kind": {"const": "S21B_A4_REFROZEN_UNSIGNED_SUBJECT"},
+    "canonicalization": {"const": "AB_RESTRICTED_CANONICAL_JSON_S21B_A4_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"},
+    "subject_state": {"const": "FINAL_POST_INTEGRATION_UNSIGNED_SUBJECT_VERIFIED_NON_LIVE"},
+    "test_only": {"const": false},
+    "synthetic": {"const": false},
+    "target_binding": {"$ref": "#/$defs/target"},
+    "receipt_binding": {"$ref": "#/$defs/receipt"},
+    "closure_bindings": {"$ref": "#/$defs/closures"},
+    "role_artifacts": {"$ref": "#/$defs/roles"},
+    "signing_boundary": {"$ref": "#/$defs/boundary"},
+    "hashing_contract": {"$ref": "#/$defs/hashing"},
+    "subject_sha256": {"$ref": "#/$defs/sha"},
+    "nonclaims": {"$ref": "#/$defs/nonclaims"}
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "oid": {"type": "string", "pattern": "^(?!0{40}$)[0-9a-f]{40}$"},
+    "target": {"type": "object", "additionalProperties": false, "required": ["integration_commit", "integration_tree", "integration_first_parent", "integration_second_parent", "archive_sha256", "archive_byte_count", "cargo_lock_sha256"], "properties": {"integration_commit": {"$ref": "#/$defs/oid"}, "integration_tree": {"$ref": "#/$defs/oid"}, "integration_first_parent": {"$ref": "#/$defs/oid"}, "integration_second_parent": {"$ref": "#/$defs/oid"}, "archive_sha256": {"$ref": "#/$defs/sha"}, "archive_byte_count": {"type": "integer", "minimum": 1}, "cargo_lock_sha256": {"$ref": "#/$defs/sha"}}},
+    "receipt": {"type": "object", "additionalProperties": false, "required": ["schema", "packet_kind", "file_sha256", "self_sha256", "double_rebuild_complete", "external_mode_octal"], "properties": {"schema": {"const": "agent_bridge.memory_temporal_owned_lab_postintegration_refreeze_receipt_s21b_a3.v0"}, "packet_kind": {"const": "S21B_A3_POST_INTEGRATION_REFREEZE_RECEIPT"}, "file_sha256": {"$ref": "#/$defs/sha"}, "self_sha256": {"$ref": "#/$defs/sha"}, "double_rebuild_complete": {"const": true}, "external_mode_octal": {"const": "0600"}}},
+    "closures": {"type": "object", "additionalProperties": false, "required": ["toolchain_manifest_sha256", "feature_set_sha256", "schema_set_sha256", "schema_content_set_sha256", "build_recipes_sha256"], "properties": {"toolchain_manifest_sha256": {"$ref": "#/$defs/sha"}, "feature_set_sha256": {"$ref": "#/$defs/sha"}, "schema_set_sha256": {"$ref": "#/$defs/sha"}, "schema_content_set_sha256": {"$ref": "#/$defs/sha"}, "build_recipes_sha256": {"$ref": "#/$defs/sha"}}},
+    "role": {"type": "object", "additionalProperties": false, "required": ["binary", "raw_sha256", "identity_sha256", "build_recipe_sha256"], "properties": {"binary": {"type": "string", "minLength": 1}, "raw_sha256": {"$ref": "#/$defs/sha"}, "identity_sha256": {"$ref": "#/$defs/sha"}, "build_recipe_sha256": {"$ref": "#/$defs/sha"}}},
+    "roles": {"type": "object", "additionalProperties": false, "required": ["controller", "observer", "runner", "validator"], "properties": {"controller": {"$ref": "#/$defs/role"}, "observer": {"$ref": "#/$defs/role"}, "runner": {"$ref": "#/$defs/role"}, "validator": {"$ref": "#/$defs/role"}}},
+    "boundary": {"type": "object", "additionalProperties": false, "required": ["signature_present", "owner_private_key_read", "owner_signature_may_be_requested_after_independent_verification", "external_input_admission_may_begin", "live_execution_may_begin", "side_effects_unlocked"], "properties": {"signature_present": {"const": false}, "owner_private_key_read": {"const": false}, "owner_signature_may_be_requested_after_independent_verification": {"const": true}, "external_input_admission_may_begin": {"const": false}, "live_execution_may_begin": {"const": false}, "side_effects_unlocked": {"const": "NONE"}}},
+    "hashing": {"type": "object", "additionalProperties": false, "required": ["hash_algorithm", "digest_domain", "digest_framing", "hash_scope", "self_hash_field", "self_hash_field_excluded", "repository_framing_lf_excluded", "candidate_reported_matches_authoritative"], "properties": {"hash_algorithm": {"const": "SHA-256"}, "digest_domain": {"const": "agent-bridge/biocortex/owned-lab/s21b-a4/refrozen-unsigned-subject/v1"}, "digest_framing": {"const": "U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD"}, "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_SUBJECT_SHA256"}, "self_hash_field": {"const": "subject_sha256"}, "self_hash_field_excluded": {"const": true}, "repository_framing_lf_excluded": {"const": true}, "candidate_reported_matches_authoritative": {"const": false}}},
+    "nonclaims": {"type": "object", "additionalProperties": false, "required": ["subject_is_owner_signature", "subject_is_owner_authority", "subject_is_execution_capability", "subject_authorizes_live_execution", "side_effects_unlocked"], "properties": {"subject_is_owner_signature": {"const": false}, "subject_is_owner_authority": {"const": false}, "subject_is_execution_capability": {"const": false}, "subject_authorizes_live_execution": {"const": false}, "side_effects_unlocked": {"const": "NONE"}}}
+  }
+}
