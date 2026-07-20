@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G8-REMEDIAL-ACQUISITION-OPERATIONAL-AUTHORIZATION-V1",
+  "contract_role": "independent_authorization_of_bounded_P11_E2R_operation",
+  "required_direct_parent_commit": "6d8a0d32574bc0c4823feff4da5e21826e76cecd",
+  "P11_E2R_custody": {
+    "record_relative_path": "majorana_certificate_p11e2r_remedial_acquisition_operational_record.json",
+    "record_raw_sha256": "cb291445ec0b6c755e15a6e24ae3ad8adc9fc94431968cfa79f7204c8d9e5832",
+    "expected_disposition": "REMEDIAL_ACQUISITION_OPERATIONAL_CONTRACT_PACK_ESTABLISHED_AWAITING_INDEPENDENT_G8_AUTHORIZATION",
+    "expected_next_gate": "P11-G8-REMEDIAL-ACQUISITION-OPERATIONAL-AUTHORIZATION-V1"
+  },
+  "readiness_review": [
+    {"check_id":"new_root_is_distinct_and_old_evidence_is_excluded","status":"PASS"},
+    {"check_id":"four_exact_source_identities_and_snapshot_are_pinned","status":"PASS"},
+    {"check_id":"APT_config_paths_are_real_isolated_paths_and_preflight_is_fail_closed","status":"PASS"},
+    {"check_id":"final_path_receipt_transaction_and_post_rename_rehash_are_required","status":"PASS"},
+    {"check_id":"bounded_attempts_and_no_substitution_are_pinned","status":"PASS"},
+    {"check_id":"source_unpack_candidate_execution_measurement_and_science_remain_closed","status":"PASS"}
+  ],
+  "decision": {
+    "disposition":"AUTHORIZE_ONE_BOUNDED_P11_E2R_FRESH_FOUR_PACKAGE_ACQUISITION_AND_BYTE_CUSTODY_RUN",
+    "all_readiness_checks_pass":true,
+    "new_external_root":"/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e2r-source-custody",
+    "network_origins":["https://archive.ubuntu.com/ubuntu/","https://security.ubuntu.com/ubuntu/","https://snapshot.ubuntu.com/"],
+    "APT_update_attempt_limit":1,
+    "source_attempt_limit_per_package":2,
+    "Acquire_Retries":0,
+    "stop_after_first_exhausted_package":true,
+    "archive_unpack_or_source_reading_authorized":false,
+    "candidate_implementation_or_execution_authorized":false,
+    "kernel_accounting_bound_design_authorized":false,
+    "scientific_authority":"NONE",
+    "post_run_gate":"P11-G9-POST-REMEDIAL-CUSTODY-GOVERNANCE-V1"
+  },
+  "forbidden_actions":["read_or_modify_P11_E1_root","version_or_snapshot_substitution","proxy_credentials_or_private_mirror","unpack_source_read_build_link_execute_measure_or_claim_science"],
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g8_remedial_operational_authorization_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g8_remedial_operational_authorization_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g8_remedial_operational_authorization_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g8_remedial_operational_authorization.py"],"record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256":true}
+}

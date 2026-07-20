@@ -1723,3 +1723,10 @@ so they are versioned normally and are not added to the preservation-only
   rehash, transactional recovery, and a mandatory independent G8 gate.
 - This pack is nonexecuting and creates neither the root nor any operational,
   source-use, candidate, measurement, or scientific authority.
+
+## Majorana P11-G8 remedial operational authorization
+
+- G8 independently passes six readiness checks and authorizes one bounded fresh
+  E2R four-package custody run in the new root only.
+- The authorization keeps unpacking, source reading, builds, candidates,
+  execution, measurement, kernel bounds, S0 and scientific authority closed.

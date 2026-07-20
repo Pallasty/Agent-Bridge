@@ -1866,3 +1866,11 @@ independent post-rename rehash. Existing P11-E1 evidence is immutable and cannot
 satisfy completeness. P11-G8 must independently authorize any future operation;
 until then all network, APT, archive, source, candidate and scientific actions
 remain closed.
+
+## Majorana P11-G8 authorizes one bounded remedial custody run
+
+G8 passes six readiness checks and authorizes one fresh E2R operation in the new
+external root, with exact four-package identities, one update, two attempts per
+package, zero internal APT retries, and stop-after-first-exhaustion. The run
+must end before G9 post-custody governance; all source use, candidate, kernel,
+measurement and scientific gates remain closed.
