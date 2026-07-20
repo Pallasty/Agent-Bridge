@@ -1,0 +1,37 @@
+{
+  "authority": {
+    "decision_integration_commit": "e75f72c0d020dec5c957d3edb7344350bda20dcd",
+    "decision_source_commit": "42563ea784858454bbd478e5e890b639bdeca793",
+    "effective_state_at_source_baseline": "AUTHORIZED_T12_OWNER_TOCTOU_ISOLATED_LAB_EXACT_UNIT",
+    "implementation_consumes_authority_after_integrated_full": true
+  },
+  "boundary": {
+    "component_total_after_integrated_full": 10,
+    "production_ingestion_controls_implemented": 0,
+    "provider_authority": false,
+    "runtime_authority": false,
+    "t12_owner_toctou_implemented_after_integrated_full": true,
+    "t13_authorized": false
+  },
+  "date": "2026-07-19",
+  "expected": {
+    "checker_line_count": 25,
+    "directed_negative_test_count": 19,
+    "policy_match_dimension_count": 4,
+    "profile_count": 2,
+    "public_input_count": 18,
+    "request_field_count": 2,
+    "source_ast_guard_count": 8,
+    "valid_case_count": 2
+  },
+  "raw_sha256": {
+    "docs/design/fixtures/biocortex-ab-track-b-reference-provider-fault-injection-runner-owner-toctou-synthetic-exact-t11-receipt-track-validation-owner-epoch-and-decision-recheck-owner-epoch-verifier-isolated-lab-v1.schema.json": "db906c335d52c0f43a801dc71e356afb77c85afc2dcbaf7793d1add29d498ff9",
+    "docs/reports/goal-c-u/2026-07-19-biocortex-track-b-reference-provider-fault-injection-runner-owner-toctou-synthetic-exact-t11-receipt-track-validation-owner-epoch-and-decision-recheck-owner-epoch-verifier-isolated-lab-v1-pack.md": "5c293cc908750f1c5d858ff02b84a7f8f189f1867031a8beab79bbff37c26ca7",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_toctou_synthetic_exact_t11_receipt_track_validation_owner_epoch_and_decision_recheck_owner_epoch_verifier_isolated_lab_v1.py": "af4d698ade2810599d21069bc5808968dfeaff21d9baafd427d027cb34ea6693",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_toctou_synthetic_exact_t11_receipt_track_validation_owner_epoch_and_decision_recheck_owner_epoch_verifier_isolated_lab_v1_pack.py": "3a7a605afe7fe13cdf63fee1c20034d719fa8451360c60d99c975f1d083d99f9",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_toctou_synthetic_exact_t11_receipt_track_validation_owner_epoch_and_decision_recheck_owner_epoch_verifier_isolated_lab_v1_pack.expected.v0.tsv": "3e891123826bc548e7bf8420fa220788ec370bfd2658dfa67d45e4c5981612e0",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_toctou_synthetic_exact_t11_receipt_track_validation_owner_epoch_and_decision_recheck_owner_epoch_verifier_isolated_lab_v1_pack_synthetic_v0.json": "8c6371a0c3fb26da21064979381718a7523e5b5163a8a5be0b777ec9749ec7d1"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.owner_toctou_isolated_lab_v1_pack.manifest.v0",
+  "source_baseline": {"commit": "e75f72c0d020dec5c957d3edb7344350bda20dcd", "tree": "54c65b6e6c88ce86a87c88c022aab3af5a45d4fb"}
+}

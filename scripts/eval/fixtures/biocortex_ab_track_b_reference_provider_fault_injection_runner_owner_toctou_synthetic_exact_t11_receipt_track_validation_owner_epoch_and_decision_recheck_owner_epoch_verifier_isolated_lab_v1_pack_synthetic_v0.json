@@ -1,0 +1,37 @@
+{
+  "canonical_json_profile": "RFC8259_STRICT_COMPACT_SORTED_KEYS_UTF8_NO_DUPLICATES_NO_FLOATS_SIGNED_INT64",
+  "contains_private_or_seed_material": false,
+  "date": "2026-07-19",
+  "execution_mode": "SYNTHETIC_KAT",
+  "expected_receipt_content_sha256": {
+    "MANAGED_SPANNER_CLOUD_KMS": "ddb58a2e4db7c74aedbf2504dcf38bde8419722429aeb3dba9cd61273ba3177d",
+    "SELF_HOSTED_ETCD_OPENBAO": "d51f20f0c0b6ba03cb8fcc8b561c671d38b59fdc80a6fe35beafa0ae9d2f5eee"
+  },
+  "public_only": true,
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.owner_toctou_synthetic_exact_t11_receipt_track_validation_owner_epoch_and_decision_recheck_owner_epoch_verifier_isolated_lab_v1_pack.synthetic.v0",
+  "separately_injected_synthetic_owner_toctou_policy": {
+    "default_disposition": "REJECTED_FAIL_CLOSED",
+    "matching_profile": "EXACT_ALL_FIELDS_AND_SIGNED_INT64_VALUES_EQUAL",
+    "profiles": [
+      {"decision_recheck_owner_epoch": 41, "t11_receipt_content_sha256": "63f0c26f10f42c923b55c4e651c001f7c38c42d9e25d7db772b4abbeadbe2ed8", "track_id": "MANAGED_SPANNER_CLOUD_KMS", "validation_owner_epoch": 41},
+      {"decision_recheck_owner_epoch": 73, "t11_receipt_content_sha256": "ce5af4f0ada753ed9a526909d071e5cb14959a6183f9169e67854d9ebcc4aee1", "track_id": "SELF_HOSTED_ETCD_OPENBAO", "validation_owner_epoch": 73}
+    ],
+    "reject_on_multiple_matches": true,
+    "reject_on_zero_matches": true,
+    "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.owner_toctou_synthetic_policy_isolated_lab_kat.v1",
+    "schema_version": 1
+  },
+  "source_bindings": {
+    "authority_decision_gate_sha256": "c7ef5e97dac145dbb89cc9d5675e52271729a4e4e89d6ac39272f93cc94c1ae9",
+    "authority_decision_integration_commit": "e75f72c0d020dec5c957d3edb7344350bda20dcd",
+    "authority_decision_source_commit": "42563ea784858454bbd478e5e890b639bdeca793",
+    "owner_decision_sha256": "0f1572d3ad824570de27e879fb26d06611ac2d315ac6dbda74967bb660a53a83",
+    "predecessor_fixture_sha256": "f5fb39e4f619cf0b3bf3d36b2eebd4357bd15a5c4114216d10445dbdccfa772f",
+    "predecessor_source_sha256": "e3c8a210430ad9e81c408de0bc2e5764600b0b814df43d689cd3ef4abca331f9",
+    "semantic_specification_sha256": "3aee2bc2f27290e9a57789d434f4373609b720f7ee1d963871fd99a613f55ff6"
+  },
+  "valid_cases": [
+    {"case_id": "VALID_MANAGED_OWNER_TOCTOU_V1", "detached_owner_toctou_request": {"decision_recheck_owner_epoch": 41, "validation_owner_epoch": 41}, "predecessor_case_id": "VALID_MANAGED_CLOCK_SKEW_V1", "track_id": "MANAGED_SPANNER_CLOUD_KMS"},
+    {"case_id": "VALID_SELF_HOSTED_OWNER_TOCTOU_V1", "detached_owner_toctou_request": {"decision_recheck_owner_epoch": 73, "validation_owner_epoch": 73}, "predecessor_case_id": "VALID_SELF_HOSTED_CLOCK_SKEW_V1", "track_id": "SELF_HOSTED_ETCD_OPENBAO"}
+  ]
+}
