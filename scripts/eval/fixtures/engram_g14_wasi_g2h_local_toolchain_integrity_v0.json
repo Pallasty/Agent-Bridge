@@ -1,0 +1,27 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2h_local_toolchain_integrity.v0",
+  "gate": "G2H_LOCAL_TOOLCHAIN_INTEGRITY_AND_RECOVERY_DECISION",
+  "predecessor": {"g2g_fail_closed_post": 4792, "g2h_claim_post": 4793},
+  "scope": "public_static_local_metadata_only",
+  "observations": {
+    "repository_selector": "stable",
+    "toolchain_directories": ["1.92.0-aarch64-apple-darwin", "1.96.0-aarch64-apple-darwin", "stable-aarch64-apple-darwin"],
+    "partial_directory": {"name": "1.96.0-aarch64-apple-darwin", "cargo_present": true, "rustc_present": false},
+    "g2f_bound_toolchain": "1.94-aarch64-apple-darwin",
+    "g2f_bound_toolchain_present": false
+  },
+  "verdict": "FAIL_CLOSED_LOCAL_TOOLCHAIN_NOT_PROVEN",
+  "authority": {
+    "cargo_or_rustup_invocation_authorized": false,
+    "toolchain_mutation_authorized": false,
+    "network_authorized": false,
+    "build_or_run_authorized": false,
+    "dependency_or_source_authorized": false,
+    "component_runtime_deploy_or_g1_4_authorized": false
+  },
+  "recovery": {
+    "automatic": false,
+    "separate_authorization_required": true,
+    "required_future_bindings": ["exact_preinstalled_toolchain", "outside_repository_selector_effects", "pre_post_binary_identities", "independent_integrity_review"]
+  }
+}

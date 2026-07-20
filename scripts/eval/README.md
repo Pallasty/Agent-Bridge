@@ -618,6 +618,22 @@ scripts/check-engram-g14-wasi-g2d-source-authorization.sh --phase postcommit
 G2E must emit B1 static source evidence then stop at the separate owner build
 decision `G2F_PUBLIC_SYNTHETIC_BUILD_AUTHORIZATION_DECISION`.
 
+## G2H local toolchain integrity
+
+`check-engram-g14-wasi-g2h-local-toolchain-integrity.sh` freezes the
+post-G2G local-toolchain observation as
+`FAIL_CLOSED_LOCAL_TOOLCHAIN_NOT_PROVEN`.  It is Python/JSON only: it never
+invokes Cargo or rustup, and cannot install, repair, select, compile, run, or
+use the network.
+
+```bash
+scripts/check-engram-g14-wasi-g2h-local-toolchain-integrity.sh
+```
+
+G2H treats directory names and binary presence as observations rather than
+proof of identity or completeness.  Recovery remains a non-automatic,
+separately reviewed authorization boundary.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
