@@ -1918,6 +1918,14 @@ does not authorize retry or source access. The sole successor,
 target normalization, package-root containment, acyclic resolution, dangling
 link rejection and pre/post graph equality before another authorization review.
 
+## Majorana P11-E3R specifies confined links without retrying
+
+E3R replaces the all-links-forbidden rule with a graph-checked policy: link
+targets must be relative, normalize inside the same package root, terminate at
+an existing file or directory, and remain acyclic. Absolute, escaping,
+cross-package, dangling and hard links remain closed. The failed E3 root is not
+reused. P11-G12 is required before any new materialization or read.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

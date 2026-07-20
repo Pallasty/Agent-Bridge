@@ -1780,3 +1780,11 @@ so they are versioned normally and are not added to the preservation-only
 - The future policy must normalize relative targets, prove package-root
   containment, reject cycles/dangling links and match pre/post link graphs.
   Materialization and source reading remain unauthorized.
+
+## Majorana P11-E3R confined-link contract design
+
+- E3R defines relative target normalization, same-package containment,
+  complete-graph resolution, cycle/dangling rejection and pre/post graph
+  equality, with synthetic positive and adversarial tests.
+- The failed E3 root is excluded and a new E3R root is pinned. No source
+  materialization or reading occurs before independent P11-G12 authorization.
