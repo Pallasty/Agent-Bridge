@@ -1894,6 +1894,14 @@ linker and kernel accounting sources. P11-G10 must independently authorize any
 materialization or read; no archive, source, build, execution, measurement or
 scientific action occurs in E3.
 
+## Majorana P11-G10 authorizes one bounded source-inspection run
+
+G10 passes six readiness checks and authorizes one operation in the E3 derived
+root: authenticated materialization, final-tree manifests, and bounded searches
+and excerpt hashes for the E3 topics. It permits read-only access to E2R custody
+bytes but no custody mutation, network, package action, patch, build, execution,
+measurement, kernel-bound derivation, candidate decision or scientific claim.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

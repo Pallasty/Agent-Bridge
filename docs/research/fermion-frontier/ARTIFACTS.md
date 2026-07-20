@@ -1756,3 +1756,11 @@ so they are versioned normally and are not added to the preservation-only
   bounded read targets across GCC, binutils, Linux and linux-signed.
 - It is nonexecuting. Materialization and reading require independent P11-G10
   authorization; builds, execution, measurement and science remain closed.
+
+## Majorana P11-G10 bounded source-inspection authorization
+
+- G10 passes six readiness checks and authorizes one safe materialization plus
+  bounded text-search/excerpt-hashing run in the distinct derived root.
+- Network/package mutation, custody-root writes, source changes, builds,
+  execution, measurement, candidate/kernel-bound derivation and science remain
+  forbidden.
