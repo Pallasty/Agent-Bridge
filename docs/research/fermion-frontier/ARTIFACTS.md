@@ -1891,3 +1891,10 @@ so they are versioned normally and are not added to the preservation-only
 - `majorana_certificate_p11e4r_nested_source_materialization_result_validator.py` and
   `test_majorana_certificate_p11e4r_nested_source_materialization_result.py`: verify
   the exact authorization/contract pins and the no-root/no-source-read boundary.
+
+## Majorana P11-G17 post-materialization governance
+
+- `majorana_certificate_p11_g17_post_nested_source_materialization_governance_contract.json`:
+  closes the consumed run and opens only metadata/failure-receipt contract design.
+- `majorana_certificate_p11_g17_post_nested_source_materialization_governance_record.json`,
+  validator and test: canonical five-finding decision and fail-closed regressions.

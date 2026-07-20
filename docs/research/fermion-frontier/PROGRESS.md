@@ -2021,3 +2021,12 @@ contract-forbidden member class. The stop occurs before creation of either the
 derived root or staging directory, before source-byte extraction, and before
 any semantic source reading. The authorization is consumed; P11-G17 must decide
 whether a separately designed metadata policy is admissible. No retry occurs.
+
+## Majorana P11-G17 closes the failed nested materialization
+
+G17 confirms the exact zero-materialization boundary and closes G16's consumed
+authorization. The PAX/sparse indication is archive metadata, not source
+semantics, and the missing external failure receipt is recorded as an operation
+contract gap rather than silently repaired. Only a new metadata-classification
+and failure-receipt contract design is opened; archive access, root creation,
+source reading and all downstream work remain closed.
