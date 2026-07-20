@@ -1,0 +1,16 @@
+{
+  "authorized_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_REPLAY_SYNTHETIC_EXACT_T12_RECEIPT_TRACK_RESERVED_ISSUER_NONCE_SEQUENCE_AND_PACKET_IDENTITY_SUBMITTED_ISSUER_NONCE_SEQUENCE_AND_PACKET_IDENTITY_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+  "boundary": {"current_component_total": 10, "decision_implements_components": 0, "future_component_total": 11, "t13_implemented": false, "t14_authorized": false},
+  "date": "2026-07-19",
+  "expected": {"checker_line_count": 18, "directed_negative_test_count": 27, "policy_match_dimension_count": 5, "profile_count": 2, "profile_field_count": 8, "public_input_count": 20, "request_field_count": 3},
+  "raw_sha256": {
+    "docs/reports/goal-c-u/2026-07-19-biocortex-track-b-reference-provider-fault-injection-runner-replay-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.md": "9c3b456645337ec4b16b8bd9e7746463bc394d65b39e69155141698b34fd30a8",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_replay_isolated_lab_implementation_authority_and_resource_binding_decision_v1.py": "828afeebf047838fbd97b7b00984c85ac0755714aeb2c150d5c5ea644885da8b",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_replay_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.py": "757ecb72e6f96b842cd6e124aa110bf363d11ccc529bb1ae85b19159a81b3128",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_replay_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "b39677d09d8cec2f521fab8590ee08ded50b68a6f70faab5efca5ef82e10d8de",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_replay_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "46eafec6b5e893c5b85e37ffb1fd7e5666e9f45be277db8beb4f06d74cd426ea"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.replay_authority_decision_manifest.v1",
+  "source_baseline": {"commit": "01da2b0af37fd73e4edd1ceb6183b0a6cf87224d", "tree": "cb87cc15c99dbb0feedf3b204de4ae4d726b8bbb"},
+  "state": {"after_integrated_full": "AUTHORIZED_T13_REPLAY_ISOLATED_LAB_EXACT_UNIT", "decision_consumes_authority": false}
+}
