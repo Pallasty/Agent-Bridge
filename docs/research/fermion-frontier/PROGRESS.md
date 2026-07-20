@@ -1825,3 +1825,18 @@ emitted an `/etc/apt/-/` readability warning. P11-G6 must decide any repair or
 future acquisition policy. No retry, unpacking, source reading, build,
 execution, resource measurement, equivalence, S0, or scientific conclusion is
 authorized by this partial result.
+
+## Majorana P11-G6 closes the partial custody route
+
+P11-G6 independently treats P11-E1 as a partial retained-evidence result, not
+as complete source custody. The P11-G5 network authority is consumed: the two
+Linux attempts cannot be extended under that authorization. The retained GCC
+and binutils bytes stay external evidence only and must not be unpacked or read.
+
+The next admissible route is solely
+`P11-E1R-REMEDIAL-ACQUISITION-GOVERNANCE-DESIGN-V1`. It must first design fresh
+authority, final-path receipt integrity, fail-closed handling of the APT
+configuration warning, fresh identity/authentication review, and disposition of
+the retained evidence. It authorizes none of those future operations, and keeps
+source use, kernel accounting, candidates, execution, measurement, S0, and
+scientific authority closed.

@@ -1681,3 +1681,17 @@ so they are versioned normally and are not added to the preservation-only
 - This does not establish complete four-package custody. The report preserves
   the stale pre-rename receipt paths and the APT configuration warning for
   P11-G6; it makes no candidate, execution, measurement, or scientific claim.
+
+## Majorana P11-G6 post-source-custody governance
+
+- `majorana_certificate_p11_g6_post_source_custody_governance_contract.json`
+  and `majorana_certificate_p11_g6_post_source_custody_governance_record.json`:
+  independently close P11-E1 as partial retained evidence, preserve its two
+  audit findings, and mark P11-G5 network authority consumed.
+- `majorana_certificate_p11_g6_post_source_custody_governance_validator.py`
+  and `test_majorana_certificate_p11_g6_post_source_custody_governance.py`:
+  Git-only custody and lifecycle checks; no external evidence, network, APT,
+  archive, candidate, or measurement action is performed.
+- The only proposed successor is a remedial-acquisition governance *design*
+  gate. It does not authorize a retry, source use, kernel-bound work, build,
+  execution, or scientific conclusion.
