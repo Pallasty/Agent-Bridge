@@ -2030,3 +2030,12 @@ semantics, and the missing external failure receipt is recorded as an operation
 contract gap rather than silently repaired. Only a new metadata-classification
 and failure-receipt contract design is opened; archive access, root creation,
 source reading and all downstream work remain closed.
+
+## Majorana P11-E4S designs metadata inspection and receipt-first failure handling
+
+E4S defines a future header-only inspection that distinguishes PAX global,
+extended, xattr/capability and GNU sparse representations without reading member
+payloads or recording paths verbatim. A separate receipt root must be created
+safely and its append-only attempt receipt fsynced before the archive is opened;
+exactly one terminal success or failure receipt follows. This design performs no
+archive access or filesystem creation and requires independent G18 authorization.

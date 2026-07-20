@@ -1898,3 +1898,10 @@ so they are versioned normally and are not added to the preservation-only
   closes the consumed run and opens only metadata/failure-receipt contract design.
 - `majorana_certificate_p11_g17_post_nested_source_materialization_governance_record.json`,
   validator and test: canonical five-finding decision and fail-closed regressions.
+
+## Majorana P11-E4S archive-metadata and receipt design
+
+- `majorana_certificate_p11e4s_archive_metadata_failure_receipt_contract.json`:
+  header-only metadata classification plus receipt-first append-only failure handling.
+- Its record, validator and test pin G17/E3R custody, closed current authority,
+  absent receipt root, payload prohibition and independent G18 authorization.
