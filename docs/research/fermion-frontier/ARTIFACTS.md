@@ -1712,3 +1712,14 @@ so they are versioned normally and are not added to the preservation-only
 - The review opens only P11-E2R operational-contract-pack design. It grants no
   network, archive, evidence mutation, source-use, build, execution,
   measurement, kernel-bound, S0, or scientific authority.
+
+## Majorana P11-E2R remedial operational contract pack
+
+- The E2R contract and canonical record specify a future fresh four-package
+  acquisition under a new external root, with no reuse or reading of P11-E1
+  evidence.
+- The Git-only validator and tests enforce isolated APT-path preflight,
+  fail-closed host-path warnings, final-path receipt identity, post-rename
+  rehash, transactional recovery, and a mandatory independent G8 gate.
+- This pack is nonexecuting and creates neither the root nor any operational,
+  source-use, candidate, measurement, or scientific authority.

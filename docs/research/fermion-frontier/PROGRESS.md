@@ -1855,3 +1855,14 @@ P11-G7 passes six read-only readiness checks and authorizes only
 repository contract, validation, test, and progress artifacts, but it may not
 create the future external root, access the network, run APT, mutate retained
 evidence, unpack or read sources, or perform candidate and scientific work.
+
+## Majorana P11-E2R defines repaired operations without executing them
+
+P11-E2R selects a distinct future custody root and requires all four exact
+packages to be acquired afresh. It replaces dash sentinel APT paths with real
+isolated paths, mandates `apt-config dump` inspection and fail-closed rejection
+of host `/etc/apt` warnings, and binds receipts to final accepted paths with an
+independent post-rename rehash. Existing P11-E1 evidence is immutable and cannot
+satisfy completeness. P11-G8 must independently authorize any future operation;
+until then all network, APT, archive, source, candidate and scientific actions
+remain closed.
