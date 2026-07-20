@@ -2056,3 +2056,11 @@ key set is limited to `path`, `atime`, `ctime` and `mtime`; no global/extended
 PAX headers, xattr/ACL/capability keys or sparse representation is observed.
 This is metadata evidence only, not a materialization-safety conclusion. P11-G19
 must govern its interpretation.
+
+## Majorana P11-G19 closes metadata inspection and opens PAX-policy design only
+
+G19 accepts the receipt-first, header-only observations and closes the consumed
+G18 run. The observed key set is compatible with a narrow future policy design,
+but is not itself a materialization authorization. Only E4T may specify checks
+for exact `path`/time metadata; all unknown, global, extended, xattr and sparse
+classes remain fail-closed.

@@ -1918,3 +1918,8 @@ so they are versioned normally and are not added to the preservation-only
   header-only runner with no extraction API use.
 - Result, validator and test pin both external receipts and verify 149,865 headers,
   zero payload/semantic read, hashed identifiers and the observed PAX-only classes.
+
+## Majorana P11-G19 metadata governance
+
+- Contract, record, validator and test close G18 and permit only restricted PAX
+  acceptance contract design; no materialization authorization is conferred.
