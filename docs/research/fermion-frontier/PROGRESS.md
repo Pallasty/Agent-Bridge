@@ -1910,6 +1910,14 @@ contract's all-links-forbidden rule. No tree was materialized and no source text
 was read. P11-G11 must govern whether a separately designed confined-link rule
 is admissible; the failed run cannot be retried or relaxed in place.
 
+## Majorana P11-G11 routes the link failure into a new design gate
+
+G11 confirms the E3 fail-closed boundary and records five passing findings. It
+does not authorize retry or source access. The sole successor,
+`P11-E3R-CONFINED-LINK-MATERIALIZATION-CONTRACT-DESIGN-V1`, must define relative
+target normalization, package-root containment, acyclic resolution, dangling
+link rejection and pre/post graph equality before another authorization review.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

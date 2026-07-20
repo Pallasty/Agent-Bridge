@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G11-POST-SOURCE-INSPECTION-GOVERNANCE-V1",
+  "contract_role": "independent_governance_after_fail_closed_P11_E3",
+  "required_direct_parent_commit": "7159b298811250e91a21a66d28a710dcebca4a65",
+  "P11_E3_result_custody": {
+    "report_relative_path": "majorana_certificate_p11e3_source_inspection_report.json",
+    "report_raw_sha256": "219731d6e23f81dacfea67435b0e1e981d5dbb10e8063525a1e90735c3ed4ce1",
+    "expected_outcome": "CLOSED_MATERIALIZATION_OR_READ_FAILURE",
+    "expected_failure_class": "ARCHIVE_LINK_ENTRY_REJECTED_BY_E3_CONTRACT",
+    "expected_failure_entry": "linux-7.0/Documentation/Changes",
+    "expected_materialization_completed": false,
+    "expected_source_text_read": false
+  },
+  "findings": [
+    {"finding_id":"E3_stopped_before_materialization","status":"PASS"},
+    {"finding_id":"custody_root_and_archive_bytes_remained_immutable","status":"PASS"},
+    {"finding_id":"all_links_forbidden_rule_is_overconservative_for_authentic_linux_source","status":"PASS"},
+    {"finding_id":"no_evidence_supports_relaxing_link_rules_without_new_contract","status":"PASS"},
+    {"finding_id":"build_execution_measurement_and_science_remain_closed","status":"PASS"}
+  ],
+  "decision": {
+    "disposition":"CLOSE_E3_FAILURE_AND_AUTHORIZE_ONLY_CONFINED_LINK_POLICY_CONTRACT_DESIGN",
+    "retry_or_materialization_authorized":false,
+    "source_reading_authorized":false,
+    "external_evidence_mutation_authorized":false,
+    "build_execution_or_measurement_authorized":false,
+    "scientific_authority":"NONE",
+    "only_allowed_next_gate":"P11-E3R-CONFINED-LINK-MATERIALIZATION-CONTRACT-DESIGN-V1"
+  },
+  "P11_E3R_required_policy": {
+    "symlink_target_must_be_relative_nonempty_and_NUL_free":true,
+    "normalized_target_must_remain_inside_package_root":true,
+    "absolute_parent_escape_cross_package_and_custody_root_targets_forbidden":true,
+    "link_chain_must_be_acyclic_and_resolve_within_package_root":true,
+    "dangling_links_must_fail_closed_after_full_tree_materialization":true,
+    "hardlinks_devices_FIFOs_sockets_privilege_bits_and_capabilities_remain_forbidden":true,
+    "pre_extraction_member_graph_and_post_extraction_filesystem_graph_must_match":true,
+    "policy_must_be_synthetically_tested_before_any_new_authorization":true
+  },
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g11_post_source_inspection_governance_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g11_post_source_inspection_governance_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g11_post_source_inspection_governance_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g11_post_source_inspection_governance.py"],"record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256":true}
+}

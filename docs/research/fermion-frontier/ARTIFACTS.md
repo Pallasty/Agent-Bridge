@@ -1772,3 +1772,11 @@ so they are versioned normally and are not added to the preservation-only
 - No package was materialized and no source text was read. The manifest,
   report, offline validator and tests preserve the exact negative result for
   P11-G11 governance.
+
+## Majorana P11-G11 post-inspection governance
+
+- G11 closes the failed E3 run without retry and opens only a confined-link
+  materialization contract design.
+- The future policy must normalize relative targets, prove package-root
+  containment, reject cycles/dangling links and match pre/post link graphs.
+  Materialization and source reading remain unauthorized.
