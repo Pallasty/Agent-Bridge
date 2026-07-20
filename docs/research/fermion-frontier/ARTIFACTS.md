@@ -1818,3 +1818,10 @@ so they are versioned normally and are not added to the preservation-only
 - Every future excerpt must bind to the tree-manifest file hash and remain
   separate from interpretation and unresolved gaps. E4 itself reads no new
   source and requires independent P11-G14 authorization.
+
+## Majorana P11-G14 source-evidence analysis authorization
+
+- G14 passes six readiness checks and authorizes one bounded E4 excerpt and
+  interpretation run under the 30-window, 8 KiB and ±20-line limits.
+- Source/custody mutation, network, packages, builds, execution, measurement,
+  kernel bounds, candidates, equivalence and science remain closed.

@@ -1958,6 +1958,13 @@ file and excerpt hashes. Observed text, interpretation and unresolved gaps must
 remain separate. No new read, bound derivation, candidate or scientific claim
 occurs before P11-G14.
 
+## Majorana P11-G14 authorizes one bounded evidence-analysis run
+
+G14 passes six readiness checks and authorizes read-only E3R tree access plus
+at most 30 hash-bound excerpts under the E4 windows. Results must retain the
+observed/interpretation/gap split and proceed to P11-G15. No mutation, build,
+execution, measurement, kernel-bound, candidate or scientific authority opens.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

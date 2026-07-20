@@ -1,0 +1,17 @@
+{
+  "schema_version":1,
+  "contract_id":"MAJORANA-P11-G14-VERSION-BOUND-SOURCE-EVIDENCE-ANALYSIS-AUTHORIZATION-V1",
+  "required_direct_parent_commit":"394f58d82f95a80de568b8ee16cc9ada52da5ba8",
+  "E4_custody":{"record_relative_path":"majorana_certificate_p11e4_version_bound_source_evidence_analysis_record.json","record_raw_sha256":"fe17c319ff5e51a61f15e22f24304317abf685b1035854e47a6aa8dd09896bc2","expected_disposition":"VERSION_BOUND_SOURCE_EVIDENCE_ANALYSIS_CONTRACT_ESTABLISHED_AWAITING_G14_AUTHORIZATION","expected_next_gate":"P11-G14-VERSION-BOUND-SOURCE-EVIDENCE-ANALYSIS-AUTHORIZATION-V1"},
+  "readiness_review":[
+    {"check_id":"four_exact_version_bound_analysis_tracks","status":"PASS"},
+    {"check_id":"tree_manifest_file_hash_precondition","status":"PASS"},
+    {"check_id":"literal_query_and_merged_context_window_bounds","status":"PASS"},
+    {"check_id":"thirty_excerpt_total_and_eight_KiB_each_caps","status":"PASS"},
+    {"check_id":"observed_interpreted_unresolved_separation","status":"PASS"},
+    {"check_id":"bounds_candidates_execution_measurement_and_science_closed","status":"PASS"}
+  ],
+  "decision":{"disposition":"AUTHORIZE_ONE_P11_E4_VERSION_BOUND_SOURCE_EVIDENCE_ANALYSIS_RUN","read_only_E3R_tree_access_authorized":true,"bounded_excerpt_admission_authorized":true,"repository_result_artifacts_authorized":true,"source_tree_or_custody_mutation_authorized":false,"network_package_build_execution_or_measurement_authorized":false,"kernel_bound_candidate_equivalence_or_science_authorized":false,"scientific_authority":"NONE","post_run_gate":"P11-G15-POST-SOURCE-EVIDENCE-ANALYSIS-GOVERNANCE-V1"},
+  "operation_limits":{"maximum_excerpt_count":30,"maximum_excerpt_bytes":8192,"context_lines_each_side":20,"literal_declared_queries_only":true,"stop_on_manifest_hash_or_UTF8_failure":true,"no_absence_claim_outside_bounded_paths":true},
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g14_source_evidence_analysis_authorization_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g14_source_evidence_analysis_authorization_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g14_source_evidence_analysis_authorization_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g14_source_evidence_analysis_authorization.py"]}
+}
