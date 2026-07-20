@@ -1880,3 +1880,14 @@ so they are versioned normally and are not added to the preservation-only
   readiness, scope and resource limits.
 - `test_majorana_certificate_p11_g16_nested_source_materialization_authorization.py`:
   standard-library checks for the authorization boundary and absent target root.
+
+## Majorana P11-E4R materialization operation
+
+- `majorana_certificate_p11e4r_nested_source_materialization_runner.py`: the
+  authorized manifest-bound byte-level runner. It stops during metadata preflight
+  on a forbidden PAX/sparse indication, before creating any external output root.
+- `majorana_certificate_p11e4r_nested_source_materialization_result.json`: canonical
+  zero-materialization failure record routed to P11-G17.
+- `majorana_certificate_p11e4r_nested_source_materialization_result_validator.py` and
+  `test_majorana_certificate_p11e4r_nested_source_materialization_result.py`: verify
+  the exact authorization/contract pins and the no-root/no-source-read boundary.

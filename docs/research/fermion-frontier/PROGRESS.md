@@ -2012,3 +2012,12 @@ E4R root, with receipts and full manifest generation. Semantic source reading,
 excerpts, E4 retry, evidence-root mutation, network, builds, execution,
 measurement, candidate work and science remain closed. P11-G17 must govern the
 operation result.
+
+## Majorana P11-E4R stops at forbidden archive metadata
+
+The single G16-authorized E4R run opens the pinned archive only for metadata
+preflight and rejects a PAX-header or sparse-member indication. This is a
+contract-forbidden member class. The stop occurs before creation of either the
+derived root or staging directory, before source-byte extraction, and before
+any semantic source reading. The authorization is consumed; P11-G17 must decide
+whether a separately designed metadata policy is admissible. No retry occurs.
