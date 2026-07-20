@@ -31,7 +31,7 @@ if python3 -I "$root/scripts/eval/verify_memory_temporal_owned_lab_review_precon
 test ! -s "$tmp/out"
 test "$(cat "$tmp/err")" = "S21B_A18_REVIEW_PRECONDITION_CROSSCHECK_REJECTED"
 
-sed 's/"accepted":false/"accepted":true/' "$tmp/review.json" >"$tmp/review-mut.json"
+sed 's/"accepted_for_capability_change":false/"accepted_for_capability_change":true/' "$tmp/review.json" >"$tmp/review-mut.json"
 if python3 -I "$root/scripts/eval/verify_memory_temporal_owned_lab_review_precondition_crosscheck_s21b_a18.py" "$tmp/matrix.json" "$tmp/review-mut.json" >"$tmp/out" 2>"$tmp/err"; then exit 1; fi
 test ! -s "$tmp/out"
 test "$(cat "$tmp/err")" = "S21B_A18_REVIEW_PRECONDITION_CROSSCHECK_REJECTED"
