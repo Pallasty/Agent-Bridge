@@ -1926,6 +1926,13 @@ an existing file or directory, and remain acyclic. Absolute, escaping,
 cross-package, dangling and hard links remain closed. The failed E3 root is not
 reused. P11-G12 is required before any new materialization or read.
 
+## Majorana P11-G12 authorizes one confined-link inspection run
+
+G12 passes six readiness checks and authorizes one new-root E3R run under the
+confined-link graph policy and the prior bounded-read limits. The E2R custody
+root stays immutable; network, package mutation, patching, builds, execution,
+measurement, candidate decisions and science remain closed.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new
