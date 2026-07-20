@@ -1923,3 +1923,8 @@ so they are versioned normally and are not added to the preservation-only
 
 - Contract, record, validator and test close G18 and permit only restricted PAX
   acceptance contract design; no materialization authorization is conferred.
+
+## Majorana P11-E4T restricted PAX design
+
+- Contract, record, validator and test define exact four-key PAX validation and
+  preserve independent G20 authorization for any future operation.

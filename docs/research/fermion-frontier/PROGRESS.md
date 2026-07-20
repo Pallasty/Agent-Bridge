@@ -2064,3 +2064,10 @@ G18 run. The observed key set is compatible with a narrow future policy design,
 but is not itself a materialization authorization. Only E4T may specify checks
 for exact `path`/time metadata; all unknown, global, extended, xattr and sparse
 classes remain fail-closed.
+
+## Majorana P11-E4T designs restricted PAX acceptance
+
+E4T permits a future policy to consider only exact per-member `path`, `atime`,
+`ctime` and `mtime` keys. Values require strict encoding, path and decimal-time
+checks; times are receipt-only and never restored. Every other PAX or metadata
+class remains fail-closed. This is a design only and needs G20 authorization.
