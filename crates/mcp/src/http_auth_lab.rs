@@ -2030,6 +2030,15 @@ mod tests {
             StatusCode::OK,
         ));
 
+        let mut conflicting_client_claims = valid_claims();
+        conflicting_client_claims.client_id = Some("other-client".into());
+        conflicting_client_claims.azp = Some("chatgpt-test-client".into());
+        cases.push((
+            "client id takes precedence over authorized party",
+            token(&conflicting_client_claims),
+            StatusCode::FORBIDDEN,
+        ));
+
         let mut bad_signature = token(&valid_claims());
         let signature_start = bad_signature.rfind('.').unwrap() + 1;
         let replacement = if &bad_signature[signature_start..=signature_start] == "A" {
