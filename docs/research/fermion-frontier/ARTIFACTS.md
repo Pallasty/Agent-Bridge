@@ -1825,3 +1825,17 @@ so they are versioned normally and are not added to the preservation-only
   interpretation run under the 30-window, 8 KiB and ±20-line limits.
 - Source/custody mutation, network, packages, builds, execution, measurement,
   kernel bounds, candidates, equivalence and science remain closed.
+
+## Majorana P11-E4 source-evidence analysis operation
+
+- `majorana_certificate_p11e4_source_evidence_analysis_runner.py`: the single-run,
+  manifest-first bounded reader. Its authorized invocation stopped before source
+  text access because the first declared GCC path was absent from the E3R manifest.
+- `majorana_certificate_p11e4_source_evidence_analysis_result.json`: canonical
+  zero-excerpt failure record pinning the contract, G14 authorization and GCC tree
+  manifest digests and routing exclusively to P11-G15.
+- `majorana_certificate_p11e4_source_evidence_analysis_result_validator.py`: checks
+  exact custody hashes, the missing declared path, retained nested archive, zero-read
+  boundary and closed scientific authority.
+- `test_majorana_certificate_p11e4_source_evidence_analysis_result.py`: regression
+  coverage for validation, zero-read authority and the manifest mismatch.

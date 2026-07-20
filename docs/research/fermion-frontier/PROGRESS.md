@@ -1972,3 +1972,13 @@ external root, with exact four-package identities, one update, two attempts per
 package, zero internal APT retries, and stop-after-first-exhaustion. The run
 must end before G9 post-custody governance; all source use, candidate, kernel,
 measurement and scientific gates remain closed.
+
+## Majorana P11-E4 stops before source-text read on a manifest mismatch
+
+The single G14-authorized run fails closed at its first GCC path precondition:
+`gcc/gcc.cc` is absent from the E3R final-tree manifest. That retained package
+tree contains the nested `gcc-15.2.0.tar.xz` archive, not the materialized
+upstream GCC subtree assumed by the E4 contract. No source text was read and
+zero excerpts were admitted. The run cannot be relaxed or retried in place;
+P11-G15 must govern any nested-archive remediation design. Build, execution,
+measurement, candidate and scientific authority remain closed.
