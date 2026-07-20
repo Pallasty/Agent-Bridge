@@ -241,6 +241,7 @@ struct JwtClaims {
     scope: Option<String>,
     scp: Option<Vec<String>>,
     client_id: Option<String>,
+    azp: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -496,7 +497,7 @@ fn validate_config(raw: RawLabConfig) -> Result<LabConfig> {
 
     let mut subjects = HashMap::new();
     for subject in raw.subjects {
-        validate_policy_token(&subject.subject, "external subject")?;
+        validate_external_subject(&subject.subject)?;
         validate_policy_token(&subject.local_subject, "local subject")?;
         if subjects.contains_key(&subject.subject) {
             return invalid("duplicate external subject policy");
@@ -696,7 +697,7 @@ fn validate_subject_policies(
 ) -> Result<HashMap<String, SubjectPolicy>> {
     let mut subjects = HashMap::new();
     for subject in values {
-        validate_policy_token(&subject.subject, "external subject")?;
+        validate_external_subject(&subject.subject)?;
         validate_policy_token(&subject.local_subject, "local subject")?;
         if subjects.contains_key(&subject.subject) {
             return invalid("duplicate external subject policy");
@@ -1056,12 +1057,27 @@ fn validate_policy_token(value: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_external_subject(value: &str) -> Result<()> {
+    if !is_external_subject(value) {
+        return invalid("external subject contains unsupported characters");
+    }
+    Ok(())
+}
+
 fn is_policy_token(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 256
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"-._:/@".contains(&byte))
+}
+
+fn is_external_subject(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._:/@|".contains(&byte))
 }
 
 fn router(state: LabState) -> Router {
@@ -1320,11 +1336,11 @@ async fn verify_token(
         .subjects
         .get(&claims.sub)
         .ok_or_else(|| AuthFailure::forbidden("subject_not_allowed"))?;
+    let client_id = claims.client_id.or(claims.azp);
     if !policy.allowed_client_ids.is_empty()
-        && !claims
-            .client_id
+        && !client_id
             .as_ref()
-            .is_some_and(|client_id| policy.allowed_client_ids.contains(client_id))
+            .is_some_and(|value| policy.allowed_client_ids.contains(value))
     {
         return Err(AuthFailure::forbidden("client_not_allowed"));
     }
@@ -1337,7 +1353,7 @@ async fn verify_token(
         audiences,
         scopes,
         expires_at_unix: claims.exp,
-        client_id: claims.client_id,
+        client_id,
         token_fingerprint: fingerprint,
     })
 }
@@ -1758,7 +1774,9 @@ mod tests {
         nbf: u64,
         iat: u64,
         scope: String,
-        client_id: String,
+        client_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        azp: Option<String>,
     }
 
     fn config_json() -> String {
@@ -1829,7 +1847,8 @@ mod tests {
             nbf: now.saturating_sub(1),
             iat: now.saturating_sub(1),
             scope: "agent-bridge:subject.read".into(),
-            client_id: "chatgpt-test-client".into(),
+            client_id: Some("chatgpt-test-client".into()),
+            azp: None,
         }
     }
 
@@ -1999,8 +2018,26 @@ mod tests {
         ));
 
         let mut wrong_client = valid_claims();
-        wrong_client.client_id = "other-client".into();
+        wrong_client.client_id = Some("other-client".into());
         cases.push(("wrong client", token(&wrong_client), StatusCode::FORBIDDEN));
+
+        let mut authorized_party = valid_claims();
+        authorized_party.client_id = None;
+        authorized_party.azp = Some("chatgpt-test-client".into());
+        cases.push((
+            "authorized party client",
+            token(&authorized_party),
+            StatusCode::OK,
+        ));
+
+        let mut conflicting_client_claims = valid_claims();
+        conflicting_client_claims.client_id = Some("other-client".into());
+        conflicting_client_claims.azp = Some("chatgpt-test-client".into());
+        cases.push((
+            "client id takes precedence over authorized party",
+            token(&conflicting_client_claims),
+            StatusCode::FORBIDDEN,
+        ));
 
         let mut bad_signature = token(&valid_claims());
         let signature_start = bad_signature.rfind('.').unwrap() + 1;
@@ -2279,5 +2316,12 @@ mod tests {
         let mut config: Value = serde_json::from_str(&config_json()).unwrap();
         config["unexpected_policy_switch"] = json!(true);
         assert!(state_from_json(&config.to_string()).is_err());
+    }
+
+    #[test]
+    fn external_subject_accepts_auth0_separator_without_relaxing_policy_tokens() {
+        assert!(validate_external_subject("auth0|user_123").is_ok());
+        assert!(!is_policy_token("auth0|user_123"));
+        assert!(validate_external_subject("auth0|user\n123").is_err());
     }
 }

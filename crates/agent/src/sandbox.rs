@@ -24,6 +24,12 @@ pub const BWRAP_BIN_ENV: &str = "AGENT_BRIDGE_BWRAP_BIN";
 const CREDS_FILE_ENV: &str = "AGENT_BRIDGE_CREDS_FILE";
 const INTERNAL_MARKER: &str = "__ab_agent_sandbox_exec";
 const INTERNAL_PREFIX: &str = "__AGENT_BRIDGE_SANDBOX_";
+// `nono` is the policy engine: it applies Seatbelt on macOS and Landlock on
+// Linux; Linux additionally enters a bubblewrap mount namespace first.
+pub const APPLIED_ATTESTATION_MACOS: &str =
+    "__AGENT_BRIDGE_SANDBOX_APPLIED__ profile=workspace platform=macos mechanism=nono-seatbelt state=applied";
+pub const APPLIED_ATTESTATION_LINUX: &str =
+    "__AGENT_BRIDGE_SANDBOX_APPLIED__ profile=workspace platform=linux mechanism=bwrap-nono-landlock state=applied";
 #[cfg(target_os = "macos")]
 const MACOS_SYSTEM_CA_FILE: &str = "/etc/ssl/cert.pem";
 
@@ -488,6 +494,13 @@ fn run_internal_launcher(request: InternalRequest) -> Result<()> {
         }
 
         apply_workspace_policy(&policy)?;
+        // This line is emitted by the hidden launcher only after the outer OS
+        // policy has been applied. It is deliberately path- and secret-free so
+        // session readers can distinguish outer enforcement from an executor's
+        // own, independent sandbox diagnostics.
+        if let Some(line) = applied_attestation_line() {
+            eprintln!("{line}");
+        }
         scrub_current_env(true);
         let error = std::process::Command::new(&request.program)
             .args(&request.args)
@@ -497,6 +510,21 @@ fn run_internal_launcher(request: InternalRequest) -> Result<()> {
             request.runtime,
             Path::new(&request.program).display()
         )))
+    }
+}
+
+pub fn applied_attestation_line() -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(APPLIED_ATTESTATION_MACOS)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Some(APPLIED_ATTESTATION_LINUX)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
     }
 }
 
@@ -1041,6 +1069,15 @@ mod tests {
             AgentSandboxMode::Workspace
         );
         assert!(effective_mode_from(None, Some("typo")).is_err());
+    }
+
+    #[test]
+    fn applied_attestation_is_closed_and_secret_free() {
+        let line = applied_attestation_line().expect("test target supports sandbox attestation");
+        assert!(line.starts_with("__AGENT_BRIDGE_SANDBOX_APPLIED__ "));
+        assert!(line.contains("profile=workspace"));
+        assert!(line.contains("state=applied"));
+        assert!(!line.contains(std::env::var("HOME").as_deref().unwrap_or("/home")));
     }
 
     #[test]

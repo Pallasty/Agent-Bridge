@@ -10884,6 +10884,61 @@ fn shape_session_output(
     (output, total, returned, returned < total)
 }
 
+fn parse_sandbox_attestation_line(line: &str) -> Option<Value> {
+    let line = line.trim_end_matches('\r');
+    let (platform, mechanism) = if line == ab_agent::sandbox::APPLIED_ATTESTATION_MACOS {
+        ("macos", "nono-seatbelt")
+    } else if line == ab_agent::sandbox::APPLIED_ATTESTATION_LINUX {
+        ("linux", "bwrap-nono-landlock")
+    } else {
+        return None;
+    };
+    Some(json!({
+        "schema": "agent_bridge.agent_sandbox_attestation.v0",
+        "profile": "workspace",
+        "state": "applied",
+        "boundary": "outer_agent_child_process",
+        "platform": platform,
+        "mechanism": mechanism,
+        "source": "launcher_post_apply_marker",
+        "assurance": "process_local_non_cryptographic_receipt",
+        "can_authorize_runtime": false,
+    }))
+}
+
+/// Remove only exact launcher receipts from a merged PTY transcript and return
+/// the first attestation found. Executor-authored sandbox banners are retained:
+/// they describe a separate inner layer and must not be mistaken for this
+/// outer Agent-Bridge boundary.
+fn extract_sandbox_attestation(raw: String) -> (String, Option<Value>) {
+    let mut output = String::with_capacity(raw.len());
+    let mut attestation = None;
+    for segment in raw.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        if let Some(found) = parse_sandbox_attestation_line(line) {
+            if attestation.is_none() {
+                attestation = Some(found);
+            }
+        } else {
+            output.push_str(segment);
+        }
+    }
+    (output, attestation)
+}
+
+fn sandbox_attestation_from_session(session: &ab_store::StoredSession) -> Option<Value> {
+    session
+        .stderr
+        .as_deref()
+        .and_then(|text| text.lines().find_map(parse_sandbox_attestation_line))
+        .or_else(|| {
+            session
+                .stdout
+                .as_deref()
+                .and_then(|text| text.lines().find_map(parse_sandbox_attestation_line))
+        })
+}
+
 /// Read the live PTY transcript of an interactive session. `agent_send_input`
 /// only confirms `status:"sent"` and `agent_session_get` shows `stdout:null`
 /// until a session finalises — so without this tool a programmatic multi-turn
@@ -10917,7 +10972,10 @@ impl McpTool for AgentSessionOutputTool {
                  strip_ansi to drop TUI redraw/escape noise. Nothing is discarded \
                  server-side — total_bytes/truncated describe the post-strip_ansi \
                  transcript the tail was applied to; re-call with neither knob for \
-                 the full raw transcript."
+                 the full raw transcript. Sandboxed sessions additionally expose a \
+                 sandbox_attestation only when the outer launcher emitted its \
+                 post-policy-apply receipt; executor-native sandbox banners describe \
+                 a separate inner layer."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -10969,8 +11027,11 @@ impl McpTool for AgentSessionOutputTool {
         // Finished sessions carry their full transcript in the persisted stdout;
         // the live in-memory buffer is gone once the PTY finalises.
         if session.ended_at.is_some() {
+            let sandbox_attestation = sandbox_attestation_from_session(&session);
+            let (raw, transcript_attestation) =
+                extract_sandbox_attestation(session.stdout.unwrap_or_default());
             let (output, total, returned, truncated) =
-                shape_session_output(session.stdout.unwrap_or_default(), strip_ansi, tail_bytes);
+                shape_session_output(raw, strip_ansi, tail_bytes);
             return Ok(ToolResult::json_text(&json!({
                 "id": id.as_str(),
                 "runtime_id": session.runtime_id,
@@ -10982,6 +11043,7 @@ impl McpTool for AgentSessionOutputTool {
                 "total_bytes": total,
                 "returned_bytes": returned,
                 "truncated": truncated,
+                "sandbox_attestation": sandbox_attestation.or(transcript_attestation),
             })));
         }
         // Running session: pull the live buffer straight from the runtime.
@@ -10991,6 +11053,7 @@ impl McpTool for AgentSessionOutputTool {
         };
         match agent.read_interactive_output(&id) {
             Some(output) => {
+                let (output, sandbox_attestation) = extract_sandbox_attestation(output);
                 let (output, total, returned, truncated) =
                     shape_session_output(output, strip_ansi, tail_bytes);
                 Ok(ToolResult::json_text(&json!({
@@ -11003,6 +11066,7 @@ impl McpTool for AgentSessionOutputTool {
                     "total_bytes": total,
                     "returned_bytes": returned,
                     "truncated": truncated,
+                    "sandbox_attestation": sandbox_attestation,
                 })))
             }
             None => Ok(ToolResult::json_text(&json!({
@@ -11037,7 +11101,9 @@ impl McpTool for AgentSessionWaitTool {
             description: "Block until the given session has finished (ended_at != null) or \
                  `timeout_secs` elapses. Polls the store every 500 ms. On success \
                  returns the final row (with stdout/stderr); on timeout returns the \
-                 latest in-flight row plus `timed_out=true`."
+                 latest in-flight row plus `timed_out=true`. When the outer \
+                 workspace launcher has applied its OS policy, the response adds \
+                 sandbox_attestation from the launcher's post-apply receipt."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -11077,6 +11143,7 @@ impl McpTool for AgentSessionWaitTool {
             if Instant::now() >= deadline {
                 return Ok(ToolResult::json_text(&json!({
                     "timed_out": true,
+                    "sandbox_attestation": row.as_ref().and_then(sandbox_attestation_from_session),
                     "session": row,
                 })));
             }
@@ -11107,6 +11174,7 @@ impl McpTool for AgentSessionWaitTool {
                             let row = store.load_session(&id).await?;
                             return Ok(ToolResult::json_text(&json!({
                                 "timed_out": true,
+                                "sandbox_attestation": row.as_ref().and_then(sandbox_attestation_from_session),
                                 "session": row,
                             })));
                         }
@@ -11128,8 +11196,12 @@ impl McpTool for AgentSessionWaitTool {
 
         // Return final row.
         let final_row = store.load_session(&id).await?;
+        let sandbox_attestation = final_row
+            .as_ref()
+            .and_then(sandbox_attestation_from_session);
         Ok(ToolResult::json_text(&json!({
             "timed_out": false,
+            "sandbox_attestation": sandbox_attestation,
             "session": final_row,
         })))
     }

@@ -13957,6 +13957,24 @@ fn shape_session_output_strip_tail_and_utf8_boundary() {
     assert_eq!((out.as_str(), total, ret, trunc), ("語", 9, 3, true));
 }
 
+#[test]
+fn sandbox_attestation_parser_is_exact_and_strips_only_launcher_receipts() {
+    let marker = ab_agent::sandbox::APPLIED_ATTESTATION_MACOS;
+    let raw = format!("{marker}\ninner sandbox: danger-full-access\nanswer\n");
+    let (output, attestation) = extract_sandbox_attestation(raw);
+    assert_eq!(output, "inner sandbox: danger-full-access\nanswer\n");
+    let attestation = attestation.expect("exact launcher marker should attest");
+    assert_eq!(attestation["state"], json!("applied"));
+    assert_eq!(attestation["boundary"], json!("outer_agent_child_process"));
+    assert_eq!(attestation["mechanism"], json!("nono-seatbelt"));
+    assert_eq!(attestation["can_authorize_runtime"], json!(false));
+
+    let spoof = format!("{} extra\n", marker);
+    let (output, attestation) = extract_sandbox_attestation(spoof.clone());
+    assert_eq!(output, spoof);
+    assert!(attestation.is_none());
+}
+
 #[tokio::test]
 async fn agent_session_output_finalized_slimming_knobs() {
     use ab_core::SessionId;
@@ -13975,7 +13993,10 @@ async fn agent_session_output_finalized_slimming_knobs() {
             ended_at: Some(dispatch_now_secs() - 5),
             exit_code: Some(0),
             stdout: Some(raw.to_string()),
-            stderr: None,
+            stderr: Some(format!(
+                "{}\n",
+                ab_agent::sandbox::APPLIED_ATTESTATION_MACOS
+            )),
             cloud_run_id: None,
             cloud_run_state: None,
             cloud_session_link: None,
@@ -14003,6 +14024,15 @@ async fn agent_session_output_finalized_slimming_knobs() {
     assert_eq!(fp["total_bytes"], json!(raw.len()));
     assert_eq!(fp["returned_bytes"], json!(raw.len()));
     assert_eq!(fp["truncated"], json!(false));
+    assert_eq!(fp["sandbox_attestation"]["state"], json!("applied"));
+    assert_eq!(
+        fp["sandbox_attestation"]["boundary"],
+        json!("outer_agent_child_process")
+    );
+    assert_eq!(
+        fp["sandbox_attestation"]["can_authorize_runtime"],
+        json!(false)
+    );
 
     // strip_ansi + tail_bytes: post-strip transcript is "red line\nok"
     // (11 bytes), tail 2 → "ok", truncated=true, total reports the
