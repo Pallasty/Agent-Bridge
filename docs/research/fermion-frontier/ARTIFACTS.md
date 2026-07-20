@@ -1905,3 +1905,9 @@ so they are versioned normally and are not added to the preservation-only
   header-only metadata classification plus receipt-first append-only failure handling.
 - Its record, validator and test pin G17/E3R custody, closed current authority,
   absent receipt root, payload prohibition and independent G18 authorization.
+
+## Majorana P11-G18 metadata-inspection authorization
+
+- Authorization contract, record, validator and test authorize exactly one
+  receipt-first, header-only inspection while enforcing zero payload bytes and
+  routing the result to P11-G19.

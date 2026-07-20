@@ -2039,3 +2039,11 @@ payloads or recording paths verbatim. A separate receipt root must be created
 safely and its append-only attempt receipt fsynced before the archive is opened;
 exactly one terminal success or failure receipt follows. This design performs no
 archive access or filesystem creation and requires independent G18 authorization.
+
+## Majorana P11-G18 authorizes one header-only metadata inspection
+
+G18 passes six independent checks and authorizes one E4S run: create its separate
+receipt root, persist the attempt record, and inspect only archive headers via
+read-only E3R access. Member payload bytes, path/link text, extraction,
+materialization and semantic reading remain prohibited. P11-G19 must review the
+result.
