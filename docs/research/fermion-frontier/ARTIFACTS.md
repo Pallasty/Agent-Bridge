@@ -1852,3 +1852,18 @@ so they are versioned normally and are not added to the preservation-only
   remediation safeguards.
 - `test_majorana_certificate_p11_g15_post_source_evidence_analysis_governance.py`:
   standard-library governance, authority and design-boundary regressions.
+
+## Majorana P11-E4R nested-source materialization design
+
+- `majorana_certificate_p11e4r_nested_source_materialization_contract.json`:
+  pins the exact GCC nested archive manifest row, new root, one-layer preflight,
+  confined-link rules, anti-bomb resource caps, staged materialization and final
+  canonical tree-manifest requirements without authorizing execution.
+- `majorana_certificate_p11e4r_nested_source_materialization_record.json`:
+  canonical design-complete record routing only to independent G16 authorization.
+- `majorana_certificate_p11e4r_nested_source_materialization_validator.py`:
+  read-only verification of G15 custody, the external E3R manifest anchor, closed
+  current authority, resource caps and authorization boundary.
+- `test_majorana_certificate_p11e4r_nested_source_materialization.py`:
+  standard-library regressions for authority, one-layer scope, root isolation and
+  the complete design validator.

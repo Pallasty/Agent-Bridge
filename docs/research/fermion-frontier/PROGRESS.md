@@ -1991,3 +1991,14 @@ single-run authority is consumed. It authorizes only design of P11-E4R: a
 manifest-bound, one-layer nested-archive materialization contract using a new
 derived root. No extraction, retry, source read, build, execution, measurement,
 candidate decision or scientific claim is authorized in this gate.
+
+## Majorana P11-E4R designs one-layer GCC source materialization
+
+E4R pins the manifest-bound `gcc-15.2.0.tar.xz` input and defines a distinct,
+initially absent derived root. A future operation must preflight the complete
+member and symlink graph, enforce a single top-level directory and strict
+member/byte/path limits, reject duplicate or special entries, materialize via
+private staging, rescan and hash the complete tree, then publish atomically.
+Nested archives found inside are never recursively unpacked. This design does
+not open the archive, create the root, read source text or retry E4; P11-G16 is
+required for one future byte-level materialization operation.
