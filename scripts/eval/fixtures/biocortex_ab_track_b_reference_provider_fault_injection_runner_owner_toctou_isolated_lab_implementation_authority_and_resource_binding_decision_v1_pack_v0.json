@@ -1,0 +1,16 @@
+{
+  "authorized_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_OWNER_TOCTOU_SYNTHETIC_EXACT_T11_RECEIPT_TRACK_VALIDATION_OWNER_EPOCH_AND_DECISION_RECHECK_OWNER_EPOCH_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+  "boundary": {"current_component_total": 9, "decision_implements_components": 0, "future_component_total": 10, "t12_implemented": false},
+  "date": "2026-07-19",
+  "expected": {"checker_line_count": 17, "directed_negative_test_count": 22, "policy_match_dimension_count": 4, "profile_count": 2, "public_input_count": 18, "request_field_count": 2},
+  "raw_sha256": {
+    "docs/reports/goal-c-u/2026-07-19-biocortex-track-b-reference-provider-fault-injection-runner-owner-toctou-isolated-lab-implementation-authority-and-resource-binding-decision-v1-pack.md": "fdd271fe9e4491565ef3613e9c58937aaead0822295395d91a1f4ee0705dc9fd",
+    "scripts/eval/biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_toctou_isolated_lab_implementation_authority_and_resource_binding_decision_v1.py": "ac831f1a62dc8708f5fcd035bc9045f1e213be7e6becb68033e84a94c68ace1f",
+    "scripts/eval/check_biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_toctou_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.py": "6dea4092d7245921880853fc03f9320b877f9f8bdce5a83401e6eaea3c2f5a6a",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_toctou_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack_owner_decision_v0.json": "0f1572d3ad824570de27e879fb26d06611ac2d315ac6dbda74967bb660a53a83",
+    "scripts/eval/fixtures/biocortex_ab_track_b_reference_provider_fault_injection_runner_owner_toctou_isolated_lab_implementation_authority_and_resource_binding_decision_v1_pack.expected.v0.tsv": "6841233960a4076e58d7315fd2d1d32a1223e2ff69bf057006cdb2dac1670f67"
+  },
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.owner_toctou_authority_decision_manifest.v1",
+  "source_baseline": {"commit": "3df8536c841390fdc593fa4a518885b3f2291fc6", "tree": "bdccc42dc1d4e4c30f57f0d464fc5a58f832b0d6"},
+  "state": {"after_integrated_full": "AUTHORIZED_T12_OWNER_TOCTOU_ISOLATED_LAB_EXACT_UNIT", "decision_consumes_authority": false}
+}
