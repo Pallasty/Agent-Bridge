@@ -1885,6 +1885,15 @@ findings. The only successor is
 immutable evidence until a later independent authorization. Source reading,
 builds, candidates, execution, measurement, S0 and science remain closed.
 
+## Majorana P11-E3 designs safe source inspection without performing it
+
+E3 fixes a distinct derived root and specifies immutable archive hashes,
+per-package empty extraction roots, filesystem-escape and special-file
+rejection, canonical final-tree manifests, and bounded questions for compiler,
+linker and kernel accounting sources. P11-G10 must independently authorize any
+materialization or read; no archive, source, build, execution, measurement or
+scientific action occurs in E3.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

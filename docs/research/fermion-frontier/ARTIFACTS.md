@@ -1748,3 +1748,11 @@ so they are versioned normally and are not added to the preservation-only
   rehashes, clean APT isolation, and exclusion of P11-E1 evidence.
 - It opens only P11-E3 pre-read contract design; no unpacking, source reading,
   build, execution, measurement or scientific authority is granted.
+
+## Majorana P11-E3 source materialization/read precondition design
+
+- E3 defines an immutable custody root, a distinct derived inspection root,
+  archive hash preservation, hostile-path rejection, final-tree manifests and
+  bounded read targets across GCC, binutils, Linux and linux-signed.
+- It is nonexecuting. Materialization and reading require independent P11-G10
+  authorization; builds, execution, measurement and science remain closed.
