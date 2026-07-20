@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-bridge:biocortex:track-b:t12-owner-toctou-isolated-lab-v1",
+  "title": "T12 public synthetic owner-TOCTOU receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "content_sha256", "execution_mode", "track_id", "predecessor_receipt_content_sha256", "validation_owner_epoch", "decision_recheck_owner_epoch", "owner_epoch_relation", "public_input_count", "binding_policy_match_dimension_count", "binding_request_field_count", "predecessor_review_count", "isolated_lab_candidate_surface_component_total", "implementation_authority_single_use_consumed", "t11_clock_skew_implemented", "t12_owner_toctou_implemented", "t13_authorized", "production_admissible", "runtime_authority", "provider_authority"],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.owner_toctou_synthetic_exact_t11_receipt_track_validation_owner_epoch_and_decision_recheck_owner_epoch_verifier_isolated_lab_v1.receipt.v0"},
+    "status": {"const": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_OWNER_TOCTOU_SYNTHETIC_EXACT_T11_RECEIPT_TRACK_VALIDATION_OWNER_EPOCH_AND_DECISION_RECHECK_OWNER_EPOCH_VERIFIED_ISOLATED_LAB_COMPONENT_ONLY_NO_PRODUCTION_AUTHORITY"},
+    "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "execution_mode": {"const": "SYNTHETIC_KAT"},
+    "track_id": {"enum": ["MANAGED_SPANNER_CLOUD_KMS", "SELF_HOSTED_ETCD_OPENBAO"]},
+    "predecessor_receipt_content_sha256": {"enum": ["63f0c26f10f42c923b55c4e651c001f7c38c42d9e25d7db772b4abbeadbe2ed8", "ce5af4f0ada753ed9a526909d071e5cb14959a6183f9169e67854d9ebcc4aee1"]},
+    "validation_owner_epoch": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+    "decision_recheck_owner_epoch": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+    "owner_epoch_relation": {"const": "VALIDATION_OWNER_EPOCH_EXACTLY_EQUALS_DECISION_RECHECK_OWNER_EPOCH"},
+    "public_input_count": {"const": 18},
+    "binding_policy_match_dimension_count": {"const": 4},
+    "binding_request_field_count": {"const": 2},
+    "predecessor_review_count": {"const": 1},
+    "isolated_lab_candidate_surface_component_total": {"const": 10},
+    "implementation_authority_single_use_consumed": {"const": true},
+    "t11_clock_skew_implemented": {"const": true},
+    "t12_owner_toctou_implemented": {"const": true},
+    "t13_authorized": {"const": false},
+    "production_admissible": {"const": false},
+    "runtime_authority": {"const": false},
+    "provider_authority": {"const": false}
+  }
+}
