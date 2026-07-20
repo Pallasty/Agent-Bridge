@@ -1867,6 +1867,16 @@ satisfy completeness. P11-G8 must independently authorize any future operation;
 until then all network, APT, archive, source, candidate and scientific actions
 remain closed.
 
+## Majorana P11-E2R establishes fresh complete archive custody
+
+The single G8-authorized run completed with all four exact source identities
+freshly accepted in the new E2R root. The repaired runner passed its APT config
+preflight, emitted no host `/etc/apt` warning, and rewrote receipts to final
+accepted paths followed by independent rehash. Eleven accepted archive bytes
+are recorded; P11-E1 evidence was not reused. This is source-byte custody only,
+not source reading, build, execution, memory measurement, equivalence, S0, or
+scientific evidence. P11-G9 is now the required post-custody governance gate.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

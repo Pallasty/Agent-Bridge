@@ -1730,3 +1730,14 @@ so they are versioned normally and are not added to the preservation-only
   E2R four-package custody run in the new root only.
 - The authorization keeps unpacking, source reading, builds, candidates,
   execution, measurement, kernel bounds, S0 and scientific authority closed.
+
+## Majorana P11-E2R fresh four-package custody result
+
+- The E2R runner, manifest, report, independent offline validator and tests
+  record a fresh complete set for GCC-15, binutils, Linux and linux-signed in
+  the new root.
+- All eleven accepted bytes are bound to final accepted paths and independently
+  rehashed; no host APT warning was detected and P11-E1 evidence was not used.
+- The result opens only P11-G9 post-remedial-custody governance; source use,
+  unpacking, candidates, execution, measurement and scientific claims remain
+  closed.
