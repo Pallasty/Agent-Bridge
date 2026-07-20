@@ -1,0 +1,8 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2f_artifact_evidence_amendment.v0",
+  "gate": "G2F_ARTIFACT_EVIDENCE_AMENDMENT",
+  "predecessor": {"integration_commit": "ddc3471a278cd024612fa61f2c6eef9e2f19d258", "g2g_independent_failure_post": 4780, "g2g_fail_closed_post": 4781, "owner_confirmation_post": 4783},
+  "raw_rlib_sha": {"required": true, "cross_worktree_reproducibility_required": false, "meaning": "per_build_observation_only"},
+  "required_acceptance_binding": ["g2e_host_source_sha256", "manifest_sha256", "lockfile_sha256", "rustc_identity", "cargo_identity", "offline_locked_command", "independent_compile_success", "temporary_target_removed", "output_not_executed"],
+  "authority": {"build_authorized": true, "run_authorized": false, "network_authorized": false, "dependency_authorized": false, "component_or_linker_authorized": false, "runtime_or_g1_4_authorized": false}
+}
