@@ -1950,6 +1950,14 @@ themselves establish compiler, linker, kernel-accounting or memory-bound
 semantics. Only P11-E4 analysis-contract design opens; no additional read or
 downstream technical/scientific authority is granted.
 
+## Majorana P11-E4 designs version-bound evidence admission
+
+E4 pins four analysis tracks and exact paths/queries. A future authorized run
+may admit at most 30 merged excerpts, each bounded to ±20 lines and 8 KiB, with
+file and excerpt hashes. Observed text, interpretation and unresolved gaps must
+remain separate. No new read, bound derivation, candidate or scientific claim
+occurs before P11-G14.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

@@ -1810,3 +1810,11 @@ so they are versioned normally and are not added to the preservation-only
   rejecting semantic or kernel-bound inference from line hashes alone.
 - It opens only P11-E4 source-evidence analysis contract design; additional
   reading, builds, execution, measurement and science remain closed.
+
+## Majorana P11-E4 source-evidence analysis contract
+
+- E4 defines four exact compiler/linker/kernel/packaging tracks, literal
+  queries, ±20-line windows, 8 KiB excerpt caps and a 30-excerpt total cap.
+- Every future excerpt must bind to the tree-manifest file hash and remain
+  separate from interpretation and unresolved gaps. E4 itself reads no new
+  source and requires independent P11-G14 authorization.
