@@ -1,0 +1,1 @@
+{"allow_device_access":false,"allow_external_input":false,"allow_live_execution":false,"allow_network":false,"allow_paid_resources":false,"format_id":"agent_bridge.memory_temporal_owned_lab_dry_run_plan_s21b_a9.v0","plan_id":"s21b-a9-canonical-no-input-v1","requested_roles":["controller","observer","runner","validator"],"side_effects_unlocked":"NONE","test_only":true}
