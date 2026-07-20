@@ -9,12 +9,21 @@ TOOLCHAIN = pathlib.Path("/Data/.ab-gate-tmp/a1-refreeze-v18/toolchain")
 SPARSE = pathlib.Path("/Data/.ab-gate-tmp/a1-refreeze-v18/cargo-home")
 REGCACHE = pathlib.Path("/home/pallasting/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f")
 ROLES = ("controller", "observer", "runner", "validator")
+FIXTURE_PREFIX = "docs/design/fixtures/biocortex-ab-track-b-owned-lab-role-build"
+MANIFESTS = {
+    "toolchain_manifest_sha256": f"{FIXTURE_PREFIX}-toolchain-manifest-s21b-a1-v0.json",
+    "feature_set_sha256": f"{FIXTURE_PREFIX}-feature-set-s21b-a1-v0.json",
+    "schema_set_sha256": f"{FIXTURE_PREFIX}-schema-set-s21b-a1-v0.json",
+    "build_recipes_sha256": f"{FIXTURE_PREFIX}-recipes-s21b-a1-v0.json",
+}
 
 def canon(x):
     return json.dumps(x, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
 def sha(b): return hashlib.sha256(b).hexdigest()
 def framed(payload):
     return struct.pack(">I", len(DOMAIN)) + DOMAIN + struct.pack(">Q", len(payload)) + payload
+def domain_digest(domain, payload):
+    return sha(struct.pack(">I",len(domain))+domain+struct.pack(">Q",len(payload))+payload)
 def git(*a): return subprocess.check_output(["git", *a], cwd=ROOT, text=True).strip()
 def archive(commit, out):
     with out.open("wb") as f: subprocess.run(["git", "-c", "tar.umask=0022", "archive", "--format=tar", commit], cwd=ROOT, stdout=f, check=True)
@@ -33,6 +42,20 @@ def make_root(base, commit, name):
     real = src
     copy_cargo(cargo)
     return real, target, cargo, base / name / "tmp"
+def closure(root):
+    values={key:sha((root/path).read_bytes()) for key,path in MANIFESTS.items()}
+    schema_set=json.loads((root/MANIFESTS["schema_set_sha256"]).read_text())
+    domain=schema_set["closure_digest_domain"].encode("ascii"); digest=hashlib.sha256(); digest.update(struct.pack(">I",len(domain))); digest.update(domain)
+    for member in schema_set["members"]:
+        rel=member["path"]; path_bytes=rel.encode("ascii"); content=(root/rel).read_bytes()
+        digest.update(struct.pack(">Q",len(path_bytes))); digest.update(path_bytes); digest.update(struct.pack(">I",int(member["git_mode"],8))); digest.update(struct.pack(">Q",len(content))); digest.update(content)
+    values["schema_content_set_sha256"]=digest.hexdigest()
+    recipes=json.loads((root/MANIFESTS["build_recipes_sha256"]).read_text())["recipes"]
+    values["recipe_digests"]={}
+    for role in ROLES:
+        binary=f"ab-owned-lab-{role}"; recipe=next(item for item in recipes if item["binary_name"]==binary); domain=f"agent-bridge/biocortex/owned-lab/s21b-a1/build-recipe/{role}/v1".encode("ascii")
+        values["recipe_digests"][role]=domain_digest(domain,canon(recipe))
+    return values
 def build(root, target, cargo, tmp, commit):
     epoch = git("show", "-s", "--format=%ct", commit)
     env = {"HOME":"/ab-build/home", "PATH":"/rust-toolchain/bin:/usr/bin:/bin", "CARGO_HOME":"/ab-build/cargo-home", "CARGO_TARGET_DIR":"/ab-build/target", "CARGO_NET_OFFLINE":"true", "CARGO_BUILD_JOBS":"1", "CARGO_INCREMENTAL":"0", "SOURCE_DATE_EPOCH":epoch, "TMPDIR":"/ab-build/tmp", "LC_ALL":"C.UTF-8", "LANG":"C.UTF-8", "TZ":"UTC", "CC":"/usr/bin/x86_64-linux-gnu-gcc-15", "AR":"/usr/bin/x86_64-linux-gnu-ar", "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER":"/usr/bin/x86_64-linux-gnu-gcc-15", "CARGO_PROFILE_RELEASE_CODEGEN_UNITS":"1", "CARGO_PROFILE_RELEASE_DEBUG":"0", "CARGO_PROFILE_RELEASE_INCREMENTAL":"false", "CARGO_PROFILE_RELEASE_LTO":"thin", "CARGO_PROFILE_RELEASE_OPT_LEVEL":"3", "CARGO_PROFILE_RELEASE_PANIC":"unwind", "CARGO_PROFILE_RELEASE_STRIP":"symbols", "CARGO_ENCODED_RUSTFLAGS":"\x1f".join(["--remap-path-prefix=/ab-build/source=/agent-bridge", "--remap-path-prefix=/ab-build/target=/agent-bridge-target", "--remap-path-prefix=/ab-build/cargo-home=/cargo-home", "-Ctarget-cpu=x86-64", "-Cdebuginfo=0", "-Cstrip=symbols", "-Ccodegen-units=1", "-Clink-arg=-Wl,--build-id=none"])}
@@ -47,17 +70,21 @@ def build(root, target, cargo, tmp, commit):
             print(run.stderr.decode(errors="replace"), end="", file=__import__("sys").stderr)
             raise SystemExit(run.returncode)
         p=target/"x86_64-unknown-linux-gnu"/"release"/binary
-        out[role]={"binary":binary,"raw_sha256":sha(p.read_bytes()),"size":p.stat().st_size}
-    return out
+        identity_cmd=["bwrap","--die-with-parent","--unshare-all","--new-session","--ro-bind",str(target),"/ab-build/target","--ro-bind","/usr","/usr","--ro-bind","/bin","/bin","--ro-bind","/lib","/lib","--ro-bind","/lib64","/lib64","--proc","/proc","--dev","/dev","--tmpfs","/tmp","--clearenv","--setenv","HOME","/tmp","--setenv","PATH","/usr/bin:/bin","--setenv","LC_ALL","C.UTF-8","--chdir","/tmp",f"/ab-build/target/x86_64-unknown-linux-gnu/release/{binary}"]
+        identity=subprocess.run(identity_cmd,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE).stdout
+        assert identity.endswith(b"\n") and identity.count(b"\n")==1
+        out[role]={"binary":binary,"raw_sha256":sha(p.read_bytes()),"identity_sha256":sha(identity[:-1]),"size":p.stat().st_size}
+    return {"roles":out,"closure":closure(root)}
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument("--commit", default="HEAD"); ap.add_argument("--receipt"); ns=ap.parse_args(); commit=git("rev-parse", ns.commit)
     with tempfile.TemporaryDirectory(prefix="s21b-a3-", dir="/Data/.ab-gate-tmp") as td:
         base=pathlib.Path(td); roots=[make_root(base,commit,n) for n in ("rebuild-a","rebuild-b")]; results=[build(*r,commit) for r in roots]
-        equal=all(results[0][r]["raw_sha256"]==results[1][r]["raw_sha256"] for r in ROLES)
-        roles={r:{"role":r,"binary":results[0][r]["binary"],"raw_sha256":results[0][r]["raw_sha256"],"identity_sha256":None,"build_recipe_sha256":None,"raw_bytes_equal":equal,"identity_sha256_equal":False,"build_recipe_sha256_equal":True} for r in ROLES}
+        equal=all(results[0]["roles"][r]["raw_sha256"]==results[1]["roles"][r]["raw_sha256"] for r in ROLES)
+        closure_equal=results[0]["closure"]==results[1]["closure"]
+        roles={r:{"role":r,"binary":results[0]["roles"][r]["binary"],"raw_sha256":results[0]["roles"][r]["raw_sha256"],"identity_sha256":results[0]["roles"][r]["identity_sha256"],"build_recipe_sha256":results[0]["closure"]["recipe_digests"][r],"raw_bytes_equal":equal,"identity_sha256_equal":results[0]["roles"][r]["identity_sha256"]==results[1]["roles"][r]["identity_sha256"],"build_recipe_sha256_equal":results[0]["closure"]["recipe_digests"][r]==results[1]["closure"]["recipe_digests"][r]} for r in ROLES}
         target_tree=git("show","-s","--format=%T",commit); lock=sha((ROOT/"Cargo.lock").read_bytes())
         tar_probe=base/"archive-probe.tar"; archive_sha, archive_bytes=archive(commit, tar_probe)
-        receipt={"schema":"agent_bridge.memory_temporal_owned_lab_postintegration_refreeze_receipt_s21b_a3.v0","packet_kind":"S21B_A3_POST_INTEGRATION_REFREEZE_RECEIPT","canonicalization":"AB_RESTRICTED_CANONICAL_JSON_S21B_A3_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT","stage":"S21B_A3_POST_INTEGRATION_REFREEZE_AND_DOUBLE_REBUILD","status":"S21B_A3_POST_INTEGRATION_DOUBLE_REBUILD_VERIFIED_NON_LIVE","receipt_state":"POST_INTEGRATION_DOUBLE_REBUILD_VERIFIED_NON_LIVE","test_only":True,"synthetic":False,"target_binding":{"integration_commit":commit,"integration_tree":target_tree,"integration_first_parent":git("show","-s","--format=%P",commit).split()[0],"integration_second_parent":git("show","-s","--format=%P",commit).split()[1] if len(git("show","-s","--format=%P",commit).split())>1 else None,"cargo_lock_sha256":lock,"archive_sha256":archive_sha,"archive_byte_count":archive_bytes,"target_refrozen":True,"candidate_supplied_target_used":False},"closure_bindings":{"toolchain_manifest_sha256":None,"feature_set_sha256":None,"schema_set_sha256":None,"schema_content_set_sha256":None,"build_recipes_sha256":None,"candidate_supplied_expected_digests_used":False},"rebuilds":{"build_roots_distinct":True,"target_directories_distinct":True,"writable_cargo_layers_distinct":True,"network_disabled":True,"incremental_state_shared":False,"all_role_outputs_byte_equal":equal,"all_closure_digests_equal":True,"double_rebuild_complete":equal},"role_artifacts":{"required_role_count":4,"completed_role_count":4,"controller":roles["controller"],"observer":roles["observer"],"runner":roles["runner"],"validator":roles["validator"],"raw_sha256_pairwise_distinct":len({results[0][r]["raw_sha256"] for r in ROLES})==4,"identity_sha256_pairwise_distinct":False,"build_recipe_sha256_pairwise_distinct":False},"forbidden_outputs":{"real_unsigned_subject_present":False,"owner_signature_present":False,"owner_private_key_read":False,"external_input_admission_present":False,"execution_capability_present":False,"live_action_count":0},"result":{"double_rebuild_complete":equal,"real_unsigned_subject_present":False,"owner_interaction_required_now":False,"owner_signature_may_be_requested":False,"live_execution_may_begin":False,"side_effects_unlocked":"NONE"},"nonclaims":{"receipt_is_unsigned_subject":False,"receipt_is_owner_authority":False,"receipt_is_execution_capability":False,"side_effects_unlocked":"NONE"},"hashing_contract":{"hash_algorithm":"SHA-256","digest_domain":"agent-bridge/biocortex/owned-lab/s21b-a3/postintegration-refreeze-receipt/v1","digest_framing":"U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD","hash_scope":"ENTIRE_PACKET_EXCEPT_ROLE_BUILD_RECEIPT_SHA256","self_hash_field":"role_build_receipt_sha256","self_hash_field_excluded":True,"repository_framing_lf_excluded":True,"candidate_reported_matches_authoritative":False,"canonicalization":"AB_RESTRICTED_CANONICAL_JSON_S21B_A3_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"}}
+        receipt={"schema":"agent_bridge.memory_temporal_owned_lab_postintegration_refreeze_receipt_s21b_a3.v0","packet_kind":"S21B_A3_POST_INTEGRATION_REFREEZE_RECEIPT","canonicalization":"AB_RESTRICTED_CANONICAL_JSON_S21B_A3_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT","stage":"S21B_A3_POST_INTEGRATION_REFREEZE_AND_DOUBLE_REBUILD","status":"S21B_A3_POST_INTEGRATION_DOUBLE_REBUILD_VERIFIED_NON_LIVE","receipt_state":"POST_INTEGRATION_DOUBLE_REBUILD_VERIFIED_NON_LIVE","test_only":True,"synthetic":False,"target_binding":{"integration_commit":commit,"integration_tree":target_tree,"integration_first_parent":git("show","-s","--format=%P",commit).split()[0],"integration_second_parent":git("show","-s","--format=%P",commit).split()[1] if len(git("show","-s","--format=%P",commit).split())>1 else None,"cargo_lock_sha256":lock,"archive_sha256":archive_sha,"archive_byte_count":archive_bytes,"target_refrozen":True,"candidate_supplied_target_used":False},"closure_bindings":{"toolchain_manifest_sha256":results[0]["closure"]["toolchain_manifest_sha256"],"feature_set_sha256":results[0]["closure"]["feature_set_sha256"],"schema_set_sha256":results[0]["closure"]["schema_set_sha256"],"schema_content_set_sha256":results[0]["closure"]["schema_content_set_sha256"],"build_recipes_sha256":results[0]["closure"]["build_recipes_sha256"],"candidate_supplied_expected_digests_used":False},"rebuilds":{"build_roots_distinct":True,"target_directories_distinct":True,"writable_cargo_layers_distinct":True,"network_disabled":True,"incremental_state_shared":False,"all_role_outputs_byte_equal":equal,"all_closure_digests_equal":closure_equal,"double_rebuild_complete":equal and closure_equal},"role_artifacts":{"required_role_count":4,"completed_role_count":4,"controller":roles["controller"],"observer":roles["observer"],"runner":roles["runner"],"validator":roles["validator"],"raw_sha256_pairwise_distinct":len({results[0]["roles"][r]["raw_sha256"] for r in ROLES})==4,"identity_sha256_pairwise_distinct":len({results[0]["roles"][r]["identity_sha256"] for r in ROLES})==4,"build_recipe_sha256_pairwise_distinct":len({results[0]["closure"]["recipe_digests"][r] for r in ROLES})==4},"forbidden_outputs":{"real_unsigned_subject_present":False,"owner_signature_present":False,"owner_private_key_read":False,"external_input_admission_present":False,"execution_capability_present":False,"live_action_count":0},"result":{"double_rebuild_complete":equal and closure_equal,"real_unsigned_subject_present":False,"owner_interaction_required_now":False,"owner_signature_may_be_requested":False,"live_execution_may_begin":False,"side_effects_unlocked":"NONE"},"nonclaims":{"receipt_is_unsigned_subject":False,"receipt_is_owner_authority":False,"receipt_is_execution_capability":False,"side_effects_unlocked":"NONE"},"hashing_contract":{"hash_algorithm":"SHA-256","digest_domain":"agent-bridge/biocortex/owned-lab/s21b-a3/postintegration-refreeze-receipt/v1","digest_framing":"U32BE_DOMAIN_LENGTH_DOMAIN_U64BE_CANONICAL_PAYLOAD_LENGTH_CANONICAL_PAYLOAD","hash_scope":"ENTIRE_PACKET_EXCEPT_ROLE_BUILD_RECEIPT_SHA256","self_hash_field":"role_build_receipt_sha256","self_hash_field_excluded":True,"repository_framing_lf_excluded":True,"candidate_reported_matches_authoritative":False,"canonicalization":"AB_RESTRICTED_CANONICAL_JSON_S21B_A3_V1_COMPACT_SORTED_KEYS_ASCII_VALUES_NO_FLOAT"}}
         body=canon(receipt); receipt["role_build_receipt_sha256"]=sha(framed(body)); raw=canon(receipt)+b"\n"
         if ns.receipt:
             p=pathlib.Path(ns.receipt); assert not p.exists(); p.write_bytes(raw); os.chmod(p,0o600)
