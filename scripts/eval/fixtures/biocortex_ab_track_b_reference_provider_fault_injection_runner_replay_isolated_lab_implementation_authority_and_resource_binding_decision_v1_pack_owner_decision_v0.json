@@ -1,0 +1,29 @@
+{
+  "authorized_component_contract": {
+    "input_topology": {"public_input_count": 20, "review_order": ["MODE_PREOBSERVATION_GUARD", "T12_OWNER_TOCTOU_REVIEW_EXACTLY_ONCE", "SEPARATE_REPLAY_POLICY_REVIEW", "DETACHED_REPLAY_REQUEST_REVIEW_LAST", "EXACT_SINGLE_PROFILE_MATCH", "ANY_RESERVED_IDENTIFIER_EQUALITY_REJECTS"]},
+    "local_scope": "SYNTHETIC_REPLAY_TRIPLE_ONLY_NO_DURABLE_RESERVATION",
+    "output_boundary": "FAIL_CLOSED_RECEIPT_ONLY",
+    "replay_binding": {
+      "policy_match_fields": ["t12_receipt_content_sha256", "track_id", "submitted_issuer_nonce", "submitted_sequence", "submitted_packet_identity_sha256"],
+      "profile_fields": ["t12_receipt_content_sha256", "track_id", "reserved_issuer_nonce", "reserved_sequence", "reserved_packet_identity_sha256", "submitted_issuer_nonce", "submitted_sequence", "submitted_packet_identity_sha256"],
+      "profile_order": ["MANAGED_SPANNER_CLOUD_KMS", "SELF_HOSTED_ETCD_OPENBAO"],
+      "profiles": [
+        {"reserved_issuer_nonce": "managed-reserved-0001", "reserved_packet_identity_sha256": "fbce175924579ab998990a7438b611cfd419937903d180e930c11058999ccbdc", "reserved_sequence": 4100, "submitted_issuer_nonce": "managed-submitted-0002", "submitted_packet_identity_sha256": "1074bc0412ef81ad6f7afba63816dabebabe53afdbc0bb368a35877add958b77", "submitted_sequence": 4101, "t12_receipt_content_sha256": "ddb58a2e4db7c74aedbf2504dcf38bde8419722429aeb3dba9cd61273ba3177d", "track_id": "MANAGED_SPANNER_CLOUD_KMS"},
+        {"reserved_issuer_nonce": "selfhosted-reserved-0001", "reserved_packet_identity_sha256": "6a1363823cdcc2664a4428625e60ae83183ea3728975589dbb64aedca07082c3", "reserved_sequence": 7300, "submitted_issuer_nonce": "selfhosted-submitted-0002", "submitted_packet_identity_sha256": "df6a8ab7205db8eb3e91dbfb323d4fba68a61484d13981d7d3eaa08eba6fd680", "submitted_sequence": 7301, "t12_receipt_content_sha256": "d51f20f0c0b6ba03cb8fcc8b561c671d38b59fdc80a6fe35beafa0ae9d2f5eee", "track_id": "SELF_HOSTED_ETCD_OPENBAO"}
+      ],
+      "request_fields": ["submitted_issuer_nonce", "submitted_sequence", "submitted_packet_identity_sha256"]
+    },
+    "reviewer_topology": "ONE_T12_PREDECESSOR_CALL"
+  },
+  "boundary": {"current_released_component_total": 10, "future_successor_component_total_after_exact_integrated_full_gate": 11, "production_ingestion_controls_implemented": 0, "provider_authority": false, "runtime_authority": false, "t12_implemented": true, "t13_implemented": false, "t14_authorized": false},
+  "date": "2026-07-19",
+  "decision": "AUTHORIZE_EXACT_BOUNDED_REVERSIBLE_T13_REPLAY_ISOLATED_LAB_COMPONENT_IMPLEMENTATION_ONLY_FAIL_CLOSED",
+  "implementation_authority": {"current_state": "AUTHORIZED_T13_REPLAY_ISOLATED_LAB_EXACT_UNIT", "exact_next_unit_authorized": true, "non_transitive": true, "single_successor_intent": true, "forbidden_operations": ["ACCESS_OR_MUTATE_DURABLE_REPLAY_STATE", "CLAIM_ATOMIC_NONCE_OR_SEQUENCE_RESERVATION", "BIND_OR_CLAIM_REAL_ISSUER_AUTHENTICATION", "PERFORM_NETWORK_PROVIDER_RUNTIME_OR_PRODUCTION_ACTION"]},
+  "next_unit": "REFERENCE_PROVIDER_MANAGED_AND_SELF_HOSTED_FAULT_INJECTION_RUNNER_V1_REPLAY_SYNTHETIC_EXACT_T12_RECEIPT_TRACK_RESERVED_ISSUER_NONCE_SEQUENCE_AND_PACKET_IDENTITY_SUBMITTED_ISSUER_NONCE_SEQUENCE_AND_PACKET_IDENTITY_VERIFIER_ISOLATED_LAB_IMPLEMENTATION",
+  "owner_implementation_actor": {"actor_class": "PROJECT_OWNER", "actor_id": "pallasting", "semantic_owner_directive": "CONTINUE_NEXT_SEMANTIC_UNIT_USING_AGENT_RECOMMENDED_ORDER"},
+  "predecessor": {"exact_release_commit": "0fb3c55bf263317d6435d6ed2ed007baf0887719", "implementation_authority_consumed": true, "t12_implemented": true},
+  "resource_binding": {"effective_external_paid_spend_cap": 0, "max_parallel_workers": 1, "max_predecessor_review_calls": 1, "max_private_scratch_bytes": 67108864, "network": false, "replay_policy_max_bytes": 65536, "replay_request_max_bytes": 16384},
+  "schema": "agent_bridge.biocortex_ab_track_b_reference_provider_fault_injection_runner.replay_isolated_lab_implementation_authority_and_resource_binding_decision.v1",
+  "schema_version": 1,
+  "state_machine": {"decision_full_gate_consumes_new_authority": false, "future_successor_integrated_full_consumes_authority": true}
+}
