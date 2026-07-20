@@ -1911,3 +1911,10 @@ so they are versioned normally and are not added to the preservation-only
 - Authorization contract, record, validator and test authorize exactly one
   receipt-first, header-only inspection while enforcing zero payload bytes and
   routing the result to P11-G19.
+
+## Majorana P11-E4S metadata-inspection operation
+
+- `majorana_certificate_p11e4s_archive_metadata_inspection_runner.py`: receipt-first,
+  header-only runner with no extraction API use.
+- Result, validator and test pin both external receipts and verify 149,865 headers,
+  zero payload/semantic read, hashed identifiers and the observed PAX-only classes.

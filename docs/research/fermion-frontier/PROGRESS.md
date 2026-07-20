@@ -2047,3 +2047,12 @@ receipt root, persist the attempt record, and inspect only archive headers via
 read-only E3R access. Member payload bytes, path/link text, extraction,
 materialization and semantic reading remain prohibited. P11-G19 must review the
 result.
+
+## Majorana P11-E4S completes header-only metadata inspection
+
+E4S persists both receipt phases and classifies 149,865 headers with zero member
+payload bytes. Every header carries per-member PAX metadata, but the observed
+key set is limited to `path`, `atime`, `ctime` and `mtime`; no global/extended
+PAX headers, xattr/ACL/capability keys or sparse representation is observed.
+This is metadata evidence only, not a materialization-safety conclusion. P11-G19
+must govern its interpretation.
