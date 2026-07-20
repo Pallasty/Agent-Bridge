@@ -1,0 +1,9 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2i_recovery_preflight.v0",
+  "gate": "G2I_TOOLCHAIN_RECOVERY_AUTHORIZATION_PREFLIGHT",
+  "predecessor": {"g2h_integration": "758dd3dc", "g2h_fail_closed_post": 4798, "claim_post": 4803},
+  "current_actions": {"rustup_or_cargo_invoked": false, "toolchain_mutated": false, "network_accessed": false, "build_or_run": false},
+  "future_recovery_required": ["separate_owner_authorization", "independent_review", "absolute_preinstalled_rustc_path", "absolute_preinstalled_cargo_path", "preuse_sha256_and_version", "selector_bypass", "disposable_environment", "pre_post_identity_receipts", "bounded_one_command_plan"],
+  "abort_conditions": ["missing_binary", "hash_or_version_mismatch", "rustup_selector_reentry", "network_indication", "unexpected_filesystem_change"],
+  "authority": {"automatic_recovery": false, "g2g_retry": false, "build": false, "run": false, "dependency": false, "component_linker": false, "runtime_or_g1_4": false}
+}
