@@ -1704,3 +1704,11 @@ so they are versioned normally and are not added to the preservation-only
   disposition of the existing partial evidence.
 - It is a design only. No network, archive, external evidence mutation, source
   use, candidate work, execution, measurement, or scientific authority opens.
+
+## Majorana P11-G7 remedial authorization review
+
+- The G7 contract and canonical record independently validate all five E1R
+  preconditions through six readiness checks.
+- The review opens only P11-E2R operational-contract-pack design. It grants no
+  network, archive, evidence mutation, source-use, build, execution,
+  measurement, kernel-bound, S0, or scientific authority.

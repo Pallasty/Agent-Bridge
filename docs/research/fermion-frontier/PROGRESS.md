@@ -1847,3 +1847,11 @@ P11-E1R converts the G6 closure findings into five auditable preconditions for
 any later operational proposal. It introduces no new network authority and does
 not modify external evidence. An independent P11-G7 review is required before
 any operational authorization can even be considered.
+
+## Majorana P11-G7 opens only the next contract-design gate
+
+P11-G7 passes six read-only readiness checks and authorizes only
+`P11-E2R-REMEDIAL-ACQUISITION-OPERATIONAL-CONTRACT-PACK-V1`. P11-E2R may write
+repository contract, validation, test, and progress artifacts, but it may not
+create the future external root, access the network, run APT, mutate retained
+evidence, unpack or read sources, or perform candidate and scientific work.
