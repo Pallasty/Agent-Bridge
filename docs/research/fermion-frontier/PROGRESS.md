@@ -1877,6 +1877,14 @@ are recorded; P11-E1 evidence was not reused. This is source-byte custody only,
 not source reading, build, execution, memory measurement, equivalence, S0, or
 scientific evidence. P11-G9 is now the required post-custody governance gate.
 
+## Majorana P11-G9 closes E2R custody and opens pre-read design only
+
+G9 validates the complete fresh E2R four-package result and records five passing
+findings. The only successor is
+`P11-E3-SOURCE-UNPACK-READ-PRECONDITION-CONTRACT-DESIGN-V1`; bytes remain
+immutable evidence until a later independent authorization. Source reading,
+builds, candidates, execution, measurement, S0 and science remain closed.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new

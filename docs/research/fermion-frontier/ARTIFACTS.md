@@ -1741,3 +1741,10 @@ so they are versioned normally and are not added to the preservation-only
 - The result opens only P11-G9 post-remedial-custody governance; source use,
   unpacking, candidates, execution, measurement and scientific claims remain
   closed.
+
+## Majorana P11-G9 post-remedial custody governance
+
+- G9 independently validates complete four-package custody, final-path receipt
+  rehashes, clean APT isolation, and exclusion of P11-E1 evidence.
+- It opens only P11-E3 pre-read contract design; no unpacking, source reading,
+  build, execution, measurement or scientific authority is granted.

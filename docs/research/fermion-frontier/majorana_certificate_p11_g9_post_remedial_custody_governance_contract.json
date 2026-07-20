@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G9-POST-REMEDIAL-CUSTODY-GOVERNANCE-V1",
+  "contract_role": "independent_governance_after_E2R_complete_fresh_byte_custody",
+  "required_direct_parent_commit": "f0f2baf26da0582854987717ba5bda2ca2134cc5",
+  "E2R_custody": {
+    "report_relative_path": "majorana_certificate_p11e2r_remedial_source_archive_custody_report.json",
+    "report_raw_sha256": "682801cad9f8c38279592eff1d08acba1d6bf63ca956ea75304a2d95da25d0a6",
+    "expected_outcome": "REMEDIAL_SOURCE_ARCHIVE_CUSTODY_ESTABLISHED_EXACT_FOUR_FRESH_PACKAGE_SET",
+    "complete_set_custody_established": true,
+    "final_path_receipts_rehashed": true,
+    "host_apt_warning_detected": false,
+    "old_p11e1_evidence_used": false
+  },
+  "findings": [
+    {"finding_id":"four_exact_fresh_source_sets_present","status":"PASS"},
+    {"finding_id":"final_path_receipts_and_independent_rehash_pass","status":"PASS"},
+    {"finding_id":"APT_isolation_warning_gate_pass","status":"PASS"},
+    {"finding_id":"P11_E1_evidence_exclusion_pass","status":"PASS"},
+    {"finding_id":"source_use_and_scientific_gates_remain_closed","status":"PASS"}
+  ],
+  "decision": {
+    "disposition":"CLOSE_E2R_AS_COMPLETE_BYTE_CUSTODY_AND_AUTHORIZE_ONLY_P11_E3_PRE_READ_CONTRACT_DESIGN",
+    "all_findings_pass":true,
+    "network_or_archive_acquisition_authorized":false,
+    "external_evidence_mutation_authorized":false,
+    "archive_unpack_or_source_reading_authorized":false,
+    "candidate_implementation_or_execution_authorized":false,
+    "kernel_accounting_bound_design_authorized":false,
+    "scientific_authority":"NONE",
+    "only_allowed_next_gate":"P11-E3-SOURCE-UNPACK-READ-PRECONDITION-CONTRACT-DESIGN-V1"
+  },
+  "P11_E3_scope": {
+    "may_design_only_repository_contract_validator_and_tests":true,
+    "must_keep_external_E2R_root_immutable":true,
+    "must_specify_unpack_read_boundary_and_hash_preservation":true,
+    "must_not_unpack_read_build_execute_or_measure":true
+  },
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g9_post_remedial_custody_governance_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g9_post_remedial_custody_governance_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g9_post_remedial_custody_governance_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g9_post_remedial_custody_governance.py"],"record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256":true}
+}
