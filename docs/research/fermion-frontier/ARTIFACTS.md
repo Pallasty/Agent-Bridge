@@ -1795,3 +1795,11 @@ so they are versioned normally and are not added to the preservation-only
   new root with mandatory graph containment and pre/post equality.
 - Network, custody mutation, builds, execution, measurement, candidates and
   scientific authority remain closed.
+
+## Majorana P11-E3R confined-link inspection result
+
+- Four exact source packages materialized under the new derived root; 85 Linux
+  symlinks passed confined graph and post-extraction containment checks.
+- Canonical tree manifests cover 130,694 entries. Bounded query receipts contain
+  63 path/line hashes. No build, execution, measurement or scientific claim is
+  admitted before P11-G13.

@@ -1933,6 +1933,15 @@ confined-link graph policy and the prior bounded-read limits. The E2R custody
 root stays immutable; network, package mutation, patching, builds, execution,
 measurement, candidate decisions and science remain closed.
 
+## Majorana P11-E3R completes confined source inspection
+
+E3R successfully materializes all four exact source packages in a new root.
+The Linux archive's 85 symlinks pass pre-extraction graph resolution and
+post-extraction realpath containment. Per-package tree manifests cover 130,694
+entries, and bounded searches yield 20 GCC, 20 binutils, 20 Linux and 3
+linux-signed receipts. These are source-location observations only; P11-G13
+must govern any semantic, kernel-bound or candidate inference.
+
 ## Majorana P11-G8 authorizes one bounded remedial custody run
 
 G8 passes six readiness checks and authorizes one fresh E2R operation in the new
