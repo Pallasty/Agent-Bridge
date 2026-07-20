@@ -1,9 +1,8 @@
-//! Exact named S21B-A1 role artifacts.
+//! Exact named S21B role artifacts with an A8 non-live dry-run surface.
 //!
-//! These binaries deliberately implement only a deterministic identity
-//! surface. They do not read external payloads, inspect the host, validate an
-//! owner packet, launch a runner, sign data, or expose a live adapter. Any
-//! operational implementation is a later refreeze and owner-review boundary.
+//! These binaries expose deterministic identity and protocol-transition
+//! surfaces. They do not read external payloads, inspect the host, launch a
+//! runner, sign data, or expose a live adapter.
 
 #![forbid(unsafe_code)]
 
@@ -22,6 +21,7 @@ pub const ROLE_ARTIFACT_COUNT: usize = 4;
 const UNSUPPORTED_COMMAND: &[u8] =
     b"S21B_A1_NON_LIVE_IDENTITY_ONLY: arguments and operational commands are forbidden\n";
 const OUTPUT_FAILURE: &[u8] = b"S21B_A1_ROLE_IDENTITY_OUTPUT_FAILED\n";
+const DRY_RUN_ARGUMENT: &str = "--dry-run-protocol-v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Role {
@@ -67,6 +67,15 @@ impl Role {
             Self::Validator => VALIDATOR_IDENTITY,
         }
     }
+
+    pub const fn dry_run_json(self) -> &'static str {
+        match self {
+            Self::Controller => CONTROLLER_DRY_RUN,
+            Self::Observer => OBSERVER_DRY_RUN,
+            Self::Runner => RUNNER_DRY_RUN,
+            Self::Validator => VALIDATOR_DRY_RUN,
+        }
+    }
 }
 
 macro_rules! role_identity {
@@ -109,6 +118,60 @@ const OBSERVER_IDENTITY: &str = role_identity!("ab-owned-lab-observer", "observe
 const RUNNER_IDENTITY: &str = role_identity!("ab-owned-lab-runner", "runner");
 const VALIDATOR_IDENTITY: &str = role_identity!("ab-owned-lab-validator", "validator");
 
+macro_rules! role_dry_run {
+    ($role:literal, $next:literal, $operation:literal, $state:literal) => {
+        concat!(
+            "{\"arguments_accepted\":true,",
+            "\"credential_access_present\":false,",
+            "\"execution_capability_present\":false,",
+            "\"external_input_read\":false,",
+            "\"format_id\":\"agent_bridge.memory_temporal_owned_lab_role_dry_run_s21b_a8.v0\",",
+            "\"live_execution_permitted\":false,",
+            "\"network_access_present\":false,",
+            "\"next_role\":",
+            $next,
+            ",",
+            "\"operation\":\"",
+            $operation,
+            "\",",
+            "\"operational_mode\":\"NON_LIVE_PROTOCOL_DRY_RUN_ONLY\",",
+            "\"role\":\"",
+            $role,
+            "\",",
+            "\"side_effects_unlocked\":\"NONE\",",
+            "\"state\":\"",
+            $state,
+            "\",",
+            "\"test_only\":true}"
+        )
+    };
+}
+
+const CONTROLLER_DRY_RUN: &str = role_dry_run!(
+    "controller",
+    "\"observer\"",
+    "VALIDATE_PLAN_SHAPE_WITHOUT_INPUT",
+    "PLAN_SHAPE_READY_NO_INPUT"
+);
+const OBSERVER_DRY_RUN: &str = role_dry_run!(
+    "observer",
+    "\"runner\"",
+    "DECLARE_OBSERVATION_SURFACE_WITHOUT_READING",
+    "OBSERVATION_SURFACE_READY_NO_INPUT"
+);
+const RUNNER_DRY_RUN: &str = role_dry_run!(
+    "runner",
+    "\"validator\"",
+    "SIMULATE_DISPATCH_WITHOUT_EXECUTION",
+    "DISPATCH_SIMULATED_NO_EXECUTION"
+);
+const VALIDATOR_DRY_RUN: &str = role_dry_run!(
+    "validator",
+    "null",
+    "DENY_ADMISSION_PENDING_REAL_EVIDENCE",
+    "ADMISSION_DENIED_FAIL_CLOSED"
+);
+
 fn write_all(stream: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
     stream.write_all(bytes)?;
     stream.flush()
@@ -119,19 +182,34 @@ pub fn write_identity(role: Role, stdout: &mut impl Write) -> io::Result<()> {
     write_all(stdout, b"\n")
 }
 
+pub fn write_dry_run(role: Role, stdout: &mut impl Write) -> io::Result<()> {
+    write_all(stdout, role.dry_run_json().as_bytes())?;
+    write_all(stdout, b"\n")
+}
+
 pub fn run<I>(role: Role, arguments: I) -> ExitCode
 where
     I: IntoIterator<Item = OsString>,
 {
-    if arguments.into_iter().next().is_some() {
+    let arguments: Vec<OsString> = arguments.into_iter().collect();
+    if arguments.is_empty() {
+        if write_identity(role, &mut io::stdout().lock()).is_err() {
+            let _ = write_all(&mut io::stderr().lock(), OUTPUT_FAILURE);
+            return ExitCode::from(74);
+        }
+        return ExitCode::SUCCESS;
+    }
+    if arguments.len() == 1 && arguments[0] == DRY_RUN_ARGUMENT {
+        if write_dry_run(role, &mut io::stdout().lock()).is_err() {
+            let _ = write_all(&mut io::stderr().lock(), OUTPUT_FAILURE);
+            return ExitCode::from(74);
+        }
+        return ExitCode::SUCCESS;
+    }
+    {
         let _ = write_all(&mut io::stderr().lock(), UNSUPPORTED_COMMAND);
         return ExitCode::from(64);
     }
-    if write_identity(role, &mut io::stdout().lock()).is_err() {
-        let _ = write_all(&mut io::stderr().lock(), OUTPUT_FAILURE);
-        return ExitCode::from(74);
-    }
-    ExitCode::SUCCESS
 }
 
 #[cfg(test)]
@@ -192,5 +270,29 @@ mod tests {
             write_identity(role, &mut output).unwrap();
             assert_eq!(output, format!("{}\n", role.identity_json()).as_bytes());
         }
+    }
+
+    #[test]
+    fn dry_run_packets_are_canonical_distinct_and_fail_closed() {
+        let mut packets = BTreeSet::new();
+        for role in Role::ALL {
+            let packet = role.dry_run_json();
+            assert!(packet.is_ascii());
+            assert!(packet.starts_with('{') && packet.ends_with('}'));
+            assert!(!packet.contains(['\n', '\r', '\t']));
+            assert!(packet.contains(&format!("\"role\":\"{}\"", role.role_name())));
+            assert!(packet.contains("\"execution_capability_present\":false"));
+            assert!(packet.contains("\"external_input_read\":false"));
+            assert!(packet.contains("\"live_execution_permitted\":false"));
+            assert!(packet.contains("\"network_access_present\":false"));
+            assert!(packet.contains("\"side_effects_unlocked\":\"NONE\""));
+            let keys = top_level_keys(packet);
+            let mut sorted = keys.clone();
+            sorted.sort_unstable();
+            assert_eq!(keys, sorted);
+            assert_eq!(keys.len(), 14);
+            assert!(packets.insert(packet));
+        }
+        assert_eq!(packets.len(), ROLE_ARTIFACT_COUNT);
     }
 }
