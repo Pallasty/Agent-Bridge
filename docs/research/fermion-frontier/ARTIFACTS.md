@@ -1839,3 +1839,16 @@ so they are versioned normally and are not added to the preservation-only
   boundary and closed scientific authority.
 - `test_majorana_certificate_p11e4_source_evidence_analysis_result.py`: regression
   coverage for validation, zero-read authority and the manifest mismatch.
+
+## Majorana P11-G15 post-analysis governance
+
+- `majorana_certificate_p11_g15_post_source_evidence_analysis_governance_contract.json`:
+  pins the zero-read E4 failure, closes the consumed authorization and permits only
+  a new-root, one-layer nested-source materialization contract design.
+- `majorana_certificate_p11_g15_post_source_evidence_analysis_governance_record.json`:
+  canonical five-finding PASS decision routing exclusively to P11-E4R design.
+- `majorana_certificate_p11_g15_post_source_evidence_analysis_governance_validator.py`:
+  verifies exact E4 custody, failure boundaries, closed authorities and all required
+  remediation safeguards.
+- `test_majorana_certificate_p11_g15_post_source_evidence_analysis_governance.py`:
+  standard-library governance, authority and design-boundary regressions.

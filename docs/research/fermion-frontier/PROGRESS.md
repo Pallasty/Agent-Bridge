@@ -1982,3 +1982,12 @@ upstream GCC subtree assumed by the E4 contract. No source text was read and
 zero excerpts were admitted. The run cannot be relaxed or retried in place;
 P11-G15 must govern any nested-archive remediation design. Build, execution,
 measurement, candidate and scientific authority remain closed.
+
+## Majorana P11-G15 closes the failed run and opens remediation design only
+
+G15 confirms the exact E4 zero-read failure, treats the missing GCC path as a
+source-layer mismatch rather than evidence corruption, and records that the G14
+single-run authority is consumed. It authorizes only design of P11-E4R: a
+manifest-bound, one-layer nested-archive materialization contract using a new
+derived root. No extraction, retry, source read, build, execution, measurement,
+candidate decision or scientific claim is authorized in this gate.
