@@ -1867,3 +1867,16 @@ so they are versioned normally and are not added to the preservation-only
 - `test_majorana_certificate_p11e4r_nested_source_materialization.py`:
   standard-library regressions for authority, one-layer scope, root isolation and
   the complete design validator.
+
+## Majorana P11-G16 nested-source materialization authorization
+
+- `majorana_certificate_p11_g16_nested_source_materialization_authorization_contract.json`:
+  seven-check independent review authorizing exactly one byte-level E4R run while
+  keeping semantic reading and all downstream technical/scientific work closed.
+- `majorana_certificate_p11_g16_nested_source_materialization_authorization_record.json`:
+  canonical authorization decision routing to P11-G17.
+- `majorana_certificate_p11_g16_nested_source_materialization_authorization_validator.py`:
+  verifies the E4R chain, external manifest/state, absent root, exact archive,
+  readiness, scope and resource limits.
+- `test_majorana_certificate_p11_g16_nested_source_materialization_authorization.py`:
+  standard-library checks for the authorization boundary and absent target root.

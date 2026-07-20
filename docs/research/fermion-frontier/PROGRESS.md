@@ -2002,3 +2002,13 @@ private staging, rescan and hash the complete tree, then publish atomically.
 Nested archives found inside are never recursively unpacked. This design does
 not open the archive, create the root, read source text or retry E4; P11-G16 is
 required for one future byte-level materialization operation.
+
+## Majorana P11-G16 authorizes one nested-source materialization run
+
+G16 independently rechecks the E4R evidence chain, exact nested archive row,
+absent target root, descriptor/graph safeguards and resource caps. It authorizes
+one byte-level, nonrecursive GCC inner-archive materialization run in the new
+E4R root, with receipts and full manifest generation. Semantic source reading,
+excerpts, E4 retry, evidence-root mutation, network, builds, execution,
+measurement, candidate work and science remain closed. P11-G17 must govern the
+operation result.
