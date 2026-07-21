@@ -1,0 +1,205 @@
+{
+  "schema": "agent_bridge.engram_g1_authenticated_freeze_authority_envelope_shadow_contract.v0",
+  "contract_id": "engram_g1_authenticated_freeze_authority_envelope_shadow_20260718",
+  "stage": "g1_authenticated_freeze_authority_envelope_shadow_synthetic_only",
+  "predecessor": {
+    "stage": "g1_authenticated_freeze_authority_adapter_preregistration_only",
+    "commit": "632918db75f65030d3ac15bc991b51a9c938cba6",
+    "contract_sha256": "a9d267056fac1662b478d929b011ef971b309db60182f0f1c7563624571945c0",
+    "validator_sha256": "632f93b9c9bfcedeca81916ed34be6b4ce8b7b03b916c060b2d1999d06597fde",
+    "checker_sha256": "ea8ac0126306de517175a3dffa2a3722439b93b10a3d9d112ca1732f553e6f29",
+    "immutable": true
+  },
+  "implementation_surface": {
+    "crate": "ab-store",
+    "module_path": "crates/store/src/engram_g1_authenticated_envelope_shadow.rs",
+    "module_source_sha256": "5f3285482c27a73b768ca3c0726031184cb022516d9d48c4abe4258c4ed117ef",
+    "cargo_feature": "engram-g1-authenticated-envelope-shadow-synthetic",
+    "feature_enabled_by_default": false,
+    "module_exported_publicly": false,
+    "runtime_entrypoint_present": false,
+    "mcp_tool_wiring_present": false,
+    "synthetic_test_vectors_only": true,
+    "reads_private_files": false,
+    "loads_real_keys": false,
+    "reads_environment": false,
+    "reads_clock": false,
+    "uses_database": false,
+    "uses_network": false,
+    "spawns_processes": false,
+    "writes_state": false
+  },
+  "implemented_shadow_checks": {
+    "canonicalization_profile": "agent_bridge_rfc8785_compatible_ascii_safe_integer_subset_v1",
+    "canonicalization_is_a_restricted_exact_subset_not_full_jcs": true,
+    "non_ascii_values_rejected_instead_of_normalized": true,
+    "nonnegative_ieee754_safe_integers_only": true,
+    "duplicate_unknown_missing_and_noncanonical_json_rejected": true,
+    "maximum_document_bytes": 65536,
+    "maximum_nesting_depth": 16,
+    "maximum_string_bytes": 4096,
+    "maximum_object_key_bytes": 128,
+    "maximum_array_items": 64,
+    "maximum_object_keys": 64,
+    "maximum_synthetic_manifest_bytes": 65536,
+    "signature_algorithm": "ed25519",
+    "signature_provider": "ring_0_17_existing_optional_dependency",
+    "required_roles_in_order": [
+      "application_owner",
+      "independence_auditor",
+      "freeze_reviewer_1",
+      "freeze_reviewer_2",
+      "sealed_evaluator_custodian"
+    ],
+    "required_signature_count": 5,
+    "all_roles_keys_public_keys_and_identity_commitments_distinct": true,
+    "role_specific_signature_domains": true,
+    "role_key_id_and_epoch_in_signature_message": true,
+    "canonical_unsigned_envelope_frame_in_signature_message": true,
+    "signature_records_contain_no_public_keys": true,
+    "trust_anchors_supplied_outside_envelope": true,
+    "domain_separated_anchor_set_commitment_bound_by_all_signatures": true,
+    "anchor_set_commitment_binds_all_roles_key_ids_epochs_public_keys_identity_commitments_repository_scope_and_revision": true,
+    "anchor_set_commitment_must_match_independently_supplied_expected_binding": true,
+    "synthetic_in_memory_trust_anchor_scope_binding_checked": true,
+    "synthetic_revision_floor_and_revocation_checked": true,
+    "exact_g1_3_and_preregistration_artifacts_bound": true,
+    "repository_scope_manifest_packet_nonce_sequence_time_and_version_bound": true,
+    "bounded_synthetic_manifest_bytes_supplied_in_memory": true,
+    "synthetic_manifest_digest_and_length_recomputed": true,
+    "private_packet_and_manifest_digests_pairwise_distinct": true,
+    "private_digests_disjoint_from_public_artifact_and_receipt_digests": true,
+    "resigned_binding_and_authority_mutations_rejected": true,
+    "implemented_by_feature_gated_shadow_module": true
+  },
+  "explicitly_missing_controls": {
+    "owner_provisioned_private_trust_ledger": false,
+    "durable_monotonic_rollback_protected_trust_revision": false,
+    "real_signer_identity_or_role_authentication": false,
+    "secure_custody_path_traversal": false,
+    "retained_repository_parent_and_file_descriptors": false,
+    "regular_file_link_mode_mount_and_inode_validation": false,
+    "real_private_manifest_or_packet_byte_loading": false,
+    "trusted_monotonic_time_boot_epoch_or_checkpoint_validation": false,
+    "durable_time_high_water_mark": false,
+    "durable_append_only_single_use_cas_claim": false,
+    "claim_time_key_currentness_recheck": false,
+    "consumer_key_and_process_bound_capability": false,
+    "production_adapter_or_runtime_integration": false
+  },
+  "synthetic_result_contract": {
+    "success_verdict": "SYNTHETIC_FIVE_SIGNATURE_ENVELOPE_CONFORMANCE_VERIFIED_NO_AUTHORITY",
+    "failure_verdict": "REJECTED_FAIL_CLOSED",
+    "emits_only_envelope_and_signing_frame_digests": true,
+    "emits_private_packet_manifest_repository_or_scope_values": false,
+    "synthetic_signature_conformance_verified_may_be_true": true,
+    "synthetic_packet_independent_anchor_match_may_be_true": true,
+    "synthetic_manifest_bytes_hash_and_length_match_may_be_true": true,
+    "secure_custody_capture_verified": false,
+    "durable_trust_ledger_verified": false,
+    "trusted_time_verified": false,
+    "durable_replay_claim_verified": false,
+    "capability_minted": false,
+    "freeze_authority_verified": false,
+    "ready_for_g1_4_candidate_protocol_preregistration": false,
+    "runtime_authority": false
+  },
+  "state_machine": {
+    "current_state": "SYNTHETIC_ENVELOPE_SHADOW_IMPLEMENTED_NO_AUTHORITY",
+    "real_adapter_state": "PENDING_IMPLEMENTATION_PREREQUISITES",
+    "representable_states": [
+      "SYNTHETIC_ENVELOPE_SHADOW_IMPLEMENTED_NO_AUTHORITY",
+      "REJECTED_FAIL_CLOSED"
+    ],
+    "positive_freeze_authority_state_representable": false,
+    "g1_4_open_state_representable": false,
+    "runtime_authority_state_representable": false
+  },
+  "next_gate": {
+    "permitted_next_action": "prepare_separate_secure_custody_retained_descriptor_shadow_implementation_gate",
+    "must_remain_synthetic_or_disposable": true,
+    "may_load_real_private_corpus": false,
+    "may_provision_real_trust_roots": false,
+    "may_mint_capability": false,
+    "may_open_g1_4": false,
+    "requires_new_threat_review": true
+  },
+  "human_audit_boundary": {
+    "this_synthetic_reversible_shadow_requires_manual_audit": false,
+    "initial_real_trust_root_provisioning_still_requires_manual_audit": true,
+    "first_production_adapter_enablement_still_requires_manual_audit": true,
+    "routine_fail_closed_test_rejection_requires_human_approval": false,
+    "rollback_failure_requires_durable_evidence_and_lesson": true
+  },
+  "threat_model": {
+    "required_cases": [
+      {
+        "threat": "packet_carried_key_or_anchor_substitution",
+        "shadow_control": "closed_schema_without_public_keys_plus_separately_supplied_anchor_set_and_independent_commitment",
+        "residual": "real_trust_ledger_unimplemented_fail_closed"
+      },
+      {
+        "threat": "role_or_domain_confusion",
+        "shadow_control": "five_ordered_distinct_roles_with_role_specific_domains_and_key_epoch_binding",
+        "residual": "real_role_identity_unimplemented_fail_closed"
+      },
+      {
+        "threat": "unsigned_field_or_signature_wrapper_confusion",
+        "shadow_control": "exact_closed_signing_frame_plus_framed_role_key_epoch_message_and_all_signer_anchor_commitment",
+        "residual": "no_runtime_consumer_exists"
+      },
+      {
+        "threat": "noncanonical_duplicate_or_number_ambiguity",
+        "shadow_control": "exact_restricted_jcs_bytes_ascii_and_safe_integer_only",
+        "residual": "values_outside_subset_are_rejected_not_supported"
+      },
+      {
+        "threat": "cross_stage_repository_scope_or_manifest_replay",
+        "shadow_control": "exact_expected_binding_and_resigned_mutation_rejection",
+        "residual": "durable_replay_claim_unimplemented_fail_closed"
+      },
+      {
+        "threat": "stale_revoked_or_rollback_anchor",
+        "shadow_control": "synthetic_epoch_revocation_revision_and_floor_checks",
+        "residual": "durable_rollback_protection_unimplemented_fail_closed"
+      },
+      {
+        "threat": "digest_alias_privacy_echo",
+        "shadow_control": "private_digest_pairwise_and_public_receipt_deny_sets",
+        "residual": "no_real_private_values_loaded"
+      },
+      {
+        "threat": "freshness_claim_laundering",
+        "shadow_control": "issue_expiry_metadata_signed_and_shape_bounded",
+        "residual": "trusted_time_not_verified_and_always_false"
+      },
+      {
+        "threat": "synthetic_success_laundered_into_authority",
+        "shadow_control": "private_module_feature_off_by_default_and_all_authority_fields_false",
+        "residual": "separate_custody_replay_capability_and_production_gates_required"
+      }
+    ]
+  },
+  "boundaries": {
+    "observes_real_role_key_or_corpus_evidence": false,
+    "real_signature_authentication_verified": false,
+    "exact_real_manifest_bytes_verified": false,
+    "secure_custody_capture_verified": false,
+    "durable_trust_ledger_verified": false,
+    "trusted_time_verified": false,
+    "durable_replay_claim_verified": false,
+    "current_private_corpus_assembly_authority": false,
+    "current_g1_corpus_freeze_authority": false,
+    "authenticated_freeze_authority_verified": false,
+    "adapter_implementation_authority": false,
+    "ready_for_authenticated_freeze_authority_review": false,
+    "ready_for_g1_4_candidate_protocol_preregistration": false,
+    "candidate_manifest_access_authority": false,
+    "candidate_fit_access_authority": false,
+    "candidate_implementation_authority": false,
+    "biocortex_experiment_execution_authority": false,
+    "retrieval_order_mutation_authority": false,
+    "live_store_write_authority": false,
+    "runtime_promotion_authority": false
+  }
+}

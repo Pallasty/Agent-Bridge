@@ -180,6 +180,23 @@ mutation, write, promotion, and G1.4 readiness fields false. See
 and run
 `scripts/check-engram-g1-authenticated-freeze-authority-adapter-preregistration.sh`.
 
+`engram_g1_authenticated_freeze_authority_envelope_shadow.py` validates the
+public contract for the first implementation-prerequisite shadow. The actual
+Rust module is private, feature-disabled by default, and synthetic-only. It
+verifies five role/domain-separated Ed25519 signatures against an independently
+expected commitment over the complete in-memory synthetic anchor set, checks a
+project-specific RFC 8785-compatible ASCII/safe-integer canonical subset, and
+rehashes bounded synthetic manifest bytes. It has no filesystem, real-key,
+clock, database, network, process, MCP, or runtime surface. A passing test means
+only synthetic envelope conformance: secure custody, durable trust, trusted
+time, replay consumption, capability minting, corpus freeze, G1.4 readiness,
+and every access/write/execution/promotion authority remain false. Its only
+successor is a separately threat-reviewed retained-descriptor secure-custody
+shadow. See
+`docs/design/ENGRAM_G1_AUTHENTICATED_FREEZE_AUTHORITY_ENVELOPE_SHADOW_2026_07_18.md`
+and run
+`scripts/check-engram-g1-authenticated-freeze-authority-envelope-shadow.sh`.
+
 `engram_g1_authenticated_freeze_authority_adapter_isolated_lab.py` is the
 separate default-off synthetic implementation gate permitted by that
 preregistration. It exercises integer-domain RFC 8785 canonicalization,
@@ -198,6 +215,30 @@ G1.4 unrepresentable. See
 `docs/design/ENGRAM_G1_AUTHENTICATED_FREEZE_AUTHORITY_ADAPTER_ISOLATED_LAB_2026_07_18.md`
 and run
 `scripts/check-engram-g1-authenticated-freeze-authority-adapter-isolated-lab.sh`.
+
+`engram_g1_custody_cross_implementation_reconciliation.py` validates the
+design-only, source-pinned comparison between the private Rust
+retained-descriptor shadow and that broader Python isolated lab. Its 28 rows
+register shared intent, one-sided strictness or scope, noncomparable controls,
+and shared gaps without claiming any exact-equivalence row. Eighteen future
+synthetic probes are preregistered, including path normalization, ancestor and
+parent swaps, `O_UNIQUE` and FIFO races, mount-policy drift, SQLite pathname
+reopening, precommit-to-commit mutation, and explicit ACL/clone gaps. No
+differential harness, source modification, private input, authority, or G1.4
+surface is introduced. See
+`docs/design/ENGRAM_G1_CUSTODY_CROSS_IMPLEMENTATION_RECONCILIATION_PREREGISTRATION_2026_07_18.md`
+and run
+`scripts/check-engram-g1-custody-cross-implementation-reconciliation.sh`.
+
+`engram_g1_custody_cross_implementation_differential_harness.py` is the
+separate, source-pinned public-synthetic successor to that preregistration. It
+does not alter either source profile: it calls the existing Rust test-only
+suite and Python disposable isolated lab, then emits 18 redacted probe records
+labelled `DYNAMIC`, `STATIC_WITNESS`, or `UNRESOLVED_SHARED_GAP`. It reports
+observations only: no exact equivalence, policy selection, real custody,
+authority, runtime surface, or G1.4 opening is representable. See
+`docs/design/ENGRAM_G1_CUSTODY_CROSS_IMPLEMENTATION_DIFFERENTIAL_HARNESS_2026_07_18.md`
+and run `scripts/check-engram-g1-custody-cross-implementation-differential-harness.sh`.
 
 `engram_g14_candidate_protocol_preregistration.py` freezes the design-only G1.4
 candidate protocol without implementing a candidate, runner, sandbox, corpus

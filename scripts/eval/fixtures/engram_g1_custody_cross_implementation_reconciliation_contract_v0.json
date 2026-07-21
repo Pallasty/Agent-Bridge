@@ -1,0 +1,511 @@
+{
+  "schema": "agent_bridge.engram_g1_custody_cross_implementation_reconciliation_contract.v0",
+  "contract_id": "engram_g1_custody_cross_implementation_reconciliation_20260718",
+  "date": "2026-07-18",
+  "verdict": "CROSS_IMPLEMENTATION_CUSTODY_RECONCILIATION_PREREGISTERED_DESIGN_ONLY_NO_AUTHORITY",
+  "provenance": {
+    "rust_custody_commit": "db27075ff3eb473b5ca779b57bd86094290dc1c6",
+    "python_isolated_lab_commit": "bdd0b07b5e9afcc20d030e7e3dcfd404d44e8d54",
+    "gitlab_and_github_master_at_preregistration": "33c2c4df78ef302fd0538986b95fa40a3711ba86",
+    "local_merge_commit": "9e441542f5bf424b4b07ac105ccc1d25c1676d81",
+    "real_private_input_examined": false,
+    "runtime_state_examined": false
+  },
+  "purpose": {
+    "question": "which custody claims are shared, implementation-specific, noncomparable, or jointly absent",
+    "design_only": true,
+    "source_pinned": true,
+    "differential_harness_implemented": false,
+    "implementation_equivalence_claimed": false,
+    "production_custody_claimed": false,
+    "authority_claimed": false
+  },
+  "classification_vocabulary": {
+    "allowed": [
+      "SHARED_INTENT_DIFFERENT_MECHANISM",
+      "RUST_STRICTER",
+      "PYTHON_BROADER_SCOPE",
+      "PYTHON_ONLY_COMPOSITION_CONTROL",
+      "NONCOMPARABLE",
+      "SHARED_GAP"
+    ],
+    "exact_equivalence_rows": [],
+    "automatic_union_permitted": false,
+    "automatic_intersection_promotion_permitted": false,
+    "both_accept_proves_equivalence": false,
+    "both_reject_proves_same_failure_semantics": false
+  },
+  "source_profiles": {
+    "rust_retained_descriptor_shadow": {
+      "language": "Rust",
+      "module": "crates/store/src/engram_g1_secure_custody_shadow.rs",
+      "module_sha256": "ef516c9e8784eac869de38aa11c217de1602f7a9d47719216b620b6401356b82",
+      "contract": "scripts/eval/fixtures/engram_g1_secure_custody_retained_descriptor_shadow_contract_v0.json",
+      "contract_sha256": "782fafff5b456d2ddd5fbe95d833525a1e62e4d5416ddf481d9ba3e36e582a84",
+      "validator": "scripts/eval/engram_g1_secure_custody_retained_descriptor_shadow.py",
+      "validator_sha256": "25badec3b0ca55f2a07f8038177a33306a56345fe670bff5c4784b586a3b3e5a",
+      "checker": "scripts/check-engram-g1-secure-custody-retained-descriptor-shadow.sh",
+      "checker_sha256": "331736d1244584c25cff50e1c77d93c38668bf9a93543c7ce14602326b699138",
+      "entry_gating": "private module plus default-off macOS feature plus cfg(test)-only permit constructor",
+      "input_scope": "one bounded file below one disposable synthetic root",
+      "positive_authority_state_representable": false
+    },
+    "python_authenticated_adapter_isolated_lab": {
+      "language": "Python",
+      "implementation": "scripts/eval/engram_g1_authenticated_freeze_authority_adapter_isolated_lab.py",
+      "implementation_sha256": "50e35469af07a81b6eef85fba5c83c92076efe1931b2ee932d8e2d05907ebc94",
+      "contract": "scripts/eval/fixtures/engram_g1_authenticated_freeze_authority_adapter_isolated_lab_contract_v0.json",
+      "contract_sha256": "f9b913c50eaf477c58a11bbf9526070c43137fe91098388d8260f84eb51a3b14",
+      "checker": "scripts/eval/check_engram_g1_authenticated_freeze_authority_adapter_isolated_lab.py",
+      "checker_sha256": "e9aec0676148591e44181b36bf6f0a3ad62f130e1c92ed88bdd3cf7519b4c69e",
+      "shell_entrypoint": "scripts/check-engram-g1-authenticated-freeze-authority-adapter-isolated-lab.sh",
+      "shell_entrypoint_sha256": "6f81855d87d348e1e096adad9df2b271385edea3eed52695532155bac06e4895",
+      "entry_gating": "unregistered script plus enabled=false plus exact SYNTHETIC_KAT markers",
+      "input_scope": "fixed multi-file synthetic envelope plus public bindings and external synthetic ledger",
+      "positive_authority_state_representable": false
+    }
+  },
+  "comparison_matrix": [
+    {
+      "id": "C01_ENTRY_GATING",
+      "domain": "exposure",
+      "classification": "SHARED_INTENT_DIFFERENT_MECHANISM",
+      "rust": "compile-time private module and test-only permit",
+      "python": "runtime disabled flag and synthetic marker without MCP or crate registration",
+      "reconciliation_rule": "neither gate may be widened or treated as a production entrypoint"
+    },
+    {
+      "id": "C02_ABSOLUTE_ROOT_SYNTAX",
+      "domain": "path",
+      "classification": "RUST_STRICTER",
+      "rust": "parses raw OS bytes and rejects repeated separators dot dot-dot trailing separators NUL and overlong components",
+      "python": "Path.parts is evaluated after pathlib normalization and has no explicit raw-byte grammar",
+      "reconciliation_rule": "future harness must preserve and observe pre-normalization spelling"
+    },
+    {
+      "id": "C03_COMPONENT_BOUNDS",
+      "domain": "path",
+      "classification": "RUST_STRICTER",
+      "rust": "bounds absolute depth relative depth and component bytes",
+      "python": "has no explicit absolute-depth relative-depth or component-byte cap",
+      "reconciliation_rule": "unknown or over-limit syntax must not be silently normalized into acceptance"
+    },
+    {
+      "id": "C04_ABSOLUTE_ANCESTOR_RETENTION",
+      "domain": "descriptor_lifetime",
+      "classification": "RUST_STRICTER",
+      "rust": "retains slash and every absolute ancestor descriptor through final validation",
+      "python": "closes each intermediate absolute ancestor while descending and retains only final configured roots",
+      "reconciliation_rule": "a final-root descriptor is not evidence of an unchanged absolute name chain"
+    },
+    {
+      "id": "C05_REPOSITORY_AND_GIT_IDENTITY",
+      "domain": "repository_binding",
+      "classification": "PYTHON_BROADER_SCOPE",
+      "rust": "binds a disposable synthetic root but no Git common directory",
+      "python": "binds repository root Git common directory path digests device inode and mount identity",
+      "reconciliation_rule": "repository identity cannot be inferred from the Rust single-file receipt"
+    },
+    {
+      "id": "C06_PRIVATE_DIRECTORY_NAME_CHAIN",
+      "domain": "descriptor_lifetime",
+      "classification": "RUST_STRICTER",
+      "rust": "re-resolves every retained directory child name from its retained parent",
+      "python": "retains private directory descriptors but does not re-resolve their names from retained parents at claim time",
+      "reconciliation_rule": "parent rename and replacement remains a required differential attack"
+    },
+    {
+      "id": "C07_DIRECTORY_OPEN_FLAGS",
+      "domain": "open_protocol",
+      "classification": "RUST_STRICTER",
+      "rust": "uses O_RDONLY O_DIRECTORY O_NOFOLLOW O_CLOEXEC and O_NONBLOCK",
+      "python": "uses O_RDONLY O_DIRECTORY O_NOFOLLOW and O_CLOEXEC",
+      "reconciliation_rule": "absence of O_NONBLOCK must remain visible in nonregular substitution analysis"
+    },
+    {
+      "id": "C08_FILE_OPEN_FLAGS",
+      "domain": "open_protocol",
+      "classification": "RUST_STRICTER",
+      "rust": "uses O_RDONLY O_NOFOLLOW O_CLOEXEC O_NONBLOCK and Darwin O_UNIQUE",
+      "python": "uses O_RDONLY O_NOFOLLOW and O_CLOEXEC",
+      "reconciliation_rule": "pre-open st_nlink equality is not equivalent to atomic O_UNIQUE"
+    },
+    {
+      "id": "C09_NONREGULAR_OPEN_RACE",
+      "domain": "open_protocol",
+      "classification": "RUST_STRICTER",
+      "rust": "O_NONBLOCK prevents a raced FIFO or device from blocking before post-open rejection",
+      "python": "pre-stats a regular file but a FIFO substitution before blocking open is not covered by an open flag",
+      "reconciliation_rule": "future probe needs a bounded child process and deterministic timeout"
+    },
+    {
+      "id": "C10_PREOPEN_NAME_SNAPSHOT",
+      "domain": "file_identity",
+      "classification": "SHARED_INTENT_DIFFERENT_MECHANISM",
+      "rust": "fstatat nofollow snapshot must equal the opened descriptor snapshot",
+      "python": "os.stat nofollow snapshot must equal os.fstat after open",
+      "reconciliation_rule": "same intent does not erase different metadata fields or open flags"
+    },
+    {
+      "id": "C11_FILE_METADATA_BREADTH",
+      "domain": "file_identity",
+      "classification": "RUST_STRICTER",
+      "rust": "binds device inode mode links uid gid rdev size blocks block size mtime ctime birthtime flags and generation",
+      "python": "binds device inode mode uid links size mtime and ctime",
+      "reconciliation_rule": "the smaller tuple cannot inherit unmeasured Darwin metadata stability"
+    },
+    {
+      "id": "C12_PRIVATE_BYTES_REVALIDATION",
+      "domain": "content",
+      "classification": "SHARED_INTENT_DIFFERENT_MECHANISM",
+      "rust": "reads once from the retained descriptor then checks full metadata and independent hash plus length",
+      "python": "reads at capture then rereads retained descriptors inside the claim transaction precommit callback",
+      "reconciliation_rule": "record both read epochs and do not label them atomically equivalent"
+    },
+    {
+      "id": "C13_FINAL_FILE_NAME_REVALIDATION",
+      "domain": "file_identity",
+      "classification": "SHARED_INTENT_DIFFERENT_MECHANISM",
+      "rust": "fstatat nofollow final name must equal retained full snapshot",
+      "python": "os.stat nofollow final name must equal retained reduced stat tuple",
+      "reconciliation_rule": "future receipts must report the exact compared field set"
+    },
+    {
+      "id": "C14_PRIVATE_DIRECTORY_METADATA_STABILITY",
+      "domain": "directory_identity",
+      "classification": "RUST_STRICTER",
+      "rust": "requires full private-directory snapshot stability except access time",
+      "python": "rechecks private-directory mount identity but does not compare directory metadata at claim time",
+      "reconciliation_rule": "directory mode owner and timestamp drift requires an explicit probe"
+    },
+    {
+      "id": "C15_MOUNT_ALLOWLIST",
+      "domain": "filesystem",
+      "classification": "RUST_STRICTER",
+      "rust": "accepts only MNT_LOCAL with exact filesystem type apfs",
+      "python": "accepts MNT_LOCAL filesystem types not present in a remote and FUSE denylist",
+      "reconciliation_rule": "an unknown local filesystem is unresolved rather than promoted"
+    },
+    {
+      "id": "C16_MOUNT_FINGERPRINT_BREADTH",
+      "domain": "filesystem",
+      "classification": "RUST_STRICTER",
+      "rust": "binds device raw fsid filesystem name and number flags mount-on and mount-from names",
+      "python": "binds device fsid filesystem name hashed mountpoint and local bit",
+      "reconciliation_rule": "the Python subset cannot imply mount source or full flag stability"
+    },
+    {
+      "id": "C17_PRIVATE_FILE_CARDINALITY",
+      "domain": "scope",
+      "classification": "PYTHON_BROADER_SCOPE",
+      "rust": "captures one bounded synthetic file",
+      "python": "captures a fixed manifest packet checkpoint signature and envelope file set",
+      "reconciliation_rule": "single-file conformance cannot be lifted to set completeness or cross-file consistency"
+    },
+    {
+      "id": "C18_PUBLIC_ARTIFACT_BINDING",
+      "domain": "scope",
+      "classification": "PYTHON_BROADER_SCOPE",
+      "rust": "does not open a public predecessor artifact set",
+      "python": "retains and hashes registered public artifacts once during session construction",
+      "reconciliation_rule": "public-set binding is Python-specific and still needs name-chain timing analysis"
+    },
+    {
+      "id": "C19_LEDGER_TOPOLOGY",
+      "domain": "composition",
+      "classification": "PYTHON_ONLY_COMPOSITION_CONTROL",
+      "rust": "has no ledger or transaction",
+      "python": "requires an owner-only external synthetic SQLite ledger on the same mount and outside the repository",
+      "reconciliation_rule": "ledger evidence must never be projected into the standalone Rust custody result"
+    },
+    {
+      "id": "C20_SQLITE_DESCRIPTOR_BINDING",
+      "domain": "composition",
+      "classification": "NONCOMPARABLE",
+      "rust": "has no SQLite path",
+      "python": "retains a sentinel descriptor but stock SQLite opens the database again by absolute pathname",
+      "reconciliation_rule": "path re-open remains an explicit gap until a descriptor-native VFS or equivalent is reviewed"
+    },
+    {
+      "id": "C21_CROSS_DOMAIN_LINEARIZATION",
+      "domain": "composition",
+      "classification": "SHARED_GAP",
+      "rust": "returns after filesystem revalidation without a ledger transaction",
+      "python": "runs filesystem revalidation inside BEGIN IMMEDIATE before later event writes and COMMIT",
+      "reconciliation_rule": "neither source proves one atomic filesystem-and-ledger linearization point"
+    },
+    {
+      "id": "C22_POSTCOMMIT_FILESYSTEM_REVALIDATION",
+      "domain": "composition",
+      "classification": "SHARED_GAP",
+      "rust": "has no commit boundary",
+      "python": "revalidates ledger identity after commit but does not rerun custody after commit",
+      "reconciliation_rule": "mutation after precommit and before or after commit remains a required threat case"
+    },
+    {
+      "id": "C23_TRUST_TIME_REPLAY_CAPABILITY",
+      "domain": "authority_mechanics",
+      "classification": "PYTHON_ONLY_COMPOSITION_CONTROL",
+      "rust": "all trust time replay capability and authority fields are false",
+      "python": "exercises synthetic KAT trust time replay and one-use capability mechanics",
+      "reconciliation_rule": "synthetic composition cannot convert either custody profile into real authority"
+    },
+    {
+      "id": "C24_ERROR_REDACTION",
+      "domain": "privacy",
+      "classification": "RUST_STRICTER",
+      "rust": "returns static codes and messages without path errno uid inode mount or content values",
+      "python": "uses fixed public input labels and can include an errno in mount-probe failure text",
+      "reconciliation_rule": "future differential receipts must contain only registered labels and classifications"
+    },
+    {
+      "id": "C25_DARWIN_EXTENDED_ACL_ABSENCE",
+      "domain": "shared_residual",
+      "classification": "SHARED_GAP",
+      "rust": "does not inspect Darwin extended ACL entries",
+      "python": "does not inspect Darwin extended ACL entries",
+      "reconciliation_rule": "exact POSIX modes must never be described as ACL absence"
+    },
+    {
+      "id": "C26_APFS_CLONE_SNAPSHOT_BACKUP_ALIAS",
+      "domain": "shared_residual",
+      "classification": "SHARED_GAP",
+      "rust": "does not prove absence of clones snapshots or backup aliases",
+      "python": "does not prove absence of clones snapshots or backup aliases",
+      "reconciliation_rule": "single-link inode evidence must not be widened to storage-copy exclusivity"
+    },
+    {
+      "id": "C27_INDEPENDENT_CONTENT_BINDING",
+      "domain": "content",
+      "classification": "NONCOMPARABLE",
+      "rust": "requires caller-supplied nonzero exact SHA-256 and byte length",
+      "python": "binds captured bytes through a canonical signed synthetic envelope and registered public artifacts",
+      "reconciliation_rule": "different trust origins must remain separately named and separately falsified"
+    },
+    {
+      "id": "C28_REAL_CUSTODY_AND_AUTHORITY",
+      "domain": "boundary",
+      "classification": "SHARED_INTENT_DIFFERENT_MECHANISM",
+      "rust": "explicitly returns secure custody and every authority field false",
+      "python": "explicitly returns production admissibility G1.4 and every real-authority field false",
+      "reconciliation_rule": "no comparison outcome may change a false authority field to true"
+    }
+  ],
+  "required_future_differential_probes": [
+    {
+      "id": "P01_RAW_PATH_SPELLING",
+      "phase": "open",
+      "fixture": "repeated separator dot trailing separator NUL over-depth and overlong component variants",
+      "required_record": "raw spelling digest plus per-implementation reject code",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P02_ABSOLUTE_ANCESTOR_SWAP",
+      "phase": "revalidate",
+      "fixture": "rename and replace an absolute ancestor after descendant descriptors open",
+      "required_record": "which retained name chain detects the replacement",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P03_PRIVATE_PARENT_SWAP",
+      "phase": "revalidate",
+      "fixture": "rename and replace the retained private parent after file read",
+      "required_record": "directory-name and final-file-name outcomes separately",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P04_PRIVATE_DIRECTORY_METADATA_DRIFT",
+      "phase": "revalidate",
+      "fixture": "change directory mode owner-neutral metadata and timestamps without replacing inode",
+      "required_record": "exact compared metadata fields",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P05_HARDLINK_BEFORE_OPEN",
+      "phase": "open",
+      "fixture": "create a persistent second hard link before capture",
+      "required_record": "pre-stat open and post-open outcomes",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P06_HARDLINK_OPEN_RACE",
+      "phase": "open",
+      "fixture": "add and remove a second hard link around the file-open boundary",
+      "required_record": "O_UNIQUE result and nlink snapshots",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P07_FIFO_OR_DEVICE_SUBSTITUTION",
+      "phase": "open",
+      "fixture": "replace a pre-statted regular file with a FIFO or device before open",
+      "required_record": "bounded timeout block status and reject code",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P08_FILE_REBIND_AFTER_READ",
+      "phase": "revalidate",
+      "fixture": "rename the opened file and create a replacement at its original name",
+      "required_record": "descriptor and final-name identities",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P09_IN_PLACE_BYTE_MUTATION",
+      "phase": "revalidate",
+      "fixture": "append or overwrite bytes after initial read",
+      "required_record": "read epoch digest size and metadata outcome",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P10_LOCAL_NON_APFS_FILESYSTEM",
+      "phase": "mount_policy",
+      "fixture": "synthetic mount identity marked local with an unregistered non-APFS type",
+      "required_record": "allowlist versus denylist policy outcome",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P11_MOUNT_FINGERPRINT_DRIFT",
+      "phase": "revalidate",
+      "fixture": "mutate each representable mount fingerprint field independently",
+      "required_record": "field coverage map and reject code",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P12_EXTENDED_METADATA_DRIFT",
+      "phase": "revalidate",
+      "fixture": "change a Rust-only stat field while the Python reduced tuple remains unchanged",
+      "required_record": "supported mutation or explicit platform limitation",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P13_PUBLIC_ARTIFACT_NAME_REBIND",
+      "phase": "precommit",
+      "fixture": "replace a pinned public artifact name after initial hash",
+      "required_record": "retained bytes name-chain and claim-time observation",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P14_SQLITE_PATH_REOPEN_SWAP",
+      "phase": "ledger_open",
+      "fixture": "swap the ledger path between sentinel open and SQLite pathname open",
+      "required_record": "sentinel inode SQLite target inode and quarantine outcome",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P15_AFTER_PRECOMMIT_BEFORE_COMMIT_MUTATION",
+      "phase": "linearization",
+      "fixture": "mutate or rebind a private input after custody precommit returns and before COMMIT",
+      "required_record": "filesystem event and ledger event ordering",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P16_POSTCOMMIT_FILESYSTEM_MUTATION",
+      "phase": "linearization",
+      "fixture": "mutate or rebind a private input immediately after COMMIT",
+      "required_record": "whether any postcommit custody observation exists",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P17_DARWIN_ACL_PRESENT",
+      "phase": "shared_gap",
+      "fixture": "exact POSIX modes with an added Darwin extended ACL",
+      "required_record": "UNRESOLVED_SHARED_GAP unless an independently reviewed ACL control exists",
+      "authority_if_pass": false
+    },
+    {
+      "id": "P18_APFS_COPY_ALIAS",
+      "phase": "shared_gap",
+      "fixture": "clone snapshot or backup alias where practical",
+      "required_record": "UNRESOLVED_SHARED_GAP rather than inferred exclusivity",
+      "authority_if_pass": false
+    }
+  ],
+  "linearization_model": {
+    "ordered_events": [
+      "F0_DESCRIPTOR_OPEN",
+      "F1_INITIAL_BYTE_READ",
+      "L0_BEGIN_IMMEDIATE",
+      "F2_PRECOMMIT_CUSTODY_REVALIDATION",
+      "L1_EVENT_APPEND_AND_CAS",
+      "L2_COMMIT",
+      "F3_POSTCOMMIT_CUSTODY_REVALIDATION"
+    ],
+    "rust_current_events": [
+      "F0_DESCRIPTOR_OPEN",
+      "F1_INITIAL_BYTE_READ",
+      "F2_PRECOMMIT_CUSTODY_REVALIDATION"
+    ],
+    "python_current_events": [
+      "F0_DESCRIPTOR_OPEN",
+      "F1_INITIAL_BYTE_READ",
+      "L0_BEGIN_IMMEDIATE",
+      "F2_PRECOMMIT_CUSTODY_REVALIDATION",
+      "L1_EVENT_APPEND_AND_CAS",
+      "L2_COMMIT"
+    ],
+    "shared_atomic_linearization_point_proven": false,
+    "descriptor_native_sqlite_open_proven": false,
+    "postcommit_custody_revalidation_present": false,
+    "future_solution_selected": false
+  },
+  "adjudication_rules": {
+    "source_hash_drift_verdict": "REJECT_SOURCE_DRIFT",
+    "contract_semantic_drift_verdict": "REJECT_CONTRACT_DRIFT",
+    "both_accept_verdict": "OBSERVED_BOTH_ACCEPT_NO_EQUIVALENCE",
+    "both_reject_verdict": "OBSERVED_BOTH_REJECT_CAUSES_REMAIN_SEPARATE",
+    "rust_reject_python_accept_verdict": "OBSERVED_RUST_STRICTER_OR_SCOPE_MISMATCH",
+    "rust_accept_python_reject_verdict": "OBSERVED_PYTHON_SCOPE_OR_COMPOSITION_REJECTION",
+    "shared_gap_verdict": "UNRESOLVED_SHARED_GAP",
+    "may_select_strongest_control_by_union": false,
+    "may_promote_synthetic_result_to_real_authority": false,
+    "may_modify_either_source_implementation_in_this_gate": false
+  },
+  "state_machine": {
+    "representable_states": [
+      "SOURCE_PINNED_MATRIX_VALIDATED_NO_AUTHORITY",
+      "REJECT_SOURCE_DRIFT",
+      "REJECT_CONTRACT_DRIFT",
+      "FUTURE_DIFFERENTIAL_EVIDENCE_PENDING"
+    ],
+    "current_state": "SOURCE_PINNED_MATRIX_VALIDATED_NO_AUTHORITY",
+    "positive_equivalence_state_representable": false,
+    "production_custody_state_representable": false,
+    "freeze_authority_state_representable": false,
+    "g1_4_open_state_representable": false
+  },
+  "human_audit_boundary": {
+    "routine_public_contract_validation_requires_manual_audit": false,
+    "unchanged_predecessor_checker_rerun_requires_manual_audit": false,
+    "initial_real_trust_root_requires_manual_audit": true,
+    "real_private_input_requires_manual_audit": true,
+    "filesystem_policy_widening_requires_manual_audit": true,
+    "descriptor_or_sqlite_vfs_strategy_change_requires_manual_audit": true,
+    "first_production_enablement_requires_manual_audit": true,
+    "suspected_secret_privacy_or_identity_exposure_requires_manual_audit": true
+  },
+  "boundaries": {
+    "real_private_corpus_loading_permitted": false,
+    "real_key_or_trust_root_provisioning_permitted": false,
+    "runtime_or_mcp_registration_permitted": false,
+    "network_provider_access_permitted": false,
+    "live_store_write_permitted": false,
+    "candidate_access_permitted": false,
+    "biocortex_execution_permitted": false,
+    "retrieval_mutation_permitted": false,
+    "capability_minting_permitted": false,
+    "corpus_freeze_permitted": false,
+    "g1_4_open_permitted": false,
+    "production_promotion_permitted": false,
+    "runtime_authority": false
+  },
+  "next_gate": {
+    "permitted_next_action": "implement_separate_synthetic_cross_implementation_differential_harness_after_independent_threat_review",
+    "design_review_required_before_implementation": true,
+    "must_use_disposable_public_synthetic_fixtures": true,
+    "must_keep_source_profiles_separately_named": true,
+    "must_preserve_no_authority_result": true,
+    "may_load_real_private_inputs": false,
+    "may_change_filesystem_allowlist": false,
+    "may_add_runtime_entrypoint": false,
+    "may_open_g1_4": false
+  }
+}
