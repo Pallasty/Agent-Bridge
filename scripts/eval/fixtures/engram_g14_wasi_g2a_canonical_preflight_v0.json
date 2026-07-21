@@ -1,0 +1,71 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2a_canonical_preflight.v0",
+  "gate": "G2A_CANONICAL_WIT_TOOLING_PREFLIGHT",
+  "mode": "READ_ONLY_STATIC_OBSERVATION_NO_INSTALL_NO_DOWNLOAD_NO_BUILD_NO_RUN",
+  "status": "FAIL_CLOSED_TOOLING_TUPLE_NOT_READY",
+  "predecessor": {
+    "integration_commit": "64a2aa80662c88d9e853ff7f59875e1a386f4a25",
+    "integration_tree": "87a1946d1b7146d528c1da4d4acb63c983e67176"
+  },
+  "canonical_wit": {
+    "path": "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit",
+    "sha256": "d47b294dc4c7ee3f48d7af8a6233022a75e79533a2f554ec1299639ba3e142be",
+    "package": "agent-bridge:g14-clock-probe@0.1.0",
+    "world": "probe",
+    "imports_in_order": [
+      "wasi:clocks/wall-clock@0.2.12",
+      "wasi:clocks/monotonic-clock@0.2.12",
+      "wasi:io/poll@0.2.12"
+    ],
+    "export": "typed-report: func() -> typed-report",
+    "record_fields_in_order": [
+      "wall-epoch-seconds: u64",
+      "logical-nanoseconds: u64",
+      "quantum-nanoseconds: u64"
+    ]
+  },
+  "tool_observations": {
+    "rustc": {
+      "path": "/Users/pallasting/.cargo/bin/rustc",
+      "version": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+      "sha256": "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1",
+      "observed_only": true
+    },
+    "cargo": {
+      "path": "/Users/pallasting/.cargo/bin/cargo",
+      "version": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+      "sha256": "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1",
+      "observed_only": true
+    },
+    "missing_tools": ["wasm-tools", "wit-bindgen", "cargo-component", "wasm-ld", "wasmtime"],
+    "missing_tools_are_authorized_to_install": false,
+    "historical_g2l_rust_tool_drift": {
+      "recorded_rust_release": "1.92.0",
+      "current_observed_release": "1.94.0",
+      "requires_new_signed_tuple": true
+    }
+  },
+  "authority": {
+    "owner_approval": false,
+    "toolchain_selection": false,
+    "dependency_selection": false,
+    "install_or_download": false,
+    "source_authority": false,
+    "build_authority": false,
+    "run_authority": false,
+    "runtime_or_deploy_authority": false
+  },
+  "next_gate": {
+    "id": "OWNER_SIGNED_TOOLCHAIN_TUPLE_REVIEW",
+    "automatic_transition": false,
+    "requires_explicit_owner_signature": true
+  },
+  "negative_evidence": {
+    "install_attempted": false,
+    "download_attempted": false,
+    "build_attempted": false,
+    "component_run": false,
+    "runtime_changed": false,
+    "deployment_changed": false
+  }
+}
