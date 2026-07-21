@@ -35,10 +35,12 @@ against the accepted component returned:
 {"wall-epoch-seconds":946684800,"logical-nanoseconds":0,"quantum-nanoseconds":1000000}
 ```
 
-Existing MCP processes were started before this deployment and retain the old
-mapped inode. Each client must reconnect MCP before it can claim the new
-runtime feature. No process was killed automatically.
+Existing MCP processes started before this deployment retained the old mapped
+inode. After the owner reconnected MCP, the active session reported
+`git_sha=da556bc6988e` through capabilities; the fresh MCP process PID `52779`
+started at `2026-07-21 05:53:19`. The deployed runtime feature is therefore
+live in this session. Older MCP processes may still need their own reconnect.
 
 Status:
 
-**RELEASE BUILD PASS — DEPLOYMENT PASS — DIRECT LIVE-BINARY CHECK PASS — MCP RECONNECT PENDING**
+**RELEASE BUILD PASS — DEPLOYMENT PASS — DIRECT LIVE-BINARY CHECK PASS — MCP LIVE VERIFIED**
