@@ -20,7 +20,7 @@ def verify():
     g25=json.loads(raw(TIP,'majorana_certificate_p11_g25_post_path_relation_proof_governance_contract.json'))
     result_raw=raw('aaa2d5bf','majorana_certificate_p11e4v_path_relation_proof_result.json');e4v=json.loads(result_raw)
     if e4u['shape_counts']['path']!={'equal_name':621,'missing':149190,'other_relation':54}: raise ValueError('e4u')
-    if hashlib.sha256(result_raw.encode()).hexdigest()!=g25['E4V_result_custody']['result_raw_sha256'] or e4v['relation_counts']!={'exact_byte_equal':0,'single_leading_dot_slash_equal':0,'posix_lexically_normalized_equal':0,'unsafe_or_unproven_relation':54}: raise ValueError('e4v')
+    if hashlib.sha256(result_raw).hexdigest()!=g25['E4V_result_custody']['result_raw_sha256'] or e4v['relation_counts']!={'exact_byte_equal':0,'single_leading_dot_slash_equal':0,'posix_lexically_normalized_equal':0,'unsafe_or_unproven_relation':54}: raise ValueError('e4v')
     d=g25['decision']
     if d['disposition']!='CLOSE_P11_PAX_PATH_MAPPING_AS_UNPROVEN' or any(d[k] for k in ('retry_or_policy_relaxation_authorized','materialization_authorized','source_payload_or_semantic_read_authorized','new_follow_on_contract_authorized')) or d['next_route']!='TERMINATE_P11_PAX_PATH_MAPPING_ROUTE': raise ValueError('g25')
     return {'status':'PASS','pax_route':d['next_route']}
