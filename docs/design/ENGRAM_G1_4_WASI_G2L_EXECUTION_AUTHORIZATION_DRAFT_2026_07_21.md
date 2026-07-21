@@ -3,12 +3,37 @@
 Status: **DRAFT / PROPOSED — NOT OWNER SIGNED — NO EXECUTION AUTHORITY**.
 
 This static packet is based only on commit
-`b086e221d5a6d83a218ae70118b0dcac53570d73`, tree
-`ceb87fe2664d0c05d813bccd22edb51325a9c70b`. It proposes the fields and
+`652c9e1a9ba148cd24a4fbc1987c9ab2a5d49c9e`, tree
+`3b88a5a691db846c5a1bcb245779c149fa6017fc`. It proposes the fields and
 controls that a future owner-signed G2L execution authorization would have to
 freeze. It does not discover, infer, approve, build, run, or deploy anything.
-Every real WIT, dependency, toolchain, linker, component, output, target, and
-runtime value remains `UNSET_REQUIRES_OWNER_SIGNATURE`.
+The packet records already-observed canonical WIT and direct Rust tool
+identities without authorizing their use. Every unobserved ABI, generated
+binding, adapter, dependency, lockfile, cache, command, linker, component,
+output, target, and runtime value remains `UNSET_REQUIRES_OWNER_SIGNATURE` or
+`NOT_OBSERVED`.
+
+## Observed canonical contract and tools
+
+The observed canonical WIT is
+`scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit`, SHA-256
+`d47b294dc4c7ee3f48d7af8a6233022a75e79533a2f554ec1299639ba3e142be`.
+It declares package `agent-bridge:g14-clock-probe@0.1.0`, world `probe`, and
+the sole export `typed-report: func() -> typed-report`. Its result record is
+`typed-report`, with ordered fields `wall-epoch-seconds: u64`,
+`logical-nanoseconds: u64`, and `quantum-nanoseconds: u64`.
+
+Direct observation records rustc
+`/Users/pallasting/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin/rustc`,
+SHA-256 `12cab30aa9890d54445e29149a1e82d18fbe457de12801bd11bbe7e5e7fe33a0`,
+version `rustc 1.92.0 (ded5c06cf 2025-12-08)`, and cargo at the sibling
+`cargo` path, SHA-256
+`03e381389f5b7b8e695a744362f3866478f99034b2cf2df6afd4d42cfdab6f67`,
+version `cargo 1.92.0 (344c4567c 2025-10-21)`. G2A's Wasmtime 46.0.1 is
+recorded only as a candidate; it does not authorize dependency selection,
+resolution, parsing, fetching, or use. ABI SHA, generated bindings, adapter,
+`wasm-tools`, `wit-bindgen`, `cargo-component`, and `wasm-ld` were not
+observed.
 
 ## Frozen tuple required before signature
 
@@ -69,7 +94,8 @@ output execution, zero runtime admission, and zero deployment actions.
 
 ## Closed gates and static integrity
 
-Dependency, WIT, linker, component, output, runtime, and deploy gates are all
+Owner approval, independent review, execution authorization, dependency, WIT,
+linker, component, output, runtime, and deploy gates are all
 `false`. Checker PASS means only that this four-file draft remains internally
 bound and fail-closed; it cannot open a gate.
 
