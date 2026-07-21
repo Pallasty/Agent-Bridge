@@ -1,6 +1,6 @@
 # Dynamic-JW primary-source evidence ledger
 
-核查日期：2026-07-11  
+核查日期：2026-07-11
 主源：[Aigner et al., arXiv:2605.12600v1](https://arxiv.org/abs/2605.12600)
 
 ## 已直接确认
