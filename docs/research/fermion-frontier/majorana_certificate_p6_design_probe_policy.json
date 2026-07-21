@@ -1,0 +1,611 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P6-E768-MAX-LAZY37-D0-V1",
+  "policy_fingerprint": "majorana_p6_result_unpinned_full_domain_budget_escrow_lazy_k37_resource_probe_v1",
+  "policy_role": "result_unpinned_non_authoritative_resource_envelope_probe_for_one_full_domain_budget_constrained_step2_drop_candidate",
+  "required_direct_parent_commit": "39100195cfd04bb4de086f127e8a75da0a7548ce",
+  "required_fixture_relative_path": "majorana_certificate_p6_design_probe_fixture.json",
+  "probe_driver_relative_path": "majorana_certificate_p6_design_probe/majorana_p6_adaptive_drop_resource_probe.jl",
+  "scientific_authority": "NONE",
+  "certificate_eligible": false,
+  "hindsight_firewall": {
+    "disclosure": "P6 is informed by the qualitative published P5 conclusion and is result-unpinned only with respect to all P6 executions",
+    "P5_informed": true,
+    "P6_result_unpinned": true,
+    "allowed_P5_design_inputs": [
+      "the qualitative conclusion that the frozen uniform-threshold comparison selected no candidate",
+      "the qualitative conclusion that the decisive fixed-candidate obstruction was the step2 local allocation",
+      "the pre-existing P3 step1 path and P5 step2 workload cadence",
+      "the frozen P5 candidate-threshold vocabulary used only to choose a deterministic lazy-ordering accelerator anchor",
+      "published resource vocabulary and resource projections used only for control and initial safety-cap design"
+    ],
+    "forbidden_P5_scientific_design_inputs": [
+      "any exact K36 or K37 product merge drop local or cumulative scientific tick value",
+      "any exact K36 or K37 allocation deficit or slack",
+      "any K36 or K37 drop stream row digest or final-state digest",
+      "any K36 or K37 checkerboard-Neel center interval or contribution stream",
+      "any candidate ordering selected from observed scientific bounds",
+      "any budget constant reverse-engineered from an observed P5 scientific result"
+    ],
+    "lazy_anchor_derivation": "use the smallest threshold in the already-frozen P5 candidate-threshold vocabulary as an implementation-only initial-segment anchor without granting pool-only scientific eligibility",
+    "no_P6_probe_output_may_exist_before_this_policy_is_committed": true,
+    "any_prior_uncommitted_P6_scientific_or_resource_observation_requires_a_new_disclosed_policy_version": true,
+    "policy_and_source_must_not_contain_forbidden_P5_scientific_literals": true
+  },
+  "candidate_design": {
+    "probe_mode_order": [
+      "P5_K37_RESOURCE_CONTROL",
+      "E768_MAX_LAZY37_V1"
+    ],
+    "candidate_execution_order": [
+      "P5-K37-RESOURCE-CONTROL",
+      "E768-MAX-LAZY37-V1"
+    ],
+    "control_must_complete_and_conform_before_the_formal_candidate_starts": true,
+    "resource_control": {
+      "candidate_id": "P5-K37-RESOURCE-CONTROL",
+      "probe_mode": "P5_K37_RESOURCE_CONTROL",
+      "role": "non_selectable_instrumentation_and_resource-counter_conformance_control",
+      "selectable": false,
+      "step1_threshold_exponent": 34,
+      "step2_threshold_exponent": 37,
+      "strict_drop_rule": "abs_binary64_coefficient_strictly_less_than_2_pow_minus_37",
+      "must_reproduce_pinned_P5_resource_projection_without_exposing_scientific_fields": true
+    },
+    "formal_candidate_order_is_frozen_before_any_D0_output": [
+      "E768-MAX-LAZY37-V1"
+    ],
+    "formal_candidates": [
+      {
+        "candidate_id": "E768-MAX-LAZY37-V1",
+        "probe_mode": "E768_MAX_LAZY37_V1",
+        "scientific_semantics": "full_postmerge_domain_maximal_affordable_prefix_under_total_local_error_prefix_escrow",
+        "implementation_strategy": "exact_lazy_initial_segment_acceleration_anchored_at_strict_2_pow_minus_37",
+        "fresh_D0_process_count": 1,
+        "required_future_S0_fresh_process_count": 2,
+        "selectable": true
+      }
+    ],
+    "exactly_one_formal_candidate": true,
+    "control_can_never_enter_a_formal_selector": true,
+    "candidate_set_cannot_be_selected_removed_reordered_or_extended_from_D0_output": true,
+    "budget_fraction_threshold_anchor_ranking_cadence_or_algorithm_change_requires_a_new_D0_policy_version": true,
+    "no_open_budget_grid_threshold_grid_K_grid_or_post_probe_fallback_candidate": true
+  },
+  "staged_instrumentation_transform": {
+    "role": "candidate_algorithm_transform_for_the_staged_P5_copy_not_observation_only_instrumentation",
+    "source_relative_path": "majorana_certificate_p5/majorana_p5_runner.jl",
+    "selection_prepare_needle": "                        dropped = Tuple{typeof(constituent.rotation.ms_int),Float64}[]\n",
+    "selection_prepare_replacement": "                        p6_drop_decision = p6_prepare_boundary_drop!(\n                            merged_main, ticks, Int(public.boundary_index_after),\n                            maximum_bits, merge(context, (\n                                operation=\"p6_drop_selection\",\n                            )),\n                        )\n                        dropped = Tuple{typeof(constituent.rotation.ms_int),Float64}[]\n",
+    "callback_needle": "                            should_drop = abs(coefficient) < threshold\n",
+    "callback_replacement": "                            should_drop = p6_should_drop(\n                                p6_drop_decision, mask, coefficient, threshold,\n                            )\n",
+    "selection_validation_needle": "                        drop_rows_digest = finish_canonical_array!(drop_hasher)\n",
+    "selection_validation_replacement": "                        p6_validate_selected_drop_ticks!(\n                            p6_drop_decision, transition_drop_ticks, dropped,\n                        )\n                        drop_rows_digest = finish_canonical_array!(drop_hasher)\n",
+    "each_needle_must_have_exactly_one_occurrence": true,
+    "repository_source_is_not_modified": true,
+    "control_mode_prepare_returns_a_noop_sentinel_callback_retains_the_original_strict_K37_rule_and_all_selection_counters_remain_zero": true,
+    "formal_mode_threshold_argument_only_revalidates_the_2^-37_lazy_anchor_bits_and_never_creates_pool_only_scientific_eligibility": true,
+    "prepare_helper_is_read_only_over_merged_main_and_authoritative_ticks": true,
+    "all_deletion_and_the_only_authoritative_drop_charge_remain_on_the_existing_callback_and_drop_ledger_path": true
+  },
+  "scientific_algorithm": {
+    "algorithm_id": "MAJORANA-P6-E768-MAX-LAZY37-V1",
+    "common_grid_denominator": "340282366920938463463374607431768211456",
+    "grid_definition": "2^128",
+    "step2_local_allocation": "1/400000",
+    "strict_local_maximum_ticks": "850705917302346158658436518579420",
+    "strict_local_maximum_formula": "floor((2^128-1)/400000)",
+    "allocation_equality_is_failure": true,
+    "step1_path": {
+      "threshold_exponent": 34,
+      "threshold_rational": "1/17179869184",
+      "threshold_Float64_bits_hex": "3dd0000000000000",
+      "must_fieldwise_conform_to_P3_before_any_parent_error_is_inherited": true
+    },
+    "step2_boundary_design": {
+      "boundary_count": 768,
+      "ranking_time": "after_the_frozen_merge_and_only_at_each_existing_truncation_boundary",
+      "one_postmerge_snapshot_per_boundary": true,
+      "one_logical_full_domain_ranking_per_boundary": true,
+      "drop_before_merge_is_forbidden": true,
+      "additional_or_removed_drop_boundaries_are_forbidden": true,
+            "raw_boundary_index_domain": "0_through_767",
+            "released_prefix_number_q": "raw_boundary_index_plus_one_in_1_through_768",
+            "prefix_cap_ticks_formula": "floor((raw_boundary_index+1)*strict_local_maximum_ticks/768)",
+      "prefix_cap_is_cumulative_not_incremental": true,
+      "prefix_cap_cannot_reset_at_a_stage_composite_or_boundary": true,
+      "unused_prefix_slack_may_carry_forward": true,
+      "future_prefix_slack_may_not_be_borrowed": true
+    },
+    "total_local_ledger": {
+      "charged_components": [
+        "every_step2_product_defect_row",
+        "every_step2_merge_defect_row",
+        "every_executed_step2_drop_defect_row"
+      ],
+      "every_row_is_independently_rounded_outward_before_BigInt_accumulation": true,
+      "product_and_merge_are_charged_before_the_current_boundary_drop_decision": true,
+      "available_drop_ticks_at_boundary_q": "max(0,prefix_cap_ticks_q-cumulative_product_ticks_q-cumulative_merge_ticks_q-cumulative_drop_ticks_before_q)",
+      "drop_row_cost": "ceil(2^128*exact_abs_of_original_finite_binary64_coefficient)",
+      "drop_budget_fit_comparison": "candidate_prefix_cost_less_than_or_equal_to_available_drop_ticks",
+      "zero_cost_rows_are_affordable_when_available_drop_ticks_is_zero": true,
+      "no_drop_cost_refund_after_future_merge_cancellation_reappearance_or_state_removal": true,
+      "no_local_budget_may_be_borrowed_from_the_cumulative_allocation_or_any_future_mapped_step": true,
+      "final_step2_local_ticks": "cumulative_product_ticks_plus_cumulative_merge_ticks_plus_cumulative_drop_ticks",
+      "final_local_pass_uses_exact_integer_cross_multiplication_only": true,
+      "a_complete_local_failure_is_a_fixed_candidate_scientific_result_not_a_resource_or_host_failure": true
+    },
+    "full_domain_order": {
+      "domain": "every_row_in_the_immutable_postmerge_snapshot",
+      "ranking_key": [
+        "drop_row_cost_BigInt_ascending",
+        "raw_binary64_absolute_magnitude_bits_as_UInt64_ascending",
+        "unsigned_Majorana_mask_ascending"
+      ],
+      "host_dictionary_iteration_order_is_forbidden": true,
+      "host_Float64_comparison_sort_key_is_forbidden": true,
+      "NaN_or_infinite_coefficients_are_invalid": true,
+      "selected_drop_set": "the_longest_initial_prefix_whose_sum_of_row_costs_is_at_most_the_available_drop_ticks",
+      "first_nonfitting_positive_cost_row_stops_the_full_logical_ranking": true,
+      "skipping_a_nonfitting_row_to_test_a_later_row_is_forbidden": true,
+      "ranking_is_not_recomputed_after_each_deletion": true,
+      "all_deletions_occur_only_after_the_selected_prefix_is_frozen": true
+    },
+    "lazy_k37_accelerator": {
+      "scientific_role": "implementation_only_exact_initial_segment_accelerator_not_a_scientific_eligibility_gate",
+      "threshold_exponent": 37,
+      "threshold_rational": "1/137438953472",
+      "threshold_Float64_bits_hex": "3da0000000000000",
+      "pool_membership": "raw_binary64_absolute_magnitude_bits_strictly_less_than_3da0000000000000",
+      "strict_less_than_not_less_than_or_equal": true,
+      "initial_segment_proof_obligation": "every_pool_row_precedes_every_nonpool_row_under_the_complete_drop_cost_abs_bits_unsigned_mask_key_including_cross_threshold_equal_tick_costs",
+            "first_pass": "scan_once_to_freeze_a_lightweight_full_identity_and_coefficient_bits_snapshot_but_materialize_only_pool_rows_as_costly_rank_rows_then_sort_them_by_the_complete_ranking_key",
+      "pool_partial_fit_rule": "if_the_first_nonfitting_pool_row_is_reached_then_stop_because_no_later_pool_or_nonpool_row_can_fit",
+      "pool_complete_fit_rule": "if_every_pool_row_fits_compute_the_exact_remaining_ticks_and_continue_the_full_domain_semantics",
+            "second_pass": "rescan_the_same_frozen_immutable_postmerge_snapshot_and_materialize_every_nonpool_row_whose_drop_row_cost_is_at_most_the_remaining_ticks",
+      "second_pass_order": "sort_all_materialized_affordable_nonpool_rows_by_the_complete_ranking_key_and_take_the_longest_affordable_prefix",
+      "nonpool_rows_costlier_than_the_remaining_ticks_may_be_excluded_from_materialization_only_because_they_can_never_fit": true,
+      "hard_K37_pool_only_stopping_with_positive_remaining_ticks_is_forbidden": true,
+      "pool_exhaustion_is_not_a_scientific_resource_or_terminal_branch": true,
+      "lazy_and_bruteforce_full_domain_selected_rows_ledger_and_final_state_must_be_identical": true,
+      "changing_or_removing_the_accelerator_requires_a_new_resource-policy_version_even_if_scientific_output_would_be_equivalent": true
+    },
+    "signed_zero_and_identity": {
+      "original_coefficient_bits_are_bound_in_every_drop_row_and_state_digest": true,
+      "positive_and_negative_zero_have_zero_drop_cost_but_remain_bitwise_distinct": true,
+      "ordered_ComplexF64_times_Complex_Int64_identity_operations_are_required": true,
+      "phase_only_or_real_value_only_Fock_shortcuts_are_forbidden": true,
+      "signed_zero_micro_oracle_sha256": "323caca70bb0131db1ac554beaa99ffe4b4d9927ec448c83db5a9b11dd9d70c4",
+      "signed_zero_counterexample_masks_hex": [
+        "17c",
+        "53c"
+      ]
+    }
+  },
+  "D0_observation_contract": {
+    "scientific_authority": "NONE",
+    "allowed_aggregate_resource_outputs": [
+      "candidate_id_and_frozen_algorithm_identity",
+      "completion_or_first_deterministic_cap_context_without_coefficient_or_budget_values",
+            "aggregate_cap_scan_propagation_truncation_and_ranking_scan_visits",
+            "aggregate_sort_work_items_or_comparator_events",
+            "aggregate_tick_evaluation_event_count",
+            "aggregate_selected_membership_insertion_count",
+            "aggregate_total_selection_work_units",
+      "peak_ranking_buffer_terms",
+      "aggregate_accuracy_event_counts_used_only_for_resource_caps",
+      "peak_premerge_postmerge_boundary_retained_and_final_term_counts",
+      "wall_time_maximum_RSS_stdout_stderr_returncode_and_supervisor_diagnostics"
+    ],
+    "forbidden_outputs": [
+      "any_product_merge_drop_or_total_scientific_tick_value",
+      "any_local_or_cumulative_allocation_comparison_or_pass_bit",
+      "any_prefix_cap_available_budget_used_budget_remaining_budget_or utilization value",
+      "any ranking cutoff cost absolute bits coefficient bits or mask",
+      "any boundary-level lazy-pool size cost membership saturation or exhaustion field",
+      "any boundary-level second-pass fallback bit or affordable-nonpool count",
+      "any dropped-row list drop-row digest term-state digest or contribution digest",
+      "any boundary-level dropped count or scientific transition record",
+      "any final state coefficient row checkerboard-Neel center interval or contribution stream",
+      "any candidate score rank winner selection allocation claim certificate witness or READY claim"
+    ],
+    "public_cap_event_name_allowlist": [
+      "cap_scan_term_visits",
+      "final_evaluation_term_visits",
+      "maximum_BigInt_bit_length",
+      "maximum_accuracy_charged_events",
+      "maximum_anticommuting_events",
+      "maximum_boundary_retained_terms",
+      "maximum_cap_scan_term_visits",
+      "maximum_current_terms_before_constituent",
+      "maximum_drop_defect_events",
+      "maximum_final_evaluation_term_visits",
+      "maximum_merge_defect_events",
+      "maximum_peak_ranking_buffer_terms",
+      "maximum_premerge_terms",
+      "maximum_product_defect_events",
+      "maximum_propagation_term_visits",
+      "maximum_ranking_scan_term_visits",
+      "maximum_selected_membership_insertions",
+      "maximum_sort_input_items",
+      "maximum_tick_evaluations",
+      "maximum_total_P2_plus_accuracy_charged_events",
+      "maximum_total_charged_term_visits",
+      "maximum_total_selection_work_units",
+      "maximum_truncation_term_visits",
+      "propagation_term_visits",
+      "total_charged_term_visits",
+      "truncation_term_visits"
+    ],
+    "public_resource_identities": [
+      "P2_total_equals_cap_scan_plus_propagation_plus_truncation_plus_final_evaluation",
+      "accuracy_total_equals_product_plus_merge_plus_drop",
+      "product_defect_events_equal_twice_anticommuting_events",
+      "completed_execution_anticommuting_split_count_equals_anticommuting_event_count",
+      "completed_execution_threshold_dropped_term_count_equals_drop_defect_event_count",
+      "combined_total_equals_P2_total_plus_accuracy_total",
+      "completed_final_retained_count_equals_final_evaluation_term_visits",
+      "uncapped_adaptive_selection_boundaries_equal_completed_step2_truncation_boundaries",
+      "capped_progress_aggregates_never_exceed_their_precharged_event_counts",
+      "every_public_count_is_within_its_frozen_D0_probe_cap_or_schedule_bound"
+    ],
+    "aggregate_resource_counts_cannot_select_remove_reorder_or_modify_a_candidate": true,
+    "D0_report_cannot_enter_a_formal_runner": true,
+    "D0_raw_stdout_checkpoint_state_or_private_scientific_sidecar_must_not_be_persisted": true,
+    "operator_must_not_inspect_suppressed_scientific_fields": true
+  },
+  "D0_deterministic_resource_caps": {
+    "maximum_BigInt_bit_length": 2048,
+    "maximum_step2_current_terms_before_constituent": 1048576,
+    "maximum_step2_premerge_terms": 1048576,
+    "maximum_step2_boundary_retained_terms": 1048576,
+    "maximum_step2_final_retained_terms": 1048576,
+    "maximum_step2_cap_scan_term_visits": 1073741824,
+    "maximum_step2_propagation_term_visits": 1073741824,
+    "maximum_step2_truncation_term_visits": 536870912,
+    "maximum_ranking_scan_term_visits": 1073741824,
+    "maximum_sort_input_items": 268435456,
+    "maximum_tick_evaluations": 268435456,
+    "maximum_selected_membership_insertions": 16777216,
+    "maximum_peak_ranking_buffer_terms": 1048576,
+    "maximum_total_selection_work_units": 2147483648,
+    "total_selection_work_units_formula": "ranking_scan_term_visits_plus_sort_input_items_plus_tick_evaluations_plus_selected_membership_insertions",
+    "ranking_scan_term_visits_increment": "one_for_each_snapshot_row_examined_by_either_lazy_scan",
+    "sort_input_items_increment": "buffer_length_charged_once_immediately_before_each_sort",
+    "tick_evaluations_increment": "one_immediately_before_each_exact_point_abs_tick_evaluation_used_by_selection",
+    "selected_membership_insertions_increment": "one_immediately_before_each_selected_mask_and_coefficient_bits_insertion",
+    "peak_ranking_buffer_terms_definition": "maximum_of_the_lightweight_full_snapshot_row_count_and_each_materialized_tier_rank_buffer_length_before_sort",
+    "live_selected_membership_peak_is_bounded_by_the_step2_postmerge_term_cap_and_cleared_after_each_boundary": true,
+    "maximum_step2_anticommuting_events": 33554432,
+    "maximum_step2_product_defect_events": 67108864,
+    "maximum_step2_merge_defect_events": 8388608,
+    "maximum_step2_drop_defect_events": 16777216,
+    "maximum_step2_accuracy_charged_events": 134217728,
+    "maximum_step2_total_P2_charged_term_visits": 2147483648,
+    "maximum_step2_total_P2_plus_accuracy_charged_events": 2147483648,
+    "caps_are_checked_before_the_corresponding_scan_allocation_sort_comparison_accuracy_or_state_mutation": true,
+    "no_operation_occurs_after_the_first_deterministic_cap_event": true,
+    "a_rejected_operation_is_not_executed": true,
+    "cap_context_excludes_coefficient_drop_budget_and_scientific_tick_values": true,
+    "a_deterministic_cap_has_resource_guard_authority_only": true
+  },
+  "D0_host_supervisor_caps": {
+    "MemoryMax_bytes": 4294967296,
+    "MemorySwapMax_bytes": 0,
+    "RuntimeMaxSec": "1800s",
+    "outer_safety_timeout_seconds": 1830,
+    "maximum_stdout_bytes": 1048576,
+    "maximum_stderr_bytes": 1048576,
+    "systemd_user_scope_cgroup_v2_required": true,
+        "fresh_writable_scratch_and_depot_prefix_per_process": true,
+        "network_PID_and_private_proc_namespace_isolation": "not_required_for_this_non_authoritative_D0_resource_probe_but_required_again_for_future_S0",
+    "host_timeout_OOM_cgroup_supervisor_environment_or_sandbox_failure_branch": "INDETERMINATE",
+    "host_failure_has_no_mathematical_resource_no_go_or_candidate_selection_authority": true
+  },
+  "formal_cap_derivation_rule": {
+    "requires_control_conformance_and_complete_E768_MAX_LAZY37_D0_without_host_or_deterministic_cap": true,
+    "each_formal_deterministic_metric_cap": "the_smallest_power_of_two_greater_than_or_equal_to_two_times_the_maximum_completed_allowed_aggregate_observation_across_the_control_and_formal_candidate",
+    "one_common_formal_cap_set_applies_to_both_future_fresh_replays": true,
+    "formal_memory_cap_rule": "the_smallest_power_of_two_bytes_greater_than_or_equal_to_two_times_the_maximum_completed_D0_RSS_with_a_fixed_4_GiB_ceiling_requiring_a_new_D0_version_if_exceeded",
+    "formal_runtime_cap_rule": "round_up_two_times_the_maximum_completed_D0_wall_time_to_the_next_60_seconds_with_a_fixed_1800_second_ceiling_requiring_a_new_D0_version_if_exceeded",
+    "formal_stderr_cap_rule": "the_smallest_power_of_two_greater_than_or_equal_to_two_times_the_maximum_completed_D0_stderr_bytes",
+    "formal_scientific_witness_stdout_or_persisted_container_cap_cannot_be_inferred_from_the_suppressed_D0_stdout": true,
+    "formal_scientific_witness_stdout_or_persisted_container_cap_must_be_separately_schema_derived_and_result_unpinned_in_S0": true,
+    "caps_are_resource_guards_not_scientific_evidence": true,
+    "a_D0_cap_or_host_failure_forbids_formal_cap_derivation": true,
+    "changing_a_derived_cap_requires_a_new_result_unpinned_policy_version": true,
+    "candidate_specific_cap_relaxation_is_forbidden": true
+  },
+  "stop_rules": {
+    "control_mismatch_stops_before_the_formal_candidate": true,
+    "control_host_failure_terminates_before_candidate_and_report_as_INDETERMINATE_without_authority": true,
+    "control_deterministic_cap_terminates_before_candidate_and_report_as_D0_RESOURCE_ENVELOPE_NOT_ESTABLISHED_without_authority": true,
+    "formal_candidate_host_failure_returns_INDETERMINATE": true,
+    "formal_candidate_deterministic_cap_is_recorded_as_resource_only_and_forbids_S0": true,
+    "never_expand_caps_change_the_candidate_change_the_lazy_anchor_or_add_a_fallback_in_place": true,
+    "a_new_version_may_change_only_predeclared_resource_caps_without_using_suppressed_scientific_values": true,
+    "D0_never_emits_a_candidate_selection_or_scientific_negative": true,
+    "successful_D0_completion_requires_control_conformance_and_complete_formal_candidate_execution": true
+  },
+  "runtime": {
+    "runtime_lock_id": "MAJORANA-P0-JULIA-1.11.9-LINUX-X86_64-V1",
+    "julia_executable_sha256": "2976d17aba35be5d546e8e315e521bd9be3e58c2e64abfd588f186696e807b7d",
+    "JULIA_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "compiled_modules": false,
+    "network_or_package_resolution_required": false,
+    "Float64_rounding_mode": "RoundNearest"
+  },
+  "expected_P5_K37_control_resource_projection": {
+    "step1": {
+      "completed_composite_count": 512,
+      "completed_constituent_count": 1152,
+      "completed_truncation_boundary_count": 768,
+      "peak_premerge_contribution_count": 44222,
+      "peak_postmerge_unique_term_count": 43848,
+      "anticommuting_split_count": 489740,
+      "threshold_dropped_term_count": 328956,
+      "exact_zero_dropped_term_count": 3714,
+      "P2_resource_counters": {
+        "cap_scan_term_visits": 15113342,
+        "final_evaluation_term_visits": 42704,
+        "propagation_term_visits": 15113342,
+        "total_charged_term_visits": 40259148,
+        "truncation_term_visits": 9989760
+      },
+      "accuracy_event_counters": {
+        "accuracy_charged_event_count": 1426644,
+        "anticommuting_event_count": 489740,
+        "drop_defect_event_count": 328956,
+        "merge_defect_event_count": 118208,
+        "product_defect_event_count": 979480
+      },
+      "total_P2_plus_accuracy_charged_event_count": 41685792,
+      "final_retained_term_count": 42704,
+      "cap_event": null
+    },
+    "step2": {
+      "completed_composite_count": 512,
+      "completed_constituent_count": 1152,
+      "completed_truncation_boundary_count": 768,
+      "peak_premerge_contribution_count": 257558,
+      "peak_postmerge_unique_term_count": 253710,
+      "anticommuting_split_count": 5372752,
+      "threshold_dropped_term_count": 3682224,
+      "exact_zero_dropped_term_count": 23061,
+      "P2_resource_counters": {
+        "cap_scan_term_visits": 138923424,
+        "final_evaluation_term_visits": 241120,
+        "propagation_term_visits": 138923424,
+        "total_charged_term_visits": 372980288,
+        "truncation_term_visits": 94892320
+      },
+      "accuracy_event_counters": {
+        "accuracy_charged_event_count": 15919840,
+        "anticommuting_event_count": 5372752,
+        "drop_defect_event_count": 3682224,
+        "merge_defect_event_count": 1492112,
+        "product_defect_event_count": 10745504
+      },
+      "total_P2_plus_accuracy_charged_event_count": 388900128,
+      "final_retained_term_count": 241120,
+      "cap_event": null
+    },
+    "step_link": {
+      "same_process": true,
+      "checkpoint_or_serialized_state_used": false,
+      "step1_final_term_count": 42704,
+      "step2_input_term_count": 42704
+    },
+    "selection_resources": {
+      "completed_selection_boundary_count": 0,
+      "total_ranking_scan_term_visits": 0,
+      "total_sort_work_items": 0,
+      "total_tick_evaluations": 0,
+      "total_selected_membership_insertions": 0,
+      "peak_ranking_buffer_terms": 0,
+      "total_selection_work_units": 0
+    }
+  },
+  "state_custody_and_runner_visibility": {
+    "every_D0_execution_starts_from_O0_in_a_fresh_process": true,
+    "each_process_executes_fixed_P3_step1_then_its_step2_path": true,
+    "step1_and_step2_share_one_live_process_without_checkpoint_or_serialization": true,
+    "control_and_formal_candidate_share_no_state_cache_checkpoint_ranking_buffer_budget_counter_scratch_or_depot_prefix": true,
+    "P5_final_state_or_candidate_checkpoint_is_forbidden": true,
+    "P3_step1_replay_is_state_reconstruction_not_a_second_parent_error_charge": true,
+    "D0_runner_may_read_only_frozen_source_fixture_runtime_control_and_candidate_identity_inputs": true,
+    "D0_runner_must_not_read_P3_P4_or_P5_result_contract_certificate_witness_or_numeric_scientific_result": true,
+    "D0_runner_must_not_read_any_P6_report_raw_transcript_result_contract_certificate_or_exact_result_test": true,
+    "future_S0_runner_must_not_read_the_D0_policy_or_report_bytes": true,
+    "future_outer_checker_may_read_pinned_P3_E1_only_after_all_raw_processes_finish_and_full_step1_conformance_passes": true,
+    "future_outer_checker_must_not_inherit_P4_or_P5_step2_error_or_final_state": true,
+    "future_P3_E1_charge_multiplicity_per_complete_conformed_candidate": 1
+  },
+  "stage_and_artifact_exclusions": {
+    "D0_probe_stage_may_contain": [
+      "frozen_source_files",
+      "frozen_nonresult_fixtures",
+      "frozen_runtime_environment",
+      "this_policy",
+      "control_and_candidate_identity_inputs"
+    ],
+    "D0_probe_stage_must_exclude": [
+      "P3_result_contract_certificate_witness_or_exact_result_test",
+      "P4_result_contract_certificate_witness_or_exact_result_test",
+      "P5_result_contract_certificate_witness_raw_replay_or_exact_result_test",
+      "any_prior_P6_report_raw_transcript_checkpoint_result_contract_certificate_or_exact_result_test"
+    ],
+    "future_S0_runner_stage_must_exclude": [
+      "this_D0_policy_bytes",
+      "D0_report_bytes",
+      "D0_raw_stdout_or_private_sidecars",
+      "P3_P4_or_P5_result_artifact_bytes",
+      "P6_result_contract_certificate_raw_replay_or_exact_result_test"
+    ],
+    "formal_result_artifacts_must_be_absent_at_future_S0_precommit": [
+      "majorana_certificate_p6_contract.json",
+      "majorana_certificate_p6_certificate.json",
+      "test_majorana_certificate_p6_result.py"
+    ]
+  },
+  "D0_to_S0_lifecycle": [
+    {
+      "stage": "D0_PRECOMMIT",
+      "requirements": "commit_this_policy_candidate_algorithm_hindsight_firewall_caps_observation_contract_stop_rules_and_source_custody_before_any_P6_execution"
+    },
+    {
+      "stage": "D0_CONTROL",
+      "requirements": "run_P5_K37_resource_control_from_O0_in_a_fresh_isolated_process_and_require_resource_counter_conformance_without_scientific_output"
+    },
+    {
+      "stage": "D0_FORMAL_CANDIDATE_PROBE",
+      "requirements": "run_E768_MAX_LAZY37_V1_from_O0_in_a_fresh_isolated_process_and_export_only_allowed_aggregate_resource_fields"
+    },
+    {
+      "stage": "D0_REPORT",
+      "requirements": "materialize_a_canonical_scientific_authority_NONE_report_and_derive_formal_caps_only_after_complete_control_and_candidate_execution"
+    },
+    {
+      "stage": "S0_RESULT_UNPINNED_PRECOMMIT",
+      "requirements": "in_a_direct_child_of_the_committed_D0_report_freeze_checker_runner_fixture_policy_runtime_source_hashes_caps_two_fresh_replays_and_result_artifact_absence"
+    },
+    {
+      "stage": "S0_RAW_REPLAYS",
+      "requirements": "run_two_fresh_isolated_E768_MAX_LAZY37_V1_processes_from_O0_with_same_process_step1_to_step2_and_require_byte_identical_raw_stdout"
+    },
+    {
+      "stage": "S0_INDEPENDENT_RECONSTRUCTION",
+      "requirements": "independently_reconstruct_every_product_merge_full_domain_lazy_ranking_drop_ledger_transition_state_resource_event_and_signed_zero_aware_Fock_contribution"
+    },
+    {
+      "stage": "S0_COMPOSITION",
+      "requirements": "after_complete_P3_fieldwise_conformance_inherit_P3_E1_once_recompute_strict_local_and_cumulative_allocations_and_apply_the_single_candidate_truth_table"
+    },
+    {
+      "stage": "S0_RESULT_MATERIALIZATION",
+      "requirements": "create_branch_exact_contract_certificate_and_exact_result_tests_only_after_replay_and_keep_authority_within_the_fixed_two_step_subcertificate"
+    }
+  ],
+  "future_S0_terminal_truth_requirements": {
+    "positive_candidate_branch": "allowed_only_after_both_fresh_replays_complete_match_reconstruct_and_pass_strict_local_and_cumulative_allocations",
+    "complete_allocation_failure_branch": "bounded_negative_for_E768_MAX_LAZY37_V1_only_not_a_general_adaptive_drop_or_simulation_no_go",
+    "deterministic_cap_branch": "requires_both_fresh_replays_to_reproduce_the_same_first_cap_and_has_resource_guard_authority_only",
+    "host_failure_branch": "INDETERMINATE_with_no_authority",
+    "custody_schema_identity_determinism_lazy_equivalence_signed_zero_or_checker_failure_branch": "INVALID_REPLAY_with_no_authority",
+    "a_missing_failed_capped_or_indeterminate_required_replay_forbids_a_positive_candidate": true
+  },
+  "adversarial_mutations_required": [
+    "inject_a_forbidden_exact_P5_scientific_tick_deficit_slack_digest_or_result_literal_into_the_policy_or_candidate_derivation",
+    "remove_reorder_extend_or_replace_the_frozen_formal_candidate_after_D0",
+    "allow_the_P5_K37_resource_control_to_enter_the_formal_selector",
+    "emit_scientific_ticks_allocation_bits_budget_values_cutoffs_digests_final_state_or_Neel_fields_from_D0",
+    "omit_product_or_merge_rows_from_the_prefix_escrow_or_final_local_ledger",
+    "reset_the_cumulative_drop_ledger_at_a_boundary_stage_or_composite",
+    "refund_drop_cost_after_a_future_merge_cancellation_reappearance_or_state_removal",
+    "aggregate_exact_drop_magnitudes_before_rounding_or_floor_an_individual_drop_row",
+    "replace_the_strict_local_maximum_formula_or_treat_exact_allocation_equality_as_success",
+    "change_a_prefix_index_denominator_or_reset_the_768_boundary_schedule",
+    "rank_by_host_dictionary_order_Float64_abs_or_a_key_without_unsigned_mask_tie_breaking",
+    "skip_the_first_nonfitting_row_and_drop_a_later_row",
+    "rerank_after_each_deletion_or_delete_before_the_selected_prefix_is_frozen",
+    "change_lazy_pool_membership_from_strict_less_than_to_less_than_or_equal_or_change_the_anchor_exponent",
+    "hard_stop_after_the_complete_K37_pool_with_positive_remaining_ticks",
+    "fail_to_materialize_and_rank_an_affordable_nonpool_row_after_the_pool_completely_fits",
+    "include_a_nonpool_row_costlier_than_the_remaining_ticks_or_exclude_one_that_is_affordable",
+    "break_the_cross_threshold_equal-tick-cost_initial-segment_order",
+    "perform_the_second_lazy_scan_on_a_mutated_state_instead_of_the_original_postmerge_snapshot",
+    "make_the_lazy_selected_rows_ledger_or_final_state_differ_from_bruteforce_full_domain_ranking",
+    "normalize_negative_zero_drop_original_coefficient_bits_or_use_a_phase_only_Fock_shortcut",
+    "drop_before_merge_change_the_existing_boundary_cadence_or_add_a_hidden_drop_boundary",
+    "borrow_cumulative_or_future-step_budget_to_increase_the_local_drop_escrow",
+    "inherit_P4_or_P5_step2_error_or_state_omit_P3_E1_or_charge_P3_E1_more_than_once",
+    "resume_step2_from_a_serialized_checkpoint_or_share_cache_ranking_budget_scratch_or_depot_state_across_processes",
+    "execute_a_scan_sort_allocation_accuracy_or_state_mutation_after_its_cap_would_be_exceeded",
+    "classify_a_timeout_OOM_cgroup_or_environment_failure_as_a_deterministic_cap_scientific_negative_or_no_go",
+    "classify_a_deterministic_resource_cap_as_an_allocation_failure_or_candidate winner",
+    "derive_formal_caps_after_a_D0_cap_or_host_failure_or_relax_only_one_replay_cap",
+    "expand_a_cap_change_the_candidate_or_add_a_fallback_in_place_after_D0",
+    "stage_a_parent_result_D0_report_raw_checkpoint_or_future_result_artifact_for_the_runner",
+    "permit_nonidentical_future_fresh_replays_or_select_after_a_missing_capped_host-failed_or_invalid_replay",
+    "expand_any_future_result_to_the_remaining_98_steps_exact_Hubbard_error_double_occupancy_physical_reference_or_READY"
+  ],
+  "authority_exclusions": [
+    "D0_does_not_bound_any_product_merge_drop_or_total_operator_error",
+    "D0_does_not_compare_any_candidate_to_a_local_or_cumulative_allocation",
+    "D0_does_not_select_rank_remove_or_certify_a_candidate",
+    "D0_does_not_establish_hard_K37_pool_only_scientific_eligibility",
+    "D0_does_not_establish_global_optimality_of_the_causal_maximal_prefix_algorithm",
+    "D0_does_not_expand_P3_P4_or_P5_authority",
+    "D0_does_not_assess_the_remaining_98_mapped_steps",
+    "D0_does_not_assess_product_formula_to_exact_Hubbard_error",
+    "D0_does_not_assess_double_occupancy_physical_reference_qualification_or_READY"
+  ],
+  "source_files": [
+    {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "size_bytes": 235,
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "size_bytes": 15336,
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406"
+    },
+    {
+      "relative_path": "majorana_certificate_p2/majorana_p2_runner.jl",
+      "size_bytes": 33888,
+      "sha256": "03edd9640bc3d83a61ea0c9c7d9e93af3fc683972c517af4a7691e21359e25ed"
+    },
+    {
+      "relative_path": "majorana_certificate_p3/majorana_p3_runner.jl",
+      "size_bytes": 59318,
+      "sha256": "958de8886bb8e56cda26eb6c45029c7016e886caae26c598c7e6b5c595257fe2"
+    },
+    {
+      "relative_path": "majorana_certificate_p4/majorana_p4_runner.jl",
+      "size_bytes": 24880,
+      "sha256": "f425dbab80d60c49fceefc2b3e805fd3a4b29037f0e95491c50891ed7b7b9f47"
+    },
+    {
+      "relative_path": "majorana_certificate_p5/majorana_p5_runner.jl",
+      "size_bytes": 46561,
+      "sha256": "3f91ae3a6886c930cd482a13809cad5e772b8c5db0188bfa6dcbf3a7067721ea"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_fixture.json",
+      "size_bytes": 5891,
+      "sha256": "252fa0c4ed26db5581bcd9ff0101d18d858faf6d31fb9b6cdcaa821bf318e82a"
+    },
+    {
+      "relative_path": "majorana_certificate_p3_fixture.json",
+      "size_bytes": 6033,
+      "sha256": "a478b783ae4005f7ef79572a4b34eee72299da262e439bdc35eca13496bdc236"
+    },
+    {
+      "relative_path": "majorana_certificate_p4_fixture.json",
+      "size_bytes": 17259,
+      "sha256": "b020b6bcc0ed56010af9ed3b1836469c084b9244a9303a8101cf7657adb79964"
+    },
+    {
+      "relative_path": "majorana_certificate_p5_fixture.json",
+      "size_bytes": 4763,
+      "sha256": "fd8b46c8761f548d615042b24f8ec85b32891e4f42dbafdd9bd70d58379a8afb"
+    },
+    {
+      "relative_path": "majorana_certificate_p6_design_probe_fixture.json",
+      "size_bytes": 8269,
+      "sha256": "2e5254b7a98cf4b0ba08c5674215d78a59a78ddf0b0e27460b7cf82ac7be3b6e"
+    },
+    {
+      "relative_path": "majorana_certificate_p6_design_probe/majorana_p6_adaptive_drop_resource_probe.jl",
+      "size_bytes": 37965,
+      "sha256": "75f6b1bb48917c987816760aca08504e2d56cdc0bfdd45c6938ddeb3a9ce13ef"
+    },
+    {
+      "relative_path": "majorana_certificate_p6_design_probe.py",
+      "size_bytes": 71611,
+      "sha256": "071ba9f687db0d97e842e34df5fba3a0f62f203adf904baee71da31ece94929e"
+    }
+  ]
+}

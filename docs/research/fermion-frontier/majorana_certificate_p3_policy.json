@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P3-S0",
+  "policy_fingerprint": "majorana_certificate_p3_s0_result_unpinned_local_defect_policy_v1",
+  "policy_role": "fixed_result_unpinned_L8_first_fused_mapped_step_exact_prefix_local_defect_operator_and_Neel_expectation_enclosure_policy",
+  "maximum_positive_authority": {
+    "status": "VERIFIED_MAJORANA_P3_L8_STAGGERED_MAGNETIZATION_ONE_FUSED_STEP_LOCAL_DEFECT_AND_TRUNCATION_OPERATOR_AND_NEEL_EXPECTATION_BOUND_SUBCERTIFICATE",
+    "claim": "for_the_fixed_first_fused_mapped_step_the_exact_untruncated_prefix_operator_and_checkerboard_Neel_expectation_are_enclosed_around_the_freshly_executed_Float64_thresholded_output_by_an_outward_local_numerical_defect_plus_executed_drop_bound_strictly_below_1_over_400000",
+    "authority_is_fixture_and_policy_specific": true,
+    "authority_is_one_exact_fused_product_formula_prefix_only": true,
+    "does_not_certify_product_formula_to_exact_Hubbard_error": true,
+    "does_not_certify_the_remaining_99_mapped_steps_or_full_R100": true,
+    "does_not_create_physical_reference_or_READY_authority": true
+  },
+  "precommit_boundary": {
+    "policy_contains_observed_P3_replay_results": false,
+    "policy_contains_P3_witness_or_result_hashes": false,
+    "policy_promises_a_terminal_branch": false,
+    "formal_replay_must_start_only_after_all_inputs_and_the_precommit_contract_are_committed": true,
+    "fresh_replay_processes_must_start_after_the_precommit_git_commit": true,
+    "result_contract_certificate_and_exact_result_test_must_be_absent_from_the_precommit_commit": true,
+    "P2_parent_results_may_be_used_only_as_prior_custody_and_post_replay_conformance_evidence": true,
+    "any_workload_order_angle_cadence_threshold_arithmetic_allocation_cap_runtime_source_or_isolation_change_requires_a_new_policy_version": true
+  },
+  "forbidden_formal_result_pins": [
+    "observed_P3_terminal_branch",
+    "observed_P3_status",
+    "observed_product_merge_or_drop_ticks",
+    "observed_total_error_bound",
+    "observed_retained_expectation_center",
+    "observed_declared_expectation_interval",
+    "observed_event_counts",
+    "observed_final_term_count_or_digest",
+    "observed_ledger_digest",
+    "observed_witness_bytes_or_sha256",
+    "observed_replay_stdout_sha256",
+    "observed_runtime_seconds_or_peak_RSS",
+    "P3_result_contract_sha256",
+    "P3_certificate_sha256",
+    "P3_exact_result_test_sha256"
+  ],
+  "proof_obligations": {
+    "fresh_execution": "rerun_all_1152_constituents_and_768_threshold_boundaries_without_reading_the_P2_result_contract_in_the_Julia_runner",
+    "ideal_angles": "use_the_exact_reduced_rational_schedule_angles_for_true_trig_enclosures",
+    "actual_points": "bind_angle_cast_libm_product_sign_merge_and_drop_to_exact_finite_Float64_bits",
+    "Majorana_action": "independently_rederive_every_anticommuting_target_mask_and_phase_sign",
+    "contribution_closure": "include_both_cosine_and_sine_contributions_for_every_anticommuting_source",
+    "merge_closure": "include_every_actual_collision_in_the_executed_merge_order_and_assert_at_most_one_aux_contribution_per_mask",
+    "drop_closure": "include_every_actual_strict_threshold_drop_after_merge_at_the_P2_cadence",
+    "telescoping": "sum_outward_local_coefficient_L1_defects_under_exact_unitary_operator_norm_invariance_without_future_L1_amplification",
+    "observable": "compute_the_retained_Neel_center_as_an_exact_dyadic_dot_product_with_an_independent_Fock_oracle",
+    "allocation": "compare_total_integer_ticks_to_1_over_400000_by_exact_cross_multiplication"
+  },
+  "outward_rules": {
+    "trig_enclosure": "order_7_exact_rational_Taylor_plus_symmetric_next_term_remainder_then_2_pow_minus_128_outward_quantization",
+    "per_row_upper": "ceil_exact_rational_defect_times_2_pow_128_using_integer_division",
+    "accumulation": "BigInt_nonnegative_ticks_only",
+    "Float64_checker_arithmetic": "independent_integer_IEEE754_binary64_round_to_nearest_ties_to_even_without_Python_math_or_libm",
+    "outward_widening_is_already_inside_each_row_upper_and_is_not_added_again": true,
+    "P2_Float64_drop_sum_and_expectation_are_diagnostic_only": true
+  },
+  "resource_enforcement": {
+    "inherit_all_P2_term_and_visit_caps_for_the_fresh_execution": true,
+    "accuracy_event_caps_are_checked_before_each_corresponding_defect_operation": true,
+    "BigInt_bit_length_is_checked_after_each_tick_computation_and_cumulative_update": true,
+    "total_charged_events_include_the_P2_resource_ledger_and_all_P3_defect_rows": true,
+    "host_MemoryMax_and_RuntimeMaxSec_are_kernel_enforced_by_a_systemd_user_scope_cgroup_v2_outside_bubblewrap": true,
+    "host_stdout_and_stderr_caps_are_enforced_by_the_outer_replay_harness": true,
+    "host_cap_failure_is_indeterminate_not_a_deterministic_policy_or_allocation_result": true
+  },
+  "replay_environment_custody": {
+    "classification": "host_replay_environment_not_precommit_Git_source_and_not_runner_staged_source",
+    "host_ABI_and_locale_are_excluded_from_the_27_file_precommit_source_closure": true,
+    "host_ABI_and_locale_are_excluded_from_the_6_file_runner_staging_allowlist": true,
+    "exact_sandbox_regular_file_targets": [
+      {
+        "role": "ELF_DYNAMIC_LOADER",
+        "sandbox_path": "/lib64/ld-linux-x86-64.so.2"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_ADDRESS"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_COLLATE"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_CTYPE"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_IDENTIFICATION"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_MEASUREMENT"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_MONETARY"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_NAME"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_NUMERIC"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_PAPER"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_TELEPHONE"
+      },
+      {
+        "role": "C_UTF_8_LOCALE",
+        "sandbox_path": "/usr/lib/locale/C.utf8/LC_TIME"
+      },
+      {
+        "role": "GLIBC_ABI",
+        "sandbox_path": "/usr/lib/x86_64-linux-gnu/libc.so.6"
+      },
+      {
+        "role": "GLIBC_ABI",
+        "sandbox_path": "/usr/lib/x86_64-linux-gnu/libdl.so.2"
+      },
+      {
+        "role": "GLIBC_ABI",
+        "sandbox_path": "/usr/lib/x86_64-linux-gnu/libm.so.6"
+      },
+      {
+        "role": "GLIBC_ABI",
+        "sandbox_path": "/usr/lib/x86_64-linux-gnu/libpthread.so.0"
+      },
+      {
+        "role": "GLIBC_ABI",
+        "sandbox_path": "/usr/lib/x86_64-linux-gnu/librt.so.1"
+      }
+    ],
+    "exact_sandbox_regular_file_target_count": 18,
+    "all_environment_custody_targets_are_read_only": true,
+    "only_writable_host_backed_bind_mount_target": "/scratch",
+    "private_kernel_virtual_mount_targets": [
+      "/dev",
+      "/proc"
+    ],
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "pre_and_post_replay_manifests_must_match_exactly": true,
+    "package_manifest_row_exact_keys": [
+      "role",
+      "sandbox_path",
+      "mode",
+      "size_bytes",
+      "sha256"
+    ],
+    "package_manifest_rows_are_sorted_by": "sandbox_path",
+    "package_excludes_host_source_absolute_path_mtime_and_inode": true,
+    "canonical_witness_excludes_replay_environment_custody": true,
+    "generation_missing_nonregular_or_changed_custody_branch": "INDETERMINATE",
+    "recorded_package_structure_or_digest_mismatch_branch": "INVALID_REPLAY"
+  },
+  "result_determinism": {
+    "fresh_process_count": 2,
+    "fresh_writable_scratch_and_depot_prefix_per_process": true,
+    "network_namespace_unshared": true,
+    "PID_namespace_unshared": true,
+    "canonical_stdout_must_be_byte_identical": true,
+    "runner_emits_only_trig_transition_boundary_stage_and_final_aggregates_not_million_row_payloads": true,
+    "independent_Python_oracle_reconstructs_every_contribution_collision_drop_and_final_Fock_element": true,
+    "post_replay_P2_comparison_must_match_schedule_transition_boundary_stage_and_final_term_digests": true,
+    "host_RSS_runtime_paths_timestamps_and_process_ids_are_excluded_from_the_canonical_witness": true
+  },
+  "required_adversarial_mutations": [
+    "USE_FLOAT_ANGLE_AS_THE_IDEAL_ANGLE",
+    "REMOVE_OR_INWARD_ROUND_THE_TAYLOR_REMAINDER",
+    "ROUND_ONE_DEFECT_ROW_DOWN_BY_ONE_TICK",
+    "OMIT_A_COSINE_OR_SINE_CONTRIBUTION",
+    "FLIP_A_MAJORANA_BRANCH_SIGN_OR_TARGET_MASK",
+    "OMIT_A_MERGE_COLLISION_OR_TREAT_FLOAT_ADDITION_AS_EXACT",
+    "CHANGE_STRICT_THRESHOLD_TO_LESS_OR_EQUAL_OR_TRUNCATE_BEFORE_MERGE",
+    "REUSE_THE_P2_FLOAT_DIAGNOSTIC_DROP_SUM_OR_EXPECTATION_AS_AUTHORITY",
+    "USE_COEFFICIENT_L2_INSTEAD_OF_L1_FOR_AN_OPERATOR_BOUND",
+    "APPLY_FUTURE_ABS_COS_PLUS_ABS_SIN_AMPLIFICATION_OR_DELETE_A_TELESCOPING_TERM",
+    "CHANGE_THE_NEEL_OCCUPATION_OR_FOCK_PHASE_RULE",
+    "READ_THE_P2_RESULT_AS_A_JULIA_EXECUTION_INPUT",
+    "TREAT_TIMEOUT_OOM_OR_SANDBOX_FAILURE_AS_AN_ALLOCATION_RESULT",
+    "MOUNT_HOST_ROOT_OR_A_BROAD_HOST_DIRECTORY_IN_THE_RUNNER_SANDBOX",
+    "OMIT_CHANGE_OR_MAKE_WRITABLE_A_HOST_ABI_OR_C_UTF_8_CUSTODY_TARGET",
+    "PUT_HOST_SOURCE_PATH_MTIME_INODE_OR_ENVIRONMENT_CUSTODY_IN_THE_CANONICAL_WITNESS",
+    "FORGE_THE_RECORDED_REPLAY_ENVIRONMENT_PACKAGE_MANIFEST_OR_DIGEST",
+    "TREAT_MISSING_OR_CHANGED_GENERATION_ENVIRONMENT_CUSTODY_AS_A_MATHEMATICAL_RESULT",
+    "ALLOW_A_P3_RESULT_ARTIFACT_IN_THE_PRECOMMIT_TREE",
+    "EXPAND_AUTHORITY_TO_RAW_THRESHOLD_R100_EXACT_HUBBARD_REFERENCE_OR_READY"
+  ],
+  "legal_terminal_branches": [
+    {
+      "branch": "BOUND_WITHIN_PREFIX_ALLOCATION",
+      "maximum_status": "VERIFIED_MAJORANA_P3_L8_STAGGERED_MAGNETIZATION_ONE_FUSED_STEP_LOCAL_DEFECT_AND_TRUNCATION_OPERATOR_AND_NEEL_EXPECTATION_BOUND_SUBCERTIFICATE",
+      "authority": "fixed_exact_fused_one_prefix_operator_and_checkerboard_Neel_expectation_error_enclosure_only"
+    },
+    {
+      "branch": "BOUND_EXCEEDS_PREFIX_ALLOCATION",
+      "maximum_status": "VERIFIED_MAJORANA_P3_L8_ONE_FUSED_STEP_ERROR_BOUND_EXCEEDS_ALLOCATION_SUBCERTIFICATE",
+      "authority": "fixed_prefix_outward_error_bound_and_allocation_failure_only_not_a_general_method_no_go"
+    },
+    {
+      "branch": "DETERMINISTIC_POLICY_CAP_EXCEEDED",
+      "maximum_status": "VERIFIED_MAJORANA_P3_L8_ONE_FUSED_STEP_ACCURACY_POLICY_CAP_EXCEEDED_SUBCERTIFICATE",
+      "authority": "fixed_accuracy_ledger_resource_cap_result_only"
+    },
+    {
+      "branch": "FAILED_CONFORMANCE",
+      "maximum_status": "FAILED_MAJORANA_P3_FIXED_PREFIX_ACCURACY_CONFORMANCE",
+      "authority": "fixed_environment_or_cross_language_accuracy_ledger_mismatch_only"
+    },
+    {
+      "branch": "INDETERMINATE",
+      "maximum_status": "INDETERMINATE_MAJORANA_P3_REPLAY",
+      "authority": "none_for_timeout_OOM_RSS_host_environment_or_sandbox_failure"
+    },
+    {
+      "branch": "INVALID_REPLAY",
+      "maximum_status": "INVALID_MAJORANA_P3_REPLAY",
+      "authority": "none_for_custody_hash_isolation_or_contract_failure"
+    }
+  ],
+  "source_and_parent_custody": {
+    "required_direct_parent_commit": "c90014ed8569924350d5d3fce4959d31021e0461",
+    "required_parent_status": "VERIFIED_MAJORANA_P2_L8_STAGGERED_MAGNETIZATION_ONE_STEP_BOUNDED_PREFIX_RESOURCE_FEASIBILITY_SUBCERTIFICATE",
+    "P2_is_used_for_workload_runtime_source_resource_and_post_replay_execution_conformance": true,
+    "P2_does_not_supply_P3_accuracy_results": true,
+    "MajoranaPropagation_version": "0.3.0",
+    "MajoranaPropagation_git_tree_sha1": "d62823f20677593ff5e256e5f8bc316dd7aecd7a",
+    "PauliPropagation_version": "0.7.3",
+    "PauliPropagation_git_tree_sha1": "757b43af3c247d9fad953dd056d3df76fe6e6a08"
+  },
+  "scope_boundary": {
+    "fixed_L8_first_fused_mapped_step_exact_prefix_only": true,
+    "fresh_executed_Float64_threshold_path": "ASSESSED_BY_LOCAL_DEFECT_AND_DROP_BOUND",
+    "operator_norm_error_enclosure": "ASSESSED",
+    "checkerboard_Neel_expectation_enclosure": "ASSESSED",
+    "executed_drop_contribution_alone_is_the_total_exact_prefix_error": false,
+    "global_coefficientwise_interval_state": "NOT_CLAIMED",
+    "exact_arithmetic_threshold_drop_set": "NOT_CLAIMED_EQUAL",
+    "raw_1280_constituent_threshold_path": "NOT_EXECUTED",
+    "double_occupancy": "NOT_ASSESSED",
+    "existing_Python_topL1_route_result_equality": "NOT_CLAIMED",
+    "remaining_99_mapped_steps_or_full_R100": "NOT_ASSESSED",
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  }
+}

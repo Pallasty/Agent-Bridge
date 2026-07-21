@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G4-SPLIT-GOVERNANCE-CLOSURE-V1",
+  "contract_role": "result_informed_nonimplementing_split_governance_after_P11_D",
+  "self_relative_path": "majorana_certificate_p11_g4_split_governance_contract.json",
+  "required_direct_parent_commit": "00d74c729bbc9322e215d6beab603f28e79d9923",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "implementation_authority": false,
+    "prototype_or_compilation_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "source_archive_acquisition_authority": false,
+    "kernel_accounting_bound_design_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "P11_D_custody": {
+    "result_commit_sha": "00d74c729bbc9322e215d6beab603f28e79d9923",
+    "contract_relative_path": "majorana_certificate_p11d_source_runtime_evidence_feasibility_contract.json",
+    "contract_raw_sha256": "ca9a5603b2e234cab393dba2d0a1afec812161d37b7868c8ce18f973f27ff673",
+    "contract_canonical_sha256": "77e17775596b01b25099783d4e5690eeaf7e8e145e425011ce77b09832c171c9",
+    "report_relative_path": "majorana_certificate_p11d_source_runtime_evidence_feasibility_report.json",
+    "report_raw_sha256": "17cb3c507c095886c1726510dddedec913c3dd6a5b0a8a53c59d5a602e9b9011",
+    "expected_outcome": "SOURCE_CUSTODY_ROUTE_IDENTIFIED_STATIC_KERNEL_ACCOUNTING_NOT_ESTABLISHED",
+    "expected_source_custody_route_status": "FEASIBLE_AUTHENTICATED_EXACT_VERSION_ROUTE_IDENTIFIED_NOT_ACQUIRED",
+    "expected_static_kernel_accounting_status": "NOT_ESTABLISHED_FROM_CURRENT_FROZEN_INPUTS",
+    "expected_source_archive_custody_established": false,
+    "expected_static_kernel_cgroup_accounting_bound_established": false,
+    "expected_implementation_gate": "CLOSED",
+    "expected_execution_gate": "CLOSED"
+  },
+  "decision": {
+    "disposition": "OPEN_NONIMPLEMENTING_P11_E0_SOURCE_ARCHIVE_ACQUISITION_CONTRACT_PACK_ONLY_DEFER_P11_E2_KERNEL_BOUND_DESIGN",
+    "source_archive_byte_custody_is_a_prerequisite_for_version_bound_kernel_accounting_design": true,
+    "P11_D_route_identification_is_not_source_archive_custody": true,
+    "P11_D_dynamic_interfaces_are_not_a_static_peak_bound": true,
+    "fixed_process_cap_bytes": 2147483648,
+    "contract_target_component_sum_bytes": 1028653056,
+    "difference_to_fixed_cap_bytes": 1118830592,
+    "difference_is_proven_headroom": false,
+    "exact_static_process_peak_bytes": null,
+    "strict_integer_peak_less_than_fixed_cap": null,
+    "semantic_equivalence_established": false,
+    "implementation_gate": "CLOSED",
+    "execution_gate": "CLOSED",
+    "resource_no_go_inference": false
+  },
+  "route_A_source_archive_custody": {
+    "status": "OPEN_CONTRACT_PACK_ONLY_ACQUISITION_NOT_AUTHORIZED",
+    "only_allowed_next_gate": "P11-E0-SOURCE-ARCHIVE-ACQUISITION-CONTRACT-PACK-V1",
+    "role": "nonexecuting_contract_pack_for_exact_authenticated_source_archive_acquisition_and_byte_custody",
+    "required_exact_source_identities": [
+      {"source_package": "gcc-15", "source_version": "15.2.0-16ubuntu1", "binding_role": "selected_compiler_source"},
+      {"source_package": "binutils", "source_version": "2.46-3ubuntu2", "binding_role": "selected_linker_and_binary_utilities_source"},
+      {"source_package": "linux", "source_version": "7.0.0-28.28", "binding_role": "selected_unsigned_kernel_source"},
+      {"source_package": "linux-signed", "source_version": "7.0.0-28.28", "binding_role": "installed_signed_kernel_packaging_source"}
+    ],
+    "required_contract_pack_sections": [
+      "exact_deb_src_suite_component_and_apt_secure_requirements",
+      "isolated_empty_custody_root_and_no_repository_archive_ingestion",
+      "signed_InRelease_and_Sources_index_byte_receipts",
+      "exact_version_download_only_command_argv_without_execution",
+      "dsc_authentication_and_mandatory_SHA256_verification_rules",
+      "complete_dsc_referenced_part_manifest_and_raw_SHA256_receipts",
+      "binary_to_source_identity_binding_back_to_P11_B_and_P11_D",
+      "fail_closed_partial_download_cleanup_and_retry_semantics",
+      "no_unpack_build_compile_link_or_candidate_execution_boundary",
+      "post_acquisition_independent_governance_requirement"
+    ],
+    "contract_pack_may_define_commands_but_must_not_run_them": true,
+    "package_source_configuration_mutation_allowed": false,
+    "package_index_refresh_allowed": false,
+    "binary_or_source_archive_download_allowed": false,
+    "archive_unpack_or_patch_application_allowed": false,
+    "source_tree_materialization_allowed": false,
+    "candidate_source_allowed": false,
+    "compilation_linking_disassembly_or_execution_allowed": false,
+    "allowed_outcomes": [
+      "SOURCE_ARCHIVE_ACQUISITION_CONTRACT_PACK_ESTABLISHED_AWAITING_INDEPENDENT_AUTHORIZATION",
+      "CLOSED_SOURCE_ARCHIVE_ACQUISITION_CONTRACT_PACK_INCOMPLETE_OR_AMBIGUOUS"
+    ],
+    "all_outcomes_keep_acquisition_implementation_and_execution_closed": true
+  },
+  "route_B_static_kernel_accounting_bound": {
+    "status": "DEFERRED_PENDING_VERIFIED_EXACT_SOURCE_ARCHIVE_CUSTODY_AND_NEW_GOVERNANCE",
+    "future_gate": "P11-E2-KERNEL-ACCOUNTING-BOUND-FEASIBILITY-DESIGN-V1",
+    "prerequisites": [
+      "verified_P11_E1_exact_source_archive_custody_receipt",
+      "byte_pinned_linux_and_linux_signed_source_archives",
+      "byte_pinned_host_kernel_config_and_build_identity",
+      "explicit_component_scope_for_pagetables_kernel_stack_slab_percpu_vmalloc_file_cache_and_transport",
+      "explicit_cgroup_ownership_ancestor_descendant_and_concurrency_model",
+      "new_independent_governance_authorizing_nonexecuting_source_bound_design"
+    ],
+    "official_documentation_alone_is_not_version_bound_source_semantics": true,
+    "dynamic_memory_current_peak_or_stat_observation_is_not_a_static_all_execution_bound": true,
+    "kernel_source_reading_or_bound_derivation_allowed": false,
+    "dynamic_kernel_or_candidate_measurement_allowed": false,
+    "static_kernel_cgroup_accounting_bound_established": false,
+    "exact_static_process_peak_bytes": null
+  },
+  "ordered_successor_sequence": [
+    "P11-E0_SOURCE_ARCHIVE_ACQUISITION_CONTRACT_PACK",
+    "NEW_INDEPENDENT_GOVERNANCE_FOR_P11_E1_SOURCE_ARCHIVE_ACQUISITION",
+    "P11-E1_EXACT_SOURCE_ARCHIVE_ACQUISITION_AND_BYTE_CUSTODY",
+    "NEW_INDEPENDENT_GOVERNANCE_FOR_P11_E2_KERNEL_ACCOUNTING_BOUND_DESIGN",
+    "P11-E2_NONEXECUTING_VERSION_BOUND_KERNEL_ACCOUNTING_DESIGN"
+  ],
+  "sequence_is_dependency_order_not_authority_to_skip_any_gate": true,
+  "forbidden_actions": [
+    "edit_apt_source_configuration_or_run_package_index_update",
+    "download_unpack_patch_or_materialize_a_binary_or_source_archive",
+    "write_candidate_C_assembly_object_or_runnable_linker_script_source",
+    "compile_link_disassemble_or_execute_a_candidate_or_prototype",
+    "read_kernel_source_or_derive_a_version_bound_kernel_accounting_claim_before_verified_custody_and_new_governance",
+    "run_Julia_or_any_P9_candidate_or_measure_candidate_or_kernel_memory",
+    "treat_P11_D_route_identification_as_source_archive_byte_custody",
+    "treat_cgroup_runtime_observation_as_a_static_all_execution_peak_bound",
+    "claim_the_contract_target_difference_is_proven_headroom",
+    "relax_the_2147483648_byte_cap_or_change_frozen_scientific_semantics",
+    "claim_semantic_equivalence_resource_no_go_OOM_attribution_S0_or_scientific_result"
+  ],
+  "P11_E0_lifecycle": {
+    "required_direct_parent": "P11_G4_result_commit",
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11e0_source_archive_acquisition_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e0_source_archive_acquisition_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e0_source_archive_acquisition_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11e0_source_archive_acquisition.py"
+    ],
+    "record_must_be_canonical_JSON_and_reconstructed_without_running_acquisition_commands": true,
+    "validator_and_tests_may_only_run_git_and_must_not_mutate_package_or_archive_state": true
+  },
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g4_split_governance_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g4_split_governance_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g4_split_governance_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11_g4_split_governance.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

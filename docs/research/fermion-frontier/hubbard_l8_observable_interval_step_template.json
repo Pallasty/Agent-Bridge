@@ -1,0 +1,629 @@
+{
+  "certificate_type": "l8_one_step_fixed_point_interval_truncation_subcertificate_v1",
+  "contract_fingerprint": "hubbard_l8_observable_interval_step_contract_v1",
+  "propagation_policy": {
+    "backpropagation_order": "reverse_stages_and_reverse_gates_within_each_stage",
+    "central_H4_half_events_fused_before_any_truncation": true,
+    "checkpoint_count": 144,
+    "checkpoint_status": "OUTWARD_FIXED_TICK_MERGE_THEN_DETERMINISTIC_TOP_L1",
+    "drop_bound": "sum_max_abs_interval_endpoint_over_dropped_terms_divided_by_tick_denominator",
+    "forward_stages": [
+      "H1:1/2",
+      "H2:1/2",
+      "HU:1/2",
+      "H3:1/2",
+      "H4:1/1",
+      "H3:1/2",
+      "HU:1/2",
+      "H2:1/2",
+      "H1:1/2"
+    ],
+    "fused_gate_count": 1152,
+    "fused_stage_count": 9,
+    "gates_per_checkpoint": 8,
+    "generator_order_within_stage": "ascending_numeric_x_mask_then_z_mask",
+    "multiplication_rounding_diagnostic": "sum_per_product_max_lower_or_upper_grid_extension_over_tick_denominator_squared_already_contained_not_additive_error",
+    "outward_multiply": "floor_or_ceil_of_four_integer_tick_products_divided_by_tick_denominator",
+    "ranking": "descending_max_abs_interval_endpoint_then_ascending_numeric_x_mask_z_mask",
+    "raw_group_event_count": 10,
+    "raw_nonidentity_gate_count": 1280,
+    "retained_term_cap": 65536,
+    "taylor_order": 5,
+    "taylor_rule": "sin_through_2Nplus1_cos_through_2N_symmetric_next_term_radius_abs_theta_le_1",
+    "tick_denominator": 18446744073709551616
+  },
+  "schema_version": 1,
+  "scope_claims": {
+    "MajoranaPropagation_runtime_or_Manifest_custody": "NOT_ASSESSED",
+    "all_five_group_internal_commutation_verified": true,
+    "checker_execution_from_contract_pinned_source_bytes_verified": true,
+    "final_one_step_mapped_circuit_expectation_intervals_verified": true,
+    "fixed_tick_Taylor_interval_propagation_verified": true,
+    "fixed_two_observable_and_Neel_initializations_verified": true,
+    "full_R100_observable_propagation": "NOT_ASSESSED",
+    "fused_nine_stage_1152_gate_occurrence_identity_verified": true,
+    "independent_CAR_hopping_action_witnesses_verified": true,
+    "independent_L8_OBC_geometry_and_JW_groups_verified": true,
+    "independent_onsite_occupation_energies_verified": true,
+    "interval_box_optimality": "NOT_ASSESSED",
+    "merge_before_deterministic_top_L1_truncation_verified": true,
+    "multiplication_grid_rounding_L1_upper_diagnostic_verified": true,
+    "omitted_identity_global_phase_ledger_verified": true,
+    "per_checkpoint_dropped_L1_ledger_with_nonzero_total_verified": true,
+    "physical_reference_qualified": false,
+    "positive_base_commutator_subcertificate_verified": true,
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "raw_1280_occurrence_truncation_path_identical": false,
+    "raw_to_fused_exact_unitary_equivalence_verified": true,
+    "ready_gate_eligible": false,
+    "separate_rounding_error_budget": "NOT_ASSESSED_CONTAINED_IN_RETAINED_INTERVAL_BOX"
+  },
+  "witness_claim": {
+    "decision": {
+      "continue_to_repeated_step_parent_child_checkpoint_chain": true,
+      "full_R100_or_exact_Hubbard_error_certified": false,
+      "one_step_nonzero_truncation_ledger_closed": true
+    },
+    "fixed_point_trigonometric_intervals": {
+      "maximum_trigonometric_tick_bits": 64,
+      "records": [
+        {
+          "cosine_fraction_interval": {
+            "lower": "116920362029614605074249669999/116943750000000000000000000000",
+            "upper": "116920362029614605074249670001/116943750000000000000000000000"
+          },
+          "cosine_tick_interval": {
+            "lower": "18443054847871463831",
+            "upper": "18443054847871463832"
+          },
+          "sine_fraction_interval": {
+            "lower": "-1520167400777005695107249610001/76013437500000000000000000000000",
+            "upper": "-1520167400777005695107249609999/76013437500000000000000000000000"
+          },
+          "sine_tick_interval": {
+            "lower": "-368910286307334577",
+            "upper": "-368910286307334576"
+          },
+          "theta": "-1/50"
+        },
+        {
+          "cosine_fraction_interval": {
+            "lower": "478977650119583334721187998679999/479001600000000000000000000000000",
+            "upper": "68425378588511904960169714097143/68428800000000000000000000000000"
+          },
+          "cosine_tick_interval": {
+            "lower": "18445821744191983882",
+            "upper": "18445821744191983883"
+          },
+          "sine_fraction_interval": {
+            "lower": "-889559573834131023497387999777143/88957440000000000000000000000000000",
+            "upper": "-6226917016838917164481715998439999/622702080000000000000000000000000000"
+          },
+          "sine_tick_interval": {
+            "lower": "-184464366295122149",
+            "upper": "-184464366295122148"
+          },
+          "theta": "-1/100"
+        },
+        {
+          "cosine_fraction_interval": {
+            "lower": "1961966028769173461422099007994719999/1961990553600000000000000000000000000",
+            "upper": "280280861252739065917442715427817143/280284364800000000000000000000000000"
+          },
+          "cosine_tick_interval": {
+            "lower": "18446513489889013806",
+            "upper": "18446513489889013807"
+          },
+          "sine_fraction_interval": {
+            "lower": "-25505770922444523031326747455993760001/5101175439360000000000000000000000000000",
+            "upper": "-25505770922444523031326747455993759999/5101175439360000000000000000000000000000"
+          },
+          "sine_tick_interval": {
+            "lower": "-92233336061859940",
+            "upper": "-92233336061859939"
+          },
+          "theta": "-1/200"
+        },
+        {
+          "cosine_fraction_interval": {
+            "lower": "116920362029614605074249669999/116943750000000000000000000000",
+            "upper": "116920362029614605074249670001/116943750000000000000000000000"
+          },
+          "cosine_tick_interval": {
+            "lower": "18443054847871463831",
+            "upper": "18443054847871463832"
+          },
+          "sine_fraction_interval": {
+            "lower": "1520167400777005695107249609999/76013437500000000000000000000000",
+            "upper": "1520167400777005695107249610001/76013437500000000000000000000000"
+          },
+          "sine_tick_interval": {
+            "lower": "368910286307334576",
+            "upper": "368910286307334577"
+          },
+          "theta": "1/50"
+        }
+      ],
+      "records_sha256": "30f2f4e05846398bfbcb3584d0caa83a7bed8058e0049cd961246a24e3fc53d5",
+      "unique_theta_count": 4
+    },
+    "initial_Neel_state": {
+      "basis_integer_hex": "0x66669999666699996666999966669999",
+      "particle_count": 64,
+      "spin_down_particle_count": 32,
+      "spin_up_particle_count": 32
+    },
+    "mapping_oracles": {
+      "CAR_action_witness_count": 3584,
+      "CAR_action_witnesses_sha256": "4bd90a474daefb664b9dc1247dea561f921d04ad592484bd6ad931aa55da4750",
+      "CAR_representative_equivalence_classes_per_bond": 16,
+      "all_group_generators_internally_commute": true,
+      "all_groups_match_source_pinned_backend": true,
+      "all_onsite_energies_match_unshifted_U_nup_ndown": true,
+      "all_representative_hopping_CAR_equivalence_classes_match_JW": true,
+      "geometric_bond_count": 112,
+      "group_internal_pair_counts": {
+        "H1": 8128,
+        "H2": 4560,
+        "H3": 4560,
+        "H4": 8128,
+        "HU": 18336
+      },
+      "group_records": [
+        {
+          "expansion_sha256": "0201714666b8a72db1ccb3423e142e778efb981dfa3dfddd5a46078d234a3183",
+          "group": "H1",
+          "internal_pair_commutation_count": 8128,
+          "term_count": 128
+        },
+        {
+          "expansion_sha256": "5cf03045c65b8ee7998332ae3e75af06c265b29da70b3cf76439bfa42f13c7d3",
+          "group": "H2",
+          "internal_pair_commutation_count": 4560,
+          "term_count": 96
+        },
+        {
+          "expansion_sha256": "846b118b5b927ec939efc8b6a837424c28847338ca6005afbf4aaea6090594be",
+          "group": "HU",
+          "internal_pair_commutation_count": 18336,
+          "term_count": 192
+        },
+        {
+          "expansion_sha256": "d123ddff88ed615c2c1df8ec1079a48627c6cf8fd79317f0cb2f8a268329b0b7",
+          "group": "H3",
+          "internal_pair_commutation_count": 4560,
+          "term_count": 96
+        },
+        {
+          "expansion_sha256": "ec39bc442a5e7a63864d31f85a19315be3635830650ab366dab8906b20a7edaa",
+          "group": "H4",
+          "internal_pair_commutation_count": 8128,
+          "term_count": 128
+        }
+      ],
+      "group_spin_resolved_bond_counts": {
+        "H1": 64,
+        "H2": 48,
+        "H3": 48,
+        "H4": 64
+      },
+      "onsite_occupation_witness_count": 256,
+      "onsite_occupation_witnesses_sha256": "dc3300f6dcc78460ab3fc2e483367884a5a291d4b958b3b98e9fb5f60417a3ae",
+      "spin_resolved_bond_count": 224
+    },
+    "observable_claims": [
+      {
+        "checkpoint_count": 144,
+        "checkpoint_ledger_sha256": "614a790f535f92c1a69b8559022519236cbf3215717831a903725f80e282592d",
+        "cumulative_dropped_l1": "2309992903873/9223372036854775808",
+        "cumulative_dropped_l1_ticks": "4619985807746",
+        "declared_untruncated_mapped_step_Neel_expectation_interval": {
+          "lower": "9216920286085779723/9223372036854775808",
+          "lower_ticks": "18433840572171559446",
+          "upper": "9216924906071589489/9223372036854775808",
+          "upper_ticks": "18433849812143178978"
+        },
+        "final_retained_Neel_expectation_interval": {
+          "lower": "2304230649019670899/2305843009213693952",
+          "lower_ticks": "18433845192157367192",
+          "upper": "576057662254917851/576460752303423488",
+          "upper_ticks": "18433845192157371232"
+        },
+        "final_retained_expansion_sha256": "7b19692913f479e74b4a3d9b3165d8e66b7d338cb2f54787106ff8d2a934f428",
+        "final_retained_term_count": 65536,
+        "initial_Neel_expectation_interval": {
+          "lower": "1/1",
+          "lower_ticks": "18446744073709551616",
+          "upper": "1/1",
+          "upper_ticks": "18446744073709551616"
+        },
+        "initial_coefficient_L1": "1/1",
+        "initial_term_count": 128,
+        "initial_tick_expansion_sha256": "587b4cf490877d0c72a7ca7da1e877c7784b8c1335d985dacbb8d04ea56e8eb0",
+        "maximum_checkpoint_dropped_l1_ticks": "205359206310",
+        "nonzero_checkpoint_count": 79,
+        "nonzero_truncation_exercised": true,
+        "observable_id": "staggered_magnetization",
+        "resource_usage": {
+          "maximum_expansion_coefficient_tick_bits": 58,
+          "maximum_product_bits": 121,
+          "multiplication_grid_rounding_L1_upper": "35984051204946559148972741/170141183460469231731687303715884105728",
+          "multiplication_grid_rounding_L1_upper_scaled_ticks_squared": "71968102409893118297945482",
+          "multiplication_grid_rounding_already_contained_not_additive_error": true,
+          "peak_single_expansion_term_count": 115492,
+          "term_gate_visits": 49896346
+        },
+        "stage_records": [
+          {
+            "backprop_stage_index": 0,
+            "cumulative_dropped_l1": "0/1",
+            "dropped_l1": "0/1",
+            "dropped_l1_ticks": "0",
+            "dropped_term_count": 0,
+            "end_retained_term_count": 256,
+            "forward_stage_index": 8,
+            "group": "H1",
+            "multiplication_grid_rounding_L1_upper_cumulative": "88658295283155043825/2658455991569831745807614120560689152",
+            "multiplication_grid_rounding_L1_upper_increment": "88658295283155043825/2658455991569831745807614120560689152",
+            "peak_single_expansion_term_count": 256,
+            "retained_expansion_sha256": "227f6329737960066d8dbcc02f1b48eb8d898c9d60f517cf38ee6e7b40b8310a",
+            "start_term_count": 128
+          },
+          {
+            "backprop_stage_index": 1,
+            "cumulative_dropped_l1": "0/1",
+            "dropped_l1": "0/1",
+            "dropped_l1_ticks": "0",
+            "dropped_term_count": 0,
+            "end_retained_term_count": 608,
+            "forward_stage_index": 7,
+            "group": "H2",
+            "multiplication_grid_rounding_L1_upper_cumulative": "199051944670722434897/2658455991569831745807614120560689152",
+            "multiplication_grid_rounding_L1_upper_increment": "3449801543361480971/83076749736557242056487941267521536",
+            "peak_single_expansion_term_count": 608,
+            "retained_expansion_sha256": "f215c5c56481cab2cf33ef8bec86c457bdf4241010efe0048ee1cc307ffdb800",
+            "start_term_count": 256
+          },
+          {
+            "backprop_stage_index": 2,
+            "cumulative_dropped_l1": "0/1",
+            "dropped_l1": "0/1",
+            "dropped_l1_ticks": "0",
+            "dropped_term_count": 0,
+            "end_retained_term_count": 3968,
+            "forward_stage_index": 6,
+            "group": "HU",
+            "multiplication_grid_rounding_L1_upper_cumulative": "3395349787212223020765/5316911983139663491615228241121378304",
+            "multiplication_grid_rounding_L1_upper_increment": "2997245897870778150971/5316911983139663491615228241121378304",
+            "peak_single_expansion_term_count": 3968,
+            "retained_expansion_sha256": "c2966fa3423480290f5a62efefa824e46dedd7a6d9f7f0b8281ecb5fee04a8b9",
+            "start_term_count": 608
+          },
+          {
+            "backprop_stage_index": 3,
+            "cumulative_dropped_l1": "0/1",
+            "dropped_l1": "0/1",
+            "dropped_l1_ticks": "0",
+            "dropped_term_count": 0,
+            "end_retained_term_count": 37184,
+            "forward_stage_index": 5,
+            "group": "H3",
+            "multiplication_grid_rounding_L1_upper_cumulative": "235508793390918167508729/42535295865117307932921825928971026432",
+            "multiplication_grid_rounding_L1_upper_increment": "208345995093220383342609/42535295865117307932921825928971026432",
+            "peak_single_expansion_term_count": 37184,
+            "retained_expansion_sha256": "f20fd766a1eb89d467381d46900bd37a8f11de24a3b674da296cf591726840f0",
+            "start_term_count": 3968
+          },
+          {
+            "backprop_stage_index": 4,
+            "cumulative_dropped_l1": "1266224245/4611686018427387904",
+            "dropped_l1": "1266224245/4611686018427387904",
+            "dropped_l1_ticks": "5064896980",
+            "dropped_term_count": 345164,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 4,
+            "group": "H4",
+            "multiplication_grid_rounding_L1_upper_cumulative": "3116959591779229308463803/85070591730234615865843651857942052864",
+            "multiplication_grid_rounding_L1_upper_increment": "2645942004997392973446345/85070591730234615865843651857942052864",
+            "peak_single_expansion_term_count": 115492,
+            "retained_expansion_sha256": "ca13367c0a3c18a8a88c5a352d6903fd02c7952bebbc3a0432b154dd7c31a636",
+            "start_term_count": 37184
+          },
+          {
+            "backprop_stage_index": 5,
+            "cumulative_dropped_l1": "5525869721/4611686018427387904",
+            "dropped_l1": "1064911369/1152921504606846976",
+            "dropped_l1_ticks": "17038581904",
+            "dropped_term_count": 207334,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 3,
+            "group": "H3",
+            "multiplication_grid_rounding_L1_upper_cumulative": "1517778359318820195962287/21267647932558653966460912964485513216",
+            "multiplication_grid_rounding_L1_upper_increment": "2954153845496051475385345/85070591730234615865843651857942052864",
+            "peak_single_expansion_term_count": 88244,
+            "retained_expansion_sha256": "7197c34525b3edc6500033b367c54b771a0a07b4a87529c6dfb0559a4a00e79e",
+            "start_term_count": 65536
+          },
+          {
+            "backprop_stage_index": 6,
+            "cumulative_dropped_l1": "103635905621/4611686018427387904",
+            "dropped_l1": "24527508975/1152921504606846976",
+            "dropped_l1_ticks": "392440143600",
+            "dropped_term_count": 520068,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 2,
+            "group": "HU",
+            "multiplication_grid_rounding_L1_upper_cumulative": "21734543993959177524486581/170141183460469231731687303715884105728",
+            "multiplication_grid_rounding_L1_upper_increment": "9592317119408615956788285/170141183460469231731687303715884105728",
+            "peak_single_expansion_term_count": 97814,
+            "retained_expansion_sha256": "51cbaff2b5620481bee88c8aa19d8999f2bf1bf6b085c3ef968d0940a876247a",
+            "start_term_count": 65536
+          },
+          {
+            "backprop_stage_index": 7,
+            "cumulative_dropped_l1": "112045900921/1152921504606846976",
+            "dropped_l1": "344547698063/4611686018427387904",
+            "dropped_l1_ticks": "1378190792252",
+            "dropped_term_count": 375862,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 1,
+            "group": "H2",
+            "multiplication_grid_rounding_L1_upper_cumulative": "28134828867329265770982739/170141183460469231731687303715884105728",
+            "multiplication_grid_rounding_L1_upper_increment": "3200142436685044123248079/85070591730234615865843651857942052864",
+            "peak_single_expansion_term_count": 109800,
+            "retained_expansion_sha256": "353935d523e0969a5dcbf82a336506971ad8073b1a873f43a0a20b2659341b3b",
+            "start_term_count": 65536
+          },
+          {
+            "backprop_stage_index": 8,
+            "cumulative_dropped_l1": "2309992903873/9223372036854775808",
+            "dropped_l1": "1413625696505/9223372036854775808",
+            "dropped_l1_ticks": "2827251393010",
+            "dropped_term_count": 451478,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 0,
+            "group": "H1",
+            "multiplication_grid_rounding_L1_upper_cumulative": "35984051204946559148972741/170141183460469231731687303715884105728",
+            "multiplication_grid_rounding_L1_upper_increment": "3924611168808646688995001/85070591730234615865843651857942052864",
+            "peak_single_expansion_term_count": 101420,
+            "retained_expansion_sha256": "7b19692913f479e74b4a3d9b3165d8e66b7d338cb2f54787106ff8d2a934f428",
+            "start_term_count": 65536
+          }
+        ]
+      },
+      {
+        "checkpoint_count": 144,
+        "checkpoint_ledger_sha256": "9d8e7229c662647799e74a0761459a1eb5a286df5d2f880be7229e1ac1d25af7",
+        "cumulative_dropped_l1": "65378503502431/9223372036854775808",
+        "cumulative_dropped_l1_ticks": "130757007004862",
+        "declared_untruncated_mapped_step_Neel_expectation_interval": {
+          "lower": "6316730869963049/18446744073709551616",
+          "lower_ticks": "6316730869963049",
+          "upper": "3289122441994017/9223372036854775808",
+          "upper_ticks": "6578244883988034"
+        },
+        "final_retained_Neel_expectation_interval": {
+          "lower": "6447487876967911/18446744073709551616",
+          "lower_ticks": "6447487876967911",
+          "upper": "1611871969245793/4611686018427387904",
+          "upper_ticks": "6447487876983172"
+        },
+        "final_retained_expansion_sha256": "2f2d100a168c6dfa36adb862a341410b5fd40452da9e61d22c27d11cdb1ff333",
+        "final_retained_term_count": 65536,
+        "initial_Neel_expectation_interval": {
+          "lower": "0/1",
+          "lower_ticks": "0",
+          "upper": "0/1",
+          "upper_ticks": "0"
+        },
+        "initial_coefficient_L1": "1/1",
+        "initial_term_count": 193,
+        "initial_tick_expansion_sha256": "cdb036613c85cdfe38c37982bf0fba55687bba90292dd90aeffd912a7db64b4e",
+        "maximum_checkpoint_dropped_l1_ticks": "3974627844893",
+        "nonzero_checkpoint_count": 94,
+        "nonzero_truncation_exercised": true,
+        "observable_id": "double_occupancy",
+        "resource_usage": {
+          "maximum_expansion_coefficient_tick_bits": 63,
+          "maximum_product_bits": 120,
+          "multiplication_grid_rounding_L1_upper": "99262938124477471974036453/340282366920938463463374607431768211456",
+          "multiplication_grid_rounding_L1_upper_scaled_ticks_squared": "99262938124477471974036453",
+          "multiplication_grid_rounding_already_contained_not_additive_error": true,
+          "peak_single_expansion_term_count": 199528,
+          "term_gate_visits": 63370607
+        },
+        "stage_records": [
+          {
+            "backprop_stage_index": 0,
+            "cumulative_dropped_l1": "0/1",
+            "dropped_l1": "0/1",
+            "dropped_l1_ticks": "0",
+            "dropped_term_count": 0,
+            "end_retained_term_count": 769,
+            "forward_stage_index": 8,
+            "group": "H1",
+            "multiplication_grid_rounding_L1_upper_cumulative": "561677565410071824305/5316911983139663491615228241121378304",
+            "multiplication_grid_rounding_L1_upper_increment": "561677565410071824305/5316911983139663491615228241121378304",
+            "peak_single_expansion_term_count": 769,
+            "retained_expansion_sha256": "3a2182be110014fab3fdccb460eb9f9ddfbee64b709c69ae3dd56c96a1a5aa26",
+            "start_term_count": 193
+          },
+          {
+            "backprop_stage_index": 1,
+            "cumulative_dropped_l1": "0/1",
+            "dropped_l1": "0/1",
+            "dropped_l1_ticks": "0",
+            "dropped_term_count": 0,
+            "end_retained_term_count": 5617,
+            "forward_stage_index": 7,
+            "group": "H2",
+            "multiplication_grid_rounding_L1_upper_cumulative": "2888113817897645622583/5316911983139663491615228241121378304",
+            "multiplication_grid_rounding_L1_upper_increment": "1163218126243786899139/2658455991569831745807614120560689152",
+            "peak_single_expansion_term_count": 5617,
+            "retained_expansion_sha256": "410ddd7097cca429baf97a2789740f3ca83a31adce4855596bb320ce4fa87db8",
+            "start_term_count": 769
+          },
+          {
+            "backprop_stage_index": 2,
+            "cumulative_dropped_l1": "3309/9223372036854775808",
+            "dropped_l1": "3309/9223372036854775808",
+            "dropped_l1_ticks": "6618",
+            "dropped_term_count": 3593,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 6,
+            "group": "HU",
+            "multiplication_grid_rounding_L1_upper_cumulative": "554656458151980984954919/42535295865117307932921825928971026432",
+            "multiplication_grid_rounding_L1_upper_increment": "531551547608799819974255/42535295865117307932921825928971026432",
+            "peak_single_expansion_term_count": 67572,
+            "retained_expansion_sha256": "495704088d99e8be6ac7249edf5b25a7fdc50ebcb72f0fd728d3ca528da09fde",
+            "start_term_count": 5617
+          },
+          {
+            "backprop_stage_index": 3,
+            "cumulative_dropped_l1": "4050051257/9223372036854775808",
+            "dropped_l1": "1012511987/2305843009213693952",
+            "dropped_l1_ticks": "8100095896",
+            "dropped_term_count": 583247,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 5,
+            "group": "H3",
+            "multiplication_grid_rounding_L1_upper_cumulative": "178192330371452674719779/2658455991569831745807614120560689152",
+            "multiplication_grid_rounding_L1_upper_increment": "2296420827791261810561545/42535295865117307932921825928971026432",
+            "peak_single_expansion_term_count": 199528,
+            "retained_expansion_sha256": "b6f946d5718bf29fa5378891ffbab0721b628a8906ed831266d7981cd7257bf2",
+            "start_term_count": 65536
+          },
+          {
+            "backprop_stage_index": 4,
+            "cumulative_dropped_l1": "340646806079/1152921504606846976",
+            "dropped_l1": "2721124397375/9223372036854775808",
+            "dropped_l1_ticks": "5442248794750",
+            "dropped_term_count": 566261,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 4,
+            "group": "H4",
+            "multiplication_grid_rounding_L1_upper_cumulative": "20383910414860691509976093/170141183460469231731687303715884105728",
+            "multiplication_grid_rounding_L1_upper_increment": "8979601271087720327910237/170141183460469231731687303715884105728",
+            "peak_single_expansion_term_count": 132620,
+            "retained_expansion_sha256": "e3a53279d08ee0ec162a3ffaf9c1337a9970af442b4c94a4699bccbc74d5ef01",
+            "start_term_count": 65536
+          },
+          {
+            "backprop_stage_index": 5,
+            "cumulative_dropped_l1": "12839841201995/18446744073709551616",
+            "dropped_l1": "7389492304731/18446744073709551616",
+            "dropped_l1_ticks": "7389492304731",
+            "dropped_term_count": 309808,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 3,
+            "group": "H3",
+            "multiplication_grid_rounding_L1_upper_cumulative": "53698273166952681760403231/340282366920938463463374607431768211456",
+            "multiplication_grid_rounding_L1_upper_increment": "12930452337231298740451045/340282366920938463463374607431768211456",
+            "peak_single_expansion_term_count": 98916,
+            "retained_expansion_sha256": "97919c947b36befcd30dff5f221c304889b820e563e3afa8c5148423063bc8a2",
+            "start_term_count": 65536
+          },
+          {
+            "backprop_stage_index": 6,
+            "cumulative_dropped_l1": "51068148979973/18446744073709551616",
+            "dropped_l1": "19114153888989/9223372036854775808",
+            "dropped_l1_ticks": "38228307777978",
+            "dropped_term_count": 473745,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 2,
+            "group": "HU",
+            "multiplication_grid_rounding_L1_upper_cumulative": "73478594243461964005683629/340282366920938463463374607431768211456",
+            "multiplication_grid_rounding_L1_upper_increment": "9890160538254641122640199/170141183460469231731687303715884105728",
+            "peak_single_expansion_term_count": 94416,
+            "retained_expansion_sha256": "c39b408daad9b65ac97545a3117e297ba73f6ffd4b0c3e6ea5f585cf806a9358",
+            "start_term_count": 65536
+          },
+          {
+            "backprop_stage_index": 7,
+            "cumulative_dropped_l1": "77577423387187/18446744073709551616",
+            "dropped_l1": "13254637203607/9223372036854775808",
+            "dropped_l1_ticks": "26509274407214",
+            "dropped_term_count": 320734,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 1,
+            "group": "H2",
+            "multiplication_grid_rounding_L1_upper_cumulative": "42361378296206275846746381/170141183460469231731687303715884105728",
+            "multiplication_grid_rounding_L1_upper_increment": "11244162348950587687809133/340282366920938463463374607431768211456",
+            "peak_single_expansion_term_count": 102194,
+            "retained_expansion_sha256": "7e24d3914daa1581745b92e587474e71403a18226d36dc650ff3faadfc292b53",
+            "start_term_count": 65536
+          },
+          {
+            "backprop_stage_index": 8,
+            "cumulative_dropped_l1": "65378503502431/9223372036854775808",
+            "dropped_l1": "53179583617675/18446744073709551616",
+            "dropped_l1_ticks": "53179583617675",
+            "dropped_term_count": 422536,
+            "end_retained_term_count": 65536,
+            "forward_stage_index": 0,
+            "group": "H1",
+            "multiplication_grid_rounding_L1_upper_cumulative": "99262938124477471974036453/340282366920938463463374607431768211456",
+            "multiplication_grid_rounding_L1_upper_increment": "14540181532064920280543691/340282366920938463463374607431768211456",
+            "peak_single_expansion_term_count": 96874,
+            "retained_expansion_sha256": "2f2d100a168c6dfa36adb862a341410b5fd40452da9e61d22c27d11cdb1ff333",
+            "start_term_count": 65536
+          }
+        ]
+      }
+    ],
+    "profile_id": "L8_OBC_U8_T1_R100_NEEL_FUSED_STRANG_ONE_STEP",
+    "sequence_identity": {
+      "backprop_gate_count": 1152,
+      "backprop_gate_records_sha256": "8504eae718b7a670fa71b79c789691e70a59365f0876f8acfdd4ea8dceee2df5",
+      "central_H4_fused_generator_count": 128,
+      "central_H4_fusion_witnesses_sha256": "64c1e3e044ab08ecab6c790495a5f0f36397cb3ea7266e77d00bca735397e374",
+      "central_H4_half_events_fused_before_truncation": true,
+      "central_H4_internal_commutation_pair_count": 8128,
+      "forward_gate_records_sha256": "f0d468cc01978d65ad165d9b8682149bdd196656a98c4bbb5743152cc825faf1",
+      "forward_stage_records_sha256": "021b6b80e4cb1ac3fd5c41585f4b28364dcb3a4067efe1f6493316f45ad449d3",
+      "fused_forward_gate_count": 1152,
+      "fused_stage_count": 9,
+      "omitted_global_phase": {
+        "HU_identity_Hamiltonian_coefficient": "128/1",
+        "cancels_from_Heisenberg_observable_conjugation": true,
+        "identity_rotation_theta_sum_R100": "256/1",
+        "identity_rotation_theta_sum_per_step": "64/25",
+        "phase_exponent_R100": "128/1",
+        "phase_exponent_per_HU_half_stage": "16/25",
+        "phase_exponent_per_step": "32/25"
+      },
+      "raw_and_fused_exact_unitaries_equal_from_internal_commutation": true,
+      "raw_and_fused_truncation_paths_identical": false,
+      "raw_forward_gate_records_sha256": "5591f7990a5f12057edeec7c7fe3027dc14e96656271d48aeba6cfb46dc3b5d0",
+      "raw_forward_stage_records_sha256": "3b74699910c7694462f78fe8880d81f69e1671a3ba9866c26731f604e136035f",
+      "raw_nonidentity_gate_count": 1280,
+      "theta_histogram": {
+        "-1/100": 128,
+        "-1/200": 640,
+        "-1/50": 256,
+        "1/50": 128
+      }
+    },
+    "source_pinned_base": {
+      "checker_sha256": "e3144590c0e00bb2bd69bc50b1bdf3d7d6c3043c8697d5050202404590138fa7",
+      "status": "VERIFIED_STRANG_COMMUTATOR_L1_SUBCERTIFICATE",
+      "verified": true
+    }
+  },
+  "workload_identity": {
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "heisenberg_convention": "backpropagate_G_dagger_O_G_in_reverse_forward_occurrence_order",
+    "initial_state": "checkerboard_Neel_A_up_B_down_Nup32_Ndown32",
+    "linear_size": 8,
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "n_qubits": 128,
+    "n_sites": 64,
+    "profile_id": "L8_OBC_U8_T1_R100_NEEL_FUSED_STRANG_ONE_STEP",
+    "rotation_convention": "G_P(theta)=exp(-i*theta*P/2)",
+    "step_duration": "1/100",
+    "total_time": "1/1",
+    "trotter_steps": 100,
+    "u_over_t": "8/1"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G7-REMEDIAL-ACQUISITION-AUTHORIZATION-REVIEW-V1",
+  "contract_role": "independent_read_only_review_of_P11_E1R_design",
+  "required_direct_parent_commit": "c6ebd524a008e069281d57873bdb52affacca092",
+  "P11_E1R_custody": {
+    "record_relative_path": "majorana_certificate_p11e1r_remedial_acquisition_governance_design_record.json",
+    "record_raw_sha256": "a4238916badeec1b07a058747cbf0160b6a8c54947412da5c5a2817c3a2479ab",
+    "expected_disposition": "REMEDIAL_ACQUISITION_GOVERNANCE_DESIGN_ESTABLISHED_AWAITING_INDEPENDENT_G7_REVIEW",
+    "expected_precondition_count": 5
+  },
+  "readiness_review": [
+    {"check_id":"new_authority_and_external_root_not_inherited_from_G5","status":"PASS"},
+    {"check_id":"final_path_receipt_identity_is_a_mandatory_transactional_rule","status":"PASS"},
+    {"check_id":"host_APT_configuration_warning_requires_fail_closed_preflight","status":"PASS"},
+    {"check_id":"fresh_snapshot_identity_and_authentication_review_is_required","status":"PASS"},
+    {"check_id":"partial_P11_E1_evidence_remains_immutable_and_excluded","status":"PASS"},
+    {"check_id":"source_use_candidate_execution_measurement_and_science_remain_closed","status":"PASS"}
+  ],
+  "decision": {
+    "disposition": "AUTHORIZE_P11_E2R_REMEDIAL_ACQUISITION_OPERATIONAL_CONTRACT_PACK_DESIGN_ONLY",
+    "all_readiness_checks_pass": true,
+    "only_allowed_next_gate": "P11-E2R-REMEDIAL-ACQUISITION-OPERATIONAL-CONTRACT-PACK-V1",
+    "network_or_archive_acquisition_authorized": false,
+    "external_evidence_mutation_authorized": false,
+    "source_unpack_or_reading_authorized": false,
+    "candidate_implementation_or_execution_authorized": false,
+    "kernel_accounting_bound_design_authorized": false,
+    "scientific_authority": "NONE"
+  },
+  "P11_E2R_design_scope": {
+    "may_write_only_repository_contract_validator_tests_and_progress_artifacts": true,
+    "must_specify_a_future_new_external_root_but_must_not_create_it": true,
+    "must_define_preflight_that_fails_on_any_host_etc_APT_warning": true,
+    "must_define_final_path_receipt_atomicity_and_independent_rehash_rules": true,
+    "must_define_fresh_snapshot_identity_authentication_space_and_retry_rules": true,
+    "must_define_nonuse_and_immutability_of_P11_E1_evidence": true,
+    "must_not_run_network_APT_or_archive_commands": true
+  },
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g7_remedial_authorization_review_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g7_remedial_authorization_review_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g7_remedial_authorization_review_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11_g7_remedial_authorization_review.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "runtime_lock_id": "MAJORANA-P0-JULIA-1.11.9-LINUX-X86_64-V1",
+  "runtime_lock_role": "exact_replay_input_lock_not_a_scientific_result",
+  "julia_runtime": {
+    "version": "1.11.9",
+    "build_commit_short": "53a02c0720c",
+    "machine": "x86_64-linux-gnu",
+    "official_archive": {
+      "filename": "julia-1.11.9-linux-x86_64.tar.gz",
+      "source_url": "https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-1.11.9-linux-x86_64.tar.gz",
+      "size_bytes": 286513988,
+      "sha256": "b36363356d7a05eaf8b7b9e7a91c710f6bd3d2940be4d4e6d14b9a9f2927de35"
+    },
+    "executable": {
+      "archive_relative_path": "julia-1.11.9/bin/julia",
+      "size_bytes": 23352,
+      "sha256": "2976d17aba35be5d546e8e315e521bd9be3e58c2e64abfd588f186696e807b7d"
+    },
+    "sysimage": {
+      "archive_relative_path": "julia-1.11.9/lib/julia/sys.so",
+      "size_bytes": 213613960,
+      "sha256": "4e6f6765863713b3088d1a8f3b3eb68913503253ac5aa3a7a13c5b21f64d23bb"
+    }
+  },
+  "project_environment": {
+    "project": {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "size_bytes": 235,
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f",
+      "exact_compat": {
+        "JSON": "=0.21.4",
+        "MajoranaPropagation": "=0.3.0",
+        "julia": "=1.11.9"
+      },
+      "explicit_stdlib_dependencies": [
+        "SHA"
+      ]
+    },
+    "manifest": {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "size_bytes": 15336,
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406",
+      "manifest_format": "2.0",
+      "julia_version": "1.11.9",
+      "project_hash": "b5b5f113b31269a3211c4e7df012d91fbc47d5af"
+    }
+  },
+  "registry_snapshot": {
+    "name": "General",
+    "uuid": "23338594-aafe-5451-b93e-139f81909106",
+    "git_tree_sha1": "04292b43715b5357b8961509ba12824db3b0a202",
+    "registry_pointer": {
+      "filename": "General.toml",
+      "size_bytes": 129,
+      "sha256": "e822feb8abb2110ae2bc794ea58bd87875eb0f316d0a7d70453b1ce0b5edbf83"
+    },
+    "registry_archive": {
+      "filename": "General.tar.gz",
+      "size_bytes": 10961519,
+      "sha256": "121e46a1050707493085e0dbf102642b65982c511a32a118c1d68be308e5afd4"
+    }
+  },
+  "direct_and_semantic_upstream_packages": {
+    "MajoranaPropagation": {
+      "uuid": "c1ba0b60-2606-4ffc-8aea-7c4a0f2726e4",
+      "version": "0.3.0",
+      "manifest_git_tree_sha1": "d62823f20677593ff5e256e5f8bc316dd7aecd7a",
+      "upstream_git_commit": "b7849cb4bac5b604f0d2fe6ff807ed889305e668",
+      "upstream_git_tree_sha1": "d62823f20677593ff5e256e5f8bc316dd7aecd7a",
+      "source_archive": {
+        "size_bytes": 828489,
+        "sha256": "318aa19d06861230d7cef9a819f570741852f672fbea74cc379cabc54e34db90"
+      },
+      "installed_source_closure": {
+        "file_count": 42,
+        "total_bytes": 1875632,
+        "closure_sha256": "744e743d88d7bc62da1ba11cef02909539de626bd4b0a5533b0b65d8aae309b5"
+      }
+    },
+    "PauliPropagation": {
+      "uuid": "293282d5-3c99-4fb6-92d0-fd3280a19750",
+      "version": "0.7.3",
+      "manifest_git_tree_sha1": "757b43af3c247d9fad953dd056d3df76fe6e6a08",
+      "upstream_git_commit": "2a96e9a94dafc2df3466d2611fafa141319469f8",
+      "upstream_git_tree_sha1": "757b43af3c247d9fad953dd056d3df76fe6e6a08",
+      "source_archive": {
+        "size_bytes": 3042408,
+        "sha256": "ac6d67923523d2ef0e2fad2c1984f5d61c3f85c5ffc3160a657979e145a8dbed"
+      },
+      "installed_source_closure": {
+        "file_count": 119,
+        "total_bytes": 7736347,
+        "closure_sha256": "ce1e6cac1b09573962136fce0f315fabbf8556c9075c4aa3545c41c6ee4c3783"
+      }
+    }
+  },
+  "transitive_archive_pins": {
+    "AcceleratedKernels": {
+      "uuid": "6a4ca0a5-0e36-4168-a932-d9be78d558f1",
+      "version": "0.4.3",
+      "manifest_git_tree_sha1": "0de01460ed11e90b42ce666c8ed0265bad59aa6a",
+      "source_archive_size_bytes": 1595510,
+      "source_archive_sha256": "9b92481881ffa336ba59e00d67c15d24fb59bd82aa6513bfefecb5a2c614fb17"
+    }
+  },
+  "source_closure_algorithm": {
+    "root_rule": "dirname(dirname(pathof(module)))",
+    "coverage": "all_recursive_regular_files",
+    "symlink_action": "reject",
+    "row_order": "relative_path_ascending",
+    "row_fields_in_order": [
+      "path",
+      "mode",
+      "size",
+      "sha256"
+    ],
+    "path_separator": "/",
+    "mode_mask": "0o777",
+    "digest_rule": "sha256_of_UTF8_compact_JSON_with_recursive_lexicographic_object_key_sorting"
+  },
+  "replay_process_lock": {
+    "julia_arguments_in_order": [
+      "--startup-file=no",
+      "--history-file=no",
+      "--compiled-modules=no"
+    ],
+    "environment": {
+      "JULIA_DEPOT_PATH": "fresh_writable_scratch_prefix_then_pinned_read_only_source_depot",
+      "JULIA_LOAD_PATH": "@",
+      "JULIA_NUM_THREADS": "1",
+      "JULIA_PKG_OFFLINE": "true",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "network_access_during_formal_replay": "forbidden",
+    "repeat_count": 2,
+    "repeat_requirement": "stdout_bytes_must_be_identical"
+  },
+  "scope_boundary": {
+    "lock_certifies_runtime_custody_only": true,
+    "runtime_lock_is_not_a_conformance_result": true,
+    "runtime_lock_is_not_a_physical_reference": true,
+    "ready_gate_eligible": false
+  }
+}

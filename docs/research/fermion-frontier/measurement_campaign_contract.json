@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "evidence_contract_canonical_sha256": "609cbb8e94e05a868fa0ca3c974966187a37793a6f7e4322813d409e83a658b4",
+  "canonicalization": "json-sort-keys-compact-utf8-v1",
+  "reference_mode": "exact_bounded_planned",
+  "allocation_scope": "all_declared_points",
+  "familywise_error_rate": 0.05,
+  "campaign_attempt_failure_rate": 0.01,
+  "sampling_mode": "shared_shots",
+  "allowed_mitigation_modes": [
+    "none",
+    "bounded_weighted"
+  ],
+  "allocation_by_observable": {
+    "staggered_magnetization": {
+      "target_half_width": 0.002,
+      "point_systematic_abs_budget": 0.00025,
+      "adjacent_delta_abs_budget": 0.0005,
+      "reference_systematic_abs_budget": 0.00025,
+      "reference_delta_abs_budget": 0.0025
+    },
+    "double_occupancy": {
+      "target_half_width": 0.002,
+      "point_systematic_abs_budget": 0.00025,
+      "adjacent_delta_abs_budget": 0.0005,
+      "reference_systematic_abs_budget": 0.00025,
+      "reference_delta_abs_budget": 0.0025
+    }
+  },
+  "attempt_budget_semantics": "expected_only_not_high_confidence"
+}

@@ -1,0 +1,359 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P1-S0",
+  "policy_fingerprint": "majorana_certificate_p1_s0_result_unpinned_policy_v1",
+  "policy_role": "fixed_result_unpinned_L2_L3_Hubbard_sparse_action_and_composite_cadence_conformance_policy",
+  "maximum_positive_authority": {
+    "status": "VERIFIED_MAJORANA_P1_L2_L3_HUBBARD_SPARSE_ACTION_AND_CADENCE_CONFORMANCE_SUBCERTIFICATE",
+    "claim": "fixed_2x2_and_3x3_OBC_Hubbard_operator_sparse_candidate_action_L2_executed_dense_matrix_and_sorted_wrapper_R2_cadence_conformance",
+    "authority_is_fixture_specific": true,
+    "authority_is_a_subcertificate_only": true,
+    "does_not_create_exact_evolution_authority": true,
+    "does_not_create_physical_reference_authority": true,
+    "does_not_create_ready_authority": true
+  },
+  "precommit_boundary": {
+    "policy_contains_observed_replay_results": false,
+    "policy_contains_witness_or_result_hashes": false,
+    "policy_promises_a_terminal_branch": false,
+    "formal_replay_must_start_only_after_fixture_policy_runner_checker_and_precommit_contract_are_committed": true,
+    "fresh_replay_processes_must_start_after_the_precommit_git_commit": true,
+    "result_contract_certificate_and_exact_result_test_must_be_absent_from_the_precommit_commit": true,
+    "any_fixture_operator_matrix_oracle_cadence_runtime_package_source_or_isolation_change_requires_a_new_policy_version": true
+  },
+  "forbidden_formal_result_pins": [
+    "observed_terminal_branch",
+    "observed_status",
+    "observed_pass_or_failure",
+    "observed_witness_bytes",
+    "observed_witness_sha256",
+    "observed_canonical_witness_sha256",
+    "observed_sparse_action_stream_sha256",
+    "observed_dense_matrix_stream_sha256",
+    "observed_operator_or_profile_digest",
+    "observed_cadence_digest",
+    "observed_runtime_seconds_or_peak_RSS",
+    "observed_replay_stdout_sha256",
+    "result_contract_sha256",
+    "certificate_sha256",
+    "exact_result_test_sha256"
+  ],
+  "fixed_fixture_conformance": {
+    "fixture_id": "MAJORANA-P1-L2-L3-HUBBARD-ACTION-CADENCE-V1",
+    "lattice_profiles": [
+      {
+        "profile_id": "L2_OBC",
+        "geometry": "2x2_square_open_boundary_no_wrap",
+        "n_sites": 4,
+        "n_modes": 8,
+        "basis_dimension": 256,
+        "operator_instance_count": 18,
+        "all_occupation_sparse_action_column_count": 4608,
+        "all_bra_ket_dense_matrix_entry_count": 1179648,
+        "r2_composite_occurrence_count": 48,
+        "r2_constituent_occurrence_count": 112,
+        "r2_truncation_boundary_count": 80,
+        "omitted_identity_phase": "exp(-i*8)"
+      },
+      {
+        "profile_id": "L3_OBC",
+        "geometry": "3x3_square_open_boundary_no_wrap",
+        "n_sites": 9,
+        "n_modes": 18,
+        "basis_dimension": 262144,
+        "operator_instance_count": 44,
+        "all_occupation_sparse_action_column_count": 11534336,
+        "dense_matrix_enumeration": false,
+        "r2_composite_occurrence_count": 132,
+        "r2_constituent_occurrence_count": 300,
+        "r2_truncation_boundary_count": 204,
+        "omitted_identity_phase": "exp(-i*18)"
+      }
+    ],
+    "aggregate_planned_counts": {
+      "profile_count": 2,
+      "fixed_operator_instance_count": 62,
+      "all_occupation_sparse_action_column_count": 11538944,
+      "explicit_L2_dense_matrix_entry_count": 1179648,
+      "r2_composite_occurrence_count": 180,
+      "r2_constituent_occurrence_count": 412,
+      "r2_truncation_boundary_count": 284
+    },
+    "operator_instance_partition": {
+      "Hubbard_Hamiltonian_core": {
+        "symbols": [
+          "hopup",
+          "hopdn",
+          "nupndn"
+        ],
+        "L2_instance_count": 12,
+        "L3_instance_count": 33,
+        "aggregate_instance_count": 45
+      },
+      "site_local_sign_probe": {
+        "symbol": "Sz",
+        "site_domain": "every_row_major_physical_site",
+        "L2_instance_count": 4,
+        "L3_instance_count": 9,
+        "aggregate_instance_count": 13
+      },
+      "global_campaign_observables": {
+        "observable_ids": [
+          "staggered_magnetization",
+          "double_occupancy"
+        ],
+        "L2_instance_count": 2,
+        "L3_instance_count": 2,
+        "aggregate_instance_count": 4
+      }
+    },
+    "Hamiltonian_and_observable_convention": {
+      "Hamiltonian": "minus_sum_OBC_nearest_neighbor_spin_resolved_hopping_plus_8_sum_unshifted_nupndn",
+      "site_order": "row_major_zero_based_coordinates_exposed_as_one_based_Julia_sites",
+      "mode_order": "site_major_spin_minor_q_equals_2_times_site_plus_up0_down1",
+      "basis_index_rule": "bit_q_is_occupation_of_mode_q",
+      "global_observables": {
+        "staggered_magnetization": "(1/N)*sum_(-1)^(row+column)*(nup-ndn)",
+        "double_occupancy": "(1/N)*sum_nup*ndn"
+      },
+      "coefficient_domain": "reduced_exact_rationals_with_Gaussian_integer_phases"
+    }
+  },
+  "cross_language_action_oracle": {
+    "python_expected_route": "direct_exact_CAR_creation_annihilation_and_diagonal_occupation_without_importing_Julia_MajoranaPropagation_or_PauliPropagation",
+    "julia_observed_route": "pinned_upstream_MajoranaPropagation_constructors_and_overlapwithfock",
+    "route_independence_required": true,
+    "python_must_not_parse_or_reuse_Julia_generated_expected_actions": true,
+    "Julia_must_not_receive_Python_expected_actions_as_inputs": true,
+    "L2_coverage": "all_18_operator_instances_times_all_256_kets_times_all_256_bras_evaluated_by_upstream_overlapwithfock",
+    "L3_coverage": "all_44_operator_instances_times_all_262144_kets_at_each_operator_term_derived_sparse_candidate_target",
+    "L3_outside_candidate_support": "algebraically_implied_zero_from_Majorana_mode_flip_support_not_individually_executed",
+    "all_zero_action_columns_must_be_serialized_and_counted": true,
+    "sparse_actions_must_be_sorted_by_bra": true,
+    "dense_matrix_checks_include_structural_zeros": true,
+    "required_equality": "exact_candidate_action_and_reduced_real_imaginary_rational_coefficients",
+    "comparison_outputs": "canonical_counted_stream_digests_plus_fail_closed_first_difference_diagnostics"
+  },
+  "composite_cadence_policy": {
+    "product_formula": "R2_fixed_Strang_occurrence_matrix",
+    "trotter_steps": 2,
+    "total_time": "1",
+    "half_event_duration": "1/4",
+    "raw_group_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "hopping_symbols": [
+      "hopup",
+      "hopdn"
+    ],
+    "hopping_boundary": "truncate_after_complete_composite",
+    "onsite_symbol": "nupndn",
+    "onsite_boundary": "truncate_after_each_constituent",
+    "constituent_enumeration": "certificate_wrapper_actually_executes_unsigned_Majorana_bitmask_ascending",
+    "execution_probe": "zero_angle_identity_sentinel_with_custom_callback_observing_each_actual_truncate_call",
+    "upstream_native_applymergetruncate_Dict_order": "NOT_ASSESSED",
+    "aggregate_expected_occurrences": {
+      "composites": 180,
+      "constituents": 412,
+      "truncation_boundaries": 284
+    },
+    "occurrence_order_count_and_boundary_kind_must_all_match": true
+  },
+  "identity_phase_accounting": {
+    "onsite_constructor_identity_coefficient": "1/4",
+    "onsite_coupling": "8",
+    "total_time": "1",
+    "L2_full_Hamiltonian_identity_coefficient": "8",
+    "L3_full_Hamiltonian_identity_coefficient": "18",
+    "L2_state_vector_phase_relative_to_identity_stripped_dynamics": "exp(-i*8)",
+    "L3_state_vector_phase_relative_to_identity_stripped_dynamics": "exp(-i*18)",
+    "per_occurrence_phase_is_derived_from_constructor_identity_coefficient_times_physical_multiplier_times_event_duration": true,
+    "global_phase_is_invisible_to_Heisenberg_observable_conjugation": true,
+    "identity_stripped_and_full_state_vectors_must_not_be_claimed_equal_without_phase_restoration": true,
+    "phase_accounting_is_a_fixture_convention_check_not_an_exact_time_evolution_result": true
+  },
+  "upstream_test_gap_record": {
+    "record_is_scope_motivation_not_a_negative_upstream_verdict": true,
+    "MajoranaPropagation_default_runtests_omits": [
+      "test_evaluate.jl",
+      "test_fock.jl"
+    ],
+    "included_compare_jw_limitations": [
+      "spinless_only",
+      "free_nfermions_12_uses_n_observable",
+      "interacting_nfermions_10_uses_nn_observable",
+      "sampled_random_or_specific_states_and_expectations_not_exhaustive_action_columns",
+      "no_spinful_2x2_or_3x3_Hubbard_fixture",
+      "no_all_bra_ket_L2_dense_matrix_enumeration",
+      "no_all_ket_L3_sparse_candidate_action_matrix",
+      "no_local_Sz_and_two_global_campaign_observable_partition",
+      "no_R2_composite_constituent_truncation_boundary_occurrence_audit",
+      "no_exp_minus_i8_or_exp_minus_i18_omitted_identity_phase_accounting"
+    ],
+    "P1_closes_only_the_fixed_gaps_named_by_this_policy": true
+  },
+  "required_adversarial_mutations": [
+    {
+      "mutation_id": "SWAP_UP_DOWN_MODE_ORDER",
+      "must_be_detected_by": "local_Sz_and_spin_resolved_hopping_exact_actions"
+    },
+    {
+      "mutation_id": "REVERSE_FERMIONIC_PREFIX_PARITY",
+      "must_be_detected_by": "off_diagonal_sparse_support_coefficients_and_L2_dense_entries"
+    },
+    {
+      "mutation_id": "FLIP_HOPPING_GENERATOR_SIGN",
+      "must_be_detected_by": "spin_resolved_hopping_exact_actions"
+    },
+    {
+      "mutation_id": "DROP_HOPPING_HERMITIAN_CONJUGATE",
+      "must_be_detected_by": "bidirectional_sparse_support_and_L2_dense_matrix"
+    },
+    {
+      "mutation_id": "ADD_PERIODIC_WRAP_BOND",
+      "must_be_detected_by": "fixed_OBC_operator_instance_and_cadence_occurrence_counts"
+    },
+    {
+      "mutation_id": "OMIT_ZERO_ACTION_COLUMNS",
+      "must_be_detected_by": "all_occupation_column_count_and_canonical_stream"
+    },
+    {
+      "mutation_id": "MASK_LOCAL_Sz_SIGN_ERROR_IN_GLOBAL_STAGGERED_SUM",
+      "must_be_detected_by": "every_site_local_Sz_actions"
+    },
+    {
+      "mutation_id": "TRUNCATE_HOPPING_AFTER_EACH_CONSTITUENT",
+      "must_be_detected_by": "hopping_complete_composite_boundary_kind_and_284_boundary_total"
+    },
+    {
+      "mutation_id": "TRUNCATE_ONSITE_ONLY_AFTER_COMPLETE_COMPOSITE",
+      "must_be_detected_by": "onsite_per_constituent_boundary_kind_and_284_boundary_total"
+    },
+    {
+      "mutation_id": "REORDER_CONSTITUENTS_BY_SIGNED_OR_DICTIONARY_ORDER",
+      "must_be_detected_by": "sorted_wrapper_applied_mask_trace_and_execution_probe_digest"
+    },
+    {
+      "mutation_id": "COLLAPSE_THE_ADJACENT_H4_H4_RAW_STRANG_OCCURRENCES",
+      "must_be_detected_by": "raw_occurrence_order_and_180_composite_total"
+    },
+    {
+      "mutation_id": "DROP_OR_DOUBLE_ONSITE_IDENTITY_PHASE",
+      "must_be_detected_by": "exp_minus_i8_and_exp_minus_i18_identity_phase_accounting"
+    },
+    {
+      "mutation_id": "DERIVE_PYTHON_EXPECTED_ACTIONS_FROM_JULIA_OUTPUT",
+      "must_be_detected_by": "source_audit_and_independent_route_contract"
+    }
+  ],
+  "upstream_semantic_baseline": {
+    "MajoranaPropagation": {
+      "version": "0.3.0",
+      "git_commit": "b7849cb4bac5b604f0d2fe6ff807ed889305e668",
+      "git_tree_sha1": "d62823f20677593ff5e256e5f8bc316dd7aecd7a",
+      "contains_required_minus_imaginary_splitting_sign_fix": true
+    },
+    "PauliPropagation": {
+      "version": "0.7.3",
+      "git_commit": "2a96e9a94dafc2df3466d2611fafa141319469f8",
+      "git_tree_sha1": "757b43af3c247d9fad953dd056d3df76fe6e6a08"
+    },
+    "runtime_and_installed_source_custody_is_inherited_from_the_pinned_P0_runtime_lock": true,
+    "P0_scientific_result_is_not_a_premise_of_P1": true,
+    "experimental_branch_wholesale_adoption": false,
+    "deterministic_constituent_sort_is_a_local_runner_semantic_wrapper": true
+  },
+  "isolation_policy": {
+    "staging_source": "exact_blobs_from_the_precommit_Git_commit",
+    "allowlist_staging_tree_required": true,
+    "staging_tree_is_ephemeral_and_read_only": true,
+    "symlink_submodule_path_traversal_and_nonregular_input_rejection_required": true,
+    "live_worktree_source_copy_or_import": "forbidden",
+    "result_files_old_diagnostics_and_unlisted_inputs_in_staging": "forbidden",
+    "fresh_writable_scratch_and_depot_prefix_per_replay": true,
+    "network_during_replay": "forbidden",
+    "formal_replay_count": 2,
+    "formal_replay_stdout_requirement": "byte_identical_canonical_JSON",
+    "independent_checker_must_not_import_the_Julia_runner_or_upstream_package_as_an_oracle": true,
+    "input_hash_and_repository_state_checks_required_before_and_after_replay": true
+  },
+  "legal_terminal_branches": [
+    {
+      "branch": "CONFORMANCE_VERIFIED",
+      "maximum_status": "VERIFIED_MAJORANA_P1_L2_L3_HUBBARD_SPARSE_ACTION_AND_CADENCE_CONFORMANCE_SUBCERTIFICATE",
+      "authority": "fixed_fixture_subcertificate_only"
+    },
+    {
+      "branch": "FAILED_CONFORMANCE",
+      "maximum_status": "FAILED_MAJORANA_P1_FIXED_L2_L3_HUBBARD_ACTION_CADENCE_CONFORMANCE",
+      "authority": "fixed_fixture_environment_failure_only_no_general_algorithmic_inference"
+    },
+    {
+      "branch": "INDETERMINATE",
+      "maximum_status": "INDETERMINATE_MAJORANA_P1_REPLAY",
+      "authority": "none_for_timeout_OOM_resource_environment_or_host_failure"
+    },
+    {
+      "branch": "INVALID_REPLAY",
+      "maximum_status": "INVALID_MAJORANA_P1_REPLAY",
+      "authority": "none_for_custody_hash_isolation_or_contract_failure"
+    }
+  ],
+  "scope_boundary": {
+    "fixed_2x2_and_3x3_OBC_fixture_only": true,
+    "constructors_outside_hopup_hopdn_nupndn_and_Sz": "NOT_ASSESSED",
+    "periodic_or_other_boundary_conditions": "NOT_ASSESSED",
+    "arbitrary_lattice_sizes_mode_orders_operator_sets_states_or_circuits": "NOT_CLAIMED",
+    "arbitrary_product_formula_orders_step_counts_or_times": "NOT_CLAIMED",
+    "upstream_native_unsorted_FermionicRotation_execution_order": "NOT_ASSESSED",
+    "L8_full_propagation": "NOT_ASSESSED",
+    "1152_gate_or_100_mapped_step_workload": "NOT_ASSESSED",
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "exact_time_evolution_or_exact_dynamics": "NOT_ASSESSED",
+    "paper_figure_parameter_or_convergence_reproduction": "NOT_ASSESSED",
+    "complex_coefficient_non_Hermitian_imaginary_time_vector_GPU_or_multithreaded_routes": "NOT_ASSESSED",
+    "Pfaffian_or_other_PF_route": "NOT_ASSESSED",
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  },
+  "source_pins": [
+    {
+      "relative_path": "majorana_certificate_p1_fixture.json",
+      "role": "fixed_L2_L3_Hubbard_action_and_cadence_fixture",
+      "size_bytes": 5433,
+      "sha256": "49924e42549d1cb7bbafd27b80effd2fc3610c08c554b326934676790a1b4a6c"
+    },
+    {
+      "relative_path": "majorana_certificate_p0_runtime_lock.json",
+      "role": "exact_runtime_registry_and_loaded_source_custody_lock_reused_by_P1",
+      "size_bytes": 5281,
+      "sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "role": "exact_Julia_project_environment_reused_by_P1",
+      "size_bytes": 235,
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "role": "exact_Julia_resolved_dependency_graph_reused_by_P1",
+      "size_bytes": 15336,
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406"
+    }
+  ],
+  "precommit_forbidden_paths": [
+    "majorana_certificate_p1_contract.json",
+    "majorana_certificate_p1_certificate.json",
+    "test_majorana_certificate_p1_result.py"
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "checker_relative_path": "hubbard_l8_adaptive_k_v2_dual_screen_checker.py",
+  "checker_source_sha256": "3a3fb88b52640b18ca96aa1afcf3bc9b2851bda51a217207b4ba03bd217d7ce8",
+  "contract_fingerprint": "hubbard_l8_adaptive_k_v2_dual_screen_contract_v1",
+  "expected_witness_sha256": "79f5cfeebfe87ea45af1c29eefe9b1468af0099d9cd3501dc732cbff0ca8fcf5",
+  "maximum_positive_status": "VERIFIED_L8_ADAPTIVE_K_V2_DUAL_INFEASIBILITY_SCREENS",
+  "schema_version": 1,
+  "scope_claims": {
+    "both_v2_policies_were_committed_before_formal_replay": true,
+    "child_boundary_or_transition_committed": false,
+    "design_transcript_records_were_not_parsed_or_used_as_result_evidence": true,
+    "double_occupancy_certified_mapped_depth": 2,
+    "double_occupancy_step3_candidate_ceiling_infeasibility_verified": true,
+    "formal_new_step_arithmetic_used_only_the_v2_kernel": true,
+    "magnetization_certified_mapped_depth": 3,
+    "magnetization_step4_candidate_ceiling_infeasibility_verified": true,
+    "physical_reference_qualified": false,
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "ready_gate_eligible": false,
+    "remaining_mapped_steps": "NOT_ASSESSED",
+    "same_byte_positive_magnetization_step3_parent_chain_verified": true,
+    "transitive_same_byte_positive_two_step_parent_chain_verified": true
+  },
+  "screen_policy": {
+    "double_occupancy_policy_id": "hubbard_l8_double_occupancy_step3_adaptive_k_v2",
+    "double_occupancy_policy_sha256": "5099b6e29e52c1dc4ff26b9b4fd408fbd4483e7e4b7a554aa718226336e9c07b",
+    "formal_replay_uses_design_transcript_records": false,
+    "magnetization_policy_id": "hubbard_l8_magnetization_step4_adaptive_k_v2",
+    "magnetization_policy_sha256": "c1300af91ed28c69b309e19ffdb0e772e3e256432b08e1b17adfcea58700dd16",
+    "new_step_arithmetic_kernel_sha256": "f4819f96bf92ac07a9ce5d0be646c8d187b04f37a64c7dccda68f665722d5998",
+    "no_candidate_action": "fail_closed_without_child_boundary_transition_or_depth_increment"
+  },
+  "source_pins": [
+    {
+      "relative_path": "hubbard_l8_adaptive_k_v2_design_probe.py",
+      "role": "deterministic_replay_driver_without_certificate_authority",
+      "sha256": "01582da649f7df2a0e65dcf8ed251a341b72218eade72dcd3d69ffa627fe1ee3"
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_arithmetic_v2.py",
+      "role": "formal_new_step_fixed_tick_arithmetic_kernel",
+      "sha256": "f4819f96bf92ac07a9ce5d0be646c8d187b04f37a64c7dccda68f665722d5998"
+    },
+    {
+      "relative_path": "hubbard_l8_observable_interval_step_checker.py",
+      "role": "source_pinned_sequence_trigonometry_and_Neel_oracle",
+      "sha256": "5c151a63cee86d362851629aae743600dd61fcfd534339376aca88fe030b1f1a"
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_adaptive_k_policy_v2.json",
+      "role": "precommitted_magnetization_step4_policy",
+      "sha256": "c1300af91ed28c69b309e19ffdb0e772e3e256432b08e1b17adfcea58700dd16"
+    },
+    {
+      "relative_path": "hubbard_l8_double_occupancy_adaptive_k_policy_v2.json",
+      "role": "precommitted_double_occupancy_step3_policy",
+      "sha256": "5099b6e29e52c1dc4ff26b9b4fd408fbd4483e7e4b7a554aa718226336e9c07b"
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_adaptive_k_v2_design_transcript.json",
+      "role": "non_normative_magnetization_design_provenance_bytes_only",
+      "sha256": "aaed027aa212f60a40eea93c0826c45cfe5ffa23ef94b0b616213d794e83fd12"
+    },
+    {
+      "relative_path": "hubbard_l8_double_occupancy_adaptive_k_v2_design_transcript.json",
+      "role": "non_normative_double_occupancy_design_provenance_bytes_only",
+      "sha256": "4223155009f7dc4c8fe883a75ac71116ddaff82492e1e1602685e893c4c2368c"
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_checker.py",
+      "role": "same_byte_positive_magnetization_step3_parent_checker",
+      "sha256": "4e471b6f22838b2e9621adeeb757e7fa8277e3d8c4985eee392b182530c0c717"
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_contract.json",
+      "role": "positive_magnetization_step3_parent_contract",
+      "sha256": "fb1d5e82819d39f217a8c1c7f4979a689f4d46b8d691a8f464cad9012c197387"
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_template.json",
+      "role": "positive_magnetization_step3_parent_certificate",
+      "sha256": "b68544091be417eed5310d8579eb8dc4d1a51e1863ed1fb7a8cbfa1fc6004eb6"
+    },
+    {
+      "relative_path": "hubbard_l8_observable_interval_two_step_checker.py",
+      "role": "transitive_same_byte_positive_two_step_parent_checker",
+      "sha256": "a562055fa361b3b31d24cd9613c38d09ddc176791454a8612eb12ac2ad06c232"
+    },
+    {
+      "relative_path": "hubbard_l8_observable_interval_two_step_contract.json",
+      "role": "transitive_positive_two_step_parent_contract",
+      "sha256": "09d4233cad211bb31e5e779156af2574ed966921168e9b4baf490691301b4e45"
+    },
+    {
+      "relative_path": "hubbard_l8_observable_interval_two_step_template.json",
+      "role": "transitive_positive_two_step_parent_certificate",
+      "sha256": "4ac0a0b3cbabb595a5872ae39bd182ab561fafaa51733625575d6bfc3f627ba1"
+    }
+  ],
+  "workload_identity": {
+    "attempted_adjacent_transitions": [
+      "3_to_4",
+      "2_to_3"
+    ],
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "initial_state": "checkerboard_Neel_A_up_B_down_Nup32_Ndown32",
+    "linear_size": 8,
+    "n_qubits": 128,
+    "n_sites": 64,
+    "observables": [
+      "staggered_magnetization",
+      "double_occupancy"
+    ],
+    "profile_id": "L8_OBC_U8_T1_R100_NEEL_ADAPTIVE_K_V2_DUAL_SCREEN",
+    "step_duration": "1/100",
+    "trotter_steps": 100
+  }
+}

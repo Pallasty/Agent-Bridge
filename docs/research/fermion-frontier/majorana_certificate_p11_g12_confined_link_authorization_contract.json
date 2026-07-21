@@ -1,0 +1,17 @@
+{
+  "schema_version":1,
+  "contract_id":"MAJORANA-P11-G12-CONFINED-LINK-MATERIALIZATION-AUTHORIZATION-V1",
+  "required_direct_parent_commit":"d2f7b99ebcb9f4a4cd34e9920c9ef3d671e8913a",
+  "E3R_custody":{"record_relative_path":"majorana_certificate_p11e3r_confined_link_materialization_record.json","record_raw_sha256":"734f3d246610d27081b4834c3ddc92043f1f39bb933aa50bb69362706e77fe6d","expected_disposition":"CONFINED_LINK_MATERIALIZATION_CONTRACT_ESTABLISHED_AWAITING_G12_AUTHORIZATION","expected_next_gate":"P11-G12-CONFINED-LINK-MATERIALIZATION-AUTHORIZATION-V1"},
+  "readiness_review":[
+    {"check_id":"new_root_and_failed_root_exclusion","status":"PASS"},
+    {"check_id":"relative_target_normalization_and_same_root_containment","status":"PASS"},
+    {"check_id":"cycle_dangling_absolute_and_escape_rejection","status":"PASS"},
+    {"check_id":"pre_post_link_graph_equality","status":"PASS"},
+    {"check_id":"synthetic_positive_and_adversarial_tests","status":"PASS"},
+    {"check_id":"build_execution_measurement_and_science_closed","status":"PASS"}
+  ],
+  "decision":{"disposition":"AUTHORIZE_ONE_P11_E3R_CONFINED_LINK_MATERIALIZATION_AND_BOUNDED_READ_RUN","new_derived_root":"/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e3r-source-inspection","read_only_E2R_custody_access_authorized":true,"create_write_new_derived_root_authorized":true,"safe_symlink_materialization_authorized":true,"bounded_read_authorized":true,"network_package_or_custody_mutation_authorized":false,"patch_build_compile_link_execute_measure_or_candidate_authorized":false,"scientific_authority":"NONE","post_run_gate":"P11-G13-POST-CONFINED-SOURCE-INSPECTION-GOVERNANCE-V1"},
+  "operation_limits":{"one_attempt_per_package":true,"stop_on_first_failure":true,"pre_and_post_archive_hashes_required":true,"pre_and_post_link_graph_equality_required":true,"same_E3_query_and_hit_limits_required":true},
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g12_confined_link_authorization_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g12_confined_link_authorization_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g12_confined_link_authorization_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g12_confined_link_authorization.py"]}
+}

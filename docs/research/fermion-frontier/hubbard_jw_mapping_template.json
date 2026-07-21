@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "certificate_type": "hubbard_jw_mapping_subcertificate_v1",
+  "contract_fingerprint": "hubbard_jw_mapping_contract_v1",
+  "profile_policy": {
+    "profile_ids": [
+      "L2_OBC",
+      "L3_OBC"
+    ],
+    "linear_sizes": [
+      2,
+      3
+    ],
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "jw_convention": "n_q=(I-Z_q)/2; hopping=-1/2*(X_p Z_(p+1:q) X_q+Y_p Z_(p+1:q) Y_q),p<q;q0-first",
+    "rotation_convention": "G_P(theta)=exp(-i*theta*P/2)",
+    "u_over_t": "8/1",
+    "total_time": "1/1",
+    "trotter_steps": 2,
+    "raw_group_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "raw_events_unfused": true,
+    "onsite_identity_retained": true,
+    "sign_witness_policy": "each_spin_resolved_bond: right_even,right_odd,left_even,left_odd,right_even_external_spectator,left_odd_external_spectator,empty_endpoints_odd,both_endpoints_odd; first interior mode toggles odd parity;external spectator is prefix when available and suffix otherwise"
+  },
+  "profile_claims": [
+    {
+      "profile_id": "L2_OBC",
+      "linear_size": 2,
+      "n_qubits": 8,
+      "matching_sizes": {
+        "H1": 4,
+        "H2": 0,
+        "H3": 0,
+        "H4": 4
+      },
+      "spin_resolved_hopping_bond_count": 8,
+      "canonical_hopping_pauli_term_count": 16,
+      "onsite_pauli_term_count_including_identity": 16,
+      "canonical_term_count": 32,
+      "raw_strang_event_count": 20,
+      "raw_term_rotation_count_including_identity": 128,
+      "raw_nonidentity_rotation_count": 112,
+      "raw_identity_rotation_count": 16,
+      "global_phase_ledger": {
+        "identity_rotation_theta_sum": "16/1",
+        "phase_exponent_in_exp_minus_i_x": "8/1",
+        "status": "IDENTITY_RETAINED_IN_RAW_EVENTS_NONIDENTITY_VIEW_ONLY_OMITS_GLOBAL_PHASE"
+      },
+      "selected_sign_witness_count": 64,
+      "onsite_basis_witness_count": 16,
+      "canonical_bonds_sha256": "1a63c0d7ee8b67410702c8a8ef2630eada8f4fe268acf27cc0ddc9a26197edd5",
+      "canonical_terms_sha256": "5d4f1b0511c76f82e11af1de09461b3e11fb93b711c85594550b7edcea6d8199",
+      "raw_strang_events_sha256": "645dc9c3fafe60e2862a8abd4e34f729a554cd1ac5f03c3a2b94fefb6b3f07b3",
+      "nonidentity_gate_sequence_sha256": "3b3a7979593463681cc24a90c8d042053a433aec22e705b5ac50f614cb2bc5ad",
+      "selected_sign_witnesses_sha256": "4ffe2f328d4cdef509532cae5a296fb8cea36c6cf4dc37db061e3b9ce983be60",
+      "onsite_basis_witnesses_sha256": "66f1dffc01628f06b17db1d93681864eb35934c6772a763b778e6151b7048794"
+    },
+    {
+      "profile_id": "L3_OBC",
+      "linear_size": 3,
+      "n_qubits": 18,
+      "matching_sizes": {
+        "H1": 6,
+        "H2": 6,
+        "H3": 6,
+        "H4": 6
+      },
+      "spin_resolved_hopping_bond_count": 24,
+      "canonical_hopping_pauli_term_count": 48,
+      "onsite_pauli_term_count_including_identity": 36,
+      "canonical_term_count": 84,
+      "raw_strang_event_count": 20,
+      "raw_term_rotation_count_including_identity": 336,
+      "raw_nonidentity_rotation_count": 300,
+      "raw_identity_rotation_count": 36,
+      "global_phase_ledger": {
+        "identity_rotation_theta_sum": "36/1",
+        "phase_exponent_in_exp_minus_i_x": "18/1",
+        "status": "IDENTITY_RETAINED_IN_RAW_EVENTS_NONIDENTITY_VIEW_ONLY_OMITS_GLOBAL_PHASE"
+      },
+      "selected_sign_witness_count": 192,
+      "onsite_basis_witness_count": 36,
+      "canonical_bonds_sha256": "967499420ae8705716284e459e9c2b13f9ed289aec3e13871c0eb839ec12d5f8",
+      "canonical_terms_sha256": "da795663cc8779485aea781a772c064b06a860d1dbffd4d2648fbf389d314b3b",
+      "raw_strang_events_sha256": "0561d2e8361a00e26dbf45648f20f740c8c9af715359bd64636bc00df9265a09",
+      "nonidentity_gate_sequence_sha256": "c6308742d21347258f392fd2e0fe09034be5f32a693a9a0cd69d7716a78f4726",
+      "selected_sign_witnesses_sha256": "936d2eea87219d7de90b9cd3cff5a79e3c2cb3aa6cfb2c16ccd868f0b1155108",
+      "onsite_basis_witnesses_sha256": "4c26c30611920071c564e34ff767b65c3551a6bfdecffe6daf98e19e30c53ae8"
+    }
+  ],
+  "scope_claims": {
+    "fixed_L2_L3_OBC_profiles_verified": true,
+    "source_pinned_L2_witness_gate_sequence_verified": true,
+    "canonical_spin_resolved_bonds_verified": true,
+    "canonical_JW_hopping_selected_basis_actions_verified": true,
+    "unshifted_onsite_mapping_verified": true,
+    "raw_strang_term_expansion_verified": true,
+    "product_formula_to_exact_hamiltonian": "NOT_ASSESSED",
+    "physical_L8_instance_identity": "NOT_ASSESSED",
+    "reference_error_budget": "NOT_ASSESSED",
+    "ready_gate_eligible": false
+  }
+}

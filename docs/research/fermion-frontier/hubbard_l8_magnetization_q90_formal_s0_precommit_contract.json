@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "contract_fingerprint": "hubbard_l8_magnetization_q90_formal_s0_precommit_v1",
+  "phase": "PRECOMMIT_RESULT_UNPINNED",
+  "checker_relative_path": "hubbard_l8_magnetization_q90_formal_s0_checker.py",
+  "checker_source_sha256": "7edfb6f4b811db6f97b8bd8dc9245793ee24c0613d908ded3dc7bb340c6f7bfe",
+  "policy_relative_path": "hubbard_l8_magnetization_q90_formal_s0_policy.json",
+  "policy_file_sha256": "8084ab612c6d3cefb8f779d4dfe24450cb5c7d612d14b485feabb7044ae7cab5",
+  "policy_canonical_sha256": "c9c12105893b3b8ede1e3f55189631273771e09b1817863d65ce97cf6e308bbd",
+  "source_pins": [
+    {
+      "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q90_screen.py",
+      "role": "outcome_unpinned_q1_through_q90_same_byte_execution_engine",
+      "sha256": "f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a",
+      "size_bytes": 89527
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q88_screen.py",
+      "role": "same_byte_private_execution_parent",
+      "sha256": "6867dda2d6bd34ab2eed6b31d02a587e16762263a493e9890d0caa40f23a58a4",
+      "size_bytes": 78218
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_four_gate_granularity_screen.py",
+      "role": "four_gate_control_flow_parent",
+      "sha256": "b483d9555a24dd07ea96292ed0a7ed51587259a79a2c5d69e3a8bf1408b4a614",
+      "size_bytes": 35616
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q88_transcript.json",
+      "role": "post_replay_q1_through_q88_exact_reference_not_execution_state_or_resume_input",
+      "sha256": "0074b1eea5fa574378d5a9fae9e748e7145efaa0c96b622ddf50587a72a2551a",
+      "size_bytes": 821781
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_v6_design_probe.py",
+      "role": "baseline_configuration_before_runtime_override",
+      "sha256": "3e7f9ff0546addfaa23f351f3569b102d0c3ebb578dbc4873b042bac21070af2",
+      "size_bytes": 26538
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_v2_design_probe.py",
+      "role": "verified_helper_provider_without_run_entrypoint_authority",
+      "sha256": "01582da649f7df2a0e65dcf8ed251a341b72218eade72dcd3d69ffa627fe1ee3",
+      "size_bytes": 25517
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_arithmetic_v2.py",
+      "role": "base_fixed_tick_arithmetic_implementation",
+      "sha256": "f4819f96bf92ac07a9ce5d0be646c8d187b04f37a64c7dccda68f665722d5998",
+      "size_bytes": 23931
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_arithmetic_k622592_c34.py",
+      "role": "K622592_C34_capability_wrapper",
+      "sha256": "f4e676da40535903301181cf482119e051066b90921793e34152403b3b74b976",
+      "size_bytes": 21957
+    },
+    {
+      "relative_path": "hubbard_l8_observable_interval_step_checker.py",
+      "role": "source_pinned_sequence_trigonometry_and_Neel_oracle",
+      "sha256": "5c151a63cee86d362851629aae743600dd61fcfd534339376aca88fe030b1f1a",
+      "size_bytes": 65080
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_checker.py",
+      "role": "hash_pinned_M3_boundary_spec_provider_from_an_already_certified_premise",
+      "sha256": "4e471b6f22838b2e9621adeeb757e7fa8277e3d8c4985eee392b182530c0c717",
+      "size_bytes": 56874
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_contract.json",
+      "role": "positive_M3_parent_contract",
+      "sha256": "fb1d5e82819d39f217a8c1c7f4979a689f4d46b8d691a8f464cad9012c197387",
+      "size_bytes": 6930
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_template.json",
+      "role": "positive_M3_parent_certificate",
+      "sha256": "b68544091be417eed5310d8579eb8dc4d1a51e1863ed1fb7a8cbfa1fc6004eb6",
+      "size_bytes": 13822
+    },
+    {
+      "relative_path": "hubbard_l8_interval_checkpoints/staggered_magnetization_boundary_003.b85",
+      "role": "positive_M3_encoded_input_boundary",
+      "sha256": "91aecef5a3b79279e394c8995072d19565f4898e0ba29ddd7685ea9e535d9c84",
+      "size_bytes": 805953
+    }
+  ],
+  "legal_terminal_branches": [
+    {
+      "authority": "earlier_fixed_policy_failure_only_no_q90_inference",
+      "branch": "Q89_FAILURE_Q90_NOT_ATTEMPTED",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": false
+    },
+    {
+      "authority": "indeterminate_resource_abort_no_infeasibility_inference",
+      "branch": "Q89_RESOURCE_ABORT_Q90_NOT_ATTEMPTED",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": false
+    },
+    {
+      "authority": "narrow_q90_fixed_policy_candidate_ceiling_infeasibility_replication",
+      "branch": "Q89_SUCCESS_Q90_FAILURE",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": true
+    },
+    {
+      "authority": "indeterminate_resource_abort_no_infeasibility_inference",
+      "branch": "Q89_SUCCESS_Q90_RESOURCE_ABORT",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": false
+    },
+    {
+      "authority": "bounded_horizon_passed_without_M4_or_child_authority",
+      "branch": "Q89_AND_Q90_SUCCESS_HORIZON_REACHED",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": false
+    }
+  ],
+  "result_artifacts_absent_from_precommit_commit": [
+    "hubbard_l8_magnetization_q90_formal_s0_contract.json",
+    "hubbard_l8_magnetization_q90_formal_s0_certificate.json",
+    "test_hubbard_l8_magnetization_q90_formal_s0_result.py"
+  ],
+  "maximum_positive_status": "VERIFIED_M_Q90_FIXED_POLICY_MAX_K_INFEASIBILITY_REPLICATION",
+  "scope_ceiling": {
+    "retrospective_replication_only": true,
+    "prospective_discovery_authority": false,
+    "maximum_negative_authority": "fixed_M3_input_four_gate_q1_to_q90_K_at_most_622592_C34_policy_only",
+    "larger_K_other_cadences_and_other_algorithms": "NOT_ASSESSED",
+    "certified_mapped_depth_before_and_after": 3,
+    "M4_certification_allowed": false,
+    "child_boundary_transition_or_sidecar_allowed": false,
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  }
+}

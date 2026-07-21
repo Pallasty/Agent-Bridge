@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "certificate_type": "hubbard_strang_grouping_coefficient_l1_screen_v1",
+  "contract_fingerprint": "hubbard_strang_grouping_screen_contract_v1",
+  "primary_source": {
+    "authors": "Ansgar Schubert and Christian B. Mendl",
+    "title": "Trotter error with commutator scaling for the Fermi-Hubbard model",
+    "arxiv_version": "2306.10603v2",
+    "doi": "10.1103/PhysRevB.108.195105",
+    "formula": "Proposition 2 Equation 13",
+    "plaquette_decomposition": "Section III.B Equation 19",
+    "source_scope": "paper uses even-L periodic boundaries and three groups; four hopping terms inside a plaquette are assumed simultaneously realizable",
+    "use_in_this_checker": "formula and grouping motivation only; printed decimal norm bounds are not used as certified OBC values"
+  },
+  "screen_policy": {
+    "linear_size": 8,
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "fixed_group_names": ["H1", "H2", "HU", "H3", "H4"],
+    "fixed_permutation_count": 120,
+    "plaquette_candidate_group_names": ["P0", "P1", "B", "HU"],
+    "plaquette_permutation_count": 24,
+    "plaquette_bulk_anchors": {
+      "P0": "even_row_even_column_lower_left",
+      "P1": "odd_row_odd_column_lower_left_strictly_interior"
+    },
+    "boundary_residual": "odd horizontal bonds on top/bottom plus odd vertical bonds on left/right",
+    "bound": "Schubert_Mendl_Proposition_2_Eq_13_then_merged_Pauli_coefficient_L1",
+    "observable_comparison": "generic_norm_at_most_one_factor_two",
+    "trotter_steps": 100,
+    "per_observable_allocation": "1/4000",
+    "material_relative_C_reduction_threshold": "1/100"
+  },
+  "screen_claim": {
+    "profile_id": "L8_OBC_U8_T1_R100_GROUPING_COEFFICIENT_L1_SCREEN",
+    "allocation_coefficient_C_ceiling": "5/4",
+    "fixed_five_group_screen": {
+      "permutation_count": 120,
+      "all_order_records_sha256": "a22f6fdb65f1a5ea2ffeea1f36c765731544d655646963ac12903a3073c23d31",
+      "maximum_candidate_commutator_pair_products": 887808,
+      "fixed_declared_order": {
+        "order": ["H1", "H2", "HU", "H3", "H4"],
+        "tail_nested_l1_sum": "22752/1",
+        "self_nested_l1_sum": "11104/1",
+        "coefficient_C": "7076/3",
+        "generic_norm_one_observable_R100_bound": "1769/3750",
+        "minimum_R_for_allocation": 4344,
+        "commutator_pair_products": 775168
+      },
+      "fixed_declared_order_rank": 4,
+      "best_order_count": 2,
+      "best_orders": [
+        {
+          "order": ["H1", "H2", "HU", "H4", "H3"],
+          "tail_nested_l1_sum": "22720/1",
+          "self_nested_l1_sum": "11136/1",
+          "coefficient_C": "7072/3",
+          "generic_norm_one_observable_R100_bound": "884/1875",
+          "minimum_R_for_allocation": 4343,
+          "commutator_pair_products": 775168
+        },
+        {
+          "order": ["H4", "H3", "HU", "H1", "H2"],
+          "tail_nested_l1_sum": "22720/1",
+          "self_nested_l1_sum": "11136/1",
+          "coefficient_C": "7072/3",
+          "generic_norm_one_observable_R100_bound": "884/1875",
+          "minimum_R_for_allocation": 4343,
+          "commutator_pair_products": 775168
+        }
+      ],
+      "relative_C_reduction_from_declared_to_best": "1/1769",
+      "material_relative_C_reduction_threshold_satisfied": false,
+      "best_meets_R100_allocation": false
+    },
+    "OBC_plaquette_boundary_screen": {
+      "structure": {
+        "spatial_bond_counts": {"P0": 64, "P1": 36, "B": 12},
+        "pauli_term_counts": {"P0": 256, "P1": 144, "B": 48, "HU": 192},
+        "P0_disjoint_plaquette_count": 16,
+        "P1_disjoint_plaquette_count": 9,
+        "boundary_residual_disjoint_bond_count": 12,
+        "group_internal_pairwise_commutation": {
+          "P0": false,
+          "P1": false,
+          "B": true,
+          "HU": true
+        },
+        "bulk_group_exponentials_require_noncommuting_plaquette_cluster_evolution": true,
+        "spatial_assignment_sha256": "2c6ab5847378d8b31fa2d5311bd99468fc82167e40d04b5f206387406fa1ce6e",
+        "hamiltonian_equality_verified": true
+      },
+      "permutation_count": 24,
+      "all_order_records_sha256": "75e7bab6e1a58b2c91082def80f4c83beeec6f37f24d1c8990d4dc36226fbc35",
+      "maximum_candidate_commutator_pair_products": 955136,
+      "best_order_count": 3,
+      "best_orders": [
+        {
+          "order": ["P0", "HU", "B", "P1"],
+          "tail_nested_l1_sum": "21568/1",
+          "self_nested_l1_sum": "14720/1",
+          "coefficient_C": "7232/3",
+          "generic_norm_one_observable_R100_bound": "904/1875",
+          "minimum_R_for_allocation": 4392,
+          "commutator_pair_products": 862976
+        },
+        {
+          "order": ["P0", "HU", "P1", "B"],
+          "tail_nested_l1_sum": "21568/1",
+          "self_nested_l1_sum": "14720/1",
+          "coefficient_C": "7232/3",
+          "generic_norm_one_observable_R100_bound": "904/1875",
+          "minimum_R_for_allocation": 4392,
+          "commutator_pair_products": 862976
+        },
+        {
+          "order": ["P0", "P1", "HU", "B"],
+          "tail_nested_l1_sum": "21568/1",
+          "self_nested_l1_sum": "14720/1",
+          "coefficient_C": "7232/3",
+          "generic_norm_one_observable_R100_bound": "904/1875",
+          "minimum_R_for_allocation": 4392,
+          "commutator_pair_products": 849152
+        }
+      ],
+      "best_meets_R100_allocation": false,
+      "matches_declared_individual_term_benchmark_circuit": false
+    },
+    "decision": {
+      "permutation_materially_improves_fixed_coefficient_L1_bound": false,
+      "OBC_plaquette_regrouping_improves_fixed_declared_coefficient_L1_bound": false,
+      "coefficient_L1_grouping_search_qualifies_reference_at_R100": false,
+      "next_required_tightening": "observable_or_locality_specific_norm_or_certified_cluster_spectral_norm"
+    }
+  },
+  "scope_claims": {
+    "checker_execution_from_contract_pinned_source_bytes_verified": true,
+    "base_commutator_subcertificate_source_pinned_and_verified": true,
+    "fixed_five_group_all_120_orders_exactly_screened": true,
+    "OBC_plaquette_boundary_hamiltonian_cover_verified": true,
+    "OBC_plaquette_boundary_all_24_orders_exactly_screened": true,
+    "nested_commutators_merged_before_coefficient_L1": true,
+    "R100_generic_observable_allocation_tested": true,
+    "paper_periodic_plaquette_numerical_bound_imported": false,
+    "candidate_group_exponentials_matched_to_benchmark_circuit": false,
+    "observable_specific_or_locality_tightening": "NOT_ASSESSED",
+    "truncation_certificate_composed": false,
+    "physical_L8_instance_identity": "NOT_ASSESSED",
+    "reference_error_budget_qualified": false,
+    "ready_gate_eligible": false
+  }
+}

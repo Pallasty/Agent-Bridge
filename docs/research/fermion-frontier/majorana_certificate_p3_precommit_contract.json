@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "contract_type": "majorana_p3_result_unpinned_formal_replay_input_and_isolation_contract_v1",
+  "self_relative_path": "majorana_certificate_p3_precommit_contract.json",
+  "required_parent_commit": "c90014ed8569924350d5d3fce4959d31021e0461",
+  "result_artifacts_required_absent": [
+    "majorana_certificate_p3_contract.json",
+    "majorana_certificate_p3_certificate.json",
+    "test_majorana_certificate_p3_result.py"
+  ],
+  "forbidden_formal_result_pins": [
+    "observed_P3_terminal_branch",
+    "observed_P3_status",
+    "observed_product_merge_or_drop_ticks",
+    "observed_total_error_bound",
+    "observed_retained_expectation_center",
+    "observed_declared_expectation_interval",
+    "observed_event_counts",
+    "observed_final_term_count_or_digest",
+    "observed_ledger_digest",
+    "observed_witness_bytes_or_sha256",
+    "observed_replay_stdout_sha256",
+    "observed_runtime_seconds_or_peak_RSS",
+    "P3_result_contract_sha256",
+    "P3_certificate_sha256",
+    "P3_exact_result_test_sha256"
+  ],
+  "source_files": [
+    {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "size_bytes": 15336,
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "size_bytes": 235,
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f"
+    },
+    {
+      "relative_path": "majorana_certificate_p0_checker.py",
+      "size_bytes": 63189,
+      "sha256": "3ceb79998f3cccc7d65bce2a4dbe38d5f808aad35ebf3714b232cd4493a5f820"
+    },
+    {
+      "relative_path": "majorana_certificate_p0_runtime_lock.json",
+      "size_bytes": 5281,
+      "sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17"
+    },
+    {
+      "relative_path": "majorana_certificate_p1/majorana_p1_runner.jl",
+      "size_bytes": 41754,
+      "sha256": "54cda433aac87676fbae1f5a27259eeba472232997f9762553f0fab2b995823f"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_certificate.json",
+      "size_bytes": 1986,
+      "sha256": "368be66beac326d8d409550c95731eb02fcb756bb3bfc396b20376d45af99e34"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_checker.py",
+      "size_bytes": 62922,
+      "sha256": "4325ce276e8bdf91ab511444b90f47c39bad9b7f33ae8df027b21eea00c4bfd0"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_contract.json",
+      "size_bytes": 116855,
+      "sha256": "73c5e423b7ed5d234b5be4f78a107843e0d29365791c9475373971f7f88714b4"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_fixture.json",
+      "size_bytes": 5433,
+      "sha256": "49924e42549d1cb7bbafd27b80effd2fc3610c08c554b326934676790a1b4a6c"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_policy.json",
+      "size_bytes": 15605,
+      "sha256": "64b1afb6790172b705f4be06c659fdc33909fb0741f9954f10dc70c83516e561"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_precommit_contract.json",
+      "size_bytes": 2636,
+      "sha256": "9da0a48942054d77613a3cb9dda5d0a983562063ff6c80e1c1a12fa1f0e8d56c"
+    },
+    {
+      "relative_path": "majorana_certificate_p2/majorana_p2_runner.jl",
+      "size_bytes": 33888,
+      "sha256": "03edd9640bc3d83a61ea0c9c7d9e93af3fc683972c517af4a7691e21359e25ed"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_certificate.json",
+      "size_bytes": 2042,
+      "sha256": "2b700d70c75392777d3f756d06199d6e416351f894a8a58bdb0e2a181ff10e09"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_checker.py",
+      "size_bytes": 81814,
+      "sha256": "a495134b32545715ea9dd8044096d54ce477ba25ad1feca7d28034239cb11611"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_contract.json",
+      "size_bytes": 1291482,
+      "sha256": "36071d1648d35f831436623b2b36d30b5f72dd9dafcddb991ea6083e7e4f1813"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_fixture.json",
+      "size_bytes": 5891,
+      "sha256": "252fa0c4ed26db5581bcd9ff0101d18d858faf6d31fb9b6cdcaa821bf318e82a"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_policy.json",
+      "size_bytes": 9048,
+      "sha256": "255845f0e835dbfaf57dbda10bde3d0dd4fbfe0fd2564caf19a60a11e90752c9"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_precommit_contract.json",
+      "size_bytes": 3660,
+      "sha256": "dfa35363930c895f1baae9e117bc347f57d5ace95bdc0061863ba973c4f663fa"
+    },
+    {
+      "relative_path": "majorana_certificate_p3/majorana_p3_runner.jl",
+      "size_bytes": 59318,
+      "sha256": "958de8886bb8e56cda26eb6c45029c7016e886caae26c598c7e6b5c595257fe2"
+    },
+    {
+      "relative_path": "majorana_certificate_p3_checker.py",
+      "size_bytes": 99881,
+      "sha256": "06a106db25536bddd5e1b910fe12736ef827b37128d61b227dd549a4e08c4997"
+    },
+    {
+      "relative_path": "majorana_certificate_p3_fixture.json",
+      "size_bytes": 6033,
+      "sha256": "a478b783ae4005f7ef79572a4b34eee72299da262e439bdc35eca13496bdc236"
+    },
+    {
+      "relative_path": "majorana_certificate_p3_policy.json",
+      "size_bytes": 13075,
+      "sha256": "a72ef3796de65f08941cb1e82df0fbcf3f6218d678ac5ddfdefc4d05d63b0b66"
+    },
+    {
+      "relative_path": "test_majorana_certificate_p1.py",
+      "size_bytes": 29860,
+      "sha256": "5d4e6af9bdf8d97a8eae28432d3893c3493199c3a9f05ac65badfafa59cdd84c"
+    },
+    {
+      "relative_path": "test_majorana_certificate_p1_result.py",
+      "size_bytes": 24702,
+      "sha256": "37cf51be16f9b1924fc837555f04671b3c48a1a8302fc9423609cc696909d34d"
+    },
+    {
+      "relative_path": "test_majorana_certificate_p2.py",
+      "size_bytes": 14453,
+      "sha256": "fba4b2a1a97f723ae3abff1ef47178b26763f8b87f2546495a824fa2be2f62aa"
+    },
+    {
+      "relative_path": "test_majorana_certificate_p2_result.py",
+      "size_bytes": 9112,
+      "sha256": "3c46212ab6d4f818a0735e517cabdc3da01673684d5ded23b0bf49f5feb5451a"
+    },
+    {
+      "relative_path": "test_majorana_certificate_p3.py",
+      "size_bytes": 42038,
+      "sha256": "9b0a92694a8d5aa49b543ea517b19e601522a7fcf864209c28a4daa9491cd75b"
+    }
+  ],
+  "runner_staged_files": [
+    "majorana_certificate_p0/Manifest.toml",
+    "majorana_certificate_p0/Project.toml",
+    "majorana_certificate_p2/majorana_p2_runner.jl",
+    "majorana_certificate_p2_fixture.json",
+    "majorana_certificate_p3/majorana_p3_runner.jl",
+    "majorana_certificate_p3_fixture.json"
+  ],
+  "runner_forbidden_paths": [
+    "majorana_certificate_p2_contract.json",
+    "majorana_certificate_p2_certificate.json",
+    "test_majorana_certificate_p2_result.py",
+    "majorana_certificate_p3_contract.json",
+    "majorana_certificate_p3_certificate.json",
+    "test_majorana_certificate_p3_result.py"
+  ]
+}

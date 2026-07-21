@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "fixture_id": "MAJORANA-P9-STEP3-E768-BITORDER-D1-COARSE-PHASE-V1",
+  "required_direct_parent_commit": "92629e3049ac0dfac12c390fc5ed499597076b7f",
+  "scientific_authority": "NONE",
+  "certificate_eligible": false,
+  "result_contract_eligible": false,
+  "diagnostic_identity": {
+    "diagnostic_probe_id": "P9-D1-E768-BITORDER-COARSE-PHASE-V1",
+    "classification": "P9_B1_RESULT_INFORMED_RESULT_UNPINNED_SCIENTIFIC_BLIND_COARSE_PHASE_DIAGNOSTIC",
+    "candidate_id": "E768-BITORDER-STEP3-V1",
+    "scientific_probe_mode": "E768_BITORDER_STEP3_V1",
+    "diagnostic_mode": "E768_BITORDER_STEP3_D1_COARSE_PHASE_V1",
+    "algorithm_id": "MAJORANA-P9-E768-BITORDER-STEP3-V1",
+    "one_fresh_process_only": true,
+    "does_not_define_a_new_scientific_candidate": true,
+    "does_not_establish_future_S0_admission": true
+  },
+  "p9_b1_parent_custody": {
+    "result_commit_sha": "92629e3049ac0dfac12c390fc5ed499597076b7f",
+    "report_relative_path": "majorana_certificate_p9_bit_order_resource_probe_report.json",
+    "report_size_bytes": 10173,
+    "report_sha256": "881b4e4634c324e4578a7c8acd0009fa9a8b10ac953bf5f2a085af83ccafad8d",
+    "scientific_authority": "NONE",
+    "terminal_status": "INDETERMINATE_HOST_OR_RUNTIME_FAILURE",
+    "resource_witness_is_null": true,
+    "S0_admission_status": "NOT_ESTABLISHED_INDETERMINATE_HOST_OR_RUNTIME_FAILURE",
+    "allowed_result_informed_facts_are_exhaustive": true
+  },
+  "frozen_p9_source_custody": {
+    "p9_preprobe_commit_sha": "ac2125eab524ec574c855a5931e51c7f9292f0c8",
+    "p9_driver_relative_path": "majorana_certificate_p9_bit_order_resource_probe/majorana_p9_bit_order_step3_resource_probe.jl",
+    "p9_driver_size_bytes": 78229,
+    "p9_driver_sha256": "f12ea9a93d4079792de8b5e8bae5b5ee0b45895a4399c19f41b7041034d3f14c",
+    "p9_fixture_relative_path": "majorana_certificate_p9_bit_order_resource_probe_fixture.json",
+    "p9_fixture_size_bytes": 21575,
+    "p9_fixture_sha256": "8365f441765cc5dbe1658b8aba2e2371c1619a0894c73ad5c0b21f8bf74a1be8",
+    "frozen_candidate_mode_is_passed_unchanged_to_main_p9_d0": true,
+    "P9_report_policy_python_and_original_driver_are_not_staged_to_D1_runner": true
+  },
+  "phase_event_protocol": {
+    "schema_version": 1,
+    "wire_record_exact_fields": [
+      "event",
+      "sequence"
+    ],
+    "sequence_origin": 0,
+    "sequence_is_contiguous": true,
+    "maximum_event_count": 9,
+    "maximum_line_bytes_including_newline": 256,
+    "maximum_total_channel_bytes": 2048,
+    "allowed_events": [
+      "D1_RUNNER_STARTED",
+      "D1_INPUT_AND_RUNTIME_CUSTODY_VALIDATED",
+      "D1_STATIC_SETUP_COMPLETED",
+      "P6_PREFIX_STARTED",
+      "P6_PREFIX_RETURNED",
+      "P6_PREFIX_RESOURCE_CONFORMANCE_PASSED",
+      "P6_PREFIX_RESOURCE_CONFORMANCE_NOT_ESTABLISHED_TERMINAL",
+      "STEP3_ENGINE_STARTED",
+      "STEP3_ENGINE_RETURNED",
+      "D1_DIAGNOSTIC_COMPLETED"
+    ],
+    "legal_terminal_sequences": {
+      "PREFIX_NOT_ESTABLISHED": [
+        "D1_RUNNER_STARTED",
+        "D1_INPUT_AND_RUNTIME_CUSTODY_VALIDATED",
+        "D1_STATIC_SETUP_COMPLETED",
+        "P6_PREFIX_STARTED",
+        "P6_PREFIX_RETURNED",
+        "P6_PREFIX_RESOURCE_CONFORMANCE_NOT_ESTABLISHED_TERMINAL",
+        "D1_DIAGNOSTIC_COMPLETED"
+      ],
+      "STEP3_RETURNED": [
+        "D1_RUNNER_STARTED",
+        "D1_INPUT_AND_RUNTIME_CUSTODY_VALIDATED",
+        "D1_STATIC_SETUP_COMPLETED",
+        "P6_PREFIX_STARTED",
+        "P6_PREFIX_RETURNED",
+        "P6_PREFIX_RESOURCE_CONFORMANCE_PASSED",
+        "STEP3_ENGINE_STARTED",
+        "STEP3_ENGINE_RETURNED",
+        "D1_DIAGNOSTIC_COMPLETED"
+      ]
+    },
+    "host_or_runtime_failure_may_retain_only_a_legal_sequence_prefix": true,
+    "clean_exit_requires_exactly_one_complete_terminal_sequence": true,
+    "step3_started_does_not_establish_term_processing_selector_execution_or_scientific_truth": true,
+    "prefix_not_established_does_not_establish_an_algorithmic_or_physical_failure": true
+  },
+  "phase_channel_custody": {
+    "transport": "dedicated_inherited_anonymous_pipe_file_descriptor",
+    "writer_runs_inside_the_same_systemd_scope_as_Julia": true,
+    "reader_runs_in_the_outer_supervisor": true,
+    "wire_records_are_single_atomic_POSIX_pipe_writes": true,
+    "child_emits_only_fixed_event_names_and_sequence": true,
+    "child_emits_no_timestamp_term_count_index_mask_coefficient_tick_budget_cap_resource_or_free_text": true,
+    "stdout_is_strictly_empty": true,
+    "stderr_is_not_a_phase_channel": true,
+    "raw_phase_channel_bytes_are_not_persisted": true,
+    "no_phase_file_FIFO_checkpoint_or_persistent_sidecar_is_created": true,
+    "phase_trace_must_not_enter_S0_or_a_future_D2_runner": true
+  },
+  "host_supervisor_caps": {
+    "D0_and_future_S0_use_the_same_memory_swap_and_runtime_admission": true,
+    "MemoryMax_bytes": 2147483648,
+    "MemorySwapMax_bytes": 0,
+    "RuntimeMaxSec": "1800s",
+    "caps_cannot_be_relaxed_in_place_after_a_failure": true,
+    "fresh_writable_scratch_and_depot_prefix_per_process": true,
+    "host_caps_are_fixed_before_P9_D0_and_are_not_derived_from_observations": true,
+    "host_failure_has_no_mathematical_resource_no_go_or_candidate_selection_authority": true,
+    "host_timeout_OOM_cgroup_supervisor_environment_or_sandbox_failure_branch": "INDETERMINATE",
+    "maximum_stderr_bytes": 1048576,
+    "maximum_stdout_bytes": 1048576,
+    "network_PID_and_private_proc_namespace_isolation": "not_required_for_this_non_authoritative_D0_resource_probe_but_required_again_for_future_S0",
+    "outer_safety_timeout_seconds": 1830,
+    "systemd_user_scope_cgroup_v2_required": true
+  },
+  "runtime_custody": {
+    "Float64_rounding_mode": "RoundNearest",
+    "JULIA_NUM_THREADS": "1",
+    "MajoranaPropagation_source_tree_closure": {
+      "closure_sha256": "744e743d88d7bc62da1ba11cef02909539de626bd4b0a5533b0b65d8aae309b5",
+      "file_count": 42,
+      "total_bytes": 1875632
+    },
+    "OPENBLAS_NUM_THREADS": "1",
+    "PauliPropagation_source_tree_closure": {
+      "closure_sha256": "ce1e6cac1b09573962136fce0f315fabbf8556c9075c4aa3545c41c6ee4c3783",
+      "file_count": 119,
+      "total_bytes": 7736347
+    },
+    "compiled_modules": false,
+    "julia_executable_sha256": "2976d17aba35be5d546e8e315e521bd9be3e58c2e64abfd588f186696e807b7d",
+    "locale": "C",
+    "network_or_package_resolution_required": false,
+    "runtime_lock_bytes_verified_by_preprobe_checker": true,
+    "runtime_lock_id": "MAJORANA-P0-JULIA-1.11.9-LINUX-X86_64-V1",
+    "runtime_lock_relative_path": "majorana_certificate_p0_runtime_lock.json",
+    "runtime_lock_sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17",
+    "timezone": "UTC"
+  },
+  "authority_exclusions": [
+    "D1_does_not_run_or_replace_P9_D0",
+    "D1_does_not_export_term_count_index_mask_coefficient_tick_budget_cap_or_resource_witness",
+    "D1_does_not_establish_actual_memory_RSS_allocation_runtime_or_timeout_causality",
+    "D1_does_not_change_candidate_algorithm_anchor_cadence_caps_host_admission_or_fallback",
+    "D1_does_not_reprove_or_expand_P6_scientific_authority",
+    "D1_does_not_establish_S0_step3_error_or_a_physical_result",
+    "D1_does_not_select_rank_reject_or_certify_a_candidate_or_READY"
+  ]
+}

@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-E0-SOURCE-ARCHIVE-ACQUISITION-CONTRACT-PACK-V1",
+  "contract_role": "nonexecuting_exact_authenticated_source_archive_acquisition_contract_pack",
+  "self_relative_path": "majorana_certificate_p11e0_source_archive_acquisition_contract.json",
+  "required_direct_parent_commit": "a26d75d2943a4dd683eaa166656f99a5df39758e",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "implementation_authority": false,
+    "prototype_or_compilation_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "package_or_environment_mutation_authority": false,
+    "network_or_source_archive_acquisition_authority": false,
+    "source_archive_unpack_or_materialization_authority": false,
+    "kernel_accounting_bound_design_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "source_inputs": [
+    {"relative_path": "majorana_certificate_p11_g4_split_governance_contract.json", "sha256": "68a6bbee684f1c154cef3bd40c8473e60a69bc2ccbd9653ad40f5cf94665d3be", "role": "sole_P11_E0_authority"},
+    {"relative_path": "majorana_certificate_p11_g4_split_governance_record.json", "sha256": "1d78bcfa898a28a57e89b4a770d29c8b6ee43110db8b3e890f91fd4ffe832b5a", "role": "canonical_P11_G4_split_decision"},
+    {"relative_path": "majorana_certificate_p11d_source_runtime_evidence_feasibility_contract.json", "sha256": "ca9a5603b2e234cab393dba2d0a1afec812161d37b7868c8ce18f973f27ff673", "role": "P11_D_source_identity_and_route_contract"},
+    {"relative_path": "majorana_certificate_p11d_source_runtime_evidence_feasibility_report.json", "sha256": "17cb3c507c095886c1726510dddedec913c3dd6a5b0a8a53c59d5a602e9b9011", "role": "P11_D_route_not_custody_result"}
+  ],
+  "official_primary_sources": [
+    {"url": "https://snapshot.ubuntu.com/", "retrieved_on": "2026-07-19", "supports": "timestamped_Ubuntu_archive_snapshot_selection_for_reproducible_queries", "byte_pinned": false},
+    {"url": "https://manpages.ubuntu.com/manpages/resolute/man8/apt-get.8.html", "retrieved_on": "2026-07-19", "supports": "deb_src_exact_source_name_version_and_download_only_without_unpack", "byte_pinned": false},
+    {"url": "https://manpages.ubuntu.com/manpages/resolute/man5/apt.conf.5.html", "retrieved_on": "2026-07-19", "supports": "isolated_source_list_state_lists_cache_archives_and_status_paths", "byte_pinned": false},
+    {"url": "https://manpages.ubuntu.com/manpages/resolute/man8/apt-secure.8.html", "retrieved_on": "2026-07-19", "supports": "signed_InRelease_to_index_to_archive_checksum_authentication_chain", "byte_pinned": false},
+    {"url": "https://www.debian.org/doc/debian-policy/ch-controlfields.html", "retrieved_on": "2026-07-19", "supports": "dsc_and_source_control_SHA256_fields", "byte_pinned": false},
+    {"url": "https://www.debian.org/doc/debian-policy/ch-source.html", "retrieved_on": "2026-07-19", "supports": "source_package_dsc_and_compressed_source_part_composition", "byte_pinned": false}
+  ],
+  "snapshot_anchor": {
+    "snapshot_id": "20260719T064131Z",
+    "derivation": "UTC_instant_of_P11_D_result_commit_00d74c729bbc9322e215d6beab603f28e79d9923",
+    "required_same_snapshot_for_update_index_queries_and_all_source_downloads": true,
+    "snapshot_service_availability_or_package_presence_checked_in_P11_E0": false,
+    "future_P11_E1_must_fail_closed_if_snapshot_or_any_exact_version_is_unavailable": true,
+    "fallback_to_latest_or_different_snapshot_allowed": false
+  },
+  "exact_source_identities": [
+    {"source_package": "gcc-15", "source_version": "15.2.0-16ubuntu1", "binary_binding": "gcc-15=15.2.0-16ubuntu1", "role": "selected_compiler_source"},
+    {"source_package": "binutils", "source_version": "2.46-3ubuntu2", "binary_binding": "binutils=2.46-3ubuntu2", "role": "selected_linker_and_binary_utilities_source"},
+    {"source_package": "linux", "source_version": "7.0.0-28.28", "binary_binding": "linux-image-unsigned-7.0.0-28-generic=7.0.0-28.28", "role": "selected_unsigned_kernel_source"},
+    {"source_package": "linux-signed", "source_version": "7.0.0-28.28", "binary_binding": "linux-image-7.0.0-28-generic=7.0.0-28.28", "role": "installed_signed_kernel_packaging_source"}
+  ],
+  "isolated_custody_layout": {
+    "root_placeholder": "${CUSTODY_ROOT}",
+    "root_must_be_absolute_non_symlink_new_or_empty_and_outside_git_worktrees": true,
+    "recommended_future_root": "/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e1-source-custody",
+    "repository_archive_ingestion_allowed": false,
+    "paths": [
+      {"relative_path": "apt/apt.conf", "role": "sole_APT_CONFIG"},
+      {"relative_path": "apt/ubuntu.sources", "role": "sole_deb_src_configuration"},
+      {"relative_path": "apt/empty-status", "role": "empty_isolated_dpkg_status"},
+      {"relative_path": "apt/lists", "role": "isolated_signed_index_state"},
+      {"relative_path": "apt/archives", "role": "isolated_APT_archive_cache"},
+      {"relative_path": "incoming/gcc-15", "role": "transactional_unverified_download_directory"},
+      {"relative_path": "incoming/binutils", "role": "transactional_unverified_download_directory"},
+      {"relative_path": "incoming/linux", "role": "transactional_unverified_download_directory"},
+      {"relative_path": "incoming/linux-signed", "role": "transactional_unverified_download_directory"},
+      {"relative_path": "accepted", "role": "immutable_verified_archive_bytes_only"},
+      {"relative_path": "receipts", "role": "canonical_JSON_receipts_and_raw_command_logs"}
+    ],
+    "incoming_and_accepted_must_share_filesystem_for_atomic_rename": true,
+    "accepted_files_are_never_overwritten_or_deleted_by_retry": true,
+    "symlinks_hardlinks_devices_fifos_and_sockets_forbidden_below_root": true
+  },
+  "deb822_source_template": {
+    "filename": "${CUSTODY_ROOT}/apt/ubuntu.sources",
+    "exact_utf8_text": "Types: deb-src\nURIs: https://archive.ubuntu.com/ubuntu/\nSuites: resolute resolute-updates\nComponents: main restricted universe multiverse\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\nSnapshot: 20260719T064131Z\n\nTypes: deb-src\nURIs: https://security.ubuntu.com/ubuntu/\nSuites: resolute-security\nComponents: main restricted universe multiverse\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\nSnapshot: 20260719T064131Z\n",
+    "only_deb_src_entries": true,
+    "trusted_yes_allow_insecure_or_signature_bypass_present": false,
+    "suite_or_component_substitution_allowed": false,
+    "keyring_path_must_be_regular_non_symlink_and_raw_SHA256_receipted_before_update": true
+  },
+  "apt_config_template": {
+    "filename": "${CUSTODY_ROOT}/apt/apt.conf",
+    "exact_lines": [
+      "Dir::Etc::SourceList \"${CUSTODY_ROOT}/apt/ubuntu.sources\";",
+      "Dir::Etc::SourceParts \"-\";",
+      "Dir::Etc::Parts \"-\";",
+      "Dir::Etc::main \"-\";",
+      "Dir::State::Lists \"${CUSTODY_ROOT}/apt/lists\";",
+      "Dir::State::status \"${CUSTODY_ROOT}/apt/empty-status\";",
+      "Dir::Cache::archives \"${CUSTODY_ROOT}/apt/archives\";",
+      "Dir::Cache::pkgcache \"\";",
+      "Dir::Cache::srcpkgcache \"\";",
+      "APT::Get::List-Cleanup \"false\";",
+      "APT::Get::Download-Only \"true\";",
+      "APT::Get::Only-Source \"true\";",
+      "Acquire::AllowInsecureRepositories \"false\";",
+      "Acquire::AllowDowngradeToInsecureRepositories \"false\";",
+      "Acquire::Check-Valid-Until \"true\";",
+      "Acquire::Languages \"none\";",
+      "Acquire::Retries \"0\";"
+    ],
+    "APT_CONFIG_environment_value": "${CUSTODY_ROOT}/apt/apt.conf",
+    "host_etc_apt_host_lists_host_cache_or_host_dpkg_status_may_be_written": false,
+    "unlisted_system_APT_configuration_may_be_loaded": false
+  },
+  "future_P11_E1_command_plan": [
+    {"step_id": "APT_UPDATE_ISOLATED_SNAPSHOT", "cwd": "${CUSTODY_ROOT}", "environment": {"APT_CONFIG": "${CUSTODY_ROOT}/apt/apt.conf"}, "argv": ["apt-get", "--snapshot", "20260719T064131Z", "update"], "allowed_in_P11_E0": false},
+    {"step_id": "APT_SOURCE_GCC15", "cwd": "${CUSTODY_ROOT}/incoming/gcc-15", "environment": {"APT_CONFIG": "${CUSTODY_ROOT}/apt/apt.conf"}, "argv": ["apt-get", "--snapshot", "20260719T064131Z", "--download-only", "--only-source", "source", "gcc-15=15.2.0-16ubuntu1"], "allowed_in_P11_E0": false},
+    {"step_id": "APT_SOURCE_BINUTILS", "cwd": "${CUSTODY_ROOT}/incoming/binutils", "environment": {"APT_CONFIG": "${CUSTODY_ROOT}/apt/apt.conf"}, "argv": ["apt-get", "--snapshot", "20260719T064131Z", "--download-only", "--only-source", "source", "binutils=2.46-3ubuntu2"], "allowed_in_P11_E0": false},
+    {"step_id": "APT_SOURCE_LINUX", "cwd": "${CUSTODY_ROOT}/incoming/linux", "environment": {"APT_CONFIG": "${CUSTODY_ROOT}/apt/apt.conf"}, "argv": ["apt-get", "--snapshot", "20260719T064131Z", "--download-only", "--only-source", "source", "linux=7.0.0-28.28"], "allowed_in_P11_E0": false},
+    {"step_id": "APT_SOURCE_LINUX_SIGNED", "cwd": "${CUSTODY_ROOT}/incoming/linux-signed", "environment": {"APT_CONFIG": "${CUSTODY_ROOT}/apt/apt.conf"}, "argv": ["apt-get", "--snapshot", "20260719T064131Z", "--download-only", "--only-source", "source", "linux-signed=7.0.0-28.28"], "allowed_in_P11_E0": false}
+  ],
+  "future_executor_preconditions": [
+    "new_independent_P11_G5_authorization_pins_this_exact_contract_raw_SHA256",
+    "operator_supplied_CUSTODY_ROOT_equals_declared_absolute_root_and_is_new_or_empty",
+    "root_and_all_created_parents_are_real_directories_without_symlink_components",
+    "apt_get_version_and_binary_raw_SHA256_are_receipted_before_network_use",
+    "ubuntu_archive_keyring_is_regular_non_symlink_and_raw_SHA256_is_receipted",
+    "apt_templates_match_contract_bytes_after_placeholder_resolution",
+    "empty_status_is_zero_bytes_and_all_incoming_directories_are_empty",
+    "no_host_APT_or_dpkg_lock_is_requested_and_effective_config_resolves_only_to_isolated_writable_paths",
+    "network_scope_is_limited_to_the_two_declared_Ubuntu_archive_origins_and_snapshot_redirects",
+    "no_candidate_source_or_build_tree_exists_below_custody_root"
+  ],
+  "authentication_and_completeness_rules": {
+    "archive_trust_chain": [
+      "pinned_ubuntu_archive_keyring_bytes",
+      "APT_successful_InRelease_signature_and_release_freshness_validation",
+      "InRelease_SHA256_binding_of_each_acquired_Sources_index",
+      "Sources_stanza_SHA256_and_size_binding_of_dsc_and_every_source_part",
+      "dsc_mandatory_Checksums_Sha256_and_size_binding_of_every_referenced_source_part",
+      "locally_recomputed_raw_SHA256_and_size_for_every_retained_byte_file"
+    ],
+    "direct_dsc_OpenPGP_signature_is_supplemental_not_a_substitute_for_archive_chain": true,
+    "unsigned_or_unverifiable_repository_metadata_allowed": false,
+    "Sources_stanza_selection": {
+      "must_match_exact_Package_and_Version": true,
+      "zero_matches": "FAIL_CLOSED",
+      "multiple_identical_matches": "ALLOW_ONLY_IF_ALL_FILENAME_SIZE_SHA256_TUPLES_ARE_IDENTICAL",
+      "multiple_conflicting_matches": "FAIL_CLOSED"
+    },
+    "dsc_parser": {
+      "cleartext_signature_envelope_may_be_removed_without_modifying_retained_raw_dsc": true,
+      "duplicate_control_fields_forbidden": true,
+      "duplicate_Checksums_Sha256_filenames_forbidden": true,
+      "filename_must_equal_basename_and_have_no_path_component_equal_to_dot_or_dotdot": true,
+      "sha256_must_be_exactly_64_lowercase_hex": true,
+      "size_must_be_canonical_nonnegative_decimal_integer": true,
+      "Files_or_Checksums_Sha1_may_not_override_Checksums_Sha256": true
+    },
+    "required_set_equalities": [
+      "downloaded_raw_archive_basenames_equal_Sources_Checksums_Sha256_basenames",
+      "dsc_referenced_non_dsc_basenames_equal_Sources_non_dsc_basenames",
+      "every_size_and_SHA256_tuple_matches_between_Sources_dsc_and_local_bytes"
+    ],
+    "unexpected_extra_archive_file": "FAIL_CLOSED",
+    "missing_referenced_archive_file": "FAIL_CLOSED",
+    "archive_unpack_patch_or_source_tree_materialization_allowed": false
+  },
+  "space_and_transaction_rules": {
+    "expected_download_bytes_must_be_derived_from_authenticated_Sources_entries_before_source_downloads": true,
+    "minimum_free_bytes_formula": "expected_download_bytes + max(67108864, ceil(expected_download_bytes / 10))",
+    "free_space_check_scope": "filesystem_containing_CUSTODY_ROOT",
+    "insufficient_or_unknown_free_space": "FAIL_CLOSED_BEFORE_SOURCE_DOWNLOAD",
+    "one_package_per_empty_incoming_directory": true,
+    "acceptance_unit": "complete_verified_package_archive_set_plus_canonical_receipt",
+    "publish_operation": "same_filesystem_atomic_rename_from_incoming_to_accepted_package_version_directory",
+    "partial_package_acceptance_allowed": false,
+    "cross_package_overwrite_or_deduplication_allowed": false
+  },
+  "canonical_receipt_contract": {
+    "receipt_schema_id": "MAJORANA-P11-E1-SOURCE-ARCHIVE-CUSTODY-RECEIPT-V1",
+    "one_canonical_JSON_receipt_per_source_package": true,
+    "required_fields": [
+      "schema_version",
+      "source_package",
+      "source_version",
+      "snapshot_id",
+      "source_stanza_origin_suite_component",
+      "APT_CONFIG_raw_SHA256",
+      "deb822_source_raw_SHA256",
+      "ubuntu_archive_keyring_raw_SHA256",
+      "InRelease_relative_path_size_SHA256",
+      "Sources_index_relative_path_size_SHA256",
+      "dsc_relative_path_size_SHA256",
+      "complete_source_part_relative_path_size_SHA256_rows",
+      "command_argv_cwd_environment_exit_status_and_stdout_stderr_SHA256_rows",
+      "authentication_chain_status",
+      "set_equality_status",
+      "accepted_directory_relative_path"
+    ],
+    "aggregate_manifest_must_sort_by_source_package_then_filename": true,
+    "receipt_and_aggregate_manifest_must_be_canonical_ASCII_JSON_without_trailing_newline": true,
+    "raw_command_logs_are_retained_but_are_not_archive_identity": true,
+    "receipt_without_retained_verified_bytes_is_not_custody": true
+  },
+  "failure_cleanup_and_retry": {
+    "any_nonzero_exit_signature_failure_hash_mismatch_size_mismatch_parse_error_missing_or_extra_file_is_terminal_for_that_attempt": true,
+    "on_failure_delete_only_the_current_unaccepted_incoming_package_directory_after_recording_failure_receipt": true,
+    "accepted_bytes_or_receipts_must_never_be_deleted_or_changed_by_failure_cleanup": true,
+    "retry_requires_a_new_empty_incoming_directory_and_same_contract_snapshot_package_and_version": true,
+    "retry_with_changed_snapshot_package_version_source_template_or_APT_config_requires_new_governance": true,
+    "resume_or_reuse_of_partial_download_bytes_allowed": false,
+    "network_success_without_complete_authentication_and_set_equality_is_failure": true
+  },
+  "decision": {
+    "outcome": "SOURCE_ARCHIVE_ACQUISITION_CONTRACT_PACK_ESTABLISHED_AWAITING_INDEPENDENT_AUTHORIZATION",
+    "next_governance_gate": "P11-G5-SOURCE-ARCHIVE-ACQUISITION-AUTHORIZATION-V1",
+    "P11_E1_source_archive_acquisition_authorized": false,
+    "source_archive_custody_established": false,
+    "source_tree_materialized": false,
+    "static_kernel_cgroup_accounting_bound_established": false,
+    "fixed_process_cap_bytes": 2147483648,
+    "exact_static_process_peak_bytes": null,
+    "strict_integer_peak_less_than_fixed_cap": null,
+    "difference_is_proven_headroom": false,
+    "semantic_equivalence_established": false,
+    "implementation_gate": "CLOSED",
+    "execution_gate": "CLOSED",
+    "resource_no_go_inference": false
+  },
+  "nonclaims": [
+    "no_snapshot_availability_or_exact_version_presence_check",
+    "no_APT_configuration_mutation_index_refresh_or_network_access",
+    "no_source_archive_download_authentication_or_custody",
+    "no_archive_unpack_patch_or_source_tree_materialization",
+    "no_kernel_source_reading_or_static_accounting_bound",
+    "no_candidate_source_compile_link_disassembly_or_execution",
+    "no_dynamic_memory_measurement",
+    "no_exact_process_peak_or_proven_headroom",
+    "no_semantic_equivalence_resource_no_go_or_OOM_attribution",
+    "no_S0_or_scientific_result"
+  ],
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11e0_source_archive_acquisition_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e0_source_archive_acquisition_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e0_source_archive_acquisition_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11e0_source_archive_acquisition.py"
+    ],
+    "record_must_be_canonical_JSON_and_reconstructed_from_contract_and_frozen_git_sources": true,
+    "validator_and_tests_may_only_run_git": true,
+    "validator_and_tests_must_not_resolve_DNS_open_network_or_run_APT_GPG_hash_unpack_build_compile_link_or_candidate_commands": true
+  }
+}

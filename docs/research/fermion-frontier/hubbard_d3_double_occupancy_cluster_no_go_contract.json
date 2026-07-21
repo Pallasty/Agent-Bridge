@@ -1,0 +1,103 @@
+{
+  "certificate_type": "hubbard_d3_double_occupancy_cluster_uniform_sup_no_go_v1",
+  "checker_fingerprint": "hubbard_d3_exact_cluster_uniform_sup_no_go_v1",
+  "checker_source_sha256": "32c4c53cb543546cf962a77224bfdbd4c51154adc8f178985d332514e86c5818",
+  "contract_fingerprint": "hubbard_d3_double_occupancy_cluster_uniform_sup_no_go_contract_v1",
+  "expected_witness_sha256": "350fbc2b9627970c5593509e0632d6a0a93f0b54bdcd3b2b0ce4306a073767fd",
+  "fixture_raw_sha256": "107cd7945811370216da25876934256101a315d0853d383f523fbb04e591f793",
+  "maximum_positive_status": "VERIFIED_D3_DOUBLE_OCCUPANCY_CLUSTER_UNIFORM_SUP_NO_GO",
+  "resource_limits": {
+    "max_checker_source_bytes": 131072,
+    "max_cluster_action_outputs": 16384,
+    "max_cluster_modes": 14,
+    "max_clusters": 64,
+    "max_field_terms": 25000,
+    "max_fixture_depth": 8,
+    "max_fixture_encoded_bytes": 65536,
+    "max_fixture_nodes": 32768,
+    "max_fixture_raw_bytes": 1048576,
+    "max_json_bytes": 1048576,
+    "max_pauli_terms": 20000,
+    "max_pinned_source_bytes": 1048576,
+    "max_rational_digits": 128,
+    "max_symbolic_terms": 2748
+  },
+  "schema_version": 1,
+  "scope_claims": {
+    "actual_R100_product_formula_error_lower_bounded": false,
+    "alternative_partition": "NOT_ASSESSED",
+    "binary64_cluster_spectral_norm_used": false,
+    "checker_execution_from_contract_pinned_source_bytes_verified": true,
+    "cluster_field_transition_equals_independent_JW_action_verified": true,
+    "cross_cluster_cancellation": "NOT_ASSESSED",
+    "direct_global_half_sector_norm": "NOT_ASSESSED",
+    "fixed_greedy_14_mode_partition_exactly_recomputed": true,
+    "fixed_k0_cluster_triangle_uniform_supremum_infeasible_verified": true,
+    "fixture_decomposition_and_order_provenance_to_upstream_machine_verified": false,
+    "fixture_decompressed_and_exact_schema_verified": true,
+    "fixture_support_graph_single_component_verified": true,
+    "global_D3_norm_lower_bounded_by_cluster_sum": false,
+    "global_Neel_matrix_element_cluster_norm_lower_bounds_verified": true,
+    "global_half_filled_spin_balanced_sector_action_verified": true,
+    "per_step_evolved_cluster_triangle_ledger": "NOT_ASSESSED_STILL_OPEN",
+    "physical_fermion_fixture_JW_equals_exact_Pauli_D3_verified": true,
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false,
+    "source_pinned_observable_taylor_backend_verified": true
+  },
+  "source_pins": [
+    {
+      "relative_path": "hubbard_strang_observable_taylor_step_checker.py",
+      "role": "exact_L8_double_occupancy_D3_Pauli_oracle_and_base_custody",
+      "sha256": "c0cf77034d97f713c47ae666f015729d4595f445df5b58a36b61adb6274b98b5"
+    },
+    {
+      "relative_path": "hubbard_d3_double_occupancy_symbolic_terms.b85",
+      "role": "compressed_fh_comm_simplified_physical_fermion_term_fixture",
+      "sha256": "a4f5ba58be3c5fe11c560698cea6ae10970b79c83f7fd94d935da981bc8efa00"
+    }
+  ],
+  "upstream_context": {
+    "audited_commit": "859bef092675957ae126e9d3b09dc3c63b213859",
+    "fixture_decomposition_and_order_recomputed_from_upstream_source_by_checker": false,
+    "fixture_generation_role": "simplified symbolic term order and recursive operator records only; the checker independently expands every record and proves its full Jordan-Wigner Pauli sum equals the source-pinned D3 oracle",
+    "hamiltonian_ops_relative_path": "fh_comm/hamiltonian_ops.py",
+    "hamiltonian_ops_sha256": "c8fd4425f573d57823ac6857c66a7b8464db9d84bbe562241c9730c86350c9ea",
+    "official_repository": "https://github.com/qc-tum/fermi_hubbard_commutators",
+    "upstream_binary64_spectral_norm_imported": false,
+    "upstream_code_executed_or_imported_by_checker": false
+  },
+  "witness_policy": {
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "cluster_norm_lower_witness": "maximum absolute matrix element from each cluster acting directly on the global 128-mode checkerboard Neel basis state",
+    "cluster_partition": "fixture-defined order externally audited against fh_comm; reverse term order; seed_first_remaining; repeatedly choose first minimum support addition while union_modes<=14",
+    "fixed_group_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4"
+    ],
+    "fixed_nine_stage_Strang": [
+      "H1/2",
+      "H2/2",
+      "HU/2",
+      "H3/2",
+      "H4",
+      "H3/2",
+      "HU/2",
+      "H2/2",
+      "H1/2"
+    ],
+    "leading_defect_identity": "D3=-i*[B3,D]",
+    "linear_size": 8,
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "n_qubits": 128,
+    "observable": "D=(1/64)*sum_i n_i_up*n_i_down",
+    "partial_cluster_count": 30,
+    "per_observable_allocation": "1/4000",
+    "profile_id": "L8_OBC_U8_T1_R100_DOUBLE_OCCUPANCY_D3_GREEDY14_UNIFORM_SUP_NO_GO",
+    "required_uniform_supremum_D3_coefficient_ceiling": "5/2",
+    "trotter_steps": 100
+  }
+}

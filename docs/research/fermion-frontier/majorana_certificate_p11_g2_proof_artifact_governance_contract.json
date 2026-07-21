@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G2-PROOF-ARTIFACT-GOVERNANCE-CLOSURE-V1",
+  "contract_role": "result_informed_nonimplementing_governance_after_P11_B",
+  "self_relative_path": "majorana_certificate_p11_g2_proof_artifact_governance_contract.json",
+  "required_direct_parent_commit": "9659d7cdf4a75768b358f0085e50dbf9f76bbc02",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "implementation_authority": false,
+    "prototype_or_compilation_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "P11_B_custody": {
+    "result_commit_sha": "9659d7cdf4a75768b358f0085e50dbf9f76bbc02",
+    "contract_relative_path": "majorana_certificate_p11b_preimplementation_contract_pack_contract.json",
+    "contract_raw_sha256": "590ee6f0054aea499145ab388efbca45b20a56306b2f069101990ab206b80f80",
+    "report_relative_path": "majorana_certificate_p11b_preimplementation_contract_pack_report.json",
+    "report_raw_sha256": "491d0a8fec866c3aca14062d667d2fdb133644e6faa34b1ac125ec029e6e3323",
+    "expected_outcome": "PREIMPLEMENTATION_CONTRACT_PACK_DEFINED_NOT_IMPLEMENTATION_AUTHORITY",
+    "expected_target_component_sum_bytes": 1028653056,
+    "expected_explicit_arena_bytes": 872415232,
+    "expected_wide_scratch_bits": 2112,
+    "expected_implementation_gate": "CLOSED",
+    "expected_execution_gate": "CLOSED"
+  },
+  "decision": {
+    "disposition": "OPEN_NONIMPLEMENTING_P11_C_STATIC_PROOF_ARTIFACT_PACK_ONLY",
+    "P11_B_contract_is_not_an_implementation_peak_or_equivalence_proof": true,
+    "fixed_process_cap_bytes": 2147483648,
+    "preimplementation_target_component_sum_bytes": 1028653056,
+    "difference_to_fixed_cap_bytes": 1118830592,
+    "difference_is_proven_headroom": false,
+    "exact_static_process_peak_bytes": null,
+    "strict_integer_peak_less_than_fixed_cap": null,
+    "implementation_gate": "CLOSED",
+    "execution_gate": "CLOSED",
+    "resource_no_go_inference": false
+  },
+  "P11_C_authorization": {
+    "only_allowed_next_gate": "P11-C-STATIC-PROOF-ARTIFACT-PACK-V1",
+    "role": "nonimplementing_independent_rederivation_and_adversarial_validation_of_contract_level_static_artifacts",
+    "allowed_artifacts": [
+      "machine_readable_slot_layout_and_implicit_padding_manifest",
+      "arena_interval_alignment_contiguity_and_nonalias_manifest",
+      "arithmetic_width_derivation_ledger",
+      "runtime_target_sum_and_nonheadroom_ledger",
+      "frozen_prelude_checkpoint_custody_ledger",
+      "independent_contract_artifact_checker",
+      "adversarial_contract_mutation_vectors"
+    ],
+    "checker_must_not_import_P11_B_validator": true,
+    "checker_must_rederive_values_from_the_frozen_P11_B_contract": true,
+    "implementation_source_allowed": false,
+    "C_assembly_or_linker_script_source_allowed": false,
+    "prototype_allowed": false,
+    "compilation_or_linking_allowed": false,
+    "Julia_or_candidate_execution_allowed": false,
+    "benchmark_or_host_measurement_allowed": false,
+    "package_installation_or_environment_mutation_allowed": false,
+    "binary_or_source_archive_download_allowed": false,
+    "network_retrieval_allowed": false,
+    "scientific_schedule_semantics_or_cap_change_allowed": false,
+    "allowed_outcomes": [
+      "STATIC_PROOF_ARTIFACTS_ESTABLISHED_PARTIAL_OBLIGATION_CLOSURE",
+      "ASSESSED_STATIC_PROOF_ARTIFACTS_NOT_ESTABLISHED"
+    ],
+    "both_outcomes_keep_implementation_and_execution_closed": true,
+    "positive_outcome_may_close_only_contract_level_static_artifact_readiness": true,
+    "positive_outcome_cannot_close_toolchain_source_custody_kernel_accounting_postlink_stack_semantic_equivalence_or_exact_process_peak": true,
+    "any_candidate_source_or_execution_requires_a_new_independent_governance_decision": true
+  },
+  "forbidden_actions": [
+    "write_candidate_C_assembly_object_or_runnable_linker_script_source",
+    "compile_link_disassemble_or_execute_a_candidate_or_prototype",
+    "install_update_or_download_a_compiler_linker_library_package_binary_or_source_archive",
+    "run_Julia_or_any_P9_candidate",
+    "claim_contract_level_target_arithmetic_is_an_exact_process_peak_or_runtime_headroom_proof",
+    "claim_static_artifact_readiness_proves_source_implementation_or_frozen_semantic_equivalence",
+    "relax_the_2147483648_byte_cap_or_change_frozen_scientific_semantics",
+    "claim_resource_no_go_OOM_attribution_S0_or_scientific_result"
+  ],
+  "P11_C_lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11c_static_proof_artifact_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11c_static_proof_artifact_manifest.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11c_static_proof_artifact_report.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11c_static_proof_artifact_independent_checker.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11c_static_proof_artifact.py"
+    ],
+    "manifest_and_report_must_be_canonical_JSON": true,
+    "checker_and_tests_are_read_only_git_only_and_nonexecuting": true
+  },
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g2_proof_artifact_governance_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g2_proof_artifact_governance_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g2_proof_artifact_governance_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11_g2_proof_artifact_governance.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

@@ -1,0 +1,1 @@
+{"bounded_read_completed":false,"failure_class":"ARCHIVE_LINK_ENTRY_REJECTED_BY_E3_CONTRACT","failure_entry":"linux-7.0/Documentation/Changes","failure_source_archive":"linux_7.0.0.orig.tar.gz","materialization_completed":false,"next_gate":"P11-G11-POST-SOURCE-INSPECTION-GOVERNANCE-V1","outcome":"CLOSED_MATERIALIZATION_OR_READ_FAILURE","schema_version":1,"source_text_read":false}

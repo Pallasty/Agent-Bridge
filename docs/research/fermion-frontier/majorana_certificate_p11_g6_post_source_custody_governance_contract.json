@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G6-POST-SOURCE-CUSTODY-GOVERNANCE-CLOSURE-V1",
+  "contract_role": "independent_read_only_governance_after_bounded_P11_E1_result",
+  "required_direct_parent_commit": "aac2138c4b02d9e5218f92ddb575d5c17cd38dd3",
+  "P11_E1_custody": {
+    "manifest_relative_path": "majorana_certificate_p11e1_source_archive_custody_manifest.json",
+    "manifest_raw_sha256": "9b30eb4062f59082f1e1b22684afca95bdabf15f94dead5f57c95550994a480d",
+    "report_relative_path": "majorana_certificate_p11e1_source_archive_custody_report.json",
+    "report_raw_sha256": "686fb0cffe0fc8c494b12c0dbce0f34982187823a49bc8d4238017c8277d9b5f",
+    "expected_outcome": "PARTIAL_VERIFIED_SOURCE_ARCHIVES_RETAINED_COMPLETE_SET_CUSTODY_NOT_ESTABLISHED",
+    "accepted_exact_source_identities": [
+      "gcc-15=15.2.0-16ubuntu1",
+      "binutils=2.46-3ubuntu2"
+    ],
+    "unattempted_exact_source_identity": "linux-signed=7.0.0-28.28",
+    "exhausted_exact_source_identity": "linux=7.0.0-28.28",
+    "source_archive_custody_established": false
+  },
+  "findings": [
+    {
+      "finding_id": "P11E1_NETWORK_AUTHORITY_CONSUMED",
+      "status": "PASS",
+      "meaning": "The G5 bounded acquisition authority cannot be reused for another request."
+    },
+    {
+      "finding_id": "P11E1_PARTIAL_BYTES_RETAINED_NOT_COMPLETE_CUSTODY",
+      "status": "PASS",
+      "meaning": "Two complete accepted archive sets remain evidence only; they do not authorize source reading or establish the four-package set."
+    },
+    {
+      "finding_id": "P11E1_RECEIPT_PATH_IDENTITY_DEFECT_PRESERVED",
+      "status": "PASS",
+      "meaning": "Per-file receipts retain pre-rename incoming paths; accepted bytes were independently rehashed, but the defect needs a new remedial design before any future acquisition."
+    },
+    {
+      "finding_id": "P11E1_APT_CONFIGURATION_WARNING_PRESERVED",
+      "status": "PASS",
+      "meaning": "The /etc/apt/-/ warning precludes a complete configuration-isolation proof from this record."
+    }
+  ],
+  "decision": {
+    "disposition": "CLOSE_P11_E1_AS_PARTIAL_RETAINED_EVIDENCE_AND_AUTHORIZE_ONLY_REMEDIAL_ACQUISITION_GOVERNANCE_DESIGN",
+    "P11_E1_network_authority_is_consumed": true,
+    "retry_or_network_acquisition_authorized": false,
+    "archive_unpack_or_source_reading_authorized": false,
+    "candidate_implementation_or_execution_authorized": false,
+    "kernel_accounting_bound_design_authorized": false,
+    "scientific_authority": "NONE",
+    "only_allowed_next_gate": "P11-E1R-REMEDIAL-ACQUISITION-GOVERNANCE-DESIGN-V1",
+    "required_remedial_design_topics": [
+      "independent_root_and_new_authority_with_no_reuse_of_G5_attempt_budget",
+      "receipt_paths_written_only_after_atomic_acceptance_or_bound_to_final_paths",
+      "APT_configuration_that_eliminates_or_fail_closes_on_host_etc_warning",
+      "fresh_snapshot_availability_identity_and_authentication_review",
+      "explicit disposition_of_existing_partial_evidence_without_unpacking_or_reading"
+    ]
+  },
+  "forbidden_actions": [
+    "retry_or_contact_any_network_origin",
+    "modify_or_delete_external_P11_E1_evidence",
+    "unpack_or_read_source_archives",
+    "write_candidate_source_or_build_or_execute",
+    "claim_complete_custody_configuration_isolation_resource_bound_or_scientific_result"
+  ],
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g6_post_source_custody_governance_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g6_post_source_custody_governance_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g6_post_source_custody_governance_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11_g6_post_source_custody_governance.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

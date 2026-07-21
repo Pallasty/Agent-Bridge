@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G3-EVIDENCE-FEASIBILITY-GOVERNANCE-CLOSURE-V1",
+  "contract_role": "result_informed_nonimplementing_governance_after_P11_C",
+  "self_relative_path": "majorana_certificate_p11_g3_evidence_feasibility_governance_contract.json",
+  "required_direct_parent_commit": "61f06e3d9eae013303edcd902bd1ef99bff8930f",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "implementation_authority": false,
+    "prototype_or_compilation_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "P11_C_custody": {
+    "result_commit_sha": "61f06e3d9eae013303edcd902bd1ef99bff8930f",
+    "contract_relative_path": "majorana_certificate_p11c_static_proof_artifact_contract.json",
+    "contract_raw_sha256": "aad97c4a2f91b9bb02cba18d9254bf7cf8e7d4792de08b9d37b1426bd0843531",
+    "manifest_relative_path": "majorana_certificate_p11c_static_proof_artifact_manifest.json",
+    "manifest_raw_sha256": "eccae56a4a1132ff14f82763318892e3e478edc7b9816bfe266932161fc83cde",
+    "report_relative_path": "majorana_certificate_p11c_static_proof_artifact_report.json",
+    "report_raw_sha256": "c4c95d4e06825e9f85185d5859b2d97548a367831839360490667d2394eec968",
+    "expected_outcome": "STATIC_PROOF_ARTIFACTS_ESTABLISHED_PARTIAL_OBLIGATION_CLOSURE",
+    "expected_implicit_zero_padding_bytes_total": 4,
+    "expected_target_component_sum_bytes": 1028653056,
+    "expected_implementation_gate": "CLOSED",
+    "expected_execution_gate": "CLOSED"
+  },
+  "decision": {
+    "disposition": "OPEN_NONIMPLEMENTING_P11_D_SOURCE_CUSTODY_AND_STATIC_RUNTIME_EVIDENCE_FEASIBILITY_AUDIT_ONLY",
+    "P11_C_partial_closure_is_not_source_custody_runtime_accounting_peak_or_equivalence_proof": true,
+    "fixed_process_cap_bytes": 2147483648,
+    "contract_target_component_sum_bytes": 1028653056,
+    "difference_to_fixed_cap_bytes": 1118830592,
+    "difference_is_proven_headroom": false,
+    "exact_static_process_peak_bytes": null,
+    "strict_integer_peak_less_than_fixed_cap": null,
+    "implementation_gate": "CLOSED",
+    "execution_gate": "CLOSED",
+    "resource_no_go_inference": false
+  },
+  "P11_D_authorization": {
+    "only_allowed_next_gate": "P11-D-SOURCE-CUSTODY-AND-STATIC-RUNTIME-EVIDENCE-FEASIBILITY-AUDIT-V1",
+    "role": "read_only_nonimplementing_audit_of_whether_source_archive_custody_and_static_kernel_cgroup_accounting_evidence_can_be_closed",
+    "required_evidence_classes": [
+      "selected_toolchain_binary_to_source_package_identity",
+      "source_archive_authenticity_byte_pinning_and_reproduction_route",
+      "local_source_archive_custody_presence_or_absence",
+      "host_kernel_config_and_cgroup_v2_identity_custody",
+      "cgroup_v2_memory_charge_semantics_and_observable_components",
+      "static_bounds_for_page_tables_kernel_stack_pipe_transport_and_other_accounted_kernel_memory",
+      "exact_process_peak_and_strict_cap_proof_closure_route"
+    ],
+    "read_only_local_paths_allowed": [
+      "/etc/apt",
+      "/var/lib/apt/lists",
+      "/var/cache/apt/archives",
+      "/var/lib/dpkg/status",
+      "/usr/share/doc",
+      "/proc",
+      "/sys/fs/cgroup",
+      "/boot"
+    ],
+    "read_only_local_identity_commands_allowed": ["uname", "dpkg-query", "apt-cache", "stat", "sha256sum"],
+    "read_only_official_primary_documentation_retrieval_allowed": true,
+    "webpage_retrieval_is_not_archive_custody": true,
+    "candidate_source_allowed": false,
+    "C_assembly_or_linker_script_source_allowed": false,
+    "prototype_allowed": false,
+    "compilation_or_linking_allowed": false,
+    "Julia_or_candidate_execution_allowed": false,
+    "benchmark_or_host_measurement_allowed": false,
+    "package_index_update_installation_or_environment_mutation_allowed": false,
+    "binary_or_source_archive_download_allowed": false,
+    "scientific_schedule_semantics_or_cap_change_allowed": false,
+    "allowed_outcomes": [
+      "SOURCE_CUSTODY_AND_STATIC_RUNTIME_EVIDENCE_ROUTES_IDENTIFIED_NOT_PROOFS",
+      "SOURCE_CUSTODY_ROUTE_IDENTIFIED_STATIC_KERNEL_ACCOUNTING_NOT_ESTABLISHED",
+      "CLOSED_NO_AUDITABLE_SOURCE_CUSTODY_OR_STATIC_RUNTIME_EVIDENCE_ROUTE"
+    ],
+    "all_outcomes_keep_implementation_and_execution_closed": true,
+    "audit_may_classify_route_feasibility_but_cannot_claim_archive_custody_or_peak_without_the_bytes_and_complete_bound": true,
+    "any_archive_download_candidate_source_compilation_or_execution_requires_new_independent_governance": true
+  },
+  "forbidden_actions": [
+    "run_apt_update_apt_install_apt_source_or_any_package_mutation",
+    "download_or_unpack_a_binary_or_source_archive",
+    "write_candidate_C_assembly_object_or_runnable_linker_script_source",
+    "compile_link_disassemble_or_execute_a_candidate_or_prototype",
+    "run_Julia_or_any_P9_candidate_or_measure_candidate_memory",
+    "treat_web_metadata_or_a_package_version_string_as_source_archive_byte_custody",
+    "treat_memory_current_or_memory_peak_documentation_as_a_static_exact_peak_bound",
+    "claim_the_contract_target_difference_is_proven_headroom",
+    "relax_the_2147483648_byte_cap_or_change_frozen_scientific_semantics",
+    "claim_semantic_equivalence_resource_no_go_OOM_attribution_S0_or_scientific_result"
+  ],
+  "P11_D_lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11d_source_runtime_evidence_feasibility_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11d_source_runtime_evidence_feasibility_report.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11d_source_runtime_evidence_feasibility_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11d_source_runtime_evidence_feasibility.py"
+    ],
+    "report_must_be_canonical_JSON": true,
+    "validator_may_only_run_git_and_allowlisted_read_only_identity_commands": true,
+    "validator_and_tests_must_not_download_compile_link_or_execute_a_candidate": true
+  },
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g3_evidence_feasibility_governance_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g3_evidence_feasibility_governance_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g3_evidence_feasibility_governance_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11_g3_evidence_feasibility_governance.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

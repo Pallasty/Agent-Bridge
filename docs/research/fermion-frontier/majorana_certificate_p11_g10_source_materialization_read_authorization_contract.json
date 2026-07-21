@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G10-SOURCE-MATERIALIZATION-AND-BOUNDED-READ-AUTHORIZATION-V1",
+  "contract_role": "independent_authorization_review_after_P11_E3",
+  "required_direct_parent_commit": "a86583e3597bce8afc569da9dca2c24976a9111b",
+  "P11_E3_custody": {
+    "record_relative_path": "majorana_certificate_p11e3_source_unpack_read_precondition_record.json",
+    "record_raw_sha256": "b052bd15b525504071092e88ac207760a5d344fff3ced0a759ce2cfacee1c806",
+    "expected_disposition": "SOURCE_UNPACK_READ_PRECONDITION_CONTRACT_ESTABLISHED_AWAITING_G10_AUTHORIZATION",
+    "expected_next_gate": "P11-G10-SOURCE-MATERIALIZATION-AND-BOUNDED-READ-AUTHORIZATION-V1"
+  },
+  "readiness_review": [
+    {"check_id":"immutable_E2R_root_and_distinct_empty_derived_root","status":"PASS"},
+    {"check_id":"pre_and_post_eleven_archive_hash_verification","status":"PASS"},
+    {"check_id":"path_escape_special_file_and_privilege_bit_rejection","status":"PASS"},
+    {"check_id":"per_package_materialization_receipts_and_tree_manifests","status":"PASS"},
+    {"check_id":"bounded_GCC_binutils_linux_linux_signed_read_queries","status":"PASS"},
+    {"check_id":"build_execution_measurement_candidate_and_science_closed","status":"PASS"}
+  ],
+  "decision": {
+    "disposition":"AUTHORIZE_ONE_P11_E3_SAFE_MATERIALIZATION_AND_BOUNDED_READ_RUN",
+    "all_readiness_checks_pass":true,
+    "derived_root":"/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e3-source-inspection",
+    "read_only_access_to_E2R_custody_bytes_authorized":true,
+    "create_and_write_only_derived_root_authorized":true,
+    "authenticated_source_materialization_authorized":true,
+    "bounded_text_search_and_excerpt_hashing_authorized":true,
+    "network_or_package_mutation_authorized":false,
+    "E2R_custody_root_mutation_authorized":false,
+    "source_patch_build_configure_compile_link_execute_or_measure_authorized":false,
+    "candidate_or_kernel_bound_derivation_authorized":false,
+    "scientific_authority":"NONE",
+    "post_run_gate":"P11-G11-POST-SOURCE-INSPECTION-GOVERNANCE-V1"
+  },
+  "operation_limits": {
+    "one_materialization_attempt_per_package":true,
+    "stop_on_first_hash_path_type_or_tool_failure":true,
+    "no_network_environment_and_direct_argv_required":true,
+    "read_queries_must_match_E3_named_topics":true,
+    "excerpts_must_be_bounded_and_record_path_line_range_size_sha256":true,
+    "no_semantic_claim_may_exceed_observed_source_text":true
+  },
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g10_source_materialization_read_authorization_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g10_source_materialization_read_authorization_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g10_source_materialization_read_authorization_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g10_source_materialization_read_authorization.py"],"record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256":true}
+}

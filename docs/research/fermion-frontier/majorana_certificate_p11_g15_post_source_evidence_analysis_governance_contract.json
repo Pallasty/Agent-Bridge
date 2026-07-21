@@ -1,0 +1,35 @@
+{
+  "schema_version":1,
+  "contract_id":"MAJORANA-P11-G15-POST-SOURCE-EVIDENCE-ANALYSIS-GOVERNANCE-V1",
+  "required_direct_parent_commit":"aa1d21de79b0abee53acf0032526103dfab38b71",
+  "E4_custody":{"result_relative_path":"majorana_certificate_p11e4_source_evidence_analysis_result.json","result_raw_sha256":"9330cdf5787be9be803647799bebdf95bf3b88515194f46cea78844e05694ebf","runner_relative_path":"majorana_certificate_p11e4_source_evidence_analysis_runner.py","runner_raw_sha256":"5b0a33a1a151fa4faa03229194490b8f1cd010b3a9a8430712f48d637e7a59dd","expected_disposition":"STOPPED_FAIL_CLOSED_BEFORE_SOURCE_TEXT_READ","expected_source_text_read":false,"expected_excerpt_count":0,"expected_next_gate":"P11-G15-POST-SOURCE-EVIDENCE-ANALYSIS-GOVERNANCE-V1"},
+  "findings":[
+    {"finding_id":"exact_E4_failure_custody_and_zero_read_boundary","status":"PASS"},
+    {"finding_id":"declared_GCC_path_absent_but_nested_archive_manifested","status":"PASS"},
+    {"finding_id":"G14_single_run_authority_consumed_without_relaxation","status":"PASS"},
+    {"finding_id":"E2R_custody_and_E3R_materialized_trees_remain_immutable","status":"PASS"},
+    {"finding_id":"nested_archive_remediation_requires_new_design_and_authorization","status":"PASS"}
+  ],
+  "decision":{
+    "disposition":"CLOSE_FAILED_E4_RUN_AND_AUTHORIZE_ONLY_NESTED_SOURCE_MATERIALIZATION_CONTRACT_DESIGN",
+    "E4_retry_authorized":false,
+    "nested_archive_materialization_authorized":false,
+    "source_text_read_authorized":false,
+    "source_or_custody_mutation_authorized":false,
+    "network_package_build_execution_or_measurement_authorized":false,
+    "kernel_bound_candidate_equivalence_or_science_authorized":false,
+    "scientific_authority":"NONE",
+    "only_allowed_next_gate":"P11-E4R-NESTED-SOURCE-MATERIALIZATION-CONTRACT-DESIGN-V1"
+  },
+  "future_design_requirements":{
+    "GCC_nested_archive_identity_must_bind_to_E3R_manifest":true,
+    "distinct_derived_root_required":true,
+    "exactly_one_nested_archive_layer":true,
+    "archive_path_type_privilege_and_link_graph_checks_required":true,
+    "post_materialization_tree_manifest_required":true,
+    "E2R_and_E3R_roots_read_only":true,
+    "source_analysis_requires_later_independent_authorization":true,
+    "no_in_place_retry_or_contract_relaxation":true
+  },
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g15_post_source_evidence_analysis_governance_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g15_post_source_evidence_analysis_governance_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g15_post_source_evidence_analysis_governance_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g15_post_source_evidence_analysis_governance.py"]}
+}

@@ -1,0 +1,28 @@
+{
+  "source": "Aigner et al., arXiv:2605.12600v1, Figs. 5 and 15",
+  "status": "candidate reconstruction, not author-supplied machine-readable data",
+  "domain": {
+    "linear_size_L": [4, 10],
+    "fermionic_modes_N": "2 L^2"
+  },
+  "count_candidate_formulas": {
+    "dynamic_jw": "42 L^2 - 24 L",
+    "fsn_standard": "16 L^3 - 2 L (L - 1)",
+    "fsn_ladder": "8 L^3 - 2 L (L - 1)"
+  },
+  "depth_status": {
+    "dynamic_jw": "candidate finite-size fit 4 L + 30",
+    "fsn_standard": "leading visual slope about 16 L; no exact source formula",
+    "fsn_ladder": "leading visual slope about 8 L; no exact source formula"
+  },
+  "points": [
+    {"L": 4, "N": 32, "dynamic_jw_count": 576, "fsn_standard_count": 1000, "fsn_ladder_count": 488, "dynamic_jw_depth_fit": 46},
+    {"L": 5, "N": 50, "dynamic_jw_count": 930, "fsn_standard_count": 1960, "fsn_ladder_count": 960, "dynamic_jw_depth_fit": 50},
+    {"L": 6, "N": 72, "dynamic_jw_count": 1368, "fsn_standard_count": 3396, "fsn_ladder_count": 1668, "dynamic_jw_depth_fit": 54},
+    {"L": 7, "N": 98, "dynamic_jw_count": 1890, "fsn_standard_count": 5404, "fsn_ladder_count": 2660, "dynamic_jw_depth_fit": 58},
+    {"L": 8, "N": 128, "dynamic_jw_count": 2496, "fsn_standard_count": 8080, "fsn_ladder_count": 3984, "dynamic_jw_depth_fit": 62},
+    {"L": 9, "N": 162, "dynamic_jw_count": 3186, "fsn_standard_count": 11520, "fsn_ladder_count": 5688, "dynamic_jw_depth_fit": 66},
+    {"L": 10, "N": 200, "dynamic_jw_count": 3960, "fsn_standard_count": 15820, "fsn_ladder_count": 7820, "dynamic_jw_depth_fit": 70}
+  ],
+  "warning": "The integer points and formulas were reconstructed from the plotted schedule. Zero residual against this reconstruction does not prove that the paper states a unique algebraic formula."
+}

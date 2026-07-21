@@ -1,0 +1,555 @@
+{
+  "certificate_type": "l8_adaptive_k_v2_dual_infeasibility_screens_v1",
+  "contract_fingerprint": "hubbard_l8_adaptive_k_v2_dual_screen_contract_v1",
+  "schema_version": 1,
+  "scope_claims": {
+    "both_v2_policies_were_committed_before_formal_replay": true,
+    "child_boundary_or_transition_committed": false,
+    "design_transcript_records_were_not_parsed_or_used_as_result_evidence": true,
+    "double_occupancy_certified_mapped_depth": 2,
+    "double_occupancy_step3_candidate_ceiling_infeasibility_verified": true,
+    "formal_new_step_arithmetic_used_only_the_v2_kernel": true,
+    "magnetization_certified_mapped_depth": 3,
+    "magnetization_step4_candidate_ceiling_infeasibility_verified": true,
+    "physical_reference_qualified": false,
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "ready_gate_eligible": false,
+    "remaining_mapped_steps": "NOT_ASSESSED",
+    "same_byte_positive_magnetization_step3_parent_chain_verified": true,
+    "transitive_same_byte_positive_two_step_parent_chain_verified": true
+  },
+  "screen_policy": {
+    "double_occupancy_policy_id": "hubbard_l8_double_occupancy_step3_adaptive_k_v2",
+    "double_occupancy_policy_sha256": "5099b6e29e52c1dc4ff26b9b4fd408fbd4483e7e4b7a554aa718226336e9c07b",
+    "formal_replay_uses_design_transcript_records": false,
+    "magnetization_policy_id": "hubbard_l8_magnetization_step4_adaptive_k_v2",
+    "magnetization_policy_sha256": "c1300af91ed28c69b309e19ffdb0e772e3e256432b08e1b17adfcea58700dd16",
+    "new_step_arithmetic_kernel_sha256": "f4819f96bf92ac07a9ce5d0be646c8d187b04f37a64c7dccda68f665722d5998",
+    "no_candidate_action": "fail_closed_without_child_boundary_transition_or_depth_increment"
+  },
+  "witness_claim": {
+    "arithmetic_custody": {
+      "design_transcript_records_parsed_or_used_as_result_input": false,
+      "replay_driver_sha256": "01582da649f7df2a0e65dcf8ed251a341b72218eade72dcd3d69ffa627fe1ee3",
+      "root_globals_monkeypatched": false,
+      "root_new_step_arithmetic_helpers_used": false,
+      "v2_kernel_sha256": "f4819f96bf92ac07a9ce5d0be646c8d187b04f37a64c7dccda68f665722d5998"
+    },
+    "checker_fingerprint": "hubbard_l8_adaptive_k_v2_dual_screen_checker_v1",
+    "decision": {
+      "both_candidate_ceiling_infeasibility_screens_verified": true,
+      "child_boundary_transition_or_sidecar_generated": false,
+      "double_occupancy_certified_mapped_depth": 2,
+      "magnetization_certified_mapped_depth": 3,
+      "remaining_R100_steps_exact_Hubbard_error_reference_and_READY": "NOT_ASSESSED"
+    },
+    "parent_chain": {
+      "magnetization_step3_expected_witness_sha256": "e5a1fec288bbb118fbc56adfa2ee9d21e0e5f4eb49196a7301d70b361c592ff7",
+      "same_byte_magnetization_step3_status": "VERIFIED_L8_MAGNETIZATION_STEP3_MAPPED_INTERVAL_CHILD_SUBCERTIFICATE",
+      "transitive_same_byte_two_step_status": "VERIFIED_L8_TWO_STEP_MAPPED_INTERVAL_CHILD_CHAIN_SUBCERTIFICATE",
+      "two_step_execution_verified_inside_step3_parent": true,
+      "two_step_expected_witness_sha256": "b63bcf3b6b8b920630e639215281cd04c065e5226aa430dd417a5515df8ad623"
+    },
+    "policy_precommit": {
+      "double_occupancy_policy_sha256": "5099b6e29e52c1dc4ff26b9b4fd408fbd4483e7e4b7a554aa718226336e9c07b",
+      "formal_output_pins_absent_from_policies": true,
+      "magnetization_policy_sha256": "c1300af91ed28c69b309e19ffdb0e772e3e256432b08e1b17adfcea58700dd16",
+      "policies_committed_before_formal_replay": true
+    },
+    "screen_results": [
+      {
+        "attempted_child_step_index": 4,
+        "certified_mapped_depth_after_screen": 3,
+        "checkpoint_ledger_sha256": "30c538ed5faee21fe92a547ead1e3e2f1726f9ebebaad6f7fa815b64f36ca6fa",
+        "child_boundary_committed": false,
+        "child_transition_committed": false,
+        "completed_checkpoint_count": 28,
+        "configured_candidate_count": 17,
+        "configured_maximum_K": 327680,
+        "design_transcript_records_used_as_result_input": false,
+        "failure_E_before_ticks": "1697274762053234",
+        "failure_budget_prefix_cap_ticks": "1697559491117243",
+        "failure_candidate_evaluations": [
+          {
+            "E_after_if_selected_ticks": "2069096083317370",
+            "candidate_index": 0,
+            "configured_K": 65536,
+            "drop_ticks": "371821321264136",
+            "dropped_term_count": 305982,
+            "effective_retained_count": 65536,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1964900757496010",
+            "candidate_index": 1,
+            "configured_K": 81920,
+            "drop_ticks": "267625995442776",
+            "dropped_term_count": 289598,
+            "effective_retained_count": 81920,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1896675727871554",
+            "candidate_index": 2,
+            "configured_K": 98304,
+            "drop_ticks": "199400965818320",
+            "dropped_term_count": 273214,
+            "effective_retained_count": 98304,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1852194367564770",
+            "candidate_index": 3,
+            "configured_K": 114688,
+            "drop_ticks": "154919605511536",
+            "dropped_term_count": 256830,
+            "effective_retained_count": 114688,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1816247461884345",
+            "candidate_index": 4,
+            "configured_K": 131072,
+            "drop_ticks": "118972699831111",
+            "dropped_term_count": 240446,
+            "effective_retained_count": 131072,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1787582395227068",
+            "candidate_index": 5,
+            "configured_K": 147456,
+            "drop_ticks": "90307633173834",
+            "dropped_term_count": 224062,
+            "effective_retained_count": 147456,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1765033280951586",
+            "candidate_index": 6,
+            "configured_K": 163840,
+            "drop_ticks": "67758518898352",
+            "dropped_term_count": 207678,
+            "effective_retained_count": 163840,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1747745033944427",
+            "candidate_index": 7,
+            "configured_K": 180224,
+            "drop_ticks": "50470271891193",
+            "dropped_term_count": 191294,
+            "effective_retained_count": 180224,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1734101044360105",
+            "candidate_index": 8,
+            "configured_K": 196608,
+            "drop_ticks": "36826282306871",
+            "dropped_term_count": 174910,
+            "effective_retained_count": 196608,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1722840346694313",
+            "candidate_index": 9,
+            "configured_K": 212992,
+            "drop_ticks": "25565584641079",
+            "dropped_term_count": 158526,
+            "effective_retained_count": 212992,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1711941877822365",
+            "candidate_index": 10,
+            "configured_K": 229376,
+            "drop_ticks": "14667115769131",
+            "dropped_term_count": 142142,
+            "effective_retained_count": 229376,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1704147070000610",
+            "candidate_index": 11,
+            "configured_K": 245760,
+            "drop_ticks": "6872307947376",
+            "dropped_term_count": 125758,
+            "effective_retained_count": 245760,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1700431942834948",
+            "candidate_index": 12,
+            "configured_K": 262144,
+            "drop_ticks": "3157180781714",
+            "dropped_term_count": 109374,
+            "effective_retained_count": 262144,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1699180218356445",
+            "candidate_index": 13,
+            "configured_K": 278528,
+            "drop_ticks": "1905456303211",
+            "dropped_term_count": 92990,
+            "effective_retained_count": 278528,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1698509730748889",
+            "candidate_index": 14,
+            "configured_K": 294912,
+            "drop_ticks": "1234968695655",
+            "dropped_term_count": 76606,
+            "effective_retained_count": 294912,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1698071603221789",
+            "candidate_index": 15,
+            "configured_K": 311296,
+            "drop_ticks": "796841168555",
+            "dropped_term_count": 60222,
+            "effective_retained_count": 311296,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "1697689780282785",
+            "candidate_index": 16,
+            "configured_K": 327680,
+            "drop_ticks": "415018229551",
+            "dropped_term_count": 43838,
+            "effective_retained_count": 327680,
+            "feasible_under_current_prefix_cap": false
+          }
+        ],
+        "failure_checkpoint_number_one_based": 29,
+        "failure_maximum_candidate_drop_excess_over_slack_ticks": "130289165542",
+        "failure_policy_max_K_candidate_drop_ticks": "415018229551",
+        "failure_prefix_slack_ticks": "284729064009",
+        "failure_pretruncation_expansion_count": 371518,
+        "failure_record_sha256": "1a8ec75243bc2e3134c1df4586ebcbbbc4f12b9d5b286d5bb0801f37f5702894",
+        "input_step_index": 3,
+        "last_committed_cumulative_drop_ticks": "1697274762053234",
+        "minimum_effective_K_to_meet_prefix": 333983,
+        "observable_id": "staggered_magnetization",
+        "parent_positive_status": "VERIFIED_L8_MAGNETIZATION_STEP3_MAPPED_INTERVAL_CHILD_SUBCERTIFICATE",
+        "policy_id": "hubbard_l8_magnetization_step4_adaptive_k_v2",
+        "policy_sha256": "c1300af91ed28c69b309e19ffdb0e772e3e256432b08e1b17adfcea58700dd16",
+        "positive_child_artifact_generated": false,
+        "required_K_excess_over_policy_maximum": 6303,
+        "resource_summary": {
+          "maximum_expansion_coefficient_tick_bits": 57,
+          "maximum_product_bits": 121,
+          "peak_single_expansion_terms": 397526,
+          "rounding_cumulative_scaled_ticks_squared": "58214000484856634216120234",
+          "term_gate_visits_including_failure": 48646721
+        },
+        "root_arithmetic_globals_unchanged": true,
+        "screen_status": "VERIFIED_POLICY_MAX_K_INFEASIBILITY",
+        "selected_K_history": [
+          81920,
+          81920,
+          98304,
+          98304,
+          114688,
+          114688,
+          131072,
+          131072,
+          147456,
+          147456,
+          163840,
+          180224,
+          180224,
+          180224,
+          196608,
+          196608,
+          196608,
+          196608,
+          212992,
+          229376,
+          245760,
+          262144,
+          278528,
+          294912,
+          311296,
+          327680,
+          327680,
+          327680
+        ],
+        "selected_K_history_sha256": "da62d62c4f71baec52aefc94965dccdf185067e98fe54d95ff4361e1dbe465aa"
+      },
+      {
+        "attempted_child_step_index": 3,
+        "certified_mapped_depth_after_screen": 2,
+        "checkpoint_ledger_sha256": "504964a8ab8cb0d68ccf203f8c70876bbf21b5bd631d621bdaef8500c479b051",
+        "child_boundary_committed": false,
+        "child_transition_committed": false,
+        "completed_checkpoint_count": 21,
+        "configured_candidate_count": 21,
+        "configured_maximum_K": 327680,
+        "design_transcript_records_used_as_result_input": false,
+        "failure_E_before_ticks": "2286550711700036",
+        "failure_budget_prefix_cap_ticks": "2286779942095670",
+        "failure_candidate_evaluations": [
+          {
+            "E_after_if_selected_ticks": "2865010355019060",
+            "candidate_index": 0,
+            "configured_K": 65536,
+            "drop_ticks": "578459643319024",
+            "dropped_term_count": 435718,
+            "effective_retained_count": 65536,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2745691714353951",
+            "candidate_index": 1,
+            "configured_K": 73728,
+            "drop_ticks": "459141002653915",
+            "dropped_term_count": 427526,
+            "effective_retained_count": 73728,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2652504639036866",
+            "candidate_index": 2,
+            "configured_K": 81920,
+            "drop_ticks": "365953927336830",
+            "dropped_term_count": 419334,
+            "effective_retained_count": 81920,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2587904205916761",
+            "candidate_index": 3,
+            "configured_K": 90112,
+            "drop_ticks": "301353494216725",
+            "dropped_term_count": 411142,
+            "effective_retained_count": 90112,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2524189037966539",
+            "candidate_index": 4,
+            "configured_K": 98304,
+            "drop_ticks": "237638326266503",
+            "dropped_term_count": 402950,
+            "effective_retained_count": 98304,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2465421620555666",
+            "candidate_index": 5,
+            "configured_K": 106496,
+            "drop_ticks": "178870908855630",
+            "dropped_term_count": 394758,
+            "effective_retained_count": 106496,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2414879817521085",
+            "candidate_index": 6,
+            "configured_K": 114688,
+            "drop_ticks": "128329105821049",
+            "dropped_term_count": 386566,
+            "effective_retained_count": 114688,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2374222324099630",
+            "candidate_index": 7,
+            "configured_K": 122880,
+            "drop_ticks": "87671612399594",
+            "dropped_term_count": 378374,
+            "effective_retained_count": 122880,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2343318482732593",
+            "candidate_index": 8,
+            "configured_K": 131072,
+            "drop_ticks": "56767771032557",
+            "dropped_term_count": 370182,
+            "effective_retained_count": 131072,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2314788730212377",
+            "candidate_index": 9,
+            "configured_K": 147456,
+            "drop_ticks": "28238018512341",
+            "dropped_term_count": 353798,
+            "effective_retained_count": 147456,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2309221937847158",
+            "candidate_index": 10,
+            "configured_K": 163840,
+            "drop_ticks": "22671226147122",
+            "dropped_term_count": 337414,
+            "effective_retained_count": 163840,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2304187038664125",
+            "candidate_index": 11,
+            "configured_K": 180224,
+            "drop_ticks": "17636326964089",
+            "dropped_term_count": 321030,
+            "effective_retained_count": 180224,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2299841178604606",
+            "candidate_index": 12,
+            "configured_K": 196608,
+            "drop_ticks": "13290466904570",
+            "dropped_term_count": 304646,
+            "effective_retained_count": 196608,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2296774748970355",
+            "candidate_index": 13,
+            "configured_K": 212992,
+            "drop_ticks": "10224037270319",
+            "dropped_term_count": 288262,
+            "effective_retained_count": 212992,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2294478663671426",
+            "candidate_index": 14,
+            "configured_K": 229376,
+            "drop_ticks": "7927951971390",
+            "dropped_term_count": 271878,
+            "effective_retained_count": 229376,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2292803032804019",
+            "candidate_index": 15,
+            "configured_K": 245760,
+            "drop_ticks": "6252321103983",
+            "dropped_term_count": 255494,
+            "effective_retained_count": 245760,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2291392884482039",
+            "candidate_index": 16,
+            "configured_K": 262144,
+            "drop_ticks": "4842172782003",
+            "dropped_term_count": 239110,
+            "effective_retained_count": 262144,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2290114191256646",
+            "candidate_index": 17,
+            "configured_K": 278528,
+            "drop_ticks": "3563479556610",
+            "dropped_term_count": 222726,
+            "effective_retained_count": 278528,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2289030653451813",
+            "candidate_index": 18,
+            "configured_K": 294912,
+            "drop_ticks": "2479941751777",
+            "dropped_term_count": 206342,
+            "effective_retained_count": 294912,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2288271026163039",
+            "candidate_index": 19,
+            "configured_K": 311296,
+            "drop_ticks": "1720314463003",
+            "dropped_term_count": 189958,
+            "effective_retained_count": 311296,
+            "feasible_under_current_prefix_cap": false
+          },
+          {
+            "E_after_if_selected_ticks": "2287625025209861",
+            "candidate_index": 20,
+            "configured_K": 327680,
+            "drop_ticks": "1074313509825",
+            "dropped_term_count": 173574,
+            "effective_retained_count": 327680,
+            "feasible_under_current_prefix_cap": false
+          }
+        ],
+        "failure_checkpoint_number_one_based": 22,
+        "failure_maximum_candidate_drop_excess_over_slack_ticks": "845083114191",
+        "failure_policy_max_K_candidate_drop_ticks": "1074313509825",
+        "failure_prefix_slack_ticks": "229230395634",
+        "failure_pretruncation_expansion_count": 501254,
+        "failure_record_sha256": "f3e78409683eb88c21861a0ae4b1029b8247629d458eb836b30edeaeb2e50820",
+        "input_step_index": 2,
+        "last_committed_cumulative_drop_ticks": "2286550711700036",
+        "minimum_effective_K_to_meet_prefix": 350604,
+        "observable_id": "double_occupancy",
+        "parent_positive_status": "VERIFIED_L8_TWO_STEP_MAPPED_INTERVAL_CHILD_CHAIN_SUBCERTIFICATE",
+        "policy_id": "hubbard_l8_double_occupancy_step3_adaptive_k_v2",
+        "policy_sha256": "5099b6e29e52c1dc4ff26b9b4fd408fbd4483e7e4b7a554aa718226336e9c07b",
+        "positive_child_artifact_generated": false,
+        "required_K_excess_over_policy_maximum": 22924,
+        "resource_summary": {
+          "maximum_expansion_coefficient_tick_bits": 63,
+          "maximum_product_bits": 120,
+          "peak_single_expansion_terms": 501254,
+          "rounding_cumulative_scaled_ticks_squared": "52895966859009042364436135",
+          "term_gate_visits_including_failure": 37271764
+        },
+        "root_arithmetic_globals_unchanged": true,
+        "screen_status": "VERIFIED_POLICY_MAX_K_INFEASIBILITY",
+        "selected_K_history": [
+          73728,
+          81920,
+          90112,
+          98304,
+          114688,
+          122880,
+          147456,
+          163840,
+          163840,
+          180224,
+          196608,
+          212992,
+          229376,
+          229376,
+          245760,
+          245760,
+          262144,
+          262144,
+          294912,
+          311296,
+          327680
+        ],
+        "selected_K_history_sha256": "fdcd6561c7174e40fb42d1dda17dc1630cc445057d97ec6094ac27418ab7c8b8"
+      }
+    ]
+  },
+  "workload_identity": {
+    "attempted_adjacent_transitions": [
+      "3_to_4",
+      "2_to_3"
+    ],
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "initial_state": "checkerboard_Neel_A_up_B_down_Nup32_Ndown32",
+    "linear_size": 8,
+    "n_qubits": 128,
+    "n_sites": 64,
+    "observables": [
+      "staggered_magnetization",
+      "double_occupancy"
+    ],
+    "profile_id": "L8_OBC_U8_T1_R100_NEEL_ADAPTIVE_K_V2_DUAL_SCREEN",
+    "step_duration": "1/100",
+    "trotter_steps": 100
+  }
+}

@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "campaign_id": "FH_L8_dual_observable_measurement_campaign_v1",
+  "evidence_contract_canonical_sha256": "609cbb8e94e05a868fa0ca3c974966187a37793a6f7e4322813d409e83a658b4",
+  "reference_mode": "exact_bounded_planned",
+  "allocation_scope": "all_declared_points",
+  "cells": [
+    {
+      "route": "native_fermions",
+      "R": 25,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "native_fermions",
+      "R": 50,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "native_fermions",
+      "R": 100,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "native_fermions",
+      "R": 200,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "native_fermions",
+      "R": 400,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "native_fermions",
+      "R": 800,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "dynamic_jw_local_grid",
+      "R": 25,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "dynamic_jw_local_grid",
+      "R": 50,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "dynamic_jw_local_grid",
+      "R": 100,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "dynamic_jw_local_grid",
+      "R": 200,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "dynamic_jw_local_grid",
+      "R": 400,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "dynamic_jw_local_grid",
+      "R": 800,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_standard",
+      "R": 25,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_standard",
+      "R": 50,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_standard",
+      "R": 100,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_standard",
+      "R": 200,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_standard",
+      "R": 400,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_standard",
+      "R": 800,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_ladder",
+      "R": 25,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_ladder",
+      "R": 50,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_ladder",
+      "R": 100,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_ladder",
+      "R": 200,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_ladder",
+      "R": 400,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    },
+    {
+      "route": "fsn_ladder",
+      "R": 800,
+      "sampling_mode": "shared_shots",
+      "mitigation_mode": "none",
+      "per_shot_contribution_ranges": {"staggered_magnetization": [-1.0, 1.0], "double_occupancy": [0.0, 1.0]},
+      "acceptance_probability": null,
+      "effective_shot_fraction": null,
+      "sampling_assumption_provenance": ""
+    }
+  ]
+}

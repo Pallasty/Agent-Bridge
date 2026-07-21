@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "snapshot_status": "source_leading_and_derived_bookkeeping_only",
+  "snapshot_provenance": "Values copied from the evidence-bounded resource model; null means the primary source or benchmark has not supplied the field.",
+  "term_order": {
+    "schema_version": 1,
+    "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+    "required_routes": [
+      "native_fermions",
+      "dynamic_jw_local_grid_source_leading",
+      "dynamic_jw_local_grid_figure_candidate_fit",
+      "fsn_standard_figure_candidate_fit",
+      "fsn_ladder_figure_candidate_fit"
+    ],
+    "exports": {}
+  },
+  "first_step": {
+    "schema_version": 1,
+    "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+    "routes": {
+      "native_fermions": {
+        "R": 100,
+        "steady_count_per_step": 448,
+        "steady_depth_per_step": 8,
+        "first_step_extra_count": 64,
+        "first_step_extra_depth": 1,
+        "compiled_exact": false,
+        "provenance": "derived common group-order native schedule; not a source-reported compiled export",
+        "timing": {
+          "cnot_layer_us": null,
+          "non_cnot_us_per_steady_step": null,
+          "first_step_extra_non_cnot_us": null,
+          "timing_provenance": "occurrence-level native transition measurements not supplied"
+        }
+      },
+      "dynamic_jw_local_grid_source_leading": {
+        "R": 100,
+        "steady_count_per_step": 2688,
+        "steady_depth_per_step": 32,
+        "first_step_extra_count": null,
+        "first_step_extra_depth": null,
+        "compiled_exact": false,
+        "provenance": "arXiv:2605.12600v1 Table I/Appendix I source-leading 21N and 4L",
+        "timing": {
+          "cnot_layer_us": null,
+          "non_cnot_us_per_steady_step": null,
+          "first_step_extra_non_cnot_us": null,
+          "timing_provenance": "route timing not supplied"
+        }
+      },
+      "dynamic_jw_local_grid_figure_candidate_fit": {
+        "R": 100,
+        "steady_count_per_step": 2496,
+        "steady_depth_per_step": 62,
+        "first_step_extra_count": null,
+        "first_step_extra_depth": null,
+        "compiled_exact": false,
+        "provenance": "candidate finite-size fit to arXiv:2605.12600v1 Fig. 5; not an author formula",
+        "timing": {
+          "cnot_layer_us": null,
+          "non_cnot_us_per_steady_step": null,
+          "first_step_extra_non_cnot_us": null,
+          "timing_provenance": "route timing not supplied"
+        }
+      },
+      "fsn_standard_figure_candidate_fit": {
+        "R": 100,
+        "steady_count_per_step": 8080,
+        "steady_depth_per_step": 128,
+        "first_step_extra_count": null,
+        "first_step_extra_depth": null,
+        "compiled_exact": false,
+        "provenance": "candidate finite-size fit to arXiv:2605.12600v1 Fig. 5; not an author formula",
+        "timing": {
+          "cnot_layer_us": null,
+          "non_cnot_us_per_steady_step": null,
+          "first_step_extra_non_cnot_us": null,
+          "timing_provenance": "route timing not supplied"
+        }
+      },
+      "fsn_ladder_figure_candidate_fit": {
+        "R": 100,
+        "steady_count_per_step": 3984,
+        "steady_depth_per_step": 64,
+        "first_step_extra_count": null,
+        "first_step_extra_depth": null,
+        "compiled_exact": false,
+        "provenance": "candidate finite-size fit to arXiv:2605.12600v1 Fig. 5; not an author formula",
+        "timing": {
+          "cnot_layer_us": null,
+          "non_cnot_us_per_steady_step": null,
+          "first_step_extra_non_cnot_us": null,
+          "timing_provenance": "route timing not supplied"
+        }
+      }
+    }
+  },
+  "native_transition": {
+    "schema_version": 1,
+    "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+    "route": "native_fermions",
+    "linear_size": 8,
+    "trotter_steps": 100,
+    "compiled_exact": false,
+    "timing_provenance": "",
+    "occurrences": []
+  },
+  "surface_place_route": {
+    "schema_version": 1,
+    "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+    "route": "dynamic_jw_surface_code",
+    "linear_size": 8,
+    "trotter_steps": 100,
+    "logical_sequence_fingerprint": "",
+    "logical_event_count": 1000,
+    "distance": 21,
+    "cycle_us": 1.0,
+    "patch_model": "rotated_surface_code_one_patch_per_tile",
+    "compiled_exact": false,
+    "place_route_validated": false,
+    "timing_evidence_status": "assumed",
+    "error_evidence_status": "assumed",
+    "schedule_provenance": "",
+    "timing_provenance": "",
+    "error_model_provenance": "",
+    "logical_failure_budget": 0.005,
+    "patches": [],
+    "layouts": [],
+    "intervals": []
+  },
+  "convergence": {
+    "schema_version": 2,
+    "workload": {
+      "observable_order": [
+        "staggered_magnetization",
+        "double_occupancy"
+      ],
+      "observables": {
+        "staggered_magnetization": {
+          "definition_fingerprint": "staggered_magnetization_per_site_v1",
+          "physical_range": [-1.0, 1.0],
+          "algorithmic_error_budget": 0.005,
+          "statistical_half_width_budget": 0.01
+        },
+        "double_occupancy": {
+          "definition_fingerprint": "double_occupancy_per_site_v1",
+          "physical_range": [0.0, 1.0],
+          "algorithmic_error_budget": 0.005,
+          "statistical_half_width_budget": 0.01
+        }
+      },
+      "measurement_setting": "joint_occupation_basis",
+      "initial_state": "checkerboard Neel product state",
+      "initial_state_fingerprint": "checkerboard_Neel_product_state_v1",
+      "hamiltonian_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+      "evolution_fingerprint": "FH_L8_UoverT8_tT1_ideal_time_evolution_v1",
+      "trotter_formula": "second-order Suzuki--Trotter (Strang)",
+      "target_R": 100,
+      "planned_R_values": [25, 50, 100, 200, 400, 800],
+      "minimum_stable_intervals": 2,
+      "familywise_error_rate": 0.05,
+      "familywise_method": "bonferroni_bounded_hoeffding",
+      "interval_method": "bounded_hoeffding_or_deterministic",
+      "analysis_plan_fingerprint": "FH_L8_dual_observable_R25_50_100_200_400_800_v1"
+    },
+    "references": null,
+    "required_routes": [
+      "native_fermions",
+      "dynamic_jw_local_grid",
+      "fsn_standard",
+      "fsn_ladder"
+    ],
+    "routes": {}
+  }
+}
