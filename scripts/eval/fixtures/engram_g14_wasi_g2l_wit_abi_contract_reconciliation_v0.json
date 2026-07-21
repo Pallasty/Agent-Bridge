@@ -1,0 +1,75 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2l_wit_abi_contract_reconciliation.v0",
+  "gate": "G2L_WIT_ABI_CONTRACT_RECONCILIATION_STATIC_BLOCKER",
+  "status": "CONTRACT_RECONCILIATION_REQUIRED",
+  "execution_draft_baseline": {
+    "commit": "4db84d614fdff3430a664d1bec8627780ce99168",
+    "tree": "d535e7b9bea5268713374ab4569c70a92c5f066b"
+  },
+  "observed_wit": {
+    "sole_path": "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit",
+    "sha256": "d47b294dc4c7ee3f48d7af8a6233022a75e79533a2f554ec1299639ba3e142be",
+    "package": "agent-bridge:g14-clock-probe@0.1.0",
+    "world": "probe",
+    "export": "typed-report: func() -> typed-report",
+    "imports": [
+      "wasi:clocks/wall-clock@0.2.12",
+      "wasi:clocks/monotonic-clock@0.2.12",
+      "wasi:io/poll@0.2.12"
+    ]
+  },
+  "not_observed": [
+    "abi_sha256",
+    "generated_bindings",
+    "adapter",
+    "component"
+  ],
+  "older_preregistration_expectation": {
+    "export": "agent-bridge:g14-clock-probe/probe.run@0.1.0",
+    "result": "deterministic-clock-report-v0",
+    "matches_observed_wit": false,
+    "automatic_modification_allowed": false
+  },
+  "observed_tooling": {
+    "g2a_candidate_only": {
+      "wasmtime": "46.0.1",
+      "authorizes_parsing_or_dependency_resolution": false
+    },
+    "direct_observable": {
+      "rustc": "1.92.0",
+      "cargo": "1.92.0"
+    },
+    "not_found": [
+      "wasm-tools",
+      "wit-bindgen",
+      "cargo-component",
+      "wasm-ld"
+    ]
+  },
+  "current_authority": {
+    "wit_generation_allowed": false,
+    "component_build_allowed": false,
+    "linker_build_allowed": false,
+    "execution_allowed": false,
+    "runtime_allowed": false,
+    "deploy_allowed": false,
+    "dependency_resolution_allowed": false,
+    "wit_parsing_allowed": false
+  },
+  "only_allowed_successor": {
+    "action": "OWNER_SELECT_CANONICAL_WIT_CONTRACT_AND_SEPARATELY_APPROVE_REVISION",
+    "may_modify_old_preregistration": false,
+    "may_execute_tools": false
+  },
+  "pass_effect": {
+    "opens_permissions": false,
+    "execution_authority": false
+  },
+  "static_bindings": {
+    "algorithm": "sha256_after_replacing_lowercase_64_hex_with_64_zeroes",
+    "docs/design/ENGRAM_G1_4_WASI_G2L_WIT_ABI_CONTRACT_RECONCILIATION_2026_07_21.md": "ed8ce535e131d9d795f2b83051a2e2bb891ef809252053c53b9dd5cc38e531a7",
+    "scripts/eval/fixtures/engram_g14_wasi_g2l_wit_abi_contract_reconciliation_v0.json": "855cb10347223164a9b05b8349a8dc5a69c13c55e63d480e8af9ae104d5aa647",
+    "scripts/eval/check_engram_g14_wasi_g2l_wit_abi_contract_reconciliation.py": "44204e8f36045b287a8850a241e8a312da059df758dcad7bc30745cd856a00e3",
+    "scripts/check-engram-g14-wasi-g2l-wit-abi-contract-reconciliation.sh": "67d3f079d9653eca61986b6599f52f1ebc7ef85fac01b2c734b203e2fcae10db"
+  }
+}
