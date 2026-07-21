@@ -1,6 +1,12 @@
 # G2L execution authorization packet draft
 
-Status: **DRAFT / PROPOSED — NOT OWNER SIGNED — NO EXECUTION AUTHORITY**.
+Status: **HISTORICAL / SUPERSEDED — RETAINED FOR AUDIT; NO CURRENT AUTHORITY**.
+
+The later owner-authorized execution, build, deployment, and live MCP
+verification are recorded in
+`ENGRAM_G1_4_WASI_G2L_STATUS_CONVERGENCE_AND_BUSINESS_COMPONENT_CONTRACT_2026_07_21.md`.
+This packet remains unchanged as historical evidence of the pre-execution
+boundary and must not be interpreted as the current G2L status.
 
 This static packet is based only on commit
 `652c9e1a9ba148cd24a4fbc1987c9ab2a5d49c9e`, tree

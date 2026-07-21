@@ -1,6 +1,12 @@
 # G2L WIT/component/linker authorization preregistration
 
-Status: **STATIC PREREGISTRATION ONLY — ALL EXECUTION AUTHORITY CLOSED**.
+Status: **HISTORICAL / SUPERSEDED — RETAINED FOR AUDIT; NO CURRENT AUTHORITY**.
+
+The structural contract and the subsequently authorized execution path are
+closed by
+`ENGRAM_G1_4_WASI_G2L_STATUS_CONVERGENCE_AND_BUSINESS_COMPONENT_CONTRACT_2026_07_21.md`.
+This preregistration records the earlier boundary and does not describe a
+pending G2L task.
 
 G2L follows the G2G FINAL PASS at master commit
 `f0ea35edc066afe7adb71f7d7d9916cb630de938`, tree

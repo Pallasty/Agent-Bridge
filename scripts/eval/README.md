@@ -732,3 +732,11 @@ diff instrumentation exposed as a draft-row artifact, not a regression.
   record excluded-as-noise pairs in the `excluded` section with a reason.
 - Budget/token lessons: measure with CJK corpora — ASCII corpora underestimate
   line cost ~2.5× (PR#76 lesson).
+## Engram G1.4 G2L status and next business-component contract
+
+The G2L WASI clock-probe lane is closed and live-verified. Its canonical
+status, evidence links, historical-record resolution, and the bounded next
+contract-design objective are recorded in
+`docs/design/ENGRAM_G1_4_WASI_G2L_STATUS_CONVERGENCE_AND_BUSINESS_COMPONENT_CONTRACT_2026_07_21.md`.
+G2L does not open a dynamic registry, arbitrary component execution, native
+sandbox authority, production writes, or candidate/private-data access.

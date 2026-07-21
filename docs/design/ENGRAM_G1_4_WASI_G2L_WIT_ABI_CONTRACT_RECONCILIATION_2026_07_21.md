@@ -1,7 +1,14 @@
 # Engram G1.4 WASI G2L WIT/ABI Contract Reconciliation
 
 Date: 2026-07-21
-Status: `CONTRACT_RECONCILIATION_REQUIRED`
+Status: `RESOLVED — TYPED_REPORT CANONICAL; HISTORICAL RECONCILIATION RECORD`
+
+The reconciliation was resolved by the owner decision to use the observed
+`typed-report` WIT contract. The final build, runtime, deployment, and live
+MCP evidence are indexed by
+`ENGRAM_G1_4_WASI_G2L_STATUS_CONVERGENCE_AND_BUSINESS_COMPONENT_CONTRACT_2026_07_21.md`.
+The remainder of this file is retained to explain the former mismatch and is
+not an active blocker or authorization gate.
 
 ## Purpose and authority boundary
 
