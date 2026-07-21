@@ -71,7 +71,9 @@ def fixture_identity(worktree: Path) -> tuple[str, str, str]:
 
 
 def fixture_json(value: tuple[str, str, str]) -> dict[str, str]:
-    return dict(zip(("manifest_sha256", "lockfile_sha256", "wrapper_sha256"), value, strict=True))
+    if len(value) != 3:
+        raise FailClosed("fixture identity field count mismatch")
+    return dict(zip(("manifest_sha256", "lockfile_sha256", "wrapper_sha256"), value))
 
 
 def toolchain_identity() -> tuple[str, str, str, str, str, str]:
@@ -82,7 +84,9 @@ def toolchain_identity() -> tuple[str, str, str, str, str, str]:
 
 def toolchain_json(value: tuple[str, str, str, str, str, str]) -> dict[str, str]:
     keys = ("rustc_absolute_path", "rustc_sha256", "rustc_version", "cargo_absolute_path", "cargo_sha256", "cargo_version")
-    return dict(zip(keys, value, strict=True))
+    if len(value) != len(keys):
+        raise FailClosed("toolchain identity field count mismatch")
+    return dict(zip(keys, value))
 
 
 def blank_receipt(worktree: Path, target: Path) -> dict[str, Any]:
