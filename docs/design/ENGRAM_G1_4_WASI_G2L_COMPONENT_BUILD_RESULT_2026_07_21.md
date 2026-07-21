@@ -63,11 +63,9 @@ normal isolated attempt then failed while constructing the target world:
 resolution problem, not evidence against the successful direct
 `wit-bindgen` + `wasm-tools` linker path.
 
-The next implementation decision is whether G2L requires the native
-`cargo-component` packaging path. If yes, local dependency registration must
-be fixed in a separate, explicitly scoped follow-up. If G2L requires only a
-valid component with the canonical structural contract, the direct path is
-ready for independent acceptance.
+The owner selected the structural G2L contract. The native `cargo-component`
+packaging issue remains a separate, explicitly scoped follow-up and does not
+block this G2L result.
 
 ## Package identity caveat
 
@@ -76,14 +74,14 @@ ready for independent acceptance.
 `agent-bridge:g14-clock-probe@0.1.0` package and `probe` world, while the
 linker-generated component's structural world is anonymous. This is recorded
 as a contract caveat, not silently treated as an exact nominal-package match.
-An acceptance decision must explicitly choose one of:
+The owner selected the first acceptance mode:
 
-1. structural G2L acceptance (imports, versions, export, and record types);
-2. strict nominal-package acceptance, which requires a linker/packaging path
-   that preserves `agent-bridge:g14-clock-probe@0.1.0` at the component top
-   level.
+1. **selected:** structural G2L acceptance (imports, versions, export, and
+   record types);
+2. not selected: strict nominal-package acceptance, which would require a
+   linker/packaging path that preserves `agent-bridge:g14-clock-probe@0.1.0`
+   at the component top level.
 
 Until that choice is made, the evidence status is:
 
-**STRUCTURAL_BUILD_PASS — NATIVE_CARGO_COMPONENT_UNRESOLVED — NOMINAL_PACKAGE_IDENTITY_REQUIRES_DECISION**
-
+**G2L STRUCTURAL ACCEPTED — NATIVE_CARGO_COMPONENT_UNRESOLVED (NON-BLOCKING FOLLOW-UP)**
