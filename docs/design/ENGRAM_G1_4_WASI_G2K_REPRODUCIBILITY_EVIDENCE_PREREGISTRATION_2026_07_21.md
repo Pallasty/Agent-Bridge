@@ -30,13 +30,15 @@ compile template is:
 ```sh
 CARGO_NET_OFFLINE=true /Users/pallasting/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin/cargo \
   build --offline --locked \
-  --manifest-path scripts/eval/fixtures/engram_g14_wasi_g2g_host_build_v0/Cargo.toml \
-  --target-dir <fresh-target-directory>
+  --manifest-path <receipt-specific-absolute-fixture-manifest> \
+  --target-dir <receipt-specific-fresh-absolute-target>
 ```
 
-The target placeholder is the only variable. Each receipt must bind its
-manifest and lockfile to the G2K fixture bytes, then record a distinct clean
-worktree identifier and target path.
+Those are the only two placeholders. For each receipt, both must be fully
+expanded to that receipt's own absolute paths: the fixture manifest inside its
+clean worktree and its distinct fresh target directory. Each receipt must bind
+its manifest and lockfile to the G2K fixture bytes, then record the clean
+worktree identifier and both expanded paths.
 
 ## Future receipt contract
 
@@ -45,15 +47,19 @@ its Git `HEAD` and tree IDs; the absolute manifest and target paths; the fully
 expanded command; exit code; compilation-success flag; manifest/lock/wrapper
 and G2E-source pre- and post-SHA-256 as separate named values; `rustc` and `cargo` absolute path,
 SHA-256, and version before and after; raw artifact SHA marked local-only;
-cleanup result; a negative-evidence object for network, rustup-selector,
+cleanup fields including `target_cleanup_attempted`,
+`target_cleanup_confirmed`, and `target_leftovers` (which must be an empty
+array); a negative-evidence object for network, rustup-selector,
 lockfile, dependency, and output-execution indicators; and a fail-closed reason
 when unsuccessful. A receipt without every field is not admissible.
 
 Pair acceptance requires two receipts with different worktree paths and target
 paths; equal G2E/fixture/toolchain bindings; each exit code zero, compilation
-success true, and cleanup true; and no network, selector, lock, dependency, or
-execution indication in either receipt. The fully expanded command must name that receipt's own
-absolute manifest and target path. Pair acceptance must ignore raw artifact SHA
+success true; cleanup attempted and confirmed with an empty leftovers array;
+and no network, selector, lock, dependency, or execution indication in either
+receipt. Any cleanup failure or leftover makes the pair FAIL. The fully
+expanded command must name that receipt's own absolute manifest and target
+path. Pair acceptance must ignore raw artifact SHA
 equality and must not synthesize a normalized artifact digest. Equality between
 receipts is insufficient: each receipt's pre- and post-G2E, fixture, and
 toolchain identities must separately equal the G2K frozen input tuple.
