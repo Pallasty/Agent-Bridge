@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-PUBLIC-EXPORT-SOURCE-AUDIT-V1",
+  "required_ancestor_commit": "1ed5b86bb491f361ccd2c7d4995571bb96c0e9d4",
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "required_routes": [
+    "native_fermions",
+    "dynamic_jw_local_grid_source_leading",
+    "dynamic_jw_local_grid_figure_candidate_fit",
+    "fsn_standard_figure_candidate_fit",
+    "fsn_ladder_figure_candidate_fit"
+  ],
+  "admission_requirements": [
+    "authoritative_public_origin",
+    "version_or_commit_identity",
+    "raw_artifact_sha256",
+    "compiler_identity_and_version",
+    "compiler_configuration_sha256",
+    "environment_lock_sha256",
+    "full_individual_term_event_sequence",
+    "route_and_workload_provenance"
+  ],
+  "audit_boundaries": {
+    "network_download_or_execution_performed": false,
+    "third_party_package_installation_performed": false,
+    "manual_or_figure_reconstruction_admissible": false,
+    "absence_claim_scope": "only_the_named_public_sources_and_searches_on_audit_date"
+  },
+  "expected_disposition": "NO_ADMISSIBLE_PUBLIC_FIVE_ROUTE_EXPORT_SET_IDENTIFIED"
+}

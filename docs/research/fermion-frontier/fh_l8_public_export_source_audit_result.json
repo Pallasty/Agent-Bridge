@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-PUBLIC-EXPORT-SOURCE-AUDIT-V1",
+  "audit_date": "2026-07-20",
+  "working_tree_commit": "1ed5b86bb491f361ccd2c7d4995571bb96c0e9d4",
+  "method": "metadata_and_public_html_review_only; no_artifact_download_or_code_execution",
+  "sources": [
+    {
+      "source_id": "dynamic_jw_primary",
+      "url": "https://arxiv.org/abs/2605.12600",
+      "route_scope": ["dynamic_jw_local_grid_source_leading", "dynamic_jw_local_grid_figure_candidate_fit"],
+      "source_kind": "author_preprint_landing_page",
+      "public_machine_readable_target_export_identified": false,
+      "admission_status": "INSUFFICIENT: no versioned FH-L8 individual-term compiler export identified in reviewed public record"
+    },
+    {
+      "source_id": "fsn_primary",
+      "url": "https://arxiv.org/abs/1711.04789",
+      "route_scope": ["fsn_standard_figure_candidate_fit", "fsn_ladder_figure_candidate_fit"],
+      "source_kind": "author_preprint_landing_page",
+      "public_machine_readable_target_export_identified": false,
+      "admission_status": "INSUFFICIENT: method and Hubbard construction are described, but no versioned FH-L8 individual-term compiler export identified in reviewed public record"
+    },
+    {
+      "source_id": "native_fermions_primary",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10468619/",
+      "route_scope": ["native_fermions"],
+      "source_kind": "open_access_journal_article",
+      "public_machine_readable_target_export_identified": false,
+      "admission_status": "INSUFFICIENT: article states study data are in main text; no versioned FH-L8 individual-term compiler export identified in reviewed public record"
+    },
+    {
+      "source_id": "native_collisional_gate_context",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13083236/",
+      "route_scope": ["native_fermions"],
+      "source_kind": "open_access_journal_article",
+      "public_machine_readable_target_export_identified": false,
+      "admission_status": "CONTEXT_ONLY: gate-level result is not an FH-L8 five-route export"
+    }
+  ],
+  "route_disposition": {
+    "native_fermions": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+    "dynamic_jw_local_grid_source_leading": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+    "dynamic_jw_local_grid_figure_candidate_fit": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+    "fsn_standard_figure_candidate_fit": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+    "fsn_ladder_figure_candidate_fit": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED"
+  },
+  "admitted_exports": [],
+  "synthetic_or_figure_reconstructed_sequence_accepted": false,
+  "audit_disposition": "NO_ADMISSIBLE_PUBLIC_FIVE_ROUTE_EXPORT_SET_IDENTIFIED",
+  "minimum_external_acquisition_request": {
+    "per_required_route": [
+      "immutable public URL or author-signed archive identity",
+      "raw export with SHA-256 and release tag or source commit",
+      "FH-L8 workload parameters and route provenance",
+      "complete ordered individual-term event list for every Trotter step",
+      "compiler name/version, compiler configuration digest, and environment lock digest"
+    ],
+    "acceptance_rule": "admit only after every required route passes every admission requirement"
+  },
+  "next_state": "COLLECT_VERSIONED_PRIMARY_EXPORTS_OR_REMAIN_UNRESOLVED"
+}
