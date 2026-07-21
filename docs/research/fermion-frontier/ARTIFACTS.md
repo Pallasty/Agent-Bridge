@@ -1969,3 +1969,13 @@ so they are versioned normally and are not added to the preservation-only
 - `majorana_p11_closure_validator.py` and its standard-library test validate the
   key commit-parent chain, E4U/E4V external receipt hashes and the G25 closure
   decision after integration.
+
+## FH-L8 external-evidence activation
+
+- `matched_benchmark_evidence_activation_contract.json` binds the current
+  template hashes, required real-evidence deliverables and fail-closed baseline.
+- `matched_benchmark_evidence_activation_validator.py` invokes the existing
+  term-order, campaign, reference, native, surface and matched-manifest
+  validators together; its test asserts the required unresolved baseline.
+- `MATCHED_BENCHMARK_EVIDENCE_ACTIVATION_ZH.md` is the operator-facing handoff
+  for replacing templates only with real compiler, measurement and hardware data.

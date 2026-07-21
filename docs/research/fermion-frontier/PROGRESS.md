@@ -2118,3 +2118,13 @@ relaxation, materialization, semantic read or new follow-on contract. The route
 is `TERMINATE_P11_PAX_PATH_MAPPING_ROUTE`. This is a scoped closure of the
 current PAX path-mapping route, not a claim that all source-materialization
 strategies or the Majorana program are impossible.
+
+## Matched benchmark external-evidence activation remains fail-closed
+
+The existing FH-L8 validators now have a single activation contract that binds
+their current templates and checks the baseline jointly. Cross-route term order,
+campaign parameters, bounded reference, native transition, surface place-route
+and the matched evidence manifest all remain unresolved for lack of real external
+evidence. The baseline is explicitly
+`BASELINE_UNRESOLVED_EXTERNAL_EVIDENCE_REQUIRED`; it cannot be upgraded by a
+synthetic fixture, assumed hardware value, empty template or uncertified reference.
