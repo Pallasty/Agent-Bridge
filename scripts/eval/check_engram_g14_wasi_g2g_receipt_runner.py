@@ -22,7 +22,7 @@ def main() -> None:
     wrapper = WRAPPER.read_text(encoding="utf-8")
     need(wrapper == "#!/bin/sh\nexec python3 scripts/eval/check_engram_g14_wasi_g2g_receipt_runner.py\n", "wrapper widened")
     required = (
-        "f63fb2810c054f7f2ce827e2a40e4d36372d7e12", "/Users/pallasting/Projects",
+        "81eaddc51081721cf82db6d44ce571c6f8481187", "/Users/pallasting/Projects",
         'tempfile.mkdtemp(prefix="g2g-receipts.", dir=PROJECTS_ROOT)', "origin/master",
         '"build", "--offline", "--locked", "--manifest-path"', '"--target-dir"',
         'env = os.environ.copy()', 'env["CARGO_NET_OFFLINE"] = "true"',

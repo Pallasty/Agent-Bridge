@@ -14,15 +14,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-FIXED_COMMIT = "f63fb2810c054f7f2ce827e2a40e4d36372d7e12"
+FIXED_COMMIT = "81eaddc51081721cf82db6d44ce571c6f8481187"
 PROJECTS_ROOT = Path("/Users/pallasting/Projects")
 FIXTURE_REL = Path("scripts/eval/fixtures/engram_g14_wasi_g2g_host_build_v0")
 MANIFEST_REL = FIXTURE_REL / "Cargo.toml"
 LOCK_REL = FIXTURE_REL / "Cargo.lock"
 WRAPPER_REL = FIXTURE_REL / "src/lib.rs"
 SOURCE_REL = Path("scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/host/src/lib.rs")
-RUSTC = Path("/Users/pallasting/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin/rustc")
-CARGO = Path("/Users/pallasting/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin/cargo")
+RUSTC = Path("/Users/pallasting/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc")
+CARGO = Path("/Users/pallasting/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo")
 FROZEN_SOURCE = "52f5f2adeed96e4d70b3ddb03d7793bac6f142b7eb8e125eb591eec4f1207343"
 FROZEN_FIXTURE = (
     "187cd13adf218f8bc3bc7f2fb83fe35e658af2b32346b55e1d7cd13746424253",
@@ -30,10 +30,10 @@ FROZEN_FIXTURE = (
     "9a34d87e2d9795c63e49abea5495e4860c649a0d718cf9f38b26b46749a48f0d",
 )
 FROZEN_TOOLCHAIN = (
-    str(RUSTC), "12cab30aa9890d54445e29149a1e82d18fbe457de12801bd11bbe7e5e7fe33a0",
-    "rustc 1.92.0 (ded5c06cf 2025-12-08)", str(CARGO),
-    "03e381389f5b7b8e695a744362f3866478f99034b2cf2df6afd4d42cfdab6f67",
-    "cargo 1.92.0 (344c4567c 2025-10-21)",
+    str(RUSTC), "4f26ad57dcb9b12f9791317a1387e3e8d6ad803d4bd20fcdc65142a91e903d45",
+    "rustc 1.94.0 (4a4ef493e 2026-03-02)", str(CARGO),
+    "cb7151ab1c5fcd42648336a2c98020b1819b0993955c8ba3ed44494772a82bdf",
+    "cargo 1.94.0 (85eff7c80 2026-01-15)",
 )
 NEGATIVE_KEYS = ("network_indication", "rustup_selector_reentry", "lockfile_mutation", "dependency_appearance", "output_execution")
 

@@ -14,7 +14,7 @@ tuple:
 | --- | --- |
 | G2E host source | SHA-256 `52f5f2adeed96e4d70b3ddb03d7793bac6f142b7eb8e125eb591eec4f1207343` |
 | Isolated fixture | pre-registered zero-dependency `[workspace]` manifest and lockfile, each SHA-256 frozen below and recorded in both receipts |
-| Toolchain | direct 1.92.0 absolute `rustc`/`cargo` paths, their R2 SHA-256 values, and `--version` output |
+| Toolchain | direct 1.94.0 absolute `rustc`/`cargo` paths, their SHA-256 values, and `--version` output |
 | Build semantics | `--offline --locked`, explicit fixture manifest, fresh target directory, no output execution |
 | Independence | two distinct clean worktrees and distinct fresh target directories, each with a separate receipt |
 
@@ -28,7 +28,7 @@ The pre-registered fixture is
 compile template is:
 
 ```sh
-CARGO_NET_OFFLINE=true /Users/pallasting/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin/cargo \
+CARGO_NET_OFFLINE=true /Users/pallasting/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo \
   build --offline --locked \
   --manifest-path <receipt-specific-absolute-fixture-manifest> \
   --target-dir <receipt-specific-fresh-absolute-target>
