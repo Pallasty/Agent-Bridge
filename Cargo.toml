@@ -75,6 +75,12 @@ bytes = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 
+# Optional, default-off WASI component host for the G1.4 typed-report proof.
+# The runtime path is intentionally not part of the default Agent-Bridge
+# binary or MCP surface.
+wasmtime = "46.0.1"
+wasmtime-wasi = "46.0.1"
+
 # Storage — pure Rust, bundled SQLite (no system libsqlite3 needed)
 tokio-rusqlite = { version = "0.6", features = ["bundled"] }
 

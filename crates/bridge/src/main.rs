@@ -230,6 +230,19 @@ enum Cmd {
         #[arg(long, env = "AGENT_BRIDGE_HTTP_LISTEN")]
         listen: Option<String>,
     },
+    /// Run the explicitly hash-pinned G1.4 WASI typed-report component.
+    ///
+    /// Available only with `g14-wasi-component-runtime`; this is an operator
+    /// probe, not an MCP tool or an open component/plugin registry.
+    #[cfg(feature = "g14-wasi-component-runtime")]
+    G14WasiComponent {
+        /// Component artifact to load.
+        #[arg(long)]
+        artifact: PathBuf,
+        /// Expected lowercase SHA-256 of the artifact.
+        #[arg(long)]
+        sha256: String,
+    },
     /// v21 — Synaptic Dream introspection (the "thermometer" for the
     /// memory_coactivation graph that α populates).
     ///
@@ -4375,6 +4388,25 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // The synchronous Wasmtime WASI linker must run outside Tokio. Handle the
+    // explicit, default-off component probe before constructing AB's async
+    // runtime; otherwise WASI p2 attempts a nested block_on and panics.
+    #[cfg(feature = "g14-wasi-component-runtime")]
+    {
+        let early_cmd = Cli::parse().cmd.unwrap_or(Cmd::Daemon);
+        if let Cmd::G14WasiComponent { artifact, sha256 } = early_cmd {
+            let runtime = ab_bridge::g14_component_runtime::G14ComponentRuntime::new()?;
+            let report = runtime.execute_typed_report(artifact, &sha256)?;
+            println!(
+                "{{\"wall-epoch-seconds\":{},\"logical-nanoseconds\":{},\"quantum-nanoseconds\":{}}}",
+                report.wall_epoch_seconds,
+                report.logical_nanoseconds,
+                report.quantum_nanoseconds
+            );
+            return Ok(());
+        }
+    }
+
     // TD-02: bound the tokio blocking-thread pool. `#[tokio::main]` uses the
     // default cap of 512, which in practice let blocked `spawn_blocking` tasks
     // (sqlite / pty / a hung host call) accumulate threads (observed 83 -> 242,
@@ -7855,6 +7887,8 @@ async fn real_main() -> Result<()> {
             ab_bridge::embedding_dim_guard::spawn(store.clone());
             ab_bridge::daemon_http::run(store, &listen).await
         }
+        #[cfg(feature = "g14-wasi-component-runtime")]
+        Cmd::G14WasiComponent { .. } => unreachable!(),
         Cmd::Setup { .. }
         | Cmd::Sync { .. }
         | Cmd::OperatorRequest { .. }

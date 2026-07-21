@@ -43,6 +43,8 @@ pub mod github_api;
 pub mod gitlab_api;
 pub mod gos_lite;
 pub mod hub;
+#[cfg(feature = "g14-wasi-component-runtime")]
+pub mod g14_component_runtime;
 pub mod ide;
 pub mod instinct;
 pub mod llm_client;

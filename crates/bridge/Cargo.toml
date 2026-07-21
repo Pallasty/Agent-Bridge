@@ -19,6 +19,9 @@ temporal-evidence-s5-candidate-synthetic = [
     "temporal-evidence-s4-synthetic",
     "ab-store/temporal-evidence-s5-candidate-synthetic",
 ]
+# Default-off G1.4 WASI component host. This exposes only the explicit CLI
+# probe and never registers an arbitrary component MCP tool.
+g14-wasi-component-runtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
 # Reserved marker for legacy Seed substrate UX. The AB runtime no longer links
 # `ab-seed-bridge`; CLI/MCP surfaces report build-time disabled. Build the
 # standalone `crates/seed-bridge` crate for historical replay experiments.
@@ -51,6 +54,8 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 walkdir.workspace = true
 uuid.workspace = true
+wasmtime = { workspace = true, optional = true }
+wasmtime-wasi = { workspace = true, optional = true }
 
 # v20: HTTP daemon for cross-machine forum + presence over Tailscale
 axum = "0.7"
