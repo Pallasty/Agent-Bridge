@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "initial_state_fingerprint": "checkerboard_Neel_product_state_v1",
+  "evolution_fingerprint": "FH_L8_UoverT8_tT1_ideal_time_evolution_v1",
+  "analysis_plan_fingerprint": "FH_L8_dual_observable_R25_50_100_200_400_800_v1",
+  "reference_target": "ideal_exact_time_evolution",
+  "boundary_condition_fingerprint": "square_lattice_L8_open_boundary_v1",
+  "hamiltonian_convention_fingerprint": "spinful_FH_minus_t_hopping_plus_U_nup_ndown_unshifted_v1",
+  "qualification_policy_fingerprint": "reference_qualification_v2_structural_unverified_json_binding",
+  "observable_order": [
+    "staggered_magnetization",
+    "double_occupancy"
+  ],
+  "route_inputs": {
+    "batch_fingerprints": [],
+    "circuit_fingerprints": []
+  },
+  "references": {}
+}

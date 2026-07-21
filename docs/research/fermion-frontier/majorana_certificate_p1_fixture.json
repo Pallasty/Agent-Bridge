@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "fixture_id": "MAJORANA-P1-L2-L3-HUBBARD-ACTION-CADENCE-V1",
+  "fixture_role": "fixed_cross_language_exact_CAR_JW_sparse_action_and_composite_cadence_conformance",
+  "profiles": [
+    {
+      "profile_id": "L2_OBC",
+      "linear_size": 2,
+      "n_sites": 4,
+      "n_modes": 8,
+      "basis_dimension": 256,
+      "dense_matrix_enumeration": true,
+      "spin_resolved_hopping_instance_count": 8,
+      "onsite_instance_count": 4,
+      "local_Sz_observable_count": 4,
+      "campaign_observable_count": 2,
+      "operator_instance_count": 18,
+      "occupation_action_column_count": 4608,
+      "dense_matrix_entry_count": 1179648,
+      "unique_composite_count": 12,
+      "unique_constituent_count": 28,
+      "unique_truncation_boundary_count": 20,
+      "r2_composite_occurrence_count": 48,
+      "r2_constituent_occurrence_count": 112,
+      "r2_truncation_boundary_count": 80,
+      "r2_omitted_identity_phase_exponent_in_exp_minus_i_x": "8"
+    },
+    {
+      "profile_id": "L3_OBC",
+      "linear_size": 3,
+      "n_sites": 9,
+      "n_modes": 18,
+      "basis_dimension": 262144,
+      "dense_matrix_enumeration": false,
+      "spin_resolved_hopping_instance_count": 24,
+      "onsite_instance_count": 9,
+      "local_Sz_observable_count": 9,
+      "campaign_observable_count": 2,
+      "operator_instance_count": 44,
+      "occupation_action_column_count": 11534336,
+      "dense_matrix_entry_count": 3023656976384,
+      "unique_composite_count": 33,
+      "unique_constituent_count": 75,
+      "unique_truncation_boundary_count": 51,
+      "r2_composite_occurrence_count": 132,
+      "r2_constituent_occurrence_count": 300,
+      "r2_truncation_boundary_count": 204,
+      "r2_omitted_identity_phase_exponent_in_exp_minus_i_x": "18"
+    }
+  ],
+  "lattice_and_mode_convention": {
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "site_order": "row_major_zero_based_coordinates_exposed_as_one_based_Julia_sites",
+    "mode_order": "site_major_spin_minor_q_equals_2_times_site_plus_up0_down1",
+    "basis_index_rule": "bit_q_is_occupation_of_mode_q",
+    "bond_group_order": [
+      "H1",
+      "H2",
+      "H3",
+      "H4"
+    ],
+    "raw_strang_group_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "trotter_steps_for_cadence_occurrence_matrix": 2,
+    "total_time": "1",
+    "half_event_duration": "1/4"
+  },
+  "hubbard_generator_convention": {
+    "hamiltonian": "minus_sum_OBC_hopping_plus_8_sum_unshifted_nupndn",
+    "hopping_symbols": [
+      "hopup",
+      "hopdn"
+    ],
+    "hopping_constructor_theta_multiplier": "-1",
+    "onsite_symbol": "nupndn",
+    "onsite_constructor_theta_multiplier": "8",
+    "onsite_constructor_identity_coefficient": "1/4",
+    "hopping_cadence": "truncate_after_complete_composite",
+    "onsite_cadence": "truncate_after_each_constituent",
+    "constituent_order": "certificate_wrapper_executes_unsigned_Majorana_mask_ascending",
+    "upstream_native_applymergetruncate_Dict_order": "NOT_ASSESSED"
+  },
+  "campaign_observables": [
+    {
+      "observable_id": "staggered_magnetization",
+      "definition": "(1/N)*sum_(-1)^(row+column)*(nup-ndn)",
+      "normalization": "1/N"
+    },
+    {
+      "observable_id": "double_occupancy",
+      "definition": "(1/N)*sum_nup*ndn",
+      "normalization": "1/N"
+    }
+  ],
+  "local_observable_constituents": {
+    "symbols": [
+      "Sz"
+    ],
+    "site_domain": "every_row_major_physical_site",
+    "purpose": "prevent_global_staggered_sum_from_masking_site_local_sign_or_mode_errors"
+  },
+  "action_oracle_policy": {
+    "python_expected_route": "direct_exact_CAR_creation_annihilation_and_diagonal_occupation_without_importing_Julia_or_upstream",
+    "julia_observed_route": "pinned_upstream_Majorana_constructors_and_overlapwithfock",
+    "coefficient_domain": "reduced_exact_rationals_with_Gaussian_integer_phases",
+    "L2_coverage": "all_operator_instances_times_all_ket_times_all_bra_entries_evaluated_by_upstream_overlapwithfock",
+    "L3_coverage": "all_operator_instances_times_all_ket_sparse_candidate_action_columns_at_term_derived_flip_support",
+    "L3_outside_support_entries": "algebraically_implied_by_Majorana_flip_support_not_individually_executed",
+    "sparse_action_stream": "UTF8_decimal_ket_tab_semicolon_joined_bra_comma_real_comma_imag_newline_v1",
+    "dense_matrix_stream": "UTF8_decimal_ket_tab_bra_tab_real_tab_imag_newline_v1",
+    "zero_action_columns_are_serialized": true,
+    "action_outputs_are_sorted_by_bra": true
+  },
+  "cadence_execution_probe_policy": {
+    "wrapper": "explicit_unsigned_mask_sorted_MajoranaRotation_apply_merge_and_truncate_sequence",
+    "rotation_angle": "0",
+    "sentinel": "identity_term_with_unit_coefficient",
+    "truncation_observation": "custom_callback_identity_visit_count_binds_each_actual_truncate_call",
+    "native_unsorted_FermionicRotation_execution": "NOT_ASSESSED"
+  },
+  "aggregate_planned_counts": {
+    "profile_count": 2,
+    "operator_instance_count": 62,
+    "hubbard_generator_instance_count": 45,
+    "local_Sz_observable_instance_count": 13,
+    "campaign_observable_instance_count": 4,
+    "occupation_action_column_count": 11538944,
+    "explicit_dense_matrix_entry_count": 1179648,
+    "r2_composite_occurrence_count": 180,
+    "r2_constituent_occurrence_count": 412,
+    "r2_truncation_boundary_count": 284
+  }
+}

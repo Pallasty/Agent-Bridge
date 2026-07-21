@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "fixture_id": "MAJORANA-P0-SMALL-FIXTURE-V1",
+  "primitive_conformance": {
+    "n_fermions": 3,
+    "mask_minimum": 0,
+    "mask_maximum": 63,
+    "even_nonidentity_gate_masks_only": true,
+    "angles_in_order": [
+      "0",
+      "1/8",
+      "-1/8",
+      "1/3",
+      "-1/3",
+      "1/2",
+      "-1/2",
+      "1",
+      "-1"
+    ]
+  },
+  "interval_policy": {
+    "coefficient_domain": "real_hermitian_rational_interval_only",
+    "taylor_order": 5,
+    "maximum_absolute_angle": "1",
+    "outward_quantization_denominator": "18446744073709551616",
+    "quantization_schedule": "each_rotation_product_then_global_postmerge",
+    "rounding_accounting": "absorbed_in_coefficient_boxes_not_added_again_as_scalar",
+    "threshold_epsilon": "1/100",
+    "threshold_rule": "drop_only_if_interval_abs_upper_is_strictly_less_than_epsilon",
+    "equal_or_crossing_threshold_action": "retain"
+  },
+  "composite_conformance": {
+    "n_sites": 2,
+    "spinful": true,
+    "observable": {
+      "symbol": "nupndn",
+      "sites": [1]
+    },
+    "fock_state": {
+      "up_occupied_sites": [1],
+      "down_occupied_sites": [2]
+    },
+    "schrodinger_gates_in_order": [
+      {
+        "symbol": "hopup",
+        "sites": [1, 2],
+        "theta": "1/5"
+      },
+      {
+        "symbol": "nupndn",
+        "sites": [2],
+        "theta": "2/5"
+      },
+      {
+        "symbol": "hopdn",
+        "sites": [1, 2],
+        "theta": "-1/4"
+      }
+    ],
+    "heisenberg_rule": "reverse_composite_occurrences_keep_declared_theta_then_sort_constituents_by_unsigned_mask",
+    "merge_rule": "canonical_global_dedup_before_every_truncation",
+    "zero_rule": "prune_only_exact_zero_interval_after_merge",
+    "hopping_truncation_boundary": "after_complete_composite",
+    "other_composite_truncation_boundary": "after_each_constituent"
+  },
+  "scope_ceiling": {
+    "small_fixture_conformance_only": true,
+    "complex_coefficients": "NOT_ASSESSED",
+    "imaginary_time": "NOT_ASSESSED",
+    "vector_gpu_or_multithreaded_backend": "NOT_ASSESSED",
+    "majorana_weight_unpaired_frequency_sine_or_custom_truncation": "NOT_ASSESSED",
+    "L8_full_propagation": "NOT_ASSESSED",
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  }
+}

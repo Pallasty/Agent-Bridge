@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-E3R-CONFINED-LINK-MATERIALIZATION-CONTRACT-DESIGN-V1",
+  "contract_role": "nonexecuting_link_aware_replacement_for_failed_P11_E3",
+  "required_direct_parent_commit": "29ecb3500b76210eb0666f022b737ae9b42a6b96",
+  "P11_G11_custody": {
+    "record_relative_path": "majorana_certificate_p11_g11_post_source_inspection_governance_record.json",
+    "record_raw_sha256": "470048d9240366ed151022751be939cf3beafa40bfbafa645bd03aeb7d965349",
+    "expected_disposition": "CLOSE_E3_FAILURE_AND_AUTHORIZE_ONLY_CONFINED_LINK_POLICY_CONTRACT_DESIGN",
+    "expected_next_gate": "P11-E3R-CONFINED-LINK-MATERIALIZATION-CONTRACT-DESIGN-V1"
+  },
+  "current_authority": {
+    "materialization_or_source_reading_authorized": false,
+    "failed_E3_root_reuse_or_mutation_authorized": false,
+    "E2R_custody_mutation_authorized": false,
+    "build_execution_measurement_or_candidate_authorized": false,
+    "scientific_authority": "NONE"
+  },
+  "future_operation_identity": {
+    "immutable_custody_root": "/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e2r-source-custody",
+    "failed_E3_root_excluded": "/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e3-source-inspection",
+    "new_empty_derived_root": "/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e3r-source-inspection",
+    "all_eleven_archive_hashes_must_be_reverified": true,
+    "one_attempt_per_package_and_stop_on_first_failure": true
+  },
+  "confined_symlink_policy": {
+    "member_path_must_be_relative_normalized_NUL_free_and_inside_package_root": true,
+    "symlink_target_must_be_relative_nonempty_NUL_free_and_control_free": true,
+    "target_is_resolved_relative_to_link_parent": true,
+    "normalized_target_must_remain_inside_same_package_root": true,
+    "absolute_parent_escape_cross_package_and_custody_targets_are_forbidden": true,
+    "complete_member_graph_is_built_before_materialization": true,
+    "every_link_chain_must_be_acyclic_and_resolve_to_an_existing_regular_file_or_directory": true,
+    "dangling_self_referential_and_mutually_cyclic_links_fail_closed": true,
+    "hardlinks_devices_FIFOs_sockets_setuid_setgid_and_capabilities_remain_forbidden": true,
+    "post_materialization_lstat_graph_must_equal_pre_materialization_link_graph": true,
+    "post_materialization_realpath_of_each_link_must_remain_inside_package_root": true
+  },
+  "future_bounded_read_scope": {
+    "same_E3_named_GCC_binutils_linux_linux_signed_queries_only": true,
+    "maximum_hits_per_package": 20,
+    "maximum_text_file_size_bytes": 2000000,
+    "record_query_path_line_number_line_size_and_line_sha256": true,
+    "no_patch_build_configure_compile_link_execute_measure_or_scientific_inference": true
+  },
+  "future_operation_requires_independent_authorization": true,
+  "only_allowed_next_gate": "P11-G12-CONFINED-LINK-MATERIALIZATION-AUTHORIZATION-V1",
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11e3r_confined_link_materialization_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e3r_confined_link_materialization_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e3r_confined_link_materialization_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11e3r_confined_link_materialization.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

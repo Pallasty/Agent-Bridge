@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-E3-SOURCE-UNPACK-READ-PRECONDITION-CONTRACT-DESIGN-V1",
+  "contract_role": "nonexecuting_contract_for_future_bounded_source_materialization_and_reading",
+  "required_direct_parent_commit": "768928a53af9174fa30e39e80884fa0afdd500f6",
+  "P11_G9_custody": {
+    "record_relative_path": "majorana_certificate_p11_g9_post_remedial_custody_governance_record.json",
+    "record_raw_sha256": "c7e8834297e8dacbd6a54864b563a8c42a40649d49670b390e15376b7acd0993",
+    "expected_disposition": "CLOSE_E2R_AS_COMPLETE_BYTE_CUSTODY_AND_AUTHORIZE_ONLY_P11_E3_PRE_READ_CONTRACT_DESIGN",
+    "expected_next_gate": "P11-E3-SOURCE-UNPACK-READ-PRECONDITION-CONTRACT-DESIGN-V1"
+  },
+  "current_authority": {
+    "external_E2R_evidence_mutation_authorized": false,
+    "archive_unpack_or_source_reading_authorized": false,
+    "network_or_package_operation_authorized": false,
+    "candidate_implementation_or_execution_authorized": false,
+    "kernel_accounting_bound_derivation_authorized": false,
+    "scientific_authority": "NONE"
+  },
+  "future_materialization_identity": {
+    "immutable_custody_root": "/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e2r-source-custody",
+    "new_empty_derived_root": "/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e3-source-inspection",
+    "derived_root_must_be_distinct_non_symlink_and_outside_Git": true,
+    "all_eleven_archive_hashes_must_be_reverified_before_and_after_materialization": true,
+    "custody_root_write_mount_or_metadata_mutation_forbidden": true
+  },
+  "future_safe_materialization_contract": {
+    "only_authenticated_dsc_referenced_parts_may_be_consumed": true,
+    "materialize_each_source_package_into_its_own_empty_directory": true,
+    "reject_absolute_parent_traversal_NUL_duplicate_case_collision_and_control_character_paths": true,
+    "reject_symlink_hardlink_device_fifo_socket_setuid_setgid_and_capability_entries": true,
+    "reject_filesystem_escape_before_and_after_extraction": true,
+    "record_tool_binary_version_argv_stdout_stderr_and_exit_status": true,
+    "record_sorted_final_tree_path_type_mode_size_and_sha256_manifest": true,
+    "no_patch_build_configure_compile_link_execute_or_network_action": true
+  },
+  "future_bounded_read_scope": {
+    "gcc_15": ["driver_and_link_spec_selection", "startup_object_and_linker_invocation_metadata"],
+    "binutils": ["ELF_linker_script_and_program_header_construction", "section_segment_alignment_and_NOLOAD_semantics"],
+    "linux": ["ELF_exec_loader_mapping_and_accounting", "cgroup_v2_memory_charge_and_peak_interfaces"],
+    "linux_signed": ["packaging_identity_relationship_to_linux_source_only"],
+    "read_only_text_search_and_file_excerpt_receipts_allowed_only_after_future_authorization": true,
+    "whole_tree_semantic_inference_candidate_design_and_scientific_claims_forbidden": true
+  },
+  "future_required_outputs": [
+    "pre_and_post_immutable_archive_hash_manifest",
+    "one_materialization_command_receipt_per_source_package",
+    "one_canonical_final_tree_manifest_per_source_package",
+    "bounded_read_query_and_excerpt_hash_receipts",
+    "negative_finding_and_unresolved_gap_ledger"
+  ],
+  "future_operation_requires_independent_authorization": true,
+  "only_allowed_next_gate": "P11-G10-SOURCE-MATERIALIZATION-AND-BOUNDED-READ-AUTHORIZATION-V1",
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11e3_source_unpack_read_precondition_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e3_source_unpack_read_precondition_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e3_source_unpack_read_precondition_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11e3_source_unpack_read_precondition.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

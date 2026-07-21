@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "fixture_id": "MAJORANA-P3-L8-FUSED-ONE-STEP-LOCAL-DEFECT-V1",
+  "fixture_role": "fixed_L8_first_fused_mapped_step_exact_prefix_vs_executed_Float64_thresholded_local_defect_and_expectation_enclosure",
+  "required_parent": {
+    "commit": "c90014ed8569924350d5d3fce4959d31021e0461",
+    "status": "VERIFIED_MAJORANA_P2_L8_STAGGERED_MAGNETIZATION_ONE_STEP_BOUNDED_PREFIX_RESOURCE_FEASIBILITY_SUBCERTIFICATE",
+    "result_contract_sha256": "36071d1648d35f831436623b2b36d30b5f72dd9dafcddb991ea6083e7e4f1813",
+    "certificate_sha256": "2b700d70c75392777d3f756d06199d6e416351f894a8a58bdb0e2a181ff10e09",
+    "fixture_sha256": "252fa0c4ed26db5581bcd9ff0101d18d858faf6d31fb9b6cdcaa821bf318e82a",
+    "policy_sha256": "255845f0e835dbfaf57dbda10bde3d0dd4fbfe0fd2564caf19a60a11e90752c9",
+    "runner_sha256": "03edd9640bc3d83a61ea0c9c7d9e93af3fc683972c517af4a7691e21359e25ed",
+    "checker_sha256": "a495134b32545715ea9dd8044096d54ce477ba25ad1feca7d28034239cb11611"
+  },
+  "frozen_execution_relation": {
+    "workload_fixture": "MAJORANA-P2-L8-FUSED-ONE-STEP-RESOURCE-PREFIX-V1",
+    "observable": "normalized_staggered_magnetization",
+    "initial_state": "checkerboard_Neel_A_up_B_down_Nup32_Ndown32",
+    "linear_size": 8,
+    "n_sites": 64,
+    "n_fermionic_modes": 128,
+    "n_majorana_generators": 256,
+    "mask_type": "UInt256",
+    "exact_mapped_step_duration": "1/100",
+    "trotter_steps_in_campaign": 100,
+    "fused_stage_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "composite_count": 512,
+    "constituent_count": 1152,
+    "truncation_boundary_count": 768,
+    "threshold_rational": "1/17179869184",
+    "threshold_Float64_bits_hex": "3dd0000000000000",
+    "threshold_rule": "drop_actual_Float64_coefficient_only_if_strict_abs_less_than_threshold_after_the_P2_merge_cadence",
+    "P3_must_freshly_execute_the_route": true,
+    "P2_result_is_post_replay_conformance_evidence_not_a_runner_input": true
+  },
+  "exact_prefix_target": {
+    "picture": "Heisenberg_conjugation",
+    "target": "the_untruncated_exact_real_trigonometric_unitary_map_for_the_same_fused_1152_constituent_schedule",
+    "angle_source": "exact_reduced_rational_applied_angle_from_the_frozen_schedule_not_the_Float64_cast",
+    "allowed_exact_applied_angles": [
+      "-1/50",
+      "-1/100",
+      "-1/200",
+      "1/200",
+      "1/100",
+      "1/50"
+    ],
+    "local_map": "commuting_terms_unchanged_and_anticommuting_terms_map_to_cos(theta)_same_mask_plus_signed_sin(theta)_multiplied_mask",
+    "initial_observable_coefficients_are_exact_binary64_dyadics": true,
+    "initial_identity_cancellation_is_exact": true
+  },
+  "outward_arithmetic": {
+    "trigonometric_enclosure": "exact_rational_Taylor_point_plus_symmetric_next_term_remainder_then_outward_fixed_grid_quantization",
+    "taylor_order": 7,
+    "maximum_absolute_exact_angle": "1/50",
+    "trig_grid_denominator": "340282366920938463463374607431768211456",
+    "defect_grid_denominator": "340282366920938463463374607431768211456",
+    "Float64_interpretation": "decode_every_finite_bit_pattern_as_an_exact_dyadic_without_using_decimal_or_host_libm_in_the_checker",
+    "product_defect": "per_anticommuting_cosine_and_sine_contribution_ceil_grid_sup_distance_between_actual_Float64_product_point_and_true_trig_product_interval",
+    "merge_defect": "per_actual_collision_ceil_grid_absolute_difference_between_the_merged_Float64_point_and_the_exact_dyadic_sum_of_premerge_points",
+    "drop_defect": "per_actual_dropped_coefficient_ceil_grid_exact_dyadic_absolute_value",
+    "integer_accumulation": "nonnegative_BigInt_ticks_with_no_downward_final_conversion",
+    "maximum_BigInt_bit_length": 2048,
+    "no_scalar_double_count_of_outward_widening": true
+  },
+  "telescoping_proof": {
+    "actual_state_before_constituent": "A_j_minus_1",
+    "exact_unitary_map": "U_j",
+    "actual_apply_merge_before_threshold": "B_j",
+    "local_numerical_defect": "R_j_equals_B_j_minus_U_j_of_A_j_minus_1",
+    "actual_drop_operator": "D_j",
+    "actual_state_after_boundary": "A_j_equals_B_j_minus_D_j",
+    "recurrence": "E_j_less_or_equal_E_j_minus_1_plus_coefficient_L1_upper_of_R_j_plus_coefficient_L1_upper_of_D_j",
+    "reason_no_future_L1_amplification": "U_j_is_unitary_conjugation_and_preserves_operator_norm",
+    "Majorana_monomial_operator_norm": "1",
+    "final_operator_bound": "sum_all_product_merge_and_drop_upper_ticks_divided_by_the_defect_grid_denominator"
+  },
+  "final_expectation": {
+    "state": "checkerboard_Neel_A_up_B_down_Nup32_Ndown32",
+    "retained_center": "exact_dyadic_sum_of_final_Float64_coefficients_times_independent_Fock_diagonal_elements_in_minus1_0_plus1",
+    "center_quantization": "floor_lower_and_ceil_upper_on_the_defect_grid",
+    "declared_interval": "center_grid_enclosure_plus_or_minus_total_operator_error_upper",
+    "normalized_state_expectation_is_bounded_by_operator_norm": true,
+    "P2_Float64_reduction_is_diagnostic_only": true
+  },
+  "allocation": {
+    "prefix_total_error_allocation": "1/400000",
+    "comparison": "strict_total_operator_error_upper_less_than_allocation",
+    "rationale": "one_over_4000_campaign_reference_allocation_divided_by_100_mapped_steps",
+    "passing_one_prefix_does_not_certify_the_other_99_prefixes_or_their_sum": true
+  },
+  "deterministic_resource_caps": {
+    "maximum_anticommuting_events": 524288,
+    "maximum_product_defect_events": 1048576,
+    "maximum_merge_defect_events": 524288,
+    "maximum_drop_defect_events": 524288,
+    "maximum_accuracy_charged_events": 2097152,
+    "maximum_total_P2_plus_accuracy_charged_events": 67108864,
+    "maximum_trig_table_entries": 6
+  },
+  "host_supervisor_caps": {
+    "systemd_user_scope_cgroup_v2_required": true,
+    "RuntimeMaxSec": "300s",
+    "MemoryMax_bytes": 4294967296,
+    "subprocess_safety_timeout_seconds": 330,
+    "maximum_stdout_bytes": 8388608,
+    "maximum_stderr_bytes": 1048576,
+    "host_cap_failure_branch": "INDETERMINATE"
+  }
+}

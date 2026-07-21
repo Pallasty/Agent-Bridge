@@ -1,0 +1,16 @@
+{
+  "schema_version":1,
+  "contract_id":"MAJORANA-P11-G13-POST-CONFINED-SOURCE-INSPECTION-GOVERNANCE-V1",
+  "required_direct_parent_commit":"960cdd32f276a55a718d909d2c066125b26fc80f",
+  "E3R_custody":{"report_relative_path":"majorana_certificate_p11e3r_source_inspection_report.json","report_raw_sha256":"a2808a07b15f759a26c8f534508db1c1bc67dfd94966f7cc31088bf79c1010cc","expected_outcome":"SOURCE_MATERIALIZATION_AND_BOUNDED_READ_COMPLETED","expected_materialization_completed":true,"expected_pre_post_link_policy_passed":true,"expected_scientific_claim_established":false},
+  "findings":[
+    {"finding_id":"four_version_bound_source_trees_materialized","status":"PASS"},
+    {"finding_id":"tree_and_link_graph_custody_available","status":"PASS"},
+    {"finding_id":"bounded_path_line_hash_receipts_available","status":"PASS"},
+    {"finding_id":"line_hashes_alone_do_not_establish_semantics_or_bounds","status":"PASS"},
+    {"finding_id":"candidate_kernel_bound_measurement_and_science_remain_closed","status":"PASS"}
+  ],
+  "decision":{"disposition":"CLOSE_E3R_AS_SOURCE_LOCATION_EVIDENCE_AND_AUTHORIZE_ONLY_VERSION_BOUND_SOURCE_EVIDENCE_ANALYSIS_CONTRACT_DESIGN","source_tree_mutation_or_additional_read_authorized":false,"build_execution_measurement_or_candidate_authorized":false,"kernel_accounting_bound_derivation_authorized":false,"scientific_authority":"NONE","only_allowed_next_gate":"P11-E4-VERSION-BOUND-SOURCE-EVIDENCE-ANALYSIS-CONTRACT-DESIGN-V1"},
+  "P11_E4_required_scope":{"design_only_repository_artifacts":true,"must_pin_exact_query_receipts_and_tree_manifests":true,"must_define_bounded_excerpt_admission_and_context_window":true,"must_separate_observed_text_interpretation_and_unresolved_gaps":true,"must_cover_GCC_driver_binutils_ELF_linux_exec_and_cgroup_accounting_topics":true,"must_not_read_more_source_or_derive_bounds_in_E4_design":true},
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g13_post_source_inspection_governance_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g13_post_source_inspection_governance_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g13_post_source_inspection_governance_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g13_post_source_inspection_governance.py"]}
+}

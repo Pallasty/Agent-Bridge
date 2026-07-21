@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "route": "native_fermions",
+  "required_fields": {
+    "occurrence_index": "consecutive non-negative integer",
+    "class": "one of H1_half,H2_half,H3_half,H1_full,H4_full,HU_half",
+    "group": "matching/onsite group implied by class",
+    "incoming_layout_id": "non-empty string",
+    "outgoing_layout_id": "non-empty string",
+    "move_legs": "non-negative integer",
+    "move_distance_um": "finite non-negative number",
+    "move_us": "finite non-negative number",
+    "gate_us": "finite non-negative number",
+    "cooling_echo_us": "finite non-negative number",
+    "return_us": "finite non-negative number",
+    "other_us": "finite non-negative number",
+    "transition_us": "sum of timing components",
+    "loss_rate": "finite number in [0,1]",
+    "leakage_rate": "finite number in [0,1]",
+    "measurement_status": "measured, derived, or assumed",
+    "provenance": "non-empty string"
+  },
+  "class_count_formula": {
+    "H1_half": "2",
+    "H2_half": "2R",
+    "H3_half": "2R",
+    "H1_full": "R-1",
+    "H4_full": "R",
+    "HU_half": "2R"
+  },
+  "status_rules": {
+    "complete": "all expected occurrences and fields are present, compiled_exact=true, and every measurement_status=measured",
+    "bookkeeping_closed_estimate": "all occurrences and timing fields are present but compiled_exact=false or at least one measurement is derived/assumed",
+    "unresolved": "header, occurrence, timing, or provenance fields are missing/invalid"
+  }
+}

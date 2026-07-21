@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "certificate_type": "majorana_p0_subcertificate_v1",
+  "status": "VERIFIED_MAJORANA_P0_DETERMINISTIC_INTERVAL_LEDGER_CONFORMANCE_SUBCERTIFICATE",
+  "authority": "fixed_small_fixture_subcertificate_only",
+  "result_contract_sha256": "b5ec90c848c4cf1b71b199d04c8aab9f85a2e128aa0d28195218636d70cce2ce",
+  "precommit_commit_sha": "c6050be2fcc0beb1454465aa77240f6b1f88c71b",
+  "policy_sha256": "73523bc4863410db0b23d42f00468e03525e4e905533c6533f1cc1584f932729",
+  "runtime_lock_sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17",
+  "fixture_sha256": "2db3a2d474f3f85779674e443c8b166cd428276b60f21d37ac210fce08f80a28",
+  "runner_sha256": "67a72a6ac2f02dd7572a48694c9e07ecaf84936411d212b48a996e6710946941",
+  "checker_sha256": "3ceb79998f3cccc7d65bce2a4dbe38d5f808aad35ebf3714b232cd4493a5f820",
+  "canonical_witness_sha256": "b06a7a16bc6697b92e6d3fa05a33089a2437195d5d12133346b68438177d13f8",
+  "claims": [
+    "pinned_Julia_1.11.9_MajoranaPropagation_0.3.0_and_PauliPropagation_0.7.3_runtime_and_loaded_source_custody",
+    "independent_agreement_for_all_4096_ordered_small_mask_multiplication_phase_and_commutation_cases",
+    "independent_agreement_for_all_17856_fixed_primitive_rotation_interval_cases",
+    "unsigned_mask_sorted_two_site_composite_constituent_execution_on_the_frozen_fixture",
+    "outward_rational_interval_merge_before_strict_threshold_drop_and_term_level_dropped_L1_ledger_conformance",
+    "two_fresh_network_isolated_processes_produced_byte_identical_canonical_transcripts"
+  ],
+  "explicit_exclusions": [
+    "L8_full_propagation",
+    "1152_gate_or_100_mapped_step_workload",
+    "product_formula_to_exact_Hubbard_error",
+    "paper_figure_or_parameter_convergence",
+    "complex_coefficients",
+    "imaginary_time",
+    "vector_GPU_or_multithreaded_backend",
+    "top_K_truncation",
+    "Majorana_weight_unpaired_frequency_sine_or_custom_truncation",
+    "arbitrary_circuit_observable_state_or_threshold_generalization",
+    "physical_reference_qualification",
+    "READY_gate_authority",
+    "M4_or_D_route_authority"
+  ],
+  "ready_gate_eligible": false
+}

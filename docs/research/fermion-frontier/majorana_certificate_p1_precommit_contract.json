@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P1-PRECOMMIT-S0",
+  "contract_role": "result_unpinned_formal_replay_input_and_isolation_contract",
+  "required_parent_commit": "87a47403bb84a52cdbe5c741cf8e14d5f7204bb1",
+  "self_relative_path": "majorana_certificate_p1_precommit_contract.json",
+  "source_files": [
+    {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "mode": "100644",
+      "size_bytes": 15336,
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "mode": "100644",
+      "size_bytes": 235,
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f"
+    },
+    {
+      "relative_path": "majorana_certificate_p0_checker.py",
+      "mode": "100644",
+      "size_bytes": 63189,
+      "sha256": "3ceb79998f3cccc7d65bce2a4dbe38d5f808aad35ebf3714b232cd4493a5f820"
+    },
+    {
+      "relative_path": "majorana_certificate_p0_runtime_lock.json",
+      "mode": "100644",
+      "size_bytes": 5281,
+      "sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17"
+    },
+    {
+      "relative_path": "majorana_certificate_p1/majorana_p1_runner.jl",
+      "mode": "100644",
+      "size_bytes": 41754,
+      "sha256": "54cda433aac87676fbae1f5a27259eeba472232997f9762553f0fab2b995823f"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_checker.py",
+      "mode": "100644",
+      "size_bytes": 62922,
+      "sha256": "4325ce276e8bdf91ab511444b90f47c39bad9b7f33ae8df027b21eea00c4bfd0"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_fixture.json",
+      "mode": "100644",
+      "size_bytes": 5433,
+      "sha256": "49924e42549d1cb7bbafd27b80effd2fc3610c08c554b326934676790a1b4a6c"
+    },
+    {
+      "relative_path": "majorana_certificate_p1_policy.json",
+      "mode": "100644",
+      "size_bytes": 15605,
+      "sha256": "64b1afb6790172b705f4be06c659fdc33909fb0741f9954f10dc70c83516e561"
+    },
+    {
+      "relative_path": "test_majorana_certificate_p1.py",
+      "mode": "100644",
+      "size_bytes": 29860,
+      "sha256": "5d4e6af9bdf8d97a8eae28432d3893c3493199c3a9f05ac65badfafa59cdd84c"
+    }
+  ],
+  "result_artifacts_required_absent": [
+    "majorana_certificate_p1_contract.json",
+    "majorana_certificate_p1_certificate.json",
+    "test_majorana_certificate_p1_result.py"
+  ],
+  "formal_replay": {
+    "process_count": 2,
+    "fresh_scratch_and_depot_per_process": true,
+    "network_namespace_isolated": true,
+    "canonical_stdout_must_be_byte_identical": true,
+    "independent_python_oracle_required": true
+  }
+}

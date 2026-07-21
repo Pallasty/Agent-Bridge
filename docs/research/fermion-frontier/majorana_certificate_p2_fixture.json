@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "fixture_id": "MAJORANA-P2-L8-FUSED-ONE-STEP-RESOURCE-PREFIX-V1",
+  "fixture_role": "fixed_L8_OBC_staggered_magnetization_binary64_thresholded_one_mapped_step_execution_resource_feasibility_prefix",
+  "lattice_and_observable": {
+    "linear_size": 8,
+    "n_sites": 64,
+    "n_modes": 128,
+    "n_fermionic_modes": 128,
+    "n_majorana_generators": 256,
+    "mask_type": "UInt256",
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "site_order": "row_major_zero_based_coordinates_exposed_as_one_based_Julia_sites",
+    "mode_order": "site_major_spin_minor_q_equals_2_times_site_plus_up0_down1",
+    "observable_id": "staggered_magnetization",
+    "observable_definition": "(1/64)*sum_(-1)^(row+column)*(nup-ndn)",
+    "observable_initial_nonzero_term_count": 128,
+    "initial_exact_zero_identity_prune_count": 1,
+    "initial_exact_zero_prune_is_outside_the_768_cadence_boundaries": true,
+    "diagnostic_initial_state": "checkerboard_Neel_A_up_B_down_Nup32_Ndown32"
+  },
+  "mapped_step": {
+    "hamiltonian": "minus_sum_OBC_hopping_plus_8_sum_unshifted_nupndn",
+    "total_time": "1",
+    "trotter_steps": 100,
+    "mapped_step_duration": "1/100",
+    "raw_strang_group_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "fused_forward_stage_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "central_H4_fusion": "two_adjacent_commuting_half_events_combined_before_execution",
+    "raw_nonidentity_constituent_count": 1280,
+    "fused_nonidentity_constituent_count": 1152
+  },
+  "heisenberg_prefix": {
+    "picture": "backpropagate_G_dagger_O_G_in_reverse_forward_occurrence_order",
+    "stage_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "stage_count": 9,
+    "prefix_relation": "the_first_complete_fused_mapped_step_of_the_R100_chain",
+    "composite_order_within_stage": "reverse_of_forward_P1_row_major_spin_up_then_down_order",
+    "constituent_order_within_composite": "unsigned_Majorana_bitmask_ascending",
+    "stages": [
+      {
+        "stage_index": 0,
+        "group": "H1",
+        "event_duration": "1/200",
+        "composite_count": 64,
+        "constituent_count": 128,
+        "truncation_boundary_count": 64
+      },
+      {
+        "stage_index": 1,
+        "group": "H2",
+        "event_duration": "1/200",
+        "composite_count": 48,
+        "constituent_count": 96,
+        "truncation_boundary_count": 48
+      },
+      {
+        "stage_index": 2,
+        "group": "HU",
+        "event_duration": "1/200",
+        "composite_count": 64,
+        "constituent_count": 192,
+        "truncation_boundary_count": 192
+      },
+      {
+        "stage_index": 3,
+        "group": "H3",
+        "event_duration": "1/200",
+        "composite_count": 48,
+        "constituent_count": 96,
+        "truncation_boundary_count": 48
+      },
+      {
+        "stage_index": 4,
+        "group": "H4",
+        "event_duration": "1/100",
+        "composite_count": 64,
+        "constituent_count": 128,
+        "truncation_boundary_count": 64
+      },
+      {
+        "stage_index": 5,
+        "group": "H3",
+        "event_duration": "1/200",
+        "composite_count": 48,
+        "constituent_count": 96,
+        "truncation_boundary_count": 48
+      },
+      {
+        "stage_index": 6,
+        "group": "HU",
+        "event_duration": "1/200",
+        "composite_count": 64,
+        "constituent_count": 192,
+        "truncation_boundary_count": 192
+      },
+      {
+        "stage_index": 7,
+        "group": "H2",
+        "event_duration": "1/200",
+        "composite_count": 48,
+        "constituent_count": 96,
+        "truncation_boundary_count": 48
+      },
+      {
+        "stage_index": 8,
+        "group": "H1",
+        "event_duration": "1/200",
+        "composite_count": 64,
+        "constituent_count": 128,
+        "truncation_boundary_count": 64
+      }
+    ],
+    "planned_composite_count": 512,
+    "planned_constituent_count": 1152,
+    "planned_truncation_boundary_count": 768
+  },
+  "execution_semantics": {
+    "coefficient_type": "Float64",
+    "upstream_path": "MajoranaPropagation_MajoranaSum_Dict_cache_applytoall_merge_truncate",
+    "hopping_cadence": "truncate_after_complete_composite",
+    "onsite_cadence": "truncate_after_each_constituent",
+    "truncation_policy": "strict_abs_Float64_coefficient_less_than_exact_binary64_2_pow_minus_34_after_merge_at_the_frozen_cadence_boundary",
+    "threshold_rational": "1/17179869184",
+    "threshold_Float64_bits_hex": "3dd0000000000000",
+    "threshold_comparison": "strict_less_than",
+    "topK_weight_unpaired_frequency_or_custom_truncation": "NOT_USED",
+    "native_unsorted_FermionicRotation_execution": "NOT_USED",
+    "canonical_final_digest_stream": "ascending_unsigned_mask_decimal_tab_Float64_bits_lowercase_hex16_newline",
+    "canonical_resource_ledger_excludes_host_time_RSS_paths_and_timestamps": true
+  },
+  "deterministic_resource_caps": {
+    "maximum_boundary_retained_terms": 65536,
+    "maximum_current_terms_before_constituent": 65536,
+    "maximum_premerge_terms": 65536,
+    "maximum_cap_scan_term_visits": 33554432,
+    "maximum_propagation_term_visits": 33554432,
+    "maximum_truncation_term_visits": 16777216,
+    "maximum_total_charged_term_visits": 67108864,
+    "maximum_composites": 512,
+    "maximum_constituents": 1152,
+    "maximum_truncation_boundaries": 768
+  },
+  "host_supervisor_caps": {
+    "systemd_user_scope_cgroup_v2_required": true,
+    "RuntimeMaxSec": "300s",
+    "MemoryMax_bytes": 4294967296,
+    "subprocess_safety_timeout_seconds": 330,
+    "maximum_stdout_bytes": 8388608,
+    "maximum_stderr_bytes": 1048576,
+    "host_cap_failure_branch": "INDETERMINATE"
+  }
+}

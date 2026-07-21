@@ -1,0 +1,545 @@
+{
+  "bound_source": {
+    "arxiv_version": "2306.10603v2",
+    "authors": "Ansgar Schubert and Christian B. Mendl",
+    "doi": "10.1103/PhysRevB.108.195105",
+    "formula": "K_gamma=sum_{j>gamma}H_j; C=sum_gamma(norm([K_gamma,[K_gamma,H_gamma]])/12+norm([H_gamma,[K_gamma,H_gamma]])/24); R_step_error<=C*T^3/R^2",
+    "group_index_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4"
+    ],
+    "norm_substitution": "each nested commutator is independently Pauli-merged, then operator norm is upper-bounded by coefficient L1",
+    "result": "Proposition 2, Equation (13), citing Childs-et-al Proposition 10",
+    "title": "Trotter error with commutator scaling for the Fermi-Hubbard model"
+  },
+  "certificate_type": "hubbard_strang_commutator_l1_subcertificate_v1",
+  "contract_fingerprint": "hubbard_strang_commutator_contract_v1",
+  "numerical_formula_oracle": {
+    "direct_error_strictly_below_bound": true,
+    "direct_spectral_error_decimal": "0.00037204489565608308",
+    "floating_point_role": "ORACLE_ONLY_NOT_USED_IN_CERTIFIED_EXACT_BOUNDS",
+    "hamiltonians": "H1=X,H2=Z",
+    "nested_norms": {
+      "self_family": "4/1",
+      "tail_family": "4/1"
+    },
+    "status": "VERIFIED_DIRECT_2X2_NUMERICAL_ORACLE",
+    "step_duration": "1/10",
+    "theorem_bound": "1/2000"
+  },
+  "profile_claims": [
+    {
+      "R_step_unitary_error_bound": "11/1875",
+      "action_oracle": {
+        "action_records_sha256": "9db8e4e68ba2095a0b1768a62c2c21006c1fa17e48379621008e042badbd280f",
+        "basis_state_count": 256,
+        "coverage": "ALL_COMPUTATIONAL_BASIS_STATES",
+        "operator_action_comparison_count": 3840,
+        "status": "VERIFIED_INDEPENDENT_SPARSE_ACTION_ORACLE"
+      },
+      "commutator_records": [
+        {
+          "group": "H1",
+          "inner_sha256": "0795978a3990c1b2e73b712a3cf404e85fbaa28ac4f784394b0f32aa528de926",
+          "inner_term_count": 16,
+          "self_nested_l1": "128/1",
+          "self_nested_sha256": "b62d3bed62a99e4ba30842df7855ea383ed5c526903dce8dc4c63c14cfd823b6",
+          "self_nested_term_count": 16,
+          "tail_groups": [
+            "H2",
+            "HU",
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "384/1",
+          "tail_nested_sha256": "ec127cf61990a0ce2a0e58f3ad34c8c59100ca44bf6e72fc6827aaa741df5cd0",
+          "tail_nested_term_count": 80,
+          "tail_term_count": 20
+        },
+        {
+          "group": "H2",
+          "inner_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "inner_term_count": 0,
+          "self_nested_l1": "0/1",
+          "self_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "self_nested_term_count": 0,
+          "tail_groups": [
+            "HU",
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "0/1",
+          "tail_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "tail_nested_term_count": 0,
+          "tail_term_count": 20
+        },
+        {
+          "group": "HU",
+          "inner_sha256": "8bad6dbb69b8855c05b69bfd6f5a93f484e18a0338db321532adc23476aa3f71",
+          "inner_term_count": 16,
+          "self_nested_l1": "256/1",
+          "self_nested_sha256": "773308c71888a42bfa2b82e9f771dbd76593df8ba0f01f941e4b53067bac2e65",
+          "self_nested_term_count": 16,
+          "tail_groups": [
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "128/1",
+          "tail_nested_sha256": "fe19cfcdd2b9c4808320ea74dc8825b1e214b22be591675c7cb39ca4c3162369",
+          "tail_nested_term_count": 16,
+          "tail_term_count": 8
+        },
+        {
+          "group": "H3",
+          "inner_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "inner_term_count": 0,
+          "self_nested_l1": "0/1",
+          "self_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "self_nested_term_count": 0,
+          "tail_groups": [
+            "H4"
+          ],
+          "tail_nested_l1": "0/1",
+          "tail_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "tail_nested_term_count": 0,
+          "tail_term_count": 8
+        },
+        {
+          "group": "H4",
+          "inner_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "inner_term_count": 0,
+          "self_nested_l1": "0/1",
+          "self_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "self_nested_term_count": 0,
+          "tail_groups": [],
+          "tail_nested_l1": "0/1",
+          "tail_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "tail_nested_term_count": 0,
+          "tail_term_count": 0
+        }
+      ],
+      "generic_norm_one_observable_error_bound": "22/1875",
+      "group_internal_pairwise_commutation_verified": true,
+      "group_records": {
+        "H1": {
+          "expansion_sha256": "1bff1ea2fc7f58285579bbed4dd30622aa3a84764fe1e2f568ff2fc156301409",
+          "pairwise_commutation_pair_count": 28,
+          "term_count": 8
+        },
+        "H2": {
+          "expansion_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "pairwise_commutation_pair_count": 0,
+          "term_count": 0
+        },
+        "H3": {
+          "expansion_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "pairwise_commutation_pair_count": 0,
+          "term_count": 0
+        },
+        "H4": {
+          "expansion_sha256": "c400fc1461291b76652e860e13343eecaa72bfc9c8dd7f65b4e46b5ef4cda37b",
+          "pairwise_commutation_pair_count": 28,
+          "term_count": 8
+        },
+        "HU": {
+          "expansion_sha256": "7d557340040bb697567a80ee2837145611c6c2ff58a0f032f16d406291442bed",
+          "pairwise_commutation_pair_count": 66,
+          "term_count": 12
+        }
+      },
+      "identity_phase_ledger": {
+        "full_time_common_phase_exponent": "8/1",
+        "omitted_HU_identity_coefficient": "8/1",
+        "status": "FULL_AND_NONIDENTITY_REDUCED_EXACT_AND_S2_EVOLUTIONS_SHARE_THE_SAME_IDENTITY_PHASE_SO_OPERATOR_NORM_DIFFERENCE_IS_UNCHANGED"
+      },
+      "linear_size": 2,
+      "minimum_R_for_generic_norm_one_observable_allocation": 686,
+      "minimum_R_for_unitary_error_allocation": 485,
+      "n_qubits": 8,
+      "one_step_commutator_coefficient_C": "176/3",
+      "per_observable_allocation": "1/4000",
+      "per_observable_allocation_satisfied_at_R100": false,
+      "profile_id": "L2_OBC_R100",
+      "raw_s2_binding": {
+        "raw_group_event_count_per_step": 10,
+        "raw_group_events_sha256": "74a7d3925a215b0b5285892176473a095658d9df78e41d99458fa9af3a1d347e",
+        "raw_nonidentity_term_event_count_per_step": 56,
+        "raw_nonidentity_term_events_sha256": "513208130ac83e6d019138018e55aee49a05ae1001a2d81b8eb2344a57359975",
+        "status": "VERIFIED_RAW_PALINDROME_AND_COMMUTING_TERM_PRODUCT_BINDING"
+      },
+      "resource_usage": {
+        "action_term_applications": 339184,
+        "commutator_pair_products": 1024
+      },
+      "self_nested_l1_sum": "384/1",
+      "single_step_unitary_error_bound": "11/187500",
+      "tail_nested_l1_sum": "512/1",
+      "total_nonidentity_term_count": 28,
+      "total_time": "1/1",
+      "trotter_steps": 100
+    },
+    {
+      "R_step_unitary_error_bound": "1297/60000",
+      "action_oracle": {
+        "action_records_sha256": "c126bfa0df0e8ced40bbccea4dffecc54fae5f8075f1c475d77b996f36fb4526",
+        "basis_state_count": 16,
+        "coverage": "FIXED_16_COMPUTATIONAL_BASIS_STATES",
+        "operator_action_comparison_count": 240,
+        "status": "VERIFIED_INDEPENDENT_SPARSE_ACTION_ORACLE"
+      },
+      "commutator_records": [
+        {
+          "group": "H1",
+          "inner_sha256": "9633fb693e1dc40dab19e8608409ae82a013c9ccf309605614884ae85489d09e",
+          "inner_term_count": 36,
+          "self_nested_l1": "198/1",
+          "self_nested_sha256": "daf3a19eb5006bd234b76d88441ef11b8c9f812db3b2e11f04d7d34ec44d143e",
+          "self_nested_term_count": 36,
+          "tail_groups": [
+            "H2",
+            "HU",
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "790/1",
+          "tail_nested_sha256": "fe40ae3bfb17b96df05dd39c686b72e12e441753fca6aa8d51a4f67d549e1612",
+          "tail_nested_term_count": 212,
+          "tail_term_count": 63
+        },
+        {
+          "group": "H2",
+          "inner_sha256": "47bdd6d973d7016fbceb0424c9afe1cf3f6afdcc1b83c85f75d65a8b83d87df1",
+          "inner_term_count": 24,
+          "self_nested_l1": "192/1",
+          "self_nested_sha256": "32f8bacf6bf8595ea5d796e6e287c56e767ee824cb5cc9885ca566cee3d59b2b",
+          "self_nested_term_count": 24,
+          "tail_groups": [
+            "HU",
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "640/1",
+          "tail_nested_sha256": "0267b456ab2a838cd3cb6a76f8bcbce939766ad2d366d7adc776949b70655153",
+          "tail_nested_term_count": 152,
+          "tail_term_count": 51
+        },
+        {
+          "group": "HU",
+          "inner_sha256": "5585452d49487ff09d1a031a84c3a4ff0582b1f10ccd3f4427200927701fe03c",
+          "inner_term_count": 48,
+          "self_nested_l1": "768/1",
+          "self_nested_sha256": "f06717de0a23e547779d14df07733b91d3bb0ce7ac42613f23ddc2d5edfe56bd",
+          "self_nested_term_count": 48,
+          "tail_groups": [
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "576/1",
+          "tail_nested_sha256": "d87ea5a4b938728642172f1afc2b5883dbd3a6f4c62aff533ac64399df697f00",
+          "tail_nested_term_count": 105,
+          "tail_term_count": 24
+        },
+        {
+          "group": "H3",
+          "inner_sha256": "154120af7f73fe0dfc635b6502dbad9d96688f7323e1bc15f5a55c668a996e03",
+          "inner_term_count": 12,
+          "self_nested_l1": "6/1",
+          "self_nested_sha256": "d9719e788e7795cb09fe6388c8541751689dd2dcb8b4c7d1fe473af707e6ab26",
+          "self_nested_term_count": 12,
+          "tail_groups": [
+            "H4"
+          ],
+          "tail_nested_l1": "6/1",
+          "tail_nested_sha256": "98f3ef79e42c899858cb36064cf5efd1a68d01b3cd2dbc02552efbd493480fbf",
+          "tail_nested_term_count": 12,
+          "tail_term_count": 12
+        },
+        {
+          "group": "H4",
+          "inner_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "inner_term_count": 0,
+          "self_nested_l1": "0/1",
+          "self_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "self_nested_term_count": 0,
+          "tail_groups": [],
+          "tail_nested_l1": "0/1",
+          "tail_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "tail_nested_term_count": 0,
+          "tail_term_count": 0
+        }
+      ],
+      "generic_norm_one_observable_error_bound": "1297/30000",
+      "group_internal_pairwise_commutation_verified": true,
+      "group_records": {
+        "H1": {
+          "expansion_sha256": "37549cf61abc0d67f0fafd618ef8a3a83d50ca0674c608dfc39d8faef7180cfb",
+          "pairwise_commutation_pair_count": 66,
+          "term_count": 12
+        },
+        "H2": {
+          "expansion_sha256": "f7a0bc7f23e726e6a08e73beab3c04875762bbe2f7e9c2ea19cf9d37a5bb3949",
+          "pairwise_commutation_pair_count": 66,
+          "term_count": 12
+        },
+        "H3": {
+          "expansion_sha256": "98f3ef79e42c899858cb36064cf5efd1a68d01b3cd2dbc02552efbd493480fbf",
+          "pairwise_commutation_pair_count": 66,
+          "term_count": 12
+        },
+        "H4": {
+          "expansion_sha256": "9dcd7306fa4918c13e1565e541b7d8c7e4b394e2805457b100f8375dbea9f80f",
+          "pairwise_commutation_pair_count": 66,
+          "term_count": 12
+        },
+        "HU": {
+          "expansion_sha256": "c4e01e833ef705c4573b9c9054ee7b21f914cd183465bc3f2920ed438c36a6ff",
+          "pairwise_commutation_pair_count": 351,
+          "term_count": 27
+        }
+      },
+      "identity_phase_ledger": {
+        "full_time_common_phase_exponent": "18/1",
+        "omitted_HU_identity_coefficient": "18/1",
+        "status": "FULL_AND_NONIDENTITY_REDUCED_EXACT_AND_S2_EVOLUTIONS_SHARE_THE_SAME_IDENTITY_PHASE_SO_OPERATOR_NORM_DIFFERENCE_IS_UNCHANGED"
+      },
+      "linear_size": 3,
+      "minimum_R_for_generic_norm_one_observable_allocation": 1316,
+      "minimum_R_for_unitary_error_allocation": 930,
+      "n_qubits": 18,
+      "one_step_commutator_coefficient_C": "1297/6",
+      "per_observable_allocation": "1/4000",
+      "per_observable_allocation_satisfied_at_R100": false,
+      "profile_id": "L3_OBC_R100",
+      "raw_s2_binding": {
+        "raw_group_event_count_per_step": 10,
+        "raw_group_events_sha256": "a9ec3c46455bb790353b5be9bcb62e3a45e2a5690d43e1eb69e004ca05290573",
+        "raw_nonidentity_term_event_count_per_step": 150,
+        "raw_nonidentity_term_events_sha256": "f99ddbd8e7f6284fb6628378453f5761525578cf22b360218c3370d8789f10e9",
+        "status": "VERIFIED_RAW_PALINDROME_AND_COMMUTING_TERM_PRODUCT_BINDING"
+      },
+      "resource_usage": {
+        "action_term_applications": 171133,
+        "commutator_pair_products": 9108
+      },
+      "self_nested_l1_sum": "1164/1",
+      "single_step_unitary_error_bound": "1297/6000000",
+      "tail_nested_l1_sum": "2012/1",
+      "total_nonidentity_term_count": 75,
+      "total_time": "1/1",
+      "trotter_steps": 100
+    },
+    {
+      "R_step_unitary_error_bound": "1769/7500",
+      "action_oracle": {
+        "action_records_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "basis_state_count": 0,
+        "coverage": "NONE",
+        "operator_action_comparison_count": 0,
+        "status": "NOT_RUN_L8_ACTION_ORACLE_RESOURCE_LIMIT"
+      },
+      "commutator_records": [
+        {
+          "group": "H1",
+          "inner_sha256": "74cc1a9613f36031387796d99039179804d21f069c1afa9b6d0dba35b865b274",
+          "inner_term_count": 448,
+          "self_nested_l1": "2240/1",
+          "self_nested_sha256": "dbd802936c244013f9a83f5b91c14829f30632529f6d75c85a03d000d5053e28",
+          "self_nested_term_count": 448,
+          "tail_groups": [
+            "H2",
+            "HU",
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "10144/1",
+          "tail_nested_sha256": "3904aeaf044dd8180daa7b4c91a7ac6473e830f2fbf3dcc26c0e1480c19c0224",
+          "tail_nested_term_count": 3072,
+          "tail_term_count": 512
+        },
+        {
+          "group": "H2",
+          "inner_sha256": "5c58436a68d01184332334b3344df359ca89da6275104fe39ad0ceea79336bd1",
+          "inner_term_count": 192,
+          "self_nested_l1": "1536/1",
+          "self_nested_sha256": "dc04c58aeab88ab8b573dc745b2d77915c4d6559ec5829d5e5a0b600d31768c7",
+          "self_nested_term_count": 192,
+          "tail_groups": [
+            "HU",
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "5760/1",
+          "tail_nested_sha256": "41a61ffab0769c6b1719a20bb5f439848184c00a64b4609c0a48a29c05e6f8f8",
+          "tail_nested_term_count": 1536,
+          "tail_term_count": 416
+        },
+        {
+          "group": "HU",
+          "inner_sha256": "1ac9ad9e87c16013b45d1399cb0a3405cb016b2eee13a7d589bffd6c4da1c032",
+          "inner_term_count": 448,
+          "self_nested_l1": "7168/1",
+          "self_nested_sha256": "12d455c0d91dac2ab678824a12cd54db7803af1b92cfd6833f642a3e9016d001",
+          "self_nested_term_count": 448,
+          "tail_groups": [
+            "H3",
+            "H4"
+          ],
+          "tail_nested_l1": "6656/1",
+          "tail_nested_sha256": "3228bfc26923565df9a3628134434f868061d857b31dd91626c32a651f77ac9e",
+          "tail_nested_term_count": 1360,
+          "tail_term_count": 224
+        },
+        {
+          "group": "H3",
+          "inner_sha256": "c2715648cd3646cae3373d36552e86efbe2452e27632190c8e2644b41891f256",
+          "inner_term_count": 192,
+          "self_nested_l1": "160/1",
+          "self_nested_sha256": "76d9f2593c2adb3b6eb137fd9a2e2c29d8440cc5d25e20d659e251aad474c0e7",
+          "self_nested_term_count": 192,
+          "tail_groups": [
+            "H4"
+          ],
+          "tail_nested_l1": "192/1",
+          "tail_nested_sha256": "f7ef8f3c4b44eb195e12bd4b70504c7880f1d1d2b108ef59738f4529418bd86e",
+          "tail_nested_term_count": 192,
+          "tail_term_count": 128
+        },
+        {
+          "group": "H4",
+          "inner_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "inner_term_count": 0,
+          "self_nested_l1": "0/1",
+          "self_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "self_nested_term_count": 0,
+          "tail_groups": [],
+          "tail_nested_l1": "0/1",
+          "tail_nested_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "tail_nested_term_count": 0,
+          "tail_term_count": 0
+        }
+      ],
+      "generic_norm_one_observable_error_bound": "1769/3750",
+      "group_internal_pairwise_commutation_verified": true,
+      "group_records": {
+        "H1": {
+          "expansion_sha256": "0201714666b8a72db1ccb3423e142e778efb981dfa3dfddd5a46078d234a3183",
+          "pairwise_commutation_pair_count": 8128,
+          "term_count": 128
+        },
+        "H2": {
+          "expansion_sha256": "5cf03045c65b8ee7998332ae3e75af06c265b29da70b3cf76439bfa42f13c7d3",
+          "pairwise_commutation_pair_count": 4560,
+          "term_count": 96
+        },
+        "H3": {
+          "expansion_sha256": "d123ddff88ed615c2c1df8ec1079a48627c6cf8fd79317f0cb2f8a268329b0b7",
+          "pairwise_commutation_pair_count": 4560,
+          "term_count": 96
+        },
+        "H4": {
+          "expansion_sha256": "ec39bc442a5e7a63864d31f85a19315be3635830650ab366dab8906b20a7edaa",
+          "pairwise_commutation_pair_count": 8128,
+          "term_count": 128
+        },
+        "HU": {
+          "expansion_sha256": "846b118b5b927ec939efc8b6a837424c28847338ca6005afbf4aaea6090594be",
+          "pairwise_commutation_pair_count": 18336,
+          "term_count": 192
+        }
+      },
+      "identity_phase_ledger": {
+        "full_time_common_phase_exponent": "128/1",
+        "omitted_HU_identity_coefficient": "128/1",
+        "status": "FULL_AND_NONIDENTITY_REDUCED_EXACT_AND_S2_EVOLUTIONS_SHARE_THE_SAME_IDENTITY_PHASE_SO_OPERATOR_NORM_DIFFERENCE_IS_UNCHANGED"
+      },
+      "linear_size": 8,
+      "minimum_R_for_generic_norm_one_observable_allocation": 4344,
+      "minimum_R_for_unitary_error_allocation": 3072,
+      "n_qubits": 128,
+      "one_step_commutator_coefficient_C": "7076/3",
+      "per_observable_allocation": "1/4000",
+      "per_observable_allocation_satisfied_at_R100": false,
+      "profile_id": "L8_OBC_R100",
+      "raw_s2_binding": {
+        "raw_group_event_count_per_step": 10,
+        "raw_group_events_sha256": "c9bdcd86317ea49bb5075f7d536e53cf89f2dddcc2f8691ea5a34a61d1285852",
+        "raw_nonidentity_term_event_count_per_step": 1280,
+        "raw_nonidentity_term_events_sha256": "629b6a23348651bfb42921f31d615b4851fae3e27777482531d8651073804d8f",
+        "status": "VERIFIED_RAW_PALINDROME_AND_COMMUTING_TERM_PRODUCT_BINDING"
+      },
+      "resource_usage": {
+        "action_term_applications": 0,
+        "commutator_pair_products": 775168
+      },
+      "self_nested_l1_sum": "11104/1",
+      "single_step_unitary_error_bound": "1769/750000",
+      "tail_nested_l1_sum": "22752/1",
+      "total_nonidentity_term_count": 640,
+      "total_time": "1/1",
+      "trotter_steps": 100
+    }
+  ],
+  "profile_policy": {
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "group_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4"
+    ],
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "linear_sizes": [
+      2,
+      3,
+      8
+    ],
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "observable_allocation": "1/4000",
+    "observable_comparison_policy": "generic_norm_at_most_one_factor_two_only",
+    "onsite_identity_policy": "omit_common_identity_with_explicit_phase_ledger",
+    "profile_ids": [
+      "L2_OBC_R100",
+      "L3_OBC_R100",
+      "L8_OBC_R100"
+    ],
+    "raw_symmetric_s2_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "single_step_duration": "1/100",
+    "total_time": "1/1",
+    "trotter_steps": 100
+  },
+  "schema_version": 1,
+  "scope_claims": {
+    "L2_full_basis_sparse_action_oracle_verified": true,
+    "L3_selected_basis_sparse_action_oracle_verified": true,
+    "canonical_nonidentity_group_expansions_recomputed": true,
+    "checker_execution_from_contract_pinned_source_bytes_verified": true,
+    "coefficient_L1_operator_norm_upper_bounds_verified": true,
+    "fixed_L2_L3_L8_OBC_commutator_profiles_verified": true,
+    "group_internal_pairwise_commutation_verified": true,
+    "mapping_certificate_composed": false,
+    "nested_commutators_exactly_aggregated": true,
+    "observable_specific_tightening": "NOT_ASSESSED",
+    "physical_L8_instance_identity": "NOT_ASSESSED",
+    "pinned_strang_bound_and_R_step_telescoping_verified": true,
+    "raw_S2_palindrome_and_commuting_term_product_binding_verified": true,
+    "ready_gate_eligible": false,
+    "reference_error_budget_qualified": false,
+    "source_pins_verified": true,
+    "truncation_certificate_composed": false
+  }
+}

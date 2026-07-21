@@ -1,0 +1,292 @@
+{
+  "question": "对两个论题做前沿深度调研（2023–2026 文献为主，经典基石文献为辅），产出带引用的中文报告：\n\n论题一：\"费米子连续性\"（fermion continuity）。该词在不同领域含义不同，报告需先做概念界定与分流，再逐线深入：(a) 凝聚态：Landau Fermi 液体的绝热连续性、Luttinger 定理及其推广、非 Fermi 液体/奇异金属中连续性的破坏、近期的 Fermi 面重构与拓扑保护论证；(b) 场论：费米子流守恒/连续性方程、手征反常；(c) 量子信息：费米子模式的连续演化、费米子线性光学/matchgate 电路、费米子高斯态；(d) 若文献中存在其他显著用法（如格点费米子 doubling/连续极限、fermionic continuity 在张量网络中的表述），一并覆盖。\n\n论题二：费米子在高维张量空间中的计算优势。核心问题：费米子反对称结构（Grassmann 代数、Slater 行列式、Pauli 不相容）为什么以及在何种条件下带来计算杠杆。需覆盖：(a) 自由费米子/matchgate 电路的经典可模拟性——指数维 Hilbert 空间坍缩到多项式（Valiant、Terhal-DiVincenzo 谱系及近期扩展，如 matchgate 影子层析、非高斯性资源理论）；(b) 费米子张量网络/Grassmann 张量网络的表达与收缩效率；(c) 神经量子态与行列式结构（FermiNet、PauliNet、Psiformer 及后续），行列式作为反对称归纳偏置的表达力与代价；(d) 行列式点过程（DPP）等经典 ML 中的费米子结构；(e) 费米子量子处理器与费米子-量子比特编码（Jordan-Wigner、Bravyi-Kitaev 及 2023 年后的新编码、中性原子费米子处理器）的优势论证；(f) 诚实评估：这些\"优势\"各自的适用边界、已知的 no-go 或失效条件。\n\n落点：两者兼顾但偏计算/AI 连接——报告最后需要一节综合评估\"费米子结构对经典计算/ML/AI 架构设计的可迁移启示\"，区分已有实证支撑的连接与仅为类比的连接，并明确标注哪些主张是文献直接支持的、哪些是外推。读者背景：熟悉线性代数、张量网络基础与 ML，非专业物理研究者。",
+  "summary": "对 22 条经三票对抗验证存活的主张合并去重后，得到 10 项发现。论题一\"费米子连续性\"的核心图景已被验证证据充分支撑：凝聚态中该概念已从 Landau 式\"向自由费米子的绝热连续性\"重构为\"涌现对称性与 't Hooft 反常的拓扑保护\"（ersatz Fermi liquid 框架），其具体破坏与推广实例包括 SYK 无准粒子体系（绝热连续性明确失效但广义 Luttinger 关系存续）、FL* 分数化 Fermi 液体（无对称破缺下 Luttinger 体积改变，CeCoIn5 有实验对应）以及 2026 年分数陈绝缘体中 Luttinger 计数违反的精确对角化演示；场论/格点线上，Nielsen-Ninomiya 定理为格点费米子连续极限设定硬 no-go 边界，Ginsparg-Wilson 关系是其标准逃逸路径，手征反常则是费米子流连续性方程的量子破坏。论题二仅有 matchgate/费米子高斯簇存活验证：matchgate 3-design 定理与 matchgate 影子层析构成\"费米子反对称/高斯结构把指数维问题坍缩为多项式经典处理\"的最强实证案例（QC-AFQMC 中指数级后处理被消除）。对经典计算/ML/AI 的可迁移启示中，唯一有文献直接支撑的连接是 matchgate/高斯结构的经典杠杆；神经量子态行列式、费米子张量网络、DPP、费米子-量子比特编码等方向在本轮验证中无存活主张，任何相关论述须标注为外推。",
+  "findings": [
+    {
+      "claim": "【论题一(a)核心：连续性的现代重构】Luttinger 定理与 Lieb-Schultz-Mattis 定理已被大幅推广为拓扑/反常保护论证（ersatz Fermi liquid 框架）：在电荷守恒+格点平移对称系统中，分数填充 ν 对低能理论施加极强约束；若 ν 连续可调（电荷可压缩），低能理论必须具有比任何紧致李群都大的涌现对称群（Fermi 液体的 Fermi 面即实例——面上每点电荷分别守恒）；许多（可能全部）奇异非 Fermi 液体与 Fermi 液体共享该涌现对称群，因此共享 Luttinger 定理与磁场量子振荡。关键结论：Fermi 液体的核心性质并非依赖向自由费米子的绝热连续性，而是由涌现对称性与 't Hooft 反常（连接 SPT 相理论）保护。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/abs/2007.07896"
+      ],
+      "evidence": "四条主张（原 claims 0-3）均逐字对应 Else-Thorngren-Senthil《Non-Fermi liquids as ersatz Fermi liquids》（PRX 11, 021005, 2021）摘要：\"vastly generalizing the Luttinger and Lieb-Schultz-Mattis theorems\"、\"the low-energy theory must have a very large emergent symmetry group -- larger than any compact Lie group\"、\"ersatz Fermi liquids share... Luttinger's theorem (which is thus extended to a large class of non-Fermi liquids) and periodic 'quantum oscillations'\"、\"makes connection between filling constraints and the theory of SPT phases... through the concept of 't Hooft anomalies\"。验证方确认后续文献（SciPost Phys. 15, 051 (2023) Cheng-Seiberg、arXiv:2402.14066、2512.04150 等）采纳并扩展该框架，无反例。范围注意：定理假设格点平移对称与未破缺 U(1)（超流体可压缩但破缺 U(1)，不受约束）。",
+      "vote": "3-0 ×4（四条合并，全票）"
+    },
+    {
+      "claim": "【论题一(a)：连续性的明确破坏与约束的存续】SYK 模型是 Fermi 液体绝热连续性失效的可解范例：无任何准粒子激发，Planckian 弛豫时间 ~ħ/kBT 且与相互作用强度 U 无关（T≪U 区），这是任何有准粒子的金属都不具备的特征。同时，即便无 Fermi 面、无准粒子，Luttinger 定理仍以推广形式存续：共形 Green 函数的粒子-空穴不对称角 θ 由 Luttinger 关系锁定到密度 Q = 1/2 − θ/π − sin(2θ)/4（q=4 SYK），表明 Luttinger 型守恒约束可延伸到无准粒子体系——与发现 1 的\"反常保护而非绝热连续性\"图景互证。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/abs/2305.01001"
+      ],
+      "evidence": "两条主张（原 claims 4-5）在 Sachdev 综述《Strange metals and black holes》（Oxford Research Encyclopedia of Physics, 2023）全文中逐字验证：\"There are no quasiparticle excitations, and the SYK model exhibits quantum dynamics with a Planckian relaxation time... the relaxation time is independent of U, a feature not present in any ordinary metal with quasiparticles\"；Eq.(17) 之 Luttinger 关系溯源至 Georges-Parcollet-Sachdev PRB 63, 134406 (2001)。独立佐证：Chowdhury et al. Rev. Mod. Phys. 2022 给出一般 Δ 形式并在 Δ=1/4 处精确还原该公式。作者为模型共同发明人，权威性充分。",
+      "vote": "3-0 ×2（两条合并，全票）"
+    },
+    {
+      "claim": "【论题一(a)：Fermi 面重构与体积改变】存在分数化 Fermi 液体（FL*）相：f 电子形成带分数化自旋子的自旋液体、传导电子只占据违反常规 Luttinger 计数的\"小\"Fermi 面（non-Luttinger volume），而 FL 相中 f/c 杂化形成满足自由电子 Luttinger 体积的\"大\"Fermi 面——即 Luttinger 定理可在不破缺任何对称性的前提下因分数化（拓扑序）而被规避/推广。CeCoIn5 的近期实验（Maksimovic et al., Science 375, 2022）观测到 FL*-FL 型 Fermi 体积改变转变。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/abs/2305.01001",
+        "https://arxiv.org/abs/2407.15919"
+      ],
+      "evidence": "两条主张（原 claims 6、8）分别在 Sachdev 2023 综述（Fig.8 图注及正文逐字：\"In the FL* phase the f electrons form a spin liquid with fractionalized spinon excitations, while the c electrons form a 'small' Fermi surface... A recent example... in CeCoIn5\"）与 Sachdev 2024 讲义摘要（\"'fractionalized Fermi liquid' (FL*), which has a non-Luttinger volume Fermi surface accompanied by a spin liquid\"）中逐字验证。概念奠基文献 Senthil-Sachdev-Vojta PRL 90, 216403 (2003) 与广义 Luttinger 定理（Paramekanti-Vishwanath PRB 70, 245118）独立佐证。注意：将 CeCoIn5 实验标为 FL*-FL 是主流理论诠释而非实验直接判定。",
+      "vote": "3-0 ×2（两条合并，全票）"
+    },
+    {
+      "claim": "【论题一(a)：奇异金属的统一机制主张】金属量子相变可按 Fermi 面变化分三类：前两类涉及对称破缺（Fermi 面变形/重构），第三类在无对称破缺下改变 Luttinger 体积（FL*-FL 型）。在存在 Harris 无序（量子临界点位置的空间涨落，为相关微扰）时，三类相变均表现出奇异金属行为，并可由普适的二维 Yukawa-SYK 模型描述——这是 Fermi 液体绝热连续性在奇异金属中失效的一个具体、可检验的统一机制主张（proposal 而非定论）。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/abs/2407.15919"
+      ],
+      "evidence": "两条主张（原 claims 7、9）逐字对应 Sachdev《Lectures on the quantum phase transitions of metals》（2024）摘要：\"can be divided into three categories... The third category involves a change in the volume enclosed by the Fermi surface without any symmetry breaking\"；\"In the presence of Harris disorder, all three categories exhibit strange metal behavior, which can be described by a universal two-dimensional Yukawa-Sachdev-Ye-Kitaev model\"。同行评审配套文献 PRL 133.186502 与 Science abq6011 支撑。验证方标注活跃争议：无序平均 SYK 模型难以复现实验大磁阻，2024 年有工作论证自平均假设在 QCP 附近低温必然失效——机制的完备性存疑，但\"该文提出此主张\"本身确凿；分类为教学式框架（如 Lifshitz 转变不在其列），非穷尽定理。",
+      "vote": "3-0 ×2（两条合并，全票）"
+    },
+    {
+      "claim": "【论题一(a)：强关联拓扑相中 Luttinger 违反的直接数值演示】在分数陈绝缘体（FCI）中：(i) 用费米子 Harper-Hofstadter-Hubbard 模型精确对角化计算体单粒子 Green 函数，直接演示 Luttinger 计数被明确违反；(ii) 分数化准粒子与电子间不存在绝热连接——Landau 式绝热连续性论证在此类相中不成立，这正是 Luttinger 违反与 Green 函数拓扑不变量问题的根源；(iii) 多体陈数的分数部分编码在 Luttinger 积分（Luttinger 定理修正项）的 Středa 响应中，整数 Ishikawa-Matsuyama 不变量 N₃[G] 来自 Luttinger 计数的 Středa 响应——Luttinger 违反标志着量子化霍尔响应与 N₃[G] 等同关系的破坏。",
+      "confidence": "medium",
+      "sources": [
+        "https://arxiv.org/pdf/2603.17006"
+      ],
+      "evidence": "三条主张（原 claims 10-12）均在 Markov, Nikishin, Cooper, Goldman, Peralta Gavensky（arXiv 2603.17006, 2026-03）中逐字验证：\"We demonstrate a clear violation of Luttinger's theorem\"、\"fractionalized quasiparticles lack an adiabatic connection to electrons\"、\"the fractional nature of the many-body Chern number is encoded in the Středa response of the Luttinger integral, while the integer invariant N₃[G] arises from the Středa response of the Luttinger count\"。前驱工作 PRL 131, 236601 (2023) 独立佐证分解结构。降为 medium 的原因：单篇未复现预印本（2026 年 3 月），且所涉为 gapped 相的广义 Luttinger 积分形式而非经典金属 Fermi 面体积表述；作者团队（Cooper、Goldman）声誉良好。",
+      "vote": "3-0 ×3（三条合并，全票；单预印本降级）"
+    },
+    {
+      "claim": "【论题一(d)：格点费米子连续极限的硬 no-go 边界】Nielsen-Ninomiya 定理（基于布里渊区环面拓扑的论证）：任何手征不变、局域、平移不变且实的自由费米子格点作用量必然出现费米子加倍。等价的四条件表述：D̃(p) 不能同时满足 (1) 周期且解析（局域性）、(2) 低动量下 D∝γµpµ、(3) 除 p=0 外处处可逆（无 doubler）、(4) {Γ,D̃(p)}=0（手征对称）；天真离散化只违反 (3)，在 3+1 维布里渊区 2⁴ 个角上产生 16 个费米子味（物理费米子外 15 个 doubler）。去除 doubler 的代价是必须放弃局域性、超立方对称性、反射正定性、手征对称性四者之一或多者（Pelissetto 表述）。所有已知规避路径（Wilson、Ginsparg-Wilson/overlap、domain-wall、非厄米、symmetric mass generation）均通过放松某一前提而非违反定理。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/pdf/hep-lat/0405024",
+        "https://arxiv.org/pdf/0912.2560",
+        "https://arxiv.org/pdf/hep-lat/9801002"
+      ],
+      "evidence": "三条主张（原 claims 13、15、18）在三个独立一手来源中逐字验证：Chandrasekharan-Wiese 综述（Prog. Part. Nucl. Phys. 53, 2004）\"necessarily has fermion doubling. The theorem is based on topology... the Brillouin zone B is a torus\"；Kaplan Les Houches 讲义（0912.2560）四条件表述与 2⁴ 角落 doubler；Banerjee-De（hep-lat/9801002）四性质代价表述（溯源 Pelissetto, Ann. Phys. 182, 1988）。Friedan 1982 严格证明独立存在。2023-2026 文献（arXiv:2411.09886 非厄米、2603.15985/2505.20436 SMG、2310.17539）一致将其作为约束性 no-go 处理。",
+      "vote": "3-0 ×3（三条合并，全票，三个独立一手来源）"
+    },
+    {
+      "claim": "【论题一(d)：no-go 的标准逃逸路径】满足 Ginsparg-Wilson 关系的局域格点费米子作用量同时具有精确（Lüscher 型）手征对称性、正确的轴反常、格点版 Atiyah-Singer 指标定理，且无加倍问题；该关系 {D⁻¹,γ5}=aγ5 在连续极限 a→0 下回到连续理论的 {D⁻¹,γ5}=0——即以\"格点修正版手征对称\"（放松 Nielsen-Ninomiya 第 4 条件的精确连续形式）为代价换取其余全部性质。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/pdf/hep-lat/0405024"
+      ],
+      "evidence": "原 claim 14 逐字对应 Chandrasekharan-Wiese 摘要：\"Local lattice fermion actions that obey the Ginsparg-Wilson relation have an exact chiral symmetry, the correct axial anomaly, they obey a lattice version of the Atiyah-Singer index theorem, and still they do not suffer from the notorious doubling problem\"。D⁻¹ 形式经数学核验（对 {D,γ5}=aDγ5D 左右乘 D⁻¹，R=1 归一化）。1998 年以来格点 QCD 主流共识（Lüscher hep-lat/9802011、Hasenfratz-Laliena-Niedermayer、Neuberger overlap），2024 年广义 GW 关系（PRD 109.014502）为扩展而非否定。",
+      "vote": "3-0（教科书级共识，多重独立佐证）"
+    },
+    {
+      "claim": "【论题一(b)定量核心：手征反常=费米子流连续性方程的量子破坏】3+1 维轴矢流的连续性方程被反常项破坏：∂µJ_A^µ = 2imΨ̄ΓΨ + (e²/16π²)ε^{µνρσ}F_{µν}F_{ρσ}（Kaplan 讲义式 2.11）——即使质量 m=0，只要 E·B≠0 轴矢流散度仍非零。该结果可由两条独立路径导出：Landau 能级零模的物理图像（E∥B 下最低 Landau 能级作为 1+1 维费米子给出 g₀eE/π 的一维反常）或 Pauli-Villars 正规化三角图（正规化子的手征破坏在 M→∞ 时不解耦）。这就是经典守恒的费米子流在量子理论中\"连续性\"失效的 Adler-Bell-Jackiw 机制。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/pdf/0912.2560"
+      ],
+      "evidence": "原 claim 17 经直接下载 PDF 逐字核验（Kaplan《Chiral Symmetry and Lattice Fermions》v2 第 20-21 页）：Eq.(2.7)-(2.8) Landau 能级与简并度、Eq.(2.10) \"anomalous divergence of the axial current equal to g₀eE/π = e²EB/2π² = (e²/16π²)εµνρσF^µνF^ρσ\"、Eq.(2.11) 完整含质量形式，以及紧随其后的 Pauli-Villars 三角图表述。与 Peskin-Schroeder 第 19 章标准结果一致（至符号约定）。1969 年 ABJ 反常为已定论物理，无时效风险。",
+      "vote": "3-0（一手来源逐页核验+教科书佐证）"
+    },
+    {
+      "claim": "【论题一(b)×(d) 缝合：doubling 与反常的必然联系】由于有限自由度的 UV 截断（格点）不产生反常，格点上精确的对称性在连续极限中必然精确；因此任何在连续极限中反常的对称性（如 U(1)_A）必须在格点上被显式破坏——这在概念层面解释了 doubling 问题为何不可绕过：要么容忍 doubler（其贡献抵消反常），要么显式破坏手征对称（Wilson 项），要么采用修正版格点手征对称（Ginsparg-Wilson，反常经由不变测度的 Fujikawa 机制进入）。",
+      "confidence": "medium",
+      "sources": [
+        "https://arxiv.org/pdf/0912.2560"
+      ],
+      "evidence": "原 claim 16 对应 Kaplan 讲义论证：\"in a UV cutoff on the number of degrees of freedom, there are no anomalies... any symmetry anomalous in the continuum limit must be broken explicitly on the lattice\"。验证方确认 Ginsparg-Wilson 是与该原则一致的精化（修正对称性+测度反常）而非反例。降为 medium 的原因：三票中一票反对（2-1），且同一主题下来自 hep-lat/9801002 的两条相邻主张（Wilson 质量项产生反常、格点无反常 Ward 恒等式）被 0-3 否决——该概念区域的精确措辞需谨慎，建议报告中采用 Kaplan 的表述而非更强的变体。",
+      "vote": "2-1（分裂票；相邻主张两条被否决）"
+    },
+    {
+      "claim": "【论题二(a)核心之一：matchgate 3-design 定理】仅在 Clifford 群内的离散 matchgate 电路上均匀分布，其前三阶矩即与连续 matchgate 群（费米子高斯幺正）上 Haar 分布的前三阶矩完全相等——离散 Clifford∩matchgate 集合构成 \"matchgate 3-design\"，两种系综产生的经典影子功能等价。意义：费米子高斯结构允许用可高效采样的离散电路系综替代连续群随机化，这是费米子结构降低随机化协议资源需求的严格定理。边界：该系综在第 4 阶矩失效（非 4-design），依赖高阶矩的任务不享有此等价。",
+      "confidence": "high",
+      "sources": [
+        "https://link.springer.com/article/10.1007/s00220-023-04844-0"
+      ],
+      "evidence": "原 claim 19 逐字对应 Wan-Huggins-Lee-Babbush《Matchgate Shadows for Fermionic Quantum Simulation》（Commun. Math. Phys. 404, 629-700, 2023；arXiv:2207.13723）摘要：\"the first three moments of the Haar distribution over the continuous group of matchgate circuits are equal to those of the discrete uniform distribution over only the matchgate circuits that are also Clifford unitaries; thus, the latter forms a 'matchgate 3-design'\"。后续独立佐证：arXiv:2603.12392（matchgate commutant 理论，确认恰在 k=4 失效）、npj Quantum Information 2025（arXiv:2409.03836，推广到广义费米子高斯幺正）。顶级同行评审期刊，无勘误无争议。",
+      "vote": "3-0（同行评审定理+两项独立后续佐证）"
+    },
+    {
+      "claim": "【论题二(a)核心之二：费米子结构的经典计算杠杆实例】matchgate 影子可高效估计任意量子态与费米子高斯态（含 Slater 行列式）的内积/重叠及局域费米子算符期望值等多种量，超越此前协议（仅限高斯态或仅限局域可观测量）；具体应用：使 QC-AFQMC（Huggins et al., Nature 603:416, 2022）中控制费米子符号问题的波函数约束得以实施，并消除原方法（通用 Clifford 影子）所需的指数级经典后处理——这是\"费米子/matchgate 结构相对通用量子比特工具带来经典计算杠杆\"（指数维 Hilbert 空间坍缩到多项式 Pfaffian 计算）的最直接、验证最强的文献实例。诚实边界：\"高效\"是渐近意义（指数→多项式），绝对成本仍重——能量估计后处理 ~O(M·N^8.5·log N)，Kanno et al. 估计 (54e,50o) 体系总重叠后处理 ~O(N⁹) 量级、约 10¹¹ CPU 小时。",
+      "confidence": "high",
+      "sources": [
+        "https://link.springer.com/article/10.1007/s00220-023-04844-0"
+      ],
+      "evidence": "两条主张（原 claims 20-21）逐字对应同一 CMP 论文摘要：\"efficiently estimate inner products between an arbitrary quantum state and fermionic Gaussian states, as well as the expectation values of local fermionic operators... surpassing the capabilities of prior work\"；\"apply wavefunction constraints that control the fermion sign problem in QC-AFQMC... without the exponential post-processing cost incurred by the original approach\"。独立佐证：Kiser et al. New J. Phys. 26 (2024)、PRResearch 6, 043063 (2024)（同时提供实用成本警示）、囚禁离子硬件演示 arXiv:2506.22408。作者 Huggins 同为原 Nature 论文作者（同一谱系自我修正）。",
+      "vote": "3-0 ×2（两条合并，全票；实用成本警示已并入）"
+    }
+  ],
+  "caveats": "（1）覆盖面不对称——这是本轮合成最大的缺口：22 条存活主张集中在论题一的 (a) 凝聚态连续性、(b) 手征反常、(d) 格点 doubling 三线和论题二的 (a) matchgate/自由费米子经典可模拟性一线。论题一 (c)（费米子模式连续演化/量子信息）、论题二 (b) 费米子/Grassmann 张量网络、(c) FermiNet/PauliNet/Psiformer 神经量子态、(d) DPP、(e) 费米子-量子比特编码与中性原子费米子处理器均无存活验证主张——最终报告中这些小节以及\"对经典计算/ML/AI 的可迁移启示\"综合节里除 matchgate 杠杆之外的任何连接，都必须明确标注为未经本轮验证的外推或需补充调研。（2）单源集中风险：ersatz FL 四条全部出自同一篇 PRX（虽有后续文献佐证）；FCI 三条出自单篇 2026 年 3 月未复现预印本（已降为 medium）；matchgate 三条出自单篇 CMP 论文（有独立后续与硬件演示佐证）。（3）被否决主张的警示：hep-lat/9801002 关于\"Wilson 质量项产生反常\"与\"格点上无反常 Ward 恒等式\"的两条主张 0-3 否决、hep-lat/0405024 的 QCD 味单态反常公式一条 1-2 否决——报告中反常的定量表述应只采用已核验的 Kaplan 式 (2.11)，勿引入这三条变体；claim 16（doubling-反常必然联系）仅 2-1 通过，措辞须贴紧 Kaplan 原文。（4）机制与定论之别：Harris 无序→普适 Yukawa-SYK 是可检验的机制主张而非定论，存在活跃争议（磁阻幅度、自平均假设在 QCP 附近低温失效）；CeCoIn5 标为 FL*-FL 是主流理论诠释。（5）\"高效\"的渐近性：matchgate 影子消除的是指数级后处理，多项式常数仍然实用上沉重（~O(N⁹) 级实例估计）。（6）时效性：FCI 论文为 2026 年 3 月预印本，极新；奇异金属机制争论持续演化，2026 年下半年可能有更新。",
+  "openQuestions": [
+    "费米子结构在经典 ML 中的计算杠杆（FermiNet/Psiformer 行列式反对称归纳偏置的表达力-代价定量权衡、Grassmann/费米子张量网络收缩效率的形式边界、DPP 的费米子对应）完全缺乏本轮验证覆盖——需要一轮针对性的补充检索与对抗验证才能支撑报告的 AI 连接综合节。",
+    "matchgate 系综在第 4 阶矩失效（非 4-design）：哪些具体任务（如某些非线性可观测量估计、benchmarking 协议）因此丧失离散系综等价性？非高斯性资源理论（fermionic magic）为经典可模拟性扩展划定的精确边界是什么？",
+    "ersatz Fermi liquid 的涌现对称/反常框架能否统一容纳 FL*（违反常规 Luttinger 计数，经修正反常）与 Harris 无序 Yukawa-SYK 奇异金属机制？该框架宣称的\"many, if not all\"非 Fermi 液体覆盖范围的反例搜索现状如何？",
+    "2023 年后的费米子-量子比特编码（Jordan-Wigner/Bravyi-Kitaev 之后的新编码）与中性原子费米子处理器的\"原生费米子优势\"论证未获任何存活主张——量子硬件侧的费米子优势主张需独立验证，包括其相对 matchgate 经典可模拟边界的定位（可模拟区之外优势何在）。"
+  ],
+  "refuted": [
+    {
+      "claim": "手征反常即费米子连续性方程的量子破坏：无质量 QCD 的味单态轴矢流在经典层面守恒，但量子理论中其散度非零，∂µ jµ5 = −(Nf/32π²) εµνρσ Tr[Fµν Fρσ]，来源于瞬子等拓扑荷载体；且轴荷变化量等于 Nf 乘以规范场拓扑荷。",
+      "vote": "1-2",
+      "source": "https://arxiv.org/pdf/hep-lat/0405024"
+    },
+    {
+      "claim": "论文主结果：在 Wilson 格点模型中，正规质量项对轴矢流四维散度的贡献在手征极限 m→0 下不为零，且恰好等于 ABJ 手征反常；Wilson 项对手征对称性的显式破坏对该结果并非必要——即反常的产生者可以归为费米子质量项而非破坏手征对称的正规化项。",
+      "vote": "0-3",
+      "source": "https://arxiv.org/pdf/hep-lat/9801002"
+    },
+    {
+      "claim": "关于费米子流连续性方程与反常关系的关键论断：在有限格距 a 下，格点上不存在反常 Ward 恒等式（即轴矢流的格点连续性方程是精确的）；反常只在连续极限中、通过格点算符与连续算符之间假设的对应关系才出现——这直接支撑报告中'费米子流守恒/连续性方程、手征反常'（论题一 b 线）关于反常本质上是连续极限现象的界定。",
+      "vote": "0-3",
+      "source": "https://arxiv.org/pdf/hep-lat/9801002"
+    }
+  ],
+  "unverified": [],
+  "sources": [
+    {
+      "url": "https://arxiv.org/abs/2007.07896",
+      "quality": "primary",
+      "angle": "凝聚态主线：Fermi 液体连续性与 Luttinger 定理前沿",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2305.01001",
+      "quality": "primary",
+      "angle": "凝聚态主线：Fermi 液体连续性与 Luttinger 定理前沿",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2407.15919",
+      "quality": "primary",
+      "angle": "凝聚态主线：Fermi 液体连续性与 Luttinger 定理前沿",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2603.17006",
+      "quality": "primary",
+      "angle": "凝聚态主线：Fermi 液体连续性与 Luttinger 定理前沿",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/hep-lat/0405024",
+      "quality": "primary",
+      "angle": "场论与格点：概念界定与分流",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/0912.2560",
+      "quality": "primary",
+      "angle": "场论与格点：概念界定与分流",
+      "claimCount": 5
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Fermion_doubling",
+      "quality": "secondary",
+      "angle": "场论与格点：概念界定与分流",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/hep-lat/9801002",
+      "quality": "primary",
+      "angle": "场论与格点：概念界定与分流",
+      "claimCount": 5
+    },
+    {
+      "url": "https://mcgreevy.physics.ucsd.edu/s13/final-papers/2013S-215C-Kadakia-Nirag.pdf",
+      "quality": "secondary",
+      "angle": "场论与格点：概念界定与分流",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/html/2607.05485",
+      "quality": "primary",
+      "angle": "场论与格点：概念界定与分流",
+      "claimCount": 5
+    },
+    {
+      "url": "https://link.springer.com/article/10.1007/s00220-023-04844-0",
+      "quality": "primary",
+      "angle": "量子信息：自由费米子可模拟性、影子层析与编码",
+      "claimCount": 5
+    },
+    {
+      "url": "https://quantum-journal.org/papers/q-2024-05-21-1350/",
+      "quality": "primary",
+      "angle": "量子信息：自由费米子可模拟性、影子层析与编码",
+      "claimCount": 5
+    },
+    {
+      "url": "https://quantum-journal.org/papers/q-2024-12-04-1549/",
+      "quality": "primary",
+      "angle": "量子信息：自由费米子可模拟性、影子层析与编码",
+      "claimCount": 5
+    },
+    {
+      "url": "https://www.pnas.org/doi/10.1073/pnas.2304294120",
+      "quality": "primary",
+      "angle": "量子信息：自由费米子可模拟性、影子层析与编码",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2402.09402",
+      "quality": "primary",
+      "angle": "AI/数值方法：行列式神经量子态与费米子张量网络",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2605.12907",
+      "quality": "primary",
+      "angle": "AI/数值方法：行列式神经量子态与费米子张量网络",
+      "claimCount": 5
+    },
+    {
+      "url": "https://link.aps.org/doi/10.1103/PhysRevResearch.7.023193",
+      "quality": "primary",
+      "angle": "AI/数值方法：行列式神经量子态与费米子张量网络",
+      "claimCount": 5
+    },
+    {
+      "url": "https://www.sciencedirect.com/science/article/abs/pii/S0021999125004012",
+      "quality": "primary",
+      "angle": "AI/数值方法：行列式神经量子态与费米子张量网络",
+      "claimCount": 5
+    },
+    {
+      "url": "https://www.researchgate.net/publication/365784112_A_Self-Attention_Ansatz_for_Ab-initio_Quantum_Chemistry",
+      "quality": "primary",
+      "angle": "AI/数值方法：行列式神经量子态与费米子张量网络",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2205.13205",
+      "quality": "primary",
+      "angle": "AI/数值方法：行列式神经量子态与费米子张量网络",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/html/2502.07285",
+      "quality": "primary",
+      "angle": "经典 ML 连接与诚实边界：DPP、失效条件与可迁移性",
+      "claimCount": 5
+    },
+    {
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11293867/",
+      "quality": "primary",
+      "angle": "经典 ML 连接与诚实边界：DPP、失效条件与可迁移性",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/1207.6083",
+      "quality": "primary",
+      "angle": "经典 ML 连接与诚实边界：DPP、失效条件与可迁移性",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2208.03264",
+      "quality": "primary",
+      "angle": "经典 ML 连接与诚实边界：DPP、失效条件与可迁移性",
+      "claimCount": 5
+    }
+  ],
+  "stats": {
+    "angles": 5,
+    "sourcesFetched": 24,
+    "claimsExtracted": 120,
+    "claimsVerified": 25,
+    "confirmed": 22,
+    "killed": 3,
+    "unverified": 0,
+    "afterSynthesis": 11,
+    "urlDupes": 1,
+    "budgetDropped": 5,
+    "agentCalls": 106
+  }
+}

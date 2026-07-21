@@ -1,0 +1,288 @@
+{
+  "question": "这是两轮调研的第二轮（第一轮已收口：凝聚态 Luttinger/ersatz Fermi liquid、格点 Nielsen-Ninomiya/Ginsparg-Wilson、手征反常、matchgate 3-design 与 matchgate 影子层析均已验证存活）。本轮只针对第一轮未覆盖的缺口做聚焦深挖（2023–2026 文献为主，经典基石为辅），产出带引用的中文材料：\n\n缺口一：费米子/Grassmann 张量网络。Grassmann 张量网络（如 arXiv 2605.12907）与费米子 PEPS/MERA 的表达力与收缩效率：反对称结构（费米子符号/swap gate/奇偶分级）对张量网络收缩复杂度的影响，相对玻色/自旋张量网络是负担还是杠杆，2023 年后的算法进展与形式化边界。\n\n缺口二：行列式神经量子态。FermiNet、PauliNet、Psiformer 及 2023–2026 后续（如 LapNet、forward-laplacian、Pfaffian ansatz、transferable/foundation 波函数模型）：行列式作为反对称归纳偏置的表达力定理（单行列式+任意等变 backflow 的普适性主张及其条件）、O(N^3) 行列式代价与缩放瓶颈、与传统 CCSD(T) 的精度/成本实证对比、失效案例。\n\n缺口三：经典 ML 中的费米子结构。行列式点过程（DPP：Kulesza-Taskar 谱系与 2023 后进展）、负相依作为 ML 工具箱（arXiv 2502.07285）：费米子排斥结构在多样性采样、coreset 选择、随机数值线性代数（DPP 采样的无偏估计）中被证明的计算/统计优势，以及行列式结构在注意力/特征选择中的应用实证；哪些主张有定理/实验支撑，哪些只是\"量子启发\"营销。\n\n缺口四：费米子-量子比特编码与费米子量子处理器。Jordan-Wigner/Bravyi-Kitaev 之后 2023–2026 的新编码（局域性保持编码、ternary tree、custom fermionic codes 的资源开销对比）；中性原子/光镊费米子原子处理器（如 fermionic quantum processing 提案与实验，Zoller/Lukin 系）\"原生费米子统计免去编码开销\"的优势论证与当前实验状态；费米子非高斯性资源理论（fermionic magic/non-Gaussianity）为经典可模拟边界划定的最新结果，matchgate+非高斯资源注入的模拟代价定理。\n\n缺口五（轻量）：量子信息中\"费米子模式连续演化/费米子高斯态\"作为\"费米子连续性\"的一种用法：费米子高斯态流形上的连续参数化/优化（Gaussian state optimization）、费米子线性光学的连续群结构，只需界定性覆盖。\n\n要求：每个缺口给出可验证的具体主张（定理条件、数值对比、资源计数），明确标注适用边界与失效条件；区分同行评审结果与预印本；为最终报告的\"费米子结构对经典计算/ML/AI 架构的可迁移启示\"综合节提供实证弹药——特别标注哪些连接有直接文献支撑、哪些是类比外推。读者：熟悉线性代数、张量网络、ML，非物理专业研究者。",
+  "summary": "本轮 21 条经三票对抗验证存活的主张全部集中在缺口一（费米子/Grassmann 张量网络）与缺口二（行列式神经量子态），给出两组有直接文献支撑的结论。缺口一的形式化答案：费米子反对称结构进入张量网络收缩的方式是 Z2 宇称分级——符号化为分块矩阵乘法的块级公共因子/flag，渐近收缩复杂度与玻色/自旋网络同阶（四个独立、基本全为同行评审的来源一致），分级/箭头形式化进一步免去 Jordan-Wigner 弦与显式 swap-gate 追踪，且在费米子问题上反对称 ansatz 是表达力杠杆（JW 玻色化 PEPS 在 10×10 格点不收敛，fPEPS 达 ~1e-5 能量密度误差）。缺口二：行列式/Pfaffian 的 O(N³) 反对称化仍是精度-代价前沿（sub-cubic 方案有普适性存在定理但依赖全电子等变函数且实用精度受限，其\"替代行列式瓶颈\"的定位在验证中被否决），实证进展在正交方向——Forward Laplacian 前向化消除 Laplacian 瓶颈（Nature MI 2024）、Neural Pfaffian 以严格超集构造取消离散轨道选择并在 TinyMol 上压过 CCSD(T)/CBS 参考 1.9 mEh（NeurIPS 2024 Oral）、可迁移/foundation 波函数在 CCSD(T)/3Z 精度点省 ~20x 微调步（Nature Comms 2024）；WF-Bench（2026 preprint）补充了保真度幂律衰减、Psiformer 同参数系统性占优、N_det≈32 饱和三条可复核经验缩放律。缺口三（DPP/负相依 ML）、缺口四（费米子编码/费米子处理器/非高斯资源理论）、缺口五（费米子高斯态连续优化）本轮零存活主张，是最终报告的最大遗留缺口。",
+  "findings": [
+    {
+      "claim": "【缺口一·核心定理级结论】费米子反对称符号结构对张量网络收缩的渐近复杂度是零负担（次主导/常数级开销）：(a) 确定宇称（Grassmann-even）张量的收缩化为按宇称分块的矩阵乘法，符号 (−1)^s 成为每个宇称块的公共因子，处理方式与普通阿贝尔对称张量完全相同（arXiv 2605.12907，Annals of Physics 491, 2026）；(b) 分级张量的数据结构与带全局 Z2/U(1)/SU(N) 对称性的张量相同（按 parity 扇区分块），奇偶符号整块作用、可作简单 flag 保存，作者原话为『minimal overhead』（arXiv 2404.14611，SciPost Phys. 18, 012, 2025）；(c) 重排收缩顺序所需的额外宇称计算『不产生可观计算开销』，收缩路径优化可完全按玻色/自旋网络方式进行（arXiv 2410.02215，Phys. Rev. Research 7, 023193, 2025）；(d) fPEPS 变分蒙特卡洛单次 MC sweep 为 O(Lx·Ly·D'²·D⁴)、环境收缩 O(D'³D²+D'²D⁴)，与玻色 PEPS 同阶（arXiv 2506.20106，Chinese Physics B）。经典基石佐证：Corboz et al. PRB 81, 165104 (2010) 证明 swap-gate 吸收为次主导代价。适用边界：这是『渐近同阶+小常数』结论，2605.12907 未给显式常数因子对比数字；宇称分级带来的 Z2 块稀疏在实现上还可复用对称张量加速（『杠杆』半句是合理推断而非源文断言）。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/abs/2605.12907",
+        "https://arxiv.org/abs/2404.14611",
+        "https://arxiv.org/abs/2410.02215",
+        "https://arxiv.org/abs/2506.20106",
+        "Corboz et al., Phys. Rev. B 81, 165104 (2010)"
+      ],
+      "evidence": "四个独立来源逐字核实且互相印证：『Eq. (21) can be evaluated by block matrix multiplication ... (−1)^s is a common sign for each block, as done in ordinary symmetric tensor networks』（2605.12907 §2.3）；『the corresponding minus signs immediately apply to complete matrix blocks ... can therefore be kept as simple flags ... only results in a minimal overhead』（2404.14611 脚注8）；『changing the contraction order requires computing additional parities, but this does not incur any appreciable computational cost』（2410.02215 §III）；『The complexity of one MC sweep is O(Lx Ly D'^2 D^4)』（2506.20106）。除 2605.12907 v2 外其余主源均已同行评审发表。",
+      "vote": "合并 4 条主张，全部 3-0 一致通过"
+    },
+    {
+      "claim": "【缺口一·形式化机制】局域化形式（Z2 分级希尔伯特空间/箭头/locally-ordered）是反对称结构进入张量网络的现代标准答案：(a) 动机——Jordan-Wigner 变换在二维及以上产生难以处理的非局域弦算符，而 Grassmann/分级路线把符号局域化在张量运算内部（2605.12907）；(b) Z2 分级希尔伯特空间（super vector spaces）可在任意图上的张量网络中局域编码费米子统计，完全免去 JW 变换与 2D 网络中对腿交叉逐一插入 swap gate 的显式追踪，且框架兼容 JW 变换本身（2404.14611）；(c) 相对 swap-gate 方法的具体优势：给张量腿加方向箭头后标准收缩例程无需大改即可自动记账，而 swap-gate 方法对非平面连接图（典型 PEPS）必须显式引入 braiding 张量并强制平面化收缩（2404.14611 作者自陈的『main advantage』，独立佐证来自 2410.02215/PRR：早期 swap-gate 实现需按几何手工插入 swap 张量，不便于支持任意图的库）。适用边界：swap-gate 方法本身仍被成功使用（如 2506.20106），(c) 是工程便利性对比而非 swap-gate 失效主张；2404.14611 明言 graded-direct vs JW-first 的详细优劣对比是 future work。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/abs/2404.14611",
+        "https://arxiv.org/abs/2605.12907",
+        "https://arxiv.org/abs/2410.02215"
+      ],
+      "evidence": "『in two or more dimensions, the Jordan-Wigner transformation yields non-local string operators that are not straightforward to handle』（2605.12907 引言，逐字）；『fermionic statistics can be naturally incorporated in tensor networks on arbitrary graphs through the use of graded Hilbert spaces ... avoiding the need of a Jordan-Wigner transformation or the explicit tracking of leg crossings by swap gates』（2404.14611 摘要，SciPost 同行评审，Ghent Verstraete/Haegeman 组，TensorKit.jl 开源实现）；swap-gate 对比段落全文核实（『this invalidates our initial objective to encode the fermionic characteristics locally』）。注意：关于 quimb 库默认实现与箭头成环边界的更强主张（1-2）未存活，不可引用。",
+      "vote": "合并 3 条主张：两条 3-0、一条 2-1（swap-gate 对比条）"
+    },
+    {
+      "claim": "【缺口一·实证杠杆】在费米子问题上，原生反对称 ansatz 是表达力杠杆而非负担：作者明确预期玻色 PEPS 与 fPEPS 在 VMC 算法层面的差异只来自 ansatz 表达力而非算法成本（两者渐近复杂度相同）；实证上，费米子测试系统（Insulator/Dirac 相）中 JW 玻色化的 boson PEPS 在 10×10 格点上『差到无法收敛』（只能退回 4×4/6×6），而 fPEPS（D=4, D'=12, 每步 4096 样本）在 10×10 上达到 ~1e-5 量级能量密度误差。适用边界：比较对象是同一费米子问题的 JW 玻色化表示，优势特定于费米子问题而非普适；单一课题组结果、格点规模适中（4×4 vs 10×10）。",
+      "confidence": "medium",
+      "sources": [
+        "https://arxiv.org/abs/2506.20106"
+      ],
+      "evidence": "『For the VMC algorithm, one expects the difference between boson PEPS and fPEPS to come only from the different representing power of the ansatz』与『the performance of boson PEPS is so bad that we could not even converge the calculation at 10×10 on first tries』均逐字核实；D=4/D'=12/4096 样本/1e-5 误差量级见其 Table 1 与 Fig. 3。已被 Chinese Physics B 接收（DOI 10.1088/1674-1056/ae2673），但为单一来源、其中一条主张 2-1 通过（『明确主张』略强于原文 hedged 的『one expects』）。",
+      "vote": "合并 2 条主张：一条 2-1、一条 3-0；单一来源故降档 medium"
+    },
+    {
+      "claim": "【缺口二·缩放瓶颈的算法回应】Forward Laplacian（Nature Machine Intelligence 6, 209–219, 2024，同行评审）：神经网络 Laplacian 的计算是 NN-VMC 的计算瓶颈，Forward Laplacian 框架通过一次高效前向传播（替代嵌套自动微分）计算之（论文报总加速 >10x，其中 ~2x 来自 Laplacian 计算方式替换），并且被定位为后续两类加速的使能层：稀疏导数矩阵优化与更高效的网络设计（LapNet 架构，Fig. 2）。可对照开源实现复核（lapjax、bytedance/LapNet，含新旧方法切换开关）。关键适用边界：Forward Laplacian 消除的是 Laplacian/自动微分成本，不消除行列式本身的 O(N³) 渐近——报告综合节不应把它写成对行列式标度的解答。后续文献（folx 生态、foundation 波函数模型）在采纳而非质疑该路线。",
+      "confidence": "high",
+      "sources": [
+        "https://www.nature.com/articles/s42256-024-00794-x",
+        "https://arxiv.org/abs/2307.08214",
+        "https://github.com/bytedance/LapNet"
+      ],
+      "evidence": "摘要逐字：『a computational framework named Forward Laplacian, which computes the Laplacian associated with neural networks, the bottleneck of NN-VMC, through an efficient forward propagation process』及『can further facilitate more developments of acceleration methods ... including optimization for sparse derivative matrix and efficient network design』。注意：关于摘要页具体加速倍数/电子数上限的另一条主张（1-2）未存活——具体数值引用需回到正文/代码，不能只引摘要页。",
+      "vote": "合并 2 条主张，均 3-0"
+    },
+    {
+      "claim": "【缺口二·Pfaffian 归纳偏置与 O(N³) 资源计数】Neural Pfaffian（arXiv 2405.14762，NeurIPS 2024 Oral）：(a) 表达力定理——Pf(Φ̂A_PfΦ̂ᵀ) 构造经恒等式 Pf(BAB^T)=det(B)Pf(A) 精确满足费米子反对称，是 Slater 行列式的严格超集（取 Φ̂_Pf=Φ̂ 时退化为行列式），N_o ≥ max{N↑,N↓} 的过参数化取消『恰好 N 个轨道』的离散选择约束——这是跨分子 foundation 波函数路线的核心归纳偏置改动（经典 QMC 文献 Bajdich et al. PRL 96, 130201 独立佐证 Pfaffian⊃Slater/AGP）；(b) 数值对比——单个泛化模型在 TinyMol 小分子上训练 32k 步后能量比 CCSD(T)/CBS 参考低 1.9 mEh（VMC 变分原理下更低=更准），比先前泛化模型 TAO/Globe 分别低 5.9/11.3 mEh，大分子早期训练误差比 TAO 小 25 倍；作者自注边界：CCSD(T)(CBS) 参考『既非精确也非变分』，对真实基态误差未知；(c) 资源计数——Pfaffian 与行列式同为 O(N³)，JAX 实现（10–100 电子、含矩阵乘）比有高度优化 CUDA 核的行列式慢约 5 倍，即差距来自软件生态而非渐近标度；论文同时断言低于 O(N³) 的反对称化尝试（Han 2019、Acevedo 2020、Richter-Powell 2023）精度受限——O(N³) 目前仍是精度-代价前沿。",
+      "confidence": "high",
+      "sources": [
+        "https://arxiv.org/abs/2405.14762",
+        "Bajdich et al., Phys. Rev. Lett. 96, 130201 (2006)"
+      ],
+      "evidence": "定理、超集陈述、TinyMol 全部数字（1.9/5.9/11.3 mEh、25x）、5x 基准与 sub-cubic 精度受限断言均在正文/附录逐字核实；NeurIPS 2024 Oral（top 0.4%）同行评审。边界：反对称性为同自旋交换（标准自旋指派约定）；TinyMol 数字与 5x 基准为作者自报、无独立复现；sub-cubic 精度受限是『论文断言』且 Richter-Powell sortlet 在小体系自报达化学精度——前沿判断在大体系成立、小体系有例外。",
+      "vote": "合并 3 条主张，均 3-0"
+    },
+    {
+      "claim": "【缺口二·foundation 波函数的迁移实证】可迁移费米子神经波函数（Scherbela, Gerard & Grohs, Nature Communications 15, 120, 2024，同行评审）：(a) 微调预训练模型达到 CCSD(T)/3Z 基组精度所需优化步数比从零训练少约 20 倍（1k 步 vs 20k 步；从零模型 1k 步时误差高 60 倍）；(b) 预训练于 H6/H10 链的模型可零样本（不微调）预测最长 2 倍于训练所见的氢链能量，而 GLOBE 基线不迁移（误差高 5–6 倍）。适用边界：20x 是 operating-point 特定的（在 CCSD(T)/3Z 这一作者选定精度点；训练到 32k 步时优势衰减为 ~3x 误差差距）；零样本外推是渐进退化（~2x 处收敛到接近 Hartree-Fock 水平）而非硬边界——『可证伪迁移边界』的措辞是合成者框架而非论文原话。",
+      "confidence": "high",
+      "sources": [
+        "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10762074/",
+        "https://www.nature.com/articles/s41467-023-44216-9"
+      ],
+      "evidence": "『fine-tuning our pre-trained model reaches this accuracy ≈ 20x faster, than optimizing a new model from scratch』与『successfully predicts zero-shot energies (i.e. without fine-tuning) for up to 2x longer chains』均逐字核实；开源 DeepErwin 实现；NeurIPS 2023 'VMC on a Budget' 等后续文献独立佐证迁移加速方向。",
+      "vote": "合并 2 条主张，均 3-0"
+    },
+    {
+      "claim": "【缺口二·反对称化普适性的精确边界】arXiv 2205.13205（Pang, Yan, Lin；ICML 2022 AI4Science workshop）给出『成对构造是否够用』的形式化划界：定理 1（失效边界）——Han et al. 2019 的 O(N²) 成对 ansatz（φ_B 仅依赖两个电子坐标）存在基态波函数使其必须用不连续的 φ_B 或 φ_C 才能精确表示（三电子四坐标反例，乘积符号约束 A_{1,2,3}·A_{1,2,4}·A_{1,3,4}·A_{2,3,4}≥0，结合 Ceperley 1991 节点 tiling 性质），即两电子依赖在连续函数类内不足以实现普适反对称；定理 2（连续普适性）——升级为依赖全部其余电子的置换等变连续函数 φ_B 后，O(N²) 成对乘积构造可精确表示任意基态波函数。严格适用条件：定理 2 仅对基态成立（证明依赖基态节点胞 tiling 结构）；对一般反对称函数（推论 1）φ_B 存在但可能不连续。关键限定（来自被否决主张）：把该结果读作『O(N²) 形式化替代 O(N³) 行列式瓶颈的实用方案』在对抗验证中被 0-3 否决——这是存在性/表达力定理，不是被实证验证的低成本替代（且与 Neural Pfaffian 论文的 sub-cubic 精度受限断言一致）。",
+      "confidence": "medium",
+      "sources": [
+        "https://arxiv.org/pdf/2205.13205",
+        "Ceperley, J. Stat. Phys. 63, 1237 (1991)",
+        "Han, Zhang & E, J. Comput. Phys. 399, 108929 (2019)"
+      ],
+      "evidence": "定理 1/定理 2/推论 1 的陈述均与原文逐字比对（含定理 2 之连续性限定只在基态出现、推论 1 刻意不含连续性限定），证明结构（三电子反例、tiling 引理）核实；后续文献（2311.05064、2402.15167）延展而非反驳。降档理由：venue 为 workshop 级（两名验证者对『是否算 ICML 同行评审』判断不一）；定理 2 是充分性而非唯一修复方案；符号构型存在性论证在脚注中为 sketch 级。",
+      "vote": "合并 2 条主张，均 3-0；因 venue 等级降档 medium"
+    },
+    {
+      "claim": "【缺口二·经验缩放律与架构对比】WF-Bench（arXiv 2605.29683，2026-05 preprint，未同行评审）三条可复核实证：(a) 对全部 31 个目标波函数（拓扑态/超导/Wigner 晶体），FermiNet 与 Psiformer 可达保真度随电子数按幂律衰减 F=1−α(N_e−2)^β（如 laughlin_m5/FermiNet：F(8)=0.8737、β=3.02，Table 1 全部拟合参数与 RMSE 可查）——行列式神经量子态表达力随系统尺寸的经验缩放律；(b) 参数量大致相同（N_e=10 拓扑态：FermiNet 7.3×10⁵ vs Psiformer 8.3×10⁵）、同训练协议（100k KFAC 保真度优化步）下，Psiformer 在全部 31 个目标上保真度超过 FermiNet——注意力式 backflow 同预算系统性占优；(c) 行列式数目 N_det 收益在 ~32 处饱和（其后仅边际改善而成本随 N_det 线性增长），网络深度 N_layer>2 后收益 modest（moore_m2 在 N_layer=1 时两架构都失败）。适用边界：固定优化器下的『可达保真度』混淆表达力与可训练性；N_det/N_layer 消融只覆盖两个目标态、监督式保真度匹配（非 VMC 能量优化），~32 饱和点可能随体系尺寸移动；β≈3 拟合只在测试范围（N_e≈8–14）内有效，外推会给非物理负保真度；所测 FermiNet 为 SchNet 增强变体。",
+      "confidence": "medium",
+      "sources": [
+        "https://arxiv.org/pdf/2605.29683"
+      ],
+      "evidence": "三段关键文本逐字核实（幂律句、Psiformer 超越句含参数计数、N_det ~32 饱和句）；laughlin_m5 数字经无引导二次抓取反幻觉核验（并回吐未提供的其他行数据，内部一致）；方向与同行评审的 Psiformer 原文（von Glehn et al., ICLR 2023）一致。降档理由：单一 preprint、未同行评审。另注：该 preprint 中 Moore-Read/复杂相位缠绕『失效案例』的更强叙事主张（1-2）未存活，不可作为 det-vs-Pf 结构匹配论点引用。",
+      "vote": "合并 3 条主张，均 3-0；因 preprint 单源降档 medium"
+    },
+    {
+      "claim": "【综合节定位·可迁移启示的支撑等级标注】对最终报告『费米子结构对经典计算/ML/AI 架构的可迁移启示』一节：有直接文献支撑的连接为（i）反对称性作为归纳偏置在数据结构层面可化为 Z2 分级块稀疏、渐近免费（Finding 1/2，多个同行评审来源）；（ii）对天然具有交换反对称的目标问题，把反对称烘焙进 ansatz 是表达力杠杆、把它摊到非局域弦上是负担（Finding 3 实证 + Finding 1 形式化）；（iii）O(N³) 行列式/Pfaffian 是当前精度-代价前沿，工程收益来自正交方向（前向 Laplacian、过参数化超集构造、预训练迁移）而非降低反对称化复杂度（Finding 4/5/6/7）。属于类比外推、本轮无验证弹药的连接为：费米子排斥→DPP/多样性采样/coreset（缺口三）、原生费米子硬件免编码开销（缺口四）、费米子高斯流形优化→连续参数化（缺口五）——这三条在报告中必须标注为未经本轮验证。",
+      "confidence": "high",
+      "sources": [
+        "本轮全部 21 条存活主张的交叉归纳（一手来源见 Findings 1–8）"
+      ],
+      "evidence": "这是对存活主张分布的元观察：21/21 条落在缺口一与缺口二；缺口三/四/五零存活。『直接支撑 vs 类比外推』的区分由此可机械判定，符合任务要求的标注纪律。",
+      "vote": "元综合，无独立投票"
+    }
+  ],
+  "caveats": "（1）覆盖缺口是本轮最大问题：任务书要求的缺口三（DPP/负相依 ML 工具箱、arXiv 2502.07285）、缺口四（2023–26 费米子-量子比特编码、中性原子费米子处理器、fermionic magic/非高斯资源理论）、缺口五（费米子高斯态连续优化）没有任何存活主张——最终报告这三节目前只能标注『未验证/待补充』，不能用本轮材料撰写。（2）同行评审状态分层：缺口一来源基本已发表（Annals of Physics 2026 / SciPost Phys. 2025 / PRResearch 2025 / Chinese Physics B），缺口二中 Nature MI、Nature Comms、NeurIPS Oral 已同行评审，但 WF-Bench（2605.29683）是 2026-05 preprint、2205.13205 是 workshop 级——报告中须按此分层引用。（3）多个关键数字是作者自报基准且无独立复现：Pfaffian 5x 慢、TinyMol 1.9/5.9/11.3 mEh、20x 微调加速（且 operating-point 特定，32k 步时衰减为 ~3x）、WF-Bench 全部拟合参数。（4）『杠杆而非负担』的框架在多处是从『minimal overhead/同阶复杂度』的中性源文推断而来；fPEPS 实证优势特定于费米子问题（对比对象是 JW 玻色化），不能外推为反对称结构对任意问题有利。（5）四条被否决主张划出的禁区：quimb 默认费米子实现/箭头成环边界细节、Nature MI 摘要页加速数值、『O(N²) 成对构造是行列式瓶颈的形式化替代』定位、WF-Bench 的 Moore-Read/相位缠绕失效案例叙事——均不可进入正文。（6）时效性：三个 2026 年预印本（2605.12907 v2、2605.29683、2506.20106 的最终刊印版）可能在评审/校对中修订数字。",
+  "openQuestions": [
+    "缺口三/四/五需要专门一轮验证：DPP 在 coreset/随机数值线性代数中被定理证明的计算/统计优势边界、2023–26 局域性保持费米子编码的资源开销对比表、fermionic magic 注入下 matchgate 模拟代价定理、费米子高斯态流形优化——本轮零弹药。",
+    "graded-local（箭头/Z2 分级）与 JW-first 两条管线的端到端性能对比仍无正面基准（2404.14611 作者明示为 future work）——『局域化更优』目前只有工程便利性论证，缺硬数字。",
+    "Psiformer 对 FermiNet 的全面占优究竟反映表达力还是固定优化器下的可训练性（WF-Bench 自认无法区分）？以及 sub-cubic 反对称化（sortlet 等）能否在大体系上达到化学精度、突破 O(N³) 前沿？",
+    "『反对称化机制与目标态结构匹配决定表达力』（det vs Pf，Moore-Read 案例）的主张被 1-2 否决——该论点若要进综合节，需针对 Moore-Read/Pfaffian 目标态做定向再验证。"
+  ],
+  "refuted": [
+    {
+      "claim": "locally ordered 形式化只需在每条共享费米子键上存储两个张量的相对顺序（'箭头'），即可将费米子张量网络收缩推广到任意图/几何结构，且该形式化已成为 quimb 库的默认费米子实现；但并非任意箭头指派都与全局排序一致（箭头成环时失效），这是其形式化边界。",
+      "vote": "1-2",
+      "source": "https://arxiv.org/abs/2410.02215"
+    },
+    {
+      "claim": "论文声称该方法实现显著加速，从而把 NN-VMC 的适用范围扩展到更大的分子体系；但摘要中未给出具体加速倍数或电子数上限——精确数值（量级加速、最大体系规模）在付费墙后，需经 arXiv:2307.08214 或开源代码复核，属于'有同行评审背书但本页不可直接核数'的主张。",
+      "vote": "1-2",
+      "source": "https://www.nature.com/articles/s42256-024-00794-x"
+    },
+    {
+      "claim": "Slater 行列式是 FermiNet 类神经波函数的渐近计算瓶颈（N 电子 O(N^3)），该文提出用成对反对称构造（pairwise antisymmetry）替代行列式，将反对称化代价降到 O(N^2)，且形式化证明其普适性。这直接回应缺口二'O(N^3) 行列式代价与缩放瓶颈'是否有形式化替代方案的问题。",
+      "vote": "0-3",
+      "source": "https://arxiv.org/pdf/2205.13205"
+    },
+    {
+      "claim": "行列式归纳偏置的具体失效案例：Moore-Read 态的 Pfaffian 反对称结构比 Laughlin 态更难被行列式基神经 ansatz 表示（moore_m2 的 F(8) 更低，尽管其 m 更小）；且拓扑态的非平凡相位结构可致网络保真度在预训练阶段崩塌，复杂相位缠绕下连迁移学习也失败——直接支撑『单一反对称化机制（det vs Pf）匹配目标态结构与否决定表达力』的论点。",
+      "vote": "1-2",
+      "source": "https://arxiv.org/pdf/2605.29683"
+    }
+  ],
+  "unverified": [],
+  "sources": [
+    {
+      "url": "https://arxiv.org/abs/2605.12907",
+      "quality": "primary",
+      "angle": "缺口一：费米子/Grassmann 张量网络的收缩复杂度",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2404.14611",
+      "quality": "primary",
+      "angle": "缺口一：费米子/Grassmann 张量网络的收缩复杂度",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2410.02215",
+      "quality": "primary",
+      "angle": "缺口一：费米子/Grassmann 张量网络的收缩复杂度",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2506.20106",
+      "quality": "primary",
+      "angle": "缺口一：费米子/Grassmann 张量网络的收缩复杂度",
+      "claimCount": 5
+    },
+    {
+      "url": "https://www.nature.com/articles/s42256-024-00794-x",
+      "quality": "primary",
+      "angle": "缺口二：行列式神经量子态的表达力与缩放",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2405.14762",
+      "quality": "primary",
+      "angle": "缺口二：行列式神经量子态的表达力与缩放",
+      "claimCount": 5
+    },
+    {
+      "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10762074/",
+      "quality": "primary",
+      "angle": "缺口二：行列式神经量子态的表达力与缩放",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2205.13205",
+      "quality": "primary",
+      "angle": "缺口二：行列式神经量子态的表达力与缩放",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2605.29683",
+      "quality": "primary",
+      "angle": "缺口二：行列式神经量子态的表达力与缩放",
+      "claimCount": 5
+    },
+    {
+      "url": "https://github.com/bytedance/LapNet",
+      "quality": "primary",
+      "angle": "缺口二：行列式神经量子态的表达力与缩放",
+      "claimCount": 4
+    },
+    {
+      "url": "https://arxiv.org/abs/2502.07285",
+      "quality": "primary",
+      "angle": "缺口三：DPP 与负相依在经典 ML 中的已证优势",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2411.00611",
+      "quality": "primary",
+      "angle": "缺口三：DPP 与负相依在经典 ML 中的已证优势",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2005.03185",
+      "quality": "primary",
+      "angle": "缺口三：DPP 与负相依在经典 ML 中的已证优势",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/1811.03717",
+      "quality": "primary",
+      "angle": "缺口三：DPP 与负相依在经典 ML 中的已证优势",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/1907.03411",
+      "quality": "primary",
+      "angle": "缺口三：DPP 与负相依在经典 ML 中的已证优势",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/1207.6083",
+      "quality": "primary",
+      "angle": "缺口三：DPP 与负相依在经典 ML 中的已证优势",
+      "claimCount": 5
+    },
+    {
+      "url": "https://www.pnas.org/doi/10.1073/pnas.2304294120",
+      "quality": "primary",
+      "angle": "缺口四：费米子编码、原生费米子处理器与非高斯性资源边界",
+      "claimCount": 5
+    },
+    {
+      "url": "https://quantum-journal.org/papers/q-2024-05-21-1350/",
+      "quality": "primary",
+      "angle": "缺口四：费米子编码、原生费米子处理器与非高斯性资源边界",
+      "claimCount": 5
+    },
+    {
+      "url": "https://quantum-journal.org/papers/q-2024-12-04-1549/",
+      "quality": "primary",
+      "angle": "缺口四：费米子编码、原生费米子处理器与非高斯性资源边界",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2409.02010",
+      "quality": "primary",
+      "angle": "缺口四：费米子编码、原生费米子处理器与非高斯性资源边界",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/pdf/2605.12600",
+      "quality": "primary",
+      "angle": "缺口四：费米子编码、原生费米子处理器与非高斯性资源边界",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2009.11884",
+      "quality": "primary",
+      "angle": "缺口五：费米子高斯态流形的连续优化（轻量界定）",
+      "claimCount": 5
+    },
+    {
+      "url": "https://arxiv.org/abs/2004.01015",
+      "quality": "primary",
+      "angle": "缺口五：费米子高斯态流形的连续优化（轻量界定）",
+      "claimCount": 5
+    },
+    {
+      "url": "https://par.nsf.gov/servlets/purl/10303113",
+      "quality": "primary",
+      "angle": "缺口五：费米子高斯态流形的连续优化（轻量界定）",
+      "claimCount": 5
+    }
+  ],
+  "stats": {
+    "angles": 5,
+    "sourcesFetched": 24,
+    "claimsExtracted": 119,
+    "claimsVerified": 25,
+    "confirmed": 21,
+    "killed": 4,
+    "unverified": 0,
+    "afterSynthesis": 9,
+    "urlDupes": 0,
+    "budgetDropped": 5,
+    "agentCalls": 106
+  }
+}

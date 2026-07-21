@@ -1,0 +1,597 @@
+{
+  "schema_version": 1,
+  "certificate_type": "l8_magnetization_q90_fixed_policy_replication_v1",
+  "contract_fingerprint": "hubbard_l8_magnetization_q90_formal_s0_contract_v1",
+  "workload_identity": {
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "initial_state": "checkerboard_Neel_A_up_B_down_Nup32_Ndown32",
+    "input_step_index": 3,
+    "linear_size": 8,
+    "n_qubits": 128,
+    "n_sites": 64,
+    "observable_id": "staggered_magnetization",
+    "profile_id": "L8_OBC_U8_T1_R100_NEEL_M_Q90_FORMAL_S0",
+    "step_duration": "1/100",
+    "trotter_steps": 100
+  },
+  "scope_claims": {
+    "M4_certified": false,
+    "certified_mapped_depth": 3,
+    "child_boundary_transition_or_sidecar_generated": false,
+    "fixed_policy_q90_candidate_ceiling_infeasibility_verified": true,
+    "larger_K_other_cadences_and_other_algorithms": "NOT_ASSESSED",
+    "physical_reference_qualified": false,
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "prospective_discovery_authority": false,
+    "ready_gate_eligible": false,
+    "retrospective_replication_only": true
+  },
+  "witness_claim": {
+    "checker_fingerprint": "hubbard_l8_magnetization_q90_formal_s0_checker_v1",
+    "decision": {
+      "M4_certified": false,
+      "certified_mapped_depth": 3,
+      "child_boundary_transition_or_sidecar_generated": false,
+      "fixed_policy_negative_authority": true,
+      "remaining_R100_steps_exact_Hubbard_error_reference_and_READY": "NOT_ASSESSED",
+      "status": "VERIFIED_M_Q90_FIXED_POLICY_MAX_K_INFEASIBILITY_REPLICATION"
+    },
+    "execution_custody": {
+      "C33_predecessor_files_read_or_staged": false,
+      "allowlist_file_count": 13,
+      "allowlist_staging_manifest": [
+        {
+          "relative_path": "hubbard_l8_adaptive_k_arithmetic_k622592_c34.py",
+          "sha256": "f4e676da40535903301181cf482119e051066b90921793e34152403b3b74b976",
+          "size_bytes": 21957
+        },
+        {
+          "relative_path": "hubbard_l8_adaptive_k_arithmetic_v2.py",
+          "sha256": "f4819f96bf92ac07a9ce5d0be646c8d187b04f37a64c7dccda68f665722d5998",
+          "size_bytes": 23931
+        },
+        {
+          "relative_path": "hubbard_l8_adaptive_k_four_gate_granularity_screen.py",
+          "sha256": "b483d9555a24dd07ea96292ed0a7ed51587259a79a2c5d69e3a8bf1408b4a614",
+          "size_bytes": 35616
+        },
+        {
+          "relative_path": "hubbard_l8_adaptive_k_v2_design_probe.py",
+          "sha256": "01582da649f7df2a0e65dcf8ed251a341b72218eade72dcd3d69ffa627fe1ee3",
+          "size_bytes": 25517
+        },
+        {
+          "relative_path": "hubbard_l8_adaptive_k_v6_design_probe.py",
+          "sha256": "3e7f9ff0546addfaa23f351f3569b102d0c3ebb578dbc4873b042bac21070af2",
+          "size_bytes": 26538
+        },
+        {
+          "relative_path": "hubbard_l8_interval_checkpoints/staggered_magnetization_boundary_003.b85",
+          "sha256": "91aecef5a3b79279e394c8995072d19565f4898e0ba29ddd7685ea9e535d9c84",
+          "size_bytes": 805953
+        },
+        {
+          "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q88_screen.py",
+          "sha256": "6867dda2d6bd34ab2eed6b31d02a587e16762263a493e9890d0caa40f23a58a4",
+          "size_bytes": 78218
+        },
+        {
+          "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q88_transcript.json",
+          "sha256": "0074b1eea5fa574378d5a9fae9e748e7145efaa0c96b622ddf50587a72a2551a",
+          "size_bytes": 821781
+        },
+        {
+          "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q90_screen.py",
+          "sha256": "f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a",
+          "size_bytes": 89527
+        },
+        {
+          "relative_path": "hubbard_l8_magnetization_interval_step3_checker.py",
+          "sha256": "4e471b6f22838b2e9621adeeb757e7fa8277e3d8c4985eee392b182530c0c717",
+          "size_bytes": 56874
+        },
+        {
+          "relative_path": "hubbard_l8_magnetization_interval_step3_contract.json",
+          "sha256": "fb1d5e82819d39f217a8c1c7f4979a689f4d46b8d691a8f464cad9012c197387",
+          "size_bytes": 6930
+        },
+        {
+          "relative_path": "hubbard_l8_magnetization_interval_step3_template.json",
+          "sha256": "b68544091be417eed5310d8579eb8dc4d1a51e1863ed1fb7a8cbfa1fc6004eb6",
+          "size_bytes": 13822
+        },
+        {
+          "relative_path": "hubbard_l8_observable_interval_step_checker.py",
+          "sha256": "5c151a63cee86d362851629aae743600dd61fcfd534339376aca88fe030b1f1a",
+          "size_bytes": 65080
+        }
+      ],
+      "allowlist_staging_manifest_sha256": "33ddaa4dead2496d21fb77d785eefb8c2015859f93e4c11c7e7dc9efb93f091e",
+      "nested_four_gate_control_root_included": true,
+      "prior_q90_result_artifacts_read_or_staged": false,
+      "q88_canonical_loaded_post_replay_as_prefix_reference_only": true,
+      "q90_outer_component_report_hides_nested_control_root": true,
+      "same_byte_q90_engine_sha256": "f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a"
+    },
+    "parent_premise": {
+      "certified_mapped_depth": 3,
+      "encoded_boundary_sha256": "91aecef5a3b79279e394c8995072d19565f4898e0ba29ddd7685ea9e535d9c84",
+      "expected_witness_sha256": "e5a1fec288bbb118fbc56adfa2ee9d21e0e5f4eb49196a7301d70b361c592ff7",
+      "role": "already_certified_hash_pinned_M3_boundary_premise_not_reverified_by_this_13_file_replay_closure",
+      "status": "VERIFIED_L8_MAGNETIZATION_STEP3_MAPPED_INTERVAL_CHILD_SUBCERTIFICATE"
+    },
+    "policy_precommit": {
+      "inner_diagnostic_probe_historical_precommit_flag_preserved_as_false": true,
+      "outer_formal_policy_committed_before_replay": true,
+      "policy_canonical_sha256": "c9c12105893b3b8ede1e3f55189631273771e09b1817863d65ce97cf6e308bbd",
+      "policy_file_sha256": "8084ab612c6d3cefb8f779d4dfe24450cb5c7d612d14b485feabb7044ae7cab5",
+      "policy_id": "M-Q90-FORMAL-S0",
+      "retrospective_replication_disclosed": true
+    },
+    "resource_summary": {
+      "host_runtime_RSS_timestamp_or_float_fields_included": false,
+      "maximum_expansion_coefficient_tick_bits": 57,
+      "maximum_product_bits": 121,
+      "peak_single_expansion_terms": 741376,
+      "rounding_cumulative_scaled_ticks_squared": "158998426224482340534477790",
+      "scientific_policy_caps": {
+        "max_candidate_K": 622592,
+        "max_candidate_count": 34,
+        "max_digest_terms": 786432,
+        "max_expansion_coefficient_tick_bits": 192,
+        "max_output_terms_if_successful": 622592,
+        "max_product_bits": 384,
+        "max_single_expansion_terms": 786432,
+        "max_suffix_accumulator_bits": 224,
+        "max_term_gate_visits": 536870912,
+        "max_trigonometric_tick_bits": 66,
+        "resource_abort_action": "indeterminate_fail_closed_without_scientific_negative_authority"
+      },
+      "term_gate_visits_including_terminal_attempt": 111667095
+    },
+    "screen_result": {
+      "authority": "narrow_q90_fixed_policy_candidate_ceiling_infeasibility_replication",
+      "candidate_row_count": 3060,
+      "checkpoint_ledger_sha256": "8978329b712168dce39991af25f6903deaf69c45f236521bb0e08e74f3d8741f",
+      "failure_record_sha256": "74b3d8201861663339f5465ae8bbfdb0fcb80433524f8f318aae591045665a14",
+      "last_committed_cumulative_drop_ticks": "1700709292382471",
+      "minimum_effective_K_is_diagnostic_not_required_for_negative_authority": true,
+      "q89_q90_record_summaries": [
+        {
+          "E_after_ticks": "1700709292382471",
+          "E_before_ticks": "1700535038508063",
+          "budget_prefix_cap_ticks": "1700799964693059",
+          "checkpoint_number_one_based": 89,
+          "prefix_slack_before_selection_ticks": "264926184996",
+          "pretruncation_expansion_count": 718896,
+          "record_sha256": "75b7faa4353f7b7ab2183e8fe7f056c07fcb9b68329ab93f45ad95a475e4d3ea",
+          "retained_expansion_count": 622592,
+          "retained_expansion_sha256": "b7d1e16a3f344eb1353593fd66c379d36272c49d1ebfe5c5c2b3e6958ed98c19",
+          "selected_K": 622592,
+          "status": "DIAGNOSTIC_FIRST_FEASIBLE_SELECTED"
+        },
+        {
+          "E_before_ticks": "1700709292382471",
+          "budget_prefix_cap_ticks": "1700904496098731",
+          "checkpoint_number_one_based": 90,
+          "minimum_effective_K_diagnostic_only": 635284,
+          "policy_max_K_candidate_drop_ticks": "369541613084",
+          "prefix_slack_before_selection_ticks": "195203716260",
+          "pretruncation_expansion_count": 741376,
+          "record_sha256": "74b3d8201861663339f5465ae8bbfdb0fcb80433524f8f318aae591045665a14",
+          "required_K_excess_diagnostic_only": 12692,
+          "selected_K": null,
+          "status": "DIAGNOSTIC_NO_POLICY_CANDIDATE_FEASIBLE"
+        }
+      ],
+      "record_count": 90,
+      "resource_policy_abort": null,
+      "resource_policy_abort_sha256": null,
+      "scientific_negative_authority": true,
+      "selected_K_history": [
+        81920,
+        81920,
+        81920,
+        81920,
+        81920,
+        98304,
+        98304,
+        98304,
+        98304,
+        114688,
+        114688,
+        114688,
+        114688,
+        131072,
+        131072,
+        131072,
+        147456,
+        147456,
+        147456,
+        147456,
+        163840,
+        163840,
+        163840,
+        180224,
+        180224,
+        180224,
+        180224,
+        180224,
+        196608,
+        196608,
+        196608,
+        196608,
+        196608,
+        196608,
+        196608,
+        196608,
+        212992,
+        212992,
+        229376,
+        229376,
+        245760,
+        245760,
+        262144,
+        262144,
+        278528,
+        278528,
+        294912,
+        294912,
+        311296,
+        311296,
+        311296,
+        327680,
+        327680,
+        327680,
+        327680,
+        327680,
+        344064,
+        344064,
+        344064,
+        360448,
+        360448,
+        360448,
+        376832,
+        393216,
+        393216,
+        409600,
+        425984,
+        425984,
+        442368,
+        442368,
+        458752,
+        475136,
+        491520,
+        491520,
+        491520,
+        507904,
+        524288,
+        540672,
+        540672,
+        540672,
+        557056,
+        557056,
+        573440,
+        589824,
+        606208,
+        589824,
+        606208,
+        622592,
+        622592
+      ],
+      "selected_K_history_count": 89,
+      "selected_K_history_sha256": "c6755c7655d6b2ff37da7b1a8ac8c16cfc4295ef9ad0b687ddaa3dcd3c785d53",
+      "status": "VERIFIED_M_Q90_FIXED_POLICY_MAX_K_INFEASIBILITY_REPLICATION",
+      "terminal_branch": "Q89_SUCCESS_Q90_FAILURE",
+      "terminal_failure_candidate_evaluations": [
+        {
+          "E_after_if_selected_ticks": "2177990190869791",
+          "candidate_index": 0,
+          "configured_K": 81920,
+          "drop_ticks": "477280898487320",
+          "dropped_term_count": 659456,
+          "effective_retained_count": 81920,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "2078940357742423",
+          "candidate_index": 1,
+          "configured_K": 98304,
+          "drop_ticks": "378231065359952",
+          "dropped_term_count": 643072,
+          "effective_retained_count": 98304,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "2000497231840368",
+          "candidate_index": 2,
+          "configured_K": 114688,
+          "drop_ticks": "299787939457897",
+          "dropped_term_count": 626688,
+          "effective_retained_count": 114688,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1938682101473316",
+          "candidate_index": 3,
+          "configured_K": 131072,
+          "drop_ticks": "237972809090845",
+          "dropped_term_count": 610304,
+          "effective_retained_count": 131072,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1893061398940269",
+          "candidate_index": 4,
+          "configured_K": 147456,
+          "drop_ticks": "192352106557798",
+          "dropped_term_count": 593920,
+          "effective_retained_count": 147456,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1855285556336896",
+          "candidate_index": 5,
+          "configured_K": 163840,
+          "drop_ticks": "154576263954425",
+          "dropped_term_count": 577536,
+          "effective_retained_count": 163840,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1823328224168726",
+          "candidate_index": 6,
+          "configured_K": 180224,
+          "drop_ticks": "122618931786255",
+          "dropped_term_count": 561152,
+          "effective_retained_count": 180224,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1797383736764304",
+          "candidate_index": 7,
+          "configured_K": 196608,
+          "drop_ticks": "96674444381833",
+          "dropped_term_count": 544768,
+          "effective_retained_count": 196608,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1775470320226483",
+          "candidate_index": 8,
+          "configured_K": 212992,
+          "drop_ticks": "74761027844012",
+          "dropped_term_count": 528384,
+          "effective_retained_count": 212992,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1759553408845041",
+          "candidate_index": 9,
+          "configured_K": 229376,
+          "drop_ticks": "58844116462570",
+          "dropped_term_count": 512000,
+          "effective_retained_count": 229376,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1746925430731822",
+          "candidate_index": 10,
+          "configured_K": 245760,
+          "drop_ticks": "46216138349351",
+          "dropped_term_count": 495616,
+          "effective_retained_count": 245760,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1735677279109960",
+          "candidate_index": 11,
+          "configured_K": 262144,
+          "drop_ticks": "34967986727489",
+          "dropped_term_count": 479232,
+          "effective_retained_count": 262144,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1726073681038640",
+          "candidate_index": 12,
+          "configured_K": 278528,
+          "drop_ticks": "25364388656169",
+          "dropped_term_count": 462848,
+          "effective_retained_count": 278528,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1719218034955258",
+          "candidate_index": 13,
+          "configured_K": 294912,
+          "drop_ticks": "18508742572787",
+          "dropped_term_count": 446464,
+          "effective_retained_count": 294912,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1715793811561520",
+          "candidate_index": 14,
+          "configured_K": 311296,
+          "drop_ticks": "15084519179049",
+          "dropped_term_count": 430080,
+          "effective_retained_count": 311296,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1713579392664274",
+          "candidate_index": 15,
+          "configured_K": 327680,
+          "drop_ticks": "12870100281803",
+          "dropped_term_count": 413696,
+          "effective_retained_count": 327680,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1711868336445414",
+          "candidate_index": 16,
+          "configured_K": 344064,
+          "drop_ticks": "11159044062943",
+          "dropped_term_count": 397312,
+          "effective_retained_count": 344064,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1710370210061745",
+          "candidate_index": 17,
+          "configured_K": 360448,
+          "drop_ticks": "9660917679274",
+          "dropped_term_count": 380928,
+          "effective_retained_count": 360448,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1709130965959731",
+          "candidate_index": 18,
+          "configured_K": 376832,
+          "drop_ticks": "8421673577260",
+          "dropped_term_count": 364544,
+          "effective_retained_count": 376832,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1708143094952199",
+          "candidate_index": 19,
+          "configured_K": 393216,
+          "drop_ticks": "7433802569728",
+          "dropped_term_count": 348160,
+          "effective_retained_count": 393216,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1707250975102834",
+          "candidate_index": 20,
+          "configured_K": 409600,
+          "drop_ticks": "6541682720363",
+          "dropped_term_count": 331776,
+          "effective_retained_count": 409600,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1706443218777362",
+          "candidate_index": 21,
+          "configured_K": 425984,
+          "drop_ticks": "5733926394891",
+          "dropped_term_count": 315392,
+          "effective_retained_count": 425984,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1705746062273864",
+          "candidate_index": 22,
+          "configured_K": 442368,
+          "drop_ticks": "5036769891393",
+          "dropped_term_count": 299008,
+          "effective_retained_count": 442368,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1705103081704276",
+          "candidate_index": 23,
+          "configured_K": 458752,
+          "drop_ticks": "4393789321805",
+          "dropped_term_count": 282624,
+          "effective_retained_count": 458752,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1704525153640526",
+          "candidate_index": 24,
+          "configured_K": 475136,
+          "drop_ticks": "3815861258055",
+          "dropped_term_count": 266240,
+          "effective_retained_count": 475136,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1704013825376624",
+          "candidate_index": 25,
+          "configured_K": 491520,
+          "drop_ticks": "3304532994153",
+          "dropped_term_count": 249856,
+          "effective_retained_count": 491520,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1703551494866934",
+          "candidate_index": 26,
+          "configured_K": 507904,
+          "drop_ticks": "2842202484463",
+          "dropped_term_count": 233472,
+          "effective_retained_count": 507904,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1703103525864560",
+          "candidate_index": 27,
+          "configured_K": 524288,
+          "drop_ticks": "2394233482089",
+          "dropped_term_count": 217088,
+          "effective_retained_count": 524288,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1702666494428182",
+          "candidate_index": 28,
+          "configured_K": 540672,
+          "drop_ticks": "1957202045711",
+          "dropped_term_count": 200704,
+          "effective_retained_count": 540672,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1702272458415011",
+          "candidate_index": 29,
+          "configured_K": 557056,
+          "drop_ticks": "1563166032540",
+          "dropped_term_count": 184320,
+          "effective_retained_count": 557056,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1701908906308941",
+          "candidate_index": 30,
+          "configured_K": 573440,
+          "drop_ticks": "1199613926470",
+          "dropped_term_count": 167936,
+          "effective_retained_count": 573440,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1701599322676983",
+          "candidate_index": 31,
+          "configured_K": 589824,
+          "drop_ticks": "890030294512",
+          "dropped_term_count": 151552,
+          "effective_retained_count": 589824,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1701311746111733",
+          "candidate_index": 32,
+          "configured_K": 606208,
+          "drop_ticks": "602453729262",
+          "dropped_term_count": 135168,
+          "effective_retained_count": 606208,
+          "feasible_under_current_prefix_cap": false
+        },
+        {
+          "E_after_if_selected_ticks": "1701078833995555",
+          "candidate_index": 33,
+          "configured_K": 622592,
+          "drop_ticks": "369541613084",
+          "dropped_term_count": 118784,
+          "effective_retained_count": 622592,
+          "feasible_under_current_prefix_cap": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,316 @@
+{
+  "candidate_policy": {
+    "all_candidate_drop_values_derived_from_one_ranked_suffix_sum": true,
+    "all_smaller_candidates_must_be_recorded": true,
+    "candidate_K_values_in_strict_ascending_order": [
+      81920,
+      98304,
+      114688,
+      131072,
+      147456,
+      163840,
+      180224,
+      196608,
+      212992,
+      229376,
+      245760,
+      262144,
+      278528,
+      294912,
+      311296,
+      327680,
+      344064,
+      360448,
+      376832,
+      393216,
+      409600,
+      425984,
+      442368,
+      458752,
+      475136,
+      491520,
+      507904,
+      524288,
+      540672,
+      557056,
+      573440,
+      589824,
+      606208,
+      622592
+    ],
+    "candidate_K_values_sha256": "4de63e9494a84e9603fccfa0bbf6d5e03da1be4aee08927728e8f575ad516d01",
+    "configured_candidate_count": 34,
+    "configured_maximum_K": 622592,
+    "future_gates_final_interval_and_future_prefix_slack_are_forbidden_as_selection_inputs": true,
+    "Neel_expectation_is_forbidden_as_a_K_selection_input": true,
+    "no_candidate_action": "fail_closed_without_child_boundary_transition_sidecar_or_depth_increment",
+    "selection_rule": "first_candidate_whose_exact_ranked_suffix_drop_respects_current_prefix_cap",
+    "selection_time": "after_each_exact_four_gate_merge_before_truncation",
+    "single_propagation_and_single_ranking_per_checkpoint": true
+  },
+  "execution_engine": {
+    "certificate_authority": "NONE_BY_ITSELF",
+    "fresh_replay_entrypoint": "_run_verified",
+    "fresh_replay_from_q1_through_the_first_legal_terminal_condition_required": true,
+    "q90_is_attempted_if_and_only_if_q89_commits": true,
+    "q88_reference_loaded_only_after_fresh_replay": true,
+    "q90_diagnostic_transcript_is_not_an_execution_or_witness_input": true,
+    "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q90_screen.py",
+    "same_byte_source_compilation_required": true,
+    "sha256": "f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a"
+  },
+  "forbidden_formal_result_pins": [
+    "formal_terminal_branch",
+    "formal_status",
+    "formal_records_sha256",
+    "formal_selected_K_history",
+    "formal_selected_K_history_sha256",
+    "formal_failure_record_sha256",
+    "formal_q89_record_sha256",
+    "formal_q90_record_sha256",
+    "formal_q89_retained_expansion_sha256",
+    "formal_failure_minimum_effective_K",
+    "formal_required_K_excess_over_policy_maximum",
+    "formal_observed_resource_values",
+    "formal_runtime_seconds",
+    "formal_peak_RSS",
+    "formal_witness_sha256",
+    "formal_positive_status",
+    "formal_child_boundary_committed",
+    "formal_child_transition_sha256"
+  ],
+  "historical_disclosure": {
+    "formal_replay_is_retrospective_replication_not_prospective_discovery": true,
+    "policy_was_selected_after_a_non_authoritative_diagnostic_observation": true,
+    "prior_q89_q90_outcome_bytes_must_not_be_read_or_staged_by_the_formal_replay_or_checker_execution_closure": true,
+    "replication_may_not_be_described_as_blind_preregistration": true,
+    "replication_may_not_be_generalized_beyond_this_fixed_policy": true
+  },
+  "isolation_policy": {
+    "allowlist_staging_tree_required": true,
+    "execution_process_must_start_after_the_precommit_git_commit": true,
+    "live_repository_python_imports_forbidden": true,
+    "old_q90_diagnostic_canonical_must_be_absent_from_staging_tree": true,
+    "old_q90_exact_result_test_must_be_absent_from_staging_tree": true,
+    "only_source_pins_may_be_copied_to_staging_tree": true,
+    "q88_canonical_role": "post_replay_q1_through_q88_exact_reference_only",
+    "staging_tree_is_ephemeral": true
+  },
+  "legal_terminal_branches": [
+    {
+      "authority": "earlier_fixed_policy_failure_only_no_q90_inference",
+      "branch": "Q89_FAILURE_Q90_NOT_ATTEMPTED",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": false
+    },
+    {
+      "authority": "indeterminate_resource_abort_no_infeasibility_inference",
+      "branch": "Q89_RESOURCE_ABORT_Q90_NOT_ATTEMPTED",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": false
+    },
+    {
+      "authority": "narrow_q90_fixed_policy_candidate_ceiling_infeasibility_replication",
+      "branch": "Q89_SUCCESS_Q90_FAILURE",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": true
+    },
+    {
+      "authority": "indeterminate_resource_abort_no_infeasibility_inference",
+      "branch": "Q89_SUCCESS_Q90_RESOURCE_ABORT",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": false
+    },
+    {
+      "authority": "bounded_horizon_passed_without_M4_or_child_authority",
+      "branch": "Q89_AND_Q90_SUCCESS_HORIZON_REACHED",
+      "child_boundary_transition_or_sidecar_allowed": false,
+      "scientific_negative_authority": false
+    }
+  ],
+  "operational_observation_policy": {
+    "external_timeout_or_memory_termination_is_indeterminate": true,
+    "logical_checker_does_not_claim_to_enforce_a_host_runtime_or_RSS_cap": true,
+    "runtime_and_RSS_may_be_recorded_only_in_a_non_authoritative_external_receipt": true,
+    "runtime_fields_are_excluded_from_the_logical_witness": true
+  },
+  "parent_authority": {
+    "certified_mapped_depth_before_and_after_screen": 3,
+    "certificate_relative_path": "hubbard_l8_magnetization_interval_step3_template.json",
+    "certificate_sha256": "b68544091be417eed5310d8579eb8dc4d1a51e1863ed1fb7a8cbfa1fc6004eb6",
+    "checker_relative_path": "hubbard_l8_magnetization_interval_step3_checker.py",
+    "checker_sha256": "4e471b6f22838b2e9621adeeb757e7fa8277e3d8c4985eee392b182530c0c717",
+    "contract_relative_path": "hubbard_l8_magnetization_interval_step3_contract.json",
+    "contract_sha256": "fb1d5e82819d39f217a8c1c7f4979a689f4d46b8d691a8f464cad9012c197387",
+    "encoded_boundary_relative_path": "hubbard_l8_interval_checkpoints/staggered_magnetization_boundary_003.b85",
+    "encoded_boundary_sha256": "91aecef5a3b79279e394c8995072d19565f4898e0ba29ddd7685ea9e535d9c84",
+    "expected_witness_sha256": "e5a1fec288bbb118fbc56adfa2ee9d21e0e5f4eb49196a7301d70b361c592ff7",
+    "premise_role": "already_certified_hash_pinned_M3_boundary_premise_not_reverified_by_this_13_file_replay_closure",
+    "required_positive_status": "VERIFIED_L8_MAGNETIZATION_STEP3_MAPPED_INTERVAL_CHILD_SUBCERTIFICATE"
+  },
+  "policy_fingerprint": "hubbard_l8_magnetization_q90_formal_s0_policy_v1",
+  "policy_id": "M-Q90-FORMAL-S0",
+  "policy_role": "design_informed_result_unpinned_retrospective_fixed_policy_replication",
+  "precommit_boundary": {
+    "any_candidate_budget_horizon_resource_or_source_change_requires_a_new_policy_version": true,
+    "formal_replay_must_start_only_after_policy_checker_and_precommit_contract_are_committed": true,
+    "formal_replay_started_before_this_policy_commit": false,
+    "policy_contains_formal_outcome_pins": false,
+    "policy_does_not_promise_any_terminal_branch": true,
+    "result_contract_certificate_and_exact_result_tests_must_be_absent_from_the_precommit_commit": true
+  },
+  "resource_policy": {
+    "max_candidate_K": 622592,
+    "max_candidate_count": 34,
+    "max_digest_terms": 786432,
+    "max_expansion_coefficient_tick_bits": 192,
+    "max_output_terms_if_successful": 622592,
+    "max_product_bits": 384,
+    "max_single_expansion_terms": 786432,
+    "max_suffix_accumulator_bits": 224,
+    "max_term_gate_visits": 536870912,
+    "max_trigonometric_tick_bits": 66,
+    "resource_abort_action": "indeterminate_fail_closed_without_scientific_negative_authority"
+  },
+  "schema_version": 1,
+  "scope_boundary": {
+    "attempted_child_step_index": 4,
+    "certified_mapped_depth_after_any_terminal_branch": 3,
+    "child_boundary_committed": false,
+    "child_transition_committed": false,
+    "exact_Hubbard_error": "NOT_ASSESSED",
+    "general_infeasibility_for_larger_K_other_cadences_or_other_algorithms": "NOT_CLAIMED",
+    "M4_certified": false,
+    "physical_reference_qualified": false,
+    "positive_child_artifact_generated": false,
+    "product_formula_error": "NOT_ASSESSED",
+    "ready_gate_eligible": false,
+    "remaining_mapped_steps": "NOT_ASSESSED"
+  },
+  "sequence_and_budget": {
+    "backprop_gate_records_sha256": "8504eae718b7a670fa71b79c789691e70a59365f0876f8acfdd4ea8dceee2df5",
+    "baseline_checkpoints_per_mapped_step": 144,
+    "baseline_gates_per_checkpoint": 8,
+    "four_gate_checkpoints_per_mapped_step": 288,
+    "four_gate_gates_per_checkpoint": 4,
+    "horizon_checkpoint_count": 90,
+    "horizon_prefix_cap_ticks": "1700904496098731",
+    "input_cumulative_drop_ticks": "1691496669588296",
+    "maximum_cumulative_drop_ticks": "4611686018427387",
+    "physical_gate_count_per_mapped_step": 1152,
+    "prefix_cap_formula": "E3+floor(q*(B-E3)/(97*288))",
+    "remaining_mapped_steps_including_attempt": 97,
+    "total_future_checkpoint_denominator": 27936
+  },
+  "source_pins": [
+    {
+      "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q90_screen.py",
+      "role": "outcome_unpinned_q1_through_q90_same_byte_execution_engine",
+      "sha256": "f880e851bb16df5e659d7c0e6aa237d1836b17b4ad010d5676557ade2ba9140a",
+      "size_bytes": 89527
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q88_screen.py",
+      "role": "same_byte_private_execution_parent",
+      "sha256": "6867dda2d6bd34ab2eed6b31d02a587e16762263a493e9890d0caa40f23a58a4",
+      "size_bytes": 78218
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_four_gate_granularity_screen.py",
+      "role": "four_gate_control_flow_parent",
+      "sha256": "b483d9555a24dd07ea96292ed0a7ed51587259a79a2c5d69e3a8bf1408b4a614",
+      "size_bytes": 35616
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_adaptive_k_four_gate_k622592_c34_q88_transcript.json",
+      "role": "post_replay_q1_through_q88_exact_reference_not_execution_state_or_resume_input",
+      "sha256": "0074b1eea5fa574378d5a9fae9e748e7145efaa0c96b622ddf50587a72a2551a",
+      "size_bytes": 821781
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_v6_design_probe.py",
+      "role": "baseline_configuration_before_runtime_override",
+      "sha256": "3e7f9ff0546addfaa23f351f3569b102d0c3ebb578dbc4873b042bac21070af2",
+      "size_bytes": 26538
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_v2_design_probe.py",
+      "role": "verified_helper_provider_without_run_entrypoint_authority",
+      "sha256": "01582da649f7df2a0e65dcf8ed251a341b72218eade72dcd3d69ffa627fe1ee3",
+      "size_bytes": 25517
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_arithmetic_v2.py",
+      "role": "base_fixed_tick_arithmetic_implementation",
+      "sha256": "f4819f96bf92ac07a9ce5d0be646c8d187b04f37a64c7dccda68f665722d5998",
+      "size_bytes": 23931
+    },
+    {
+      "relative_path": "hubbard_l8_adaptive_k_arithmetic_k622592_c34.py",
+      "role": "K622592_C34_capability_wrapper",
+      "sha256": "f4e676da40535903301181cf482119e051066b90921793e34152403b3b74b976",
+      "size_bytes": 21957
+    },
+    {
+      "relative_path": "hubbard_l8_observable_interval_step_checker.py",
+      "role": "source_pinned_sequence_trigonometry_and_Neel_oracle",
+      "sha256": "5c151a63cee86d362851629aae743600dd61fcfd534339376aca88fe030b1f1a",
+      "size_bytes": 65080
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_checker.py",
+      "role": "hash_pinned_M3_boundary_spec_provider_from_an_already_certified_premise",
+      "sha256": "4e471b6f22838b2e9621adeeb757e7fa8277e3d8c4985eee392b182530c0c717",
+      "size_bytes": 56874
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_contract.json",
+      "role": "positive_M3_parent_contract",
+      "sha256": "fb1d5e82819d39f217a8c1c7f4979a689f4d46b8d691a8f464cad9012c197387",
+      "size_bytes": 6930
+    },
+    {
+      "relative_path": "hubbard_l8_magnetization_interval_step3_template.json",
+      "role": "positive_M3_parent_certificate",
+      "sha256": "b68544091be417eed5310d8579eb8dc4d1a51e1863ed1fb7a8cbfa1fc6004eb6",
+      "size_bytes": 13822
+    },
+    {
+      "relative_path": "hubbard_l8_interval_checkpoints/staggered_magnetization_boundary_003.b85",
+      "role": "positive_M3_encoded_input_boundary",
+      "sha256": "91aecef5a3b79279e394c8995072d19565f4898e0ba29ddd7685ea9e535d9c84",
+      "size_bytes": 805953
+    }
+  ],
+  "workload_identity": {
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "initial_state": "checkerboard_Neel_A_up_B_down_Nup32_Ndown32",
+    "input_step_index": 3,
+    "linear_size": 8,
+    "n_qubits": 128,
+    "n_sites": 64,
+    "observable_id": "staggered_magnetization",
+    "profile_id": "L8_OBC_U8_T1_R100_NEEL_M_Q90_FORMAL_S0",
+    "step_duration": "1/100",
+    "trotter_steps": 100
+  },
+  "wrapped_kernel_capability": {
+    "capability_is_not_a_scientific_policy_cap": true,
+    "capability_manifest_sha256": "3c2b66149d524cc63a4d04838b3eec47fb69677466fe1f208e226df92bf0dac3",
+    "limits": {
+      "max_candidate_count": 34,
+      "max_digest_terms": 1048576,
+      "max_expansion_coefficient_tick_bits": 192,
+      "max_product_bits": 384,
+      "max_retained_K": 622592,
+      "max_single_expansion_terms": 1048576,
+      "max_source_bytes": 196608,
+      "max_suffix_accumulator_bits": 224,
+      "max_term_gate_visits": 1000000000,
+      "max_trigonometric_tick_bits": 66
+    },
+    "relative_path": "hubbard_l8_adaptive_k_arithmetic_k622592_c34.py",
+    "sha256": "f4e676da40535903301181cf482119e051066b90921793e34152403b3b74b976"
+  }
+}

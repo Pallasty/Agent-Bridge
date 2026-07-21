@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "contract_fingerprint": "hubbard_strang_grouping_screen_contract_v1",
+  "certificate_type": "hubbard_strang_grouping_coefficient_l1_screen_v1",
+  "checker_fingerprint": "hubbard_strang_grouping_exact_permutation_screen_v1",
+  "checker_source_sha256": "f392f80902f1f0352cd9d14c51a6e74a5246a3910736cba59b17e0f8c5c5ac06",
+  "source_pins": [
+    {
+      "relative_path": "hubbard_strang_commutator_checker.py",
+      "role": "audited_exact_commutator_and_coefficient_L1_backend",
+      "sha256": "e3144590c0e00bb2bd69bc50b1bdf3d7d6c3043c8697d5050202404590138fa7"
+    },
+    {
+      "relative_path": "hubbard_strang_commutator_contract.json",
+      "role": "positive_base_contract",
+      "sha256": "44bc15474b7964d94db6cd79fb7bce3255d1c8f9bb181ddada8dc294cdb428c1"
+    },
+    {
+      "relative_path": "hubbard_strang_commutator_template.json",
+      "role": "positive_base_certificate",
+      "sha256": "ba42851a7bad6fa117df8bfa4d8f6f7c261f11175a6df4bb673614b5cdbba572"
+    }
+  ],
+  "primary_source": {
+    "authors": "Ansgar Schubert and Christian B. Mendl",
+    "title": "Trotter error with commutator scaling for the Fermi-Hubbard model",
+    "arxiv_version": "2306.10603v2",
+    "doi": "10.1103/PhysRevB.108.195105",
+    "formula": "Proposition 2 Equation 13",
+    "plaquette_decomposition": "Section III.B Equation 19",
+    "source_scope": "paper uses even-L periodic boundaries and three groups; four hopping terms inside a plaquette are assumed simultaneously realizable",
+    "use_in_this_checker": "formula and grouping motivation only; printed decimal norm bounds are not used as certified OBC values"
+  },
+  "screen_policy": {
+    "linear_size": 8,
+    "boundary_condition": "square_open_boundary_no_wrap",
+    "hamiltonian_convention": "H=-sum_<ij>,sigma(cdag_i_sigma*c_j_sigma+cdag_j_sigma*c_i_sigma)+8*sum_i n_i_up*n_i_down_unshifted",
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "fixed_group_names": ["H1", "H2", "HU", "H3", "H4"],
+    "fixed_permutation_count": 120,
+    "plaquette_candidate_group_names": ["P0", "P1", "B", "HU"],
+    "plaquette_permutation_count": 24,
+    "plaquette_bulk_anchors": {
+      "P0": "even_row_even_column_lower_left",
+      "P1": "odd_row_odd_column_lower_left_strictly_interior"
+    },
+    "boundary_residual": "odd horizontal bonds on top/bottom plus odd vertical bonds on left/right",
+    "bound": "Schubert_Mendl_Proposition_2_Eq_13_then_merged_Pauli_coefficient_L1",
+    "observable_comparison": "generic_norm_at_most_one_factor_two",
+    "trotter_steps": 100,
+    "per_observable_allocation": "1/4000",
+    "material_relative_C_reduction_threshold": "1/100"
+  },
+  "resource_limits": {
+    "max_json_bytes": 262144,
+    "max_checker_source_bytes": 131072,
+    "max_pinned_source_bytes": 1048576,
+    "max_fixed_permutations": 120,
+    "max_plaquette_permutations": 24,
+    "max_total_terms": 640,
+    "max_commutator_pair_products_per_candidate": 2000000
+  },
+  "expected_screen_sha256": "c1d083cf521722349a488ac5223b5ac24734dd7f49418a3646f14440f997a36a",
+  "maximum_positive_status": "VERIFIED_STRANG_GROUPING_COEFFICIENT_L1_SCREEN",
+  "scope_claims": {
+    "checker_execution_from_contract_pinned_source_bytes_verified": true,
+    "base_commutator_subcertificate_source_pinned_and_verified": true,
+    "fixed_five_group_all_120_orders_exactly_screened": true,
+    "OBC_plaquette_boundary_hamiltonian_cover_verified": true,
+    "OBC_plaquette_boundary_all_24_orders_exactly_screened": true,
+    "nested_commutators_merged_before_coefficient_L1": true,
+    "R100_generic_observable_allocation_tested": true,
+    "paper_periodic_plaquette_numerical_bound_imported": false,
+    "candidate_group_exponentials_matched_to_benchmark_circuit": false,
+    "observable_specific_or_locality_tightening": "NOT_ASSESSED",
+    "truncation_certificate_composed": false,
+    "physical_L8_instance_identity": "NOT_ASSESSED",
+    "reference_error_budget_qualified": false,
+    "ready_gate_eligible": false
+  }
+}

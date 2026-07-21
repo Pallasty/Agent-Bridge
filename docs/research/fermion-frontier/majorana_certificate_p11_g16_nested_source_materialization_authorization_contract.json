@@ -1,0 +1,18 @@
+{
+  "schema_version":1,
+  "contract_id":"MAJORANA-P11-G16-NESTED-SOURCE-MATERIALIZATION-AUTHORIZATION-V1",
+  "required_direct_parent_commit":"214a8442141c4f3d0cc49fb1b8ed8bf35814c8e7",
+  "E4R_custody":{"contract_relative_path":"majorana_certificate_p11e4r_nested_source_materialization_contract.json","contract_raw_sha256":"c4cfa4aaa9930e7268b578edb70d75d626fda691df18eed6d0b1652c7173a3b2","record_relative_path":"majorana_certificate_p11e4r_nested_source_materialization_record.json","record_raw_sha256":"3358bbd5fbced3aadf556071b890c597d9494b9458d6eb82de7b9cf0667336da","expected_disposition":"NESTED_SOURCE_MATERIALIZATION_CONTRACT_ESTABLISHED_AWAITING_G16_AUTHORIZATION","expected_next_gate":"P11-G16-NESTED-SOURCE-MATERIALIZATION-AUTHORIZATION-V1"},
+  "readiness_review":[
+    {"check_id":"full_G15_E4_failure_E3R_chain_and_exact_nested_archive_identity","status":"PASS"},
+    {"check_id":"E3R_manifest_state_and_expected_derived_parent_are_present_and_consistent","status":"PASS"},
+    {"check_id":"derived_root_absent_and_distinct_before_authorization","status":"PASS"},
+    {"check_id":"single_O_NOFOLLOW_descriptor_preflight_and_posthash_policy","status":"PASS"},
+    {"check_id":"complete_graph_collision_special_entry_and_dirfd_creation_policy","status":"PASS"},
+    {"check_id":"one_layer_nonrecursive_resource_caps_and_atomic_publish_policy","status":"PASS"},
+    {"check_id":"semantic_read_E4_retry_build_execution_measurement_candidate_and_science_closed","status":"PASS"}
+  ],
+  "decision":{"disposition":"AUTHORIZE_ONE_P11_E4R_NESTED_SOURCE_MATERIALIZATION_RUN","read_only_E3R_nested_archive_access_authorized":true,"new_E4R_derived_root_and_receipt_creation_authorized":true,"byte_level_archive_parse_copy_and_hash_authorized":true,"source_text_semantic_read_or_excerpt_authorized":false,"E4_analysis_retry_authorized":false,"E2R_or_E3R_mutation_authorized":false,"network_package_build_execution_or_measurement_authorized":false,"kernel_bound_candidate_equivalence_or_science_authorized":false,"scientific_authority":"NONE","post_run_gate":"P11-G17-POST-NESTED-SOURCE-MATERIALIZATION-GOVERNANCE-V1"},
+  "operation_limits":{"maximum_authorized_runs":1,"materialized_nesting_layers":1,"recursive_archive_extraction":false,"maximum_member_count":200000,"maximum_total_regular_file_bytes":4294967296,"maximum_single_regular_file_bytes":1073741824,"maximum_expansion_ratio":64,"source_analysis_or_excerpt_count":0,"stop_on_first_preflight_or_postcheck_failure":true,"only_contract_pinned_archive_row":true},
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11_g16_nested_source_materialization_authorization_contract.json","docs/research/fermion-frontier/majorana_certificate_p11_g16_nested_source_materialization_authorization_record.json","docs/research/fermion-frontier/majorana_certificate_p11_g16_nested_source_materialization_authorization_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11_g16_nested_source_materialization_authorization.py"]}
+}

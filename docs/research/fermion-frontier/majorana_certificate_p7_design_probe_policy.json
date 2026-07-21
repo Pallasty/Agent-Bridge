@@ -1,0 +1,685 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P7-STEP3-E768-MAX-LAZY37-D0-V1",
+  "policy_fingerprint": "majorana_p7_p6_informed_result_unpinned_fixed_admission_step3_e768_max_lazy37_resource_probe_v1",
+  "policy_role": "result_unpinned_non_authoritative_resource_probe_for_one_adjacent_step3_continuation_after_a_fresh_resource_conforming_P6_prefix",
+  "required_direct_parent_commit": "254f893dc5e40c27f6c4fb17dfd1c07ab749c2e4",
+  "required_fixture_relative_path": "majorana_certificate_p7_design_probe_fixture.json",
+  "probe_driver_relative_path": "majorana_certificate_p7_design_probe/majorana_p7_step3_resource_probe.jl",
+  "scientific_authority": "NONE",
+  "certificate_eligible": false,
+  "hindsight_firewall": {
+    "disclosure": "P7 is informed by the positive published P6 parent and is result-unpinned with respect to every P7 execution",
+    "classification": "P6_INFORMED_P7_RESULT_UNPINNED",
+    "P6_informed": true,
+    "P7_result_unpinned": true,
+    "allowed_P6_design_inputs": [
+      "the_positive fixed two-step P6 parent identity and published scope",
+      "the frozen P3 step1 and P6 E768-MAX-LAZY37-V1 step2 algorithms",
+      "the frozen 768-boundary cadence and campaign grid and per-step allocation",
+      "the published aggregate P6 resource projection and formal resource caps"
+    ],
+    "forbidden_P6_inputs_to_the_D0_runner": [
+      "P6 result contract certificate raw witness exact result test or replay package bytes",
+      "P6 product merge drop local cumulative allocation slack or utilization values",
+      "P6 selected masks coefficient bits cutoff drop rows or scientific digests",
+      "P6 final term stream checkerboard-Neel center interval or contribution stream"
+    ],
+    "forbidden_P7_design_inputs": [
+      "any prior P7 execution output",
+      "any P7 scientific tick prefix budget allocation cutoff membership digest state or observable value",
+      "any P7 resource observation used to change the candidate deterministic caps host caps or fallback in place"
+    ],
+    "step3_budget_formula_depends_only_on_campaign_constants": true,
+    "P6_observed_local_slack_is_not_a_step3_budget_input": true,
+    "no_P7_probe_output_may_exist_before_this_policy_is_committed": true,
+    "any_prior_uncommitted_P7_execution_requires_a_new_disclosed_policy_version": true,
+    "policy_and_runner_must_not_contain_P6_or_P7_scientific_result_literals": true
+  },
+  "candidate_design": {
+    "probe_mode_order": [
+      "E768_MAX_LAZY37_STEP3_V1"
+    ],
+    "candidate_execution_order": [
+      "E768-MAX-LAZY37-STEP3-V1"
+    ],
+    "formal_candidate_order_is_frozen_before_any_D0_output": [
+      "E768-MAX-LAZY37-STEP3-V1"
+    ],
+    "formal_candidates": [
+      {
+        "candidate_id": "E768-MAX-LAZY37-STEP3-V1",
+        "probe_mode": "E768_MAX_LAZY37_STEP3_V1",
+        "algorithm_id": "MAJORANA-P7-E768-MAX-LAZY37-STEP3-V1",
+        "prefix_path": "fresh_O0_then_P3_2^-34_step1_then_P6_E768_MAX_LAZY37_V1_step2",
+        "step3_path": "full_postmerge_domain_maximal_affordable_prefix_under_a_new_step3_local_error_escrow",
+        "implementation_strategy": "exact_lazy_initial_segment_acceleration_anchored_at_strict_2_pow_minus_37",
+        "fresh_D0_process_count": 1,
+        "required_future_S0_fresh_process_count": 2,
+        "selectable": true
+      }
+    ],
+    "exactly_one_formal_candidate": true,
+    "control_candidate": null,
+    "there_is_no_multi_candidate_selector": true,
+    "prefix_resource_conformance_is_a_precondition_not_a_control_candidate": true,
+    "candidate_set_cannot_be_selected_removed_reordered_or_extended_from_D0_output": true,
+    "no_open_budget_threshold_K_or_candidate_grid": true,
+    "no_post_probe_no_drop_fixed_threshold_or_other_fallback": true,
+    "candidate_budget_fraction_lazy_anchor_ranking_schedule_and_algorithm_are_frozen_before_P7_output": true,
+    "candidate_CLI_environment_or_runtime_selection_is_forbidden": true,
+    "any_candidate_algorithm_budget_or_cadence_change_requires_a_new_result_unpinned_policy_version": true
+  },
+  "P6_prefix_reproduction": {
+    "required_prefix": "fixed_L8_P3_2^-34_step1_then_P6_E768_MAX_LAZY37_V1_step2",
+    "fresh_execution_starts_from_O0": true,
+    "step1_and_step2_share_one_live_process": true,
+    "step2_input_is_a_live_deepcopy_of_step1_retained_mainsum": true,
+    "step3_input_is_a_live_deepcopy_of_step2_retained_mainsum": true,
+    "checkpoint_serialization_cross_process_resume_or_parent_state_loading_is_forbidden": true,
+    "P6_runner_source_is_staged_without_transform": true,
+    "all_thirteen_staged_paths_must_equal_their_repository_bytes": true,
+    "P6_prefix_formal_caps_are_not_relaxed": true,
+    "complete_inline_resource_projection_conformance_is_required_before_step3_starts": true,
+    "resource_projection_is_compared_field_for_field_to_expected_P6_prefix_resource_projection": true,
+    "prefix_resource_projection_mismatch_is_not_a_scientific_failure": true,
+    "D0_prefix_conformance_has_resource_custody_authority_only": true,
+    "scientific_P6_fieldwise_conformance_is_deferred_to_future_S0": true,
+    "D0_does_not_decode_or_inherit_P6_E12": true,
+    "future_S0_decodes_and_inherits_P6_E12_once_only_after_full_prefix_fieldwise_conformance": true,
+    "future_S0_does_not_separately_inherit_P3_E1_or_recharge_fresh_step2": true,
+    "step2_drop_ledger_slack_selection_membership_ranking_buffer_and_counters_do_not_seed_step3": true
+  },
+  "scientific_algorithm": {
+    "algorithm_id": "MAJORANA-P7-E768-MAX-LAZY37-STEP3-V1",
+    "common_grid_denominator": "340282366920938463463374607431768211456",
+    "grid_definition": "2^128",
+    "step3_local_allocation": "1/400000",
+    "strict_local_maximum_ticks": "850705917302346158658436518579420",
+    "strict_local_maximum_formula": "floor((2^128-1)/400000)",
+    "allocation_equality_is_failure": true,
+    "fixed_three_step_chain": {
+      "mapped_step_indices": [
+        1,
+        2,
+        3
+      ],
+      "step1_path": "fixed_P3_2_pow_minus_34",
+      "step2_path": "fixed_P6_E768_MAX_LAZY37_V1",
+      "step3_path": "fixed_E768_MAX_LAZY37_STEP3_V1",
+      "all_steps_execute_in_one_fresh_process": true,
+      "no_fusion_across_mapped_step_boundaries": true
+    },
+    "step3_boundary_design": {
+      "boundary_count": 768,
+      "local_raw_boundary_index_domain": "0_through_767",
+      "local_released_prefix_number_q": "local_raw_boundary_index_plus_one_in_1_through_768",
+      "global_raw_boundary_index_domain": "1536_through_2303",
+      "global_raw_boundary_index_formula": "1536_plus_local_raw_boundary_index",
+      "prefix_cap_ticks_formula": "floor(q*strict_local_maximum_ticks/768)",
+      "prefix_uses_local_q_and_never_the_global_boundary_index": true,
+      "prefix_cap_is_cumulative_within_step3_not_across_steps": true,
+      "prefix_cap_cannot_reset_at_a_stage_composite_or_boundary": true,
+      "local_ledger_resets_exactly_once_at_the_step2_to_step3_boundary": true,
+      "step2_unused_slack_cannot_carry_forward": true,
+      "future_step_budget_cannot_be_borrowed": true,
+      "one_immutable_postmerge_snapshot_per_boundary": true,
+      "one_logical_full_domain_ranking_per_boundary": true,
+      "drop_before_merge_is_forbidden": true,
+      "additional_removed_or_reordered_drop_boundaries_are_forbidden": true
+    },
+    "total_step3_local_ledger": {
+      "charged_components": [
+        "every_step3_product_defect_row",
+        "every_step3_merge_defect_row",
+        "every_executed_step3_drop_defect_row"
+      ],
+      "every_row_is_individually_rounded_outward_before_BigInt_accumulation": true,
+      "product_and_merge_are_charged_before_the_current_boundary_drop_decision": true,
+      "available_drop_ticks_at_boundary_q": "max(0,prefix_cap_ticks_q-cumulative_step3_product_ticks_q-cumulative_step3_merge_ticks_q-cumulative_step3_drop_ticks_before_q)",
+      "drop_row_cost": "ceil(2^128*exact_abs_of_original_finite_binary64_coefficient)",
+      "drop_budget_fit_comparison": "candidate_prefix_cost_less_than_or_equal_to_available_drop_ticks",
+      "exact_fit_is_selected": true,
+      "zero_cost_rows_are_affordable_when_available_drop_ticks_is_zero": true,
+      "no_drop_cost_refund_after_future_merge_cancellation_reappearance_or_state_removal": true,
+      "no_local_budget_may_be_borrowed_from_the_P6_prefix_cumulative_slack_or_a_future_step": true,
+      "scientific_local_overflow_does_not_short_circuit_D0": true,
+      "D0_never_compares_the_completed_ledger_to_an_allocation": true
+    },
+    "full_domain_order": {
+      "domain": "every_row_in_the_immutable_postmerge_snapshot",
+      "ranking_key": [
+        "drop_row_cost_BigInt_ascending",
+        "raw_binary64_absolute_magnitude_bits_as_UInt64_ascending",
+        "unsigned_Majorana_mask_ascending"
+      ],
+      "host_dictionary_iteration_order_is_forbidden": true,
+      "host_Float64_comparison_sort_key_is_forbidden": true,
+      "selected_drop_set": "the_longest_initial_prefix_whose_sum_of_row_costs_is_at_most_the_available_drop_ticks",
+      "first_nonfitting_positive_cost_row_stops_without_skipping": true,
+      "ranking_is_not_recomputed_after_each_deletion": true,
+      "all_deletions_occur_only_after_the_selected_prefix_is_frozen": true
+    },
+    "lazy_k37_accelerator": {
+      "scientific_role": "implementation_only_exact_initial_segment_accelerator_not_a_scientific_eligibility_gate",
+      "threshold_exponent": 37,
+      "threshold_rational": "1/137438953472",
+      "threshold_Float64_bits_hex": "3da0000000000000",
+      "pool_membership": "raw_binary64_absolute_magnitude_bits_strictly_less_than_3da0000000000000",
+      "strict_less_than_not_less_than_or_equal": true,
+      "hard_K37_pool_only_stopping_with_positive_remaining_ticks_is_forbidden": true,
+      "second_scan_uses_the_same_frozen_unmodified_snapshot": true,
+      "every_affordable_nonpool_row_is_materialized_and_ranked": true,
+      "callback_only_tests_precomputed_membership": true,
+      "callback_iteration_order_cannot_consume_budget": true,
+      "step2_and_step3_selection_state_is_disjoint": true
+    },
+    "future_S0_composition": {
+      "step3_local_pass_iff": "step3_local_ticks_times_400000_strictly_less_than_2^128",
+      "three_step_cumulative_allocation": "3/400000",
+      "maximum_strictly_legal_cumulative_ticks": "2552117751907038475975309555738261",
+      "maximum_strictly_legal_cumulative_ticks_formula": "floor((3*2^128-1)/400000)",
+      "three_step_cumulative_pass_iff": "E123_ticks_times_400000_strictly_less_than_3_times_2^128",
+      "composition_identity": "once_inherited_conformed_P6_E12_plus_fresh_step3_local_increment",
+      "P6_E12_charge_multiplicity": 1,
+      "D0_has_no_authority_over_any_future_S0_pass_bit": true
+    }
+  },
+  "D0_observation_contract": {
+    "scientific_authority": "NONE",
+    "public_witness_exact_top_level_fields": [
+      "schema_version",
+      "probe_type",
+      "fixture_id",
+      "fixture_sha256",
+      "fixture_canonical_sha256",
+      "scientific_authority",
+      "certificate_eligible",
+      "result_contract_eligible",
+      "resource_observations_only",
+      "candidate",
+      "runtime_custody",
+      "step1",
+      "step2",
+      "step3",
+      "step1_to_step2_link",
+      "step2_to_step3_link",
+      "step2_selection_resources",
+      "step3_selection_resources",
+      "P6_prefix_resource_projection_conformed",
+      "step3_started",
+      "explicit_exclusions"
+    ],
+    "public_candidate_exact_fields": [
+      "candidate_id",
+      "probe_mode",
+      "identity",
+      "formal_candidate",
+      "step1_path",
+      "step2_path",
+      "step3_path"
+    ],
+    "public_link_exact_fields": [
+      "same_process",
+      "checkpoint_or_serialized_state_used",
+      "previous_step_final_term_count",
+      "next_step_input_term_count"
+    ],
+    "public_explicit_exclusions": [
+      "scientific_local_or_cumulative_error_values",
+      "allocation_assessment_or_candidate_selection",
+      "term_or_drop_stream_commitments",
+      "checkerboard_observable_center_or_interval",
+      "adaptive_execution_branch_as_scientific_evidence",
+      "scientific_witness_result_contract_certificate_or_READY_authority"
+    ],
+    "formal_finalizer_privacy": {
+      "complete_formal_finalizer_execution_role": "future_S0_resource_path_equivalence_only",
+      "complete_formal_finalizer_has_scientific_authority": false,
+      "transient_private_values": [
+        "term_digest",
+        "checkerboard_Neel_value",
+        "exact_center",
+        "declared_interval",
+        "operator_error_ticks"
+      ],
+      "D0_driver_reads_transient_private_values": false,
+      "D0_driver_serializes_transient_private_values": false,
+      "D0_driver_compares_transient_private_values": false,
+      "only_public_finalizer_resource_fields": [
+        "final_retained_term_count",
+        "P2_resource_counters.final_evaluation_term_visits"
+      ],
+      "public_finalizer_fields_are_resource_counts_only": true,
+      "public_finalizer_fields_do_not_form_a_scientific_assessment_or_expand_authority": true
+    },
+    "allowed_aggregate_resource_outputs": [
+      "candidate fixture and fixed runtime custody identity",
+      "completion or first deterministic cap context without coefficient or budget values",
+      "the complete step1 and step2 aggregate P6 resource projection",
+      "the exact boolean result of fieldwise P6 aggregate resource projection comparison",
+      "whether step3 started after a conforming complete prefix",
+      "aggregate step3 cap scan propagation truncation and accuracy event counts",
+      "aggregate step2 and step3 selection work counts",
+      "peak premerge postmerge ranking buffer and boundary retained term counts",
+      "only final retained term count and final-evaluation term visits from the complete formal finalizer",
+      "same-process live step links using term counts only",
+      "wall time maximum RSS stdout stderr return code and supervisor diagnostics"
+    ],
+    "forbidden_outputs": [
+      "any product merge drop local prefix or cumulative scientific tick value",
+      "any local or cumulative allocation comparison pass bit deficit slack or utilization",
+      "any prefix target available used or remaining budget value",
+      "any ranking cutoff cost absolute bits coefficient bits or mask",
+      "any boundary-level lazy pool size membership saturation exhaustion fallback or affordable-nonpool field",
+      "any dropped row list row digest term state digest contribution digest or scientific transition record",
+      "any final coefficient row checkerboard-Neel center interval or contribution stream",
+      "any transient private finalizer term digest exact center declared interval or operator-error tick value",
+      "any scientific candidate score rank winner negative no-go certificate or READY claim"
+    ],
+    "public_cap_event_name_allowlist": [
+      "cap_scan_term_visits",
+      "final_evaluation_term_visits",
+      "maximum_BigInt_bit_length",
+      "maximum_accuracy_charged_events",
+      "maximum_anticommuting_events",
+      "maximum_boundary_retained_terms",
+      "maximum_cap_scan_term_visits",
+      "maximum_current_terms_before_constituent",
+      "maximum_drop_defect_events",
+      "maximum_final_evaluation_term_visits",
+      "maximum_merge_defect_events",
+      "maximum_peak_ranking_buffer_terms",
+      "maximum_premerge_terms",
+      "maximum_product_defect_events",
+      "maximum_propagation_term_visits",
+      "maximum_ranking_scan_term_visits",
+      "maximum_selected_membership_insertions",
+      "maximum_sort_input_items",
+      "maximum_tick_evaluations",
+      "maximum_total_P2_plus_accuracy_charged_events",
+      "maximum_total_charged_term_visits",
+      "maximum_total_selection_work_units",
+      "maximum_truncation_term_visits",
+      "propagation_term_visits",
+      "total_charged_term_visits",
+      "truncation_term_visits"
+    ],
+    "public_resource_identities": [
+      "P2_total_equals_cap_scan_plus_propagation_plus_truncation_plus_final_evaluation",
+      "accuracy_total_equals_product_plus_merge_plus_drop",
+      "product_defect_events_equal_twice_anticommuting_events",
+      "completed_execution_anticommuting_split_count_equals_anticommuting_event_count",
+      "completed_execution_threshold_dropped_term_count_equals_drop_defect_event_count",
+      "combined_total_equals_P2_total_plus_accuracy_total",
+      "completed_final_retained_count_equals_final_evaluation_term_visits",
+      "uncapped_adaptive_selection_boundaries_equal_completed_step3_truncation_boundaries",
+      "capped_progress_aggregates_never_exceed_their_precharged_event_counts",
+      "every_public_count_is_within_its_frozen_D0_probe_cap_or_schedule_bound"
+    ],
+    "prefix_mismatch_public_shape": {
+      "step1_and_step2_are_complete": true,
+      "P6_prefix_resource_projection_conformed": false,
+      "step3_started": false,
+      "step3": null,
+      "step2_to_step3_link": null,
+      "step3_selection_resources": null,
+      "fixed_formal_admission_status": "NOT_ESTABLISHED_INVALID_PREFIX_RESOURCE_CONFORMANCE"
+    },
+    "D0_report_cannot_enter_a_future_formal_runner": true,
+    "D0_raw_stdout_checkpoint_state_or_private_scientific_sidecar_must_not_be_persisted": true,
+    "operator_must_not_inspect_suppressed_scientific_fields": true
+  },
+  "D0_deterministic_resource_caps": {
+    "cap_scope": "one_fixed_step3_continuation_after_a_resource_conforming_fresh_P6_prefix",
+    "maximum_BigInt_bit_length": 2048,
+    "maximum_trig_table_entries": 6,
+    "maximum_step3_accuracy_charged_events": 8589934592,
+    "maximum_step3_anticommuting_events": 2147483648,
+    "maximum_step3_boundary_retained_terms": 1048576,
+    "maximum_step3_cap_scan_term_visits": 2147483648,
+    "maximum_step3_current_terms_before_constituent": 1048576,
+    "maximum_step3_drop_defect_events": 1073741824,
+    "maximum_step3_final_retained_terms": 1048576,
+    "maximum_step3_merge_defect_events": 2147483648,
+    "maximum_step3_premerge_terms": 1048576,
+    "maximum_step3_product_defect_events": 4294967296,
+    "maximum_step3_propagation_term_visits": 2147483648,
+    "maximum_step3_total_P2_charged_term_visits": 4294967296,
+    "maximum_step3_total_P2_plus_accuracy_charged_events": 8589934592,
+    "maximum_step3_truncation_term_visits": 1073741824,
+    "caps_are_checked_before_the_rejected_operation": true,
+    "caps_are_checked_before_scan_allocation_sort_tick_evaluation_or_state_mutation": true,
+    "no_operation_occurs_after_the_first_deterministic_cap_event": true,
+    "cap_context_includes_mapped_step_index_and_local_boundary_index": true,
+    "cap_context_excludes_coefficient_mask_budget_tick_cutoff_and_allocation_values": true,
+    "BigInt_bit_length_is_checked_after_each_tick_computation_and_cumulative_update": true,
+    "maximum_peak_ranking_buffer_terms": 1048576,
+    "maximum_ranking_scan_term_visits": 2147483648,
+    "maximum_selected_membership_insertions": 1073741824,
+    "maximum_sort_input_items": 1073741824,
+    "maximum_tick_evaluations": 1073741824,
+    "maximum_total_selection_work_units": 4294967296,
+    "total_selection_work_units_formula": "ranking_scan_term_visits_plus_sort_input_items_plus_tick_evaluations_plus_selected_membership_insertions",
+    "peak_is_checked_before_snapshot_or_rank_buffer_materialization": true,
+    "each_component_and_the_combined_total_are_checked_before_the_corresponding_operation": true
+  },
+  "D0_host_supervisor_caps": {
+    "MemoryMax_bytes": 2147483648,
+    "MemorySwapMax_bytes": 0,
+    "RuntimeMaxSec": "1800s",
+    "outer_safety_timeout_seconds": 1830,
+    "maximum_stdout_bytes": 1048576,
+    "maximum_stderr_bytes": 1048576,
+    "systemd_user_scope_cgroup_v2_required": true,
+    "fresh_writable_scratch_and_depot_prefix_per_process": true,
+    "network_PID_and_private_proc_namespace_isolation": "not_required_for_this_non_authoritative_D0_resource_probe_but_required_again_for_future_S0",
+    "host_timeout_OOM_cgroup_supervisor_environment_or_sandbox_failure_branch": "INDETERMINATE",
+    "host_failure_has_no_mathematical_resource_no_go_or_candidate_selection_authority": true,
+    "D0_and_future_S0_use_the_same_memory_swap_and_runtime_admission": true,
+    "host_caps_are_fixed_before_P7_D0_and_are_not_derived_from_observations": true,
+    "caps_cannot_be_relaxed_in_place_after_a_failure": true
+  },
+  "fixed_admission_rule": {
+    "rule": "D0_and_future_S0_use_the_same_precommitted_deterministic_and_host_admission_without_observation_based_derivation",
+    "D0_step3_caps_equal_fixture_step3_caps": true,
+    "future_S0_step3_caps_equal_D0_step3_caps": true,
+    "future_S0_step3_selection_caps_equal_D0_step3_selection_caps": true,
+    "formal_MemoryMax_bytes": 2147483648,
+    "formal_MemorySwapMax_bytes": 0,
+    "formal_RuntimeMaxSec": "1800s",
+    "formal_outer_safety_timeout_seconds": 1830,
+    "derived_from_observation": false,
+    "same_as_D0_admission": true,
+    "completed_observations_cannot_tighten_or_relax_the_fixed_caps": true,
+    "a_D0_cap_host_failure_or_prefix_mismatch_does_not_authorize_a_different_admission": true,
+    "scientific_witness_stdout_and_persisted_container_caps_must_be_separately_schema_derived_in_future_S0": true,
+    "caps_are_resource_guards_not_scientific_evidence": true
+  },
+  "fixed_formal_admission_schema": {
+    "report_field_name": "fixed_formal_admission",
+    "exact_fields": [
+      "status",
+      "formal_step3_caps",
+      "formal_step3_selection_caps",
+      "formal_host_caps",
+      "derived_from_observation",
+      "same_as_D0_admission"
+    ],
+    "established_status": "ESTABLISHED_FOR_FUTURE_S0_PRECOMMIT",
+    "prefix_mismatch_status": "NOT_ESTABLISHED_INVALID_PREFIX_RESOURCE_CONFORMANCE",
+    "step1_cap_status": "NOT_ESTABLISHED_DETERMINISTIC_STEP1_CAP",
+    "step2_cap_status": "NOT_ESTABLISHED_DETERMINISTIC_STEP2_CAP",
+    "step3_cap_status": "NOT_ESTABLISHED_DETERMINISTIC_STEP3_CAP",
+    "host_failure_status": "NOT_ESTABLISHED_INDETERMINATE_HOST_OR_RUNTIME_FAILURE",
+    "derived_from_observation": false,
+    "same_as_D0_admission": true
+  },
+  "stop_rules": {
+    "host_timeout_OOM_cgroup_supervisor_environment_sandbox_or_generation_failure_returns_INDETERMINATE": true,
+    "custody_schema_source_runtime_or_forbidden_output_failure_returns_INVALID_D0_PROBE": true,
+    "P6_prefix_deterministic_cap_stops_before_step3_and_does_not_decode_scientific_fields": true,
+    "P6_prefix_resource_projection_mismatch_stops_before_step3": true,
+    "prefix_mismatch_is_resource_conformance_invalidity_not_a_P6_or_P7_scientific_negative": true,
+    "step3_first_deterministic_cap_is_recorded_as_resource_only_and_forbids_S0": true,
+    "complete_D0_requires_a_complete_resource_conforming_P6_prefix_and_complete_step3": true,
+    "never_expand_caps_change_candidate_change_lazy_anchor_or_add_a_fallback_in_place": true,
+    "a_new_version_cannot_use_suppressed_scientific_values_to_change_admission": true,
+    "D0_never_emits_a_candidate_selection_allocation_result_or_scientific_negative": true
+  },
+  "runtime": {
+    "runtime_lock_id": "MAJORANA-P0-JULIA-1.11.9-LINUX-X86_64-V1",
+    "runtime_lock_relative_path": "majorana_certificate_p0_runtime_lock.json",
+    "runtime_lock_sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17",
+    "runtime_lock_bytes_verified_by_preprobe_checker": true,
+    "MajoranaPropagation_source_tree_closure": {
+      "file_count": 42,
+      "total_bytes": 1875632,
+      "closure_sha256": "744e743d88d7bc62da1ba11cef02909539de626bd4b0a5533b0b65d8aae309b5"
+    },
+    "PauliPropagation_source_tree_closure": {
+      "file_count": 119,
+      "total_bytes": 7736347,
+      "closure_sha256": "ce1e6cac1b09573962136fce0f315fabbf8556c9075c4aa3545c41c6ee4c3783"
+    },
+    "julia_executable_sha256": "2976d17aba35be5d546e8e315e521bd9be3e58c2e64abfd588f186696e807b7d",
+    "JULIA_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "compiled_modules": false,
+    "network_or_package_resolution_required": false,
+    "Float64_rounding_mode": "RoundNearest",
+    "locale": "C",
+    "timezone": "UTC"
+  },
+  "state_custody_and_runner_visibility": {
+    "every_D0_execution_starts_from_O0_in_one_fresh_process": true,
+    "each_process_executes_step1_step2_and_if_the_prefix_conforms_step3": true,
+    "all_executed_steps_share_one_live_process_without_checkpoint_or_serialization": true,
+    "step1_to_step2_and_step2_to_step3_each_use_a_live_deepcopy": true,
+    "D0_runner_may_read_only_the_thirteen_staged_precommitted_nonresult_files": true,
+    "D0_runner_must_not_read_any_P2_P3_P4_P5_or_P6_result_artifact": true,
+    "D0_runner_must_not_read_any_prior_P7_report_stdout_checkpoint_result_contract_certificate_or_test": true,
+    "D0_report_and_raw_stdout_must_not_enter_a_future_S0_runner": true,
+    "future_S0_runner_starts_from_O0_and_must_not_load_a_P6_final_state": true,
+    "future_outer_checker_may_open_pinned_P6_result_bytes_only_after_both_raw_processes_complete_match_and_are_noncap": true,
+    "future_outer_checker_must_complete_P6_prefix_fieldwise_conformance_before_decoding_E12": true,
+    "future_P6_E12_charge_multiplicity": 1,
+    "complete_formal_finalizer_runs_in_D0_only_for_future_S0_resource_path_equivalence": true,
+    "formal_finalizer_scientific_values_remain_transient_private": true,
+    "D0_runner_exports_only_final_retained_count_and_final_evaluation_visits_from_the_finalizer": true,
+    "D0_runner_cannot_use_finalizer_resource_counts_for_scientific_assessment_or_authority": true
+  },
+  "staged_source_custody": {
+    "staged_path_order": [
+      "majorana_certificate_p0/Project.toml",
+      "majorana_certificate_p0/Manifest.toml",
+      "majorana_certificate_p2/majorana_p2_runner.jl",
+      "majorana_certificate_p3/majorana_p3_runner.jl",
+      "majorana_certificate_p4/majorana_p4_runner.jl",
+      "majorana_certificate_p6/majorana_p6_runner.jl",
+      "majorana_certificate_p2_fixture.json",
+      "majorana_certificate_p3_fixture.json",
+      "majorana_certificate_p4_fixture.json",
+      "majorana_certificate_p5_fixture.json",
+      "majorana_certificate_p6_fixture.json",
+      "majorana_certificate_p7_design_probe_fixture.json",
+      "majorana_certificate_p7_design_probe/majorana_p7_step3_resource_probe.jl"
+    ],
+    "exact_staged_path_count": 13,
+    "every_staged_file_is_regular_and_not_a_symlink": true,
+    "every_staged_file_sha256_and_size_are_source_pinned": true,
+    "staged_sha256_must_equal_repository_sha256_for_every_path": true,
+    "candidate_algorithm_transform_applied_is_false_for_every_path": true,
+    "string_source_AST_or_runtime_transform_is_forbidden": true,
+    "Python_orchestrator_is_source_pinned_but_not_runner_staged": true
+  },
+  "stage_and_artifact_exclusions": {
+    "D0_probe_stage_may_contain": [
+      "the_exact_thirteen_frozen_nonresult_source_fixture_and_driver_paths",
+      "the_frozen_runtime_environment outside the staged tree"
+    ],
+    "D0_probe_stage_must_exclude": [
+      "P2 P3 P4 or P5 result contracts certificates witnesses or exact result tests",
+      "P6 result contract certificate raw replay package exact result test or final-state sidecar",
+      "any prior P7 D0 report stdout checkpoint or private sidecar",
+      "any P7 S0 fixture policy precommit contract raw replay result contract certificate or exact result test"
+    ],
+    "future_S0_runner_stage_must_exclude": [
+      "this_D0_policy_bytes",
+      "D0_report_bytes",
+      "D0_raw_stdout_or_private_sidecars",
+      "P6 result contract certificate raw replay package or exact result test",
+      "all future P7 result artifacts"
+    ],
+    "future_P7_result_artifacts_must_be_absent_at_D0_precommit": [
+      "majorana_certificate_p7_design_probe_report.json",
+      "majorana_certificate_p7_fixture.json",
+      "majorana_certificate_p7_policy.json",
+      "majorana_certificate_p7_precommit_contract.json",
+      "majorana_certificate_p7_contract.json",
+      "majorana_certificate_p7_certificate.json",
+      "test_majorana_certificate_p7_result.py"
+    ]
+  },
+  "D0_to_S0_lifecycle": [
+    {
+      "stage": "D0_PRECOMMIT",
+      "requirements": "commit this policy fixture candidate fixed admission observation contract stop rules source pins and driver before any P7 execution"
+    },
+    {
+      "stage": "D0_SINGLE_FORMAL_RESOURCE_PROBE",
+      "requirements": "run the sole candidate once from O0 under fixed admission and expose only the allowed aggregate resource witness"
+    },
+    {
+      "stage": "D0_PREFIX_RESOURCE_CONFORMANCE",
+      "requirements": "compare every frozen P6 aggregate resource field and start step3 only after complete conformance"
+    },
+    {
+      "stage": "D0_REPORT",
+      "requirements": "materialize a canonical scientific-authority-NONE report with fixed formal admission copied from policy rather than derived from observations"
+    },
+    {
+      "stage": "S0_RESULT_UNPINNED_PRECOMMIT",
+      "requirements": "in a direct child of a successful D0 report freeze formal source custody fixed admission two fresh replays independent checker and result artifact absence"
+    },
+    {
+      "stage": "S0_RAW_REPLAYS",
+      "requirements": "run two fresh isolated processes from O0 through all three steps and require byte-identical raw stdout"
+    },
+    {
+      "stage": "S0_PREFIX_CONFORMANCE_AND_RECONSTRUCTION",
+      "requirements": "after the raw pair completes independently reconstruct step3 and compare the complete P6 prefix field for field before decoding P6 E12"
+    },
+    {
+      "stage": "S0_COMPOSITION",
+      "requirements": "inherit conformed P6 E12 once add step3 local once and reconstruct strict local and three-step cumulative comparisons in the outer checker"
+    },
+    {
+      "stage": "S0_RESULT_MATERIALIZATION",
+      "requirements": "materialize a bounded three-step result only after all replay and reconstruction obligations and retain all authority exclusions"
+    }
+  ],
+  "future_S0_terminal_truth_requirements": {
+    "positive_candidate_branch": "allowed_only_after_both_replays_complete_match_reconstruct_conform_to_P6_and_pass_strict_step3_local_and_three_step_cumulative_allocations",
+    "complete_local_only_or_local_and_cumulative_failure_branch": "bounded_negative_for_the_single_fixed_step3_continuation_only",
+    "local_pass_and_cumulative_fail_branch": "INVALID_REPLAY_as_impossible_after_a_qualified_P6_parent",
+    "deterministic_cap_branch": "requires_both_replays_to_reproduce_the_same_first_cap_and_has_resource_guard_authority_only_without_E12_decoding",
+    "one_cap_and_one_complete_or_two_different_first_caps": "INVALID_REPLAY",
+    "P6_prefix_fieldwise_conformance_failure": "FAILED_P6_PREFIX_POST_REPLAY_CONFORMANCE_without_E12_decoding",
+    "host_failure_branch": "INDETERMINATE_with_no_authority",
+    "custody_schema_identity_determinism_lazy_equivalence_signed_zero_or_checker_failure_branch": "INVALID_REPLAY_with_no_authority",
+    "a_missing_failed_capped_or_indeterminate_required_replay_forbids_a_positive_candidate": true
+  },
+  "adversarial_mutations_required": [
+    "inject_a_prior_P7_scientific_or_resource_output_into_candidate_design",
+    "load_a_P6_result_state_checkpoint_sidecar_contract_certificate_or_raw_witness_in_the_runner",
+    "skip_or_rethreshold_the_P3_step1_or_change_the_P6_step2_algorithm",
+    "change_any_P6_prefix_formal_cap_or_accept_a_partial_or_resource_mismatched_prefix",
+    "resume_step2_or_step3_from_serialized_or_cross_process_state",
+    "change_the_live_step1_to_step2_or_step2_to_step3_term_stream",
+    "carry_step2_drop_ticks_slack_membership_rank_buffer_or_selection_counters_into_step3",
+    "use_global_boundary_1536_through_2303_as_q_instead_of_local_q_1_through_768",
+    "reset_the_step3_local_ledger_at_a_boundary_stage_or_composite",
+    "borrow_P6_cumulative_slack_or_future_step_budget_for_step3_local_selection",
+    "refund_drop_cost_after_future_merge_cancellation_reappearance_or_state_removal",
+    "change_the_full_domain_exact_cost_abs_bits_unsigned_mask_order",
+    "skip_the_first_nonfitting_row_reject_an_exact_fit_or_hard_stop_after_the_K37_pool",
+    "perform_the_nonpool_scan_on_a_mutated_snapshot_or omit_an_affordable_nonpool_row",
+    "normalize_negative_zero_or_use_a_phase_only_Fock_shortcut",
+    "execute_a_scan_allocation_sort_tick_evaluation_accuracy_event_or_state_mutation_after_its_cap_would_be_exceeded",
+    "emit_any_scientific_tick_budget cutoff mask coefficient digest state Neel pass bit or terminal result_from_D0",
+    "read_serialize_compare_or_branch_on_a_transient_private_formal_finalizer_scientific_value",
+    "interpret_final_retained_count_or_final_evaluation_visits_as_a_scientific_result_or_authority",
+    "classify_a_prefix_mismatch_deterministic_cap_timeout_OOM_or_host_failure_as_a_scientific_negative_or_no_go",
+    "derive_tighten_or_relax_D0_or_S0_admission_from_the_observed_resource witness",
+    "stage_a_parent_result_D0_report_raw_checkpoint_or_future_P7_result_artifact",
+    "in_future_S0_decode_P6_E12_before_both_raw_replays_or_before_complete_prefix_conformance",
+    "in_future_S0_double_charge_P3_E1_or_fresh_step2_in_addition_to_P6_E12",
+    "expand_authority_to_global_optimality_remaining_steps exact_Hubbard double_occupancy reference_or_READY"
+  ],
+  "authority_exclusions": [
+    "D0_does_not_bound_any_step3_product_merge_drop_local_or_cumulative_operator_error",
+    "D0_does_not_compare_step3_or_three_step_error_to_any_allocation",
+    "D0_does_not_select_reject_rank_remove_or_certify_a_candidate",
+    "D0_prefix_resource_conformance_does_not_reprove_or_expand_P6_scientific_authority",
+    "D0_does_not_establish_hard_K37_pool_only_scientific_eligibility",
+    "D0_does_not_establish_global_optimality_of_the_causal_maximal_prefix_algorithm",
+    "D0_does_not_certify_step3_or_the_remaining_98_mapped_steps_after_the_P6_prefix",
+    "D0_does_not_assess_product_formula_to_exact_Hubbard_error_or_exact_time_evolution",
+    "D0_does_not_assess_double_occupancy_physical_reference_qualification_or_READY",
+    "D0_complete_formal_finalizer_execution_and_its_public_resource_counts_have_no_scientific_authority",
+    "a_future_successful_three_step_S0_would_still_leave_97_mapped_steps_unassessed"
+  ],
+  "source_files": [
+    {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "size_bytes": 235,
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "size_bytes": 15336,
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406"
+    },
+    {
+      "relative_path": "majorana_certificate_p2/majorana_p2_runner.jl",
+      "size_bytes": 33888,
+      "sha256": "03edd9640bc3d83a61ea0c9c7d9e93af3fc683972c517af4a7691e21359e25ed"
+    },
+    {
+      "relative_path": "majorana_certificate_p3/majorana_p3_runner.jl",
+      "size_bytes": 59318,
+      "sha256": "958de8886bb8e56cda26eb6c45029c7016e886caae26c598c7e6b5c595257fe2"
+    },
+    {
+      "relative_path": "majorana_certificate_p4/majorana_p4_runner.jl",
+      "size_bytes": 24880,
+      "sha256": "f425dbab80d60c49fceefc2b3e805fd3a4b29037f0e95491c50891ed7b7b9f47"
+    },
+    {
+      "relative_path": "majorana_certificate_p6/majorana_p6_runner.jl",
+      "size_bytes": 74471,
+      "sha256": "b63143c066d3d258594e27ee4062632632030e9962a0fcd127fcd5000ff9cc1c"
+    },
+    {
+      "relative_path": "majorana_certificate_p2_fixture.json",
+      "size_bytes": 5891,
+      "sha256": "252fa0c4ed26db5581bcd9ff0101d18d858faf6d31fb9b6cdcaa821bf318e82a"
+    },
+    {
+      "relative_path": "majorana_certificate_p3_fixture.json",
+      "size_bytes": 6033,
+      "sha256": "a478b783ae4005f7ef79572a4b34eee72299da262e439bdc35eca13496bdc236"
+    },
+    {
+      "relative_path": "majorana_certificate_p4_fixture.json",
+      "size_bytes": 17259,
+      "sha256": "b020b6bcc0ed56010af9ed3b1836469c084b9244a9303a8101cf7657adb79964"
+    },
+    {
+      "relative_path": "majorana_certificate_p5_fixture.json",
+      "size_bytes": 4763,
+      "sha256": "fd8b46c8761f548d615042b24f8ec85b32891e4f42dbafdd9bd70d58379a8afb"
+    },
+    {
+      "relative_path": "majorana_certificate_p6_fixture.json",
+      "size_bytes": 14267,
+      "sha256": "fb381c613d675551d33680484a88870020a494e4a356dafd9fd869714c9d475d"
+    },
+    {
+      "relative_path": "majorana_certificate_p7_design_probe_fixture.json",
+      "size_bytes": 20111,
+      "sha256": "d81af9a8e49e283c63a33b6af71f164497fe77a507f6dbfe4db7339d43fb52b2"
+    },
+    {
+      "relative_path": "majorana_certificate_p7_design_probe/majorana_p7_step3_resource_probe.jl",
+      "size_bytes": 33680,
+      "sha256": "12b3883309e64e49baa6b05c9d42ef6b311fa3c692daeccb90ab52849845723c"
+    },
+    {
+      "relative_path": "majorana_certificate_p7_design_probe.py",
+      "size_bytes": 88555,
+      "sha256": "fbd6aefeffac3f7bfa83da42d25d1f59f2a35fd71c2a6ecd0b0cd227b51df568"
+    }
+  ]
+}

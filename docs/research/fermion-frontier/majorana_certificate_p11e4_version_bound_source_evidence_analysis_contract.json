@@ -1,0 +1,18 @@
+{
+  "schema_version":1,
+  "contract_id":"MAJORANA-P11-E4-VERSION-BOUND-SOURCE-EVIDENCE-ANALYSIS-CONTRACT-DESIGN-V1",
+  "required_direct_parent_commit":"9b0240dc8123cad04e211f6dbc2a9cdca60a42c7",
+  "P11_G13_custody":{"record_relative_path":"majorana_certificate_p11_g13_post_source_inspection_governance_record.json","record_raw_sha256":"217fd76c5f23cc09818aa5af22eef92828e8c1594e442ca9a7371f6628d44f72","expected_disposition":"CLOSE_E3R_AS_SOURCE_LOCATION_EVIDENCE_AND_AUTHORIZE_ONLY_VERSION_BOUND_SOURCE_EVIDENCE_ANALYSIS_CONTRACT_DESIGN","expected_next_gate":"P11-E4-VERSION-BOUND-SOURCE-EVIDENCE-ANALYSIS-CONTRACT-DESIGN-V1"},
+  "current_authority":{"additional_source_reading_authorized":false,"source_mutation_build_execution_or_measurement_authorized":false,"kernel_bound_or_candidate_derivation_authorized":false,"scientific_authority":"NONE"},
+  "future_evidence_admission":{"exact_E3R_tree_manifest_and_hit_receipts_must_be_pinned":true,"source_file_must_match_tree_manifest_sha256_before_read":true,"query_must_be_literal_and_predeclared":true,"context_window_lines_each_side":20,"maximum_excerpt_bytes":8192,"maximum_admitted_excerpts_total":30,"receipt_fields":["source_identity","relative_path","file_sha256","query","match_line","start_line","end_line","excerpt_size_bytes","excerpt_sha256"],"duplicate_or_overlapping_windows_must_be_merged":true,"binary_invalid_UTF8_oversized_or_manifest_mismatch_must_fail_closed":true},
+  "analysis_tracks":[
+    {"track_id":"GCC_DRIVER_LINK_INPUTS","source":"gcc-15=15.2.0-16ubuntu1","paths":["gcc/gcc.cc","gcc/config/linux.h","gcc/config/gnu-user.h"],"queries":["STARTFILE_SPEC","ENDFILE_SPEC","LINK_SPEC","link_command_spec"]},
+    {"track_id":"BINUTILS_ELF_LAYOUT","source":"binutils=2.46-3ubuntu2","paths":["ld/ld.texi","ld/ldlang.c","ld/ldelf.c","ld/scripttempl/elf.sc","bfd/elf.c"],"queries":["PHDRS","NOLOAD","p_align","PT_LOAD"]},
+    {"track_id":"LINUX_ELF_EXEC_ACCOUNTING","source":"linux=7.0.0-28.28","paths":["fs/binfmt_elf.c","mm/mmap.c","mm/memcontrol.c","Documentation/admin-guide/cgroup-v2.rst"],"queries":["load_elf_binary","vm_mmap","memory.peak","memory_current_read"]},
+    {"track_id":"LINUX_SIGNED_IDENTITY","source":"linux-signed=7.0.0-28.28","paths":["debian/control","debian/ancillary/linux-generate/debian/control.common"],"queries":["Source: linux","Build-Depends"]}
+  ],
+  "interpretation_rules":{"observed_text_must_be_separate_from_interpretation":true,"each_interpretation_must_cite_one_or_more_excerpt_receipts":true,"absence_in_bounded_paths_is_not_global_absence":true,"conflicting_or_incomplete_evidence_enters_unresolved_gap_ledger":true,"no_exact_memory_bound_candidate_equivalence_resource_no_go_S0_or_scientific_claim":true},
+  "future_operation_requires_independent_authorization":true,
+  "only_allowed_next_gate":"P11-G14-VERSION-BOUND-SOURCE-EVIDENCE-ANALYSIS-AUTHORIZATION-V1",
+  "lifecycle":{"exact_changed_paths":["docs/research/fermion-frontier/ARTIFACTS.md","docs/research/fermion-frontier/PROGRESS.md","docs/research/fermion-frontier/majorana_certificate_p11e4_version_bound_source_evidence_analysis_contract.json","docs/research/fermion-frontier/majorana_certificate_p11e4_version_bound_source_evidence_analysis_record.json","docs/research/fermion-frontier/majorana_certificate_p11e4_version_bound_source_evidence_analysis_validator.py","docs/research/fermion-frontier/test_majorana_certificate_p11e4_version_bound_source_evidence_analysis.py"]}
+}

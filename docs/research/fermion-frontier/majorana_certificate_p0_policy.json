@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P0-S0",
+  "policy_fingerprint": "majorana_certificate_p0_s0_result_unpinned_policy_v1",
+  "policy_role": "fixed_result_unpinned_small_fixture_conformance_policy",
+  "maximum_positive_authority": {
+    "status": "VERIFIED_MAJORANA_P0_DETERMINISTIC_INTERVAL_LEDGER_CONFORMANCE_SUBCERTIFICATE",
+    "claim": "fixed_small_fixture_deterministic_Majorana_algebra_rotation_interval_threshold_and_dropped_L1_ledger_conformance",
+    "authority_is_fixture_specific": true,
+    "authority_is_a_subcertificate_only": true,
+    "does_not_create_reference_authority": true,
+    "does_not_create_ready_authority": true
+  },
+  "precommit_boundary": {
+    "policy_contains_observed_replay_results": false,
+    "policy_contains_witness_or_result_hashes": false,
+    "policy_promises_a_terminal_branch": false,
+    "formal_replay_must_start_only_after_policy_runner_checker_and_precommit_contract_are_committed": true,
+    "fresh_replay_processes_must_start_after_the_precommit_git_commit": true,
+    "result_contract_certificate_and_exact_result_test_must_be_absent_from_the_precommit_commit": true,
+    "any_fixture_arithmetic_runtime_package_source_or_isolation_change_requires_a_new_policy_version": true
+  },
+  "forbidden_formal_result_pins": [
+    "observed_terminal_branch",
+    "observed_status",
+    "observed_pass_or_failure",
+    "observed_witness_bytes",
+    "observed_witness_sha256",
+    "observed_canonical_witness_sha256",
+    "observed_primitive_algebra_records_sha256",
+    "observed_primitive_rotation_records_sha256",
+    "observed_composite_records_or_ledger_sha256",
+    "observed_final_retained_terms_or_expectation",
+    "observed_drop_increment_or_cumulative_dropped_L1",
+    "observed_runtime_seconds_or_peak_RSS",
+    "observed_replay_stdout_sha256",
+    "result_contract_sha256",
+    "certificate_sha256",
+    "exact_result_test_sha256"
+  ],
+  "fixed_fixture_conformance": {
+    "fixture_id": "MAJORANA-P0-SMALL-FIXTURE-V1",
+    "primitive_algebra": {
+      "n_fermions": 3,
+      "mask_domain_inclusive": [
+        0,
+        63
+      ],
+      "planned_ordered_pair_count": 4096,
+      "checks": [
+        "multiplication_result_mask",
+        "multiplication_phase",
+        "commutation"
+      ]
+    },
+    "primitive_rotations": {
+      "gate_domain": "all_nonidentity_even_masks_in_0_through_63",
+      "operator_domain": "all_masks_in_0_through_63",
+      "angles_in_order": [
+        "0",
+        "1/8",
+        "-1/8",
+        "1/3",
+        "-1/3",
+        "1/2",
+        "-1/2",
+        "1",
+        "-1"
+      ],
+      "planned_case_count": 17856,
+      "splitting_sign_rule": "minus_imaginary_part_of_Majorana_multiplication_phase"
+    },
+    "composite_fixture": {
+      "n_sites": 2,
+      "spinful": true,
+      "initial_observable": "nupndn_site_1",
+      "fock_state": "up_site_1_and_down_site_2",
+      "schrodinger_composites_in_order": [
+        "hopup_sites_1_2_theta_1/5",
+        "nupndn_site_2_theta_2/5",
+        "hopdn_sites_1_2_theta_-1/4"
+      ],
+      "heisenberg_occurrence_rule": "reverse_composite_occurrences_keep_declared_theta",
+      "constituent_enumeration_rule": "unsigned_Majorana_bitmask_ascending",
+      "constituent_order_is_imposed_by_the_pinned_runner": true
+    }
+  },
+  "interval_arithmetic_policy": {
+    "coefficient_domain": "real_Hermitian_rational_intervals_only",
+    "input_JSON_numbers_for_scientific_values": "canonical_integer_or_rational_string_only",
+    "JSON_float_NaN_Infinity_and_negative_zero": "forbidden",
+    "maximum_absolute_angle": "1",
+    "taylor_order": 5,
+    "trigonometric_enclosure": "exact_Fraction_alternating_Taylor_with_symmetric_next_term_remainder_then_outward_quantization",
+    "outward_quantization_denominator": "18446744073709551616",
+    "lower_endpoint_rule": "floor_denominator_times_exact_lower",
+    "upper_endpoint_rule": "ceil_denominator_times_exact_upper",
+    "addition_rule": "exact_endpoint_addition",
+    "multiplication_rule": "four_endpoint_products_minimum_and_maximum_then_outward_division",
+    "allowed_exact_phase_multipliers": [
+      -1,
+      1
+    ],
+    "rotation_quantization_schedule": "each_rotation_product_then_global_postmerge",
+    "rounding_accounting": "absorbed_in_coefficient_boxes_not_added_again_as_a_scalar_error"
+  },
+  "merge_threshold_and_ledger_policy": {
+    "merge_order": "collect_then_unsigned_mask_sort_then_global_interval_add_by_mask",
+    "deduplication_must_precede_every_truncation": true,
+    "zero_prune_rule": "only_exact_zero_interval_after_global_merge",
+    "threshold_epsilon": "1/100",
+    "threshold_drop_rule": "drop_only_if_interval_abs_upper_is_strictly_less_than_epsilon",
+    "equal_to_or_crossing_threshold_action": "retain",
+    "hopping_truncation_boundary": "after_complete_composite",
+    "other_composite_truncation_boundary": "after_each_constituent",
+    "dropped_term_value": "maximum_of_absolute_lower_and_absolute_upper_interval_endpoints",
+    "drop_increment": "exact_sum_of_dropped_term_values_at_the_event",
+    "cumulative_recurrence": "cumulative_after_equals_cumulative_before_plus_drop_increment",
+    "ledger_requires_term_level_masks_intervals_values_reasons_and_digests": true,
+    "stage_aggregate_must_equal_the_exact_event_sum": true
+  },
+  "upstream_semantic_baseline": {
+    "MajoranaPropagation": {
+      "version": "0.3.0",
+      "git_commit": "b7849cb4bac5b604f0d2fe6ff807ed889305e668",
+      "git_tree_sha1": "d62823f20677593ff5e256e5f8bc316dd7aecd7a",
+      "contains_required_minus_imaginary_splitting_sign_fix": true
+    },
+    "PauliPropagation": {
+      "version": "0.7.3",
+      "git_commit": "2a96e9a94dafc2df3466d2611fafa141319469f8",
+      "git_tree_sha1": "757b43af3c247d9fad953dd056d3df76fe6e6a08"
+    },
+    "experimental_branch_wholesale_adoption": false,
+    "deterministic_constituent_sort_is_a_local_runner_semantic_wrapper": true
+  },
+  "isolation_policy": {
+    "staging_source": "exact_blobs_from_the_precommit_Git_commit",
+    "allowlist_staging_tree_required": true,
+    "staging_tree_is_ephemeral_and_read_only": true,
+    "symlink_submodule_path_traversal_and_nonregular_input_rejection_required": true,
+    "live_worktree_source_copy_or_import": "forbidden",
+    "result_files_old_diagnostics_and_unlisted_inputs_in_staging": "forbidden",
+    "fresh_writable_scratch_and_depot_prefix_per_replay": true,
+    "network_during_replay": "forbidden",
+    "formal_replay_count": 2,
+    "formal_replay_stdout_requirement": "byte_identical_canonical_JSON",
+    "independent_checker_must_not_import_the_Julia_runner_or_upstream_package_as_an_oracle": true,
+    "input_hash_and_repository_state_checks_required_before_and_after_replay": true
+  },
+  "legal_terminal_branches": [
+    {
+      "branch": "CONFORMANCE_VERIFIED",
+      "maximum_status": "VERIFIED_MAJORANA_P0_DETERMINISTIC_INTERVAL_LEDGER_CONFORMANCE_SUBCERTIFICATE",
+      "authority": "fixed_fixture_subcertificate_only"
+    },
+    {
+      "branch": "FAILED_CONFORMANCE",
+      "maximum_status": "FAILED_MAJORANA_P0_FIXED_FIXTURE_CONFORMANCE",
+      "authority": "fixed_fixture_environment_failure_only_no_general_algorithmic_inference"
+    },
+    {
+      "branch": "INDETERMINATE",
+      "maximum_status": "INDETERMINATE_MAJORANA_P0_REPLAY",
+      "authority": "none_for_timeout_OOM_resource_environment_or_host_failure"
+    },
+    {
+      "branch": "INVALID_REPLAY",
+      "maximum_status": "INVALID_MAJORANA_P0_REPLAY",
+      "authority": "none_for_custody_hash_isolation_or_contract_failure"
+    }
+  ],
+  "scope_boundary": {
+    "small_fixture_conformance_only": true,
+    "L8_full_propagation": "NOT_ASSESSED",
+    "1152_gate_or_100_mapped_step_workload": "NOT_ASSESSED",
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "paper_figure_or_parameter_convergence": "NOT_ASSESSED",
+    "complex_coefficients": "NOT_ASSESSED",
+    "imaginary_time": "NOT_ASSESSED",
+    "vector_GPU_or_multithreaded_backend": "NOT_ASSESSED",
+    "top_K_truncation": "NOT_ASSESSED",
+    "Majorana_weight_unpaired_frequency_sine_or_custom_truncation": "NOT_ASSESSED",
+    "arbitrary_circuit_observable_state_or_threshold_generalization": "NOT_CLAIMED",
+    "M4_or_D_route_authority": "NOT_CREATED",
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  },
+  "source_pins": [
+    {
+      "relative_path": "majorana_certificate_p0_fixture.json",
+      "role": "fixed_small_conformance_fixture",
+      "size_bytes": 2326,
+      "sha256": "2db3a2d474f3f85779674e443c8b166cd428276b60f21d37ac210fce08f80a28"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/majorana_p0_runner.jl",
+      "role": "result_unpinned_Julia_execution_runner",
+      "size_bytes": 24689,
+      "sha256": "67a72a6ac2f02dd7572a48694c9e07ecaf84936411d212b48a996e6710946941"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "role": "exact_Julia_project_environment",
+      "size_bytes": 235,
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f"
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "role": "exact_Julia_resolved_dependency_graph",
+      "size_bytes": 15336,
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406"
+    },
+    {
+      "relative_path": "majorana_certificate_p0_runtime_lock.json",
+      "role": "exact_runtime_registry_and_loaded_source_custody_lock",
+      "size_bytes": 5281,
+      "sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17"
+    }
+  ],
+  "precommit_forbidden_paths": [
+    "majorana_certificate_p0_contract.json",
+    "majorana_certificate_p0_certificate.json",
+    "test_majorana_certificate_p0_result.py"
+  ]
+}

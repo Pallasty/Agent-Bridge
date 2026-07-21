@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P2-S0",
+  "policy_fingerprint": "majorana_certificate_p2_s0_result_unpinned_policy_v1",
+  "policy_role": "fixed_result_unpinned_L8_fused_one_mapped_step_thresholded_execution_resource_feasibility_policy",
+  "maximum_positive_authority": {
+    "status": "VERIFIED_MAJORANA_P2_L8_STAGGERED_MAGNETIZATION_ONE_STEP_BOUNDED_PREFIX_RESOURCE_FEASIBILITY_SUBCERTIFICATE",
+    "claim": "the_fixed_binary64_MajoranaSum_route_completed_the_frozen_1152_constituent_L8_thresholded_fused_mapped_step_under_every_declared_deterministic_and_host_supervisor_cap_in_two_byte_identical_fresh_replays",
+    "authority_is_fixture_and_policy_specific": true,
+    "authority_is_execution_resource_feasibility_only": true,
+    "does_not_certify_binary64_coefficient_accuracy": true,
+    "does_not_certify_the_Float64_threshold_drop_as_an_error_bound": true,
+    "does_not_certify_the_remaining_99_mapped_steps_or_R100": true,
+    "does_not_create_exact_evolution_reference_or_ready_authority": true
+  },
+  "precommit_boundary": {
+    "policy_contains_observed_replay_results": false,
+    "policy_contains_witness_or_result_hashes": false,
+    "policy_promises_a_terminal_branch": false,
+    "formal_replay_must_start_only_after_all_inputs_and_the_precommit_contract_are_committed": true,
+    "fresh_replay_processes_must_start_after_the_precommit_git_commit": true,
+    "result_contract_certificate_and_exact_result_test_must_be_absent_from_the_precommit_commit": true,
+    "any_workload_order_angle_cadence_threshold_cap_runtime_source_or_isolation_change_requires_a_new_policy_version": true
+  },
+  "forbidden_formal_result_pins": [
+    "observed_terminal_branch",
+    "observed_status",
+    "observed_pass_or_failure",
+    "observed_final_term_count",
+    "observed_stage_term_count",
+    "observed_peak_term_count",
+    "observed_term_visit_count",
+    "observed_threshold_drop_count_or_magnitude",
+    "observed_final_expansion_sha256",
+    "observed_resource_ledger_sha256",
+    "observed_witness_bytes",
+    "observed_witness_sha256",
+    "observed_runtime_seconds_or_peak_RSS",
+    "observed_replay_stdout_sha256",
+    "result_contract_sha256",
+    "certificate_sha256",
+    "exact_result_test_sha256"
+  ],
+  "fixed_workload": {
+    "fixture_id": "MAJORANA-P2-L8-FUSED-ONE-STEP-RESOURCE-PREFIX-V1",
+    "linear_size": 8,
+    "observable_id": "staggered_magnetization",
+    "mapped_step_duration": "1/100",
+    "backpropagated_stage_order": [
+      "H1",
+      "H2",
+      "HU",
+      "H3",
+      "H4",
+      "H3",
+      "HU",
+      "H2",
+      "H1"
+    ],
+    "central_H4_is_the_fusion_of_two_adjacent_half_events": true,
+    "planned_composite_count": 512,
+    "planned_constituent_count": 1152,
+    "planned_boundary_count": 768,
+    "all_512_composites_and_1152_constituents_must_be_generated_not_embedded_as_output": true
+  },
+  "execution_route": {
+    "observable_constructor": "pinned_upstream_nup_and_ndn_MajoranaSum_constructors_with_exactly_representable_binary64_1_over_64_weights",
+    "composite_constructor": "pinned_upstream_getmajoranarotations",
+    "constituent_order": "certificate_wrapper_sorts_unsigned_Majorana_masks_before_execution",
+    "primitive_application": "pinned_upstream_applytoall_MajoranaRotation_then_merge",
+    "cadence": "P1_hopping_after_complete_composite_and_onsite_after_each_constituent",
+    "threshold": "strict_abs_Float64_coefficient_less_than_exact_binary64_2_pow_minus_34_at_each_cadence_boundary",
+    "threshold_is_a_resource_policy_not_a_certified_error_budget": true,
+    "topK_weight_unpaired_frequency_and_custom_truncation": "NOT_USED",
+    "upstream_native_Dict_constituent_order": "NOT_USED",
+    "whole_circuit_propagate_bang": "NOT_USED",
+    "coefficient_domain": "observed_binary64_bits_without_interval_or_accuracy_authority"
+  },
+  "resource_enforcement": {
+    "deterministic_caps_are_checked_before_the_corresponding_scan_or_allocation": true,
+    "premerge_cap_uses_current_live_plus_exact_anticommuting_count_before_applytoall": true,
+    "propagation_visit_cap_charges_every_current_term_once_per_constituent": true,
+    "cap_scan_visit_cap_charges_the_predictive_anticommutation_scan": true,
+    "truncation_visit_cap_charges_every_term_present_at_each_real_threshold_boundary": true,
+    "total_visit_cap_is_the_sum_of_cap_scan_propagation_truncation_and_one_sorted_final_digest_evaluation_visit_per_retained_term": true,
+    "first_deterministic_cap_event_must_terminate_without_executing_the_rejected_operation": true,
+    "host_MemoryMax_and_RuntimeMaxSec_are_kernel_enforced_by_a_systemd_user_scope_cgroup_v2_outside_bubblewrap": true,
+    "host_stdout_and_stderr_caps_are_enforced_by_the_outer_replay_harness": true,
+    "host_cap_enforcement_and_measurements_are_noncanonical": true,
+    "host_cap_failure_is_indeterminate_not_a_deterministic_policy_cap_exceeded_result": true
+  },
+  "result_determinism": {
+    "fresh_process_count": 2,
+    "fresh_writable_scratch_and_depot_prefix_per_process": true,
+    "network_namespace_unshared": true,
+    "each_replay_is_wrapped_by_a_fresh_systemd_user_scope_with_MemoryMax_and_RuntimeMaxSec": true,
+    "canonical_stdout_must_be_byte_identical": true,
+    "final_expansion_digest_binds_sorted_unsigned_masks_and_exact_Float64_bits": true,
+    "host_RSS_runtime_paths_timestamps_and_process_ids_are_excluded_from_the_canonical_witness": true
+  },
+  "required_adversarial_mutations": [
+    "SKIP_OR_DUPLICATE_STAGE_COMPOSITE_OR_CONSTITUENT",
+    "EXECUTE_FORWARD_INSTEAD_OF_HEISENBERG_REVERSE_COMPOSITE_ORDER",
+    "USE_NATIVE_UNSORTED_CONSTITUENT_ORDER",
+    "CHANGE_H4_FROM_FUSED_FULL_EVENT_TO_ONE_HALF_EVENT",
+    "TRUNCATE_HOPPING_AFTER_EACH_CONSTITUENT",
+    "TRUNCATE_ONSITE_ONLY_AFTER_COMPLETE_COMPOSITE",
+    "DROP_A_COEFFICIENT_WITH_ABS_EQUAL_TO_OR_ABOVE_THE_THRESHOLD",
+    "CHECK_LIVE_OR_PREMERGE_CAP_ONLY_AFTER_ALLOCATION",
+    "OMIT_CAP_SCAN_PROPAGATION_OR_TRUNCATION_VISITS",
+    "CHANGE_STRICT_2_POW_MINUS_34_THRESHOLD_OR_TREAT_ITS_FLOAT64_DROP_SUM_AS_CERTIFIED_ERROR",
+    "TREAT_HOST_TIMEOUT_OOM_OR_RSS_KILL_AS_DETERMINISTIC_POLICY_CAP_EXCEEDED",
+    "INCLUDE_HOST_FIELDS_IN_CANONICAL_WITNESS",
+    "ALLOW_RESULT_ARTIFACT_AS_A_PRECOMMIT_INPUT",
+    "EXPAND_AUTHORITY_TO_FULL_STEP_R100_ACCURACY_REFERENCE_OR_READY"
+  ],
+  "legal_terminal_branches": [
+    {
+      "branch": "PREFIX_COMPLETED_UNDER_CAPS",
+      "maximum_status": "VERIFIED_MAJORANA_P2_L8_STAGGERED_MAGNETIZATION_ONE_STEP_BOUNDED_PREFIX_RESOURCE_FEASIBILITY_SUBCERTIFICATE",
+      "authority": "fixed_execution_resource_feasibility_only"
+    },
+    {
+      "branch": "DETERMINISTIC_POLICY_CAP_EXCEEDED",
+      "maximum_status": "VERIFIED_MAJORANA_P2_L8_ONE_STEP_PREFIX_POLICY_CAP_EXCEEDED_SUBCERTIFICATE",
+      "authority": "fixed_cap_and_prefix_negative_resource_result_only_not_a_general_algorithmic_no_go"
+    },
+    {
+      "branch": "FAILED_CONFORMANCE",
+      "maximum_status": "FAILED_MAJORANA_P2_FIXED_PREFIX_EXECUTION_CONFORMANCE",
+      "authority": "fixed_environment_execution_mismatch_only"
+    },
+    {
+      "branch": "INDETERMINATE",
+      "maximum_status": "INDETERMINATE_MAJORANA_P2_REPLAY",
+      "authority": "none_for_timeout_OOM_RSS_host_environment_or_sandbox_failure"
+    },
+    {
+      "branch": "INVALID_REPLAY",
+      "maximum_status": "INVALID_MAJORANA_P2_REPLAY",
+      "authority": "none_for_custody_hash_isolation_or_contract_failure"
+    }
+  ],
+  "source_and_parent_custody": {
+    "required_direct_parent_commit": "2062c64a13b71189f01a0f2e9a11957534bf3a77",
+    "required_parent_status": "VERIFIED_MAJORANA_P1_L2_L3_HUBBARD_SPARSE_ACTION_AND_CADENCE_CONFORMANCE_SUBCERTIFICATE",
+    "P1_is_used_for_constructor_action_and_sorted_wrapper_cadence_conformance_only": true,
+    "P1_does_not_supply_P2_execution_results": true,
+    "runtime_Manifest_and_installed_package_closure_are_inherited_from_the_pinned_P0_runtime_lock": true,
+    "MajoranaPropagation_version": "0.3.0",
+    "MajoranaPropagation_git_tree_sha1": "d62823f20677593ff5e256e5f8bc316dd7aecd7a",
+    "PauliPropagation_version": "0.7.3",
+    "PauliPropagation_git_tree_sha1": "757b43af3c247d9fad953dd056d3df76fe6e6a08"
+  },
+  "scope_boundary": {
+    "fixed_L8_one_fused_mapped_step_prefix_only": true,
+    "binary64_values_are_scientific_estimates": false,
+    "binary64_roundoff_or_coefficient_error": "NOT_ASSESSED",
+    "fixed_strict_2_pow_minus_34_Float64_threshold": "EXECUTED_WITHOUT_ERROR_BOUND_AUTHORITY",
+    "other_threshold_topK_weight_unpaired_or_frequency_truncation": "NOT_USED_OR_ASSESSED",
+    "complete_1152_constituent_first_mapped_step_execution": "RESOURCE_FEASIBILITY_ONLY",
+    "raw_1280_constituent_threshold_path": "NOT_EXECUTED",
+    "existing_Python_eight_gate_topL1_route_result_equality": "NOT_CLAIMED",
+    "double_occupancy": "NOT_ASSESSED",
+    "native_whole_circuit_propagate_bang": "NOT_USED",
+    "remaining_99_mapped_steps": "NOT_ASSESSED",
+    "product_formula_to_exact_Hubbard_error": "NOT_ASSESSED",
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  }
+}

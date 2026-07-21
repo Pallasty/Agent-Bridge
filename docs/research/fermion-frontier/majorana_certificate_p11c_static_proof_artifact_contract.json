@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-C-STATIC-PROOF-ARTIFACT-PACK-V1",
+  "contract_role": "nonimplementing_independent_contract_level_static_proof_artifact_pack",
+  "self_relative_path": "majorana_certificate_p11c_static_proof_artifact_contract.json",
+  "required_direct_parent_commit": "fa9792d456b9c6bd32a0393fec9e9baa508cb7b7",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "implementation_authority": false,
+    "prototype_or_compilation_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "scope": {
+    "gate_id": "P11-C-STATIC-PROOF-ARTIFACT-PACK-V1",
+    "candidate_source_allowed": false,
+    "C_assembly_or_linker_script_source_allowed": false,
+    "compilation_or_linking_allowed": false,
+    "Julia_or_candidate_execution_allowed": false,
+    "benchmark_or_host_measurement_allowed": false,
+    "package_installation_or_environment_mutation_allowed": false,
+    "binary_or_source_archive_download_allowed": false,
+    "network_retrieval_allowed": false,
+    "scientific_schedule_semantics_or_cap_change_allowed": false,
+    "fixed_process_cap_bytes": 2147483648,
+    "contract_target_arithmetic_is_not_exact_peak_or_headroom": true
+  },
+  "source_inputs": [
+    {"relative_path": "majorana_certificate_p11_g2_proof_artifact_governance_contract.json", "sha256": "c7fa355f93bc9e89164857005a5a3e5a98dd29178dca4745c91ff8dac6ee3558", "role": "sole_P11_C_authority"},
+    {"relative_path": "majorana_certificate_p11_g2_proof_artifact_governance_record.json", "sha256": "b055616915b7b30a7a984f93637e3e1351177257e03fcf499e74a892908b2ab0", "role": "canonical_P11_G2_decision"},
+    {"relative_path": "majorana_certificate_p11b_preimplementation_contract_pack_contract.json", "sha256": "590ee6f0054aea499145ab388efbca45b20a56306b2f069101990ab206b80f80", "role": "sole_static_derivation_input"}
+  ],
+  "independence_contract": {
+    "checker_must_not_import_P11_B_validator_or_report": true,
+    "checker_must_rederive_from_the_raw_P11_B_contract": true,
+    "checker_source_is_separate_from_any_future_candidate_source_tree": true,
+    "checker_subprocesses_are_git_only": true,
+    "manifest_and_report_are_reconstructed_not_trusted_inputs": true
+  },
+  "layout_artifact_contract": {
+    "layout_ids_in_order": ["TERM_SLOT_64", "SNAPSHOT_ROW_48", "RANK_ROW_320", "ACTION_ROW_80", "COLLISION_ROW_64", "DROPPED_ROW_48", "INDEX_MEMBERSHIP_ROW_16"],
+    "implicit_padding_policy": "all_unassigned_slot_bytes_are_zero_initialized_remain_zero_and_are_never_semantic_fields",
+    "require_field_bounds_no_overlap_and_exact_gap_enumeration": true,
+    "term_table_capacity_slots_each": 2097152,
+    "maximum_occupied_slots_each": 1048576,
+    "maximum_load_factor_numerator": 1,
+    "maximum_load_factor_denominator": 2
+  },
+  "arena_artifact_contract": {
+    "require_64_byte_alignment_contiguity_positive_size_and_nonalias": true,
+    "expected_region_count": 8,
+    "explicit_arena_bytes": 872415232,
+    "all_regions_reserved_simultaneously": true
+  },
+  "arithmetic_artifact_contract": {
+    "limb_bits": 64,
+    "stored_magnitude_bits": 2048,
+    "stored_magnitude_limb_count": 32,
+    "reused_wide_scratch_bits": 2112,
+    "reused_wide_scratch_limb_count": 33,
+    "maximum_magnitude_bits_in_order": [53, 129, 182, 1154, 2049, 2050],
+    "contract_level_derivation_does_not_prove_future_implementation_paths": true
+  },
+  "runtime_artifact_contract": {
+    "expected_component_count": 8,
+    "target_component_sum_bytes": 1028653056,
+    "difference_to_fixed_cap_bytes": 1118830592,
+    "difference_is_proven_headroom": false,
+    "sum_is_exact_process_peak": false,
+    "kernel_cgroup_accounting_bound_established": false
+  },
+  "prelude_artifact_contract": {
+    "serialized_P6_step2_term_state_available": false,
+    "step1_output_term_count": 42704,
+    "step1_output_term_stream_sha256": "067f02a72d50f8061c746896d9eb02e3b60f7e5d6b42f21f0191b8e5887a9c9e",
+    "step2_output_term_count": 284847,
+    "step2_output_term_stream_sha256": "9bd44992823cc6f8cf731f84954840d4927a972fb6a78c1583c3d8c0983a7c51",
+    "frozen_trig_entries_sha256": "2cf79510f1f76728e9cbe22cd168d220845b0be328833d04f0da322da331ee0a",
+    "checkpoint_custody_is_not_semantic_equivalence": true
+  },
+  "required_adversarial_mutations": [
+    "slot_offset_overlap",
+    "one_byte_slot_shrink",
+    "capacity_minus_one",
+    "load_factor_relaxation",
+    "scratch_2049_instead_of_2112",
+    "arena_region_overlap",
+    "runtime_component_sum_drift",
+    "headroom_claim_flip",
+    "prelude_checkpoint_hash_mismatch"
+  ],
+  "section_disposition": [
+    {"section_id": "BYTE_LAYOUT", "status": "STATIC_CONTRACT_ARTIFACT_ESTABLISHED_IMPLEMENTATION_PENDING"},
+    {"section_id": "ARITHMETIC_WIDTH", "status": "STATIC_DERIVATION_ARTIFACT_ESTABLISHED_IMPLEMENTATION_PATH_PROOF_PENDING"},
+    {"section_id": "ARENA_LIFETIME", "status": "STATIC_RESERVATION_ARTIFACT_ESTABLISHED_IMPLEMENTATION_LIFETIME_PROOF_PENDING"},
+    {"section_id": "AOT_TOOLCHAIN", "status": "NOT_CLOSED_SOURCE_ARCHIVE_NOT_PINNED"},
+    {"section_id": "RUNTIME_TOTAL", "status": "CONTRACT_TARGET_ARITHMETIC_ESTABLISHED_EXACT_PEAK_NOT_CLOSED"},
+    {"section_id": "INDEPENDENT_CHECKER", "status": "ESTABLISHED_FOR_CONTRACT_ARTIFACTS_NOT_FUTURE_CANDIDATE"},
+    {"section_id": "FROZEN_SEMANTICS", "status": "CHECKPOINT_CUSTODY_ESTABLISHED_EQUIVALENCE_NOT_CLOSED"}
+  ],
+  "outcome": "STATIC_PROOF_ARTIFACTS_ESTABLISHED_PARTIAL_OBLIGATION_CLOSURE",
+  "unresolved_after_this_pack": [
+    "source_pin_the_selected_toolchain_archive_and_reproduce_local_binary_identity",
+    "independently_review_future_candidate_layout_and_runnable_linker_script",
+    "prove_2112_bit_scratch_suffices_over_every_future_implementation_arithmetic_path",
+    "prove_no_post_init_allocation_full_phase_call_graph_and_stack_bound",
+    "prove_static_ELF_sections_program_headers_syscalls_and_zero_dynamic_dependencies",
+    "establish_a_static_cgroup_accounted_kernel_and_page_table_overhead_bound",
+    "run_a_separate_checker_against_future_candidate_postlink_and_checkpoint_artifacts",
+    "prove_full_step1_step2_step3_semantic_equivalence_and_checkpoint_hashes",
+    "derive_an_exact_integer_total_process_peak_strictly_below_2147483648"
+  ],
+  "nonclaims": [
+    "no_candidate_implementation_or_linker_script",
+    "no_compilation_linking_or_candidate_execution",
+    "no_toolchain_source_custody_or_postlink_proof",
+    "no_exact_process_peak_or_proven_headroom",
+    "no_semantic_equivalence_result",
+    "no_resource_no_go_or_OOM_attribution",
+    "no_S0_or_scientific_result"
+  ],
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11c_static_proof_artifact_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11c_static_proof_artifact_manifest.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11c_static_proof_artifact_report.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11c_static_proof_artifact_independent_checker.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11c_static_proof_artifact.py"
+    ],
+    "manifest_and_report_must_be_canonical_JSON": true,
+    "checker_must_verify_exact_direct_child_staging": true,
+    "checker_and_tests_must_not_compile_link_or_execute_a_candidate": true
+  }
+}

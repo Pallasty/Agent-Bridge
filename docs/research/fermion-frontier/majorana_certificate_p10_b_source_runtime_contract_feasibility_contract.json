@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P10-B-SOURCE-RUNTIME-CONTRACT-FEASIBILITY-AUDIT-V1",
+  "contract_role": "source-only feasibility audit under P10-G1; it inventories evidence availability and never derives a process-byte bound",
+  "self_relative_path": "majorana_certificate_p10_b_source_runtime_contract_feasibility_contract.json",
+  "required_direct_parent_commit": "a0cc8766081712955acf2a45b356d47242d12459",
+  "authority": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "scope": {
+    "gate_id": "P10-B-SOURCE-RUNTIME-CONTRACT-FEASIBILITY-AUDIT-V1",
+    "audit_mode": "READ_ONLY_FROZEN_REPOSITORY_SOURCE_AND_LOCK_INVENTORY",
+    "Julia_execution_allowed": false,
+    "candidate_execution_allowed": false,
+    "host_observation_allowed": false,
+    "D3_or_D4_observation_allowed": false,
+    "candidate_or_cap_change_allowed": false,
+    "fixed_process_cap_bytes": 2147483648,
+    "missing_contract_interpretation": "UNKNOWN_NOT_ZERO_BYTES_AND_NOT_CAP_EXCEEDANCE"
+  },
+  "source_inputs": [
+    {
+      "relative_path": "majorana_certificate_p0_runtime_lock.json",
+      "sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17",
+      "role": "runtime_identity_and_replay_input_lock"
+    },
+    {
+      "relative_path": "majorana_certificate_p9_bit_order_resource_probe_fixture.json",
+      "sha256": "8365f441765cc5dbe1658b8aba2e2371c1619a0894c73ad5c0b21f8bf74a1be8",
+      "role": "source_closure_and_selected_anchor_custody"
+    },
+    {
+      "relative_path": "majorana_certificate_p10a_static_resource_envelope_report.json",
+      "sha256": "a842b2b4776ef545e914df1e57f3c5c92859e59c8c9fdca0c6285950bf9a054e",
+      "role": "closed_negative_static_envelope_assessment"
+    },
+    {
+      "relative_path": "majorana_certificate_p10_g1_post_assessment_governance_contract.json",
+      "sha256": "4a1a164c8819e43fa87d0232fe548bab8cc04b79292708d73c78c4ebd73cd369",
+      "role": "sole_P10_B_authority_and_outcome_boundary"
+    }
+  ],
+  "required_evidence_classes": [
+    "source_pinned_transitive_allocation_and_container_type_closure",
+    "stable_Julia_and_package_object_layout_header_alignment_and_capacity_contracts",
+    "alias_ownership_copy_and_lifetime_boundary_contracts",
+    "BigInt_GMP_string_hash_and_container_resize_byte_contracts",
+    "allocator_GC_JIT_sysimage_library_thread_stack_and_transport_upper_bound_contracts",
+    "independent_checker_implementation_separation_and_adversarial_mutation_plan",
+    "sort_package_primitive_and_machine_cost_contracts"
+  ],
+  "permitted_outcomes": [
+    "EVIDENCE_ROUTE_IDENTIFIED_NOT_A_BYTE_PROOF",
+    "CLOSED_NO_INDEPENDENT_STATIC_BYTE_CONTRACT_ROUTE"
+  ],
+  "decision_rule": {
+    "closure_applies_only_to_the_frozen_source_and_lock_inventory": true,
+    "all_seven_evidence_classes_must_have_an_independent_static_contract_route_to_identify_a_route": true,
+    "a_partial_identity_or_source_tree_pin_is_not_an_object_layout_or_peak_byte_contract": true,
+    "absence_of_a_route_is_not_a_resource_no_go_or_an_OOM_attribution": true,
+    "neither_outcome_opens_execution_or_establishes_a_byte_proof": true,
+    "any_later_byte_proof_or_execution_requires_new_independent_governance": true
+  },
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p10_b_source_runtime_contract_feasibility_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p10_b_source_runtime_contract_feasibility_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p10_b_source_runtime_contract_feasibility_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p10_b_source_runtime_contract_feasibility.py"
+    ],
+    "validator_and_tests_are_read_only_and_must_not_launch_Julia_or_the_candidate": true,
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true
+  }
+}

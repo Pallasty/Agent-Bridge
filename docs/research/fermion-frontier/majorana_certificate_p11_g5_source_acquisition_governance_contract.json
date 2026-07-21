@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "contract_id": "MAJORANA-P11-G5-SOURCE-ARCHIVE-ACQUISITION-GOVERNANCE-CLOSURE-V1",
+  "contract_role": "independent_result_informed_governance_after_P11_E0",
+  "self_relative_path": "majorana_certificate_p11_g5_source_acquisition_governance_contract.json",
+  "required_direct_parent_commit": "aacab7a82d2687270f6c4eb5edb7efb9903db303",
+  "authority": {
+    "scientific_authority": "NONE",
+    "candidate_execution_authority": false,
+    "candidate_implementation_authority": false,
+    "prototype_or_compilation_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_or_no_go_authority": false,
+    "source_archive_acquisition_authority_consumed_in_P11_G5": false,
+    "package_or_environment_mutation_authority_consumed_in_P11_G5": false,
+    "kernel_accounting_bound_design_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "P11_E0_custody": {
+    "result_commit_sha": "aacab7a82d2687270f6c4eb5edb7efb9903db303",
+    "required_parent_commit_sha": "a26d75d2943a4dd683eaa166656f99a5df39758e",
+    "contract_relative_path": "majorana_certificate_p11e0_source_archive_acquisition_contract.json",
+    "contract_raw_sha256": "43147dc554d1994dfd7d2d6c5400e68648a418c58d99833bccad72be91b8c4a3",
+    "contract_canonical_sha256": "8bec22d3bc8855f1c2ac0f2c214e1f68de49af2eec82e998f392d299d56ae7bc",
+    "record_relative_path": "majorana_certificate_p11e0_source_archive_acquisition_record.json",
+    "record_raw_sha256": "e40312c33a8cdffdbd630cd18bb8ecc42703e155c4f75e6511e83c74654a5de2",
+    "expected_outcome": "SOURCE_ARCHIVE_ACQUISITION_CONTRACT_PACK_ESTABLISHED_AWAITING_INDEPENDENT_AUTHORIZATION",
+    "expected_next_governance_gate": "P11-G5-SOURCE-ARCHIVE-ACQUISITION-AUTHORIZATION-V1",
+    "expected_snapshot_id": "20260719T064131Z",
+    "expected_exact_source_identity_count": 4,
+    "expected_planned_future_command_count": 5,
+    "expected_source_archive_acquisition_authorized": false,
+    "expected_source_archive_custody_established": false,
+    "expected_implementation_gate": "CLOSED",
+    "expected_execution_gate": "CLOSED"
+  },
+  "readiness_review": [
+    {"check_id": "direct_parent_topology_and_exact_six_path_custody", "status": "PASS"},
+    {"check_id": "four_exact_source_identities_and_P11_D_snapshot_anchor", "status": "PASS"},
+    {"check_id": "snapshot_unavailability_and_version_substitution_fail_closed", "status": "PASS"},
+    {"check_id": "absolute_new_or_empty_non_symlink_custody_root_outside_Git", "status": "PASS"},
+    {"check_id": "isolated_APT_source_lists_cache_status_and_no_host_state_writes", "status": "PASS"},
+    {"check_id": "five_exact_snapshot_commands_and_download_only_no_unpack_boundary", "status": "PASS"},
+    {"check_id": "keyring_InRelease_Sources_dsc_parts_local_SHA256_chain", "status": "PASS"},
+    {"check_id": "Sources_dsc_local_set_equality_and_strict_parser", "status": "PASS"},
+    {"check_id": "authenticated_size_budget_atomic_acceptance_receipts_and_bounded_cleanup", "status": "PASS"},
+    {"check_id": "candidate_build_execution_kernel_bound_and_scientific_gates_remain_closed", "status": "PASS"}
+  ],
+  "decision": {
+    "disposition": "AUTHORIZE_P11_E1_EXACT_ISOLATED_SOURCE_ARCHIVE_ACQUISITION_AND_BYTE_CUSTODY_ONLY",
+    "all_readiness_checks_pass": true,
+    "only_allowed_next_gate": "P11-E1-EXACT-SOURCE-ARCHIVE-ACQUISITION-AND-BYTE-CUSTODY-V1",
+    "authorization_is_single_stage_exact_contract_bound_and_fail_closed": true,
+    "authorization_is_not_consumed_by_P11_G5": true,
+    "P11_E0_contract_is_a_recipe_not_current_source_custody": true,
+    "fixed_process_cap_bytes": 2147483648,
+    "exact_static_process_peak_bytes": null,
+    "strict_integer_peak_less_than_fixed_cap": null,
+    "difference_is_proven_headroom": false,
+    "semantic_equivalence_established": false,
+    "candidate_implementation_gate": "CLOSED",
+    "candidate_execution_gate": "CLOSED",
+    "resource_no_go_inference": false
+  },
+  "P11_E1_authorization": {
+    "gate_id": "P11-E1-EXACT-SOURCE-ARCHIVE-ACQUISITION-AND-BYTE-CUSTODY-V1",
+    "role": "bounded_operational_acquisition_of_exact_authenticated_source_archive_bytes_outside_Git",
+    "required_direct_parent": "P11_G5_result_commit",
+    "P11_E0_contract_must_match_raw_SHA256": "43147dc554d1994dfd7d2d6c5400e68648a418c58d99833bccad72be91b8c4a3",
+    "snapshot_id": "20260719T064131Z",
+    "exact_source_identities": [
+      "gcc-15=15.2.0-16ubuntu1",
+      "binutils=2.46-3ubuntu2",
+      "linux=7.0.0-28.28",
+      "linux-signed=7.0.0-28.28"
+    ],
+    "exact_custody_root": "/Data/CascadeProjects/.ab-evidence/fermion-majorana/p11-e1-source-custody",
+    "allowed_network_origins": [
+      "https://archive.ubuntu.com/ubuntu/",
+      "https://security.ubuntu.com/ubuntu/",
+      "https://snapshot.ubuntu.com/"
+    ],
+    "snapshot_service_redirects_allowed_only_when_initiated_by_declared_Ubuntu_origins": true,
+    "operational_acquisition_runner_source_allowed": true,
+    "create_and_write_exact_custody_root_allowed": true,
+    "read_apt_get_binary_ubuntu_keyring_and_declared_system_identity_inputs_allowed": true,
+    "network_snapshot_index_and_source_archive_acquisition_allowed": true,
+    "run_only_the_five_exact_P11_E0_apt_get_argv_allowed": true,
+    "hash_parse_verify_receipt_and_atomic_acceptance_allowed": true,
+    "host_etc_apt_var_lib_apt_var_cache_apt_or_dpkg_status_write_allowed": false,
+    "sudo_root_or_privilege_escalation_allowed": false,
+    "credentials_tokens_private_mirrors_proxies_or_third_party_keys_allowed": false,
+    "latest_version_alternate_snapshot_suite_component_package_or_version_substitution_allowed": false,
+    "archive_unpack_patch_or_source_tree_materialization_allowed": false,
+    "kernel_source_reading_or_kernel_accounting_bound_derivation_allowed": false,
+    "candidate_source_linker_script_object_or_executable_allowed": false,
+    "compile_link_disassemble_execute_benchmark_or_dynamic_measurement_allowed": false,
+    "Julia_or_P9_candidate_execution_allowed": false,
+    "scientific_schedule_semantics_or_cap_change_allowed": false
+  },
+  "P11_E1_execution_order_and_limits": {
+    "required_step_order": [
+      "preflight_exact_parent_contract_root_binary_keyring_templates_and_no_host_write_projection",
+      "create_isolated_custody_layout_and_zero_byte_status",
+      "run_APT_UPDATE_ISOLATED_SNAPSHOT_once",
+      "authenticate_and_receipt_InRelease_and_Sources_indexes",
+      "derive_authenticated_expected_download_bytes_and_check_free_space",
+      "acquire_verify_and_atomically_accept_gcc_15",
+      "acquire_verify_and_atomically_accept_binutils",
+      "acquire_verify_and_atomically_accept_linux",
+      "acquire_verify_and_atomically_accept_linux_signed",
+      "write_canonical_aggregate_manifest_and_report",
+      "run_independent_offline_validator_and_synthetic_tests",
+      "stage_exact_seven_repository_paths_and_validate_lifecycle"
+    ],
+    "APT_update_attempt_limit": 1,
+    "source_download_attempt_limit_per_package": 2,
+    "Acquire_Retries_inside_each_apt_command": 0,
+    "stop_after_first_package_that_exhausts_attempts": true,
+    "accepted_prior_package_bytes_may_be_retained_but_do_not_establish_complete_set_custody": true,
+    "runner_must_use_direct_argv_without_shell": true,
+    "runner_must_not_read_proxy_or_credential_environment_variables": true,
+    "runner_must_clear_environment_except_explicit_locale_PATH_HOME_and_APT_CONFIG_allowlist": true,
+    "network_phase_ends_before_independent_validator": true,
+    "independent_validator_must_be_offline_and_must_not_run_APT_GPG_unpack_build_or_candidate_commands": true
+  },
+  "P11_E1_required_outputs": {
+    "external_outputs": [
+      "exact_P11_E0_isolated_APT_configuration_bytes",
+      "apt_get_binary_and_Ubuntu_archive_keyring_identity_receipts",
+      "retained_authenticated_InRelease_and_Sources_index_bytes",
+      "four_complete_exact_source_package_archive_sets_if_available",
+      "one_canonical_receipt_per_accepted_source_package",
+      "raw_command_stdout_stderr_receipts_without_credentials",
+      "failure_receipt_for_each_failed_attempt"
+    ],
+    "repository_outputs": [
+      "majorana_certificate_p11e1_source_archive_custody_manifest.json",
+      "majorana_certificate_p11e1_source_archive_custody_report.json",
+      "majorana_certificate_p11e1_source_archive_acquisition_runner.py",
+      "majorana_certificate_p11e1_source_archive_custody_validator.py",
+      "test_majorana_certificate_p11e1_source_archive_custody.py"
+    ],
+    "repository_manifest_contains_hashes_sizes_and_external_relative_paths_not_archive_bytes": true,
+    "report_must_be_canonical_JSON_and_reconstructed_from_external_receipts_and_manifest": true,
+    "independent_validator_must_rehash_all_retained_external_evidence_bytes": true
+  },
+  "P11_E1_allowed_outcomes": [
+    "SOURCE_ARCHIVE_CUSTODY_ESTABLISHED_EXACT_FOUR_PACKAGE_SET",
+    "PARTIAL_VERIFIED_SOURCE_ARCHIVES_RETAINED_COMPLETE_SET_CUSTODY_NOT_ESTABLISHED",
+    "CLOSED_SNAPSHOT_OR_EXACT_SOURCE_VERSION_UNAVAILABLE",
+    "CLOSED_AUTHENTICATION_COMPLETENESS_SPACE_OR_TRANSACTION_FAILURE"
+  ],
+  "all_P11_E1_outcomes_keep_archive_unpack_kernel_bound_candidate_implementation_and_execution_closed": true,
+  "post_P11_E1_requirement": {
+    "next_gate_if_complete_custody": "P11-G6-POST-SOURCE-CUSTODY-GOVERNANCE-V1",
+    "next_gate_if_incomplete_or_failed": "P11-G6-POST-SOURCE-CUSTODY-GOVERNANCE-V1",
+    "P11_E1_result_must_be_independently_governed_before_retry_beyond_limits_source_reading_unpack_or_bound_design": true
+  },
+  "forbidden_actions": [
+    "consume_the_P11_E1_network_or_write_authority_during_P11_G5",
+    "write_to_host_APT_source_list_index_cache_archive_or_dpkg_status_paths",
+    "use_sudo_root_credentials_private_mirrors_proxies_or_third_party_signing_keys",
+    "change_snapshot_suite_component_source_package_version_custody_root_or_P11_E0_templates",
+    "resume_or_reuse_unaccepted_partial_archive_bytes",
+    "accept_missing_extra_duplicate_conflicting_or_hash_mismatched_source_parts",
+    "commit_source_archive_bytes_or_materialized_source_trees_to_Git",
+    "unpack_patch_read_or_build_acquired_source_archives",
+    "write_compile_link_disassemble_execute_or_benchmark_candidate_source_or_binary",
+    "run_Julia_or_measure_candidate_or_kernel_memory",
+    "claim_source_custody_before_all_four_sets_and_receipts_validate",
+    "claim_static_kernel_bound_exact_process_peak_headroom_semantic_equivalence_resource_no_go_OOM_S0_or_scientific_result"
+  ],
+  "P11_E1_lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11e1_source_archive_custody_manifest.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e1_source_archive_custody_report.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11e1_source_archive_acquisition_runner.py",
+      "docs/research/fermion-frontier/majorana_certificate_p11e1_source_archive_custody_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11e1_source_archive_custody.py"
+    ],
+    "result_commit_must_be_direct_child_of_P11_G5": true,
+    "external_archive_bytes_must_not_be_staged_or_committed": true,
+    "runner_tests_must_use_synthetic_fixtures_and_no_network": true,
+    "live_acquisition_must_finish_before_staging_and_lifecycle_validation": true
+  },
+  "lifecycle": {
+    "exact_changed_paths": [
+      "docs/research/fermion-frontier/ARTIFACTS.md",
+      "docs/research/fermion-frontier/PROGRESS.md",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g5_source_acquisition_governance_contract.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g5_source_acquisition_governance_record.json",
+      "docs/research/fermion-frontier/majorana_certificate_p11_g5_source_acquisition_governance_validator.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p11_g5_source_acquisition_governance.py"
+    ],
+    "record_must_be_canonical_JSON_and_pin_contract_raw_and_canonical_SHA256": true,
+    "validator_and_tests_are_read_only_git_only_and_nonexecuting": true
+  }
+}

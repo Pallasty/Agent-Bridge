@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "contract_fingerprint": "operator_propagation_certificate_contract_v1",
+  "certificate_type": "abstract_pauli_circuit_truncation_subcertificate_v1",
+  "checker_fingerprint": "operator_propagation_certificate_checker_fraction_interval_v1",
+  "checker_source_sha256": "ade384b1b2258bc5cb3a296d9f7f4c0c85ee374293c2b1a5e4332f4ecba938d4",
+  "workload_identity": {
+    "workload_fingerprint": "abstract_two_qubit_pauli_conformance_v1",
+    "initial_state_fingerprint": "computational_basis_00_v1",
+    "evolution_fingerprint": "declared_pauli_rotation_sequence_v1",
+    "boundary_condition_fingerprint": "not_applicable_abstract_conformance",
+    "hamiltonian_convention_fingerprint": "not_assessed_declared_gate_sequence",
+    "reference_target": "supplied_product_formula_gate_sequence"
+  },
+  "n_qubits": 2,
+  "expected_generator_count": 2,
+  "expected_generator_sequence_sha256": "88673b8e5864d527b2c41b74e081e0560e8e13040153587effd4962251160146",
+  "expected_initial_terms_sha256": "b8bb280653d2c6128a093a6d236cb28083b5c11b829dd42a96a9ea86181e3d58",
+  "expected_computational_basis_bits": "00",
+  "heisenberg_convention": "G_P(theta)=exp(-i*theta*P/2); Heisenberg G_P(theta)^dagger O G_P(theta)",
+  "rational_encoding": "reduced_numerator_slash_positive_denominator",
+  "taylor_policy": "sin_through_2Nplus1_cos_through_2N_next_term_interval_abs_theta_le_1",
+  "merge_drop_policy": "provided_backprop_order_all_slice_gates_then_merge_then_explicit_drop_upper_abs_l1",
+  "sequence_order_semantics": "apply_backprop_slices_and_gates_left_to_right_to_observable; producer_must_reverse_forward_circuit",
+  "resource_limits": {
+    "max_certificate_bytes": 1048576,
+    "max_qubits": 16,
+    "max_initial_terms": 256,
+    "max_slices": 64,
+    "max_gates_per_slice": 256,
+    "max_live_terms": 65536,
+    "max_taylor_order": 32,
+    "max_rational_digits": 128
+  },
+  "maximum_positive_status": "VERIFIED_CIRCUIT_TRUNCATION_SUBCERTIFICATE",
+  "scope_claims": {
+    "declared_pauli_sequence_arithmetic_verified": true,
+    "declared_sequence_truncation_l1_verified": true,
+    "contract_pinned_computational_basis_evaluation_verified": true,
+    "product_formula_to_exact_hamiltonian": "NOT_ASSESSED",
+    "fermion_to_qubit_mapping_identity": "NOT_ASSESSED",
+    "physical_L8_instance_identity": "NOT_ASSESSED",
+    "ready_gate_eligible": false
+  }
+}

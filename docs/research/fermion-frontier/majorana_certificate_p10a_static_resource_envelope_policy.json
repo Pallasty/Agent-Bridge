@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "policy_id": "MAJORANA-P10-A-STATIC-RESOURCE-ENVELOPE-PROOF-DESIGN-V1",
+  "fixture_id": "MAJORANA-P10-A-STATIC-RESOURCE-ENVELOPE-PROOF-DESIGN-V1",
+  "gate_id": "P10-A-STATIC-RESOURCE-ENVELOPE-PROOF-DESIGN-V1",
+  "required_direct_parent_commit": "7650fc4beb042571477bca43eb7f62c7beab0368",
+  "report_contract": {
+    "relative_path": "majorana_certificate_p10a_static_resource_envelope_report.json",
+    "report_type": "majorana_p10_a_static_resource_envelope_proof_design_report_v1",
+    "only_legal_outcome_for_this_design": "ASSESSED_NOT_ESTABLISHED",
+    "report_status": "ASSESSED_STATIC_RESOURCE_ENVELOPE_NOT_ESTABLISHED",
+    "assessment_lifecycle_status": "CLOSED",
+    "admission_status": "NOT_ESTABLISHED_BY_P10_A_STATIC_RESOURCE_ENVELOPE_PROOF_DESIGN",
+    "report_is_canonical_JSON_without_trailing_newline": true
+  },
+  "preprobe_lifecycle": {
+    "one_direct_child_preprobe_before_report": true,
+    "preprobe_changed_paths": [
+      "docs/research/fermion-frontier/majorana_certificate_p10a_static_resource_envelope_fixture.json",
+      "docs/research/fermion-frontier/majorana_certificate_p10a_static_resource_envelope_policy.json",
+      "docs/research/fermion-frontier/majorana_certificate_p10a_static_resource_envelope.py",
+      "docs/research/fermion-frontier/test_majorana_certificate_p10a_static_resource_envelope.py"
+    ],
+    "preprobe_paths_are_regular_mode_100644_stage_zero_additions": true,
+    "report_must_be_absent_from_parent_and_preprobe": true,
+    "result_commit_is_direct_child_of_preprobe": true,
+    "result_commit_adds_only_the_report": true,
+    "all_four_preprobe_blobs_are_rebound_byte_for_byte_at_result_time": true
+  },
+  "proof_only_contract": {
+    "P10_A_is_a_design_assessment_not_an_execution": true,
+    "P10_A_does_not_launch_Julia_or_the_candidate": true,
+    "P10_A_does_not_change_candidate_algorithm_or_caps": true,
+    "P10_A_does_not_establish_a_scientific_or_physical_result": true,
+    "P10_A_does_not_establish_S0_or_execution_admission": true,
+    "P10_A_does_not_claim_resource_NO_GO_or_OOM_causality": true,
+    "P10_A_abstract_count_bounds_are_not_byte_or_wall_clock_bounds": true
+  },
+  "authority_boundary": {
+    "scientific_authority": "NONE",
+    "execution_authority": false,
+    "candidate_selection_authority": false,
+    "candidate_or_cap_change_authority": false,
+    "resource_no_go_authority": false,
+    "S0_authority": false,
+    "certificate_eligible": false,
+    "result_contract_eligible": false
+  },
+  "fixed_cap_decision_rule": {
+    "fixed_process_cap_bytes": 2147483648,
+    "positive_branch_name": "ADMISSION_BOUND_ESTABLISHED_STRICTLY_BELOW_FIXED_CAP",
+    "negative_assessment_branch_name": "ASSESSED_NOT_ESTABLISHED",
+    "positive_branch_requires_all_seven_obligations_VERIFIED": true,
+    "positive_branch_requires_exact_integer_peak_bytes": true,
+    "positive_branch_requires_peak_strictly_less_than_fixed_cap": true,
+    "unknown_peak_forces_negative_assessment_branch": true,
+    "negative_assessment_keeps_execution_gate_closed": true,
+    "even_a_positive_branch_would_require_new_independent_governance": true
+  },
+  "source_custody": {
+    "source_files_are_raw_SHA256_and_size_pinned": true,
+    "selected_core_allocation_anchors_are_checked": true,
+    "selected_anchors_are_not_claimed_as_transitive_allocation_closure": true,
+    "G0_projection_is_limited_to_gate_obligation_and_authority_custody": true,
+    "raw_D4_report_trace_events_markers_and_host_fields_are_not_inputs": true
+  },
+  "status_taxonomy": {
+    "assessment_lifecycle": "CLOSED",
+    "outcome": "ASSESSED_NOT_ESTABLISHED",
+    "admission": "NOT_ESTABLISHED_BY_P10_A_STATIC_RESOURCE_ENVELOPE_PROOF_DESIGN",
+    "execution_gate": "CLOSED",
+    "malformed_or_incomplete_input_is_INVALID_not_a_negative_outcome": true
+  },
+  "forbidden_actions": [
+    "execute_Julia_candidate_or_any_D5_repeat",
+    "read_or_import_the_D4_report_phase_trace_or_producer",
+    "use_D3_or_D4_RSS_timing_returncode_stderr_stdout_markers_or_host_failure_as_proof",
+    "infer_exact_bytes_from_logical_counts_or_assumed_bytes_per_term",
+    "infer_wall_clock_from_abstract_work_units",
+    "claim_resource_NO_GO_OOM_S0_READY_certificate_or_scientific_result",
+    "relax_the_fixed_cap_or_change_the_candidate",
+    "treat_ASSESSED_NOT_ESTABLISHED_as_execution_permission"
+  ],
+  "source_files": [
+    {
+      "relative_path": "majorana_certificate_p0/Project.toml",
+      "sha256": "62810ce02db16bf25cb74941f27f58ee556ee0826abc4aa47296ce8188a5048f",
+      "size_bytes": 235
+    },
+    {
+      "relative_path": "majorana_certificate_p0/Manifest.toml",
+      "sha256": "987572a908176b21cfbe80c385acdd0b4ab47b6c6dcd3ea9a33dd8eb22559406",
+      "size_bytes": 15336
+    },
+    {
+      "relative_path": "majorana_certificate_p0_runtime_lock.json",
+      "sha256": "d54b68d9960cc9912f09a8a20b337804e198c61d5c68852db985cc4b537a1e17",
+      "size_bytes": 5281
+    },
+    {
+      "relative_path": "majorana_certificate_p2/majorana_p2_runner.jl",
+      "sha256": "03edd9640bc3d83a61ea0c9c7d9e93af3fc683972c517af4a7691e21359e25ed",
+      "size_bytes": 33888
+    },
+    {
+      "relative_path": "majorana_certificate_p3/majorana_p3_runner.jl",
+      "sha256": "958de8886bb8e56cda26eb6c45029c7016e886caae26c598c7e6b5c595257fe2",
+      "size_bytes": 59318
+    },
+    {
+      "relative_path": "majorana_certificate_p4/majorana_p4_runner.jl",
+      "sha256": "f425dbab80d60c49fceefc2b3e805fd3a4b29037f0e95491c50891ed7b7b9f47",
+      "size_bytes": 24880
+    },
+    {
+      "relative_path": "majorana_certificate_p6/majorana_p6_runner.jl",
+      "sha256": "b63143c066d3d258594e27ee4062632632030e9962a0fcd127fcd5000ff9cc1c",
+      "size_bytes": 74471
+    },
+    {
+      "relative_path": "majorana_certificate_p2_fixture.json",
+      "sha256": "252fa0c4ed26db5581bcd9ff0101d18d858faf6d31fb9b6cdcaa821bf318e82a",
+      "size_bytes": 5891
+    },
+    {
+      "relative_path": "majorana_certificate_p3_fixture.json",
+      "sha256": "a478b783ae4005f7ef79572a4b34eee72299da262e439bdc35eca13496bdc236",
+      "size_bytes": 6033
+    },
+    {
+      "relative_path": "majorana_certificate_p4_fixture.json",
+      "sha256": "b020b6bcc0ed56010af9ed3b1836469c084b9244a9303a8101cf7657adb79964",
+      "size_bytes": 17259
+    },
+    {
+      "relative_path": "majorana_certificate_p5_fixture.json",
+      "sha256": "fd8b46c8761f548d615042b24f8ec85b32891e4f42dbafdd9bd70d58379a8afb",
+      "size_bytes": 4763
+    },
+    {
+      "relative_path": "majorana_certificate_p6_fixture.json",
+      "sha256": "fb381c613d675551d33680484a88870020a494e4a356dafd9fd869714c9d475d",
+      "size_bytes": 14267
+    },
+    {
+      "relative_path": "majorana_certificate_p9_bit_order_resource_probe_fixture.json",
+      "sha256": "8365f441765cc5dbe1658b8aba2e2371c1619a0894c73ad5c0b21f8bf74a1be8",
+      "size_bytes": 21575
+    },
+    {
+      "relative_path": "majorana_certificate_p9_bit_order_resource_probe/majorana_p9_bit_order_step3_resource_probe.jl",
+      "sha256": "f12ea9a93d4079792de8b5e8bae5b5ee0b45895a4399c19f41b7041034d3f14c",
+      "size_bytes": 78229
+    },
+    {
+      "relative_path": "majorana_certificate_p9_bit_order_resource_probe_policy.json",
+      "sha256": "da4d965ffa9362e31c5d52cec19ec40f4440f4e4f08202b0a041739c18123929",
+      "size_bytes": 40145
+    },
+    {
+      "relative_path": "majorana_certificate_p9_g0_post_d4_governance_closure_contract.json",
+      "sha256": "9f9a56981783bb9987ed18643742033ea31cefe79901319ee9444ec97a1cd57c",
+      "size_bytes": 15115
+    },
+    {
+      "relative_path": "majorana_certificate_p9_g0_post_d4_governance_closure_record.json",
+      "sha256": "a3f91d03de66e5ef5d3e3a6acbe27e1e7f0ab8b85a8b3e645ff5ccb90c3b090b",
+      "size_bytes": 6431
+    },
+    {
+      "relative_path": "majorana_certificate_p9_g0_post_d4_governance_closure_validator.py",
+      "sha256": "ba1f2d9e3297bd551ab9640bd49afd64bf2453d1797e5bf48c3e3fddf8cd9192",
+      "size_bytes": 40403
+    },
+    {
+      "relative_path": "majorana_certificate_p10a_static_resource_envelope_fixture.json",
+      "sha256": "b5af453e214d3480f71a19fdf7c61e28e78e27db9e392c5f84e867c05a4a7ed5",
+      "size_bytes": 8529
+    },
+    {
+      "relative_path": "majorana_certificate_p10a_static_resource_envelope.py",
+      "sha256": "c46e8f708e8a3f721c781e97499be551f0a251018e9d12b3eae5ed5da670b619",
+      "size_bytes": 46267
+    },
+    {
+      "relative_path": "test_majorana_certificate_p10a_static_resource_envelope.py",
+      "sha256": "f0fc3df6c0d05d3cb0aeb7fe9a60deb2f30688ad1814df308d6d6e8b69f243c2",
+      "size_bytes": 17181
+    }
+  ]
+}
