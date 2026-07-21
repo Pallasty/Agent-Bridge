@@ -99,6 +99,23 @@ def blank_receipt(worktree: Path, target: Path) -> dict[str, Any]:
     }
 
 
+def prepare_lanes(repo: Path, worktrees: list[Path], targets: list[Path], receipts: list[dict[str, Any]]) -> None:
+    if len(worktrees) != 2 or len(targets) != 2 or len(receipts) != 2:
+        raise FailClosed("G2K requires exactly two lanes")
+    for worktree, target in zip(worktrees, targets):
+        exact_child(worktree.parent, worktree, {"worktree-a", "worktree-b"})
+        exact_child(target.parent, target, {"target-a", "target-b"})
+        if worktree.exists() or target.exists():
+            raise FailClosed("lane worktree or target was not fresh")
+    for worktree in worktrees:
+        checked_output(["git", "worktree", "add", "--detach", str(worktree), FIXED_COMMIT], cwd=repo)
+    for worktree, receipt in zip(worktrees, receipts):
+        receipt["git_head"] = checked_output(["git", "rev-parse", "HEAD"], cwd=worktree)
+        receipt["git_tree"] = checked_output(["git", "rev-parse", "HEAD^{tree}"], cwd=worktree)
+        if receipt["git_head"] != FIXED_COMMIT or checked_output(["git", "status", "--porcelain"], cwd=worktree):
+            raise FailClosed("prepared detached worktree identity or cleanliness mismatch")
+
+
 def detect_markers(output: str) -> dict[str, bool]:
     lower = output.lower()
     return {
@@ -113,13 +130,8 @@ def detect_markers(output: str) -> dict[str, bool]:
 def run_lane(repo: Path, worktree: Path, target: Path, receipt: dict[str, Any]) -> None:
     exact_child(worktree.parent, worktree, {"worktree-a", "worktree-b"})
     exact_child(target.parent, target, {"target-a", "target-b"})
-    if worktree.exists() or target.exists():
-        raise FailClosed("lane worktree or target was not fresh")
-    checked_output(["git", "worktree", "add", "--detach", str(worktree), FIXED_COMMIT], cwd=repo)
-    receipt["git_head"] = checked_output(["git", "rev-parse", "HEAD"], cwd=worktree)
-    receipt["git_tree"] = checked_output(["git", "rev-parse", "HEAD^{tree}"], cwd=worktree)
-    if receipt["git_head"] != FIXED_COMMIT or checked_output(["git", "status", "--porcelain"], cwd=worktree):
-        raise FailClosed("detached worktree identity or cleanliness mismatch")
+    if not worktree.is_dir() or target.exists():
+        raise FailClosed("prepared lane worktree missing or target was not fresh")
     pre_fixture = fixture_identity(worktree)
     pre_source = sha256(worktree / SOURCE_REL)
     pre_toolchain = toolchain_identity()
@@ -157,7 +169,11 @@ def run_lane(repo: Path, worktree: Path, target: Path, receipt: dict[str, Any]) 
 
 def cleanup(repo: Path, parent: Path, worktrees: list[Path], targets: list[Path], receipts: list[dict[str, Any]]) -> list[str]:
     errors: list[str] = []
-    for target, receipt in zip(targets, receipts, strict=True):
+    for index, target in enumerate(targets):
+        receipt = receipts[index] if index < len(receipts) else None
+        if receipt is None:
+            errors.append(f"missing receipt for target: {target}")
+            continue
         receipt["target_cleanup_attempted"] = True
         try:
             exact_child(parent, target, {"target-a", "target-b"})
@@ -168,14 +184,25 @@ def cleanup(repo: Path, parent: Path, worktrees: list[Path], targets: list[Path]
             if not receipt["target_cleanup_confirmed"]:
                 errors.append(f"target cleanup unconfirmed: {target}")
         except Exception as error:  # cleanup evidence must survive every failure
-            receipt["target_leftovers"] = [str(target)] if target.exists() else []
+            try:
+                receipt["target_leftovers"] = [str(target)] if target.exists() else []
+            except Exception:
+                receipt["target_leftovers"] = [f"<uninspectable:{target}>"]
             errors.append(f"target cleanup failed: {target}: {error}")
+    registered: set[Path] = set()
+    try:
+        listing = checked_output(["git", "worktree", "list", "--porcelain"], cwd=repo)
+        registered = {Path(line.removeprefix("worktree ")).resolve() for line in listing.splitlines() if line.startswith("worktree ")}
+    except Exception as error:
+        errors.append(f"worktree registry inspection failed: {error}")
     for worktree in worktrees:
         try:
             exact_child(parent, worktree, {"worktree-a", "worktree-b"})
-            if worktree.exists():
+            if worktree.resolve() in registered:
                 checked_output(["git", "worktree", "remove", "--force", str(worktree)], cwd=repo)
-            if worktree.exists():
+            if worktree.resolve() in {Path(line.removeprefix("worktree ")).resolve() for line in checked_output(["git", "worktree", "list", "--porcelain"], cwd=repo).splitlines() if line.startswith("worktree ")}:
+                errors.append(f"worktree metadata remained: {worktree}")
+            elif worktree.exists():
                 errors.append(f"worktree remained: {worktree}")
         except Exception as error:
             errors.append(f"worktree cleanup failed: {worktree}: {error}")
@@ -208,6 +235,7 @@ def main() -> int:
         worktrees = [parent / "worktree-a", parent / "worktree-b"]
         targets = [parent / "target-a", parent / "target-b"]
         receipts = [blank_receipt(worktrees[i], targets[i]) for i in range(2)]
+        prepare_lanes(repo, worktrees, targets, receipts)
         for index in range(2):
             try:
                 run_lane(repo, worktrees[index], targets[index], receipts[index])
@@ -218,7 +246,10 @@ def main() -> int:
         failure = str(error)
     finally:
         if parent is not None:
-            cleanup_errors = cleanup(repo, parent, [parent / "worktree-a", parent / "worktree-b"], [parent / "target-a", parent / "target-b"], receipts)
+            try:
+                cleanup_errors = cleanup(repo, parent, [parent / "worktree-a", parent / "worktree-b"], [parent / "target-a", parent / "target-b"], receipts)
+            except Exception as error:
+                cleanup_errors = [f"cleanup escaped: {error}"]
             if cleanup_errors:
                 failure = "; ".join(filter(None, (failure, *cleanup_errors)))
         if failure and receipts and not any(r["fail_closed_reason"] for r in receipts):

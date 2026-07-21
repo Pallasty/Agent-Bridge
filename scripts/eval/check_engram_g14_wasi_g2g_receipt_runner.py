@@ -20,7 +20,7 @@ def main() -> None:
     source = RUNNER.read_text(encoding="utf-8")
     tree = ast.parse(source)
     wrapper = WRAPPER.read_text(encoding="utf-8")
-    need(wrapper == "#!/bin/sh\nexec python3 scripts/eval/engram_g14_wasi_g2g_receipt_runner.py\n", "wrapper widened")
+    need(wrapper == "#!/bin/sh\nexec python3 scripts/eval/check_engram_g14_wasi_g2g_receipt_runner.py\n", "wrapper widened")
     required = (
         "f63fb2810c054f7f2ce827e2a40e4d36372d7e12", "/Users/pallasting/Projects",
         'tempfile.mkdtemp(prefix="g2g-receipts.", dir=PROJECTS_ROOT)', "origin/master",
@@ -29,6 +29,8 @@ def main() -> None:
         '"raw_artifact_sha_scope": "local_observation_only"', '"target_cleanup_attempted"',
         '"target_cleanup_confirmed"', '"target_leftovers"', '"fail_closed_reason"',
         'checked_output(["git", "worktree", "remove", "--force", str(worktree)]', "parent.rmdir()",
+        "prepare_lanes(repo, worktrees, targets, receipts)",
+        '"git", "worktree", "list", "--porcelain"',
     )
     for token in required:
         need(token in source, f"missing required token: {token}")
@@ -36,6 +38,8 @@ def main() -> None:
         need(f'"{field}"' in source, f"missing G2K.1 field: {field}")
     need('if "[dependencies]" in text:' in source, "dependency-free manifest check missing")
     need("pre_fixture != FROZEN_FIXTURE" in source and "post_fixture != FROZEN_FIXTURE" in source, "pre/post frozen tuple checks missing")
+    need("len(worktrees) != 2" in source and "len(targets) != 2" in source, "two-lane prepare missing")
+    need("cleanup_errors = cleanup" in source and "except Exception as error:" in source, "cleanup escape guard missing")
     need('raw_artifact_sha256"] ==' not in source, "raw artifacts compared across lanes")
     need("subprocess.run(argv, cwd=worktree, env=env, text=True, capture_output=True, check=False)" in source, "exact captured build call missing")
     forbidden_text = ("env -i", "CARGO_HOME", 'env["RUSTC"]', 'env["PATH"]', "RUSTFLAGS", 'env["HOME"]', ".unlink(", "os.remove(")
