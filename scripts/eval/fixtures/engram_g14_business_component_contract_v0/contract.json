@@ -5,6 +5,16 @@
   "world": "transform",
   "export": "evaluate",
   "component_profile": "pure-function-no-imports",
+  "serialization": {
+    "envelope": "rfc8785-json-safe-integer-v0",
+    "encoding": "utf-8",
+    "object_keys": "lexicographic",
+    "numbers": "integers-only-safe-range",
+    "duplicate_keys": "reject",
+    "unknown_fields": "reject",
+    "invalid_utf8": "reject"
+  },
+  "invocation_id_pattern": "^g14-biz-v0-[a-z0-9]{16}$",
   "input_limits": {
     "revision": "uint64",
     "entity_count_max": 100000,

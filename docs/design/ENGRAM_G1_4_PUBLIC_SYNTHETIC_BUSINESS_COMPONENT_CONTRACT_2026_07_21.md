@@ -19,7 +19,7 @@ The frozen fixture package is:
 Initial byte pins for this contract revision:
 
 - WIT SHA-256: `67a4317d8b2664dcdd18223908dc003a03baef6513e13e37d8fa49d4868b9bd5`
-- contract JSON SHA-256: `2c402a9ef2aa9fa3598815511cf5fda43f1bd7700d933415a9600fc02fdcfaf0`
+- contract JSON SHA-256: `a666088da2603b7caf7fc4ce3a2950d08fc5ce2c4c1665d9ee4985ffe505c374`
 
 This is a contract-design result only. It does not authorize building,
 linking, executing, registering, deploying, or exposing the component.
@@ -75,9 +75,13 @@ Any future host adapter must carry an outer canonical envelope with at least:
 | `input` | WIT-compatible bounded record |
 | `input_sha256` | hash of canonical input bytes |
 
-The canonical serialization must reject duplicate keys, floats, non-standard
-numbers, invalid UTF-8, unknown fields, and payloads beyond the limits. A
-caller cannot omit hashes and receive a successful semantic result.
+The canonical serialization is the frozen `rfc8785-json-safe-integer-v0`
+profile in `contract.json`: UTF-8, lexicographically ordered object keys,
+integers only within the safe range, duplicate keys rejected, unknown fields
+rejected, and invalid UTF-8 rejected. A caller cannot omit hashes and receive
+a successful semantic result. Invocation IDs must match
+`^g14-biz-v0-[a-z0-9]{16}$`; replay uses a distinct ID and may not reuse a
+failed ID.
 
 ## 5. Output and replay receipt
 
