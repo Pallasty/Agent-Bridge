@@ -1,0 +1,43 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_toolchain_tuple_review.v0",
+  "gate": "OWNER_SIGNED_TOOLCHAIN_TUPLE_REVIEW",
+  "status": "DRAFT_PROPOSED_AWAITING_OWNER_SIGNATURE",
+  "mode": "STATIC_DRAFT_NO_INSTALL_NO_DOWNLOAD_NO_BUILD_NO_RUN",
+  "predecessor": {
+    "commit": "09a4d840da0412066de090e111de5a8006c5fbb9",
+    "tree": "bda3a598273fc4456468439f083c56375ce7651c",
+    "preflight_status": "FAIL_CLOSED_TOOLING_TUPLE_NOT_READY"
+  },
+  "recommendation": {
+    "rust_release": "1.94.0",
+    "reason": "matches the existing G2A public static pin and the current local observation",
+    "alternative_1_92": "rejected_for_now_as_stale_observation_drift",
+    "selection_is_authorized": false
+  },
+  "canonical_wit": {
+    "path": "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit",
+    "sha256": "d47b294dc4c7ee3f48d7af8a6233022a75e79533a2f554ec1299639ba3e142be",
+    "package": "agent-bridge:g14-clock-probe@0.1.0",
+    "world": "probe",
+    "export": "typed-report: func() -> typed-report",
+    "record_fields": ["wall-epoch-seconds: u64", "logical-nanoseconds: u64", "quantum-nanoseconds: u64"]
+  },
+  "candidate_tuple": {
+    "rustc": {"path": "/Users/pallasting/.cargo/bin/rustc", "version": "rustc 1.94.0 (4a4ef493e 2026-03-02)", "sha256": "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1"},
+    "cargo": {"path": "/Users/pallasting/.cargo/bin/cargo", "version": "cargo 1.94.0 (85eff7c80 2026-01-15)", "sha256": "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1"},
+    "wasmtime": {"version": "46.0.1", "source": "G2A public static candidate", "sha256": null, "absolute_path": null},
+    "wasm_tools": {"version": null, "sha256": null, "absolute_path": null},
+    "wit_bindgen": {"version": null, "sha256": null, "absolute_path": null},
+    "cargo_component": {"version": null, "sha256": null, "absolute_path": null},
+    "wasm_ld": {"version": null, "sha256": null, "absolute_path": null},
+    "adapter": {"identity": null, "sha256": null},
+    "dependencies": {"manifest_sha256": "ec21411297f03e4c46d1c6520b86f2dca6309abc03069cf885ea9300a030dc54", "lockfile_sha256": "ad53efcd1ac44e8fa10e5943c873bc02cdceeae12d34784fbf60a6c81793db6d", "selection_authorized": false},
+    "cache_roots": null,
+    "commands": null,
+    "expected_outputs": null
+  },
+  "signature": {"owner": null, "signed_at": null, "tuple_sha256": null, "valid": false},
+  "authority": {"owner_approval": false, "tool_selection": false, "install": false, "download": false, "dependency_promotion": false, "build": false, "run": false, "runtime": false, "deploy": false},
+  "stop_conditions": ["missing tool identity", "missing adapter identity", "missing command/output tuple", "tuple drift", "network/private input", "any authority flag not false"],
+  "next_gate": {"id": "OWNER_SIGNED_TOOLCHAIN_TUPLE_REVIEW", "automatic_transition": false}
+}
