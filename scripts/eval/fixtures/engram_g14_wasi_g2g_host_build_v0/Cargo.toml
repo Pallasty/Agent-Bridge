@@ -1,0 +1,11 @@
+[workspace]
+
+[package]
+name = "engram-g14-wasi-g2g-host-build"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[lib]
+path = "src/lib.rs"
