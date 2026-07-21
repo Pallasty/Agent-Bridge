@@ -1,0 +1,11 @@
+valid_case_count	2
+directed_negative_test_count	8
+public_input_count	34
+profile_count	2
+request_field_count	4
+match_dimension_count	6
+predecessor_review_count_per_case	1
+status	REJECTED_FAIL_CLOSED
+positive_production_decision	false
+downstream_execution_authority	false
+successor_authorized	false
