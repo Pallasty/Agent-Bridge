@@ -47,11 +47,14 @@ authority boundaries changed.
 
 ## 4. Next objective: business component contract
 
-The design contract has now been frozen in
+The design contract and its public-synthetic implementation gate are now
+closed in
 `ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_CONTRACT_2026_07_21.md`, with
 the WIT and JSON fixtures under
 `scripts/eval/fixtures/engram_g14_business_component_contract_v0/`. This is a
-design-only handoff; it does not open the implementation gate.
+design-plus-harness handoff; it does not open component/runtime authority.
+The implementation result is recorded in
+`ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_IMPLEMENTATION_RESULT_2026_07_21.md`.
 
 The next implementation should not start from a registry or from a production
 component. It should first freeze a contract for one synthetic business

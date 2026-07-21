@@ -1,7 +1,7 @@
 # Engram G1.4 public-synthetic business component contract
 
 Date: 2026-07-21  
-Status: `DESIGN_CONTRACT_FROZEN__NO_IMPLEMENTATION_AUTHORITY`
+Status: `IMPLEMENTATION_GATE_PASS__NO_RUNTIME_AUTHORITY`
 
 ## 1. Decision
 
@@ -21,8 +21,11 @@ Initial byte pins for this contract revision:
 - WIT SHA-256: `67a4317d8b2664dcdd18223908dc003a03baef6513e13e37d8fa49d4868b9bd5`
 - contract JSON SHA-256: `a666088da2603b7caf7fc4ce3a2950d08fc5ce2c4c1665d9ee4985ffe505c374`
 
-This is a contract-design result only. It does not authorize building,
-linking, executing, registering, deploying, or exposing the component.
+The separate public-synthetic implementation gate passed without opening
+runtime authority; see
+`ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_IMPLEMENTATION_RESULT_2026_07_21.md`.
+This still does not authorize building, linking, executing, registering,
+deploying, or exposing a WASI component.
 
 ## 2. Why a pure component first
 
