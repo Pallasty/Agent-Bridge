@@ -243,6 +243,31 @@ enum Cmd {
         #[arg(long)]
         sha256: String,
     },
+    /// Run the explicitly hash-pinned G1.4 synthetic business component.
+    ///
+    /// Available only with `g14-wasi-component-runtime`; this is an operator
+    /// probe, not an MCP tool or an open component/plugin registry.
+    #[cfg(feature = "g14-wasi-component-runtime")]
+    G14WasiBusinessComponent {
+        /// Component artifact to load.
+        #[arg(long)]
+        artifact: PathBuf,
+        /// Expected lowercase SHA-256 of the artifact.
+        #[arg(long)]
+        sha256: String,
+        /// Synthetic world-state revision.
+        #[arg(long, default_value_t = 7)]
+        revision: u64,
+        /// Synthetic entity count.
+        #[arg(long, default_value_t = 12)]
+        entity_count: u32,
+        /// Synthetic occupied-cell count.
+        #[arg(long, default_value_t = 9)]
+        occupied_cells: u32,
+        /// Synthetic transition count.
+        #[arg(long, default_value_t = 4)]
+        transition_count: u32,
+    },
     /// v21 — Synaptic Dream introspection (the "thermometer" for the
     /// memory_coactivation graph that α populates).
     ///
@@ -4394,16 +4419,47 @@ fn main() -> Result<()> {
     #[cfg(feature = "g14-wasi-component-runtime")]
     {
         let early_cmd = Cli::parse().cmd.unwrap_or(Cmd::Daemon);
-        if let Cmd::G14WasiComponent { artifact, sha256 } = early_cmd {
-            let runtime = ab_bridge::g14_component_runtime::G14ComponentRuntime::new()?;
-            let report = runtime.execute_typed_report(artifact, &sha256)?;
-            println!(
-                "{{\"wall-epoch-seconds\":{},\"logical-nanoseconds\":{},\"quantum-nanoseconds\":{}}}",
-                report.wall_epoch_seconds,
-                report.logical_nanoseconds,
-                report.quantum_nanoseconds
-            );
-            return Ok(());
+        match early_cmd {
+            Cmd::G14WasiComponent { artifact, sha256 } => {
+                let runtime = ab_bridge::g14_component_runtime::G14ComponentRuntime::new()?;
+                let report = runtime.execute_typed_report(artifact, &sha256)?;
+                println!(
+                    "{{\"wall-epoch-seconds\":{},\"logical-nanoseconds\":{},\"quantum-nanoseconds\":{}}}",
+                    report.wall_epoch_seconds,
+                    report.logical_nanoseconds,
+                    report.quantum_nanoseconds
+                );
+                return Ok(());
+            }
+            Cmd::G14WasiBusinessComponent {
+                artifact,
+                sha256,
+                revision,
+                entity_count,
+                occupied_cells,
+                transition_count,
+            } => {
+                let runtime = ab_bridge::g14_component_runtime::G14ComponentRuntime::new()?;
+                let report = runtime.execute_business_transform(
+                    artifact,
+                    &sha256,
+                    revision,
+                    entity_count,
+                    occupied_cells,
+                    transition_count,
+                )?;
+                println!(
+                    "{{\"revision\":{},\"entity-count\":{},\"occupied-cells\":{},\"transition-count\":{},\"occupancy-per-mille\":{},\"report-code\":{}}}",
+                    report.revision,
+                    report.entity_count,
+                    report.occupied_cells,
+                    report.transition_count,
+                    report.occupancy_per_mille,
+                    serde_json::to_string(&report.report_code)?
+                );
+                return Ok(());
+            }
+            _ => {}
         }
     }
 
@@ -7888,7 +7944,7 @@ async fn real_main() -> Result<()> {
             ab_bridge::daemon_http::run(store, &listen).await
         }
         #[cfg(feature = "g14-wasi-component-runtime")]
-        Cmd::G14WasiComponent { .. } => unreachable!(),
+        Cmd::G14WasiComponent { .. } | Cmd::G14WasiBusinessComponent { .. } => unreachable!(),
         Cmd::Setup { .. }
         | Cmd::Sync { .. }
         | Cmd::OperatorRequest { .. }

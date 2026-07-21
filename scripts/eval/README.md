@@ -744,5 +744,7 @@ The frozen design contract for the next public-synthetic slice is
 `docs/design/ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_CONTRACT_2026_07_21.md`;
 its implementation-gate result is
 `docs/design/ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_IMPLEMENTATION_RESULT_2026_07_21.md`.
-The harness remains synthetic-only and does not authorize component/runtime
-integration.
+Its explicit component construction/host integration result is
+`docs/design/ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_INTEGRATION_RESULT_2026_07_21.md`.
+The harness remains synthetic-only; host integration is explicit-CLI-only and
+does not authorize registry, MCP exposure, or production deployment.

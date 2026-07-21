@@ -1,0 +1,19 @@
+[package]
+name = "g14-business-probe"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+wit-bindgen = { version = "0.58.0", default-features = false, features = ["macros"] }
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+codegen-units = 1
+opt-level = "s"
+debug = false
+strip = true
+lto = true

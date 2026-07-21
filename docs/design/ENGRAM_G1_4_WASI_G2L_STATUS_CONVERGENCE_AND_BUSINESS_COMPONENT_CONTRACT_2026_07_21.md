@@ -55,6 +55,8 @@ the WIT and JSON fixtures under
 design-plus-harness handoff; it does not open component/runtime authority.
 The implementation result is recorded in
 `ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_IMPLEMENTATION_RESULT_2026_07_21.md`.
+The explicit construction/host integration result is recorded in
+`ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_INTEGRATION_RESULT_2026_07_21.md`.
 
 The next implementation should not start from a registry or from a production
 component. It should first freeze a contract for one synthetic business

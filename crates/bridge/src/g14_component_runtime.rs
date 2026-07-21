@@ -19,6 +19,16 @@ pub struct TypedReport {
     pub quantum_nanoseconds: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BusinessReport {
+    pub revision: u64,
+    pub entity_count: u32,
+    pub occupied_cells: u32,
+    pub transition_count: u32,
+    pub occupancy_per_mille: u32,
+    pub report_code: String,
+}
+
 struct HostState {
     table: ResourceTable,
     wasi: WasiCtx,
@@ -87,6 +97,67 @@ impl G14ComponentRuntime {
             .map_err(|error| anyhow!("invoke typed-report: {error}"))?;
         parse_typed_report(results.into_iter().next().expect("one result"))
     }
+
+    pub fn execute_business_transform(
+        &self,
+        artifact: impl AsRef<Path>,
+        expected_sha256: &str,
+        revision: u64,
+        entity_count: u32,
+        occupied_cells: u32,
+        transition_count: u32,
+    ) -> Result<BusinessReport> {
+        if entity_count > 100_000 {
+            bail!("business input out of bounds: entity-count > 100000");
+        }
+        if occupied_cells > 100_000 {
+            bail!("business input out of bounds: occupied-cells > 100000");
+        }
+        if transition_count > 1_000_000 {
+            bail!("business input out of bounds: transition-count > 1000000");
+        }
+        let artifact = artifact.as_ref();
+        let bytes = std::fs::read(artifact)
+            .with_context(|| format!("read component {}", artifact.display()))?;
+        let actual = hex_sha256(&bytes);
+        if !constant_time_hex_eq(&actual, expected_sha256) {
+            bail!(
+                "component SHA-256 mismatch: expected {}, actual {}",
+                expected_sha256,
+                actual
+            );
+        }
+
+        let component = Component::new(&self.engine, &bytes)
+            .map_err(|error| anyhow!("parse component {}: {error}", artifact.display()))?;
+        let mut linker = Linker::<HostState>::new(&self.engine);
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
+            .map_err(|error| anyhow!("register WASI preview-2 host interfaces: {error}"))?;
+        let wasi = wasmtime_wasi::WasiCtxBuilder::new().build();
+        let mut store = Store::new(
+            &self.engine,
+            HostState {
+                table: ResourceTable::new(),
+                wasi,
+            },
+        );
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .map_err(|error| anyhow!("instantiate business component: {error}"))?;
+        let func = instance
+            .get_func(&mut store, "evaluate")
+            .ok_or_else(|| anyhow!("component has no evaluate export"))?;
+        let input = Val::Record(vec![
+            ("revision".into(), Val::U64(revision)),
+            ("entity-count".into(), Val::U32(entity_count)),
+            ("occupied-cells".into(), Val::U32(occupied_cells)),
+            ("transition-count".into(), Val::U32(transition_count)),
+        ]);
+        let mut results = [Val::Record(Vec::new())];
+        func.call(&mut store, &[input], &mut results)
+            .map_err(|error| anyhow!("invoke business evaluate: {error}"))?;
+        parse_business_report(results.into_iter().next().expect("one result"))
+    }
 }
 
 fn parse_typed_report(value: Val) -> Result<TypedReport> {
@@ -114,6 +185,48 @@ fn parse_typed_report(value: Val) -> Result<TypedReport> {
     })
 }
 
+fn parse_business_report(value: Val) -> Result<BusinessReport> {
+    let Val::Record(fields) = value else {
+        bail!("business report result is not a record");
+    };
+    let mut revision = None;
+    let mut entity_count = None;
+    let mut occupied_cells = None;
+    let mut transition_count = None;
+    let mut occupancy_per_mille = None;
+    let mut report_code = None;
+    for (name, value) in fields {
+        match (name.as_str(), value) {
+            ("revision", Val::U64(value)) if revision.is_none() => revision = Some(value),
+            ("entity-count", Val::U32(value)) if entity_count.is_none() => {
+                entity_count = Some(value)
+            }
+            ("occupied-cells", Val::U32(value)) if occupied_cells.is_none() => {
+                occupied_cells = Some(value)
+            }
+            ("transition-count", Val::U32(value)) if transition_count.is_none() => {
+                transition_count = Some(value)
+            }
+            ("occupancy-per-mille", Val::U32(value)) if occupancy_per_mille.is_none() => {
+                occupancy_per_mille = Some(value)
+            }
+            ("report-code", Val::String(value)) if report_code.is_none() => {
+                report_code = Some(value)
+            }
+            (name, _) => bail!("unexpected, duplicate, or mistyped business report field {name}"),
+        }
+    }
+    Ok(BusinessReport {
+        revision: revision.ok_or_else(|| anyhow!("missing revision"))?,
+        entity_count: entity_count.ok_or_else(|| anyhow!("missing entity-count"))?,
+        occupied_cells: occupied_cells.ok_or_else(|| anyhow!("missing occupied-cells"))?,
+        transition_count: transition_count.ok_or_else(|| anyhow!("missing transition-count"))?,
+        occupancy_per_mille: occupancy_per_mille
+            .ok_or_else(|| anyhow!("missing occupancy-per-mille"))?,
+        report_code: report_code.ok_or_else(|| anyhow!("missing report-code"))?,
+    })
+}
+
 fn hex_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -130,7 +243,10 @@ fn constant_time_hex_eq(actual: &str, expected: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{constant_time_hex_eq, parse_typed_report, TypedReport};
+    use super::{
+        constant_time_hex_eq, parse_business_report, parse_typed_report, BusinessReport,
+        TypedReport,
+    };
     use wasmtime::component::Val;
 
     #[test]
@@ -155,5 +271,28 @@ mod tests {
         assert!(constant_time_hex_eq("00ff", "00ff"));
         assert!(!constant_time_hex_eq("00ff", "00FF"));
         assert!(!constant_time_hex_eq("00ff", "00ff00"));
+    }
+
+    #[test]
+    fn parses_canonical_business_report() {
+        let value = Val::Record(vec![
+            ("revision".into(), Val::U64(7)),
+            ("entity-count".into(), Val::U32(12)),
+            ("occupied-cells".into(), Val::U32(9)),
+            ("transition-count".into(), Val::U32(4)),
+            ("occupancy-per-mille".into(), Val::U32(750)),
+            ("report-code".into(), Val::String("WORLD_STATE_V0".into())),
+        ]);
+        assert_eq!(
+            parse_business_report(value).unwrap(),
+            BusinessReport {
+                revision: 7,
+                entity_count: 12,
+                occupied_cells: 9,
+                transition_count: 4,
+                occupancy_per_mille: 750,
+                report_code: "WORLD_STATE_V0".into(),
+            }
+        );
     }
 }

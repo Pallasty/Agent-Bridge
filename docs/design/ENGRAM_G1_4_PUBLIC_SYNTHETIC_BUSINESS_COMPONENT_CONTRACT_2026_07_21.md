@@ -24,8 +24,11 @@ Initial byte pins for this contract revision:
 The separate public-synthetic implementation gate passed without opening
 runtime authority; see
 `ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_IMPLEMENTATION_RESULT_2026_07_21.md`.
-This still does not authorize building, linking, executing, registering,
-deploying, or exposing a WASI component.
+The subsequent construction/host integration gate also passed under the
+existing explicit CLI seam; see
+`ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_INTEGRATION_RESULT_2026_07_21.md`.
+This still does not authorize registry, MCP exposure, production deployment,
+or arbitrary component execution.
 
 ## 2. Why a pure component first
 
