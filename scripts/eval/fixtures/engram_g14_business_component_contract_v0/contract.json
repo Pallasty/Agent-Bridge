@@ -1,0 +1,58 @@
+{
+  "schema": "agent_bridge.engram.g14.business_component_contract.v0",
+  "contract_id": "public-synthetic-world-transform-v0",
+  "package": "agent-bridge:g14-business-probe@0.1.0",
+  "world": "transform",
+  "export": "evaluate",
+  "component_profile": "pure-function-no-imports",
+  "input_limits": {
+    "revision": "uint64",
+    "entity_count_max": 100000,
+    "occupied_cells_max": 100000,
+    "transition_count_max": 1000000,
+    "payload_bytes_max": 512
+  },
+  "output_limits": {
+    "payload_bytes_max": 1024,
+    "report_code_max_bytes": 64
+  },
+  "capability_policy": {
+    "imports": [],
+    "filesystem": false,
+    "network": false,
+    "subprocess": false,
+    "entropy": false,
+    "host_clock": false,
+    "ambient_state": false
+  },
+  "determinism": {
+    "integer_arithmetic": "checked",
+    "occupancy_per_mille": "floor(occupied_cells * 1000 / max(entity_count, 1))",
+    "report_code": "WORLD_STATE_V0",
+    "replay_required": true
+  },
+  "admission": {
+    "default_enabled": false,
+    "mcp_exposed": false,
+    "registry_enabled": false,
+    "production_write": false,
+    "candidate_private_data": false,
+    "native_sandbox_claim": false
+  },
+  "fixture": {
+    "input": {
+      "revision": 7,
+      "entity-count": 12,
+      "occupied-cells": 9,
+      "transition-count": 4
+    },
+    "expected_output": {
+      "revision": 7,
+      "entity-count": 12,
+      "occupied-cells": 9,
+      "transition-count": 4,
+      "occupancy-per-mille": 750,
+      "report-code": "WORLD_STATE_V0"
+    }
+  }
+}

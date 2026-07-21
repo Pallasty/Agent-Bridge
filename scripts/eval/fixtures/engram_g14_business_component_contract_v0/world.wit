@@ -1,0 +1,24 @@
+package agent-bridge:g14-business-probe@0.1.0;
+
+/// Pure public-synthetic world-state transformation. The component has no
+/// imports and cannot observe host time, files, network, processes, entropy,
+/// or ambient state.
+world transform {
+  record world-state-input {
+    revision: u64,
+    entity-count: u32,
+    occupied-cells: u32,
+    transition-count: u32,
+  }
+
+  record world-state-report {
+    revision: u64,
+    entity-count: u32,
+    occupied-cells: u32,
+    transition-count: u32,
+    occupancy-per-mille: u32,
+    report-code: string,
+  }
+
+  export evaluate: func(input: world-state-input) -> world-state-report;
+}

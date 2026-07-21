@@ -740,3 +740,6 @@ contract-design objective are recorded in
 `docs/design/ENGRAM_G1_4_WASI_G2L_STATUS_CONVERGENCE_AND_BUSINESS_COMPONENT_CONTRACT_2026_07_21.md`.
 G2L does not open a dynamic registry, arbitrary component execution, native
 sandbox authority, production writes, or candidate/private-data access.
+The frozen design contract for the next public-synthetic slice is
+`docs/design/ENGRAM_G1_4_PUBLIC_SYNTHETIC_BUSINESS_COMPONENT_CONTRACT_2026_07_21.md`;
+it remains design-only and does not authorize implementation.
