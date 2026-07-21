@@ -1,0 +1,54 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2l_wit_component_linker_authorization_preregistration.v0",
+  "gate": "G2L_WIT_COMPONENT_LINKER_AUTHORIZATION_PREREGISTRATION_STATIC_ONLY",
+  "predecessor": {
+    "result": "G2G_FINAL_PASS",
+    "master_commit": "f0ea35edc066afe7adb71f7d7d9916cb630de938",
+    "master_tree": "f63107ee0ad97ee4daad589a7323e31c72722ffe",
+    "receipt_evidence_references": [
+      "scripts/eval/engram_g14_wasi_g2g_receipt_runner.py@f0ea35edc066afe7adb71f7d7d9916cb630de938",
+      "scripts/eval/check_engram_g14_wasi_g2g_receipt_runner.py@f0ea35edc066afe7adb71f7d7d9916cb630de938"
+    ],
+    "claim": "input-bound offline/locked host compile only",
+    "does_not_prove": ["byte_reproducibility", "wit", "component", "linker", "execution", "runtime", "deployment"]
+  },
+  "future_input_tuple": {
+    "wit_source": {"absolute_path": "UNSET_REQUIRES_SUCCESSOR", "sha256": "UNSET_REQUIRES_SUCCESSOR", "abi_sha256": "UNSET_REQUIRES_SUCCESSOR"},
+    "component_model_adapter_profile": {"component_model_version": "UNSET_REQUIRES_SUCCESSOR", "profile": "UNSET_REQUIRES_SUCCESSOR", "adapter_absolute_path": "UNSET_REQUIRES_SUCCESSOR", "adapter_sha256": "UNSET_REQUIRES_SUCCESSOR"},
+    "tooling": {"required_identity_fields": ["name", "absolute_path", "sha256", "version"], "rust_cargo_wasm_tools": "UNSET_REQUIRES_SUCCESSOR"},
+    "dependencies": {"required_identity_fields": ["package", "source", "sha256"], "packages": "UNSET_REQUIRES_SUCCESSOR", "lockfile_absolute_path": "UNSET_REQUIRES_SUCCESSOR", "lockfile_sha256": "UNSET_REQUIRES_SUCCESSOR"},
+    "cache_and_network_policy": {"cache_roots": "UNSET_REQUIRES_SUCCESSOR", "cache_population_allowed": false, "network_allowed": false},
+    "outputs": {"artifact_absolute_paths": "UNSET_REQUIRES_SUCCESSOR", "target_absolute_paths": "UNSET_REQUIRES_SUCCESSOR", "cleanup_policy": "UNSET_REQUIRES_SUCCESSOR"}
+  },
+  "mandatory_preconditions": {
+    "owner_approval": true,
+    "independent_pre_execution_review": true,
+    "fresh_clean_worktrees": true,
+    "offline": true,
+    "locked": true,
+    "no_private_input": true,
+    "no_network": true,
+    "no_rustup": true,
+    "no_output_execution": true,
+    "postcondition_receipts": true,
+    "rollback_receipts": true
+  },
+  "current_authority": {
+    "authorization_granted": false,
+    "dependency_resolution_allowed": false,
+    "wit_generation_allowed": false,
+    "linker_build_allowed": false,
+    "component_build_allowed": false,
+    "output_execution_allowed": false,
+    "runtime_or_deploy_allowed": false
+  },
+  "pass_effect": {"opens_permissions": false, "execution_authority": false},
+  "only_allowed_successor": "SEPARATE_G2L_EXECUTION_AUTHORIZATION",
+  "static_bindings": {
+    "algorithm": "sha256_after_replacing_lowercase_64_hex_with_64_zeroes",
+    "docs/design/ENGRAM_G1_4_WASI_G2L_WIT_COMPONENT_LINKER_AUTHORIZATION_PREREGISTRATION_2026_07_21.md": "6e9214ddaa18c15a114aa2c42164a056c13fe35b4a8904492924ed65aaca0139",
+    "scripts/eval/fixtures/engram_g14_wasi_g2l_wit_component_linker_authorization_preregistration_v0.json": "469fabdf9b26108b68e205d022a31c0529c6de4f15ba744f612574535a6aa926",
+    "scripts/eval/check_engram_g14_wasi_g2l_wit_component_linker_authorization_preregistration.py": "004bd09092b3c55eefca053bbd34fe516f8f8c0087db5fc58776e6122ad75934",
+    "scripts/check-engram-g14-wasi-g2l-wit-component-linker-authorization-preregistration.sh": "6eee1107e3e3118bbb3286e158fa6de93087b3f936cd04ceeda87037e85a483b"
+  }
+}
