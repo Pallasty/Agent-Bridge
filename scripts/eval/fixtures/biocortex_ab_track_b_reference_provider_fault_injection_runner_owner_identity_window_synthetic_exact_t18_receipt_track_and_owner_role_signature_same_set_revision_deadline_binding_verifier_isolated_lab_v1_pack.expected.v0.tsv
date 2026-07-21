@@ -1,0 +1,10 @@
+valid_case_count	2
+directed_negative_test_count	13
+public_input_count	32
+profile_count	2
+request_field_count	6
+match_dimension_count	8
+predecessor_review_count_per_case	1
+isolated_lab_candidate_surface_component_total	17
+t19_implemented	true
+t20_authorized	false
