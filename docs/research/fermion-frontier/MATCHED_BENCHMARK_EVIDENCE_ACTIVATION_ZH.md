@@ -9,3 +9,6 @@ python3 docs/research/fermion-frontier/matched_benchmark_evidence_activation_val
 ```
 
 预期状态为 `BASELINE_UNRESOLVED_EXTERNAL_EVIDENCE_REQUIRED`，不是 READY。要解除该状态，必须同时满足契约列出的八项条件：真实五路线 term export、完整 first-step ledger、campaign 参数、独立有界 reference、双观测量收敛、native transition、surface place-and-route，以及同误差 A/B 核算。合成 fixture、assumed/derived 硬件数字、未认证 reference 和空模板都不能代替其中任何一项。
+
+当前本地可用性审计固定在
+`fh_l8_real_export_availability_result.json`：`/Data/CascadeProjects` 中没有可准入的五路线 real export，且常用量子编译相关 Python 包不可用。后续采集必须提供每路线的 individual-term sequence、编译器身份与版本、配置/环境/原始产物 SHA-256 及 provenance；没有这些字段的文件不会进入跨路线比较。
