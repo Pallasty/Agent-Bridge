@@ -16,12 +16,19 @@ from typing import Any, Callable
 sys.dont_write_bytecode = True
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BASE_COMMIT = "d59ea47c66387720ebb016e0c61b6e9c84faeaae"
+BASE_COMMIT = "c4b3ffe89d1a9fc8adb55a6df8495e3c6bfbd7bc"
 PREDECESSOR_COMMIT = "3ba3a2a6e166f9272acdf48e5bc6d19779a6b3ac"
 PREDECESSOR_TREE = "b56b317d6af4e9eaaa95f98188b2d97a4c1fabb0"
 CONTRACT_PATH = (
     REPO_ROOT
     / "scripts/eval/fixtures/engram_g14_wasi_clock_preregistration_v0.json"
+)
+CANONICAL_WIT_PATH = (
+    REPO_ROOT
+    / "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit"
+)
+CANONICAL_WIT_SHA256 = (
+    "d47b294dc4c7ee3f48d7af8a6233022a75e79533a2f554ec1299639ba3e142be"
 )
 PRODUCER_PATH = REPO_ROOT / "scripts/eval/engram_g14_wasi_clock_preregistration.py"
 DESIGN_PATH = (
@@ -35,16 +42,12 @@ WRAPPER_PATH = REPO_ROOT / "scripts/check-engram-g14-wasi-clock-preregistration.
 
 EXPECTED_PATHS = {
     "docs/design/ENGRAM_G1_4_WASI_CLOCK_PREREGISTRATION_2026_07_19.md",
-    "docs/design/ENGRAM_G1_4_WASI_CLOCK_PREREGISTRATION_RESULT_2026_07_19.md",
-    "scripts/check-engram-g14-wasi-clock-preregistration.sh",
-    "scripts/eval/README.md",
     "scripts/eval/check_engram_g14_wasi_clock_preregistration.py",
-    "scripts/eval/engram_g14_wasi_clock_preregistration.py",
     "scripts/eval/fixtures/engram_g14_wasi_clock_preregistration_v0.json",
 }
 
 EXPECTED_DOC_HASHES = {
-    "design": "f0d48f9420fae87c36cfa52b4514d8bfd34f45482bc8fda6f2fa968e3573c730",
+    "design": "44fd63ce4f03b98e82dd08b0989b360da7cfccc95f169eaa0353d45cf15dd47c",
     "result": "850a457667a0164c97d79ced53392478e26078229c0d9eced28142a686caaf10",
 }
 
@@ -61,7 +64,7 @@ EXPECTED_PREDECESSOR_HASHES = {
 EXPECTED_PREDECESSOR = {
     "accepted_review_feature_commit": PREDECESSOR_COMMIT,
     "accepted_review_feature_tree": PREDECESSOR_TREE,
-    "integrated_master_commit": BASE_COMMIT,
+    "integrated_master_commit": "d59ea47c66387720ebb016e0c61b6e9c84faeaae",
     "accepted_review_verdict": "DESIGN_ROUTE_SELECTED_NO_AUTHORITY",
     "only_permitted_successor": "G2_WASI_PREREGISTRATION",
 }
@@ -72,6 +75,8 @@ EXPECTED_SCOPE = {
     "review_targets_pinned": True,
     "runtime_dependency_selected_or_installed": False,
     "component_source_authored": False,
+    "bindings_generated": False,
+    "component_abi_sha256_observed": False,
     "component_built_or_executed": False,
     "custom_clock_or_poll_host_implemented": False,
     "host_policy_applied": False,
@@ -184,14 +189,24 @@ EXPECTED_ADVISORY_REVIEW = {
 
 EXPECTED_COMPONENT_ABI = {
     "component_model": "WASIP2_COMPONENT",
+    "canonical_wit_path": "scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit",
+    "canonical_wit_sha256": "d47b294dc4c7ee3f48d7af8a6233022a75e79533a2f554ec1299639ba3e142be",
+    "package": "agent-bridge:g14-clock-probe@0.1.0",
     "probe_world": "agent-bridge:g14-clock-probe/probe@0.1.0",
     "allowed_imports_in_exact_order": [
         "wasi:clocks/wall-clock@0.2.12",
         "wasi:clocks/monotonic-clock@0.2.12",
         "wasi:io/poll@0.2.12",
     ],
-    "sole_export": "agent-bridge:g14-clock-probe/probe.run@0.1.0",
-    "sole_export_result": "deterministic-clock-report-v0",
+    "sole_export": "typed-report: func() -> typed-report",
+    "sole_export_result": {
+        "type": "typed-report",
+        "record_fields_in_order": [
+            "wall-epoch-seconds: u64",
+            "logical-nanoseconds: u64",
+            "quantum-nanoseconds: u64",
+        ],
+    },
     "component_import_graph_must_exactly_equal_allowlist": True,
     "component_import_export_manifest_sha256_required_before_run": True,
     "unknown_or_transitive_runtime_imports_fail_closed": True,
@@ -367,6 +382,8 @@ EXPECTED_DECISION = {
     "built_in_wasmtime_timer_host_acceptable": False,
     "runtime_or_dependency_adopted": False,
     "component_or_host_implemented": False,
+    "dependency_or_wit_generation_authorized": False,
+    "component_or_linker_authorized": False,
     "build_or_run_authorized": False,
     "candidate_or_private_authorized": False,
     "runtime_or_deployment_authorized": False,
@@ -380,6 +397,8 @@ EXPECTED_NONCLAIMS = {
     "runtime_supply_chain_review_complete": False,
     "dependency_advisory_review_complete": False,
     "component_abi_compiled": False,
+    "bindings_generated": False,
+    "component_abi_sha256_observed": False,
     "component_import_graph_observed": False,
     "custom_clock_or_poll_host_implemented": False,
     "public_synthetic_run_executed": False,
@@ -473,7 +492,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
     exact(contract["mode"], "PUBLIC_STATIC_PREREGISTRATION_ONLY", "mode")
     exact(
         contract["status"],
-        "STATIC_CONTRACT_COMPLETE_PENDING_EXTERNAL_PIN",
+        "CANONICAL_WIT_CONTRACT_SELECTED_STATIC_ONLY",
         "status",
     )
     exact(contract["predecessor"], EXPECTED_PREDECESSOR, "predecessor")
@@ -569,6 +588,10 @@ Mutation = tuple[str, Callable[[dict[str, Any]], None]]
 def run_semantic_mutations(contract: dict[str, Any]) -> None:
     mutations: list[Mutation] = [
         ("schema drift", lambda value: value.__setitem__("schema", "v1")),
+        (
+            "canonical status drift",
+            lambda value: value.__setitem__("status", "STATIC_CONTRACT_COMPLETE"),
+        ),
         ("unknown top-level field", lambda value: value.__setitem__("authority", True)),
         (
             "predecessor drift",
@@ -655,6 +678,24 @@ def run_semantic_mutations(contract: dict[str, Any]) -> None:
         (
             "poll import removed",
             lambda value: value["component_abi_template"]["allowed_imports_in_exact_order"].pop(),
+        ),
+        (
+            "canonical WIT checksum drift",
+            lambda value: value["component_abi_template"].__setitem__(
+                "canonical_wit_sha256", "0" * 64
+            ),
+        ),
+        (
+            "typed export drift",
+            lambda value: value["component_abi_template"].__setitem__(
+                "sole_export", "run: func()"
+            ),
+        ),
+        (
+            "typed export result drift",
+            lambda value: value["component_abi_template"]["sole_export_result"][
+                "record_fields_in_order"
+            ].pop(),
         ),
         (
             "random import added",
@@ -844,6 +885,12 @@ def run_semantic_mutations(contract: dict[str, Any]) -> None:
             lambda value: value["decision"].__setitem__("build_or_run_authorized", True),
         ),
         (
+            "WIT generation authorized",
+            lambda value: value["decision"].__setitem__(
+                "dependency_or_wit_generation_authorized", True
+            ),
+        ),
+        (
             "G1.4 opened",
             lambda value: value["decision"].__setitem__("g1_4_execution_open", True),
         ),
@@ -863,7 +910,7 @@ def run_semantic_mutations(contract: dict[str, Any]) -> None:
         except CheckError:
             continue
         raise CheckError(f"semantic mutation unexpectedly accepted: {label}")
-    exact(len(mutations), 51, "semantic mutation count")
+    exact(len(mutations), 56, "semantic mutation count")
 
 
 def load_producer_module() -> Any:
@@ -948,6 +995,11 @@ def validate_predecessor() -> None:
 def validate_docs_and_modes() -> None:
     exact(sha256_bytes(DESIGN_PATH.read_bytes()), EXPECTED_DOC_HASHES["design"], "design hash")
     exact(sha256_bytes(RESULT_PATH.read_bytes()), EXPECTED_DOC_HASHES["result"], "result hash")
+    exact(
+        sha256_bytes(CANONICAL_WIT_PATH.read_bytes()),
+        CANONICAL_WIT_SHA256,
+        "canonical WIT source binding",
+    )
     require(WRAPPER_PATH.stat().st_mode & 0o111 != 0, "wrapper is not executable")
     require(PRODUCER_PATH.stat().st_mode & 0o111 != 0, "producer is not executable")
 
@@ -1001,7 +1053,7 @@ def main(argv: list[str]) -> int:
     validate_surface(phase)
     print(
         "engram G2 WASI clock preregistration: semantic contract valid; "
-        "51 mutations rejected; no build, run, or authority"
+        "56 mutations rejected; canonical WIT bound; no build, run, or authority"
     )
     return 0
 

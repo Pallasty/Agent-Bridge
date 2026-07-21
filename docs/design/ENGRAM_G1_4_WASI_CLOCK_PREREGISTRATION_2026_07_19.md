@@ -2,7 +2,7 @@
 
 Date: 2026-07-19
 
-Status: **public static preregistration; pending independent external pin; No authority**.
+Status: **CANONICAL_WIT_CONTRACT_SELECTED_STATIC_ONLY; No authority**.
 
 ## Decision
 
@@ -12,16 +12,21 @@ without adding a dependency, authoring or building a component, implementing a
 clock, running a probe, or opening G1.4. The frozen `wall_clock_read = deny`
 canary remains unchanged and unsatisfied.
 
-The future public probe has one exact component world,
-`agent-bridge:g14-clock-probe/probe@0.1.0`. Its complete import allowlist is:
+The selected canonical WIT is
+`scripts/eval/fixtures/engram_g14_wasi_g2e_public_source_v0/world.wit`, bound to
+SHA-256 `d47b294dc4c7ee3f48d7af8a6233022a75e79533a2f554ec1299639ba3e142be`.
+It declares package `agent-bridge:g14-clock-probe@0.1.0` and world `probe` (the
+fully qualified world is `agent-bridge:g14-clock-probe/probe@0.1.0`). Its
+complete import allowlist is:
 
 1. `wasi:clocks/wall-clock@0.2.12`;
 2. `wasi:clocks/monotonic-clock@0.2.12`;
 3. `wasi:io/poll@0.2.12`.
 
-It has one typed export,
-`agent-bridge:g14-clock-probe/probe.run@0.1.0`. Stdout and stderr are not report
-channels. The built component's import graph must equal the allowlist exactly;
+It has the sole export `typed-report: func() -> typed-report`. The result is the
+`typed-report` record with fields, in order, `wall-epoch-seconds: u64`,
+`logical-nanoseconds: u64`, and `quantum-nanoseconds: u64`. Stdout and stderr
+are not report channels. The built component's import graph must equal the allowlist exactly;
 an unknown or transitive runtime import closes the gate. CLI, filesystem,
 network, HTTP, random, timezone, inherited descriptors, preopens, WASI P1, and
 native-process fallback are absent and forbidden.
@@ -147,6 +152,8 @@ access, dependency promotion, deployment, canary change, or G1.4 execution.
 ## Nonclaims
 
 No host clock or timer isolation has been verified. No dependency/advisory
-review is complete. No component ABI has been compiled or import graph observed.
-No custom host exists. No public probe, candidate, private input, runtime,
-deployment, or G1.4 authority is present.
+review is complete. No bindings have been generated, no component ABI SHA has
+been observed, and no component ABI has been compiled or import graph observed.
+No dependency/WIT generation, component, linker, build, run, runtime, or deploy
+work is authorized. No custom host exists. No public probe, candidate, private
+input, runtime, deployment, or G1.4 authority is present.
