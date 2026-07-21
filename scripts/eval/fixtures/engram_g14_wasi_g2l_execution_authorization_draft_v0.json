@@ -1,0 +1,33 @@
+{
+  "schema": "agent_bridge.engram_g14_wasi_g2l_execution_authorization_draft.v0",
+  "status": "DRAFT_PROPOSED_NOT_AUTHORIZED",
+  "baseline": {"commit": "b086e221d5a6d83a218ae70118b0dcac53570d73", "tree": "ceb87fe2664d0c05d813bccd22edb51325a9c70b"},
+  "placeholder": "UNSET_REQUIRES_OWNER_SIGNATURE",
+  "frozen_tuple": {
+    "source": {"commit": "b086e221d5a6d83a218ae70118b0dcac53570d73", "tree": "ceb87fe2664d0c05d813bccd22edb51325a9c70b"},
+    "wit": {"absolute_path": "UNSET_REQUIRES_OWNER_SIGNATURE", "sha256": "UNSET_REQUIRES_OWNER_SIGNATURE", "abi_sha256": "UNSET_REQUIRES_OWNER_SIGNATURE"},
+    "component": {"model_version": "UNSET_REQUIRES_OWNER_SIGNATURE", "profile": "UNSET_REQUIRES_OWNER_SIGNATURE", "adapter_absolute_path": "UNSET_REQUIRES_OWNER_SIGNATURE", "adapter_sha256": "UNSET_REQUIRES_OWNER_SIGNATURE"},
+    "dependencies": {"complete_package_tuple": "UNSET_REQUIRES_OWNER_SIGNATURE", "lockfile_absolute_path": "UNSET_REQUIRES_OWNER_SIGNATURE", "lockfile_sha256": "UNSET_REQUIRES_OWNER_SIGNATURE"},
+    "toolchain": {"complete_name_path_version_sha256_tuple": "UNSET_REQUIRES_OWNER_SIGNATURE", "path_lookup_allowed": false, "mutable_selector_allowed": false},
+    "commands": {"ordered_exact_argv_allowlist": "UNSET_REQUIRES_OWNER_SIGNATURE", "shell_expansion_allowed": false, "unlisted_commands_allowed": false, "retry_allowed": false},
+    "locations": {"source_worktree_absolute_path": "UNSET_REQUIRES_OWNER_SIGNATURE", "review_worktree_absolute_path": "UNSET_REQUIRES_OWNER_SIGNATURE", "output_root_absolute_path": "UNSET_REQUIRES_OWNER_SIGNATURE", "target_root_absolute_path": "UNSET_REQUIRES_OWNER_SIGNATURE"},
+    "outputs": {"expected_artifact_path_sha256_tuple": "UNSET_REQUIRES_OWNER_SIGNATURE", "unexpected_outputs_allowed": false, "produced_output_execution_allowed": false},
+    "cache": {"readonly_preexisting_roots": "UNSET_REQUIRES_OWNER_SIGNATURE", "population_allowed": false},
+    "limits_and_environment": {"exact_environment": "UNSET_REQUIRES_OWNER_SIGNATURE", "timeouts_and_resource_limits": "UNSET_REQUIRES_OWNER_SIGNATURE"},
+    "receipt_schemas": {"preflight": "UNSET_REQUIRES_OWNER_SIGNATURE", "per_command": "UNSET_REQUIRES_OWNER_SIGNATURE", "postcondition": "UNSET_REQUIRES_OWNER_SIGNATURE", "cleanup": "UNSET_REQUIRES_OWNER_SIGNATURE", "rollback": "UNSET_REQUIRES_OWNER_SIGNATURE", "negative_evidence": "UNSET_REQUIRES_OWNER_SIGNATURE"}
+  },
+  "owner_approval": {"owner_identity": "UNSET_REQUIRES_OWNER_SIGNATURE", "decision": "UNSET_REQUIRES_OWNER_SIGNATURE", "signature": "UNSET_REQUIRES_OWNER_SIGNATURE", "signed_at": "UNSET_REQUIRES_OWNER_SIGNATURE", "expires_at": "UNSET_REQUIRES_OWNER_SIGNATURE", "nonce": "UNSET_REQUIRES_OWNER_SIGNATURE", "frozen_tuple_sha256": "UNSET_REQUIRES_OWNER_SIGNATURE", "maximum_uses": "UNSET_REQUIRES_OWNER_SIGNATURE", "owner_approval_received": false},
+  "independent_pre_execution_review": {"required": true, "reviewer_identity": "UNSET_REQUIRES_OWNER_SIGNATURE", "review_receipt_sha256": "UNSET_REQUIRES_OWNER_SIGNATURE", "approved_exact_tuple": false, "completed": false},
+  "execution_controls": {"fresh_distinct_clean_worktrees_required": true, "fresh_nonexisting_output_and_target_roots_required": true, "offline": true, "locked": true, "no_private_or_candidate_input": true, "no_network": true, "no_rustup": true, "no_ambient_credentials": true, "no_privilege_escalation": true, "exact_command_allowlist_only": true, "fail_closed_on_drift": true},
+  "receipt_requirements": {"preflight_identity_and_cleanliness": true, "per_command_argv_cwd_env_exit_and_stream_hashes": true, "output_and_target_manifest": true, "postcondition": true, "cleanup": true, "rollback_on_any_deviation": true, "negative_evidence": ["zero_network_attempts", "zero_private_inputs", "zero_rustup", "zero_dependency_resolution", "zero_output_execution", "zero_runtime_admission", "zero_deploy_actions"]},
+  "authority": {"owner_approval_received": false, "execution_authorized": false, "dependency_resolution_allowed": false, "wit_generation_allowed": false, "linker_build_allowed": false, "component_build_allowed": false, "output_execution_allowed": false, "runtime_allowed": false, "deploy_allowed": false},
+  "pass_effect": {"opens_permissions": false, "execution_authority": false},
+  "only_allowed_successor": "FORMAL_OWNER_SIGNED_G2L_EXECUTION_AUTHORIZATION",
+  "static_bindings": {
+    "algorithm": "sha256_after_replacing_lowercase_64_hex_with_64_zeroes",
+    "docs/design/ENGRAM_G1_4_WASI_G2L_EXECUTION_AUTHORIZATION_DRAFT_2026_07_21.md": "47f7c821e8668bbaf0418a0dc040dcd492b52755abab0a22d62971b6542704ad",
+    "scripts/eval/fixtures/engram_g14_wasi_g2l_execution_authorization_draft_v0.json": "764be1687e9c22b9128c778b38bce3e35f0ad8d07e4ba6b1432b8156d3acbf5f",
+    "scripts/eval/check_engram_g14_wasi_g2l_execution_authorization_draft.py": "2996106272b59e9ae41f835650d0d90f7a9a8cb173149ba387b31651ca184562",
+    "scripts/check-engram-g14-wasi-g2l-execution-authorization-draft.sh": "21311b639fce586e18da13dcd7cf45da49664659126183ecba510341435a69b1"
+  }
+}
