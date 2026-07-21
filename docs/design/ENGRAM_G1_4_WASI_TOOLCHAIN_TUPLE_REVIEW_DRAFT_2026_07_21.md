@@ -11,11 +11,18 @@ G2A public-static Rust pin and the current local observation. The previously
 recorded Rust/Cargo 1.92.0 is retained as historical evidence only; it must not
 be silently substituted or upgraded during execution.
 
-This recommendation is not a selection authorization. The candidate remains
-incomplete because `wasm-tools`, `wit-bindgen`, `cargo-component`, `wasm-ld`,
-and a usable Wasmtime executable identity were not observed. The adapter,
-cache roots, exact commands, bounded output roots, and expected hashes are
-also unset.
+This recommendation is not a selection authorization. The five public tool
+identities have now been installed in the isolated prefix
+`/Users/pallasting/.local/share/agent-bridge/g2a-toolchain-20260721/bin` and
+verified by version output and local SHA-256. The selected observations are
+wasm-tools 1.252.0, wit-bindgen-cli 0.58.0, cargo-component 0.20.0, Wasmtime
+46.0.1, and LLD/wasm-ld 21.1.8. The cargo-component release API supplied no
+published digest, so its local digest is explicitly not treated as a vendor
+signature.
+
+The adapter, cache roots, exact commands, bounded output roots, and expected
+artifact/import-manifest hashes are still unset. The tuple therefore remains
+incomplete and cannot be signed for execution.
 
 ## Canonical contract
 
@@ -27,7 +34,8 @@ The tuple binds the actual WIT bytes at
 
 ## Signature boundary
 
-The fixture intentionally contains nulls and `false` authority flags. An owner
+The fixture contains the observed tool paths/version/hashes but retains nulls
+for the unreviewed execution fields and `false` authority flags. An owner
 signature may only be added after an independent reviewer freezes every tool
 path/version/hash, adapter, dependency/cache tuple, command allowlist,
 work/output roots, expected artifact/import-manifest hashes, cleanup and

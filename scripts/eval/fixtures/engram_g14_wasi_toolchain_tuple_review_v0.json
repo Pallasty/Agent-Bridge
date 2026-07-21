@@ -25,16 +25,24 @@
   "candidate_tuple": {
     "rustc": {"path": "/Users/pallasting/.cargo/bin/rustc", "version": "rustc 1.94.0 (4a4ef493e 2026-03-02)", "sha256": "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1"},
     "cargo": {"path": "/Users/pallasting/.cargo/bin/cargo", "version": "cargo 1.94.0 (85eff7c80 2026-01-15)", "sha256": "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1"},
-    "wasmtime": {"version": "46.0.1", "source": "G2A public static candidate", "sha256": null, "absolute_path": null},
-    "wasm_tools": {"version": null, "sha256": null, "absolute_path": null},
-    "wit_bindgen": {"version": null, "sha256": null, "absolute_path": null},
-    "cargo_component": {"version": null, "sha256": null, "absolute_path": null},
-    "wasm_ld": {"version": null, "sha256": null, "absolute_path": null},
+    "wasmtime": {"version": "46.0.1", "source": "G2A public static candidate", "sha256": "b57b3eaf89ff90bf8d5fff35f4cadc6a559b7297cf6802f0477392e164061f81", "absolute_path": "/Users/pallasting/.local/share/agent-bridge/g2a-toolchain-20260721/bin/wasmtime"},
+    "wasm_tools": {"version": "1.252.0", "sha256": "38e907700bf5568948a5a35c7f91a6968f78b6de90335e9cb15dc6597cd7043f", "absolute_path": "/Users/pallasting/.local/share/agent-bridge/g2a-toolchain-20260721/bin/wasm-tools"},
+    "wit_bindgen": {"version": "0.58.0", "sha256": "39be23f9d9af1a545ce305dca6daca3749fafcfe2199cb9e06a01e8e2ca9e5b1", "absolute_path": "/Users/pallasting/.local/share/agent-bridge/g2a-toolchain-20260721/bin/wit-bindgen"},
+    "cargo_component": {"version": "0.20.0", "sha256": "19ce94cbb7ba6fb8b658410a42d958b1045cd8657febc36b9fbaf7abd6a631e5", "absolute_path": "/Users/pallasting/.local/share/agent-bridge/g2a-toolchain-20260721/bin/cargo-component"},
+    "wasm_ld": {"version": "LLD 21.1.8", "sha256": "8ee8d5eb46ba5ee8b8b1c1f3d8340abe77311cc79a264e226f498d1c48e43f4f", "absolute_path": "/Users/pallasting/.local/share/agent-bridge/g2a-toolchain-20260721/bin/gcc-ld/wasm-ld"},
     "adapter": {"identity": null, "sha256": null},
     "dependencies": {"manifest_sha256": "ec21411297f03e4c46d1c6520b86f2dca6309abc03069cf885ea9300a030dc54", "lockfile_sha256": "ad53efcd1ac44e8fa10e5943c873bc02cdceeae12d34784fbf60a6c81793db6d", "selection_authorized": false},
     "cache_roots": null,
     "commands": null,
-    "expected_outputs": null
+    "expected_outputs": null,
+    "public_release_artifacts": {
+      "wasm_tools_archive_sha256": "c4c0f8560d996e47313aadf8df745e4d15eef38090e671384eafcb06d8d135fa",
+      "wit_bindgen_archive_sha256": "9b058d9b3a5b927de91f8f9f4e7cbce7f4dfa9d68f744e5ec71402d2990b2d2f",
+      "wasmtime_archive_sha256": "acee50be70dbe90b0ab2ac7db1321fc44715153a1b1cc58291c97b6d7cffc558",
+      "cargo_component_release_digest_published": false,
+      "cargo_component_archive_sha256": "19ce94cbb7ba6fb8b658410a42d958b1045cd8657febc36b9fbaf7abd6a631e5",
+      "llvm_tools_component": "rustup llvm-tools-preview for stable-aarch64-apple-darwin"
+    }
   },
   "signature": {"owner": null, "signed_at": null, "tuple_sha256": null, "valid": false},
   "authority": {"owner_approval": false, "tool_selection": false, "install": false, "download": false, "dependency_promotion": false, "build": false, "run": false, "runtime": false, "deploy": false},
