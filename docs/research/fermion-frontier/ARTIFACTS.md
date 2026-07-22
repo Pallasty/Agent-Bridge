@@ -51,6 +51,13 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `test_fh_l8_symmetry_orbit_quotient_d5_checker.py`: preregistration chronology, phase and failure-gate regressions.
 - `test_fh_l8_symmetry_orbit_quotient_d5_result.py`: frozen result identity, arithmetic and authority regressions.
 
+## FH-L8 D5 dual-track reconciliation
+
+- `FH_L8_D5_DUAL_TRACK_RECONCILIATION_ZH.md`: human-readable D5A/D5B identity, scope and authority boundary.
+- `fh_l8_d5_dual_track_reconciliation.json`: exact route aliases, topology and immutable artifact pins.
+- `fh_l8_d5_dual_track_reconciliation_checker.py`: fail-closed commit/tree/blob/hash and authority verifier.
+- `test_fh_l8_d5_dual_track_reconciliation.py`: collision, chronology, selection and mutation regressions.
+
 ## Claude source session
 
 - Session:
@@ -2065,7 +2072,8 @@ so they are versioned normally and are not added to the preservation-only
   human-readable evidence boundary and v2 reopening handoff.
 - `fh_l8_signed_d4_orbit_d5_contract.json`, checker, result, tests, and
   `FH_L8_SIGNED_D4_ORBIT_D5_ZH.md` bind the signed D4 custody-positive orbit
-  result and the depth-3 prefix boundary.
+  result and the depth-3 prefix boundary. Reconciliation alias:
+  `FH-L8-D5-EVIDENCE-SIGNED-D4-PREFIX-V1`.
 - `fh_l8_byte_table_orbit_d6_contract.json`, checker, result, tests, and
   `FH_L8_BYTE_TABLE_ORBIT_D6_ZH.md` certify full depth-3 signed-D4 support
   orbit enumeration by byte-table canonicalization.

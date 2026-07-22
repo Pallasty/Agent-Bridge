@@ -1,5 +1,16 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 D5 dual-track identity reconciliation
+
+- Preserved two immutable D5 children of the same D4-containing base while recording that both use
+  the ambiguous legacy internal ID `FH-L8-INDEPENDENT-REFERENCE-D5`.
+- Assigned unique aliases to the signed-D4 prefix/custody lane and the fully preregistered
+  symmetry-quotient lane; bare-ID evidence lookup or authorization is now forbidden.
+- The full lane closes the other lane's unmeasured full-depth-3 and quotient-transition gaps without
+  replacing its provenance or validating its prefix digest. Evidence is not additive.
+- The reconciled ceiling is D6 design only; D6 execution and every error/reference/READY claim remain
+  unauthorized.
+
 ## 2026-07-22 — FH-L8 symmetry-orbit quotient D5
 
 - Official replay verified the eight-element Néel-stabilizing D4/conditional-spin-swap action,
@@ -8,8 +19,8 @@
   `1,704,285` compress to `213,099` representatives.
 - The projected next-action upper bound `47,947,275` is below 300M; audit group actions `13,831,456`
   remain below 16M under the frozen 1 GiB, zero-swap, 600-second envelope.
-- D6 design is eligible only. No fourth action, D6 remainder, cumulative, R100, reference or READY
-  authority was produced.
+- This lane is now named `FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1`; D6 design is eligible only.
+  No fourth action, D6 remainder, cumulative, R100, reference or READY authority was produced.
 
 ## 2026-07-22 — FH-L8 scalar supremum D4
 
@@ -2226,9 +2237,10 @@ and FB-S2B stop now. This is not a source-integrity, candidate-OOM or performanc
 result. Reopen requires new owner authority, a hash-bound 1-GiB-safe gate,
 materialized adapter/mapping evidence and a new positive-qualification v2.
 
-FH-L8 D5 verifies the eight signed D4 spatial symmetries, all `+1` Néel
-characters, observable-map invariance, and exact orbit compression through
-depth 2 (`225→29`, `24421→3116`). Depth 3 has `1704285` states; only a
+The historical lane `FH-L8-D5-EVIDENCE-SIGNED-D4-PREFIX-V1` verifies the eight
+signed D4 spatial symmetries, all `+1` Néel characters, observable-map
+invariance, and exact orbit compression through depth 2 (`225→29`,
+`24421→3116`). Depth 3 has `1704285` states; only a
 100000-state prefix (`71064` orbits) is certified. The next branch is the
 byte-table signed bit-permutation canonicalizer; no D6 or error authority is
 granted.

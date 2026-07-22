@@ -1345,6 +1345,19 @@ canonicalization transform 的诊断上界为 383,578,200，须由独立 D6 设�
 该结果只允许预提交新的 D6 design。D5 没有执行第四次 Hamiltonian action，也没有给出
 degree-6 remainder、两步累计、full R100、physical reference 或 READY authority。
 
+### D5 双轨身份对账（2026-07-22）
+
+合并时发现另一个从同一 `ae393577` 基线并行产生的 signed-D4 D5 轨道；两套不可变 JSON
+都使用历史内部 ID `FH-L8-INDEPENDENT-REFERENCE-D5`，但互非 provenance successor。
+prefix/custody lane 只认证 depth 0--2 与固定 100,000-state depth-3 prefix；它没有建立
+result 前的 protocol freeze。full-quotient lane 则有 `6daf30da → 2f9556a9` 的预注册时序，
+完成全 depth-3 与 source depth 0--2 quotient transitions。
+
+对账为两者分配唯一 lane aliases，并禁止按裸历史 ID 选证。full lane 关闭了另一条轨道未测
+的 full-depth 与 quotient-transition 缺口，但不追溯验证其 prefix digest，证据也不可相加。
+后续只可把 `FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1` 作为 D6 设计输入，并须按
+alias/path/commit/blob/bytes/SHA 全绑定。最高 authority 仍为 `D6_DESIGN_ELIGIBLE_ONLY`。
+
 更一般的 bounded-error quantum simulation 已能把 learned Hamiltonian/Lindbladian 的
 实验不确定度传播到 observable interval，但目前示范对象是 long-range Ising，不是匹配
 的 Hubbard workload，见 [Kraft et al.](https://arxiv.org/abs/2511.23392)。这条路线可作为

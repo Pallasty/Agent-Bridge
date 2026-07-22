@@ -20,11 +20,12 @@ proof. See `FH_L8_DEGREE6_STREAMING_D3_ZH.md`.
 numerically inadequate and stops exact sector Krylov before its 383,464,125-candidate fourth action.
 See `FH_L8_SCALAR_SUPREMUM_D4_ZH.md`.
 
-`FH-L8-INDEPENDENT-REFERENCE-D5` verifies the fixed symmetry-orbit quotient through depth 3,
-compressing 1,704,285 full states to 213,099 representatives and placing the projected next action
-at 47,947,275 candidates below the frozen cap. This authorizes only a separately frozen D6 design;
-the fourth Hamiltonian action and every error/reference claim remain unauthorized. See
-`FH_L8_SYMMETRY_ORBIT_QUOTIENT_D5_ZH.md`.
+The evidence lane `FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1` verifies the fixed quotient through
+depth 3, compressing 1,704,285 full states to 213,099 representatives and placing the projected next
+action at 47,947,275 candidates below the frozen cap. A parallel prefix/custody lane shares its
+legacy embedded `FH-L8-INDEPENDENT-REFERENCE-D5` ID, so that bare ID is forbidden for lookup or
+authorization. The full lane authorizes only a separately frozen D6 design; see
+`FH_L8_SYMMETRY_ORBIT_QUOTIENT_D5_ZH.md` and `FH_L8_D5_DUAL_TRACK_RECONCILIATION_ZH.md`.
 
 Status date: 2026-07-14
 

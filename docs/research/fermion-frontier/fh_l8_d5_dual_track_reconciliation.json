@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "reconciliation_id": "FH-L8-D5-DUAL-TRACK-R1",
+  "status": "VERIFIED_D5_DUAL_TRACK_IDENTITY_RECONCILIATION",
+  "checker_self_sha256": "278db29e623f763e02e862bbc7f14452341672b42aeb8a3e87ad52c8b42fcd3e",
+  "common_base": {
+    "commit": "ae3935774d80f37b10f8317d0e17d339f03436cc",
+    "tree": "accc20f72c9e0e201f87418ed4a1f7d37a9865f4",
+    "parents": [
+      "b1af89d43947065217fbd676988beb573f5b7267",
+      "6ff83b850ee4e2995d1bec89c7519d01c9c92e47"
+    ]
+  },
+  "integration": {
+    "commit": "17ff4b2677254f1895075d9fcdc69ef400ad601c",
+    "tree": "acdcad3b67471228a609400bfe9761f811921105",
+    "parents": [
+      "64438c47be710835626dea0ceb2521b6634951dc",
+      "2f9556a986c50a42ff3096ded45b75e39c5a61a9"
+    ]
+  },
+  "identity_collision": {
+    "legacy_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D5",
+    "route_count": 2,
+    "bare_legacy_contract_id_forbidden": true,
+    "required_lookup_identity": "route_alias+artifact_path+git_blob+raw_sha256+bytes+commit"
+  },
+  "routes": [
+    {
+      "route_alias": "FH-L8-D5-EVIDENCE-SIGNED-D4-PREFIX-V1",
+      "legacy_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D5",
+      "scope": "historical_signed_D4_custody_and_depth3_prefix_only",
+      "preregistration_evidence": false,
+      "protocol_freeze": null,
+      "outcome": {
+        "commit": "72fe3b79a79501d5d523dc959a6a98b36a470bd4",
+        "tree": "fa4ce50442da0e4c8e617d7d3497fea4cf34c49b",
+        "parents": [
+          "ae3935774d80f37b10f8317d0e17d339f03436cc"
+        ]
+      },
+      "artifacts": [
+        {
+          "path": "fh_l8_signed_d4_orbit_d5_checker.py",
+          "mode": "100644",
+          "blob": "0cbf87befd79ad4bc5d48f923c9effa5b13f96da",
+          "bytes": 8716,
+          "sha256": "1edf1275a4fa2e3407c5903876bf6000e0dabe0113a5e403c67ad4f7e0ff7bf7"
+        },
+        {
+          "path": "fh_l8_signed_d4_orbit_d5_contract.json",
+          "mode": "100644",
+          "blob": "33818f489ae04ec7ac381929349b43ee1955f103",
+          "bytes": 2000,
+          "sha256": "0b3e1b53086e3c66af7d42aa3276c3624c14267dc89a77b84a1071cf05770441"
+        },
+        {
+          "path": "fh_l8_signed_d4_orbit_d5_result.json",
+          "mode": "100644",
+          "blob": "a89c0bcd279f42fc570ad0057f2799f4c8b27991",
+          "bytes": 2048,
+          "sha256": "79d5251a0f433b8d79f5f7a5ed9916aea13146c0ff6f869f841ff53699eaa47b"
+        }
+      ],
+      "result_status": "VERIFIED_D5_SIGNED_D4_CUSTODY_AND_DEPTH3_ORBIT_PREFIX_BOUNDARY",
+      "authority_ceiling": "HISTORICAL_PARTIAL_PREFIX_AND_CUSTODY",
+      "downstream_design_selected": false
+    },
+    {
+      "route_alias": "FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1",
+      "legacy_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D5",
+      "scope": "full_depth3_symmetry_quotient_and_D6_design_gate",
+      "preregistration_evidence": true,
+      "protocol_freeze": {
+        "commit": "6daf30daeeb375962b9986af5df91517d8a4a8ec",
+        "tree": "9c7096bca41a1da8c440f37d93a08a4f51e5cef0",
+        "parents": [
+          "ae3935774d80f37b10f8317d0e17d339f03436cc"
+        ]
+      },
+      "outcome": {
+        "commit": "2f9556a986c50a42ff3096ded45b75e39c5a61a9",
+        "tree": "c1164c1acffb570448038b461cc619ca5164d2f9",
+        "parents": [
+          "6daf30daeeb375962b9986af5df91517d8a4a8ec"
+        ]
+      },
+      "artifacts": [
+        {
+          "path": "fh_l8_symmetry_orbit_quotient_d5_checker.py",
+          "mode": "100644",
+          "blob": "129b8f7c12b19deaee518c5dfdbcf9047a91c418",
+          "bytes": 48414,
+          "sha256": "681bc63fedce8b71cfb536c66d321467bc8f01cb5947bee59b4291e2ac51a022"
+        },
+        {
+          "path": "fh_l8_symmetry_orbit_quotient_d5_contract.json",
+          "mode": "100644",
+          "blob": "0969f7214db04f771a6533f7bb8ca702f71849fe",
+          "bytes": 4999,
+          "sha256": "1ebd1d38c0c40ca9617f86e09c86d528196260dd6b6b6692c34dacfe7a28d392"
+        },
+        {
+          "path": "fh_l8_symmetry_orbit_quotient_d5_result.json",
+          "mode": "100644",
+          "blob": "f8b461b0d22e04413f01c49d072941be6d91c43b",
+          "bytes": 9319,
+          "sha256": "a04a4d0be6265dcaf9d39c7937fc133d19c7a2050e1434c7cb24be88b795baed"
+        }
+      ],
+      "result_status": "VERIFIED_D5_SYMMETRY_ORBIT_QUOTIENT_ADMISSIBLE_FOR_D6_DESIGN",
+      "authority_ceiling": "D6_DESIGN_ELIGIBLE_ONLY",
+      "downstream_design_selected": true
+    }
+  ],
+  "shared_consistency": {
+    "group_order": 8,
+    "neel_characters": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "observable_invariance": true,
+    "depth0_to_depth2_full_and_orbit_counts": [
+      [
+        1,
+        1
+      ],
+      [
+        225,
+        29
+      ],
+      [
+        24421,
+        3116
+      ]
+    ]
+  },
+  "non_equivalences": [
+    "The prefix lane and full lane use different orbit digest serializations; digest equality is not claimed.",
+    "The full lane did not replay or retroactively validate the prefix lane's deterministic 100000-state digest.",
+    "The 71064 prefix representatives are not a permutation-independent bound or ratio for the 213099 full representatives."
+  ],
+  "selection": {
+    "downstream_design_route_alias": "FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1",
+    "authority_ceiling": "D6_DESIGN_ELIGIBLE_ONLY",
+    "evidence_is_additive": false,
+    "relation": "full_lane_closes_unmeasured_full_depth3_and_quotient_transition_gaps_without_retroactive_prefix_validation"
+  },
+  "authority": {
+    "d6_design_eligible": true,
+    "d6_execution_authorized": false,
+    "fourth_hamiltonian_action_executed": false,
+    "degree6_remainder_bounded": false,
+    "two_step_cumulative_error_bounded": false,
+    "full_R100_error_bounded": false,
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  },
+  "limitations": [
+    "The bare legacy contract id is ambiguous and cannot be used for lookup or authorization.",
+    "The full lane closes gaps left unmeasured by the prefix lane but does not replace its provenance.",
+    "No fourth Hamiltonian action or D6 execution is authorized.",
+    "No remainder, cumulative, R100, physical-reference, hardware, quantum-advantage, or READY claim is certified."
+  ]
+}
