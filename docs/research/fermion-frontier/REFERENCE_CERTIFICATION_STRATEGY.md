@@ -1277,6 +1277,20 @@ Trotter error no-go。
 保留 sector 与 cancellation；在它给出正 enclosure 或 failure-local threshold 前，不授权
 D2、full R100、physical reference 或 READY。
 
+### D1：`k0 -> k1` state-specific defect 正证（2026-07-22）
+
+D1 已沿 S0 选择的 scalar cancellation 路线闭合第一步。formal degrees 0--2 继续严格相同，
+degree-3 Néel expectation 对两项 observable 均为零；新 checker 完整合并 degree-4 defect，
+得到磁化量 `115/6`、双占据 `-115/12`。随后枚举九阶段 product 的全部 1,287 条 degree-5
+weak compositions，并以 ideal `ad_H^5/5!` 与 product path Pauli-L1 控制积分余项。
+
+在 `delta=1/100` 下，总上界分别为 `8784399/6400000000000` 与
+`11682481/7680000000000`，只占单步 `1/400000` allocation 的
+`8784399/16000000` 与 `11682481/19200000`。磁化量/双占据 pair products 为
+103,506,944 / 443,025,920，peak expansion 为 272,832 / 731,693，均低于预提交 caps。
+该 authority 只覆盖初始态第一步，不能乘 100；D2 必须另行托管 evolved-state identity、
+第二步 scalar defect 与新增资源增长。
+
 更一般的 bounded-error quantum simulation 已能把 learned Hamiltonian/Lindbladian 的
 实验不确定度传播到 observable interval，但目前示范对象是 long-range Ising，不是匹配
 的 Hubbard workload，见 [Kraft et al.](https://arxiv.org/abs/2511.23392)。这条路线可作为

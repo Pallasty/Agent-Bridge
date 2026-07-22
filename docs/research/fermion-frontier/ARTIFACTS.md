@@ -10,6 +10,14 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_independent_reference_route_validator.py`: exact arithmetic/source/authority validator.
 - `test_fh_l8_independent_reference_route_validator.py`: mutation and CLI regressions.
 
+## FH-L8 state-specific defect D1
+
+- `FH_L8_STATE_SPECIFIC_DEFECT_D1_ZH.md`: proof structure, bounds, resources and authority boundary.
+- `fh_l8_state_specific_defect_d1_contract.json`: fixed workload, method, exact values and hard caps.
+- `fh_l8_state_specific_defect_d1_result.json`: dual-observable k0-to-k1 positive certificate.
+- `fh_l8_state_specific_defect_d1_checker.py`: exact D4 and complete degree-five remainder recomputation.
+- `test_fh_l8_state_specific_defect_d1_checker.py`: positive, mutation, authority and resource regressions.
+
 ## Claude source session
 
 - Session:

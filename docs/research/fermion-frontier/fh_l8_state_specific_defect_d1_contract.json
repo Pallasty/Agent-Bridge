@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D1",
+  "checker_self_sha256": "3fa6d195398576a7e92356d83bb708e97332beacff6f5f587fba06eabae93766",
+  "parent_contract_id": "FH-L8-INDEPENDENT-REFERENCE-S0",
+  "workload": {
+    "linear_size": 8,
+    "boundary": "open",
+    "interaction_over_hopping": "8/1",
+    "total_time": "1/1",
+    "strang_steps": 100,
+    "step_duration": "1/100",
+    "initial_state": "checkerboard_Neel_N_up_32_N_down_32",
+    "nine_stage_order": ["H1/2", "H2/2", "HU/2", "H3/2", "H4", "H3/2", "HU/2", "H2/2", "H1/2"]
+  },
+  "method": {
+    "formal_match_through_degree": 3,
+    "state_specific_exact_degree": 4,
+    "operator_norm_remainder_degree": 5,
+    "bound_formula": "delta^4*abs(<q|D4(O)|q>)+delta^5*(E5_L1+P5_L1)",
+    "weak_composition_count": 1287,
+    "required_observables": ["staggered_magnetization", "double_occupancy"]
+  },
+  "per_observable_single_step_allocation": "1/400000",
+  "expected_exact_values": {
+    "staggered_magnetization": {
+      "D4_Neel_expectation": "115/6",
+      "D4_L1": "32353/48",
+      "E5_L1": "9339/2",
+      "P5_L1": "13707757/1920",
+      "total_bound": "8784399/6400000000000",
+      "bound_to_allocation_ratio": "8784399/16000000"
+    },
+    "double_occupancy": {
+      "D4_Neel_expectation": "-115/12",
+      "D4_L1": "8341/24",
+      "E5_L1": "190901/30",
+      "P5_L1": "30297077/3840",
+      "total_bound": "11682481/7680000000000",
+      "bound_to_allocation_ratio": "11682481/19200000"
+    }
+  },
+  "resource_limits": {
+    "max_pair_products_per_observable": 500000000,
+    "max_expansion_terms": 800000,
+    "max_degree_five_prefixes": 2048,
+    "max_weak_compositions": 1287,
+    "max_source_bytes": 1048576
+  },
+  "source_pins": [
+    {
+      "path": "hubbard_strang_observable_taylor_step_checker.py",
+      "sha256": "c0cf77034d97f713c47ae666f015729d4595f445df5b58a36b61adb6274b98b5"
+    },
+    {
+      "path": "fh_l8_independent_reference_route_contract.json",
+      "sha256": "84047077df225745b0287bf56e4d605f7e9ef7d52284e26d4184321b3830aa3e"
+    }
+  ],
+  "forbidden_claims": ["full_R100_error_bounded", "physical_reference_qualified", "ready_gate_eligible"]
+}
