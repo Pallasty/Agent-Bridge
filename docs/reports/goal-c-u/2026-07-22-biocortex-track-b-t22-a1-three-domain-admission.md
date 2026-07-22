@@ -54,7 +54,11 @@ rollback prevention.
   and
 - private endpoint, mTLS credential-source, and signed domain-agent protocol
   schemas plus semantic validators with 62 synthetic negative paths. No real
-  manifest, credential file, listener, or network connection is used.
+  manifest, credential file, listener, or network connection is used; and
+- an offline domain-agent session core with finite coordinator/fault-target/
+  survivor lifecycles, paired signature/nonce/sequence/chain verification, 25
+  valid synthetic signed transitions, and 15 negative paths. It deliberately
+  executes no command and starts no listener or service.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only

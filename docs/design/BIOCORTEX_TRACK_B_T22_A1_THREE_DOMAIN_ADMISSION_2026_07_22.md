@@ -243,6 +243,29 @@ hashes, and the coordinator runtime public key. The runner may not discover
 ambient credentials, resolve DNS, provision the overlay, or listen on any
 address other than its exact manifest-bound overlay IP.
 
+The offline agent-session core now implements the protocol's second semantic
+layer without opening a listener. It verifies canonical request/response files,
+coordinator and domain detached Ed25519 signatures, declared signing-key
+digests, exact run/source/execution/endpoint/credential bindings, 60-second
+freshness, paired nonce/command/payload, monotonically increasing sequences,
+and the complete prior-message chain. It rejects coordinator/domain key reuse.
+
+Each domain has a finite lifecycle:
+
+- `domain-1`: preflight → start/query → authorize-consume → pre-fault Transit
+  signature → survivor/state verification → post-fault signature verification
+  → cleanup → terminal;
+- fault target (`domain-2` or `domain-3`): preflight → start/query → stop all
+  owned service members → restart → rejoin verification → cleanup → terminal;
+- other survivor: preflight → start/query → survivor/state verification →
+  cleanup → terminal.
+
+A signed failure response moves the session directly to a no-retry terminal
+state. The core emits transition receipts but explicitly executes zero
+commands, starts zero listeners/services, and injects zero faults. The network
+adapter and actual command executors remain absent until the final owner-signed
+execution contract and private runtime manifests exist.
+
 ## Third-domain decision
 
 The preferred zero-spend path is a third owner-controlled physical host. If no
@@ -347,6 +370,14 @@ certificate/SPKI uniqueness, issuer/EKU/expiry bindings, mTLS requirements,
 message direction/signers/namespaces, freshness, replay links, fault targeting,
 and shell/secret/claim escalation. It reads zero real manifest instances or
 credential files, opens zero sockets/listeners, and contacts zero hosts.
+
+The agent-session KAT validates 25 signed request/response transitions spanning
+all three role paths and adds 15 directed negatives over lifecycle order,
+coordinator/domain signature mismatch, key reuse, replay, terminal retry,
+request/response nonce-command-payload pairing, sequence and chain links,
+declared signer binding, domain binding, and message expiry. All keys and
+messages are synthetic; no real keys, credentials, network, commands, services,
+or faults are used.
 
 The collection-challenge KAT adds 42 directed negatives over schema and
 domain-separated digest binding, source/proposal/contract identities, alias
