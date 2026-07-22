@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-EXTERNAL-EVIDENCE-INTAKE-V1",
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "linear_size": 8,
+  "trotter_steps": 100,
+  "required_routes": [
+    "native_fermions",
+    "dynamic_jw_local_grid_source_leading",
+    "dynamic_jw_local_grid_figure_candidate_fit",
+    "fsn_standard_figure_candidate_fit",
+    "fsn_ladder_figure_candidate_fit"
+  ],
+  "required_registration_fields": [
+    "artifact_path",
+    "sha256",
+    "source_url",
+    "release_or_commit",
+    "evidence_class",
+    "provenance_attestation",
+    "compiler_identity",
+    "compiler_version",
+    "compiler_configuration_sha256",
+    "environment_lock_sha256"
+  ],
+  "prohibitions": {
+    "synthetic_or_handwritten_export_admissible": false,
+    "figure_or_text_reconstruction_admissible": false,
+    "cross_route_comparison_before_all_routes_admitted": false,
+    "same_artifact_hash_for_multiple_routes_admissible": false
+  }
+}
