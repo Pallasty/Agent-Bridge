@@ -1,0 +1,286 @@
+{
+  "schema": "agent_bridge.fermion_biocortex.fb_s2_hbr_r1_adapter_eligibility_contract.v1",
+  "protocol_id": "FB-S2-HBR-R1-ADAPTER-ELIGIBILITY-V1",
+  "status": "PUBLIC_EVIDENCE_AUDIT_PROTOCOL_FROZEN_AFTER_RECONNAISSANCE_BEFORE_AUTOMATED_CHECK",
+  "protocol_date": "2026-07-22",
+  "analysis_class": "ONE_SIDED_SOURCE_BOUND_PUBLIC_EVIDENCE_NEGATIVE_QUALIFICATION_NOT_OUTCOME_BLIND_PREREGISTRATION",
+  "confirmation_authority": false,
+  "positive_qualification_authority": false,
+  "purpose": "Fail closed on the fixed public BioCortex snapshot when a real, reviewed, executable HBR-R1 implementation or faithful fermion residual adapter is absent. This v1 audit cannot grant positive eligibility; an apparent all-green result requires a new hash-bound v2 positive-qualification protocol.",
+  "chronology": {
+    "manual_reconnaissance_preceded_protocol_freeze": true,
+    "automated_eligibility_receipt_must_follow_protocol_commit": true,
+    "outcome_blind_preregistration_claimed": false,
+    "performance_hypothesis_tested_here": false
+  },
+  "upstream": {
+    "repository": "git@github.com:pallasting/biocortex-rs.git",
+    "ref_observed_after_successful_fetch": "refs/remotes/origin/main",
+    "commit": "1539a6ff33867e4cb34f5530cfc137229f7f63f5",
+    "tree": "1b4eeda4bba8b0d564a216e6841de99a9dd590a2",
+    "commit_date": "2026-07-17T11:29:51-07:00"
+  },
+  "source_bindings": [
+    {
+      "path": "README.md",
+      "mode": "100644",
+      "blob": "2e46b5d1ad7f775a6b525d63e77434ae0ac34e26",
+      "bytes": 390033,
+      "sha256": "dbe47056217ba0aa051dddd26fb73992b3160d0c1bd695acccff4846b7add5dc"
+    },
+    {
+      "path": "Cargo.toml",
+      "mode": "100644",
+      "blob": "3478919bd0e6cded5db3485e5147e23f20297871",
+      "bytes": 236,
+      "sha256": "6fead38eb3759910101038f0f86301ef0bbec387d4a136e5742a3a1a8165068b"
+    },
+    {
+      "path": "docs/LANGUAGE_P3A2_HBR_R1_RUNTIME_ADAPTER_ENTRY_CONTRACT_2026_07_13.md",
+      "mode": "100644",
+      "blob": "6889f2298bf5de0b95065d02e1e3bd0895bea63d",
+      "bytes": 14978,
+      "sha256": "51d5a0b36d8a4c678a469cc517b84b78e08207be604daf6e552776c03cf3b118"
+    },
+    {
+      "path": "docs/LANGUAGE_P3A2_HBR_R1_RUNTIME_ADAPTER_ENTRY_CONTRACT_ADVERSARIAL_REVIEW_2026_07_13.md",
+      "mode": "100644",
+      "blob": "024dae1df8ea59e5b96edea485b98318d0b4b863",
+      "bytes": 13506,
+      "sha256": "46ca5b8365f867f8303f2793624d44a5f03a06a77872ea67b772bbbca6cd18de"
+    },
+    {
+      "path": "fixtures/language_p3a2_hbr_r1_runtime_adapter_entry_contract.v1.tsv",
+      "mode": "100644",
+      "blob": "1146fba8ff3e85ded5cc20abd0387b08ddc4cf8c",
+      "bytes": 8450,
+      "sha256": "a766646446a46bc7ed1751c5688546a159f996c2eef7ba235e42e99ad22ef78d"
+    },
+    {
+      "path": "fixtures/language_p3a2_hbr_r1_runtime_adapter_entry_contract_custody.v1.tsv",
+      "mode": "100644",
+      "blob": "c7ab42fd5ce378bc8e36035775bdf10ffc8dfec1",
+      "bytes": 2547,
+      "sha256": "723110ae8fe5eeca45ba52573b5c8903047ff71717f9e6d1ff56ffb0c3b0e91e"
+    },
+    {
+      "path": "fixtures/language_p3a2_hbr_r1_runtime_adapter_root_contract.v1.tsv",
+      "mode": "100644",
+      "blob": "bb3ededb7aed235f1753188671a50d45f82e54eb",
+      "bytes": 20068,
+      "sha256": "de4ab78e4bf3ee6867e05f47207c7719c1247831bb7ca6334c8709e0eeb88347"
+    },
+    {
+      "path": "fixtures/language_p3a2_hbr_r1_candidate_artifact_sources.v2.tsv",
+      "mode": "100644",
+      "blob": "75d07eab0f190c86048f1cd7b48d7cc71a44f96f",
+      "bytes": 4066,
+      "sha256": "2612dc59b5b2b8385610964a2e618798152984f284cc620c3a04eaa45438b289"
+    },
+    {
+      "path": "fixtures/language_p3a2_owner_admission_hold.v10.tsv",
+      "mode": "100644",
+      "blob": "f39004a4752ec9819789f397b8be2213d859c6db",
+      "bytes": 5620,
+      "sha256": "69f78acbde15d5203109a9069c8ccba87eec221d6eb2496a8b3ebac0886a37cf"
+    },
+    {
+      "path": "docs/LANGUAGE_P3A2_OWNER_ADMISSION_HOLD_V10_2026_07_13.md",
+      "mode": "100644",
+      "blob": "27a9bf5e496c5c35fa8014d8359e9bc74eeb1283",
+      "bytes": 4187,
+      "sha256": "c59a4d21fe90713a3bcf8ff0dec97bb54bb5b123cb0c1d8f4057d9c5d68be33d"
+    },
+    {
+      "path": "docs/LANGUAGE_P3A2_HBR_R1_CANDIDATE_ARTIFACT_CONSTRUCTION_2026_07_13.md",
+      "mode": "100644",
+      "blob": "fb6b3c7ea2c15ed70a493be1aae4ef5017514346",
+      "bytes": 6467,
+      "sha256": "b22528d0c1e5215d66f9840f0b05d5de03ecfb16c296e8e7f9e8d00cc59fc467"
+    },
+    {
+      "path": "fixtures/language_p3a2_hbr_r1_explicit_registry_packet_contents_route_closure_summary.v1.tsv",
+      "mode": "100644",
+      "blob": "a05592923988ff47cbcf490e2f6138f899b94eef",
+      "bytes": 5164,
+      "sha256": "2c84707c61a7322897517e9f1ddc1e538afe338bff2bce994fb48e897dce7033"
+    },
+    {
+      "path": "checks/language_p3a2_hbr_r1_runtime_adapter_entry_contract_check.rs",
+      "mode": "100644",
+      "blob": "8a06f91b726b701f7dccb1e7ac978e23c7c989ab",
+      "bytes": 99256,
+      "sha256": "cfdd3af2fdd4b71f47e0bb3a9d41f033dcf35d27e3c33be9350bd5c62afedfa6"
+    },
+    {
+      "path": "scripts/check_language_p3a2_hbr_r1_runtime_adapter_entry_contract.sh",
+      "mode": "100755",
+      "blob": "938f66538c32b7a3e67c01eb21ea3ac6d82f6486",
+      "bytes": 39788,
+      "sha256": "4c83b347061bd451e2c69171701445632489a17d1a70045ac6ac10fa2bab7bd0"
+    },
+    {
+      "path": "artifacts/language_p3a2_hbr_r1_generated_candidate_v2/sources/candidate_checker_contract.rs",
+      "mode": "100644",
+      "blob": "8550ff07968323fc2cb7a7df5e8fc07acf549f1d",
+      "bytes": 509957,
+      "sha256": "a7348f0f9c1299b316e072c26ca78d4b9eefd795de6a5a355fcac3cf178b6b77"
+    }
+  ],
+  "records": {
+    "runtime_adapter_entry_contract": "fixtures/language_p3a2_hbr_r1_runtime_adapter_entry_contract.v1.tsv",
+    "owner_hold": "fixtures/language_p3a2_owner_admission_hold.v10.tsv",
+    "route_closure": "fixtures/language_p3a2_hbr_r1_explicit_registry_packet_contents_route_closure_summary.v1.tsv",
+    "candidate_source_manifest": "fixtures/language_p3a2_hbr_r1_candidate_artifact_sources.v2.tsv",
+    "artifact_integrity_gate": "scripts/check_language_p3a2_hbr_r1_runtime_adapter_entry_contract.sh",
+    "required_fermion_binding_manifest": "fixtures/language_p3a2_hbr_r1_fermion_residual_adapter_binding.v1.tsv"
+  },
+  "artifact_integrity_execution": {
+    "allowed": true,
+    "scope": "EXISTING_INDEPENDENT_CHECKER_AND_ARTIFACT_INTEGRITY_ONLY_NOT_CANDIDATE_EXECUTION",
+    "must_invoke_executable_directly": true,
+    "shell_reinvocation_forbidden": true,
+    "clean_exact_head_required": true,
+    "maximum_seconds": 180,
+    "outer_memory_max_bytes": 1073741824,
+    "candidate_parse_compile_link_load_execute_forbidden": true
+  },
+  "eligibility_gates": {
+    "source_and_provenance": {
+      "exact_commit_tree_and_file_bindings": true,
+      "protocol_commit_verified_before_gate": true,
+      "all_bound_record_path_hash_pairs": true,
+      "cross_record_authority_consistent": true,
+      "candidate_source_manifest_bindings_pass": true,
+      "outer_memory_limit_enforced": true,
+      "outer_swap_limit_enforced": true,
+      "artifact_integrity_gate_returncode": 0,
+      "artifact_integrity_binding_status": "BOUND_TO_HEAD_LANGUAGE_P3A2_HBR_R1_RUNTIME_ADAPTER_ENTRY_CONTRACT",
+      "artifact_integrity_contract_gate_entered": true
+    },
+    "authority": {
+      "route_closed_current_chain": false,
+      "reopen_currently_authorized": true,
+      "runtime_adapter_contract_authority": true,
+      "runtime_adapter_implementation_authority": true,
+      "materialized_adapter_anchor_authority": true,
+      "candidate_artifact_construction_authority": true,
+      "candidate_compilation_authority": true,
+      "candidate_implementation_authority": true,
+      "candidate_execution_authority": true,
+      "source_execution_authority": true
+    },
+    "implementation": {
+      "materialized_runtime_adapter_root_present": true,
+      "materialized_entry_anchor_present": true,
+      "runtime_adapter_impl_present": true,
+      "minimum_registered_arm_executor_impl_head_count": 1,
+      "minimum_adapter_call_edge_count": 1,
+      "minimum_bound_runtime_subject_count": 1,
+      "minimum_accepted_registry_instance_count": 1,
+      "case_path_registry_present": true,
+      "case_path_closure_complete": true,
+      "candidate_artifact_construction_complete": true,
+      "candidate_artifact_constructed": true,
+      "candidate_constructed": true,
+      "candidate_compiled": true,
+      "candidate_linked": true,
+      "source_parsed": true,
+      "source_compiled": true,
+      "source_linked": true,
+      "candidate_sources_are_in_cargo_or_module_targets": true
+    },
+    "fermion_mapping": {
+      "manifest_schema": "biocortex.language_p3a2_hbr_r1_fermion_residual_adapter_binding.v1",
+      "input_semantics": "CAUSAL_EXACT_MINUS_SAME_TIME_COLLINEAR_NUMBER_CONSERVING_TDHF_RESIDUAL",
+      "observables": [
+        "staggered_magnetization",
+        "double_occupancy"
+      ],
+      "output_semantics": "NEXT_STEP_TWO_OBSERVABLE_RESIDUAL_FORECAST",
+      "future_values_visible_to_fit": false,
+      "held_out_values_visible_to_fit_or_selection": false,
+      "target_or_label_values_enter_recurrent_state": false,
+      "adapter_is_read_only": true,
+      "agent_bridge_read_or_write": false,
+      "minimum_independent_equivalence_test_count": 2
+    },
+    "fermion_mapping_artifacts": {
+      "required_roles": [
+        "adapter_cargo_manifest",
+        "adapter_source",
+        "equivalence_checker_source",
+        "equivalence_receipt",
+        "independent_review_receipt"
+      ],
+      "required_identity_fields": [
+        "path",
+        "mode",
+        "blob",
+        "bytes",
+        "sha256"
+      ],
+      "paths_must_be_distinct": true,
+      "equivalence_receipt_schema": "biocortex.language_p3a2_hbr_r1_fermion_adapter_equivalence_receipt.v1",
+      "equivalence_receipt_status": "PASS_FERMION_ADAPTER_EQUIVALENCE",
+      "minimum_independent_test_count": 2,
+      "maximum_absolute_error": 1e-12,
+      "maximum_execution_memory_bytes": 1073741824,
+      "required_equivalence_receipt_fields": {
+        "upstream_commit_matches": true,
+        "cargo_target_built": true,
+        "linked_binary_digest_present": true,
+        "runtime_adapter_entry_invoked": true,
+        "registered_arm_executor_impl_invoked": true,
+        "deterministic_replay_passed": true,
+        "state_reset_per_subject": true,
+        "same_frozen_hbr_source_and_config": true,
+        "future_values_visible_to_fit": false,
+        "held_out_values_visible_to_fit_or_selection": false,
+        "target_or_label_values_enter_recurrent_state": false,
+        "external_io_performed": false
+      },
+      "independent_review_receipt_schema": "biocortex.language_p3a2_hbr_r1_fermion_adapter_independent_review.v1",
+      "independent_review_receipt_status": "PASS_INDEPENDENT_SOURCE_BUILD_AND_EQUIVALENCE_REPLAY",
+      "required_independent_review_fields": {
+        "reviewer_independent": true,
+        "source_and_artifact_hashes_recomputed": true,
+        "clean_build_replayed": true,
+        "equivalence_replayed": true,
+        "no_authority_expansion": true
+      }
+    }
+  },
+  "decision_rule": {
+    "missing_commit_tree_binding_or_unrunnable_integrity_gate": "INDETERMINATE_SOURCE_AUTHORITY",
+    "any_bound_eligibility_gate_false_or_missing": "NO_GO_ADAPTER_ELIGIBILITY",
+    "all_bound_eligibility_gates_true": "REQUIRES_NEW_HASH_BOUND_POSITIVE_QUALIFICATION_V2"
+  },
+  "stop_rules": {
+    "no_candidate_execution_when_not_eligible": true,
+    "no_adapter_construction_under_design_only_authority": true,
+    "no_new_proxy_or_reservoir_substitute": true,
+    "no_fresh_holdout_materialization_or_reveal_when_not_eligible": true,
+    "no_threshold_seed_split_or_source_rebinding_after_receipt": true
+  },
+  "conditional_fb_s2b": {
+    "this_protocol_can_authorize_fb_s2b_design": false,
+    "design_only_after_external_status": "ELIGIBLE_UNDER_NEW_HASH_BOUND_POSITIVE_QUALIFICATION_V2",
+    "fresh_u_time_and_seed_support_required": true,
+    "fb_s1_held_out_reuse_forbidden": true,
+    "direct_pole_or_modal_baseline_required": true,
+    "performance_execution_authority_granted_here": false
+  },
+  "nonclaims": {
+    "biocortex_runtime_authority": false,
+    "agent_bridge_runtime_authority": false,
+    "agent_bridge_memory_read_or_write": false,
+    "mainline_parameter_influence": false,
+    "bgl_accessed": false,
+    "physical_l8_instance_assessed": false,
+    "hardware_evidence": false,
+    "quantum_advantage": false,
+    "fermionic_non_gaussianity_assessed": false,
+    "performance_result": false
+  }
+}

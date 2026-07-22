@@ -898,6 +898,22 @@ This result does not execute BioCortex or establish HBR-R1 conformance, and it
 does not affect Agent-Bridge runtime parameters or the outer FH-L8 evidence
 gate.
 
+## Fermion × BioCortex HBR-R1 adapter eligibility
+
+FB-S2 binds BioCortex commit `1539a6f` / tree `1b4eeda` and closes the current
+adapter chain as `OPERATIONAL_NO_GO_CURRENT_CHAIN`: the route is closed,
+implementation and execution authorities are false, materialized adapter edges
+are absent, and no Fermion mapping or equivalence evidence exists. The frozen
+machine status remains `INDETERMINATE_SOURCE_AUTHORITY`, because the mandatory
+upstream artifact-integrity gate OOMed while copying a 1.042 GB toolchain tree
+into tmpfs under the fixed 1 GiB, zero-swap envelope. No candidate or
+performance execution occurred. See
+`FERMION_BIOCORTEX_FB_S2_HBR_R1_ADAPTER_ELIGIBILITY_2026_07_22.md`.
+
+FB-S2B is not authorized. Reopening requires a new hash-bound owner packet, a
+1-GiB-safe independent gate, materialized adapter and Fermion-mapping evidence,
+and a new positive-qualification v2.
+
 ## Final deliverables
 
 - [Chinese executive brief](EXECUTIVE_BRIEF_ZH.md)
