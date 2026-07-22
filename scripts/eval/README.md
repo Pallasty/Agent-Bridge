@@ -72,6 +72,15 @@ generalization. It does not open the AB store, call MCP, train a model, or
 change default retrieval order. See
 `docs/design/FREE_RECALL_MEMORY_STRATEGY_EXPLORATION_2026_07_21.md`.
 
+`free_recall_strategy_r1_replay.py` is the separately preregistered successor.
+It creates a read-only SQLite online backup, binds every `memory_search` call to
+disposable clones, and compares fixed-budget relevance, temporal-adjacency,
+graph-expansion, text-router, and oracle-upper-bound arms on the three existing
+curated fixtures. Fixture drift, query-order-dependent rankings, snapshot-path
+misbinding, cross-scope expansion, or a source write stops the run. Its result
+is aggregate-only and grants no runtime authority. See
+`docs/design/FREE_RECALL_STRATEGY_R1_FROZEN_SNAPSHOT_PREREGISTRATION_2026_07_21.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
