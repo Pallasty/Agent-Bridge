@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-PUBLIC-NETWORK-DEEP-AUDIT-V1",
+  "audit_date": "2026-07-21",
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "search_coverage": {
+    "primary_paper_and_source_record": true,
+    "author_or_institution_publication_record": true,
+    "public_code_repository": true,
+    "public_archive_or_dataset_record": true,
+    "related_reproduction_or_source_data": true
+  },
+  "route_results": {
+    "native_fermions": {
+      "status": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+      "candidate_disposition": "NO_TARGET_ARTIFACT_IDENTIFIED",
+      "reviewed_sources": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC10468619/",
+        "https://arxiv.org/abs/2303.06985",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC13083236/",
+        "https://github.com/cristiantlopez/Programming_OpticalLattice_FermiHubbard_Quantum_Simulators",
+        "https://doi.org/10.5281/zenodo.16536686"
+      ],
+      "reason": "The 2023 native-processor article exposes main-text study data but no FH-L8 compiler/event export. The 2026 collisional-gate source data are figure spreadsheets, not an FH-L8 sequence. The 2025 optical-lattice repository reproduces a different work and exposes model/algorithm source code, not the required native route export."
+    },
+    "dynamic_jw_local_grid_source_leading": {
+      "status": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+      "candidate_disposition": "NO_TARGET_ARTIFACT_IDENTIFIED",
+      "reviewed_sources": [
+        "https://arxiv.org/abs/2605.12600",
+        "https://www.uibk.ac.at/en/th-physik/quantum-computing/publications/"
+      ],
+      "reason": "The v1 paper record, TeX-source link and institution publication record were identified; no author repository, public dataset/archive, or machine-readable FH-L8 source-leading export was identified in the named searches."
+    },
+    "dynamic_jw_local_grid_figure_candidate_fit": {
+      "status": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+      "candidate_disposition": "NO_TARGET_ARTIFACT_IDENTIFIED",
+      "reviewed_sources": [
+        "https://arxiv.org/abs/2605.12600",
+        "https://www.uibk.ac.at/en/th-physik/quantum-computing/publications/"
+      ],
+      "reason": "No distinct figure-candidate-fit raw export was identified; deriving it from a figure or TeX description remains prohibited."
+    },
+    "fsn_standard_figure_candidate_fit": {
+      "status": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+      "candidate_disposition": "METHOD_CODE_ONLY_NOT_TARGET_EXPORT",
+      "reviewed_sources": [
+        "https://arxiv.org/abs/1711.04789",
+        "https://github.com/quantumlib/OpenFermion/blob/v1.7.1/src/openfermion/circuits/trotter/low_depth_trotter_error.py",
+        "https://openfermion-cirq.readthedocs.io/en/stable/generated/openfermioncirq.SwapNetworkTrotterAnsatz.html"
+      ],
+      "reason": "Versioned OpenFermion and OpenFermion-Cirq implementations demonstrate generic FSN ordering/circuit capability, but no raw FH-L8 standard-route artifact with the required workload, custody and event list was identified."
+    },
+    "fsn_ladder_figure_candidate_fit": {
+      "status": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+      "candidate_disposition": "METHOD_CODE_ONLY_NOT_TARGET_EXPORT",
+      "reviewed_sources": [
+        "https://arxiv.org/abs/1711.04789",
+        "https://github.com/quantumlib/OpenFermion/blob/v1.7.1/src/openfermion/circuits/trotter/low_depth_trotter_error.py",
+        "https://openfermion-cirq.readthedocs.io/en/stable/generated/openfermioncirq.SwapNetworkTrotterAnsatz.html"
+      ],
+      "reason": "No ladder-specific FH-L8 export was identified. Generic FSN source cannot establish the figure-candidate-fit route or its original compiler provenance."
+    }
+  },
+  "candidate_register": [
+    {
+      "candidate": "OpenFermion v1.7.1 ordered_low_depth_terms_no_info",
+      "classification": "PUBLIC_VERSIONED_METHOD_CODE",
+      "decision": "REJECT_AS_TARGET_EXPORT",
+      "basis": "accepts a Hamiltonian and returns generic simulated order; no pinned FH-L8 input, route-specific output, environment lock or original export"
+    },
+    {
+      "candidate": "OpenFermion-Cirq 0.1a0 SwapNetworkTrotterAnsatz",
+      "classification": "PUBLIC_METHOD_EXAMPLE",
+      "decision": "REJECT_AS_TARGET_EXPORT",
+      "basis": "four-qubit illustrative circuit and reusable ansatz are not either required L8 route export"
+    },
+    {
+      "candidate": "Programming Optical-Lattice Fermi-Hubbard Quantum Simulators repository and Zenodo record",
+      "classification": "PUBLIC_REPRODUCTION_CODE_FOR_DIFFERENT_WORK",
+      "decision": "REJECT_AS_NATIVE_TARGET_EXPORT",
+      "basis": "different paper/workload and Julia model/algorithm code; repository reports no releases and exposes no required ordered FH-L8 event artifact"
+    },
+    {
+      "candidate": "High-fidelity collisional quantum gates source-data spreadsheets",
+      "classification": "PUBLIC_EXPERIMENTAL_FIGURE_DATA",
+      "decision": "CONTEXT_ONLY",
+      "basis": "gate characterization spreadsheets do not contain the five-route compiler event sequence"
+    }
+  ],
+  "admitted_exports": [],
+  "third_party_code_executed": false,
+  "paper_or_figure_sequence_reconstructed": false,
+  "audit_disposition": "PUBLIC_NETWORK_PATH_EXHAUSTED_WITHIN_NAMED_SCOPE",
+  "next_state": "PIVOT_TO_INDEPENDENT_REFERENCE_CERTIFICATION",
+  "scientific_authority": "NONE_FOR_FH_L8_CROSS_ROUTE_EXPORT_COMPARISON"
+}

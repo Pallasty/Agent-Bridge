@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-PUBLIC-NETWORK-DEEP-AUDIT-V1",
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "required_routes": [
+    "native_fermions",
+    "dynamic_jw_local_grid_source_leading",
+    "dynamic_jw_local_grid_figure_candidate_fit",
+    "fsn_standard_figure_candidate_fit",
+    "fsn_ladder_figure_candidate_fit"
+  ],
+  "required_search_classes": [
+    "primary_paper_and_source_record",
+    "author_or_institution_publication_record",
+    "public_code_repository",
+    "public_archive_or_dataset_record",
+    "related_reproduction_or_source_data"
+  ],
+  "admission_boundary": {
+    "third_party_code_executed": false,
+    "third_party_package_installed": false,
+    "paper_or_figure_sequence_reconstructed": false,
+    "method_code_equated_with_target_export": false,
+    "scope": "named_sources_and_public_searches_observed_on_2026-07-21"
+  },
+  "expected_disposition": "PUBLIC_NETWORK_PATH_EXHAUSTED_WITHIN_NAMED_SCOPE",
+  "expected_next_state": "PIVOT_TO_INDEPENDENT_REFERENCE_CERTIFICATION"
+}
