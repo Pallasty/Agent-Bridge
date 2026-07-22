@@ -1,0 +1,31 @@
+{
+  "D12_costs": {
+    "candidate_group_image_upper_bound": 19413981000,
+    "primary_spill_bytes_upper_bound": 77655924000,
+    "q4_sources": 10785545,
+    "raw_candidate_upper_bound": 2426747625,
+    "source_group_image_upper_bound": 86284360,
+    "total_group_image_upper_bound": 19500265360
+  },
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D13",
+  "degree6_remainder_bounded": false,
+  "full_R100_error_bounded": false,
+  "limitations": [
+    "No equality replacing O H^5 by H^5 O is available for either observable.",
+    "The adjoint contraction route has no certified identity, resource bound, or execution authority yet.",
+    "No q5, D6 remainder, cumulative, R100, physical reference, or READY authority."
+  ],
+  "next_gate": "OBSERVABLE_SPECIFIC_ADJOINT_CONTRACTION_CONTRACT_DESIGN",
+  "physical_reference_qualified": false,
+  "q5_executed": false,
+  "ready_gate_eligible": false,
+  "route_decisions": {
+    "commutation_shortcut": "SEMANTICALLY_INVALID_NO_OBSERVABLE_COMMUTES_WITH_HOPPING_H",
+    "full_q5_materialization": "NO_GO_CURRENT_D10_ENVELOPE",
+    "observable_adjoint_contraction": "DESIGN_ONLY_NEXT",
+    "resource_expansion": "NOT_AUTHORIZED"
+  },
+  "status": "VERIFIED_D13_OBSERVABLE_ADJOINT_CONTRACTION_DESIGN_REQUIRED",
+  "two_step_cumulative_error_bounded": false,
+  "verified": true
+}
