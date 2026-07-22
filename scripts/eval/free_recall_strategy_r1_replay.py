@@ -257,6 +257,22 @@ def parse_search_keys(text: str) -> list[str]:
     return keys
 
 
+def process_has_snapshot_fd(pid: int, snapshot: Path) -> bool:
+    """Prove the child opened the clone before any query is issued."""
+    fd_dir = Path(f"/proc/{pid}/fd")
+    if not fd_dir.is_dir():
+        raise ReplayError("pre-query snapshot FD proof requires Linux /proc")
+    target = snapshot.stat()
+    for fd in fd_dir.iterdir():
+        try:
+            observed = fd.stat()
+        except OSError:
+            continue
+        if observed.st_dev == target.st_dev and observed.st_ino == target.st_ino:
+            return True
+    return False
+
+
 def run_search_mode(
     binary: Path,
     base_snapshot: Path,
@@ -276,9 +292,10 @@ def run_search_mode(
     try:
         capabilities, _ = client.call("capabilities", {"compact": True})
         cap = json.loads(capabilities)
-        observed_db = cap.get("memory", {}).get("db_path")
-        if observed_db is None or Path(observed_db).resolve() != clone.resolve():
-            raise ReplayError("MCP child did not bind to the disposable snapshot")
+        # capabilities.memory.db_path is the platform default path, not the
+        # Hub's resolved AGENT_BRIDGE_DB. Use the opened inode as authority.
+        if not process_has_snapshot_fd(client.proc.pid, clone):
+            raise ReplayError("MCP child did not open the disposable snapshot inode")
         identity = {
             "version": cap.get("version"),
             "git_sha": cap.get("build", {}).get("git_sha"),
@@ -295,6 +312,8 @@ def run_search_mode(
             timings[case["id"]] = elapsed
     finally:
         client.close()
+    if str(clone).encode("utf-8") not in stderr_path.read_bytes():
+        raise ReplayError("MCP stderr did not confirm the disposable snapshot path")
     return results, timings, identity
 
 
@@ -696,6 +715,10 @@ def selftest() -> None:
         raise AssertionError("graph route drift")
     if infer_route("查找 WIT 证据") != "multimode_rrf":
         raise AssertionError("content route drift")
+    if Path(f"/proc/{os.getpid()}/fd").is_dir():
+        with tempfile.NamedTemporaryFile() as handle:
+            if not process_has_snapshot_fd(os.getpid(), Path(handle.name)):
+                raise AssertionError("snapshot FD binding proof drift")
 
 
 def main() -> int:
