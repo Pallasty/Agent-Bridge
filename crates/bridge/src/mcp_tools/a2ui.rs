@@ -414,5 +414,10 @@ mod tests {
         let lean = super::super::exposed_tool_names_for(Some("codex-lean"), None, None);
         assert!(!lean.iter().any(|name| name == "a2ui_validate"));
         assert!(!lean.iter().any(|name| name == "a2ui_preview"));
+
+        let a2ui = super::super::exposed_tool_names_for(Some("codex-a2ui"), None, None);
+        assert!(a2ui.iter().any(|name| name == "a2ui_preview"));
+        assert!(!a2ui.iter().any(|name| name == "a2ui_validate"));
+        assert_eq!(a2ui.len(), lean.len() + 1);
     }
 }

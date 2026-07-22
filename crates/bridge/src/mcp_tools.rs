@@ -701,6 +701,7 @@ fn compact_mcp_output_default_for_policy(policy: ToolPolicy) -> bool {
         policy.set,
         ToolSet::CodexEssential
             | ToolSet::CodexLean
+            | ToolSet::CodexA2ui
             | ToolSet::ChatGptRead
             | ToolSet::ChatGptCollab
     ) || matches!(policy.profile(), ToolProfile::Compact)
@@ -40087,6 +40088,9 @@ enum ToolSet {
     Profile,
     CodexEssential,
     CodexLean,
+    /// An opt-in Codex profile for inspecting static A2UI previews.
+    /// It is deliberately the codex-lean allowlist plus one read-only tool.
+    CodexA2ui,
     ChatGptRead,
     ChatGptCollab,
     ClaudeStandard,
@@ -40101,6 +40105,7 @@ impl ToolSet {
             Self::Profile => "profile",
             Self::CodexEssential => "codex-essential",
             Self::CodexLean => "codex-lean",
+            Self::CodexA2ui => "codex-a2ui",
             Self::ChatGptRead => "chatgpt-read",
             Self::ChatGptCollab => "chatgpt-collab",
             Self::ClaudeStandard => "claude-standard",
@@ -40115,6 +40120,7 @@ impl ToolSet {
             Some("profile") | Some("legacy") => Some(Self::Profile),
             Some("codex-essential") | Some("codex") => Some(Self::CodexEssential),
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
+            Some("codex-a2ui") | Some("codex-a2ui-preview") => Some(Self::CodexA2ui),
             Some("chatgpt-read") | Some("chatgpt") | Some("openai-chat") => Some(Self::ChatGptRead),
             Some("chatgpt-collab") | Some("openai-collab") => Some(Self::ChatGptCollab),
             Some("claude-standard") | Some("claude-code") | Some("claude") => {
@@ -40136,6 +40142,7 @@ impl ToolSet {
                 .flat_map(|g| g.iter().copied())
                 .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
                 .collect(),
+            Self::CodexA2ui => vec!["a2ui_preview"],
             _ => Vec::new(),
         }
     }
@@ -40172,6 +40179,7 @@ impl ToolPolicy {
             ToolSet::Profile => legacy_profile,
             ToolSet::CodexEssential => ToolProfile::Compact,
             ToolSet::CodexLean
+            | ToolSet::CodexA2ui
             | ToolSet::ChatGptRead
             | ToolSet::ChatGptCollab
             | ToolSet::GeminiLean => ToolProfile::Essential,
@@ -40206,6 +40214,7 @@ impl ToolPolicy {
             }
             ToolSet::CodexEssential => codex_essential_tool(tier, tool_name),
             ToolSet::CodexLean => codex_lean_tool(tool_name),
+            ToolSet::CodexA2ui => codex_lean_tool(tool_name) || tool_name == "a2ui_preview",
             ToolSet::ChatGptRead => chatgpt_read_tool(tool_name),
             ToolSet::ChatGptCollab => chatgpt_collab_tool(tool_name),
             ToolSet::GeminiLean => gemini_lean_tool(tool_name),
