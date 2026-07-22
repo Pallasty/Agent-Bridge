@@ -165,6 +165,20 @@ def active_gold_state(db_path: Path, keys: set[str]) -> dict[str, Any]:
     }
 
 
+def snapshot_as_of(db_path: Path) -> int:
+    db = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        db.execute("PRAGMA query_only=ON")
+        value = db.execute(
+            "SELECT MAX(MAX(created_at, updated_at, last_accessed_at)) FROM memories"
+        ).fetchone()[0]
+    finally:
+        db.close()
+    if not isinstance(value, int) or value < 0:
+        raise ReplayError("snapshot cannot provide a non-negative frozen clock")
+    return value
+
+
 class McpClient:
     def __init__(self, binary: Path, snapshot: Path, stderr_path: Path):
         env = os.environ.copy()
@@ -367,6 +381,71 @@ def run_search_mode(
             artifact.unlink(missing_ok=True)
     if identity is None:
         raise ReplayError("search mode received no cases")
+    return results, timings, identity
+
+
+def run_frozen_adapter_mode(
+    adapter: Path,
+    base_snapshot: Path,
+    work_dir: Path,
+    mode: str,
+    cases: list[dict[str, Any]],
+    suffix: str,
+    as_of_secs: int,
+) -> tuple[dict[str, list[str]], dict[str, float], dict[str, Any]]:
+    results: dict[str, list[str]] = {}
+    timings: dict[str, float] = {}
+    expected_sha = sha256_file(base_snapshot)
+    for index, case in enumerate(cases, start=1):
+        clone = work_dir / f"state.frozen.{mode}.{suffix}.{index}.db"
+        request_path = work_dir / f"request.frozen.{mode}.{suffix}.{index}.json"
+        clone_snapshot(base_snapshot, clone)
+        request_path.write_text(
+            json.dumps(
+                {
+                    "db_path": str(clone),
+                    "query": case["query"],
+                    "mode": mode,
+                    "limit": BUDGET,
+                    "as_of_secs": as_of_secs,
+                }
+            ),
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env["AGENT_BRIDGE_SEMANTIC_W_MEM"] = "0.005"
+        started = time.perf_counter()
+        completed = subprocess.run(
+            [str(adapter), str(request_path)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+            check=False,
+        )
+        timings[case["id"]] = (time.perf_counter() - started) * 1000
+        request_path.unlink(missing_ok=True)
+        if completed.returncode != 0:
+            raise ReplayError(f"frozen adapter failed for {mode}: {completed.stderr[-500:]}")
+        payload = json.loads(completed.stdout)
+        if (
+            payload.get("schema")
+            != "agent_bridge.eval.free_recall_r1_frozen_adapter.v0"
+            or payload.get("as_of_secs") != as_of_secs
+            or payload.get("mode") != mode
+        ):
+            raise ReplayError("frozen adapter response contract drift")
+        keys = payload.get("keys")
+        if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+            raise ReplayError("frozen adapter returned malformed keys")
+        results[case["id"]] = keys
+        if sha256_file(clone) != expected_sha:
+            raise ReplayError("frozen adapter modified its query-only clone")
+        clone.unlink(missing_ok=True)
+    identity = {
+        "adapter_sha256": sha256_file(adapter),
+        "adapter_mode": "store_example_frozen_clock",
+    }
     return results, timings, identity
 
 
@@ -669,11 +748,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     eval_dir = Path(__file__).resolve().parent
     cases, fixture_hashes = load_cases(eval_dir)
     source_db = args.source_db.resolve()
-    binary = args.binary.resolve()
+    binary = args.binary.resolve() if args.binary else None
+    frozen_adapter = args.frozen_adapter.resolve() if args.frozen_adapter else None
     if not source_db.is_file():
         raise ReplayError("source DB does not exist")
-    if not binary.is_file() or not os.access(binary, os.X_OK):
-        raise ReplayError("binary is not executable")
+    if (binary is None) == (frozen_adapter is None):
+        raise ReplayError("select exactly one of --binary or --frozen-adapter")
+    selected_binary = frozen_adapter or binary
+    assert selected_binary is not None
+    if not selected_binary.is_file() or not os.access(selected_binary, os.X_OK):
+        raise ReplayError("selected replay executable is not executable")
     harness_source_commit = subprocess.check_output(
         ["git", "-C", str(args.repo), "rev-parse", "HEAD"], text=True
     ).strip()
@@ -683,6 +767,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         base_snapshot = work_dir / "state.base.db"
         source_before, source_after = read_only_backup(source_db, base_snapshot)
         base_sha_before = sha256_file(base_snapshot)
+        as_of_secs = snapshot_as_of(base_snapshot)
         corpus = active_gold_state(base_snapshot, all_gold(cases))
         if corpus["missing_count"] or corpus["non_active_count"]:
             raise ReplayError(f"CORPUS_DRIFT_BLOCKED: {json.dumps(corpus, sort_keys=True)}")
@@ -691,9 +776,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         timings: dict[str, dict[str, float]] = {}
         identities: list[dict[str, Any]] = []
         for mode in MODES:
-            searches[mode], timings[mode], identity = run_search_mode(
-                binary, base_snapshot, work_dir, mode, cases, "forward"
-            )
+            if frozen_adapter:
+                searches[mode], timings[mode], identity = run_frozen_adapter_mode(
+                    frozen_adapter, base_snapshot, work_dir, mode, cases, "forward", as_of_secs
+                )
+            else:
+                assert binary is not None
+                searches[mode], timings[mode], identity = run_search_mode(
+                    binary, base_snapshot, work_dir, mode, cases, "forward"
+                )
             identities.append(identity)
         if any(identity != identities[0] for identity in identities[1:]):
             raise ReplayError("binary identity changed across forward observations")
@@ -702,9 +793,21 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         # if access/coactivation side effects make rankings order-dependent.
         reversed_cases = list(reversed(cases))
         for mode in MODES:
-            reversed_rows, _, reverse_identity = run_search_mode(
-                binary, base_snapshot, work_dir, mode, reversed_cases, "reverse"
-            )
+            if frozen_adapter:
+                reversed_rows, _, reverse_identity = run_frozen_adapter_mode(
+                    frozen_adapter,
+                    base_snapshot,
+                    work_dir,
+                    mode,
+                    reversed_cases,
+                    "reverse",
+                    as_of_secs,
+                )
+            else:
+                assert binary is not None
+                reversed_rows, _, reverse_identity = run_search_mode(
+                    binary, base_snapshot, work_dir, mode, reversed_cases, "reverse"
+                )
             if reverse_identity != identities[0]:
                 raise ReplayError("binary identity changed during order falsifier")
             if searches[mode] != reversed_rows:
@@ -733,7 +836,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "fixture_hashes": fixture_hashes,
         "harness_source_commit": harness_source_commit,
         "binary_capabilities": identities[0],
-        "binary_sha256": sha256_file(binary),
+        "binary_sha256": sha256_file(selected_binary),
+        "frozen_as_of_secs": as_of_secs,
+        "frozen_adapter": frozen_adapter is not None,
         "snapshot_sha256_before": base_sha_before,
         "snapshot_sha256_after": base_sha_after,
         "source_total_changes_before": source_before,
@@ -790,6 +895,7 @@ def main() -> int:
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--source-db", type=Path)
     parser.add_argument("--binary", type=Path)
+    parser.add_argument("--frozen-adapter", type=Path)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
@@ -798,8 +904,8 @@ def main() -> int:
         if args.source_db is None:
             print("selftest: PASS")
             return 0
-    if args.source_db is None or args.binary is None or args.out is None:
-        parser.error("--source-db, --binary, and --out are required for replay")
+    if args.source_db is None or args.out is None:
+        parser.error("--source-db and --out are required for replay")
     report = run(args)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(

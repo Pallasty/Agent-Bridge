@@ -45,6 +45,13 @@ continues to expose only fixture IDs, ranks/counts/timings, and hashes.
 - Every score sort must use a deterministic key tie-breaker.
 - The source snapshot and base clone are never opened writable by the adapter.
 
+The adapter deliberately measures the three **store-core modes**. Bridge-level
+post-processing (machine exclusions, class quota, correction co-surface, seed
+boost, coactivation rerank, TTL projection, and telemetry) is not reproduced.
+This prevents an evaluation helper from quietly becoming a second MCP
+implementation, but narrows the claim: a passing R1.1 can establish core
+strategy potential, not parity with tb14's deployed end-to-end MCP policy.
+
 ## 4. Negative authority
 
 R1.1 must not:
@@ -85,7 +92,9 @@ Unsupported stores and malformed requests fail closed.
 ### D — Original R1 result gate
 
 Only after A–C pass may the unchanged R1 evaluator emit arm scores and apply
-the preregistered R1 strategy, mechanism, router, and cost gates.
+the preregistered R1 strategy, mechanism, router, and cost gates. Those gates
+are interpreted as store-core evidence; they cannot authorize deployment or
+claim full-MCP performance.
 
 ## 6. Rollback
 

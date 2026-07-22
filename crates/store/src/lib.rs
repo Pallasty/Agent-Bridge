@@ -3809,6 +3809,22 @@ pub trait StateStore: Send + Sync {
         threshold: f32,
     ) -> Result<Vec<MemorySearchHit>>;
 
+    /// Frozen-clock semantic search for deterministic evaluation. Production
+    /// callers continue to use [`Self::memory_search_semantic`]; unsupported
+    /// backends fail closed instead of silently consulting wall time.
+    async fn memory_search_semantic_as_of(
+        &self,
+        query: &str,
+        limit: u32,
+        threshold: f32,
+        as_of_secs: i64,
+    ) -> Result<Vec<MemorySearchHit>> {
+        let _ = (query, limit, threshold, as_of_secs);
+        Err(ab_core::Error::Backend(
+            "memory_search_semantic_as_of unsupported by this store backend".into(),
+        ))
+    }
+
     /// Scope-safe semantic search for bootstrap and other contextual recall.
     ///
     /// Returns only rows visible under [`memory_scope_visible_in_context`]:

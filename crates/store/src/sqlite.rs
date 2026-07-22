@@ -7219,6 +7219,17 @@ impl StateStore for SqliteStore {
             .await
     }
 
+    async fn memory_search_semantic_as_of(
+        &self,
+        query: &str,
+        limit: u32,
+        threshold: f32,
+        as_of_secs: i64,
+    ) -> Result<Vec<MemorySearchHit>> {
+        self.memory_search_semantic_as_of_inner(query, limit, threshold, as_of_secs)
+            .await
+    }
+
     async fn memory_search_semantic_in_scope(
         &self,
         query: &str,
@@ -12058,6 +12069,105 @@ impl StateStore for SqliteStore {
 }
 
 impl SqliteStore {
+    /// Evaluation-only semantic leg with a caller-bound clock. This mirrors
+    /// `memory_search_semantic_in_scope` for the unscoped case; production
+    /// callers do not reach it.
+    async fn memory_search_semantic_as_of_inner(
+        &self,
+        query: &str,
+        limit: u32,
+        threshold: f32,
+        as_of_secs: i64,
+    ) -> Result<Vec<MemorySearchHit>> {
+        if as_of_secs < 0 {
+            return Err(Error::Backend(
+                "memory_search_semantic_as_of requires a non-negative as_of_secs".into(),
+            ));
+        }
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let query_vec = crate::vector::embed_text(query);
+        let limit_usize = limit as usize;
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(MemoryRecord, Vec<u8>)>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, kind, content, tags, related_keys, scope,
+                            created_at, updated_at, last_accessed_at, access_count,
+                            importance, status, trigger_pattern, superseded_by, embedding
+                     FROM memories
+                     WHERE status = 'active' AND embedding IS NOT NULL
+                     ORDER BY key COLLATE BINARY",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        let tags_s: String = row.get(3)?;
+                        let related_s: String = row.get(4)?;
+                        let record = MemoryRecord {
+                            key: row.get(0)?,
+                            kind: row.get(1)?,
+                            content: row.get(2)?,
+                            tags: parse_str_array(&tags_s),
+                            related_keys: parse_str_array(&related_s),
+                            scope: row.get(5)?,
+                            created_at: row.get(6)?,
+                            updated_at: row.get(7)?,
+                            last_accessed_at: row.get(8)?,
+                            access_count: row.get::<_, i64>(9)? as u64,
+                            importance: row.get::<_, f64>(10).unwrap_or(0.5),
+                            status: row
+                                .get::<_, String>(11)
+                                .unwrap_or_else(|_| "active".to_string()),
+                            trigger_pattern: row.get::<_, Option<String>>(12)?,
+                            superseded_by: row.get::<_, Option<String>>(13)?,
+                        };
+                        Ok((record, row.get(14)?))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_search_semantic_as_of: {e}")))?;
+
+        let weights = semantic_rank_weights();
+        let mut hits: Vec<MemorySearchHit> = rows
+            .into_iter()
+            .filter_map(|(record, embedding)| {
+                let stored_vec = crate::vector::decode_embedding(&embedding);
+                if stored_vec.is_empty() {
+                    return None;
+                }
+                let cosine = crate::vector::cosine_similarity(&query_vec, &stored_vec);
+                if cosine < threshold {
+                    return None;
+                }
+                let score = semantic_blend_score(
+                    weights,
+                    cosine,
+                    record.importance,
+                    record.last_accessed_at,
+                    record.access_count,
+                    &record.kind,
+                    as_of_secs,
+                );
+                Some(MemorySearchHit {
+                    record,
+                    score,
+                    cosine: Some(cosine),
+                })
+            })
+            .collect();
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.record.key.cmp(&b.record.key))
+        });
+        hits.truncate(limit_usize);
+        Ok(hits)
+    }
+
     /// Parameterised core of `memory_search_as_of`. `or_primary` selects the
     /// primary FTS query shape — implicit-AND ([`sanitise_fts_query`]) or the
     /// OR-joined variant ([`sanitise_fts_query_any`]), opted in via
@@ -14324,6 +14434,52 @@ mod tests {
             "memory_import should stamp embedding_backend for imported rows"
         );
 
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn semantic_as_of_is_repeatable_and_rejects_negative_clock() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-semantic-as-of-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        for (key, content) in [
+            ("semantic_clock_a", "frozen semantic clock alpha"),
+            ("semantic_clock_b", "frozen semantic clock beta"),
+        ] {
+            let mut record = mk_record(key, 1_700_000_000);
+            record.content = content.into();
+            store.memory_save(&record).await.expect("save");
+        }
+        let first = store
+            .memory_search_semantic_as_of("frozen semantic clock", 20, 0.0, 1_700_000_100)
+            .await
+            .expect("first frozen search");
+        let second = store
+            .memory_search_semantic_as_of("frozen semantic clock", 20, 0.0, 1_700_000_100)
+            .await
+            .expect("second frozen search");
+        assert_eq!(
+            first
+                .iter()
+                .map(|hit| (&hit.record.key, hit.score.to_bits()))
+                .collect::<Vec<_>>(),
+            second
+                .iter()
+                .map(|hit| (&hit.record.key, hit.score.to_bits()))
+                .collect::<Vec<_>>()
+        );
+        assert!(store
+            .memory_search_semantic_as_of("frozen", 20, 0.0, -1)
+            .await
+            .is_err());
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
