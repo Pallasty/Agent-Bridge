@@ -150,6 +150,7 @@ def validate_contract(value: dict) -> None:
         "exact_secret_value_scan_required": True,
         "raw_credentials_endpoints_or_bootstrap_secrets_in_repository_or_receipts_allowed": False,
         "clock_skew_observed_and_bounded_required": True,
+        "maximum_attestation_time_spread_seconds": 300,
     }
     assert value["external_checkpoint"] == {
         "substage": "T22_A1_R",

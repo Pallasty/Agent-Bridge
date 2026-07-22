@@ -83,6 +83,23 @@ A candidate's self-reported distinctness is not authoritative. The coordinator
 must recompute cross-packet uniqueness, freshness, source binding, signatures,
 and endpoint/ACL equality before any future execution payload can be generated.
 
+The offline verifier now implements that recomputation. It admits only a
+private `0700` directory containing exactly `domain-{1,2,3}.{json,pub}` and
+`domain-{1,2,3}.json.sig`. Packets must use canonical one-line JSON plus one LF,
+their domain-separated self digests must match, and each complete packet must
+verify under SSHSIG namespace `agent-bridge-t22-a1-domain-v1` and its own
+domain identity. Public keys are normalized to their algorithm/key material
+before hashing, so comments cannot change identity. The three packet times may
+span at most 300 seconds.
+
+Successful set verification emits only packet, signature, public-key, endpoint,
+and ACL digests. It deliberately returns
+`THREE_DOMAIN_INPUT_SET_COMPLETE_PENDING_OWNER_COUNTERSIGNATURE_NON_EXECUTING`;
+it is not an execution permit. Real packet collection remains absent until an
+exact owner-signed collection challenge can bind the selected third domain and
+private artifact root. Thus the current verifier can be fully tested without
+reading a real stable host identifier.
+
 ## Private network boundary
 
 The contract selects an owner-managed private overlay and forbids public
@@ -155,12 +172,19 @@ blocked until these inputs are concrete.
 - domain-attestation schema raw SHA-256:
   `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b`;
 - admission-contract content SHA-256:
-  `785a7d1295e5936e2b41530548086b136b62022b9c1670581eec11513a993368`;
+  `88fe5e0198e096fd2a7e93951b10db843166b94b99b0de8471cc411e22a2631e`;
 - blocked owner-proposal content SHA-256:
-  `abc2e69bc50d02de75c42024b20cbfd97ab77770333678db0e77e56e0c795609`.
+  `62c26d44d929830c04cdacfbdffa8e71183e4e1a951f5cbc4dc95aef1decc05c`.
 
 The offline gate exercises 46 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends
 nothing, injects no fault, and creates no transparency-log entry.
+
+The private-bundle verifier adds 30 synthetic directed negatives over packet
+shape, self digest, source/freshness, provider branch, private-key and network
+claims, cross-domain identity/key/alias uniqueness, endpoint/ACL equality,
+clock spread, signature mismatch, and exact bundle contents. Its KAT generates
+only ephemeral synthetic keys and removes them; it reads zero real host
+identifiers and produces zero real attestations.

@@ -37,6 +37,10 @@ rollback prevention.
   attestation-set, ACL, fault-target, and public-output choices unset; and
 - offline preflight plus 46 semantic negative mutations that recompute packet
   self-digests before rejection.
+- private three-packet bundle verifier with canonical framing, SSHSIG, public-key
+  normalization, four-hour freshness, 300-second clock spread, alias-collapse,
+  identity/key uniqueness, endpoint/ACL equality, and exact directory closure;
+  its 30 synthetic negatives create no real attestation.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -55,13 +59,19 @@ The gate returned `t22_a1_three_domain_preflight_gate pass` with:
 - spend: USD 0; and
 - public transparency entries created: 0.
 
+The domain verifier independently reports
+`BLOCKED_EXACT_THREE_PRIVATE_ATTESTATION_BUNDLE_AND_OWNER_COUNTERSIGNATURE_REQUIRED`.
+Its `status` path reads neither stable host identity nor a private bundle. A
+successful future `verify-set` result will still be non-executing until the
+owner countersigns the exact set.
+
 Frozen packet identities:
 
 | Packet | SHA-256 |
 |---|---|
 | domain-attestation schema raw bytes | `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b` |
-| admission-contract content | `785a7d1295e5936e2b41530548086b136b62022b9c1670581eec11513a993368` |
-| blocked owner proposal content | `abc2e69bc50d02de75c42024b20cbfd97ab77770333678db0e77e56e0c795609` |
+| admission-contract content | `88fe5e0198e096fd2a7e93951b10db843166b94b99b0de8471cc411e22a2631e` |
+| blocked owner proposal content | `62c26d44d929830c04cdacfbdffa8e71183e4e1a951f5cbc4dc95aef1decc05c` |
 
 ## Advancement boundary
 
@@ -76,6 +86,11 @@ No signature is requested yet. The next concrete inputs are:
 After those exist, a separate unit may build the cross-host runner, generate a
 source-bound execution payload, and ask the owner to sign it. Public Rekor
 submission remains a separate explicit choice.
+
+The collector that reads real machine/hardware/boot identifiers is
+intentionally not unlocked by this unit. It must first consume an exact signed
+collection challenge naming the selected domains; this prevents a generic
+inventory utility from silently harvesting stable identifiers.
 
 Full design and operational conditions are recorded in
 `docs/design/BIOCORTEX_TRACK_B_T22_A1_THREE_DOMAIN_ADMISSION_2026_07_22.md`.

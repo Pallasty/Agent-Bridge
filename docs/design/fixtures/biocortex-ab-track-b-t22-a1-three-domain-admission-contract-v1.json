@@ -56,7 +56,8 @@
     "per_domain_cleanup_receipts_required": true,
     "exact_secret_value_scan_required": true,
     "raw_credentials_endpoints_or_bootstrap_secrets_in_repository_or_receipts_allowed": false,
-    "clock_skew_observed_and_bounded_required": true
+    "clock_skew_observed_and_bounded_required": true,
+    "maximum_attestation_time_spread_seconds": 300
   },
   "external_checkpoint": {
     "substage": "T22_A1_R",
@@ -78,5 +79,5 @@
     "external_anti_rollback_proved": false,
     "production_admissible": false
   },
-  "contract_sha256": "785a7d1295e5936e2b41530548086b136b62022b9c1670581eec11513a993368"
+  "contract_sha256": "88fe5e0198e096fd2a7e93951b10db843166b94b99b0de8471cc411e22a2631e"
 }
