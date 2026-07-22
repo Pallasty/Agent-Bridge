@@ -281,39 +281,55 @@ def run_search_mode(
     cases: list[dict[str, Any]],
     suffix: str,
 ) -> tuple[dict[str, list[str]], dict[str, float], dict[str, Any]]:
-    clone = work_dir / f"state.{mode}.{suffix}.db"
-    stderr_path = work_dir / f"mcp.{mode}.{suffix}.stderr.log"
-    clone_snapshot(base_snapshot, clone)
-    if sha256_file(clone) != sha256_file(base_snapshot):
-        raise ReplayError("disposable clone did not start from frozen base")
-    client = McpClient(binary, clone, stderr_path)
     results: dict[str, list[str]] = {}
     timings: dict[str, float] = {}
-    try:
-        capabilities, _ = client.call("capabilities", {"compact": True})
-        cap = json.loads(capabilities)
-        # capabilities.memory.db_path is the platform default path, not the
-        # Hub's resolved AGENT_BRIDGE_DB. Use the opened inode as authority.
-        if not process_has_snapshot_fd(client.proc.pid, clone):
-            raise ReplayError("MCP child did not open the disposable snapshot inode")
-        identity = {
-            "version": cap.get("version"),
-            "git_sha": cap.get("build", {}).get("git_sha"),
-            "git_describe": cap.get("build", {}).get("git_describe"),
-            "embedding_backend": cap.get("memory", {}).get("embedding", {}).get("backend"),
-            "embedding_dim": cap.get("memory", {}).get("embedding", {}).get("dim"),
-        }
-        for case in cases:
+    expected_sha = sha256_file(base_snapshot)
+    identity: dict[str, Any] | None = None
+    for index, case in enumerate(cases, start=1):
+        clone = work_dir / f"state.{mode}.{suffix}.{index}.db"
+        stderr_path = work_dir / f"mcp.{mode}.{suffix}.{index}.stderr.log"
+        clone_snapshot(base_snapshot, clone)
+        if sha256_file(clone) != expected_sha:
+            raise ReplayError("disposable clone did not start from frozen base")
+        client = McpClient(binary, clone, stderr_path)
+        try:
+            capabilities, _ = client.call("capabilities", {"compact": True})
+            cap = json.loads(capabilities)
+            # capabilities.memory.db_path is the platform default path, not the
+            # Hub's resolved AGENT_BRIDGE_DB. Use the opened inode as authority.
+            if not process_has_snapshot_fd(client.proc.pid, clone):
+                raise ReplayError("MCP child did not open the disposable snapshot inode")
+            observed_identity = {
+                "version": cap.get("version"),
+                "git_sha": cap.get("build", {}).get("git_sha"),
+                "git_describe": cap.get("build", {}).get("git_describe"),
+                "embedding_backend": cap.get("memory", {}).get("embedding", {}).get("backend"),
+                "embedding_dim": cap.get("memory", {}).get("embedding", {}).get("dim"),
+            }
+            if identity is None:
+                identity = observed_identity
+            elif observed_identity != identity:
+                raise ReplayError("binary identity changed within one search mode")
             text, elapsed = client.call(
                 "memory_search",
                 {"query": case["query"], "mode": mode, "limit": BUDGET, "compact": True},
             )
             results[case["id"]] = parse_search_keys(text)
             timings[case["id"]] = elapsed
-    finally:
-        client.close()
-    if str(clone).encode("utf-8") not in stderr_path.read_bytes():
-        raise ReplayError("MCP stderr did not confirm the disposable snapshot path")
+        finally:
+            client.close()
+        if str(clone).encode("utf-8") not in stderr_path.read_bytes():
+            raise ReplayError("MCP stderr did not confirm the disposable snapshot path")
+        for artifact in (
+            clone,
+            Path(f"{clone}-wal"),
+            Path(f"{clone}-shm"),
+            Path(f"{clone}-journal"),
+            stderr_path,
+        ):
+            artifact.unlink(missing_ok=True)
+    if identity is None:
+        raise ReplayError("search mode received no cases")
     return results, timings, identity
 
 
