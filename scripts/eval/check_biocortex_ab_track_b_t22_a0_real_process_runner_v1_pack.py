@@ -72,9 +72,15 @@ module.subprocess.Popen = ForbiddenCall("process start")
 module.socket.socket = ForbiddenCall("port bind")
 try:
     status = module.status()
-    assert status["status"] == "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED"
+    expected_state = (
+        "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_SOURCE_BOUND_TOOL_RECEIPT_REQUIRED"
+        if status["pinned_tools_present"]
+        else "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED"
+    )
+    assert status["status"] == expected_state
     assert status["owner_trust_anchor_present"] is True
     assert status["owner_trust_anchor_valid"] is True
+    assert isinstance(status["pinned_tools_present"], bool)
     assert status["network_attempted"] is False
     assert status["processes_started"] == status["faults_injected"] == 0
     try:
@@ -106,6 +112,32 @@ value, revision = module.exact_range_value({
     "kvs": [{"key": module.b64(key), "value": module.b64(consumed)}],
 }, key)
 assert value == consumed and revision == "7"
+
+failure_range = {
+    "header": {"revision": "8"}, "count": "1",
+    "kvs": [{"key": module.b64(key), "value": module.b64(consumed)}],
+}
+for rejected in (
+    {"responses": [{"response_range": failure_range}]},
+    {"succeeded": False, "responses": [{"response_range": failure_range}]},
+):
+    assert module.exact_rejected_txn_range(rejected, key, consumed, "7") == "8"
+wrong_value_range = copy.deepcopy(failure_range)
+wrong_value_range["kvs"][0]["value"] = module.b64(seed)
+old_revision_range = copy.deepcopy(failure_range)
+old_revision_range["header"]["revision"] = "6"
+for unsafe in (
+    {"succeeded": True, "responses": [{"response_range": failure_range}]},
+    {"responses": []},
+    {"responses": [{"response_put": {"header": {"revision": "8"}}}]},
+    {"responses": [{"response_range": wrong_value_range}]},
+    {"responses": [{"response_range": old_revision_range}]},
+):
+    try:
+        module.exact_rejected_txn_range(unsafe, key, consumed, "7")
+    except module.SafeFailure:
+        continue
+    raise AssertionError("replay transaction without exact failure-range proof admitted")
 
 try:
     module.validate_loopback_url("https://example.com:443/x", contract)
@@ -168,7 +200,7 @@ authorization.validate_anchor(
     json.loads(authorization.PROPOSAL_PATH.read_text()),
 )
 print("t22_a0_real_process_runner_check\tpass")
-print(f"directed_negative_test_count\t{len(mutations) + 7}")
+print(f"directed_negative_test_count\t{len(mutations) + 12}")
 print("network_attempted\tfalse")
 print("processes_started\t0")
 print("faults_injected\t0")

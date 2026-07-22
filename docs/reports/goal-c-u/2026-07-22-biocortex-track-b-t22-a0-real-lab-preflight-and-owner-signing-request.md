@@ -2,11 +2,17 @@
 
 ## Outcome
 
-T22-A0 is intentionally blocked before owner signature. The current host is a
-single physical Linux machine with enough compute and disk for a small
-multi-process pilot, but `etcd`, `etcdctl`, `bao`, and `toxiproxy-server` are
-not installed. No credential, network endpoint, provider, cloud resource, or
-secret was inspected; no service was started and no fault was injected.
+T22-A0 crossed the real-process boundary once and failed closed before fault
+injection. Hash-pinned etcd 3.7.0, OpenBao 2.6.0, and Toxiproxy 2.12.0 were
+acquired; three etcd processes formed one local cluster; then the runner's
+strict `succeeded is False` check rejected the replay response. Official API
+semantics and protobuf-JSON default-field behavior make an omitted false scalar
+the leading diagnosis, but the original runner did not persist the raw
+response. The authorization was irreversibly consumed, all three
+owned processes stopped without SIGKILL, all 14 loopback ports were released,
+and no OpenBao process, Toxiproxy process, fault, credential, host-global
+network mutation, spend, or production claim occurred. A source-bound rerun
+requires a fresh owner signature after the response verifier correction lands.
 
 ## Proposed first real execution
 
@@ -102,11 +108,11 @@ network boundary. Its present result is
 is constructed and no release artifact is downloaded before authorization.
 
 `scripts/check-biocortex-ab-track-b-t22-a0-real-process-runner-v1-pack.sh`
-adds 27 directed negative cases over the signed execution-contract binding,
+adds 32 directed negative cases over the signed execution-contract binding,
 one-shot authorization use, exact loopback ports, clean environment, etcd CAS
 shape, canonical/hash-chained evidence, process-start boundary, and exact
 ephemeral-bootstrap-value leak rejection. Its current result is
-`BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED`; the test uses no
+`BLOCKED_EXACT_SIGNED_PAYLOAD_AND_SOURCE_BOUND_TOOL_RECEIPT_REQUIRED`; the test uses no
 real service double and proves that the offline status and rejection paths
 construct no network opener, start no process, inject no fault, and create no
 real evidence.
@@ -132,6 +138,22 @@ fault, or real evidence was created. The corrected source freezes all three
 artifact byte counts, raises only OpenBao's cap to 96 MiB, and requires a fresh
 source-bound payload and owner signature; the earlier authorization must not be
 reused.
+
+The second exact signature, bound to source commit `5b84873e`, acquired all
+three pinned tools and entered the one-shot runner. Real run
+`t22-a0-20260722T091828.865372z-250aee7115e7` formed a three-process etcd
+cluster, then terminated with `E_ETCD_REPLAY_CONSUME_ADMITTED`. The terminal
+receipt SHA-256 is
+`c5478beffd84e81c335f027b87904d898d863dd11df252deb37e403b34acf613`;
+its cleanup receipt proves all three owned processes stopped. Official etcd
+semantics define `succeeded=false` as selection of the transaction Failure
+block, whose responses correspond to that block. This makes omission of the
+default-false scalar the evidence-backed diagnosis rather than a directly
+captured fact. The corrected verifier
+accepts an omitted default-false scalar only when the response also contains
+exactly one failure RangeResponse that reads back the same consumed key/value
+at a non-regressing revision. The consumed second authorization must not be
+reused; another source-bound payload and owner signature are required.
 
 After the exact owner signature verifies, the operator sequence is fixed: first
 run the owner-gated pinned-tool acquirer into the exact `tools` directory, then

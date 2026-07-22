@@ -330,6 +330,25 @@ def exact_range_value(response: dict, expected_key: bytes) -> tuple[bytes, str]:
     return decoded(row["value"]), revision
 
 
+def exact_rejected_txn_range(
+    response: dict, expected_key: bytes, expected_value: bytes, minimum_revision: str,
+) -> str:
+    # Protobuf JSON may omit the default false scalar. The applied failure
+    # branch is therefore proven by its exact RangeResponse, not by accepting a
+    # missing `succeeded` field on its own.
+    require(response.get("succeeded", False) is False, "E_ETCD_REPLAY_CONSUME_ADMITTED")
+    operations = response.get("responses")
+    require(isinstance(operations, list) and len(operations) == 1, "E_ETCD_REPLAY_FAILURE_RESPONSE")
+    operation = operations[0]
+    require(isinstance(operation, dict) and set(operation) == {"response_range"}, "E_ETCD_REPLAY_FAILURE_RESPONSE")
+    range_response = operation["response_range"]
+    require(isinstance(range_response, dict), "E_ETCD_REPLAY_FAILURE_RESPONSE")
+    value, revision = exact_range_value(range_response, expected_key)
+    require(value == expected_value, "E_ETCD_REPLAY_FAILURE_VALUE")
+    require(int(revision) >= int(minimum_revision), "E_ETCD_REPLAY_FAILURE_REVISION")
+    return revision
+
+
 class EventLog:
     def __init__(self, path: Path):
         self.path = path
@@ -564,7 +583,7 @@ class Runner:
         read_value, read_revision = exact_range_value(self.http_json(base, "/v3/kv/range", "POST", etcd_range_request(key)), key)
         require(read_value == consumed and int(read_revision) >= int(revision), "E_ETCD_LINEARIZABLE_READBACK")
         replay = self.http_json(base, "/v3/kv/txn", "POST", etcd_consume_request(key, seed, consumed))
-        require(replay.get("succeeded") is False, "E_ETCD_REPLAY_CONSUME_ADMITTED")
+        replay_revision = exact_rejected_txn_range(replay, key, consumed, read_revision)
         self.events.append("ETCD_LINEARIZABLE_AUTHORIZE_CONSUME_OBSERVED", {
             "authority_key_sha256": hashlib.sha256(key).hexdigest(),
             "seed_value_sha256": hashlib.sha256(seed).hexdigest(),
@@ -572,6 +591,7 @@ class Runner:
             "consume_revision": revision,
             "linearizable_read_revision": read_revision,
             "replay_consume_rejected": True,
+            "replay_failure_read_revision": replay_revision,
         })
         return {"key": key, "consumed": consumed, "revision": revision, "read_revision": read_revision}
 
@@ -942,6 +962,8 @@ def status() -> dict:
         state = "BLOCKED_OWNER_TRUST_ANCHOR_AND_EXACT_SIGNATURE_REQUIRED"
     elif not authorization_status["owner_trust_anchor_valid"]:
         state = "BLOCKED_OWNER_TRUST_ANCHOR_INVALID"
+    elif tools_present:
+        state = "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_SOURCE_BOUND_TOOL_RECEIPT_REQUIRED"
     else:
         state = "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED"
     return {
