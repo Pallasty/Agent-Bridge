@@ -21,6 +21,7 @@
       "artifact_name": "etcd-v3.7.0-linux-amd64.tar.gz",
       "artifact_url": "https://github.com/etcd-io/etcd/releases/download/v3.7.0/etcd-v3.7.0-linux-amd64.tar.gz",
       "artifact_sha256": "b05cb07f5686dab8f9cdab89986b44f0dd24aaf5c627176aff325e21fa56f9f0",
+      "artifact_size_bytes": 23857260,
       "archive_format": "tar.gz",
       "maximum_download_bytes": 67108864,
       "installed_binaries": [
@@ -43,8 +44,9 @@
       "artifact_name": "openbao_2.6.0_linux_amd64.tar.gz",
       "artifact_url": "https://github.com/openbao/openbao/releases/download/v2.6.0/openbao_2.6.0_linux_amd64.tar.gz",
       "artifact_sha256": "42d83073f2d7a28ed408840138b0312111a8d4b2f5617086f009150336dad6d4",
+      "artifact_size_bytes": 75952530,
       "archive_format": "tar.gz",
-      "maximum_download_bytes": 67108864,
+      "maximum_download_bytes": 100663296,
       "installed_binaries": [
         {
           "archive_member": "bao",
@@ -61,6 +63,7 @@
       "artifact_name": "toxiproxy-server-linux-amd64",
       "artifact_url": "https://github.com/Shopify/toxiproxy/releases/download/v2.12.0/toxiproxy-server-linux-amd64",
       "artifact_sha256": "556d891134a3c582dc1e1a3f7335fd55142e5965769855a00b944e13e48302fc",
+      "artifact_size_bytes": 8642712,
       "archive_format": "raw",
       "maximum_download_bytes": 33554432,
       "installed_binaries": [

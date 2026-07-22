@@ -29,19 +29,21 @@ proposal.
 
 The public-tool supply chain is now frozen in
 `docs/design/fixtures/biocortex-ab-track-b-t22-a0-public-tool-pins-v1.json`
-(SHA-256 `87bad005334766ba4dbb80d11cc8d6418f5d35d3148472235222634471d82cc5`):
+(SHA-256 `c5f1d79dc232b1de6be2a3f4f190bd4adf4fb10425529dff1ad94747402b7dc7`):
 
-| Tool | Version | Linux/amd64 artifact SHA-256 |
-| --- | --- | --- |
-| etcd / etcdctl | 3.7.0 | `b05cb07f5686dab8f9cdab89986b44f0dd24aaf5c627176aff325e21fa56f9f0` |
-| OpenBao / bao | 2.6.0 | `42d83073f2d7a28ed408840138b0312111a8d4b2f5617086f009150336dad6d4` |
-| Toxiproxy server | 2.12.0 | `556d891134a3c582dc1e1a3f7335fd55142e5965769855a00b944e13e48302fc` |
+| Tool | Version | Exact bytes | Linux/amd64 artifact SHA-256 |
+| --- | --- | ---: | --- |
+| etcd / etcdctl | 3.7.0 | 23,857,260 | `b05cb07f5686dab8f9cdab89986b44f0dd24aaf5c627176aff325e21fa56f9f0` |
+| OpenBao / bao | 2.6.0 | 75,952,530 | `42d83073f2d7a28ed408840138b0312111a8d4b2f5617086f009150336dad6d4` |
+| Toxiproxy server | 2.12.0 | 8,642,712 | `556d891134a3c582dc1e1a3f7335fd55142e5965769855a00b944e13e48302fc` |
 
 Each artifact hash must also appear exactly once in the separately hash-pinned
 upstream checksum document. Redirects are limited to GitHub's release-asset
-host, downloads are size bounded, archive extraction selects only the four
-named regular files, and a canonical acquisition receipt records both archive
-and installed-binary hashes. The acquisition destination is fixed to
+host, ambient proxies are explicitly disabled, and every artifact must match
+both its frozen byte count and SHA-256 while remaining below its safety cap.
+Archive extraction selects only the four named regular files, and a canonical
+acquisition receipt records both archive and installed-binary hashes. The
+acquisition destination is fixed to
 `/Data/CascadeProjects/.artifacts/agent-bridge/biocortex-track-b-t22-a0-real-lab/tools`.
 
 ## Owner authorization state
@@ -92,7 +94,8 @@ result is `READY_TO_GENERATE_EXACT_PAYLOAD`; signature and real-execution flags
 remain false.
 
 `scripts/check-biocortex-ab-track-b-t22-a0-acquire-pinned-tools-v1-pack.sh`
-adds 16 directed safety checks for pin drift, URL and size policy, output path
+adds 20 directed safety checks for pin drift, exact byte-size enforcement, URL
+and size policy, output path
 escape, duplicate checksums, archive extraction, and the authorization-before-
 network boundary. Its present result is
 `BLOCKED_EXACT_OWNER_SIGNATURE_REQUIRED`; it confirms that no network request
@@ -120,6 +123,15 @@ The proposal confirmation and dedicated public-key binding are complete. The
 trust-anchor commit must land on both remotes before the exact four-hour payload
 is generated. The owner's private key never enters this repository or the lab
 artifact root.
+
+The first exact signature, bound to source commit `ae393577`, verified
+successfully. Its acquisition attempt then failed closed before final install:
+OpenBao's immutable 75,952,530-byte artifact exceeded the original 64 MiB
+safety cap. The staging directory was removed; no final tools, service process,
+fault, or real evidence was created. The corrected source freezes all three
+artifact byte counts, raises only OpenBao's cap to 96 MiB, and requires a fresh
+source-bound payload and owner signature; the earlier authorization must not be
+reused.
 
 After the exact owner signature verifies, the operator sequence is fixed: first
 run the owner-gated pinned-tool acquirer into the exact `tools` directory, then

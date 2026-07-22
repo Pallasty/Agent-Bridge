@@ -72,6 +72,7 @@ def validate_pins(pins: dict) -> None:
     for tool in pins["tools"]:
         assert tool["archive_format"] in {"tar.gz", "raw"}
         assert 0 < tool["maximum_download_bytes"] <= 128 * 1024 * 1024
+        assert 0 < tool["artifact_size_bytes"] <= tool["maximum_download_bytes"]
         assert len(tool["artifact_sha256"]) == len(tool["checksum_sha256"]) == 64
         assert all(character in "0123456789abcdef" for character in tool["artifact_sha256"] + tool["checksum_sha256"])
         validate_https_url(tool["release_url"], ALLOWED_INITIAL_HOSTS)
@@ -125,7 +126,9 @@ class RestrictedRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def download(opener, url: str, output: Path, maximum_bytes: int) -> None:  # noqa: ANN001
+def download(
+    opener, url: str, output: Path, maximum_bytes: int, expected_bytes: int | None = None,
+) -> None:  # noqa: ANN001
     validate_https_url(url, ALLOWED_INITIAL_HOSTS)
     request = urllib.request.Request(url, headers={"User-Agent": "agent-bridge-t22-a0/1"})
     written = 0
@@ -133,7 +136,10 @@ def download(opener, url: str, output: Path, maximum_bytes: int) -> None:  # noq
         validate_https_url(response.geturl(), ALLOWED_REDIRECT_HOSTS)
         length = response.headers.get("Content-Length")
         if length is not None:
-            assert 0 <= int(length) <= maximum_bytes
+            announced = int(length)
+            assert 0 <= announced <= maximum_bytes
+            if expected_bytes is not None:
+                assert announced == expected_bytes
         while True:
             chunk = response.read(READ_CHUNK_BYTES)
             if not chunk:
@@ -142,6 +148,8 @@ def download(opener, url: str, output: Path, maximum_bytes: int) -> None:  # noq
             assert written <= maximum_bytes
             handle.write(chunk)
     assert written > 0
+    if expected_bytes is not None:
+        assert written == expected_bytes
 
 
 def checksum_document_entry(document: Path, artifact_name: str) -> str:
@@ -229,7 +237,9 @@ def acquire(payload_path: Path, signature_path: Path, destination: Path) -> dict
         binaries = stage / "bin"
         downloads.mkdir(mode=0o700)
         binaries.mkdir(mode=0o700)
-        opener = urllib.request.build_opener(RestrictedRedirectHandler())
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), RestrictedRedirectHandler(),
+        )
         evidence: list[dict] = []
         installed: list[dict] = []
         for tool in pins["tools"]:
@@ -238,7 +248,10 @@ def acquire(payload_path: Path, signature_path: Path, destination: Path) -> dict
             download(opener, tool["checksum_url"], checksum, CHECKSUM_MAXIMUM_BYTES)
             assert sha256_file(checksum) == tool["checksum_sha256"]
             assert checksum_document_entry(checksum, tool["artifact_name"]) == tool["artifact_sha256"]
-            download(opener, tool["artifact_url"], artifact, tool["maximum_download_bytes"])
+            download(
+                opener, tool["artifact_url"], artifact,
+                tool["maximum_download_bytes"], tool["artifact_size_bytes"],
+            )
             assert sha256_file(artifact) == tool["artifact_sha256"]
             tool_binaries = install_tool(tool, artifact, binaries)
             installed.extend(tool_binaries)

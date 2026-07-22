@@ -38,6 +38,8 @@ for mutation in (
     lambda x: x["tools"].pop(),
     lambda x: x["tools"][0].update(archive_format="zip"),
     lambda x: x["tools"][0].update(maximum_download_bytes=1024 * 1024 * 1024),
+    lambda x: x["tools"][0].update(artifact_size_bytes=0),
+    lambda x: x["tools"][0].update(maximum_download_bytes=x["tools"][0]["artifact_size_bytes"] - 1),
     lambda x: x["tools"][0].update(artifact_url="http://github.com/example"),
     lambda x: x["tools"][0].update(checksum_sha256="0"),
     lambda x: x["tools"][0]["installed_binaries"][0].update(output_name="../etcd"),
@@ -86,6 +88,43 @@ with tempfile.TemporaryDirectory() as directory:
     else:
         raise AssertionError("duplicate checksum entry admitted")
 
+    class SyntheticResponse(io.BytesIO):
+        def __init__(self, content: bytes, announced: int | None):
+            super().__init__(content)
+            self.headers = {} if announced is None else {"Content-Length": str(announced)}
+
+        def geturl(self) -> str:
+            return "https://release-assets.githubusercontent.com/synthetic"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    class SyntheticOpener:
+        def __init__(self, content: bytes, announced: int | None):
+            self.content = content
+            self.announced = announced
+
+        def open(self, *_args, **_kwargs):
+            return SyntheticResponse(self.content, self.announced)
+
+    exact = root / "exact-artifact"
+    module.download(
+        SyntheticOpener(b"abc", 3), "https://github.com/synthetic", exact, 4, 3,
+    )
+    assert exact.read_bytes() == b"abc"
+    for name, opener in (
+        ("announced-size-drift", SyntheticOpener(b"abc", 4)),
+        ("streamed-size-drift", SyntheticOpener(b"ab", None)),
+    ):
+        try:
+            module.download(opener, "https://github.com/synthetic", root / name, 4, 3)
+        except AssertionError:
+            continue
+        raise AssertionError("artifact byte-size drift admitted")
+
     archive = root / "safe.tar.gz"
     content = b"synthetic executable"
     with tarfile.open(archive, "w:gz") as bundle:
@@ -107,6 +146,6 @@ authorization.validate_anchor(
     json.loads(authorization.PROPOSAL_PATH.read_text()),
 )
 print("t22_a0_pinned_tool_acquisition_check\tpass")
-print(f"directed_negative_test_count\t{len(mutations) + 3}")
+print(f"directed_negative_test_count\t{len(mutations) + 5}")
 print("network_attempted\tfalse")
 print("release_artifacts_downloaded\tfalse")
