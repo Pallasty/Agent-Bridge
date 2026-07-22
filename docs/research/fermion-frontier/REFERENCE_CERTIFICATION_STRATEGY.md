@@ -1305,6 +1305,19 @@ compositions 与 100,947 个 full prefixes，均超过冻结的 4,096 caps。D3-
 下一路线必须另发 streaming/meet-in-the-middle scalar remainder 契约；本门不认证两步累计
 error、full R100、physical reference 或 READY。
 
+### D3：degree-6 streaming pair floor 与 MITM proof gap（2026-07-22）
+
+DFS trie 已证明 100,947-prefix residency 不是必要条件：每个 prefix 只计算一次，同时只保留
+当前路径，磁化量/双占据 peak live terms 为 13,824 / 21,888。但在不生成 D6 child 的精确
+prospective pair ledger 中，两者分别只遍历 3,958 / 1,108 个 depth-5 leaves 就超过 2B cap；
+对应 prefix work 为 246,977,024 / 196,990,976。故 fixed streaming Pauli-L1 path architecture
+关闭在算术量而非内存。
+
+固定 MITM 候选需要把 half records 组合为完整 nested commutator 的 exact Pauli-L1；由于 L1
+必须在 coefficient merge/cancellation 后取绝对值，当前没有可验证的 half-norm composition
+identity。该候选只以 `BLOCKED_MISSING_COMPOSITION_PROOF` 关闭，不构成一般 MITM no-go。
+下一路线转为 scalar derivative supremum enclosure；D6 remainder 与两步累计界仍未认证。
+
 更一般的 bounded-error quantum simulation 已能把 learned Hamiltonian/Lindbladian 的
 实验不确定度传播到 observable interval，但目前示范对象是 long-range Ising，不是匹配
 的 Hubbard workload，见 [Kraft et al.](https://arxiv.org/abs/2511.23392)。这条路线可作为

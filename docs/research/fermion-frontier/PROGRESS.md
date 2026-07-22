@@ -1,5 +1,15 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 degree-six streaming D3
+
+- Replaced the 100,947-prefix resident cache with a deterministic DFS trie; peak live-path terms are
+  only 13,824 / 21,888 for magnetization / double occupancy.
+- Proved the fixed streaming Pauli-L1 architecture exceeds 2B prospective D6 pairs after only
+  3,958 / 1,108 of 20,349 depth-five leaves; no D6 child was materialized.
+- Fixed Pauli-L1 MITM remains blocked by the absence of an exact half-record composition identity;
+  this is not a general MITM no-go.
+- Next route is scalar derivative supremum enclosure. No D6, two-step, R100, reference or READY bound.
+
 ## 2026-07-22 — FH-L8 two-step scalar defect D2
 
 - Corrected the scalar telescoping architecture: D1 cannot be multiplied or added as an operator-norm

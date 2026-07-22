@@ -12,6 +12,10 @@ The first selected-route unit is now positive: `FH-L8-INDEPENDENT-REFERENCE-D1` 
 localizes the first missing proof to the degree-six remainder: 74,613 paths / 100,947 prefixes exceed
 the fixed caps. See `FH_L8_TWO_STEP_SCALAR_DEFECT_D2_ZH.md`.
 
+`FH-L8-INDEPENDENT-REFERENCE-D3` proves depth-first streaming fixes prefix residency but exceeds a
+2B prospective pair cap on partial traversal; the fixed Pauli-L1 MITM candidate lacks a composition
+proof. See `FH_L8_DEGREE6_STREAMING_D3_ZH.md`.
+
 Status date: 2026-07-14
 
 Scope: physical fermions, not the historical Fermion Memory service.
