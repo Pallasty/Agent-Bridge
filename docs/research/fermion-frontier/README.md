@@ -1,5 +1,9 @@
 # Fermion frontier research takeover
 
+Current independent-reference successor: `FH-L8-INDEPENDENT-REFERENCE-S0` closes the fixed
+uniform-supremum and ordinary-light-cone architectures and selects the state-specific per-step exact
+defect ledger. See `FH_L8_INDEPENDENT_REFERENCE_ROUTE_S0_ZH.md`.
+
 Status date: 2026-07-14
 
 Scope: physical fermions, not the historical Fermion Memory service.

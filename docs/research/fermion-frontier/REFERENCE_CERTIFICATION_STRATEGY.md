@@ -1263,6 +1263,20 @@ Majorana/MPS/PEPS/QMC 数值，即使跨参数看似收敛，也只能标 `DIAGN
 6. TDVP、PEPS、当前 Majorana 参数扫描、QMC 和 effective-model 结果保留为独立诊断，
    不参与任何 machine-verified reference 或 READY 判定。
 
+## 独立参考路线 S0 选择门（2026-07-21）
+
+`FH-L8-INDEPENDENT-REFERENCE-S0` 已把 PF-to-exact 方向从泛化调研收敛为机器可检的
+路线选择。它重算既有 exact-Fraction 账本的 R100 uniform-sup floor，确认磁化量与双占据
+分别超过 `1/4000` allocation 的 `159187/4000` 与 `133927/6000` 倍；同时确认普通
+803-layer support cone 已超过 L8 OBC 直径 14。两条固定架构因此关闭，但都不是 actual
+Trotter error no-go。
+
+两个 observable 的 checkerboard-Néel `k0` degree-three expectation 均严格为零，因此唯一
+保留的下一路线是 `PER_STEP_STATE_SPECIFIC_EXACT_DEFECT_LEDGER`。下一单元
+`FH-L8-INDEPENDENT-REFERENCE-D1` 只认证 `k0 -> k1` rotated-integrand defect enclosure，
+保留 sector 与 cancellation；在它给出正 enclosure 或 failure-local threshold 前，不授权
+D2、full R100、physical reference 或 READY。
+
 更一般的 bounded-error quantum simulation 已能把 learned Hamiltonian/Lindbladian 的
 实验不确定度传播到 observable interval，但目前示范对象是 long-range Ising，不是匹配
 的 Hubbard workload，见 [Kraft et al.](https://arxiv.org/abs/2511.23392)。这条路线可作为
