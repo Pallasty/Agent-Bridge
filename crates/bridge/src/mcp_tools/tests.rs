@@ -7887,6 +7887,40 @@ fn registry_exposes_event_spine_snapshot_tool() {
 }
 
 #[test]
+fn agent_world_trajectory_audit_is_all_profile_only() {
+    let all = ToolPolicy::from_values(None, None, None, Some("all"));
+
+    for profile in ["essential", "compact", "standard"] {
+        let policy = ToolPolicy::from_values(None, None, None, Some(profile));
+        assert!(!policy.includes(Tier::Niche, "agent_world_trajectory_audit"));
+        let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), policy)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+        assert!(!names
+            .iter()
+            .any(|name| name == "agent_world_trajectory_audit"));
+    }
+    assert!(all.includes(Tier::Niche, "agent_world_trajectory_audit"));
+
+    let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    assert!(names
+        .iter()
+        .any(|name| name == "agent_world_trajectory_audit"));
+}
+
+#[test]
+fn agent_world_source_cap_sentinel_detects_incomplete_source() {
+    assert!(!agent_world_source_cap_reached([3, 4, 2, 0], 5));
+    assert!(agent_world_source_cap_reached([3, 5, 2, 0], 5));
+}
+
+#[test]
 fn registry_exposes_tool_atlas_snapshot_tool() {
     let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
     let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)

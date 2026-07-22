@@ -21580,6 +21580,152 @@ impl McpTool for EventSpineSnapshotTool {
     }
 }
 
+/// Default-off, read-only compatibility audit for Qwen-AgentWorld-style
+/// action/observation trajectories. The tool emits digest-only manifests and
+/// never treats simulator material as execution evidence.
+pub struct AgentWorldTrajectoryAuditTool {
+    hub: Hub,
+}
+
+impl AgentWorldTrajectoryAuditTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for AgentWorldTrajectoryAuditTool {
+    fn name(&self) -> &'static str {
+        "agent_world_trajectory_audit"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Audit whether current Agent-Bridge telemetry can honestly reconstruct a Qwen-AgentWorld-style action/observation trajectory. This all-profile-only P0 tool is read-only and digest-only: it never exports raw prompts, tool payloads, transcripts, or state values; never writes memory; and never permits simulated observations to claim evidence or attestation."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["contract"],
+                "properties": {
+                    "contract": {
+                        "type": "object",
+                        "description": "AgentTaskContract v0 object accepted by agent_task_contract_preview."
+                    },
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 40
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let contract_value = match args.get("contract") {
+            Some(value) => value.clone(),
+            None => return Ok(ToolResult::error("missing required field: contract")),
+        };
+        let contract = match serde_json::from_value::<AgentTaskContract>(contract_value) {
+            Ok(contract) => contract,
+            Err(error) => return Ok(ToolResult::error(format!("invalid contract: {error}"))),
+        };
+        let contract_preview = preview_agent_task_contract(contract);
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(Value::as_i64)
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(40)
+            .clamp(1, 500) as usize;
+        // Fetch one sentinel row per source. Without it, a source capped at the
+        // output limit could be silently mistaken for a complete snapshot.
+        let fetch_limit = (limit.saturating_add(1).min(500)) as u32;
+
+        let calls = match store.recent_mcp_tool_calls(window_secs, fetch_limit).await {
+            Ok(rows) => rows,
+            Err(error) => return Ok(ToolResult::error(format!("recent_mcp_tool_calls: {error}"))),
+        };
+        let errors = match store.recent_mcp_tool_errors(fetch_limit).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "recent_mcp_tool_errors: {error}"
+                )))
+            }
+        };
+        let sessions = match store
+            .list_sessions(&SessionFilter::default(), fetch_limit)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => return Ok(ToolResult::error(format!("list_sessions: {error}"))),
+        };
+        let semantic_events = match store.recent_semantic_events(window_secs, fetch_limit).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "recent_semantic_events: {error}"
+                )))
+            }
+        };
+        let source_cap_reached = agent_world_source_cap_reached(
+            [
+                calls.len(),
+                errors.len(),
+                sessions.len(),
+                semantic_events.len(),
+            ],
+            fetch_limit as usize,
+        );
+        let mut snapshot = crate::event_spine::mcp_event_spine_snapshot(
+            &calls,
+            &errors,
+            &sessions,
+            &semantic_events,
+            window_secs,
+            limit,
+            dispatch_now_secs(),
+        );
+        if source_cap_reached && snapshot.truncated_count == 0 {
+            snapshot.candidate_count = snapshot.candidate_count.saturating_add(1);
+            snapshot.truncated_count = 1;
+        }
+        static COMMITMENT_KEY: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::new();
+        let commitment_key = COMMITMENT_KEY.get_or_init(|| *uuid::Uuid::new_v4().as_bytes());
+        let audit = crate::agent_world_trajectory::audit_agent_world_trajectory(
+            &contract_preview,
+            &snapshot,
+            commitment_key,
+        );
+        let payload = serde_json::to_value(audit)
+            .unwrap_or_else(|error| json!({ "error": format!("serialize audit: {error}") }));
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+fn agent_world_source_cap_reached<const N: usize>(
+    source_lengths: [usize; N],
+    fetch_limit: usize,
+) -> bool {
+    source_lengths.into_iter().any(|count| count >= fetch_limit)
+}
+
 pub struct ToolAtlasSnapshotTool {
     hub: Hub,
 }
@@ -43136,6 +43282,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Essential,
         Arc::new(EventSpineSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(AgentWorldTrajectoryAuditTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
