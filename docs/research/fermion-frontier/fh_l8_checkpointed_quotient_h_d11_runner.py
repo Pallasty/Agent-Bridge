@@ -13,6 +13,8 @@ RECORD=struct.Struct(">16sqB7x")
 DELTA=struct.Struct(">16sqQ")
 COUNT=213099;SHARD=4096
 class RunnerError(ValueError):pass
+def _dontneed(fd,offset,length):
+ if hasattr(os,"posix_fadvise") and hasattr(os,"POSIX_FADV_DONTNEED"):os.posix_fadvise(fd,offset,length,os.POSIX_FADV_DONTNEED)
 def _json(path):return json.loads(path.read_text(encoding="utf-8"))
 def _load_d5(contract):
  path=HERE/"fh_l8_symmetry_orbit_quotient_d5_checker.py"
@@ -99,10 +101,60 @@ def verify_merge(contract,source_dir,scratch,source_count):
  for i in range(0,len(raw),DELTA.size):target,value,_=DELTA.unpack(raw[i:i+DELTA.size]);actual[int.from_bytes(target,"big")]=value
  if actual!=expected:raise RunnerError("spill/merge differs from naive signed quotient action")
  return {"status":"VERIFIED_D11_BOUNDED_SPILL_MERGE_NAIVE_EQUIVALENCE","verified":True,"source_count":source_count,"target_count":len(actual),"fourth_action_executed":False,"next_gate":"D11_FULL_SHARD_SPILL_MERGE_PREFLIGHT"}
+def full_spill(contract,source_dir,scratch):
+ if not _cgroup_ok():raise RunnerError("D10 cgroup envelope absent")
+ sources=_read_checkpoint(source_dir/"depth3-source.bin",source_dir/"depth3-source.manifest.json",COUNT);d5=_load_d5(contract);d4,backend,bonds,syms=_context(d5);spool=scratch/"full-spool";checks=scratch/"full-checkpoints";spool.mkdir(parents=True,exist_ok=True);checks.mkdir(parents=True,exist_ok=True);done=0;written=0
+ for shard,start in enumerate(range(0,COUNT,SHARD)):
+  receipt=checks/f"shard-{shard:03d}.json"
+  if receipt.is_file() and _json(receipt).get("complete"):
+   prior=_json(receipt)
+   for chunk in prior["chunks"]:
+    path=spool/f"p{chunk['partition']:03d}.bin";raw=path.read_bytes()[chunk["offset"]:chunk["offset"]+chunk["bytes"]]
+    if len(raw)!=chunk["bytes"] or hashlib.sha256(raw).hexdigest()!=chunk["sha256"]:raise RunnerError("resume shard hash drift")
+    with path.open("rb") as cached:_dontneed(cached.fileno(),chunk["offset"],chunk["bytes"])
+   done+=1;continue
+  buffers={};reduced=0;dropped=0
+  for rep,amp in sources[start:start+SHARD]:
+   column,_,zero=d5._reduced_column(d4,backend,bonds,rep,syms);dropped+=zero;reduced+=len(column)
+   for target,coefficient in column.items():
+    if 8%coefficient.denominator:raise RunnerError("non-octadic quotient coefficient")
+    delta=amp*coefficient.numerator*(8//coefficient.denominator)
+    if not -(1<<63)<=delta<(1<<63):raise RunnerError("scaled delta i64 overflow")
+    part=hashlib.sha256(target.to_bytes(16,"big")).digest()[0];buffers.setdefault(part,bytearray()).extend(DELTA.pack(target.to_bytes(16,"big"),delta,0))
+  chunks=[]
+  for part,raw in buffers.items():
+   path=spool/f"p{part:03d}.bin";offset=path.stat().st_size if path.is_file() else 0
+   with path.open("ab") as out:
+    out.write(raw);out.flush();os.fsync(out.fileno());_dontneed(out.fileno(),offset,len(raw))
+   chunks.append({"partition":part,"offset":offset,"bytes":len(raw),"records":len(raw)//DELTA.size,"sha256":hashlib.sha256(raw).hexdigest()});written+=len(raw)//DELTA.size
+  doc={"shard":shard,"source_start":start,"source_records":min(SHARD,COUNT-start),"reduced_columns":reduced,"projected_zero":dropped,"chunks":sorted(chunks,key=lambda x:x["partition"]),"complete":True};tmp=receipt.with_suffix(".tmp");tmp.write_text(json.dumps(doc,sort_keys=True,separators=(",",":")),encoding="utf-8");os.replace(tmp,receipt);done+=1
+ return {"status":"VERIFIED_D11_FULL_SPILL_CHECKPOINTS_COMPLETE_NO_MERGE","verified":True,"completed_shards":done,"new_spill_records":written,"fourth_action_executed":False,"next_gate":"D11_FULL_PARTITION_SORT_MERGE"}
+def full_merge(scratch):
+ spool=scratch/"full-spool";checks=scratch/"full-checkpoints";receipts=sorted(checks.glob("shard-*.json"))
+ if len(receipts)!=53 or any(not _json(x).get("complete") for x in receipts):raise RunnerError("incomplete hash-bound shard set")
+ output=scratch/"depth4-target.bin";h=hashlib.sha256();count=0
+ with output.open("wb") as out:
+  for path in sorted(spool.glob("p*.bin")):
+   raw=path.read_bytes()
+   if len(raw)%DELTA.size:raise RunnerError("full spill record alignment drift")
+   values=[DELTA.unpack(raw[i:i+DELTA.size]) for i in range(0,len(raw),DELTA.size)];values.sort(key=lambda x:x[0]);index=0
+   while index<len(values):
+    target=values[index][0];total=0
+    while index<len(values) and values[index][0]==target:total+=values[index][1];index+=1
+    if not total:continue
+    if total%8:raise RunnerError("full scaled merge nondivisible by eight")
+    packed=DELTA.pack(target,total//8,0);out.write(packed);h.update(packed);count+=1
+  out.flush();os.fsync(out.fileno())
+ return {"status":"VERIFIED_D11_FULL_DEPTH3_TO_DEPTH4_SIGNED_QUOTIENT_ACTION","verified":True,"target_records":count,"target_payload_bytes":output.stat().st_size,"target_sha256":h.hexdigest(),"fourth_action_executed":True,"degree6_remainder_bounded":False,"two_step_cumulative_error_bounded":False,"full_R100_error_bounded":False,"physical_reference_qualified":False,"ready_gate_eligible":False}
 def main(argv=None):
- p=argparse.ArgumentParser();p.add_argument("--scratch",required=True);p.add_argument("--spill-source",type=int);p.add_argument("--source-dir",type=Path);p.add_argument("--merge",action="store_true");p.add_argument("--verify-source",type=int);a=p.parse_args(argv);contract=_json(HERE/"fh_l8_checkpointed_quotient_h_d11_contract.json")
+ p=argparse.ArgumentParser();p.add_argument("--scratch",required=True);p.add_argument("--spill-source",type=int);p.add_argument("--source-dir",type=Path);p.add_argument("--merge",action="store_true");p.add_argument("--verify-source",type=int);p.add_argument("--full-spill",action="store_true");p.add_argument("--full-merge",action="store_true");a=p.parse_args(argv);contract=_json(HERE/"fh_l8_checkpointed_quotient_h_d11_contract.json")
  try:
-  evidence=verify_merge(contract,a.source_dir,Path(a.scratch),a.verify_source) if a.verify_source else (merge(Path(a.scratch)) if a.merge else (spill(contract,a.source_dir,Path(a.scratch),a.spill_source) if a.spill_source else checkpoint(contract,Path(a.scratch))))
+  if a.full_merge:evidence=full_merge(Path(a.scratch))
+  elif a.full_spill:evidence=full_spill(contract,a.source_dir,Path(a.scratch))
+  elif a.verify_source:evidence=verify_merge(contract,a.source_dir,Path(a.scratch),a.verify_source)
+  elif a.merge:evidence=merge(Path(a.scratch))
+  elif a.spill_source:evidence=spill(contract,a.source_dir,Path(a.scratch),a.spill_source)
+  else:evidence=checkpoint(contract,Path(a.scratch))
   print(json.dumps(evidence,indent=2,sort_keys=True));return 0
  except Exception as e:print(json.dumps({"status":"RUNNER_FAILED","verified":False,"error":str(e)},sort_keys=True));return 1
 if __name__=="__main__":raise SystemExit(main())
