@@ -26,6 +26,14 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_two_step_scalar_defect_d2_checker.py`: exact D3--D5 merge and combinatorial gate.
 - `test_fh_l8_two_step_scalar_defect_d2_checker.py`: coefficient, mutation, authority and cap tests.
 
+## FH-L8 degree-six streaming D3
+
+- `FH_L8_DEGREE6_STREAMING_D3_ZH.md`: DFS pair floor, MITM proof gap and successor.
+- `fh_l8_degree6_streaming_d3_contract.json`: candidates, 2B cap and expected thresholds.
+- `fh_l8_degree6_streaming_d3_result.json`: narrow dual-architecture failure result.
+- `fh_l8_degree6_streaming_d3_checker.py`: streaming pre-child pair-floor checker.
+- `test_fh_l8_degree6_streaming_d3_checker.py`: threshold and authority regressions.
+
 ## Claude source session
 
 - Session:
@@ -2020,3 +2028,21 @@ so they are versioned normally and are not added to the preservation-only
   replay that outcome after reveal.
 - `FERMION_BIOCORTEX_FB_S1_SAME_U_TDHF_RESIDUAL_2026_07_22.md` records the
   `NO_GO_DIRECT_REDUCTION` result and its BioCortex/runtime non-claim boundary.
+
+## Fermion × BioCortex FB-S2
+
+- `fb_s2_hbr_r1_adapter_eligibility_contract.json` freezes a one-sided,
+  source-bound negative qualification against BioCortex commit `1539a6f` and
+  can never grant positive eligibility.
+- `fb_s2_hbr_r1_adapter_eligibility.py` verifies commit/tree/file identities,
+  upstream authority records, opaque candidate-source bindings, the 1 GiB
+  zero-swap envelope and any required Fermion mapping artifacts fail-closed.
+- `fb_s2_hbr_r1_adapter_eligibility_result.json` preserves the distinct
+  `INDETERMINATE_SOURCE_AUTHORITY` machine status and
+  `OPERATIONAL_NO_GO_CURRENT_CHAIN` operating decision after the upstream gate
+  OOMed in its toolchain-copy stage; no candidate execution occurred.
+- `test_fb_s2_hbr_r1_adapter_eligibility.py` covers mutation, status separation,
+  authority closure and result provenance; synthetic all-green cases are logic
+  controls only.
+- `FERMION_BIOCORTEX_FB_S2_HBR_R1_ADAPTER_ELIGIBILITY_2026_07_22.md` is the
+  human-readable evidence boundary and v2 reopening handoff.

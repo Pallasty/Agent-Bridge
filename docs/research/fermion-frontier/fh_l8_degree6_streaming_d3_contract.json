@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D3",
+  "checker_self_sha256": "bf1501f3fbbc14110bd863f0a177ca9332b1c4e65606a85e32bef51477db3ea4",
+  "parent_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D2",
+  "scope": "two_step_degree6_scalar_remainder_architecture_gate",
+  "workload": {"linear_size":8,"boundary":"open","interaction_over_hopping":"8/1","step_duration":"1/100","composed_steps":2,"merged_stage_count":17,"degree6_path_count":74613,"degree5_leaf_count":20349},
+  "candidates": {
+    "DEPTH_FIRST_STREAMING": {"retains_only_current_prefix_path":true,"computes_each_visited_prefix_once":true,"degree6_children_are_counted_but_not_materialized":true},
+    "PAULI_L1_MEET_IN_THE_MIDDLE": {"required_missing_identity":"compose_left_and_right_half_records_into_exact_full_nested_commutator_Pauli_L1","identity_available":false,"numerically_executed":false}
+  },
+  "resource_limits": {"max_prefix_pair_products_per_observable":300000000,"max_degree6_prospective_pair_products_per_observable":2000000000,"max_expansion_terms":20000,"max_live_path_terms":30000,"max_source_bytes":1048576},
+  "expected_streaming_thresholds": {
+    "staggered_magnetization": {"completed_depth5_leaves":3958,"computed_prefixes":4757,"prefix_pair_products":246977024,"degree6_floor_before":1999928832,"degree6_floor_after":2000279040,"terminal_prefix":[0,6,7,13,15],"terminal_next_stage":15,"terminal_parent_terms":3648,"terminal_next_pairs":350208,"peak_expansion_terms":9216,"peak_live_path_terms":13824},
+    "double_occupancy": {"completed_depth5_leaves":1108,"computed_prefixes":1301,"prefix_pair_products":196990976,"degree6_floor_before":1998983680,"degree6_floor_after":2000065024,"terminal_prefix":[0,1,2,2,4],"terminal_next_stage":8,"terminal_parent_terms":8448,"terminal_next_pairs":1081344,"peak_expansion_terms":14592,"peak_live_path_terms":21888}
+  },
+  "source_pins": [
+    {"path":"fh_l8_two_step_scalar_defect_d2_checker.py","sha256":"0c471f3a07a1260c27289f0da07a7c122a85a96c6c3ee17552e09e1c0ae6225f"},
+    {"path":"fh_l8_two_step_scalar_defect_d2_contract.json","sha256":"8d525f10811d30a82ce4729338a680164888f6b24014ee8fb6702b735cf0bbf0"},
+    {"path":"fh_l8_two_step_scalar_defect_d2_result.json","sha256":"f837204046393a2982e37716da80844b82d7668910963d2c6729772ee28792b2"}
+  ],
+  "terminal_branch":"STREAMING_PAIR_CAP_AND_MITM_COMPOSITION_PROOF_GAP",
+  "next_branch":"SCALAR_DERIVATIVE_SUPREMUM_ENCLOSURE",
+  "forbidden_claims":["degree6_remainder_bounded","two_step_cumulative_error_bounded","full_R100_error_bounded","physical_reference_qualified","ready_gate_eligible"]
+}
