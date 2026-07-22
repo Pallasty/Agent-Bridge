@@ -1,0 +1,26 @@
+{
+  "schema_version":1,
+  "contract_id":"FH-L8-INDEPENDENT-REFERENCE-D4",
+  "checker_self_sha256":"86692e68cee1475d3cee2dbd0e866f68d5c5514ff37268c601819bd8f4ed48f2",
+  "parent_contract_id":"FH-L8-INDEPENDENT-REFERENCE-D3",
+  "scope":"two_step_scalar_degree6_supremum_candidate_gate",
+  "step_duration":"1/100",
+  "two_step_allocation":"1/200000",
+  "degree_four_contributions":{"staggered_magnetization":"23/30000000","double_occupancy":"23/60000000"},
+  "expected_budget_arithmetic":{
+    "staggered_magnetization":{"remainder_slack":"127/30000000","M6_ceiling":"3048000000/1"},
+    "double_occupancy":{"remainder_slack":"277/60000000","M6_ceiling":"3324000000/1"}
+  },
+  "global_norm_candidate":{"group_L1":{"H1":"64/1","H2":"48/1","HU":"384/1","H3":"48/1","H4":"64/1"},"total_H_L1":"608/1","two_step_conjugation_derivative_base":"2432/1","difference_M6_bound":"413819945587727925248/1"},
+  "cauchy_candidate":{"dimensionless_exponent_rate":"608/25","majorant":"2*exp(a*x)/(x^5*(x-1)), x>1","global_lower_bound_from_exp_y_ge_y7_over_7factorial":"15356599543294590976/1922607421875"},
+  "sector_krylov_candidate":{"candidate_actions_per_state":225,"reachable_state_counts":[1,225,24421,1704285],"state_digests":["4851eca743653e8f5e4b1aaa7796811bc24f1bca5e23432e5bc96bfd9882bec9","9cbbe6d7e508bd37eef5ec54bfa5b580b80d0b3dc3998146c900d03220a847b3","c92f2de07caa1a289d7aa27cd0fa64e707e084cf96e06219161ea55ff3f3c88b","6f8f53101b8a3ec0b3dfcee624a014426d93a8aa0dfc1300780b0ad99b765e97"],"next_action_candidate_floor":383464125,"next_action_cap":300000000,"max_materialized_states":2000000},
+  "source_pins":[
+    {"path":"fh_l8_degree6_streaming_d3_checker.py","sha256":"bf1501f3fbbc14110bd863f0a177ca9332b1c4e65606a85e32bef51477db3ea4"},
+    {"path":"fh_l8_degree6_streaming_d3_contract.json","sha256":"8f892b7e8f6ace5059d6a23142dc3430ece4f7356b82b289d03365e1536dde4a"},
+    {"path":"fh_l8_degree6_streaming_d3_result.json","sha256":"674413cc1d4c7aedfccb043c30544d5098980b0d8c8a047f20549c69a5a35eaf"}
+  ],
+  "resource_limits":{"max_source_bytes":1048576,"max_materialized_states":2000000,"max_krylov_candidate_actions":300000000},
+  "terminal_branch":"GLOBAL_DERIVATIVE_AND_CAUCHY_BOUNDS_NUMERICALLY_INADEQUATE_AND_KRYLOV_ACTION_CAP_EXCEEDED",
+  "next_branch":"SYMMETRY_ORBIT_COMPRESSED_SCALAR_KRYLOV",
+  "forbidden_claims":["degree6_remainder_bounded","two_step_cumulative_error_bounded","full_R100_error_bounded","physical_reference_qualified","ready_gate_eligible"]
+}

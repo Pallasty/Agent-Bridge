@@ -16,6 +16,10 @@ the fixed caps. See `FH_L8_TWO_STEP_SCALAR_DEFECT_D2_ZH.md`.
 2B prospective pair cap on partial traversal; the fixed Pauli-L1 MITM candidate lacks a composition
 proof. See `FH_L8_DEGREE6_STREAMING_D3_ZH.md`.
 
+`FH-L8-INDEPENDENT-REFERENCE-D4` closes the fixed generic-derivative and global Cauchy bounds as
+numerically inadequate and stops exact sector Krylov before its 383,464,125-candidate fourth action.
+See `FH_L8_SCALAR_SUPREMUM_D4_ZH.md`.
+
 Status date: 2026-07-14
 
 Scope: physical fermions, not the historical Fermion Memory service.

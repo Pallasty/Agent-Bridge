@@ -1318,6 +1318,18 @@ prospective pair ledger 中，两者分别只遍历 3,958 / 1,108 个 depth-5 le
 identity。该候选只以 `BLOCKED_MISSING_COMPOSITION_PROOF` 关闭，不构成一般 MITM no-go。
 下一路线转为 scalar derivative supremum enclosure；D6 remainder 与两步累计界仍未认证。
 
+### D4：scalar supremum 三候选 failure-local gate（2026-07-22）
+
+扣除 D4 主项后，两项 observable 的六阶 derivative ceiling 为 3.048B / 3.324B。固定 generic
+bound `2*2432^6` 高出约 `1.25e11--1.36e11` 倍；当前 complex-Cauchy global-norm
+majorant 对所有半径的严格下界仍约 `7.987e6`，而 scalar slack 只有约 `4e-6`。两者均只关闭
+各自固定 bound architecture。
+
+exact-CAR sector Krylov 的 reachable states 为 `1→225→24,421→1,704,285`；下一次 H action
+的 candidate floor 为 383,464,125，超过 300M cap，故在 action 前停止。下一路线选择
+`SYMMETRY_ORBIT_COMPRESSED_SCALAR_KRYLOV`，先证明格点/初态/observable quotient 相容，再尝试
+第四层；D6 remainder 与累计 reference authority 不变。
+
 更一般的 bounded-error quantum simulation 已能把 learned Hamiltonian/Lindbladian 的
 实验不确定度传播到 observable interval，但目前示范对象是 long-range Ising，不是匹配
 的 Hubbard workload，见 [Kraft et al.](https://arxiv.org/abs/2511.23392)。这条路线可作为

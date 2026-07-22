@@ -1,5 +1,14 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 scalar supremum D4
+
+- Derived exact two-step remainder slacks and M6 ceilings: 3.048B / 3.324B.
+- Closed the fixed generic derivative bound (`2*2432^6`) and current global-norm Cauchy majorant as
+  numerically inadequate by exact rational comparisons.
+- Recomputed exact-CAR Krylov reachable-state counts `1,225,24421,1704285`; the next action floor
+  383,464,125 exceeds the 300M cap and was not executed.
+- Selected symmetry-orbit-compressed scalar Krylov. No D6, cumulative, R100, reference or READY bound.
+
 ## 2026-07-22 — FH-L8 degree-six streaming D3
 
 - Replaced the 100,947-prefix resident cache with a deterministic DFS trie; peak live-path terms are

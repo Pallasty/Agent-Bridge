@@ -34,6 +34,14 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_degree6_streaming_d3_checker.py`: streaming pre-child pair-floor checker.
 - `test_fh_l8_degree6_streaming_d3_checker.py`: threshold and authority regressions.
 
+## FH-L8 scalar supremum D4
+
+- `FH_L8_SCALAR_SUPREMUM_D4_ZH.md`: budget ceilings and three candidate thresholds.
+- `fh_l8_scalar_supremum_d4_contract.json`: fixed norm, Cauchy and Krylov policies.
+- `fh_l8_scalar_supremum_d4_result.json`: failure-local candidate result.
+- `fh_l8_scalar_supremum_d4_checker.py`: exact arithmetic and CAR prefix checker.
+- `test_fh_l8_scalar_supremum_d4_checker.py`: budget, boundary and mutation regressions.
+
 ## Claude source session
 
 - Session:
