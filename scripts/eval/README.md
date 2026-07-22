@@ -93,6 +93,12 @@ current temporal/graph proxy family; the aggregate result and claim boundary
 are recorded in
 `docs/design/FREE_RECALL_STRATEGY_R1_1_FROZEN_CLOCK_RESULT_2026_07_21.md`.
 
+R2 then tests whether current tag, graph, and timestamp metadata can recover
+episode-like synthesis sets without content or fitted parameters. It fails the
+preregistered recoverability gate; the aggregate result and prospective
+write-side instrumentation boundary are recorded in
+`docs/design/FREE_RECALL_STRATEGY_R2_EPISODE_RECOVERABILITY_RESULT_2026_07_21.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
