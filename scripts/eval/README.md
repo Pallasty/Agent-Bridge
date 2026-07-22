@@ -158,6 +158,16 @@ it does not open a store adapter, trusted key custody, build, execution,
 producer integration, merge, release, or deployment. See
 `docs/design/FREE_RECALL_STRATEGY_R10_SESSION_CURATE_PRODUCER_RESULT_2026_07_22.md`.
 
+`free_recall_strategy_r11_c1_source.py` statically checks the resulting C1
+source without invoking Cargo. It verifies the isolated default-off bridge
+feature, private optional `Hub` capability, absence of production/main/store
+wiring, explicit candidate outcome ledger, save-before-item order, first-error
+latch, positive complete close, and required fake source tests. Directed
+mutations exercise each boundary. A pass records source landing only; feature
+compilation, test execution, database access, C2 integration, merge, release,
+and deployment remain closed. See
+`docs/design/FREE_RECALL_STRATEGY_R11_C1_SOURCE_RECEIPT_2026_07_22.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,

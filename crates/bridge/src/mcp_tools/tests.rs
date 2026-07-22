@@ -125,6 +125,30 @@ fn curated_memory_governance_scopes_inference_and_deduplicates_lineage() {
     );
 }
 
+#[test]
+fn session_curate_candidate_ledger_keeps_auxiliary_errors_out_of_counts() {
+    let mut ledger = SessionCurateCandidateLedger::default();
+    ledger.record_auxiliary_error("prior-handoff scan: first".to_string());
+    ledger.record_auxiliary_error("prior-handoff scan: second".to_string());
+    ledger.record_saved();
+    ledger.record_duplicate();
+    ledger.record_lookup_error("lookup failed".to_string());
+    ledger.record_save_error("save failed".to_string());
+
+    assert_eq!(ledger.saved_count, 1);
+    assert_eq!(ledger.duplicate_count, 1);
+    assert_eq!(ledger.candidate_error_count, 2);
+    assert_eq!(
+        ledger.into_response_errors(),
+        vec![
+            "prior-handoff scan: first".to_string(),
+            "prior-handoff scan: second".to_string(),
+            "lookup failed".to_string(),
+            "save failed".to_string(),
+        ]
+    );
+}
+
 // #1758 hardening: bootstrap rows carrying a fabricatable identifier get a
 // ⚠ref marker (via tag or content detection); identifier-free rows do not.
 #[test]

@@ -10,12 +10,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
 
+#[cfg(feature = "episode-observation-slice-c1")]
+use crate::episode_observation_curation_batch::CurationBatchObservationCapability;
 use crate::security::SecurityPolicy;
 
 #[derive(Clone)]
 pub struct Hub {
     pub notifiers: Vec<Arc<dyn Notifier>>,
     pub store: Option<Arc<dyn StateStore>>,
+    /// Default-off C1 producer seam. No production implementation is wired.
+    #[cfg(feature = "episode-observation-slice-c1")]
+    pub(crate) curation_batch_observer: Option<Arc<dyn CurationBatchObservationCapability>>,
     pub terminal: Option<Arc<dyn TerminalBackend>>,
     pub browser: Option<Arc<dyn BrowserBackend>>,
     /// Default agent runtime — used when [`agent_spawn`] omits an explicit
@@ -63,6 +68,8 @@ impl Hub {
 pub struct HubBuilder {
     notifiers: Vec<Arc<dyn Notifier>>,
     store: Option<Arc<dyn StateStore>>,
+    #[cfg(feature = "episode-observation-slice-c1")]
+    curation_batch_observer: Option<Arc<dyn CurationBatchObservationCapability>>,
     terminal: Option<Arc<dyn TerminalBackend>>,
     browser: Option<Arc<dyn BrowserBackend>>,
     agent: Option<Arc<dyn AgentRuntime>>,
@@ -77,6 +84,14 @@ impl HubBuilder {
     }
     pub fn store(mut self, s: Arc<dyn StateStore>) -> Self {
         self.store = Some(s);
+        self
+    }
+    #[cfg(feature = "episode-observation-slice-c1")]
+    pub(crate) fn curation_batch_observer(
+        mut self,
+        observer: Arc<dyn CurationBatchObservationCapability>,
+    ) -> Self {
+        self.curation_batch_observer = Some(observer);
         self
     }
     pub fn terminal(mut self, t: Arc<dyn TerminalBackend>) -> Self {
@@ -108,6 +123,8 @@ impl HubBuilder {
         Hub {
             notifiers: self.notifiers,
             store: self.store,
+            #[cfg(feature = "episode-observation-slice-c1")]
+            curation_batch_observer: self.curation_batch_observer,
             terminal: self.terminal,
             browser: self.browser,
             agent: self.agent,
