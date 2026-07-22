@@ -938,12 +938,19 @@ def status() -> dict:
     acquisition = load_acquisition_module()
     authorization_status = acquisition.load_authorization_module().status()
     tools_present = (Path(contract["artifact_root"]) / "tools" / "acquisition-receipt.json").is_file()
+    if not authorization_status["owner_trust_anchor_present"]:
+        state = "BLOCKED_OWNER_TRUST_ANCHOR_AND_EXACT_SIGNATURE_REQUIRED"
+    elif not authorization_status["owner_trust_anchor_valid"]:
+        state = "BLOCKED_OWNER_TRUST_ANCHOR_INVALID"
+    else:
+        state = "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED"
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a0.real_process_runner_status.v1",
-        "status": "BLOCKED_OWNER_TRUST_ANCHOR_AND_EXACT_SIGNATURE_REQUIRED" if not authorization_status["owner_trust_anchor_present"] else "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED",
+        "status": state,
         "proposal_sha256": json.loads(acquisition.load_authorization_module().PROPOSAL_PATH.read_text())["proposal_sha256"],
         "execution_contract_sha256": contract["contract_sha256"],
         "owner_trust_anchor_present": authorization_status["owner_trust_anchor_present"],
+        "owner_trust_anchor_valid": authorization_status["owner_trust_anchor_valid"],
         "owner_signature_verified": False,
         "pinned_tools_present": tools_present,
         "network_attempted": False,

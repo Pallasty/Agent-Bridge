@@ -1,4 +1,4 @@
-"""Synthetic cryptographic and semantic checks; never installs an owner anchor."""
+"""Validate the real public anchor and exercise synthetic signing negatives."""
 import copy
 import importlib.util
 import json
@@ -13,7 +13,32 @@ spec = importlib.util.spec_from_file_location("t22auth", SOURCE)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 proposal = json.loads(module.PROPOSAL_PATH.read_text())
-assert module.status()["status"] == "BLOCKED_OWNER_TRUST_ANCHOR_REQUIRED"
+repository_anchor = json.loads(module.ANCHOR_PATH.read_text())
+module.validate_anchor(repository_anchor, proposal)
+assert repository_anchor["public_key_fingerprint"] == "SHA256:cKXQiuD9OQ0KD5zykCE0+lcRSXnrURROhzSm7NqH8Jw"
+assert module.status() == {
+    "schema": "agent_bridge.biocortex.track_b.t22_a0.owner_authorization_status.v0",
+    "status": "READY_TO_GENERATE_EXACT_PAYLOAD",
+    "owner_trust_anchor_present": True,
+    "owner_trust_anchor_valid": True,
+    "owner_signature_verified": False,
+    "real_process_execution_authorized": False,
+}
+
+anchor_mutations = (
+    lambda x: x.update(proposal_sha256="0" * 64),
+    lambda x: x.update(host="other-host"),
+    lambda x: x.update(public_key_sha256="0" * 64),
+    lambda x: x.update(public_key_fingerprint="SHA256:other"),
+)
+for mutate in anchor_mutations:
+    candidate = copy.deepcopy(repository_anchor)
+    mutate(candidate)
+    try:
+        module.validate_anchor(candidate, proposal)
+    except (AssertionError, KeyError, TypeError, ValueError):
+        continue
+    raise AssertionError("drifted repository owner trust anchor admitted")
 
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
@@ -55,7 +80,8 @@ with tempfile.TemporaryDirectory() as directory:
         except (AssertionError, KeyError, TypeError, ValueError): continue
         raise AssertionError("unsafe authorization mutation admitted")
 
-assert not module.ANCHOR_PATH.exists()
+assert module.ANCHOR_PATH.is_file()
+module.validate_anchor(json.loads(module.ANCHOR_PATH.read_text()), proposal)
 print("t22_a0_owner_authorization_check\tpass")
-print(f"directed_negative_test_count\t{len(mutations) + 2}")
-print("repository_owner_trust_anchor_present\tfalse")
+print(f"directed_negative_test_count\t{len(mutations) + len(anchor_mutations) + 2}")
+print("repository_owner_trust_anchor_present\ttrue")

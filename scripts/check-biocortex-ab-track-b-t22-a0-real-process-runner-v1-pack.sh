@@ -7,10 +7,11 @@ import json, sys
 x = json.loads(sys.argv[1])
 assert x == {
     "schema": "agent_bridge.biocortex.track_b.t22_a0.real_process_runner_status.v1",
-    "status": "BLOCKED_OWNER_TRUST_ANCHOR_AND_EXACT_SIGNATURE_REQUIRED",
+    "status": "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED",
     "proposal_sha256": "854862a6dd71935590ef0f01072b25dd289221b296c7979964afa7155faaa92b",
     "execution_contract_sha256": "f84fe9ea9d8948afa7eca516f486bb40d690acfd19437a7b3469af8c4dc37616",
-    "owner_trust_anchor_present": False,
+    "owner_trust_anchor_present": True,
+    "owner_trust_anchor_valid": True,
     "owner_signature_verified": False,
     "pinned_tools_present": False,
     "network_attempted": False,

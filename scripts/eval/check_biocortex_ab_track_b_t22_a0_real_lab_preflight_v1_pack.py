@@ -43,6 +43,8 @@ for mutate in mutations:
 
 receipt = module.inspect()
 assert receipt["status"] == "BLOCKED_OWNER_SIGNATURE_AND_PINNED_TOOLS_REQUIRED"
+assert receipt["owner_public_key_bound"] is True
+assert receipt["owner_signature_verified"] is False
 assert receipt["credentials_accessed"] is False
 assert receipt["network_accessed"] is False
 assert receipt["services_started"] == 0

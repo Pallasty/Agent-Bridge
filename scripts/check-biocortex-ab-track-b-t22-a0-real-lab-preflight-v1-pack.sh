@@ -9,6 +9,7 @@ import json, sys
 x=json.load(open(sys.argv[1]))
 assert x["status"]=="BLOCKED_OWNER_SIGNATURE_AND_PINNED_TOOLS_REQUIRED"
 assert x["physical_host_count"]==1
+assert x["owner_public_key_bound"] is True
 assert x["owner_signature_verified"] is False
 assert x["credentials_accessed"] is False and x["network_accessed"] is False
 assert x["services_started"]==x["faults_injected"]==x["real_evidence_items_created"]==0

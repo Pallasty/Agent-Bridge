@@ -44,25 +44,30 @@ named regular files, and a canonical acquisition receipt records both archive
 and installed-binary hashes. The acquisition destination is fixed to
 `/Data/CascadeProjects/.artifacts/agent-bridge/biocortex-track-b-t22-a0-real-lab/tools`.
 
-## What the owner must provide
+## Owner authorization state
 
-1. Approve or amend the exact proposal SHA-256 and its bounded scope.
-2. Provide one dedicated Ed25519 SSH public key (never the private key) as the
-   out-of-band owner trust anchor.
-3. After the exact timestamped payload is generated, sign it with
-   `ssh-keygen -Y sign` under namespace `agent-bridge-t22-a0-owner-v1`.
+The owner approved proposal SHA-256
+`854862a6dd71935590ef0f01072b25dd289221b296c7979964afa7155faaa92b` and
+provided a dedicated Ed25519 SSH public key. The repository trust anchor now
+binds that proposal, host `tb14`, owner role, canonical public key SHA-256
+`331e7a6eee7e57abf583a6dd88700c09bd9576f409d72ff24ef503485be26bd5`,
+and fingerprint
+`SHA256:cKXQiuD9OQ0KD5zykCE0+lcRSXnrURROhzSm7NqH8Jw`.
+
+The remaining owner action is to sign the exact timestamped payload with
+`ssh-keygen -Y sign` under namespace `agent-bridge-t22-a0-owner-v1`.
 
 The signed payload will be valid for at most four hours. The signature grants
 only T22-A0 implementation and execution on the named host. A later T22-A1
 decision is required for three independent failure domains, cloud/provider
 access, non-zero spend, external anti-rollback, or production claims.
 
-The authorization utility remains blocked while the exact repository trust
-anchor is absent. After the owner confirms the proposal and supplies the public
-key, `bind-anchor` accepts only an absolute, repository-external `.pub` file and
-the exact confirmed proposal hash; a separate commit will pin that key, host,
-fingerprint, and proposal hash.
-Only then can the utility generate a timestamped payload. Verification uses
+The authorization utility reports `READY_TO_GENERATE_EXACT_PAYLOAD`: the exact
+repository trust anchor is present and valid, while owner signature and real
+execution authority remain false. `bind-anchor` accepted only an absolute,
+repository-external `.pub` file and the exact confirmed proposal hash. The
+anchor pins the key, host, fingerprint, and proposal hash; the private key
+remains outside both repository and artifact root. Verification uses
 OpenSSH `sshsig` with the exact owner identity and namespace; it never reads the
 private key. A synthetic ephemeral-key test covers the cryptographic path but
 cannot install or substitute for the repository owner trust anchor.
@@ -81,9 +86,10 @@ or secret access. The current pack exercises 18 directed negative cases.
 `scripts/check-biocortex-ab-track-b-t22-a0-owner-authorization-v1-pack.sh`
 additionally verifies exact four-hour payload semantics, the memory-only lab
 bootstrap-material boundary, OpenSSH Ed25519 signing
-and verification, owner identity/namespace binding, and 14 authorization
-mutations. Its repository-facing result remains
-`BLOCKED_OWNER_TRUST_ANCHOR_REQUIRED` until the owner supplies the public key.
+and verification, owner identity/namespace binding, 14 payload/key-path
+negatives, and four repository-anchor drift negatives. Its repository-facing
+result is `READY_TO_GENERATE_EXACT_PAYLOAD`; signature and real-execution flags
+remain false.
 
 `scripts/check-biocortex-ab-track-b-t22-a0-acquire-pinned-tools-v1-pack.sh`
 adds 16 directed safety checks for pin drift, URL and size policy, output path
@@ -97,7 +103,7 @@ adds 27 directed negative cases over the signed execution-contract binding,
 one-shot authorization use, exact loopback ports, clean environment, etcd CAS
 shape, canonical/hash-chained evidence, process-start boundary, and exact
 ephemeral-bootstrap-value leak rejection. Its current result is
-`BLOCKED_OWNER_TRUST_ANCHOR_AND_EXACT_SIGNATURE_REQUIRED`; the test uses no
+`BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED`; the test uses no
 real service double and proves that the offline status and rejection paths
 construct no network opener, start no process, inject no fault, and create no
 real evidence.
@@ -110,11 +116,10 @@ It binds the loopback ports, one-shot consumption, etcd proxy-disconnect
 scenario, OpenBao active-process failover scenario, memory-only bootstrap
 material, timeouts, evidence outputs, and non-production claims.
 
-The remaining owner action is to confirm proposal SHA-256
-`854862a6dd71935590ef0f01072b25dd289221b296c7979964afa7155faaa92b`
-and provide the dedicated Ed25519 public key. The trust-anchor commit must land
-before the exact four-hour payload is generated. The owner's private key never
-enters this repository or the lab artifact root.
+The proposal confirmation and dedicated public-key binding are complete. The
+trust-anchor commit must land on both remotes before the exact four-hour payload
+is generated. The owner's private key never enters this repository or the lab
+artifact root.
 
 After the exact owner signature verifies, the operator sequence is fixed: first
 run the owner-gated pinned-tool acquirer into the exact `tools` directory, then

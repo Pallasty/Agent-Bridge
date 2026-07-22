@@ -68,7 +68,7 @@ try:
     except (AssertionError, FileNotFoundError):
         pass
     else:
-        raise AssertionError("acquire admitted without owner trust anchor and signature")
+        raise AssertionError("acquire admitted without an exact owner signature")
 finally:
     module.urllib.request.build_opener = original_build_opener
 
@@ -100,7 +100,12 @@ with tempfile.TemporaryDirectory() as directory:
     assert installed[0]["sha256"] == module.hashlib.sha256(content).hexdigest()
     assert (binary_root / "tool").stat().st_mode & 0o111
 
-assert not module.load_authorization_module().ANCHOR_PATH.exists()
+authorization = module.load_authorization_module()
+assert authorization.ANCHOR_PATH.is_file()
+authorization.validate_anchor(
+    json.loads(authorization.ANCHOR_PATH.read_text()),
+    json.loads(authorization.PROPOSAL_PATH.read_text()),
+)
 print("t22_a0_pinned_tool_acquisition_check\tpass")
 print(f"directed_negative_test_count\t{len(mutations) + 3}")
 print("network_attempted\tfalse")

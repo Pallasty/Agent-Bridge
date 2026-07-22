@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import platform
 import shutil
@@ -10,8 +11,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PROPOSAL = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a0-real-lab-owner-authorization-proposal-v1.json"
+AUTHORIZATION_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a0_owner_authorization_v1.py"
 DOMAIN = b"AB_TRACK_B_T22_A0_OWNER_AUTHORIZATION_PROPOSAL_V1\0"
 REQUIRED_TOOLS = ("etcd", "etcdctl", "bao", "toxiproxy-server")
+
+
+def load_authorization_module():
+    spec = importlib.util.spec_from_file_location("t22_a0_owner_authorization", AUTHORIZATION_SOURCE)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def canonical(value: object) -> bytes:
@@ -76,6 +86,7 @@ def validate_proposal(value: dict) -> None:
 def inspect() -> dict:
     proposal = json.loads(PROPOSAL.read_text())
     validate_proposal(proposal)
+    authorization_status = load_authorization_module().status()
     tools = {name: (shutil.which(name) or "MISSING") for name in REQUIRED_TOOLS}
     missing = [name for name, path in tools.items() if path == "MISSING"]
     return {
@@ -87,7 +98,7 @@ def inspect() -> dict:
         "required_tool_count": len(REQUIRED_TOOLS),
         "missing_tool_count": len(missing),
         "missing_tools": missing,
-        "owner_public_key_bound": False,
+        "owner_public_key_bound": authorization_status["owner_trust_anchor_valid"],
         "owner_signature_verified": False,
         "credentials_accessed": False,
         "network_accessed": False,

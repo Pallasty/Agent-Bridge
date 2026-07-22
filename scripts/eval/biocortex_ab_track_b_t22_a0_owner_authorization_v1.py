@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -36,16 +37,23 @@ def parse_time(value: str) -> datetime:
 def public_key_fingerprint(public_key: bytes) -> str:
     assert public_key.endswith(b"\n") and public_key.count(b"\n") == 1
     assert public_key.startswith(b"ssh-ed25519 ")
-    with tempfile.NamedTemporaryFile() as handle:
-        handle.write(public_key)
-        handle.flush()
-        result = subprocess.run(
-            ["ssh-keygen", "-lf", handle.name, "-E", "sha256"],
-            check=True, capture_output=True, text=True,
-        )
-    fields = result.stdout.split()
-    assert len(fields) >= 2 and fields[1].startswith("SHA256:")
-    return fields[1]
+    fields = public_key.rstrip(b"\n").split()
+    assert len(fields) >= 2 and fields[0] == b"ssh-ed25519"
+    blob = base64.b64decode(fields[1], validate=True)
+
+    def read_string(offset: int) -> tuple[bytes, int]:
+        assert offset + 4 <= len(blob)
+        length = int.from_bytes(blob[offset:offset + 4], "big")
+        start = offset + 4
+        end = start + length
+        assert end <= len(blob)
+        return blob[start:end], end
+
+    algorithm, offset = read_string(0)
+    key, offset = read_string(offset)
+    assert algorithm == b"ssh-ed25519" and len(key) == 32 and offset == len(blob)
+    encoded = base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
+    return f"SHA256:{encoded}"
 
 
 def write_exclusive_canonical(path: Path, value: dict, mode: int = 0o600) -> None:

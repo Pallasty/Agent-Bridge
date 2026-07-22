@@ -72,7 +72,9 @@ module.subprocess.Popen = ForbiddenCall("process start")
 module.socket.socket = ForbiddenCall("port bind")
 try:
     status = module.status()
-    assert status["status"] == "BLOCKED_OWNER_TRUST_ANCHOR_AND_EXACT_SIGNATURE_REQUIRED"
+    assert status["status"] == "BLOCKED_EXACT_SIGNED_PAYLOAD_AND_PINNED_TOOLS_REQUIRED"
+    assert status["owner_trust_anchor_present"] is True
+    assert status["owner_trust_anchor_valid"] is True
     assert status["network_attempted"] is False
     assert status["processes_started"] == status["faults_injected"] == 0
     try:
@@ -80,7 +82,7 @@ try:
     except (AssertionError, FileNotFoundError):
         pass
     else:
-        raise AssertionError("execution admitted without owner anchor and signature")
+        raise AssertionError("execution admitted without exact owner signature and pinned tools")
 finally:
     module.urllib.request.build_opener = original_opener
     module.subprocess.Popen = original_popen
@@ -159,7 +161,12 @@ with tempfile.TemporaryDirectory() as directory:
     else:
         raise AssertionError("exact ephemeral bootstrap-material leak admitted")
 
-assert not module.load_acquisition_module().load_authorization_module().ANCHOR_PATH.exists()
+authorization = module.load_acquisition_module().load_authorization_module()
+assert authorization.ANCHOR_PATH.is_file()
+authorization.validate_anchor(
+    json.loads(authorization.ANCHOR_PATH.read_text()),
+    json.loads(authorization.PROPOSAL_PATH.read_text()),
+)
 print("t22_a0_real_process_runner_check\tpass")
 print(f"directed_negative_test_count\t{len(mutations) + 7}")
 print("network_attempted\tfalse")
