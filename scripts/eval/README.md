@@ -146,6 +146,18 @@ only and keeps SQLite Slice B closed. It also records rustup/toolchain and
 crates.io-cache side effects from the first independent build attempt. See
 `docs/design/FREE_RECALL_STRATEGY_R6_SLICE_A_BUILD_RESULT_2026_07_22.md`.
 
+`free_recall_strategy_r10_session_curate_producer.py` validates the first and
+only Slice C producer seam without changing source. It freezes an explicit
+candidate-outcome ledger, optional `Hub` capability injection instead of
+`StateStore` widening, save-before-item order, saved-success ordinals, and
+fail-open core/fail-closed sidecar behavior. Public-synthetic traces include
+dry-run/no-store/disabled, duplicates, mixed errors, begin/item/close failures,
+and the auxiliary-error underflow counterexample. A pass opens only an
+owner-gated R11 C1 bridge-orchestration source request with a fake capability;
+it does not open a store adapter, trusted key custody, build, execution,
+producer integration, merge, release, or deployment. See
+`docs/design/FREE_RECALL_STRATEGY_R10_SESSION_CURATE_PRODUCER_RESULT_2026_07_22.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
