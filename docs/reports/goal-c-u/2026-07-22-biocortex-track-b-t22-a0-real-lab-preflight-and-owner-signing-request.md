@@ -12,16 +12,20 @@ secret was inspected; no service was started and no fault was injected.
 
 The first authorization is deliberately smaller than production: three local
 etcd processes, three local OpenBao Raft processes, and one loopback Toxiproxy
-process, with non-secret generated workload and a zero-dollar ceiling. It may
-test process crashes, loopback transport faults, CAS/replay behavior, service
-restart, and owned-lab snapshot rollback. It cannot prove independent host
+process, with generated lab-only workload and a zero-dollar ceiling. It may
+test one owned process crash, one loopback transport disconnect, CAS/replay
+behavior, and service restart. It cannot prove independent host
 failure, production HA, external anti-rollback, provider behavior, or production
 admissibility.
 
 After authorization, only hash-pinned public release artifacts may be acquired.
-No system package installation, sudo, host-global `iptables`/`tc`, ambient
-credential discovery, cloud API, production data, customer data, or external
-output is authorized by this proposal.
+OpenBao initialization may generate ephemeral unseal material and a root token,
+but they must remain memory-only, must never enter logs or receipts, and must be
+discarded when the runner exits after cleanup and exact-value leak scanning. No
+system package installation, sudo, host-global
+`iptables`/`tc`, pre-existing or ambient credential discovery, cloud API,
+production data, customer data, or external output is authorized by this
+proposal.
 
 The public-tool supply chain is now frozen in
 `docs/design/fixtures/biocortex-ab-track-b-t22-a0-public-tool-pins-v1.json`
@@ -55,11 +59,16 @@ access, non-zero spend, external anti-rollback, or production claims.
 
 The authorization utility remains blocked while the exact repository trust
 anchor is absent. After the owner confirms the proposal and supplies the public
-key, a separate commit will pin that key, host, fingerprint, and proposal hash.
+key, `bind-anchor` accepts only an absolute, repository-external `.pub` file and
+the exact confirmed proposal hash; a separate commit will pin that key, host,
+fingerprint, and proposal hash.
 Only then can the utility generate a timestamped payload. Verification uses
 OpenSSH `sshsig` with the exact owner identity and namespace; it never reads the
 private key. A synthetic ephemeral-key test covers the cryptographic path but
 cannot install or substitute for the repository owner trust anchor.
+Payload generation additionally requires a clean tracked tree and writes only
+an exclusive, non-overwriting canonical file beneath the exact lab artifact
+root's `authorizations` directory.
 
 ## Fail-closed preflight
 
@@ -67,11 +76,12 @@ cannot install or substitute for the repository owner trust anchor.
 validates the proposal hash and rejects authority, spend, credentials, cloud,
 production data, host-global networking, false topology claims, signature
 forgery, external anti-rollback claims, and hash drift. It performs no network
-or secret access.
+or secret access. The current pack exercises 18 directed negative cases.
 
 `scripts/check-biocortex-ab-track-b-t22-a0-owner-authorization-v1-pack.sh`
-additionally verifies exact four-hour payload semantics, OpenSSH Ed25519 signing
-and verification, owner identity/namespace binding, and 11 authorization
+additionally verifies exact four-hour payload semantics, the memory-only lab
+bootstrap-material boundary, OpenSSH Ed25519 signing
+and verification, owner identity/namespace binding, and 14 authorization
 mutations. Its repository-facing result remains
 `BLOCKED_OWNER_TRUST_ANCHOR_REQUIRED` until the owner supplies the public key.
 
@@ -82,10 +92,46 @@ network boundary. Its present result is
 `BLOCKED_EXACT_OWNER_SIGNATURE_REQUIRED`; it confirms that no network request
 is constructed and no release artifact is downloaded before authorization.
 
+`scripts/check-biocortex-ab-track-b-t22-a0-real-process-runner-v1-pack.sh`
+adds 27 directed negative cases over the signed execution-contract binding,
+one-shot authorization use, exact loopback ports, clean environment, etcd CAS
+shape, canonical/hash-chained evidence, process-start boundary, and exact
+ephemeral-bootstrap-value leak rejection. Its current result is
+`BLOCKED_OWNER_TRUST_ANCHOR_AND_EXACT_SIGNATURE_REQUIRED`; the test uses no
+real service double and proves that the offline status and rejection paths
+construct no network opener, start no process, inject no fault, and create no
+real evidence.
+
 ## Current transition
 
-The remaining owner action is unchanged: confirm proposal SHA-256
-`dc4ed8f36954f28695044dbc2a93b2c367160058bf62b9f2647db668b7b06eac`
+The exact execution contract is now frozen at SHA-256
+`f84fe9ea9d8948afa7eca516f486bb40d690acfd19437a7b3469af8c4dc37616`.
+It binds the loopback ports, one-shot consumption, etcd proxy-disconnect
+scenario, OpenBao active-process failover scenario, memory-only bootstrap
+material, timeouts, evidence outputs, and non-production claims.
+
+The remaining owner action is to confirm proposal SHA-256
+`854862a6dd71935590ef0f01072b25dd289221b296c7979964afa7155faaa92b`
 and provide the dedicated Ed25519 public key. The trust-anchor commit must land
 before the exact four-hour payload is generated. The owner's private key never
 enters this repository or the lab artifact root.
+
+After the exact owner signature verifies, the operator sequence is fixed: first
+run the owner-gated pinned-tool acquirer into the exact `tools` directory, then
+invoke the real-process runner with the same payload and signature. The runner
+irrevocably reserves that authorization before starting services, permits no
+automatic retry, and always attempts cleanup. A failed real attempt therefore
+requires a newly generated and newly signed payload rather than silently
+reusing authority.
+
+## Runtime source basis
+
+The executor is pinned to the upstream semantics documented for [etcd v3.7
+configuration](https://etcd.io/docs/v3.7/op-guide/configuration/) and its
+[default-linearizable Range API](https://etcd.io/docs/v3.7/learning/api/);
+[OpenBao integrated Raft join](https://openbao.org/api-docs/system/storage/raft/),
+[unseal](https://openbao.org/api-docs/system/unseal/),
+[health](https://openbao.org/api-docs/system/health/), and
+[Transit sign/verify](https://openbao.org/api-docs/secret/transit/); and the
+[Toxiproxy v2 API and `/version` surface](https://github.com/Shopify/toxiproxy).
+These references define runtime mechanics only and grant no authority.
