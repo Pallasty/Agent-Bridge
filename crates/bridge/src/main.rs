@@ -50,7 +50,7 @@ use ab_bridge::operator_request::{OperatorDecision, OperatorRequestStore, Operat
 use ab_bridge::seed_substrate as ab_seed_bridge;
 use ab_bridge::shadow_cortex as ab_shadow_cortex;
 use ab_bridge::warp_scheme;
-use ab_bridge::{browser_lite, instinct, skills};
+use ab_bridge::{a2ui, browser_lite, instinct, skills};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -190,6 +190,11 @@ enum Cmd {
     OperatorRequest {
         #[command(subcommand)]
         op: OperatorRequestOp,
+    },
+    /// Validate an A2UI v0.9.1 server-message stream without rendering or executing it.
+    A2ui {
+        #[command(subcommand)]
+        op: A2uiOp,
     },
     /// Index third-party Claude Code skill libraries into memory.
     ///
@@ -4051,6 +4056,18 @@ enum OperatorRequestOp {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum A2uiOp {
+    /// Validate a JSON array, single message, or JSONL stream. Use `-` for stdin.
+    Validate {
+        /// Input path, or `-` to read stdin.
+        input: String,
+        /// Emit the complete machine-readable validation report.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum SyncProvider {
     /// Use `gh` CLI to host on GitHub (legacy default).
@@ -4587,6 +4604,12 @@ async fn real_main() -> Result<()> {
     // need the daemon Hub, and decisions never invoke an executor.
     if let Cmd::OperatorRequest { op } = &cmd {
         return run_operator_request_cli(op);
+    }
+
+    // A2UI P0 is deliberately read-only: parse and report before any Hub,
+    // renderer, action dispatcher, browser, terminal, or agent runtime exists.
+    if let Cmd::A2ui { op } = &cmd {
+        return run_a2ui_cli(op);
     }
 
     // Skills subcommand: short-lived; no daemon hub needed.
@@ -7948,6 +7971,7 @@ async fn real_main() -> Result<()> {
         Cmd::Setup { .. }
         | Cmd::Sync { .. }
         | Cmd::OperatorRequest { .. }
+        | Cmd::A2ui { .. }
         | Cmd::Skills { .. }
         | Cmd::BrowserLite { .. }
         | Cmd::Avatar { .. }
@@ -7969,6 +7993,51 @@ async fn real_main() -> Result<()> {
         | Cmd::WorkflowFeedbackOwnerReviewPacket { .. }
         | Cmd::WorkflowFeedbackPromotionRecord { .. }
         | Cmd::Instinct { .. } => unreachable!(),
+    }
+}
+
+fn run_a2ui_cli(op: &A2uiOp) -> Result<()> {
+    use std::io::Read as _;
+
+    match op {
+        A2uiOp::Validate { input, json } => {
+            let raw = if input == "-" {
+                let mut raw = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut raw)
+                    .context("read A2UI stream from stdin")?;
+                raw
+            } else {
+                std::fs::read_to_string(input)
+                    .with_context(|| format!("read A2UI stream {input}"))?
+            };
+            let report = a2ui::validate_stream(&raw);
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else if report.valid {
+                println!(
+                    "A2UI {} valid: {} messages, {} surfaces, {} components, {} described actions; execution=false rendering=false",
+                    report.protocol_version,
+                    report.message_count,
+                    report.surface_count,
+                    report.component_count,
+                    report.action_count
+                );
+            } else {
+                eprintln!(
+                    "A2UI {} invalid: {} error(s); execution=false rendering=false",
+                    report.protocol_version,
+                    report.errors.len()
+                );
+                for issue in &report.errors {
+                    eprintln!("- {}: {}", issue.code, issue.message);
+                }
+            }
+            if !report.valid {
+                std::process::exit(2);
+            }
+            Ok(())
+        }
     }
 }
 

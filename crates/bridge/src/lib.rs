@@ -6,6 +6,7 @@
 
 pub mod agent_task_contract;
 pub mod agent_world_trajectory;
+pub mod a2ui;
 pub mod operator_request;
 pub mod anthropic_api;
 pub mod avatar_alert;
