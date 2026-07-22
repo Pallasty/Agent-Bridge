@@ -120,6 +120,16 @@ and custody still unresolved; it creates no schema or executable integration.
 See
 `docs/design/FREE_RECALL_STRATEGY_R4_OBSERVATION_ONLY_INTEGRATION_RESULT_2026_07_21.md`.
 
+`free_recall_strategy_r5_source_plan.py` validates the next source-only plan
+without implementing it. It freezes a full-length, domain-separated and
+length-framed HMAC-SHA-256 `item_ref`, an interface-only key-provider boundary,
+whole-episode purge semantics, three separately gated source slices, and the
+single proposed `session_curate:curation_batch` producer seam. Public-synthetic
+known-answer and directed-mutation checks open only an owner-gated R6 Slice A
+(pure types, derivation, synthetic provider, and no-op sink), not dependencies,
+SQLite, build, execution, real capture, retrieval, merge, or deployment. See
+`docs/design/FREE_RECALL_STRATEGY_R5_SOURCE_ONLY_PLAN_RESULT_2026_07_22.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
