@@ -1,0 +1,22 @@
+{
+  "checkpoint_materialized": false,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D8",
+  "depth3_to_depth4_action_authorized": false,
+  "depth3_to_depth4_action_executed": false,
+  "limitations": [
+    "This unit defines no checkpoint payload and executes no scientific state iteration.",
+    "A future materialization requires a new bounded preflight and separate execution authority.",
+    "No fourth Krylov action, remainder, cumulative, R100, physical reference, or READY authority."
+  ],
+  "manifest_hash_binding_required": true,
+  "next_gate": "BOUNDED_PACKED_CHECKPOINT_PREFLIGHT_PROTOCOL",
+  "payload_bytes": 6819168,
+  "record_layout_verified": true,
+  "shard_schedule": {
+    "count": 53,
+    "full_shards": 52,
+    "last_shard_records": 107
+  },
+  "status": "VERIFIED_D8_PACKED_DEPTH3_QUOTIENT_CHECKPOINT_PROTOCOL_NO_MATERIALIZATION",
+  "verified": true
+}

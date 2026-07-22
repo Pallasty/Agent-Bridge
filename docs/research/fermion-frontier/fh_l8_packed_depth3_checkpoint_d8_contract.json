@@ -1,0 +1,11 @@
+{
+  "schema_version":1,
+  "contract_id":"FH-L8-INDEPENDENT-REFERENCE-D8",
+  "checker_self_sha256":"c8cbc65a325d47ef92b65498d8f8513565d295a375e503f196f288d5a2529467",
+  "parent_d7":{"checker_path":"fh_l8_depth3_to_depth4_quotient_h_design_gate_checker.py","contract_path":"fh_l8_depth3_to_depth4_quotient_h_design_gate_contract.json","checker_sha256":"b43fcf1613fd2f3abd378c66261d2d01ca325446820bea735b5af4605dd379ae","contract_sha256":"9557b9523b5d5f29d76a3d02dc50b76553879961dae7d168dc90080529fc61ed"},
+  "record_layout":{"record_bytes":32,"fields":[{"name":"representative_u128_be","offset":0,"bytes":16},{"name":"amplitude_i64_le","offset":16,"bytes":8},{"name":"orbit_size_u8","offset":24,"bytes":1},{"name":"reserved_zero","offset":25,"bytes":7}]},
+  "source":{"record_count":213099,"maximum_payload_bytes":6819168,"source_full_vector_sha256":"6f8f53101b8a3ec0b3dfcee624a014426d93a8aa0dfc1300780b0ad99b765e97","source_quotient_sha256":"7230d8bd0e726535cb5da01bc191313b25e38b83a6b809a7e6e39823a418757e"},
+  "schedule":{"shard_size":4096,"shard_count":53,"last_shard_records":107,"ordering":"ascending_u128_representative","durability":"fsync_payload_then_manifest_per_complete_shard","resume":"only_hash_bound_complete_shard_boundary"},
+  "manifest":{"required_fields":["protocol_contract_sha256","d7_contract_sha256","source_full_vector_sha256","source_quotient_sha256","record_count","record_bytes","shard_count","shards","payload_sha256"],"payload_sha256_before_materialization":"UNSET"},
+  "authority":{"checkpoint_materialized":false,"source_vector_materialized":false,"depth3_to_depth4_action_authorized":false,"depth3_to_depth4_action_executed":false,"target_vector_materialized":false,"runtime_feasibility_certified":false,"memory_feasibility_certified":false,"degree6_remainder_bounded":false,"ready_gate_eligible":false}
+}
