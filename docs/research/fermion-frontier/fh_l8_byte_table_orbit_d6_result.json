@@ -1,0 +1,25 @@
+{
+  "canonicalization_within_seconds_cap": true,
+  "compression_ratio_denominator": 213099,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D6",
+  "degree6_remainder_bounded": false,
+  "depth3_orbit": {
+    "digest": "7e4f0d2526b49c786b124a8b45dc82cc8892a7798e7c4c362cd4aa15db74ca26",
+    "orbits": 213099,
+    "states": 1704285
+  },
+  "fourth_layer_feasibility": "NOT_EXECUTED_OR_CERTIFIED",
+  "full_R100_error_bounded": false,
+  "limitations": [
+    "The byte table is proven against the signed Fock support action on a deterministic sample; canonicalization needs only support orbits.",
+    "No quotient Hamiltonian action or fourth-layer Krylov action was executed.",
+    "No D6 remainder, cumulative, R100, physical reference, or READY authority."
+  ],
+  "next_branch": "QUOTIENT_HAMILTONIAN_ACTION_AND_FOURTH_LAYER_COST_GATE",
+  "physical_reference_qualified": false,
+  "ready_gate_eligible": false,
+  "signed_support_equivalence_samples": 4096,
+  "status": "VERIFIED_D6_BYTE_TABLE_SIGNED_D4_DEPTH3_ORBITS",
+  "two_step_cumulative_error_bounded": false,
+  "verified": true
+}

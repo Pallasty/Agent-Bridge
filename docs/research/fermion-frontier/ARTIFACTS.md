@@ -2057,3 +2057,6 @@ so they are versioned normally and are not added to the preservation-only
 - `fh_l8_signed_d4_orbit_d5_contract.json`, checker, result, tests, and
   `FH_L8_SIGNED_D4_ORBIT_D5_ZH.md` bind the signed D4 custody-positive orbit
   result and the depth-3 prefix boundary.
+- `fh_l8_byte_table_orbit_d6_contract.json`, checker, result, tests, and
+  `FH_L8_BYTE_TABLE_ORBIT_D6_ZH.md` certify full depth-3 signed-D4 support
+  orbit enumeration by byte-table canonicalization.
