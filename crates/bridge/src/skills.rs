@@ -42,6 +42,11 @@ use std::time::SystemTime;
 
 const ROUTE_STRONG_SEMANTIC_COSINE: f32 = 0.50;
 
+/// Explicit document-format requests deserve a small deterministic routing
+/// preference over broad document-related semantic matches. This only affects
+/// the final candidate order; it never installs or executes a skill.
+const ROUTE_FILE_FORMATS: &[&str] = &["pdf", "docx", "xlsx", "pptx"];
+
 /// Curated seed corpus (Phase A). All known to publish Claude Code skills
 /// in the canonical `<skill-name>/SKILL.md` layout (or a close variant).
 /// Add/remove entries here; `skills seed` indexes the lot.
@@ -766,7 +771,10 @@ async fn route_skill_entries(
 ) -> Result<Vec<RoutedSkillHit>> {
     let hits = route_skill_hits(store, query, limit).await?;
     let feedback = route_feedback_for_hits(store, &hits).await;
-    Ok(route_apply_feedback(hits, &feedback))
+    Ok(route_prioritize_explicit_format_routed(
+        query,
+        route_apply_feedback(hits, &feedback),
+    ))
 }
 
 /// Retrieve the small top-k skill set for runtime context loading.
@@ -776,6 +784,7 @@ pub async fn route_skill_hits(
     limit: usize,
 ) -> Result<Vec<MemorySearchHit>> {
     let overfetch = route_retrieval_limit(limit);
+    let formats = requested_file_formats(query);
     let semantic_hits = store
         .memory_search_semantic(query, overfetch, 0.25_f32)
         .await
@@ -793,11 +802,29 @@ pub async fn route_skill_hits(
                 .unwrap_or_default();
         }
     }
-    Ok(route_merge_hits(semantic_hits, fts_hits, limit))
+    // A multi-word FTS query can omit the exact format skill even though the
+    // user explicitly requested that format. Fetch those tiny lexical lanes
+    // separately, then let the path-based preference below rank them.
+    for format in &formats {
+        let format_hits = store
+            .memory_search(format, &tag_filter, route_candidate_limit(limit) as u32)
+            .await
+            .unwrap_or_default();
+        fts_hits.extend(format_hits);
+    }
+    let candidates = route_merge_hits(semantic_hits, fts_hits, route_candidate_limit(limit));
+    Ok(route_prioritize_explicit_format(query, candidates)
+        .into_iter()
+        .take(limit)
+        .collect())
 }
 
 fn route_retrieval_limit(limit: usize) -> u32 {
     ((limit as u32).saturating_mul(20)).clamp(100, 500)
+}
+
+fn route_candidate_limit(limit: usize) -> usize {
+    limit.saturating_mul(10).clamp(20, 100)
 }
 
 fn route_merge_hits(
@@ -834,6 +861,73 @@ fn route_merge_hits(
 
 fn is_skill_hit(hit: &MemorySearchHit) -> bool {
     hit.record.tags.iter().any(|t| t == "skill")
+}
+
+fn route_prioritize_explicit_format(
+    query: &str,
+    mut hits: Vec<MemorySearchHit>,
+) -> Vec<MemorySearchHit> {
+    let formats = requested_file_formats(query);
+    if formats.is_empty() {
+        return hits;
+    }
+    hits.sort_by(|a, b| {
+        skill_format_match_score(&b.record, &formats)
+            .cmp(&skill_format_match_score(&a.record, &formats))
+    });
+    hits
+}
+
+fn route_prioritize_explicit_format_routed(
+    query: &str,
+    mut hits: Vec<RoutedSkillHit>,
+) -> Vec<RoutedSkillHit> {
+    let formats = requested_file_formats(query);
+    if formats.is_empty() {
+        return hits;
+    }
+    hits.sort_by(|a, b| {
+        skill_format_match_score(&b.hit.record, &formats)
+            .cmp(&skill_format_match_score(&a.hit.record, &formats))
+    });
+    hits
+}
+
+fn requested_file_formats(query: &str) -> Vec<&'static str> {
+    ROUTE_FILE_FORMATS
+        .iter()
+        .copied()
+        .filter(|format| {
+            query
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|token| token.eq_ignore_ascii_case(format))
+        })
+        .collect()
+}
+
+fn skill_format_match_score(record: &MemoryRecord, formats: &[&str]) -> u8 {
+    let Some(path) = tag_value(&record.tags, "path:") else {
+        return 0;
+    };
+    let Some(skill_name) = path.rsplit('/').nth(1) else {
+        return 0;
+    };
+    formats
+        .iter()
+        .map(|format| {
+            if skill_name.eq_ignore_ascii_case(format) {
+                2
+            } else if skill_name
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|token| token.eq_ignore_ascii_case(format))
+            {
+                1
+            } else {
+                0
+            }
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -2896,6 +2990,71 @@ mod tests {
         assert_eq!(route_retrieval_limit(1), 100);
         assert_eq!(route_retrieval_limit(10), 200);
         assert_eq!(route_retrieval_limit(50), 500);
+    }
+
+    #[test]
+    fn route_candidate_limit_preserves_format_matches_before_final_cutoff() {
+        assert_eq!(route_candidate_limit(1), 20);
+        assert_eq!(route_candidate_limit(5), 50);
+        assert_eq!(route_candidate_limit(50), 100);
+    }
+
+    #[test]
+    fn route_prioritizes_exact_file_format_skill_over_broad_document_matches() {
+        let broad = test_skill_hit("skill:docs", 20.0, Some(0.8));
+        let mut partial = test_skill_hit("skill:community/pdf-official", 12.0, None);
+        partial
+            .record
+            .tags
+            .push("path:pdf-official/SKILL.md".to_string());
+        let mut exact = test_skill_hit("skill:anthropics/pdf", 8.0, None);
+        exact.record.tags.push("path:pdf/SKILL.md".to_string());
+
+        let hits = route_prioritize_explicit_format(
+            "read, edit, and verify a PDF form",
+            vec![broad, partial, exact],
+        );
+
+        assert_eq!(hits[0].record.key, "skill:anthropics/pdf");
+        assert_eq!(hits[1].record.key, "skill:community/pdf-official");
+        assert_eq!(hits[2].record.key, "skill:docs");
+    }
+
+    #[test]
+    fn route_keeps_explicit_file_format_priority_after_feedback_sorting() {
+        let mut broad = test_skill_hit("skill:docs", 20.0, Some(0.8));
+        broad.record.tags.push("path:docx/SKILL.md".to_string());
+        let mut exact = test_skill_hit("skill:pdf", 8.0, None);
+        exact.record.tags.push("path:pdf/SKILL.md".to_string());
+
+        let routed = route_apply_feedback(
+            vec![broad, exact],
+            &BTreeMap::from([(
+                "skill:docs".to_string(),
+                SkillRouteFeedback {
+                    score: 0.4,
+                    count: 1,
+                    positive_count: 1,
+                    negative_count: 0,
+                },
+            )]),
+        );
+        let routed = route_prioritize_explicit_format_routed("edit a PDF form", routed);
+
+        assert_eq!(routed[0].hit.record.key, "skill:pdf");
+        assert_eq!(routed[1].hit.record.key, "skill:docs");
+    }
+
+    #[test]
+    fn route_leaves_general_queries_in_retrieval_order() {
+        let first = test_skill_hit("skill:first", 20.0, None);
+        let mut pdf = test_skill_hit("skill:pdf", 8.0, None);
+        pdf.record.tags.push("path:pdf/SKILL.md".to_string());
+
+        let hits = route_prioritize_explicit_format("review a design document", vec![first, pdf]);
+
+        assert_eq!(hits[0].record.key, "skill:first");
+        assert_eq!(hits[1].record.key, "skill:pdf");
     }
 
     #[test]
