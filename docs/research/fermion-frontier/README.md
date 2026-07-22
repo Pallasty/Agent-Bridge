@@ -4,6 +4,10 @@ Current independent-reference successor: `FH-L8-INDEPENDENT-REFERENCE-S0` closes
 uniform-supremum and ordinary-light-cone architectures and selects the state-specific per-step exact
 defect ledger. See `FH_L8_INDEPENDENT_REFERENCE_ROUTE_S0_ZH.md`.
 
+The first selected-route unit is now positive: `FH-L8-INDEPENDENT-REFERENCE-D1` bounds the
+`k0 -> k1` PF-to-exact expectation defect for both observables below `1/400000`. See
+`FH_L8_STATE_SPECIFIC_DEFECT_D1_ZH.md`; this does not authorize multiplication by 100.
+
 Status date: 2026-07-14
 
 Scope: physical fermions, not the historical Fermion Memory service.
