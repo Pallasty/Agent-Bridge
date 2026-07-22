@@ -1,0 +1,56 @@
+{
+  "schema": "agent_bridge.biocortex.track_b.t22_a0.owner_authorization_proposal.v1",
+  "state": "AWAITING_EXACT_OWNER_SIGNATURE",
+  "track_id": "SELF_HOSTED_ETCD_OPENBAO",
+  "decision_after_signature": "AUTHORIZE_T22_A0_SINGLE_HOST_REAL_PROCESS_PILOT_ONLY",
+  "scope": {
+    "physical_host_count": 1,
+    "failure_domain_claim": "PROCESS_ONLY_SINGLE_PHYSICAL_HOST",
+    "spend_limit_usd": 0,
+    "maximum_runtime_seconds": 14400,
+    "credential_access_before_signature": false,
+    "provider_or_cloud_access": false,
+    "production_or_customer_data": false,
+    "host_global_network_mutation": false,
+    "public_hash_pinned_downloads_after_signature": true,
+    "artifact_root": "/Data/CascadeProjects/.artifacts/agent-bridge/biocortex-track-b-t22-a0-real-lab"
+  },
+  "topology": {
+    "etcd_processes": 3,
+    "openbao_processes": 3,
+    "toxiproxy_processes": 1
+  },
+  "allowed_faults_after_signature": [
+    "OWNED_PROCESS_KILL",
+    "LOOPBACK_PROXY_LATENCY",
+    "LOOPBACK_PROXY_DISCONNECT",
+    "OWNED_SERVICE_RESTART",
+    "OWNED_LAB_SNAPSHOT_ROLLBACK"
+  ],
+  "acceptance": [
+    "HASH_PINNED_PUBLIC_RELEASE_ARTIFACTS_VERIFIED",
+    "THREE_ETCD_PROCESSES_FORM_ONE_LOCAL_CLUSTER",
+    "THREE_OPENBAO_PROCESSES_FORM_ONE_LOCAL_RAFT_CLUSTER",
+    "ONE_LINEARIZABLE_AUTHORIZE_AND_CONSUME_TRANSITION_OBSERVED",
+    "ONE_PROCESS_OR_LOOPBACK_PROXY_FAULT_INJECTED_AND_RECOVERED",
+    "RAW_CANONICAL_VALIDATION_AND_CLEANUP_RECEIPTS_WRITTEN",
+    "NO_STDOUT_LOG_CALLBACK_OR_SUBPROCESS_MODEL_OUTPUT",
+    "ALL_SERVICES_STOPPED_AND_ARTIFACT_ROOT_SCOPED_AT_END"
+  ],
+  "signing": {
+    "owner_id": "pallasting",
+    "owner_role": "PROJECT_OWNER",
+    "signature_scheme": "OPENSSH_SSHSIG_ED25519",
+    "signature_namespace": "agent-bridge-t22-a0-owner-v1",
+    "owner_public_key": "UNBOUND",
+    "owner_signature": "UNBOUND",
+    "exact_payload_generated": false
+  },
+  "claims": {
+    "real_process_execution_authorized": false,
+    "three_failure_domain_evidence": false,
+    "external_anti_rollback_evidence": false,
+    "production_admissible": false
+  },
+  "proposal_sha256": "dc4ed8f36954f28695044dbc2a93b2c367160058bf62b9f2647db668b7b06eac"
+}
