@@ -2214,3 +2214,10 @@ negative authority and implementation records activate
 and FB-S2B stop now. This is not a source-integrity, candidate-OOM or performance
 result. Reopen requires new owner authority, a hash-bound 1-GiB-safe gate,
 materialized adapter/mapping evidence and a new positive-qualification v2.
+
+FH-L8 D5 verifies the eight signed D4 spatial symmetries, all `+1` Néel
+characters, observable-map invariance, and exact orbit compression through
+depth 2 (`225→29`, `24421→3116`). Depth 3 has `1704285` states; only a
+100000-state prefix (`71064` orbits) is certified. The next branch is the
+byte-table signed bit-permutation canonicalizer; no D6 or error authority is
+granted.
