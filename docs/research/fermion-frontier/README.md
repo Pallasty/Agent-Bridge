@@ -871,6 +871,21 @@ The focused 70-claim ledger is fully adjudicated: 56 unanimous verified, 8
 split/partial accepted, and 6 refuted as written, with every mandatory rewrite
 retained in `claim-status.jsonl`.
 
+## Fermion × BioCortex residual result
+
+FB-S1 is closed as `NO_GO_DIRECT_REDUCTION`. On the held-out L=2 same-U
+exact-minus-TDHF residual task, the budget-valid five-state HBR-R1-motivated tanh
+proxy reached median NRMSE `0.9252574169819254`; the 18-parameter Prony/AR8
+baseline reached `0.8932096493643846`. All registered effective horizons were
+zero. The initial eight-state reveal is separately retained as
+`INVALID_BUDGET_ACCOUNTING`; the corrected exploratory protocol was committed
+before its result. See
+`FERMION_BIOCORTEX_FB_S1_SAME_U_TDHF_RESIDUAL_2026_07_22.md`.
+
+This result does not execute BioCortex or establish HBR-R1 conformance, and it
+does not affect Agent-Bridge runtime parameters or the outer FH-L8 evidence
+gate.
+
 ## Final deliverables
 
 - [Chinese executive brief](EXECUTIVE_BRIEF_ZH.md)

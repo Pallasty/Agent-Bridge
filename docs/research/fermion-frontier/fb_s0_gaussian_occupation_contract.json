@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "calibration_id": "FB-S0_GAUSSIAN_OCCUPATION_Q2_INTERPRETATION_V1",
+  "checker_sha256": "d471cf5235b1485c8cfe260315bed06076c4b3a1fd9c9f63b6b79d9cc9a21780",
+  "analytic_kernels": {
+    "positive_loop": {
+      "matrix": [
+        ["1/2", "6/25", "6/25"],
+        ["6/25", "1/2", "6/25"],
+        ["6/25", "6/25", "1/2"]
+      ],
+      "expected_eigenvalues": ["49/50", "13/50", "13/50"],
+      "expected_triple_inclusion": "8281/125000"
+    },
+    "negative_loop": {
+      "matrix": [
+        ["1/2", "6/25", "-6/25"],
+        ["6/25", "1/2", "6/25"],
+        ["-6/25", "6/25", "1/2"]
+      ],
+      "expected_eigenvalues": ["37/50", "37/50", "1/50"],
+      "expected_triple_inclusion": "1369/125000"
+    }
+  },
+  "expected_shared_single_inclusions": ["1/2", "1/2", "1/2"],
+  "expected_shared_pair_inclusions": {
+    "0,1": "481/2500",
+    "0,2": "481/2500",
+    "1,2": "481/2500"
+  },
+  "expected_q2_cells": [
+    "193/5000",
+    "769/5000",
+    "769/5000",
+    "769/5000",
+    "769/5000",
+    "769/5000",
+    "769/5000",
+    "193/5000"
+  ],
+  "minimum_c3_bits": 0.05,
+  "l2_negative_control": {
+    "pilot_sha256": "9474ffb478dd14854e95c36430ecf500b0e44b5b2342b5dfcbe395032bee96c6",
+    "linear_size": 2,
+    "u_over_hopping": 0.0,
+    "total_time": 1.0,
+    "trotter_steps": 8,
+    "expected_modes": 8,
+    "expected_particles": 4,
+    "expected_triplets": 56,
+    "max_projection_residual": 1e-12,
+    "max_inclusion_determinant_residual": 1e-12,
+    "max_c3_bits": 1e-12
+  },
+  "resource_limits": {
+    "max_logical_state_dimension": 256,
+    "max_kernel_dimension": 8,
+    "max_triplets_processed": 56,
+    "max_table_cells_processed": 448
+  },
+  "fixed_claims": {
+    "calibration_only": true,
+    "fermionic_non_gaussianity_assessed": false,
+    "hoi_application_claim": false,
+    "physical_l8_instance_assessed": false,
+    "ready_gate_eligible": false,
+    "bgl_accessed": false,
+    "runtime_authority": false,
+    "mainline_parameter_influence": false,
+    "portable_receipt_byte_identity": false
+  }
+}

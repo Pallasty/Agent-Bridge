@@ -1,0 +1,34 @@
+{
+  "schema": "agent_bridge.fermion_biocortex.fb_s1_initial_reveal_audit.v1",
+  "status": "INVALID_BUDGET_ACCOUNTING",
+  "analysis_class": "INITIAL_PRIMARY_INVALID_BUDGET_ACCOUNTING",
+  "contract_sha256": "aaaebeced5321e50964498de03f9538a32c365f065736aee4d87cc5459f67061",
+  "source_identity_at_reveal": "NOT_PRECOMMITTED_OR_RECOVERABLY_HASH_BOUND",
+  "scientific_authority": false,
+  "historical_observation_only": true,
+  "invalid_reasons": [
+    "DIMENSION_8_REALIZED_PARAMETER_COUNT_WAS_REPORTED_AS_37_BUT_IS_54",
+    "REALIZED_PARAMETER_COUNT_54_EXCEEDS_FROZEN_CAP_40",
+    "INITIAL_CONTRACT_WAS_NOT_COMMITTED_BEFORE_RESULT_REVEAL",
+    "CANDIDATE_LABEL_IMPLIED_BIOCORTEX_BUT_CODE_WAS_ONLY_A_TANH_PROXY"
+  ],
+  "observed_diagnostic_metrics": {
+    "candidate_median_nrmse": 1.214940787764685,
+    "candidate_median_effective_horizon_steps": 0,
+    "best_direct_baseline": "PRONY_AR8",
+    "best_direct_nrmse": 0.8932096493643846,
+    "nrmse_improvement_fraction": -0.3601966667391545,
+    "effective_horizon_improvement_fraction": 0.0,
+    "direct_reduction_detected_diagnostic_only": true
+  },
+  "accounting_correction": {
+    "state_dimension": 8,
+    "incorrect_reported_parameters": 37,
+    "correct_realized_parameters": 54,
+    "incorrect_reported_operations_per_step": 98,
+    "correct_operations_per_step_with_precomputed_fixed_weights": 114,
+    "parameter_formula": "6*d+6",
+    "operation_formula": "14*d+2"
+  },
+  "disposition": "DO_NOT_USE_AS_CONFIRMATORY_OR_VALID_EQUAL_BUDGET_RESULT"
+}
