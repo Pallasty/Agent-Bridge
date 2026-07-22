@@ -1,19 +1,26 @@
-# BioCortex Track B T22-A0 real-lab preflight and owner signing request
+# BioCortex Track B T22-A0 real-lab execution result
 
 ## Outcome
 
-T22-A0 crossed the real-process boundary four times and remains fail closed.
-The sixth authorized run retained the already-proven etcd and Toxiproxy
-observations and proved that all three OpenBao processes can join and unseal.
-It then reported three Raft members and killed the sole active process only
-about one second after the final join. OpenBao had admitted both joiners as
-non-voters, so neither could elect a replacement; the run correctly terminated
-as `E_BAO_FAILOVER_NOT_OBSERVED`. All seven owned processes stopped, all
-loopback ports were released, and the exact bootstrap-secret scan covered
-343,254,086 bytes with zero matches. The correction now waits for the exact
-three-node set to contain three voters at their expected addresses with one
-matching active leader before fault injection. A source-bound rerun requires a
-fresh owner signature after the correction lands.
+T22-A0 completed its bounded single-host real-process objective on the fifth
+real attempt. The seventh exact owner authorization entered run
+`t22-a0-20260722T183604.320765z-00aee8892cc4`, which returned
+`PASS_T22_A0_REAL_PROCESS_FAULT_EVIDENCE`. It proved the three-member etcd
+cluster, linearizable exact-value consume, replay rejection, and loopback proxy
+disconnect/recovery. It then waited for all three expected OpenBao peers to be
+voters, killed active `bao-1`, observed `bao-2` become active, verified the
+pre-fault Transit signature through the replacement, restarted `bao-1`, and
+observed it rejoin unsealed with three Raft members.
+
+The terminal receipt content SHA-256 is
+`3d73929854090364a399755fcc417d83f32cd552b4207a449661277413ec31ca`.
+Its 15-event chain ends at
+`0cd1e2375e278639f8ea14c1dee5df87fc707c35d2ce5cf6abba1f6436b2798d`.
+Independent post-run verification recomputed the canonical terminal,
+preflight, and cleanup receipt digests and the complete event chain. All eight
+owned process instances stopped, all 14 loopback ports were released, no
+host-global network state changed, spend remained zero, and exact-value secret
+scanning covered 34 files and 343,261,815 bytes with zero matches.
 
 ## Authorized isolated-lab execution boundary
 
@@ -70,27 +77,24 @@ binds that proposal, host `tb14`, owner role, canonical public key SHA-256
 and fingerprint
 `SHA256:cKXQiuD9OQ0KD5zykCE0+lcRSXnrURROhzSm7NqH8Jw`.
 
-After the corrected source lands, the remaining owner action is to sign its
-fresh exact timestamped payload with `ssh-keygen -Y sign` under namespace
-`agent-bridge-t22-a0-owner-v1`.
+The seventh payload, content SHA-256
+`00aee8892cc46c2c8d5b38e6e119e746035813bad521879a746323a47182afff`,
+was signed under namespace `agent-bridge-t22-a0-owner-v1`, verified against the
+dedicated key, bound to source commit `b32a633621c790958991869e96b03f00ebd0403b`,
+and consumed exactly once. No further T22-A0 owner action is required. A later
+T22-A1 decision remains mandatory for three independent failure domains,
+cloud/provider access, non-zero spend, external anti-rollback, or production
+claims.
 
-The signed payload will be valid for at most four hours. The signature grants
-only T22-A0 implementation and execution on the named host. A later T22-A1
-decision is required for three independent failure domains, cloud/provider
-access, non-zero spend, external anti-rollback, or production claims.
-
-The authorization utility reports `READY_TO_GENERATE_EXACT_PAYLOAD`: the exact
-repository trust anchor is present and valid, while owner signature and real
-execution authority remain false. `bind-anchor` accepted only an absolute,
-repository-external `.pub` file and the exact confirmed proposal hash. The
-anchor pins the key, host, fingerprint, and proposal hash; the private key
-remains outside both repository and artifact root. Verification uses
-OpenSSH `sshsig` with the exact owner identity and namespace; it never reads the
-private key. A synthetic ephemeral-key test covers the cryptographic path but
-cannot install or substitute for the repository owner trust anchor.
-Payload generation additionally requires a clean tracked tree and writes only
-an exclusive, non-overwriting canonical file beneath the exact lab artifact
-root's `authorizations` directory.
+`bind-anchor` accepted only an absolute, repository-external `.pub` file and
+the exact confirmed proposal hash. The anchor pins the key, host, fingerprint,
+and proposal hash; the private key remains outside both repository and artifact
+root. Verification uses OpenSSH `sshsig` with the exact owner identity and
+namespace; it never reads the private key. A synthetic ephemeral-key test
+covers the cryptographic path but cannot install or substitute for the
+repository owner trust anchor. Payload generation additionally requires a
+clean tracked tree and writes only an exclusive, non-overwriting canonical file
+beneath the exact lab artifact root's `authorizations` directory.
 
 ## Fail-closed preflight
 
@@ -205,13 +209,35 @@ threshold, permits the temporary sealed state only for joined/restarted nodes,
 and waits for exact unsealed health with process-liveness monitoring. The
 consumed fifth authorization must not be reused.
 
-After the exact owner signature verifies, the operator sequence is fixed: first
-run the owner-gated pinned-tool acquirer into the exact `tools` directory, then
-invoke the real-process runner with the same payload and signature. The runner
-irrevocably reserves that authorization before starting services, permits no
-automatic retry, and always attempts cleanup. A failed real attempt therefore
-requires a newly generated and newly signed payload rather than silently
-reusing authority.
+The sixth exact signature, bound to source commit `b620f02f`, entered real run
+`t22-a0-20260722T180455.411425z-ff7e2b3acb8d`. It proved all three OpenBao
+processes could join and unseal, but the runner treated member count as voting
+readiness and killed the sole voter before Autopilot promoted either joiner.
+The run terminated as `E_BAO_FAILOVER_NOT_OBSERVED`; terminal receipt content
+SHA-256 is
+`13e5d3bc73da088262fb9e27a2e9fbb8ee181a11c80240b7a8b2ec2238bfda77`.
+All seven owned processes stopped and 343,254,086 scanned bytes contained no
+exact bootstrap-secret match. The correction requires the exact three-node
+set, expected Raft addresses, three `voter=true` states, and one matching
+leader before allowing fault injection. The consumed sixth authorization must
+not be reused.
+
+The seventh exact signature reused only revalidated hash-pinned release
+archives, with a fresh acquisition receipt bound to source commit `b32a6336`
+and authorization content SHA-256
+`00aee8892cc46c2c8d5b38e6e119e746035813bad521879a746323a47182afff`.
+The resulting real run is
+the PASS described in the Outcome section. Its claims remain deliberately
+bounded to real processes on one physical host: it supplies neither three
+failure domains nor external anti-rollback or production evidence.
+
+For every attempt, the operator sequence remained fixed: first run the
+owner-gated pinned-tool acquirer into the exact `tools` directory, then invoke
+the real-process runner with the same payload and signature. The runner
+irrevocably reserved that authorization before starting services, permitted no
+automatic retry, and always attempted cleanup. Each failed real attempt
+therefore required a newly generated and newly signed payload rather than
+silently reusing authority.
 
 ## Runtime source basis
 
