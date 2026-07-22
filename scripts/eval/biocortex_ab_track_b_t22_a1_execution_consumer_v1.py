@@ -240,6 +240,7 @@ def consume_and_dispatch(
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> dict:
     execution_module = load_execution_module()
+    require(execution_module.EXECUTION_ACTIVATION_READY, "E_EXECUTION_ACTIVATION_NOT_READY")
     observed_source_commit = foreign_call(execution_module.require_clean_tracked_tree)
     require(source_commit == observed_source_commit, "E_CONSUMER_SOURCE_COMMIT")
     _counter, collection, _attestation, _runtime, _preparation, _material, contract, proposal, schema = execution_module.load_inputs()
@@ -323,7 +324,8 @@ def status() -> dict:
     execution_module.load_inputs()
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.execution_consumer_status.v0",
-        "status": "OFFLINE_SINGLE_USE_CONSUMER_CORE_READY_SOURCE_BOUND_RUNNER_AND_REAL_ADMISSION_REQUIRED",
+        "status": "OFFLINE_SINGLE_USE_CONSUMER_CORE_READY_EXECUTION_ACTIVATION_GATE_CLOSED" if not execution_module.EXECUTION_ACTIVATION_READY else "OFFLINE_SINGLE_USE_CONSUMER_CORE_READY_SOURCE_BOUND_RUNNER_AND_REAL_ADMISSION_REQUIRED",
+        "execution_activation_ready": execution_module.EXECUTION_ACTIVATION_READY,
         "execution_contract_read": False, "owner_signature_read": False,
         "private_admission_receipt_read": False, "credential_files_read": False,
         "network_accessed": False, "listeners_started": 0, "workload_processes_started": 0,

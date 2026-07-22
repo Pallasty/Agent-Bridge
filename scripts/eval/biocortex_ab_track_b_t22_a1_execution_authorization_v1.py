@@ -36,6 +36,10 @@ TERMINAL_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/execution-admission-te
 SIGNATURE_NAMESPACE = "agent-bridge-t22-a1-owner-v1"
 MAX_JSON_BYTES = 256 * 1024
 MAX_SIGNATURE_BYTES = 64 * 1024
+# This may become True only in the same reviewed source commit that contains
+# the cross-host runner, three host-readiness validators, credential-placement
+# proof, and terminal evidence builder. Synthetic KATs opt in explicitly.
+EXECUTION_ACTIVATION_READY = False
 
 
 class SafeFailure(RuntimeError):
@@ -678,6 +682,7 @@ def admit(
     endpoint_manifest_path: Path,
     credential_manifest_path: Path,
 ) -> dict:
+    require(EXECUTION_ACTIVATION_READY, "E_EXECUTION_ACTIVATION_NOT_READY")
     countersignature, collection, _attestation, runtime, _preparation, material, contract, proposal, schema = load_inputs()
     anchor = json.loads(collection.ANCHOR_PATH.read_text())
     public_key = foreign_call(collection.validate_anchor, anchor, proposal)
@@ -799,10 +804,13 @@ def status() -> dict:
             valid = False
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.execution_authorization_status.v0",
-        "status": "BLOCKED_T22_A1_OWNER_TRUST_ANCHOR_REQUIRED" if not present else (
-            "BLOCKED_FINAL_PRIVATE_EVIDENCE_AND_EXACT_OWNER_EXECUTION_SIGNATURE_REQUIRED" if valid
-            else "BLOCKED_T22_A1_OWNER_TRUST_ANCHOR_INVALID"
+        "status": "BLOCKED_T22_A1_RUNNER_HOST_READINESS_AND_CREDENTIAL_PLACEMENT_REQUIRED" if not EXECUTION_ACTIVATION_READY else (
+            "BLOCKED_T22_A1_OWNER_TRUST_ANCHOR_REQUIRED" if not present else (
+                "BLOCKED_FINAL_PRIVATE_EVIDENCE_AND_EXACT_OWNER_EXECUTION_SIGNATURE_REQUIRED" if valid
+                else "BLOCKED_T22_A1_OWNER_TRUST_ANCHOR_INVALID"
+            )
         ),
+        "execution_activation_ready": EXECUTION_ACTIVATION_READY,
         "owner_trust_anchor_present": present, "owner_trust_anchor_valid": valid,
         "private_evidence_read": False, "credential_files_read": False,
         "network_accessed": False, "external_hosts_contacted": 0,
@@ -889,6 +897,7 @@ def main() -> None:
     source_commit = require_clean_tracked_tree()
     now = datetime.now(timezone.utc)
     if arguments.command == "generate":
+        require(EXECUTION_ACTIVATION_READY, "E_EXECUTION_ACTIVATION_NOT_READY")
         admitted, _verification, packets, set_signature_sha256 = validate_set_evidence(
             arguments.admitted_attestation_set_receipt.resolve(strict=True),
             arguments.attestation_set_countersignature.resolve(strict=True),

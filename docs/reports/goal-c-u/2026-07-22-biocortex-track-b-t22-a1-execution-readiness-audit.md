@@ -82,7 +82,7 @@ inject faults, spend money, or make production claims.
 ## Implemented closure evidence
 
 `biocortex_ab_track_b_t22_a1_execution_consumer_v1.py` and its KAT now close
-item 4. The KAT exercises one complete synthetic single-use dispatch and 41
+item 4. The KAT exercises one complete synthetic single-use dispatch and 42
 negative cases, including wrong signature before private receipt reads,
 caller-selected source commit, replay, runner failure, post-run expiry, missing
 terminal evidence, terminal cross-binding forgery, cleanup and budget

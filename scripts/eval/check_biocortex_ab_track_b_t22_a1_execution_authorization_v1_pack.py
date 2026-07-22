@@ -19,6 +19,7 @@ assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
+module.EXECUTION_ACTIVATION_READY = True
 
 countersignature = module.load_countersignature_module()
 collection = countersignature.load_collection_module()
@@ -515,9 +516,24 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
     assert ready["status"] == "BLOCKED_FINAL_PRIVATE_EVIDENCE_AND_EXACT_OWNER_EXECUTION_SIGNATURE_REQUIRED"
     assert ready["private_evidence_read"] is False and ready["credential_files_read"] is False
 
+    module.EXECUTION_ACTIVATION_READY = False
+    try:
+        module.admit(
+            execution_path, execution_signature_path, SOURCE_COMMIT,
+            NOW + timedelta(seconds=18), admitted_path, set_challenge_path,
+            set_signature_path, bundle, preparation_challenge_path,
+            preparation_signature_path, preparation_terminal_path, endpoint_path,
+            credential_path,
+        )
+    except module.SafeFailure as error:
+        assert str(error) == "E_EXECUTION_ACTIVATION_NOT_READY"
+    else:
+        raise AssertionError("real activation admitted while runner readiness gate was closed")
+
 collection.ANCHOR_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-owner-trust-anchor-v1.json"
 blocked = module.status()
-assert blocked["status"] == "BLOCKED_T22_A1_OWNER_TRUST_ANCHOR_REQUIRED"
+assert blocked["status"] == "BLOCKED_T22_A1_RUNNER_HOST_READINESS_AND_CREDENTIAL_PLACEMENT_REQUIRED"
+assert blocked["execution_activation_ready"] is False
 assert blocked["owner_trust_anchor_present"] is False and blocked["owner_trust_anchor_valid"] is False
 assert blocked["private_evidence_read"] is False and blocked["credential_files_read"] is False
 assert blocked["network_accessed"] is False and blocked["external_hosts_contacted"] == 0
@@ -525,7 +541,7 @@ assert blocked["listeners_started"] == blocked["services_started"] == blocked["f
 assert blocked["spend_usd_cents"] == 0 and blocked["execution_authorized"] is False
 assert blocked["production_admissible"] is False
 
-negative_count = len(contract_mutations) + len(receipt_mutations) + 8
+negative_count = len(contract_mutations) + len(receipt_mutations) + 9
 print("t22_a1_execution_authorization_check\tpass")
 print("synthetic_full_chain_success_count\t1")
 print(f"directed_negative_test_count\t{negative_count}")

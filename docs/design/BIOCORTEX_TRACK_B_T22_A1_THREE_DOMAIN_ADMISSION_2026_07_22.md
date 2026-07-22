@@ -365,7 +365,10 @@ now implemented: it independently checks the clean source commit, exact final
 owner signature and private admission receipt, atomically reserves one
 execution, then dispatches an injected runner. A PASS is accepted only with an
 exact schema-valid, digest-valid terminal-evidence file bound back to the
-execution contract. Failure is terminal and cannot retry. The consumer itself
+execution contract. Both final admission and the consumer are additionally
+blocked by a source constant that remains false until the runner, three host
+readiness packets and credential-placement proof are implemented. Failure is
+terminal and cannot retry. The consumer itself
 opens no socket and starts no listener, workload, or service process.
 
 ### Pre-sign execution-readiness correction
@@ -543,7 +546,7 @@ spend action.
 The final execution-authorization KAT drives one complete synthetic chain from
 three independently signed domain packets through set countersignature,
 runtime-material preparation, final owner execution signature and
-post-signature verification of eleven credential files. Its 37 directed negatives
+post-signature verification of eleven credential files. Its 38 directed negatives
 cover semantic contract escalation, evidence/tool cross-binding forgery, wrong
 owner signature, execution-admission receipt tampering/currentness, both
 output-present and reservation-backed replay, and a post-signature private-key
@@ -552,7 +555,7 @@ credential files and performs no network, listener, service, fault or spend
 action.
 
 The execution-consumer KAT adds one synthetic single-use dispatch success and
-41 directed negatives over caller-selected source commits, owner-signature/read
+42 directed negatives over the closed activation gate, caller-selected source commits, owner-signature/read
 ordering, admission replay, runner failure and expiry, runner-result closure,
 terminal-evidence schema/digest/cross-bindings, cleanup, budget and claim
 boundaries. It reads no real execution/admission/credential instance, opens no

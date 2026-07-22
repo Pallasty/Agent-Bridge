@@ -23,6 +23,7 @@ execution = consumer.load_execution_module()
 counter, collection, attestation, runtime, preparation, material, contract, proposal, schema = execution.load_inputs()
 consumer.load_execution_module = lambda: execution
 execution.load_inputs = lambda: (counter, collection, attestation, runtime, preparation, material, contract, proposal, schema)
+execution.EXECUTION_ACTIVATION_READY = True
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 SOURCE_COMMIT = "a" * 40
@@ -474,13 +475,26 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-consumer-kat-") as dir
     else:
         raise AssertionError("runner success admitted without terminal evidence file")
 
+execution.EXECUTION_ACTIVATION_READY = False
+try:
+    consumer.consume_and_dispatch(
+        execution_path, signature_path, admission_path, SOURCE_COMMIT,
+        NOW + timedelta(seconds=3), successful_runner,
+        clock=lambda: NOW + timedelta(seconds=4),
+    )
+except consumer.SafeFailure as error:
+    assert str(error) == "E_EXECUTION_ACTIVATION_NOT_READY"
+else:
+    raise AssertionError("consumer dispatched while execution activation gate was closed")
+assert callback_count == 1
 ready = consumer.status()
-assert ready["status"] == "OFFLINE_SINGLE_USE_CONSUMER_CORE_READY_SOURCE_BOUND_RUNNER_AND_REAL_ADMISSION_REQUIRED"
+assert ready["status"] == "OFFLINE_SINGLE_USE_CONSUMER_CORE_READY_EXECUTION_ACTIVATION_GATE_CLOSED"
+assert ready["execution_activation_ready"] is False
 assert ready["private_admission_receipt_read"] is False and ready["credential_files_read"] is False
 assert ready["network_accessed"] is False and ready["listeners_started"] == ready["workload_processes_started"] == ready["faults_injected"] == 0
 assert ready["runner_invoked"] is False and ready["production_admissible"] is False
 
-negative_count = len(terminal_mutations) + len(result_mutations) + len(evidence_mutations) + 6
+negative_count = len(terminal_mutations) + len(result_mutations) + len(evidence_mutations) + 7
 print("t22_a1_execution_consumer_check\tpass")
 print("synthetic_single_use_dispatch_success_count\t1")
 print(f"directed_negative_test_count\t{negative_count}")

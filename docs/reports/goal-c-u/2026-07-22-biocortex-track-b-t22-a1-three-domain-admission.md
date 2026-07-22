@@ -80,7 +80,7 @@ rollback prevention.
   binds the exact artifact/run roots, set countersignature chain, runtime-
   preparation challenge/signature/terminal, private manifests, tool binaries,
   budget and fault target. A complete synthetic chain verifies all eleven
-  credential files only after the final owner signature; 37 negative paths
+  credential files only after the final owner signature; 38 negative paths
   cover forgery, receipt integrity/currentness, replay, wrong signature and
   post-signature key substitution.
 - a completion audit proving that real collection must wait for the
@@ -90,7 +90,7 @@ rollback prevention.
 - a single-use execution consumer that independently rechecks the clean source
   commit, owner signature and admission receipt, reserves before runner
   dispatch, requires exact validated terminal evidence for PASS, and records
-  failure without retry. Its KAT has one synthetic success and 41 negative
+  failure without retry. Its KAT has one synthetic success and 42 negative
   paths with zero real network, listener, workload, fault or credential access.
 
 Stable host identity and endpoint hashes are intentionally absent from the
