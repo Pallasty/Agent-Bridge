@@ -2119,6 +2119,22 @@ is `TERMINATE_P11_PAX_PATH_MAPPING_ROUTE`. This is a scoped closure of the
 current PAX path-mapping route, not a claim that all source-materialization
 strategies or the Majorana program are impossible.
 
+## FB-S0 / FB-S1 same-U temporal-residual lane closes as direct-reduction NO-GO
+
+FB-S0 imported and revalidated the Gaussian-occupation/Q2 interpretation
+calibration. FB-S1 then compared exact-minus-TDHF residual forecasts on held-out
+L=2 Hubbard U values. The initial d=8 candidate was invalidated after a fixed
+parameter undercount was found. A mechanically budget-corrected d=5 amendment
+was committed before its outcome and kept every data split, seed and KPI fixed.
+
+All same-U, Gaussian nominal, conservation, dt-refinement, causal-fit and
+resource-cap checks pass. The corrected HBR-R1-motivated tanh proxy nevertheless
+has median NRMSE `0.9252574169819254`, versus `0.8932096493643846` for the
+18-parameter Prony/AR8 direct baseline; effective horizon is zero for both.
+The lane therefore closes `NO_GO_DIRECT_REDUCTION`. This is exploratory proxy
+evidence only: no BioCortex runtime, HBR-R1 implementation, L=8, BGL, hardware,
+non-Gaussianity or quantum-advantage authority is created.
+
 ## Matched benchmark external-evidence activation remains fail-closed
 
 The existing FH-L8 validators now have a single activation contract that binds

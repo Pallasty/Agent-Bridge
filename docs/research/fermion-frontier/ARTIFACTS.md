@@ -1979,3 +1979,20 @@ so they are versioned normally and are not added to the preservation-only
   validators together; its test asserts the required unresolved baseline.
 - `MATCHED_BENCHMARK_EVIDENCE_ACTIVATION_ZH.md` is the operator-facing handoff
   for replacing templates only with real compiler, measurement and hardware data.
+
+## Fermion × BioCortex FB-S0 / FB-S1
+
+- `FERMION_BIOCORTEX_FB_S0_TRANSFER_AND_CALIBRATION_2026_07_12.md` plus the
+  `fb_s0_gaussian_occupation_*` contract, checker, receipt and tests calibrate
+  Gaussian occupation tables against classical pairwise maximum entropy without
+  claiming a fermionic non-Gaussianity detector.
+- `fb_s1_same_u_tdhf_residual_contract.json` and
+  `fb_s1_initial_reveal_audit.json` preserve the budget-invalid initial d=8
+  reveal rather than relabelling it as valid evidence.
+- `fb_s1a_same_u_tdhf_residual_contract.json`,
+  `fb_s1_same_u_tdhf_residual_benchmark.py` and the protocol tests were
+  committed before the budget-corrected d=5 exploratory outcome;
+  `fb_s1a_same_u_tdhf_residual_receipt.json` and the result tests bind and
+  replay that outcome after reveal.
+- `FERMION_BIOCORTEX_FB_S1_SAME_U_TDHF_RESIDUAL_2026_07_22.md` records the
+  `NO_GO_DIRECT_REDUCTION` result and its BioCortex/runtime non-claim boundary.

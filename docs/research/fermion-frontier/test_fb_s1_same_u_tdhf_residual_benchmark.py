@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import importlib.util
 import json
 import math
@@ -11,6 +12,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 MODULE_PATH = HERE / "fb_s1_same_u_tdhf_residual_benchmark.py"
 INITIAL_CONTRACT_PATH = HERE / "fb_s1_same_u_tdhf_residual_contract.json"
 AMENDED_CONTRACT_PATH = HERE / "fb_s1a_same_u_tdhf_residual_contract.json"
+RECEIPT_PATH = HERE / "fb_s1a_same_u_tdhf_residual_receipt.json"
+INITIAL_AUDIT_PATH = HERE / "fb_s1_initial_reveal_audit.json"
 SPEC = importlib.util.spec_from_file_location("fb_s1_benchmark", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -122,6 +125,62 @@ class FbS1ProtocolTests(unittest.TestCase):
     def test_non_finite_results_are_rejected(self):
         with self.assertRaisesRegex(MODULE.BenchmarkError, "non-finite"):
             MODULE.assert_finite_tree({"metric": float("nan")})
+
+    def test_initial_reveal_is_permanently_invalid_not_relabelled_no_go(self):
+        audit = json.loads(INITIAL_AUDIT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(audit["status"], "INVALID_BUDGET_ACCOUNTING")
+        self.assertFalse(audit["scientific_authority"])
+        self.assertEqual(
+            audit["accounting_correction"]["correct_realized_parameters"], 54
+        )
+
+    def test_receipt_hashes_and_decision_rederive(self):
+        receipt = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(receipt["status"], "NO_GO_DIRECT_REDUCTION")
+        self.assertEqual(
+            receipt["benchmark_sha256"], MODULE.sha256_path(MODULE_PATH)
+        )
+        self.assertEqual(
+            receipt["contract_sha256"], MODULE.sha256_path(AMENDED_CONTRACT_PATH)
+        )
+        expected_science = receipt["scientific_result_sha256"]
+        core = copy.deepcopy(receipt)
+        core.pop("scientific_result_sha256")
+        core.pop("resources")
+        actual_science = hashlib.sha256(
+            json.dumps(
+                core,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(actual_science, expected_science)
+        best_name = min(
+            receipt["direct_baselines"],
+            key=lambda name: receipt["direct_baselines"][name]["nrmse"],
+        )
+        candidate_nrmse = sorted(
+            row["nrmse"] for row in receipt["candidate_runs"]
+        )[1]
+        best = receipt["direct_baselines"][best_name]
+        lift = (best["nrmse"] - candidate_nrmse) / best["nrmse"]
+        self.assertEqual(
+            best_name, receipt["decision"]["best_direct_nrmse_baseline"]
+        )
+        self.assertAlmostEqual(
+            lift, receipt["decision"]["nrmse_improvement_fraction"], places=15
+        )
+        self.assertTrue(receipt["decision"]["direct_reduction_detected"])
+        self.assertTrue(receipt["physics_constraints"]["pass"])
+        self.assertTrue(receipt["decision"]["all_budget_caps_pass"])
+        self.assertFalse(receipt["confirmation_authority"])
+
+    def test_live_scientific_payload_matches_committed_receipt(self):
+        expected = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
+        expected.pop("scientific_result_sha256")
+        expected.pop("resources")
+        self.assertEqual(MODULE.run(AMENDED_CONTRACT_PATH), expected)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,163 @@
+{
+  "analysis_class": "POST_REVEAL_AMENDED_EXPLORATORY",
+  "authority": {
+    "ready_gate_eligible": false,
+    "research_only": true,
+    "runtime_authority": false
+  },
+  "benchmark_sha256": "ede1ca6b68a6efeec12a1e80714091567ebd7f768cc48f7f1a8a78bd628c5952",
+  "candidate": "BIOCORTEX_HBR_R1_MOTIVATED_TANH_PROXY_V1",
+  "candidate_primary": {
+    "median_effective_horizon_steps": 0,
+    "median_nrmse": 0.9252574169819254
+  },
+  "candidate_runs": [
+    {
+      "effective_horizon_steps": 0,
+      "fit_rows": 120,
+      "nrmse": 0.8548022901349507,
+      "ops": 72,
+      "parameters": 36,
+      "seed": 11,
+      "state": 5
+    },
+    {
+      "effective_horizon_steps": 0,
+      "fit_rows": 120,
+      "nrmse": 0.9252574169819254,
+      "ops": 72,
+      "parameters": 36,
+      "seed": 29,
+      "state": 5
+    },
+    {
+      "effective_horizon_steps": 0,
+      "fit_rows": 120,
+      "nrmse": 1.0837624846258018,
+      "ops": 72,
+      "parameters": 36,
+      "seed": 47,
+      "state": 5
+    }
+  ],
+  "confirmation_authority": false,
+  "contract_sha256": "363c18d668ce8ea7eb3896ccd7c72ab39fdbf3cbce6509604eb625d2ea139d0b",
+  "decision": {
+    "all_budget_caps_pass": true,
+    "best_direct_horizon_baseline": "PERSISTENCE",
+    "best_direct_nrmse_baseline": "PRONY_AR8",
+    "direct_reduction_detected": true,
+    "effective_horizon_improvement_fraction": 0.0,
+    "go": false,
+    "kpi_pass": false,
+    "nrmse_improvement_fraction": -0.035879334308967954,
+    "static_candidate_budget_pass": true
+  },
+  "direct_baselines": {
+    "AFFINE_DMD": {
+      "effective_horizon_steps": 0,
+      "fit_rows": 120,
+      "nrmse": 0.9333877030824976,
+      "ops": 10,
+      "parameters": 6,
+      "state": 2
+    },
+    "PERSISTENCE": {
+      "effective_horizon_steps": 0,
+      "fit_rows": 0,
+      "nrmse": 0.9493823610244647,
+      "ops": 2,
+      "parameters": 0,
+      "state": 2
+    },
+    "PRONY_AR8": {
+      "effective_horizon_steps": 0,
+      "fit_rows": 120,
+      "nrmse": 0.8932096493643846,
+      "ops": 34,
+      "parameters": 18,
+      "state": 16
+    },
+    "RIDGE_VAR4": {
+      "effective_horizon_steps": 0,
+      "fit_rows": 120,
+      "nrmse": 1.0201752672073796,
+      "ops": 34,
+      "parameters": 18,
+      "state": 8
+    }
+  },
+  "evaluation_inventory": {
+    "fit_rows_per_fitted_model": 120,
+    "scale_values_per_observable": 147
+  },
+  "implementation_scope": "OFFLINE_TANH_PROXY_NOT_BIOCORTEX_RUNTIME_OR_HBR_R1_IMPLEMENTATION",
+  "nonclaims": {
+    "bgl_accessed": false,
+    "biocortex_repository_runtime_assessed": false,
+    "confirmatory_evidence": false,
+    "fermionic_non_gaussianity_assessed": false,
+    "hardware_evidence": false,
+    "hbr_r1_implementation_conformance_assessed": false,
+    "mainline_parameter_influence": false,
+    "physical_l8_instance_assessed": false,
+    "portable_receipt_byte_identity": false,
+    "quantum_advantage_claim": false,
+    "ready_gate_eligible": false,
+    "runtime_authority": false
+  },
+  "physics_constraints": {
+    "maxima": {
+      "energy_drift": 5.160611937782278e-10,
+      "exact_energy_drift": 5.8258320483593475e-15,
+      "exact_particle_drift": 0.0,
+      "exact_sector_leakage": 0.0,
+      "exact_state_norm": 4.440892098500626e-16,
+      "exact_time_step_refinement_observable": 2.5396351688300456e-15,
+      "hermiticity": 0.0,
+      "idempotency": 3.9968028886505635e-15,
+      "spin_coherence": 0.0,
+      "trace": 6.217248937900877e-15
+    },
+    "nominal": "COLLINEAR_NUMBER_CONSERVING_TDHF_SAME_U",
+    "pass": true,
+    "same_u_verified": true
+  },
+  "resource_caps": {
+    "logical_scalar_operations_per_step": 512,
+    "persistent_state_scalars": 16,
+    "trainable_or_fixed_scalar_parameters": 40
+  },
+  "resources": {
+    "elapsed_seconds": 32.02345224004239,
+    "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.43",
+    "portable_byte_identity": false,
+    "process_peak_rss_bytes": 434216960,
+    "python": "3.14.4",
+    "python_peak_traced_bytes": 1096612
+  },
+  "schema": "agent_bridge.fermion_biocortex.fb_s1_same_u_tdhf_residual_receipt.v1",
+  "scientific_result_sha256": "8f44b72b539f878616f2a750248f774c01a5f57b4978ccb1e94b6a050b07a41f",
+  "split": {
+    "development_u": [
+      5.0
+    ],
+    "development_use": "PHYSICS_CONSTRAINTS_ONLY_NO_MODEL_SELECTION",
+    "future_values_visible_to_fit": false,
+    "prefix_steps": 48,
+    "purge_steps": 8,
+    "seed_selection_on_test": false,
+    "test_u": [
+      3.0,
+      7.0
+    ],
+    "test_u_visible_to_fit": false,
+    "train_u": [
+      2.0,
+      4.0,
+      6.0
+    ],
+    "warmup_steps": 8
+  },
+  "status": "NO_GO_DIRECT_REDUCTION"
+}
