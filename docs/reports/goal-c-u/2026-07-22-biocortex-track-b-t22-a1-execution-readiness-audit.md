@@ -114,3 +114,11 @@ Three synthetic domain-role packets and one complete same-key signed set pass;
 52 semantic, file-set, namespace, signature, key, ordering, freshness and
 cross-binding mutations fail. Real packet/signature collection remains a later
 owner-authorized step.
+
+`biocortex_ab_track_b_t22_a1_domain_workload_plan_v1.py` now freezes the first
+runner-side source component. It purely compiles each verified private endpoint
+and readiness position into exact etcd argv, mTLS OpenBao HCL, owner-only paths,
+cleared process environment, deterministic workload values and a role-specific
+command allowlist. Three synthetic plans pass and 36 unsafe input/plan mutations
+fail. It starts nothing and does not close the still-missing executor, transport
+or evidence-builder findings.

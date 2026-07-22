@@ -103,6 +103,11 @@ rollback prevention.
   required for an etcd peer that both accepts and initiates authenticated peer
   connections. The coordinator leaf remains client-only; schema bytes and
   activation authority are unchanged.
+- a pure private workload-plan compiler with three synthetic domain successes
+  and 36 negative paths. It freezes exact etcd argv, mTLS OpenBao HCL, cleared
+  environment, local paths, deterministic workload state and the per-role
+  command allowlist, but deliberately does not start a process or claim that
+  the cross-host executor/transport/evidence builder exists.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
