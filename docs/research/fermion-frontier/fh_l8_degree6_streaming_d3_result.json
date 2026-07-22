@@ -1,0 +1,20 @@
+{
+  "candidates":{
+    "DEPTH_FIRST_STREAMING":{"decision":"PAIR_CAP_EXCEEDED","memory_architecture_feasible":true,"observables":{
+      "double_occupancy":{"observable_identity":{"definition":"(1/N)*sum_n_up*n_down","full_observable_Pauli_L1":"1/1","n_sites":64,"nonidentity_expansion_sha256":"cc6dc2b8b74795dc326fbbed5b48598663c8998081ed0291cc7ed64b4737698f","nonidentity_term_count":192,"observable_id":"double_occupancy","omitted_commuting_identity_coefficient":"1/4"},"streaming_threshold":{"completed_depth5_leaves":1108,"computed_prefixes":1301,"degree6_children_materialized":false,"degree6_floor_after":2000065024,"degree6_floor_before":1998983680,"peak_expansion_terms":14592,"peak_live_path_terms":21888,"prefix_pair_products":196990976,"terminal_next_group":"H1","terminal_next_pairs":1081344,"terminal_next_stage":8,"terminal_parent_terms":8448,"terminal_prefix":[0,1,2,2,4]}},
+      "staggered_magnetization":{"observable_identity":{"definition":"(1/N)*sum_(-1)^(r+c)*(n_up-n_down)","full_observable_Pauli_L1":"1/1","n_sites":64,"nonidentity_expansion_sha256":"6dc21a3763f141cc9e9bdcb5610cc91ab8c09dbeac8ba736560df70affdaa9ee","nonidentity_term_count":128,"observable_id":"staggered_magnetization","omitted_commuting_identity_coefficient":"0/1"},"streaming_threshold":{"completed_depth5_leaves":3958,"computed_prefixes":4757,"degree6_children_materialized":false,"degree6_floor_after":2000279040,"degree6_floor_before":1999928832,"peak_expansion_terms":9216,"peak_live_path_terms":13824,"prefix_pair_products":246977024,"terminal_next_group":"H2","terminal_next_pairs":350208,"terminal_next_stage":15,"terminal_parent_terms":3648,"terminal_prefix":[0,6,7,13,15]}}
+    }},
+    "PAULI_L1_MEET_IN_THE_MIDDLE":{"decision":"BLOCKED_MISSING_COMPOSITION_PROOF","numerically_executed":false,"required_missing_identity":"compose_left_and_right_half_records_into_exact_full_nested_commutator_Pauli_L1"}
+  },
+  "contract_id":"FH-L8-INDEPENDENT-REFERENCE-D3",
+  "degree6_remainder_bounded":false,
+  "full_R100_error_bounded":false,
+  "limitations":["The 2B floor is for the fixed DFS Pauli-L1 path architecture, not all streaming algorithms.","No general MITM no-go is claimed; the fixed candidate lacks a certified nonlinear L1 composition rule.","No degree-six child expansion or numerical remainder was produced."],
+  "next_branch":"SCALAR_DERIVATIVE_SUPREMUM_ENCLOSURE",
+  "physical_reference_qualified":false,
+  "ready_gate_eligible":false,
+  "status":"VERIFIED_D3_STREAMING_PAIR_CAP_AND_MITM_COMPOSITION_GAP",
+  "terminal_branch":"STREAMING_PAIR_CAP_AND_MITM_COMPOSITION_PROOF_GAP",
+  "two_step_cumulative_error_bounded":false,
+  "verified":true
+}

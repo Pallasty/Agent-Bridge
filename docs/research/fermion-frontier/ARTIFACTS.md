@@ -26,6 +26,14 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_two_step_scalar_defect_d2_checker.py`: exact D3--D5 merge and combinatorial gate.
 - `test_fh_l8_two_step_scalar_defect_d2_checker.py`: coefficient, mutation, authority and cap tests.
 
+## FH-L8 degree-six streaming D3
+
+- `FH_L8_DEGREE6_STREAMING_D3_ZH.md`: DFS pair floor, MITM proof gap and successor.
+- `fh_l8_degree6_streaming_d3_contract.json`: candidates, 2B cap and expected thresholds.
+- `fh_l8_degree6_streaming_d3_result.json`: narrow dual-architecture failure result.
+- `fh_l8_degree6_streaming_d3_checker.py`: streaming pre-child pair-floor checker.
+- `test_fh_l8_degree6_streaming_d3_checker.py`: threshold and authority regressions.
+
 ## Claude source session
 
 - Session:
