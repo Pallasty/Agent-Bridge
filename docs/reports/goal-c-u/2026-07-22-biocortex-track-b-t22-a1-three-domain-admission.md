@@ -87,6 +87,11 @@ rollback prevention.
   source-bound runner/executor, host-local runtime-readiness packets,
   credential-placement proof, single-use execution consumer and evidence
   builder. The decision packet now fails closed on each missing input.
+- a single-use execution consumer that independently rechecks the clean source
+  commit, owner signature and admission receipt, reserves before runner
+  dispatch, requires exact validated terminal evidence for PASS, and records
+  failure without retry. Its KAT has one synthetic success and 41 negative
+  paths with zero real network, listener, workload, fault or credential access.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only

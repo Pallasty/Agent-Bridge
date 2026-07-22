@@ -360,15 +360,21 @@ SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
 a private one-execution admission receipt; failure is terminal and cannot
 retry. The admission step itself opens no socket, starts no listener or
 service, injects no fault and spends nothing. The source-bound cross-host
-runner remains a required pre-sign successor and must consume that receipt
-exactly once.
+runner remains a required pre-sign successor. Its single-use consumer core is
+now implemented: it independently checks the clean source commit, exact final
+owner signature and private admission receipt, atomically reserves one
+execution, then dispatches an injected runner. A PASS is accepted only with an
+exact schema-valid, digest-valid terminal-evidence file bound back to the
+execution contract. Failure is terminal and cannot retry. The consumer itself
+opens no socket and starts no listener, workload, or service process.
 
 ### Pre-sign execution-readiness correction
 
 The execution-readiness audit found that the repository still lacks a
 source-bound cross-host runner, three host-local runtime-readiness packets,
-credential-placement proof, a single-use admission consumer and a real evidence
-builder. The central material manifest cannot truthfully prove that the matching
+credential-placement proof and a real evidence builder. The single-use
+admission consumer identified by the audit has since been implemented. The
+central material manifest cannot truthfully prove that the matching
 private key and certificate have been placed on each remote domain at an exact
 private path. These are execution blockers, not documentation niceties.
 
@@ -544,6 +550,13 @@ output-present and reservation-backed replay, and a post-signature private-key
 substitution. It reads zero real private evidence or
 credential files and performs no network, listener, service, fault or spend
 action.
+
+The execution-consumer KAT adds one synthetic single-use dispatch success and
+41 directed negatives over caller-selected source commits, owner-signature/read
+ordering, admission replay, runner failure and expiry, runner-result closure,
+terminal-evidence schema/digest/cross-bindings, cleanup, budget and claim
+boundaries. It reads no real execution/admission/credential instance, opens no
+network or listener, starts no workload process and injects no fault.
 
 The collection-challenge KAT adds 42 directed negatives over schema and
 domain-separated digest binding, source/proposal/contract identities, alias

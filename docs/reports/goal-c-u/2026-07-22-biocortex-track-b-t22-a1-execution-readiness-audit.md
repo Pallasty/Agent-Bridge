@@ -35,9 +35,11 @@ real collection challenge is generated.
    prove that each exact domain host possesses the matching key/certificate at
    a private local path with mode `0600`. Treating the central generation path
    as a remote host path would be false.
-4. **No single-use execution consumer.** Admission reserves one owner-signed
-   contract, but no later gate atomically consumes the admission receipt before
-   the first listener, process, or fault action.
+4. **Single-use execution consumer — closed after this audit.** The consumer
+   independently verifies the clean source commit and exact final owner SSHSIG
+   before reading the private admission receipt, reserves it atomically before
+   runner dispatch, requires bound terminal evidence for PASS, and makes
+   failure terminal with no retry. The network runner itself remains absent.
 5. **No executable evidence builder.** Event and terminal schemas reject unsafe
    synthetic packets, but there is no implementation that creates, verifies,
    secret-scans, and terminalizes the real signed three-domain chain.
@@ -76,3 +78,13 @@ surfaces as `false`. The owner proposal also requires explicit values for:
 This is a fail-closed correction, not an execution authorization. It creates no
 permission to read credentials, connect hosts, start listeners or services,
 inject faults, spend money, or make production claims.
+
+## Implemented closure evidence
+
+`biocortex_ab_track_b_t22_a1_execution_consumer_v1.py` and its KAT now close
+item 4. The KAT exercises one complete synthetic single-use dispatch and 41
+negative cases, including wrong signature before private receipt reads,
+caller-selected source commit, replay, runner failure, post-run expiry, missing
+terminal evidence, terminal cross-binding forgery, cleanup and budget
+escalation. It reads zero real instances and performs no network, listener,
+workload, fault or credential action.
