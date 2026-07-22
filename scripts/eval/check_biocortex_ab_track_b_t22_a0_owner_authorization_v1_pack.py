@@ -37,6 +37,7 @@ with tempfile.TemporaryDirectory() as directory:
     mutations = (
         lambda x: x.update(decision="PRODUCTION"), lambda x: x.update(host="other"),
         lambda x: x.update(source_commit="bad"), lambda x: x.update(expires_at=x["issued_at"]),
+        lambda x: x.update(execution_contract_sha256="0" * 64),
         lambda x: x.update(spend_limit_usd=1), lambda x: x.update(physical_host_count=3),
         lambda x: x.update(failure_domain_claim="THREE_HOSTS"), lambda x: x["allowed_after_signature"].append("CLOUD"),
         lambda x: x["forbidden"].remove("CLOUD_OR_PROVIDER_ACCESS"),

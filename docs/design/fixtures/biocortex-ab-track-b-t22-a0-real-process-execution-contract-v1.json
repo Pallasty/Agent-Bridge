@@ -1,0 +1,93 @@
+{
+  "schema": "agent_bridge.biocortex.track_b.t22_a0.real_process_execution_contract.v1",
+  "execution_mode": "OWNER_SIGNED_SINGLE_HOST_REAL_PROCESS_ISOLATED_LAB",
+  "track_id": "SELF_HOSTED_ETCD_OPENBAO",
+  "artifact_root": "/Data/CascadeProjects/.artifacts/agent-bridge/biocortex-track-b-t22-a0-real-lab",
+  "authorization": {
+    "verified_unexpired_owner_sshsig_required": true,
+    "exact_source_commit_required": true,
+    "clean_tracked_tree_required": true,
+    "pinned_tool_acquisition_receipt_required": true,
+    "one_run_per_authorization_content_sha256": true,
+    "maximum_runtime_seconds": 14400,
+    "spend_limit_usd": 0
+  },
+  "network": {
+    "runtime_addresses": ["127.0.0.1"],
+    "runtime_external_network_allowed": false,
+    "host_global_iptables_or_tc_allowed": false,
+    "proxy_environment_inherited": false
+  },
+  "topology": {
+    "etcd": [
+      {"node": "etcd-1", "client_port": 23791, "peer_port": 23801},
+      {"node": "etcd-2", "client_port": 23792, "peer_port": 23802},
+      {"node": "etcd-3", "client_port": 23793, "peer_port": 23803}
+    ],
+    "openbao": [
+      {"node": "bao-1", "api_port": 28201, "cluster_port": 28301},
+      {"node": "bao-2", "api_port": 28202, "cluster_port": 28302},
+      {"node": "bao-3", "api_port": 28203, "cluster_port": 28303}
+    ],
+    "toxiproxy": {"api_port": 28474, "etcd_proxy_port": 23790}
+  },
+  "ephemeral_lab_bootstrap_material": {
+    "openbao_unseal_key_share_count": 1,
+    "openbao_unseal_threshold": 1,
+    "openbao_initial_root_token_generated": true,
+    "held_in_process_memory_only": true,
+    "command_line_or_environment_exposure_allowed": false,
+    "log_receipt_or_artifact_persistence_allowed": false,
+    "preexisting_ambient_or_external_credentials_allowed": false,
+    "exact_value_leak_scan_before_success_receipt": true
+  },
+  "workload": {
+    "etcd_authority_key_prefix": "/agent-bridge/t22-a0/authority/",
+    "seed_state": "AUTHORIZED_UNCLAIMED",
+    "consumed_state": "CONSUMED_FOR_EXACT_RUN",
+    "seed_create_revision_zero_transaction_required": true,
+    "consume_exact_value_compare_and_swap_required": true,
+    "default_linearizable_range_read_required": true,
+    "replay_consume_must_fail_required": true,
+    "openbao_transit_mount": "t22-transit",
+    "openbao_transit_key": "t22-a0-ed25519",
+    "openbao_transit_key_type": "ed25519",
+    "post_failover_signature_verification_required": true
+  },
+  "faults": [
+    {
+      "id": "ETCD_LOOPBACK_PROXY_DISCONNECT_AND_RECOVER",
+      "target": "etcd-1 client endpoint through Toxiproxy",
+      "inject": "DISABLE_OWNED_LOOPBACK_PROXY",
+      "required_observation": "PROXIED_LINEARIZABLE_READ_FAILS_DURING_DISCONNECT_AND_MATCHES_CONSUMED_STATE_AFTER_REENABLE"
+    },
+    {
+      "id": "OPENBAO_ACTIVE_PROCESS_KILL_FAILOVER_AND_RESTART",
+      "target": "observed active OpenBao process",
+      "inject": "SIGKILL_OWNED_PROCESS",
+      "required_observation": "DIFFERENT_NODE_BECOMES_ACTIVE_TRANSIT_SIGNATURE_VERIFIES_AND_KILLED_NODE_REJOINS_UNSEALED"
+    }
+  ],
+  "timeouts_seconds": {
+    "individual_http_request": 5,
+    "process_ready": 120,
+    "cluster_recovery": 180,
+    "graceful_cleanup": 10
+  },
+  "evidence": {
+    "canonical_preflight_receipt": true,
+    "canonical_hash_chained_event_log": true,
+    "canonical_cleanup_receipt": true,
+    "canonical_terminal_receipt": true,
+    "owned_process_logs_hashed": true,
+    "stdout_or_stderr_model_output_allowed": false,
+    "secret_values_allowed": false
+  },
+  "claims": {
+    "single_physical_host_process_evidence_only": true,
+    "three_failure_domain_evidence": false,
+    "external_anti_rollback_evidence": false,
+    "production_admissible": false
+  },
+  "contract_sha256": "f84fe9ea9d8948afa7eca516f486bb40d690acfd19437a7b3469af8c4dc37616"
+}
