@@ -1,0 +1,11 @@
+{
+  "fourth_action_executed": false,
+  "manifest": "/Data/CascadeProjects/fh-l8-d11-source-checkpoint/depth3-source.manifest.json",
+  "next_gate": "D11_SPILL_MERGE_CONSUMER_IMPLEMENTATION",
+  "payload": "/Data/CascadeProjects/fh-l8-d11-source-checkpoint/depth3-source.bin",
+  "payload_bytes": 6819168,
+  "payload_sha256": "09758478e63d21014bdd704e157b1969498fdd4068b6ab4f78c2720324477017",
+  "shard_count": 53,
+  "status": "VERIFIED_D11_DEPTH3_CHECKPOINT_MATERIALIZED_NO_DEPTH4_ACTION",
+  "verified": true
+}
