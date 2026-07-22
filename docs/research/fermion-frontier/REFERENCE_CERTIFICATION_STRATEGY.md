@@ -1330,6 +1330,21 @@ exact-CAR sector Krylov 的 reachable states 为 `1→225→24,421→1,704,285`�
 `SYMMETRY_ORBIT_COMPRESSED_SCALAR_KRYLOV`，先证明格点/初态/observable quotient 相容，再尝试
 第四层；D6 remainder 与累计 reference authority 不变。
 
+### D5：symmetry-orbit quotient admissibility（2026-07-22）
+
+D5 在固定 L8 balanced sector 上证明八元 Néel-stabilizing D4/conditional fermionic
+spin-swap 的 group closure、CAR cocycle、negative-stabilizer zero projection、Hamiltonian
+equivariance、两个 observable 的 trivial character 与 quotient metric Hermiticity。
+depth 0--3 的 full-state / representative counts 为
+`1/1 → 225/29 → 24,421/3,116 → 1,704,285/213,099`；depth 0--2 的 quotient
+transitions 与下一层完整 Krylov quotient 严格一致。
+
+depth-3 的 213,099 representatives 给出 47,947,275 的第四次 raw candidate-action 上界，
+低于 300M；本次 13,831,456 次 audit group actions 也低于 16M。下一步八元
+canonicalization transform 的诊断上界为 383,578,200，须由独立 D6 设计冻结其成本与策略。
+该结果只允许预提交新的 D6 design。D5 没有执行第四次 Hamiltonian action，也没有给出
+degree-6 remainder、两步累计、full R100、physical reference 或 READY authority。
+
 更一般的 bounded-error quantum simulation 已能把 learned Hamiltonian/Lindbladian 的
 实验不确定度传播到 observable interval，但目前示范对象是 long-range Ising，不是匹配
 的 Hubbard workload，见 [Kraft et al.](https://arxiv.org/abs/2511.23392)。这条路线可作为

@@ -1,0 +1,260 @@
+{
+  "authority": {
+    "d6_design_eligible": true,
+    "d6_execution_authorized": false,
+    "degree6_remainder_bounded": false,
+    "fourth_hamiltonian_action_executed": false,
+    "full_R100_error_bounded": false,
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false,
+    "two_step_cumulative_error_bounded": false
+  },
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D5",
+  "decision": {
+    "d6_design_eligible": true,
+    "d6_execution_authorized": false,
+    "resource_gates": {
+      "audit_transforms_within_cap": true,
+      "next_action_within_cap": true,
+      "orbit_representatives_within_cap": true
+    },
+    "semantic_gates_pass": true,
+    "status": "VERIFIED_D5_SYMMETRY_ORBIT_QUOTIENT_ADMISSIBLE_FOR_D6_DESIGN"
+  },
+  "krylov_prefix": {
+    "depth_records": [
+      {
+        "amplitude_relation_checks": 8,
+        "compression_ratio": "1/1",
+        "coverage_sum": 1,
+        "depth": 0,
+        "deterministic_insertion_order_quotient_sha256": "431986141713c9cb8e6f4852a6a72b9b189bfe403156b1878561901f2dee0e59",
+        "full_state_count": 1,
+        "full_vector_sha256": "4851eca743653e8f5e4b1aaa7796811bc24f1bca5e23432e5bc96bfd9882bec9",
+        "orbit_representative_count": 1,
+        "orbit_size_histogram": {
+          "1": 1
+        },
+        "projected_zero_nonzero_states": 0,
+        "stabilizer_size_histogram": {
+          "8": 1
+        }
+      },
+      {
+        "amplitude_relation_checks": 1800,
+        "compression_ratio": "225/29",
+        "coverage_sum": 225,
+        "depth": 1,
+        "deterministic_insertion_order_quotient_sha256": "73c176baffbd66ddb01949011660d97f8a0aaaa4549986dd9df04a55b6a23e98",
+        "full_state_count": 225,
+        "full_vector_sha256": "9cbbe6d7e508bd37eef5ec54bfa5b580b80d0b3dc3998146c900d03220a847b3",
+        "orbit_representative_count": 29,
+        "orbit_size_histogram": {
+          "1": 1,
+          "8": 28
+        },
+        "projected_zero_nonzero_states": 0,
+        "stabilizer_size_histogram": {
+          "1": 28,
+          "8": 1
+        }
+      },
+      {
+        "amplitude_relation_checks": 195368,
+        "compression_ratio": "24421/3116",
+        "coverage_sum": 24421,
+        "depth": 2,
+        "deterministic_insertion_order_quotient_sha256": "3cfea6381641bea908a486a04af793faab676f35f046de6815f5da2b26f4f3f3",
+        "full_state_count": 24421,
+        "full_vector_sha256": "c92f2de07caa1a289d7aa27cd0fa64e707e084cf96e06219161ea55ff3f3c88b",
+        "orbit_representative_count": 3116,
+        "orbit_size_histogram": {
+          "1": 1,
+          "4": 125,
+          "8": 2990
+        },
+        "projected_zero_nonzero_states": 0,
+        "stabilizer_size_histogram": {
+          "1": 2990,
+          "2": 125,
+          "8": 1
+        }
+      },
+      {
+        "amplitude_relation_checks": 13634280,
+        "compression_ratio": "1704285/213099",
+        "coverage_sum": 1704285,
+        "depth": 3,
+        "deterministic_insertion_order_quotient_sha256": "7230d8bd0e726535cb5da01bc191313b25e38b83a6b809a7e6e39823a418757e",
+        "full_state_count": 1704285,
+        "full_vector_sha256": "6f8f53101b8a3ec0b3dfcee624a014426d93a8aa0dfc1300780b0ad99b765e97",
+        "orbit_representative_count": 213099,
+        "orbit_size_histogram": {
+          "1": 1,
+          "4": 125,
+          "8": 212973
+        },
+        "projected_zero_nonzero_states": 0,
+        "stabilizer_size_histogram": {
+          "1": 212973,
+          "2": 125,
+          "8": 1
+        }
+      }
+    ],
+    "quotient_transition_records": [
+      {
+        "candidate_action_upper_bound": 225,
+        "matches_next_full_quotient": true,
+        "nonzero_reduced_column_outputs": 29,
+        "projected_zero_action_outputs": 0,
+        "source_depth": 0,
+        "source_representative_count": 1,
+        "target_depth": 1
+      },
+      {
+        "candidate_action_upper_bound": 6525,
+        "matches_next_full_quotient": true,
+        "nonzero_reduced_column_outputs": 6142,
+        "projected_zero_action_outputs": 13,
+        "source_depth": 1,
+        "source_representative_count": 29,
+        "target_depth": 2
+      },
+      {
+        "candidate_action_upper_bound": 701100,
+        "matches_next_full_quotient": true,
+        "nonzero_reduced_column_outputs": 655449,
+        "projected_zero_action_outputs": 13,
+        "source_depth": 2,
+        "source_representative_count": 3116,
+        "target_depth": 3
+      }
+    ]
+  },
+  "limitations": [
+    "No fourth Hamiltonian action is executed or authorized by D5.",
+    "No degree-six remainder or two-step cumulative error is bounded.",
+    "No full-R100 error, physical reference, hardware result, quantum advantage, or READY state is certified.",
+    "The quotient is qualified only for the exact pinned L8 OBC Hamiltonian, Neel character, observables, and depths in this contract."
+  ],
+  "parent": {
+    "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D4",
+    "integration_commit": "6ff83b850ee4e2995d1bec89c7519d01c9c92e47",
+    "integration_tree": "17ac5ffb333878312ecf59cffc83c045e2e761fd",
+    "source_pins_pass": true
+  },
+  "protocol_freeze": {
+    "commit": "6daf30daeeb375962b9986af5df91517d8a4a8ec",
+    "tree": "9c7096bca41a1da8c440f37d93a08a4f51e5cef0"
+  },
+  "resource_envelope": {
+    "cgroup_v2_enforced": true,
+    "internal_deadline_seconds": 600,
+    "memory_max_bytes": 1073741824,
+    "memory_swap_max_bytes": 0,
+    "pass": true
+  },
+  "resource_projection": {
+    "audit_group_actions": 13831456,
+    "candidate_actions_per_representative": 225,
+    "limits": {
+      "max_audit_group_actions": 16000000,
+      "max_materialized_states": 2000000,
+      "max_next_action_candidates": 300000000,
+      "max_orbit_representatives": 2000000,
+      "max_source_bytes": 1048576,
+      "maximum_seconds": 600,
+      "outer_memory_max_bytes": 1073741824,
+      "outer_swap_max_bytes": 0
+    },
+    "next_action_orbit_transform_upper_bound": 383578200,
+    "next_action_upper_bound": 47947275,
+    "orbit_representatives": 213099
+  },
+  "semantic_gates": {
+    "car_sign_rule": true,
+    "fourth_action_not_executed": true,
+    "full_orbit_relations": true,
+    "group_closure": true,
+    "hamiltonian_equivariance": true,
+    "initial_and_observable_characters": true,
+    "quotient_transition_equivalence_depths_0_1_2": true
+  },
+  "semantic_proof": {
+    "car": {
+      "cocycle_checks": 448,
+      "negative_stabilizer_projection_fixture_pass": true,
+      "optimized_fixture_checks": 56,
+      "pass": true,
+      "quadratic_pair_checks": 65024,
+      "sign_formula": "(-1)^(inversions_of_site_permutation_on_singly_occupied_sites + spin_swap*number_of_doublons)",
+      "spin_swap_doublon_phase_fixture_pass": true
+    },
+    "group": {
+      "closure_pass": true,
+      "composition_table_sha256": "669804c2a6b0a501d72eac440af2035abd30a763d9decfc7f72b4450704f24ec",
+      "element_order": [
+        "I",
+        "R90",
+        "R180",
+        "R270",
+        "MX",
+        "MY",
+        "MD",
+        "MA"
+      ],
+      "group_order": 8,
+      "mode_permutation_sha256": {
+        "I": "4497d32c822ad4ae57132a3462f6a0630d5d4a7863915c4ee08634841c4fee9f",
+        "MA": "2b19194fb89e51a8848997c0cb82c10d9dcbab0f3263653b383feb7446ea2165",
+        "MD": "73b90eee286ad7ea38259fee2ea5191b65aed04b3467513e81e66b9ba0934647",
+        "MX": "33116621baf0d87371e7e8285dad5619af5b52cfa4c91dccd244120573ec4f37",
+        "MY": "aaed79a949d0d40f7dae420ec4b33ad6758398d17d7d659866799de62cb5d8b9",
+        "R180": "dece2bd7b1ce1d84ca35db5b612775c26d78f47b520a46cdcc2ac33eb706a0a5",
+        "R270": "0bc1d07ca3772cff0e20f083d639ba9bf70327d97b86b38baf329d75b3d05e07",
+        "R90": "1b55e7c09ab214e6d1135e4f09627189f62f50651f1d3414e45511eeba132ec3"
+      },
+      "site_permutation_sha256": {
+        "I": "a49d88051b2d2e5d1255d4f806a7569cda9b33a650a908566197031349ad8db4",
+        "MA": "86f2b528017b331a4c7c91ce3a90167def6bd5977dbde9da00057fe3a49938f2",
+        "MD": "723fc4e657d7d2d468d060e990ab0620603b84c8d0494e42475932c329ca52bc",
+        "MX": "103d211718b336f2d3948b8f4df09fb777db65cea285d87c2aeb4d35c98bc845",
+        "MY": "3704582ecf5ec6dbe9d428b02d0bc25e5140fe10a1f3cee20a1b2177f044d601",
+        "R180": "3fa2cf74f920b1d50b8949bf522105fc3798cc6c5805e3f4b2c4ae5b89b0b4dc",
+        "R270": "451b3e451561deddd8a095fad47772aab510b32f0bb585a837f93e9d746d3330",
+        "R90": "202d34cc1f24b57796a414e6edec49e6da2de49fa2192c01b2caf53ff9b0cfe9"
+      }
+    },
+    "hamiltonian": {
+      "action_equivariance_checks": 264,
+      "action_fixture_basis_count": 33,
+      "hopping_orbit_checks": 1792,
+      "metric_hermiticity_checks": 6142,
+      "metric_hermiticity_source_representatives": 29,
+      "onsite_orbit_checks": 512,
+      "pass": true,
+      "unique_hopping_bond_count": 224
+    },
+    "initial_and_observables": {
+      "double_occupancy_character": 1,
+      "double_occupancy_site_checks": 512,
+      "initial_character": {
+        "I": 1,
+        "MA": 1,
+        "MD": 1,
+        "MX": 1,
+        "MY": 1,
+        "R180": 1,
+        "R270": 1,
+        "R90": 1
+      },
+      "initial_state_stabilized": true,
+      "magnetization_mode_checks": 1024,
+      "pass": true,
+      "staggered_magnetization_character": 1
+    }
+  },
+  "status": "VERIFIED_D5_SYMMETRY_ORBIT_QUOTIENT_ADMISSIBLE_FOR_D6_DESIGN",
+  "verified": true
+}
