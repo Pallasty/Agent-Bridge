@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **LOCAL BUILD GATE PASS / INDEPENDENT-NODE RECHECK PENDING**
+Status: **BUILD GATE PASS / SLICE B ACCEPTED / PRODUCER NOT OPEN**
 
 Source receipt:
 `docs/design/FREE_RECALL_STRATEGY_R8_SLICE_B_SOURCE_RECEIPT_2026_07_22.md`
@@ -12,14 +12,14 @@ Source commit under test: `1d09b06c`
 ## 1. Verdict
 
 The default-off Slice B feature compiles and all five targeted public-source
-tests pass on the local macOS node. A second detached clean-worktree rerun,
-using the exact same commit, offline locked dependencies, and a separate target
-directory, also passes.
+tests pass on the local macOS node and on an isolated aio2 Linux worktree. A
+second local detached clean-worktree rerun, using the exact same commit, offline
+locked dependencies, and a separate target directory, also passes.
 
-This accepts the local build/test gate only. It does not claim independent-node
-reproducibility: both configured candidates (`aio2` and `tb14`) currently fail
-SSH host-key verification before any remote command can run. No new key was
-accepted and no remote worktree was created.
+The initial `ssh aio2` attempt failed because `known_hosts` binds the existing
+trusted ED25519 key to Tailnet IP `100.93.4.56`, not the DNS label. Tailscale
+confirmed that IP currently belongs to aio2; the accepted run used
+`pallasting@100.93.4.56`. No new host key was accepted or replaced.
 
 ## 2. Exact accepted commands
 
@@ -40,7 +40,7 @@ isolated temporary target directory.
 | --- | --- | --- | --- |
 | local worktree | Rust/Cargo 1.96.0, macOS arm64 | pass | `5 passed, 0 failed` |
 | detached clean worktree | Rust/Cargo 1.96.0, macOS arm64, offline+locked | pass | `5 passed, 0 failed` |
-| independent aio2/tb14 | not run: unverified SSH host keys | — | — |
+| independent aio2 | Rust/Cargo 1.96.0, Linux x86_64, offline+locked | pass | `5 passed, 0 failed` |
 
 The five tests cover fresh v44 creation, v43→v44 upgrade, collision rollback
 without cursor advance, disabled gate no-write behavior, and exact finalized
@@ -65,7 +65,9 @@ Only temporary disposable databases created by tests were opened. No user
 `state.db`, real producer, runtime configuration, retrieval path, sync/export,
 merge to master, or deployment was used.
 
-Before treating Slice B as independently accepted, an owner-verified SSH host
-key (or another separately trusted independent node) is required for the same
-offline locked rerun. Even after that, the next functional lane is still a
+The aio2 detached worktree and exact temporary target directory were removed
+after the successful command chain; post-run inspection found zero matching
+worktrees and zero matching temporary paths.
+
+Slice B is accepted at its build/test boundary. The next functional lane is a
 separate authorization for a single producer seam; R9 does not enable one.
