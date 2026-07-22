@@ -1,0 +1,63 @@
+{
+  "schema": "agent_bridge.fermion_biocortex.fb_s1_same_u_tdhf_residual_contract.v1",
+  "status": "PREREGISTERED_FAIL_CLOSED",
+  "source_bindings": {
+    "pilot_sha256": "9474ffb478dd14854e95c36430ecf500b0e44b5b2342b5dfcbe395032bee96c6",
+    "fb_s0_contract_sha256": "bc78a97589d49643c3c2b167601ea0682a4813716e9294c07ac297af1fe71496",
+    "fb_s0_checker_sha256": "d471cf5235b1485c8cfe260315bed06076c4b3a1fd9c9f63b6b79d9cc9a21780"
+  },
+  "physics": {
+    "linear_size": 2,
+    "particle_count": 4,
+    "nominal": "COLLINEAR_NUMBER_CONSERVING_TDHF_SAME_U",
+    "time_step": 0.05,
+    "steps": 80,
+    "corrector_iterations": 4,
+    "train_u": [2.0, 4.0, 6.0],
+    "development_u": [5.0],
+    "test_u": [3.0, 7.0],
+    "observables": ["staggered_magnetization", "double_occupancy"]
+  },
+  "split": {
+    "prefix_steps": 48,
+    "purge_steps": 8,
+    "warmup_steps": 8,
+    "future_values_visible_to_fit": false,
+    "test_u_visible_to_fit": false,
+    "seed_selection_on_test": false
+  },
+  "models": {
+    "direct_baselines": ["PERSISTENCE", "AFFINE_DMD", "RIDGE_VAR4", "PRONY_AR8"],
+    "candidate": "BIOCORTEX_FIXED_RECURRENT_CONTEXT_SIDECAR_V1",
+    "candidate_seeds": [11, 29, 47],
+    "candidate_state_dimension": 8,
+    "ridge_lambda": 1e-6
+  },
+  "equal_budget_caps": {
+    "trainable_or_fixed_scalar_parameters": 40,
+    "persistent_state_scalars": 16,
+    "logical_scalar_operations_per_step": 512
+  },
+  "success": {
+    "minimum_nrmse_improvement_fraction": 0.10,
+    "minimum_effective_horizon_improvement_fraction": 0.20,
+    "effective_horizon_normalized_error_threshold": 0.25,
+    "direct_reduction_relative_nrmse_tolerance": 0.02
+  },
+  "tolerances": {
+    "exact_state_norm": 1e-10,
+    "tdhf_hermiticity": 1e-10,
+    "tdhf_trace": 1e-9,
+    "tdhf_idempotency": 1e-8,
+    "tdhf_energy_drift": 5e-5
+  },
+  "nonclaims": {
+    "fermionic_non_gaussianity_assessed": false,
+    "quantum_advantage_claim": false,
+    "physical_l8_instance_assessed": false,
+    "bgl_accessed": false,
+    "hardware_evidence": false,
+    "runtime_authority": false,
+    "mainline_parameter_influence": false
+  }
+}

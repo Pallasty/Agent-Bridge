@@ -1,0 +1,167 @@
+{
+  "analytic_counterexample": {
+    "different_three_mode_inclusions": true,
+    "kernels": {
+      "negative_loop": {
+        "c3_bits": 0.053349939329101856,
+        "eigenvalues": [
+          "37/50",
+          "37/50",
+          "1/50"
+        ],
+        "fixed_particle_number_pure_state": false,
+        "maximum_q2_cell_error": 6.938893903907228e-18,
+        "occupation_table": [
+          "8281/125000",
+          "15769/125000",
+          "15769/125000",
+          "22681/125000",
+          "15769/125000",
+          "22681/125000",
+          "22681/125000",
+          "1369/125000"
+        ],
+        "one_mode_inclusions": [
+          "1/2",
+          "1/2",
+          "1/2"
+        ],
+        "q2_cells": [
+          0.0386,
+          0.1538,
+          0.1538,
+          0.1538,
+          0.1538,
+          0.1538,
+          0.1538,
+          0.038599999999999995
+        ],
+        "three_mode_inclusion": "1369/125000",
+        "two_mode_inclusions": {
+          "0,1": "481/2500",
+          "0,2": "481/2500",
+          "1,2": "481/2500"
+        },
+        "valid_gauge_invariant_quasifree_mixed_state_kernel": true
+      },
+      "positive_loop": {
+        "c3_bits": 0.053349939329101856,
+        "eigenvalues": [
+          "49/50",
+          "13/50",
+          "13/50"
+        ],
+        "fixed_particle_number_pure_state": false,
+        "maximum_q2_cell_error": 6.938893903907228e-18,
+        "occupation_table": [
+          "1369/125000",
+          "22681/125000",
+          "22681/125000",
+          "15769/125000",
+          "22681/125000",
+          "15769/125000",
+          "15769/125000",
+          "8281/125000"
+        ],
+        "one_mode_inclusions": [
+          "1/2",
+          "1/2",
+          "1/2"
+        ],
+        "q2_cells": [
+          0.038599999999999995,
+          0.1538,
+          0.1538,
+          0.1538,
+          0.1538,
+          0.1538,
+          0.1538,
+          0.0386
+        ],
+        "three_mode_inclusion": "8281/125000",
+        "two_mode_inclusions": {
+          "0,1": "481/2500",
+          "0,2": "481/2500",
+          "1,2": "481/2500"
+        },
+        "valid_gauge_invariant_quasifree_mixed_state_kernel": true
+      }
+    },
+    "shared_pairwise_margins": true,
+    "shared_q2": true
+  },
+  "calibration_id": "FB-S0_GAUSSIAN_OCCUPATION_Q2_INTERPRETATION_V1",
+  "claims": {
+    "bgl_accessed": false,
+    "calibration_only": true,
+    "fermionic_non_gaussianity_assessed": false,
+    "hoi_application_claim": false,
+    "mainline_parameter_influence": false,
+    "physical_l8_instance_assessed": false,
+    "portable_receipt_byte_identity": false,
+    "ready_gate_eligible": false,
+    "runtime_authority": false
+  },
+  "interpretation": {
+    "converse_not_assessed": "C3 equal to zero does not establish fermionic Gaussianity",
+    "refuted": "C3 greater than zero is a sufficient witness of fermionic non-Gaussianity, beyond-Wick structure, or a three-body Hamiltonian",
+    "supported": "C3 measures order-3 irreducibility relative to the declared classical binary pairwise-maximum-entropy family"
+  },
+  "l2_negative_control": {
+    "checks": {
+      "all_triplets_scanned": true,
+      "kernel_hermitian": true,
+      "kernel_is_projection": true,
+      "no_q2_divergence_in_fixed_fixture": true,
+      "norm_within_tolerance": true,
+      "particle_trace_is_four": true,
+      "wick_determinant_moments_match": true
+    },
+    "fixture": {
+      "linear_size": 2,
+      "modes": 8,
+      "particles": 4,
+      "pilot_sha256": "9474ffb478dd14854e95c36430ecf500b0e44b5b2342b5dfcbe395032bee96c6",
+      "quadratic_product_preserves_gaussianity": true,
+      "total_time": 1.0,
+      "trotter_steps": 8,
+      "u_over_hopping": 0.0
+    },
+    "kernel_hermitian_residual": 0.0,
+    "kernel_projection_residual": 3.1086244689504383e-15,
+    "kernel_trace_residual": 2.042810365310288e-14,
+    "maximum_c3_bits": 0.0,
+    "maximum_inclusion_determinant_residual": 1.7763568394002505e-15,
+    "norm_residual": 2.55351295663786e-15,
+    "positive_triplets": 0,
+    "status": "NO_DIVERGENCE_IN_FIXED_L2_FIXTURE",
+    "triplets_scanned": 56
+  },
+  "logical_resource_counts": {
+    "external_corpus_data_read": false,
+    "local_pinned_source_imported": true,
+    "logical_state_dimension": 256,
+    "maximum_kernel_dimension": 8,
+    "python_peak_rss_measured": false,
+    "rng_used": false,
+    "table_cells_processed": 448,
+    "triplets_processed": 56
+  },
+  "provenance": {
+    "checker_sha256": "d471cf5235b1485c8cfe260315bed06076c4b3a1fd9c9f63b6b79d9cc9a21780",
+    "contract_hash_basis": "source_bytes",
+    "contract_sha256": "bc78a97589d49643c3c2b167601ea0682a4813716e9294c07ac297af1fe71496",
+    "libc": [
+      "glibc",
+      "2.43"
+    ],
+    "pilot_execution": "compiled_and_executed_from_one_verified_byte_buffer",
+    "pilot_sha256": "9474ffb478dd14854e95c36430ecf500b0e44b5b2342b5dfcbe395032bee96c6",
+    "platform_machine": "x86_64",
+    "platform_system": "Linux",
+    "python_implementation": "CPython",
+    "python_version": "3.14.4"
+  },
+  "schema_version": 1,
+  "status": "ANALYTIC_GAUSSIAN_Q2_COUNTEREXAMPLE_VERIFIED"
+}
