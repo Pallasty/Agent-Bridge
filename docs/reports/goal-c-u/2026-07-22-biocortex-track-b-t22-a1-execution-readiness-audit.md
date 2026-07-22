@@ -26,11 +26,13 @@ real collection challenge is generated.
    signed transcript transitions but deliberately opens no socket and executes
    no command. The final execution admission receipt consequently has no
    consumer capable of producing T22-A1-H evidence.
-2. **Three-host runtime-readiness contract — closed after this audit.** The new
-   private packet binds exact executable, local-root, port, credential-placement
-   and operator/coordinator identities for each role. Its semantic KAT validates
-   all three positions. The three real packets and detached signatures remain
-   uncollected.
+2. **Three-host runtime-readiness contract and signed-set verifier — closed
+   after this audit.** The private packet binds exact executable, local-root,
+   port, credential-placement and operator/coordinator identities for each role.
+   The verifier freshly revalidates the original attestation bundle, requires
+   each readiness packet to use that domain's admitted operator key under a
+   purpose-separated namespace, and emits only a non-executing private receipt.
+   The three real packets and detached signatures remain uncollected.
 3. **No credential-placement proof.** The material preparer creates all leaf
    private keys beneath the coordinator artifact root. Its manifest does not
    prove that each exact domain host possesses the matching key/certificate at
@@ -91,6 +93,8 @@ escalation. It reads zero real instances and performs no network, listener,
 workload, fault or credential action.
 
 `biocortex_ab_track_b_t22_a1_domain_runtime_readiness_v1.py`, its closed schema
-and KAT now close the contract portion of item 2. Three synthetic domain-role
-packets pass and 44 mutations fail; real packet/signature collection remains a
-later owner-authorized step.
+and KAT now close the contract and signed-set verification portion of item 2.
+Three synthetic domain-role packets and one complete same-key signed set pass;
+52 semantic, file-set, namespace, signature, key, ordering, freshness and
+cross-binding mutations fail. Real packet/signature collection remains a later
+owner-authorized step.

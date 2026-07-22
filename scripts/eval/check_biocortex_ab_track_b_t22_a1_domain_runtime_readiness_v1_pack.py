@@ -5,7 +5,10 @@ import copy
 import hashlib
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,6 +21,7 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 SCHEMA = module.load_schema()
+ATTESTATION = module.load_attestation_module()
 CONTRACT = json.loads((ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-three-domain-admission-contract-v1.json").read_text())
 PROPOSAL = json.loads((ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-owner-decision-proposal-v1.json").read_text())
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
@@ -33,27 +37,63 @@ def utc(value: datetime) -> str:
     return value.isoformat().replace("+00:00", "Z")
 
 
-def attestation(number: int) -> dict:
-    return {
+def attestation(number: int, operator_public_key_sha256: str | None = None) -> dict:
+    domain_id = f"domain-{number}"
+    value = {
+        "schema": "agent_bridge.biocortex.track_b.t22_a1.domain_attestation.v1",
+        "packet_kind": "T22_A1_HOST_DOMAIN_ATTESTATION",
+        "hashing_contract": {
+            "hash_algorithm": "SHA-256", "canonicalization": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT",
+            "digest_domain": "agent-bridge/biocortex/track-b/t22-a1/domain-attestation/v1",
+            "hash_scope": "ENTIRE_PACKET_EXCEPT_ATTESTATION_SHA256", "self_hash_field": "attestation_sha256",
+            "self_hash_field_excluded": True, "detached_signature_covers_complete_canonical_packet": True,
+            "cross_field_semantic_validation_required": True, "candidate_reported_matches_authoritative": False,
+        },
         "source_commit": SOURCE_COMMIT,
-        "domain_id": f"domain-{number}",
-        "attestation_sha256": sha(f"attestation:{number}"),
+        "domain_id": domain_id,
+        "attested_at": utc(NOW - timedelta(minutes=1) + timedelta(seconds=number)),
         "expires_at": utc(NOW + timedelta(hours=2)),
         "host_identity": {
             "hostname": f"synthetic-host-{number}",
+            "logical_aliases": [f"synthetic-host-{number}"],
             "operating_system": "MACOS" if number == 2 else "LINUX",
+            "kernel_release": "synthetic-kernel",
             "architecture": "AARCH64" if number == 2 else "X86_64",
             "machine_id_sha256": sha(f"machine:{number}"),
             "hardware_identity_sha256": sha(f"hardware:{number}"),
             "boot_id_sha256": sha(f"boot:{number}"),
+            "physical_host_asserted": True, "provider_kind": "OWNER_PHYSICAL",
+            "provider_identity_sha256": None, "region": None, "zone": None,
+            "instance_identity_sha256": None,
         },
-        "operator_binding": {"public_key_sha256": sha(f"operator:{number}")},
+        "operator_binding": {
+            "operator_role": "T22_A1_DOMAIN_OPERATOR",
+            "public_key_sha256": operator_public_key_sha256 or sha(f"operator:{number}"),
+            "signature_scheme": "OPENSSH_SSHSIG_ED25519",
+            "signature_namespace": ATTESTATION.SIGNATURE_NAMESPACE,
+            "private_key_exported": False,
+        },
+        "network_binding": {
+            "transport": "OWNER_MANAGED_PRIVATE_OVERLAY",
+            "peer_endpoint_set_sha256": sha("peer-endpoint-set"),
+            "acl_policy_receipt_sha256": sha("overlay-acl"),
+            "public_listener_allowed": False, "credential_material_embedded": False,
+        },
         "workload_readiness": {
             "pinned_tool_receipt_sha256": sha(f"tool-receipt:{number}"),
             "private_data_root_sha256": sha(f"private-root:{number}"),
             "port_set_sha256": sha(f"ports:{number}"),
+            "tracked_tree_clean": True, "ambient_credentials_required": False,
+        },
+        "claims": {
+            "candidate_for_distinct_physical_host": True,
+            "site_or_power_independence_proved": False,
+            "production_admissible": False,
+            "attestation_is_execution_authority": False,
         },
     }
+    value["attestation_sha256"] = ATTESTATION.domain_digest(ATTESTATION.ATTESTATION_DOMAIN, value)
+    return value
 
 
 ENDPOINT = {
@@ -97,9 +137,9 @@ def placed_identity(root: Path, prefix: str, credential_row: dict) -> dict:
     }
 
 
-def readiness(number: int) -> tuple[dict, dict]:
+def readiness(number: int, operator_public_key_sha256: str | None = None) -> tuple[dict, dict]:
     domain_id = f"domain-{number}"
-    packet = attestation(number)
+    packet = attestation(number, operator_public_key_sha256)
     domain_root = Path(f"/private/t22-a1/{RUN_ID}/{domain_id}")
     credentials_root = domain_root / "credentials"
     endpoint = ENDPOINT["domains"][number - 1]
@@ -210,6 +250,20 @@ def readiness(number: int) -> tuple[dict, dict]:
     return value, packet
 
 
+def write_and_sign(path: Path, value: dict, private_key: Path, namespace: str) -> None:
+    path.write_bytes(module.canonical(value) + b"\n")
+    path.chmod(0o600)
+    signature = path.with_suffix(path.suffix + ".sig")
+    if signature.exists() or signature.is_symlink():
+        signature.unlink()
+    result = subprocess.run(
+        ["ssh-keygen", "-Y", "sign", "-f", str(private_key), "-n", namespace, str(path)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    assert result.returncode == 0 and signature.is_file()
+    signature.chmod(0o600)
+
+
 positive: list[tuple[dict, dict]] = []
 for number in (1, 2, 3):
     value, packet = readiness(number)
@@ -242,6 +296,7 @@ base, packet = positive[0]
 mutations = (
     lambda x: x.update(source_commit="b" * 40),
     lambda x: x.update(domain_id="domain-2"),
+    lambda x: x.update(collected_at=utc(NOW - timedelta(minutes=2))),
     lambda x: x.update(expires_at=utc(NOW + timedelta(hours=2))),
     lambda x: x["bindings"].update(owner_decision_proposal_sha256=sha("wrong-proposal")),
     lambda x: x["bindings"].update(admission_contract_sha256=sha("wrong-contract")),
@@ -290,16 +345,151 @@ rejected(domain_two, packet_two, lambda x: x["credential_placement"].update(coor
 rejected(base, packet, lambda x: x.update(expires_at=utc(NOW + timedelta(seconds=1))), now=NOW + timedelta(seconds=2))
 rejected(base, packet, lambda x: x.update(content_sha256=sha("forged-digest")), recalc=False)
 
+ssh_keygen = shutil.which("ssh-keygen")
+assert ssh_keygen is not None
+bundle_negative_count = 0
+with tempfile.TemporaryDirectory(prefix="t22-a1-readiness-set-kat-") as directory:
+    root = Path(directory)
+    attestation_bundle = root / "attestations"
+    readiness_bundle = root / "readiness"
+    attestation_bundle.mkdir(mode=0o700)
+    readiness_bundle.mkdir(mode=0o700)
+    keys: list[Path] = []
+    signed_readiness: list[dict] = []
+    for number in (1, 2, 3):
+        key = root / f"domain-{number}-operator"
+        subprocess.run(
+            [ssh_keygen, "-q", "-t", "ed25519", "-N", "", "-C", "T22_A1_READINESS_SYNTHETIC_ONLY", "-f", str(key)],
+            check=True,
+        )
+        keys.append(key)
+        public_key_path = attestation_bundle / f"domain-{number}.pub"
+        shutil.copyfile(str(key) + ".pub", public_key_path)
+        operator_sha256 = ATTESTATION.canonical_public_key(public_key_path)[1]
+        readiness_value, attestation_value = readiness(number, operator_sha256)
+        signed_readiness.append(readiness_value)
+        write_and_sign(
+            attestation_bundle / f"domain-{number}.json", attestation_value, key,
+            ATTESTATION.SIGNATURE_NAMESPACE,
+        )
+        write_and_sign(
+            readiness_bundle / f"domain-{number}.json", readiness_value, key,
+            module.SIGNATURE_NAMESPACE,
+        )
+
+    def verify_readiness_set(endpoint_manifest: dict = ENDPOINT, now: datetime = NOW + timedelta(seconds=1)) -> dict:
+        return module.verify_bundle(
+            readiness_bundle.resolve(), attestation_bundle.resolve(), SOURCE_COMMIT, RUN_ID,
+            CONTRACT, PROPOSAL, ADMITTED_SET_RECEIPT_SHA256, endpoint_manifest,
+            CREDENTIAL, PREPARATION_TERMINAL_SHA256, now,
+        )
+
+    def expect_bundle_failure(expected: str, endpoint_manifest: dict = ENDPOINT, now: datetime = NOW + timedelta(seconds=1)) -> None:
+        try:
+            verify_readiness_set(endpoint_manifest, now)
+        except module.SafeFailure as error:
+            assert str(error) == expected, (str(error), expected)
+            return
+        raise AssertionError(f"unsafe readiness bundle admitted: {expected}")
+
+    receipt = verify_readiness_set()
+    assert receipt["status"] == "THREE_DOMAIN_RUNTIME_READINESS_SET_VERIFIED_NON_EXECUTING"
+    assert [row["domain_id"] for row in receipt["packet_bindings"]] == list(module.DOMAIN_IDS)
+    assert [row["domain_id"] for row in receipt["signature_bindings"]] == list(module.DOMAIN_IDS)
+    assert receipt["all_three_packets_current"] is True
+    assert receipt["all_three_domain_signatures_verified"] is True
+    assert receipt["same_attested_domain_keys_reverified"] is True
+    assert receipt["credential_files_accessed"] == receipt["external_hosts_contacted"] == 0
+    assert receipt["network_accessed"] is False and receipt["execution_authorized"] is False
+    assert receipt["production_admissible"] is False
+    unsigned_receipt = dict(receipt)
+    claimed_receipt_sha256 = unsigned_receipt.pop("content_sha256")
+    assert claimed_receipt_sha256 == module.domain_digest(module.READINESS_SET_RECEIPT_DOMAIN, unsigned_receipt)
+
+    unexpected = readiness_bundle / "unexpected"
+    unexpected.write_text("synthetic")
+    expect_bundle_failure("E_READINESS_BUNDLE_FILE_SET")
+    unexpected.unlink()
+    bundle_negative_count += 1
+
+    signature_path = readiness_bundle / "domain-1.json.sig"
+    signature_raw = signature_path.read_bytes()
+    signature_path.unlink()
+    expect_bundle_failure("E_READINESS_BUNDLE_FILE_SET")
+    signature_path.write_bytes(signature_raw)
+    signature_path.chmod(0o600)
+    bundle_negative_count += 1
+
+    signature_path.unlink()
+    write_and_sign(
+        readiness_bundle / "domain-1.json", signed_readiness[0], keys[0],
+        "agent-bridge-t22-a1-wrong-readiness-v1",
+    )
+    expect_bundle_failure("E_READINESS_SIGNATURE_INVALID")
+    write_and_sign(
+        readiness_bundle / "domain-1.json", signed_readiness[0], keys[0],
+        module.SIGNATURE_NAMESPACE,
+    )
+    bundle_negative_count += 1
+
+    wrong_endpoint = copy.deepcopy(ENDPOINT)
+    wrong_endpoint["content_sha256"] = sha("wrong-endpoint-manifest")
+    expect_bundle_failure("E_READINESS_EVIDENCE_BINDINGS", wrong_endpoint)
+    bundle_negative_count += 1
+
+    domain_one_packet = readiness_bundle / "domain-1.json"
+    domain_two_packet = readiness_bundle / "domain-2.json"
+    domain_one_signature = readiness_bundle / "domain-1.json.sig"
+    domain_two_signature = readiness_bundle / "domain-2.json.sig"
+    one_raw, two_raw = domain_one_packet.read_bytes(), domain_two_packet.read_bytes()
+    one_sig, two_sig = domain_one_signature.read_bytes(), domain_two_signature.read_bytes()
+    domain_one_packet.write_bytes(two_raw)
+    domain_two_packet.write_bytes(one_raw)
+    domain_one_signature.write_bytes(two_sig)
+    domain_two_signature.write_bytes(one_sig)
+    for path in (domain_one_packet, domain_two_packet, domain_one_signature, domain_two_signature):
+        path.chmod(0o600)
+    expect_bundle_failure("E_READINESS_RUN_BINDING")
+    domain_one_packet.write_bytes(one_raw)
+    domain_two_packet.write_bytes(two_raw)
+    domain_one_signature.write_bytes(one_sig)
+    domain_two_signature.write_bytes(two_sig)
+    for path in (domain_one_packet, domain_two_packet, domain_one_signature, domain_two_signature):
+        path.chmod(0o600)
+    bundle_negative_count += 1
+
+    domain_one_public_key = attestation_bundle / "domain-1.pub"
+    public_key_raw = domain_one_public_key.read_bytes()
+    domain_one_public_key.write_bytes((attestation_bundle / "domain-2.pub").read_bytes())
+    expect_bundle_failure("E_DOMAIN_PUBLIC_KEY_BINDING")
+    domain_one_public_key.write_bytes(public_key_raw)
+    bundle_negative_count += 1
+
+    spread_packet = copy.deepcopy(signed_readiness[2])
+    spread_packet["collected_at"] = utc(NOW + timedelta(minutes=6))
+    spread_packet["expires_at"] = utc(NOW + timedelta(minutes=36))
+    spread_packet.pop("content_sha256")
+    spread_packet["content_sha256"] = module.digest(spread_packet)
+    write_and_sign(
+        readiness_bundle / "domain-3.json", spread_packet, keys[2], module.SIGNATURE_NAMESPACE,
+    )
+    expect_bundle_failure("E_READINESS_SET_CLOCK_SPREAD", now=NOW + timedelta(minutes=7))
+    write_and_sign(
+        readiness_bundle / "domain-3.json", signed_readiness[2], keys[2], module.SIGNATURE_NAMESPACE,
+    )
+    bundle_negative_count += 1
+
 status = module.status()
-assert status["status"] == "OFFLINE_DOMAIN_RUNTIME_READINESS_CONTRACT_READY_REAL_PACKET_COLLECTION_BLOCKED"
+assert status["status"] == "OFFLINE_DOMAIN_RUNTIME_READINESS_CONTRACT_AND_SET_VERIFIER_READY_REAL_PACKET_COLLECTION_BLOCKED"
 assert status["real_packet_instances_read"] == status["real_tool_or_credential_files_read"] == 0
 assert status["real_host_identifiers_read"] is False and status["network_accessed"] is False
 assert status["external_hosts_contacted"] == status["listeners_started"] == status["services_started"] == status["faults_injected"] == 0
 assert status["execution_authorized"] is False and status["production_admissible"] is False
 
-negative_count = len(mutations) + 3
+negative_count = len(mutations) + 3 + bundle_negative_count
 print("t22_a1_domain_runtime_readiness_check\tpass")
 print("synthetic_valid_domain_packet_count\t3")
+print("synthetic_valid_signed_readiness_set_count\t1")
 print(f"directed_negative_test_count\t{negative_count}")
 print("real_packet_instances_read\t0")
 print("real_host_identifiers_read\tfalse")

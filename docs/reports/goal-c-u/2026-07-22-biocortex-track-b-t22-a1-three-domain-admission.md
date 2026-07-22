@@ -92,11 +92,13 @@ rollback prevention.
   dispatch, requires exact validated terminal evidence for PASS, and records
   failure without retry. Its KAT has one synthetic success and 42 negative
   paths with zero real network, listener, workload, fault or credential access.
-- a private domain-runtime-readiness schema and semantic gate with three
-  synthetic role/domain successes and 44 negative paths. It closes the contract
-  for exact host-local tools, roots, ports, placed credentials, operator keys,
-  coordinator-only material and process boundaries while reading zero real
-  host, tool, endpoint or credential input.
+- a private domain-runtime-readiness schema, semantic gate and signed-set
+  verifier with three synthetic role/domain successes, one complete same-key
+  signed-set success and 52 negative paths. It closes the contract for exact
+  host-local tools, roots, ports, placed credentials, operator keys,
+  coordinator-only material and process boundaries, then freshly revalidates
+  the attestation bundle and purpose-separated domain signatures. The KAT reads
+  zero real host, tool, endpoint or credential input.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
