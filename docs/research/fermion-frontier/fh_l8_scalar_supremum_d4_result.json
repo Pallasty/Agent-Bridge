@@ -1,0 +1,19 @@
+{
+  "budget_gate":{"double_occupancy":{"M6_ceiling":"3324000000/1","degree_four_contribution":"23/60000000","generic_M6_to_ceiling_ratio":"1616484162452062208/12984375","remainder_slack":"277/60000000"},"staggered_magnetization":{"M6_ceiling":"3048000000/1","degree_four_contribution":"23/30000000","generic_M6_to_ceiling_ratio":"808242081226031104/5953125","remainder_slack":"127/30000000"}},
+  "candidates":{
+    "COMPLEX_CAUCHY":{"decision":"NUMERICALLY_INADEQUATE","majorant_global_lower_bound":"15356599543294590976/1922607421875","proof":"exp(y)>=y^7/7! and x^2/(x-1)>=4 for x>1"},
+    "EXACT_SECTOR_KRYLOV":{"candidate_actions_per_state":225,"decision":"NEXT_ACTION_CAP_EXCEEDED","next_action_candidate_floor":383464125,"next_action_cap":300000000,"next_action_executed":false,"reachable_state_counts":[1,225,24421,1704285],"state_digests":["4851eca743653e8f5e4b1aaa7796811bc24f1bca5e23432e5bc96bfd9882bec9","9cbbe6d7e508bd37eef5ec54bfa5b580b80d0b3dc3998146c900d03220a847b3","c92f2de07caa1a289d7aa27cd0fa64e707e084cf96e06219161ea55ff3f3c88b","6f8f53101b8a3ec0b3dfcee624a014426d93a8aa0dfc1300780b0ad99b765e97"]},
+    "GENERIC_DERIVATIVE":{"H_L1":"608/1","M6_bound":"413819945587727925248/1","decision":"NUMERICALLY_INADEQUATE"}
+  },
+  "contract_id":"FH-L8-INDEPENDENT-REFERENCE-D4",
+  "degree6_remainder_bounded":false,
+  "full_R100_error_bounded":false,
+  "limitations":["Each decision closes only the fixed candidate and constants in the contract.","The Cauchy result evaluates the current global-norm majorant, not all complex-analytic bounds.","The Krylov result stops before H acts on the depth-three vector."],
+  "next_branch":"SYMMETRY_ORBIT_COMPRESSED_SCALAR_KRYLOV",
+  "physical_reference_qualified":false,
+  "ready_gate_eligible":false,
+  "status":"VERIFIED_D4_SCALAR_SUPREMUM_CANDIDATE_FAILURE_THRESHOLDS",
+  "terminal_branch":"GLOBAL_DERIVATIVE_AND_CAUCHY_BOUNDS_NUMERICALLY_INADEQUATE_AND_KRYLOV_ACTION_CAP_EXCEEDED",
+  "two_step_cumulative_error_bounded":false,
+  "verified":true
+}
