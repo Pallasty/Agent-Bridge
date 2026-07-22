@@ -2221,3 +2221,8 @@ depth 2 (`225→29`, `24421→3116`). Depth 3 has `1704285` states; only a
 100000-state prefix (`71064` orbits) is certified. The next branch is the
 byte-table signed bit-permutation canonicalizer; no D6 or error authority is
 granted.
+
+FH-L8 D6 closes the D5 depth-3 orbit-prefix boundary with a byte-table signed
+D4 support canonicalizer: all `1704285` states yield `213099` orbits in
+14.856 seconds. This makes complete depth-3 orbit enumeration feasible, but
+does not yet construct a quotient Hamiltonian or certify fourth-layer cost.
