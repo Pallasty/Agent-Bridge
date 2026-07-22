@@ -62,6 +62,16 @@ and bootstrap calls cannot be counted as organic telemetry.
 
 ## Sibling probes (not benchmark components)
 
+`free_recall_strategy_benchmark.py` is a zero-dependency, offline
+public-synthetic strategy-shape experiment inspired by Li et al. (2026). It
+compares lexical relevance (with and without an episode prefilter), recency,
+stable episode traversal, causal graph traversal, and a text-only router on one
+controlled corpus. Its paraphrase
+challenge separates a perfect template-calibration score from routing
+generalization. It does not open the AB store, call MCP, train a model, or
+change default retrieval order. See
+`docs/design/FREE_RECALL_MEMORY_STRATEGY_EXPLORATION_2026_07_21.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,

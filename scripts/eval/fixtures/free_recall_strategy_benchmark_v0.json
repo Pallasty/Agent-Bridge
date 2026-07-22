@@ -1,0 +1,54 @@
+{
+  "schema": "agent_bridge.free_recall_strategy_fixture.v0",
+  "fixture_id": "public_synthetic_free_recall_strategies_v0",
+  "source_note": "Public synthetic fixture inspired by Li et al. (2026). It contains no production memory, private prompt, or model output.",
+  "items": [
+    {"key":"release.r1","episode":"release","position":1,"terms":["release","goal","component"],"parents":[]},
+    {"key":"release.r2","episode":"release","position":2,"terms":["wit","typed","report","contract"],"parents":["release.r1"]},
+    {"key":"release.r3","episode":"release","position":3,"terms":["rust","cargo","toolchain"],"parents":["release.r1"]},
+    {"key":"release.r4","episode":"release","position":4,"terms":["wasm","bindings","linker","evidence"],"parents":["release.r2","release.r3"]},
+    {"key":"release.r5","episode":"release","position":5,"terms":["component","host","integration","authorization"],"parents":["release.r2","release.r3"]},
+    {"key":"release.r6","episode":"release","position":6,"terms":["release","build","deploy"],"parents":["release.r4","release.r5"]},
+    {"key":"release.r7","episode":"release","position":7,"terms":["mcp","reconnect","health","verify"],"parents":["release.r6"]},
+    {"key":"release.r8","episode":"release","position":8,"terms":["acceptance","deployment","separate","lesson"],"parents":["release.r7"]},
+
+    {"key":"memory.m1","episode":"memory","position":1,"terms":["memory","goal","recall"],"parents":[]},
+    {"key":"memory.m2","episode":"memory","position":2,"terms":["semantic","ranking","exhaustive","miss"],"parents":["memory.m1"]},
+    {"key":"memory.m3","episode":"memory","position":3,"terms":["default","order","preserve","decision"],"parents":["memory.m2"]},
+    {"key":"memory.m4","episode":"memory","position":4,"terms":["synthetic","benchmark","task"],"parents":["memory.m2"]},
+    {"key":"memory.m5","episode":"memory","position":5,"terms":["graph","onehop","coverage","evidence"],"parents":["memory.m4"]},
+    {"key":"memory.m6","episode":"memory","position":6,"terms":["gnn","centrality","rejected","lesson"],"parents":["memory.m5"]},
+    {"key":"memory.m7","episode":"memory","position":7,"terms":["strategy","router","proposal"],"parents":["memory.m5","memory.m6","memory.m2"]},
+    {"key":"memory.m8","episode":"memory","position":8,"terms":["offline","evaluate","next"],"parents":["memory.m7"]},
+
+    {"key":"world.w1","episode":"world","position":1,"terms":["world","goal","semantic"],"parents":[]},
+    {"key":"world.w2","episode":"world","position":2,"terms":["onsen","patch","runtime"],"parents":["world.w1"]},
+    {"key":"world.w3","episode":"world","position":3,"terms":["viewport","pixel","render","evidence"],"parents":["world.w2"]},
+    {"key":"world.w4","episode":"world","position":4,"terms":["visibility","query","contract"],"parents":["world.w3"]},
+    {"key":"world.w5","episode":"world","position":5,"terms":["no","green","inert","falsifier"],"parents":["world.w4"]},
+    {"key":"world.w6","episode":"world","position":6,"terms":["tcp","mcp","adapter"],"parents":["world.w4"]},
+    {"key":"world.w7","episode":"world","position":7,"terms":["acceptance","live","render"],"parents":["world.w3","world.w5","world.w6"]},
+    {"key":"world.w8","episode":"world","position":8,"terms":["phase0","closed","next"],"parents":["world.w7"]}
+  ],
+  "queries": [
+    {"id":"Q01","split":"calibration","text":"完整回忆 release 会话的全部记录并按顺序列出","intent":"exhaustive","scope":"release","terms":["complete","all","order"],"budget":8,"gold":["release.r1","release.r2","release.r3","release.r4","release.r5","release.r6","release.r7","release.r8"],"ordered":true},
+    {"id":"Q02","split":"calibration","text":"查找 WIT、bindings 和 linker 相关证据","intent":"conditional","scope":null,"terms":["wit","bindings","linker","evidence"],"budget":2,"gold":["release.r2","release.r4"],"ordered":false},
+    {"id":"Q03","split":"calibration","text":"为什么 release build 可以部署？追溯原因","intent":"causal","scope":"release","target":"release.r6","terms":["why","release","build","deploy"],"budget":4,"gold":["release.r2","release.r3","release.r4","release.r5"],"ordered":false},
+    {"id":"Q04","split":"calibration","text":"release 会话刚才做到哪里，下一步锚点是什么？","intent":"continuity","scope":"release","terms":["current","next"],"budget":1,"gold":["release.r8"],"ordered":false},
+
+    {"id":"Q05","split":"calibration","text":"完整盘点 memory 会话的全部决策和证据，按发生顺序","intent":"exhaustive","scope":"memory","terms":["complete","all","order"],"budget":8,"gold":["memory.m1","memory.m2","memory.m3","memory.m4","memory.m5","memory.m6","memory.m7","memory.m8"],"ordered":true},
+    {"id":"Q06","split":"calibration","text":"查找 graph、GNN 和 centrality 相关结论","intent":"conditional","scope":null,"terms":["graph","gnn","centrality"],"budget":2,"gold":["memory.m5","memory.m6"],"ordered":false},
+    {"id":"Q07","split":"calibration","text":"为什么提出 strategy router？给出因果证据","intent":"causal","scope":"memory","target":"memory.m7","terms":["why","strategy","router"],"budget":4,"gold":["memory.m2","memory.m4","memory.m5","memory.m6"],"ordered":false},
+    {"id":"Q08","split":"calibration","text":"memory 研究刚才做到哪里，下一步是什么？","intent":"continuity","scope":"memory","terms":["current","next"],"budget":1,"gold":["memory.m8"],"ordered":false},
+
+    {"id":"Q09","split":"calibration","text":"完整回忆 world 会话全部记录并按顺序列出","intent":"exhaustive","scope":"world","terms":["complete","all","order"],"budget":8,"gold":["world.w1","world.w2","world.w3","world.w4","world.w5","world.w6","world.w7","world.w8"],"ordered":true},
+    {"id":"Q10","split":"calibration","text":"查找 viewport、pixel 和 render 相关证据","intent":"conditional","scope":null,"terms":["viewport","pixel","render","evidence"],"budget":2,"gold":["world.w3","world.w7"],"ordered":false},
+    {"id":"Q11","split":"calibration","text":"为什么 live render 可以通过验收？追溯原因","intent":"causal","scope":"world","target":"world.w7","terms":["why","live","render","acceptance"],"budget":5,"gold":["world.w2","world.w3","world.w4","world.w5","world.w6"],"ordered":false},
+    {"id":"Q12","split":"calibration","text":"world Phase 0 刚才做到哪里，下一步锚点是什么？","intent":"continuity","scope":"world","terms":["current","next"],"budget":1,"gold":["world.w8"],"ordered":false},
+
+    {"id":"Q13","split":"paraphrase_challenge","text":"给我一张 release 会话从起点到结束的逐项清单","intent":"exhaustive","scope":"release","terms":["session","list"],"budget":8,"gold":["release.r1","release.r2","release.r3","release.r4","release.r5","release.r6","release.r7","release.r8"],"ordered":true},
+    {"id":"Q14","split":"paraphrase_challenge","text":"WIT 和 linker 的证据落在哪些记录里？","intent":"conditional","scope":null,"terms":["wit","linker","evidence"],"budget":2,"gold":["release.r2","release.r4"],"ordered":false},
+    {"id":"Q15","split":"paraphrase_challenge","text":"release build 走过了哪些前置依赖？","intent":"causal","scope":"release","target":"release.r6","terms":["release","build","dependency"],"budget":4,"gold":["release.r2","release.r3","release.r4","release.r5"],"ordered":false},
+    {"id":"Q16","split":"paraphrase_challenge","text":"接着 memory 研究往下做","intent":"continuity","scope":"memory","terms":["continue","memory"],"budget":1,"gold":["memory.m8"],"ordered":false}
+  ]
+}
