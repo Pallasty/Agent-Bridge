@@ -117,10 +117,10 @@ fn payload_sha256_is_valid(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn event_shape(
-    event: &EpisodeObservationEvent<'_>,
+fn event_shape<'a>(
+    event: &EpisodeObservationEvent<'a>,
 ) -> std::result::Result<
-    (&'static str, Option<&str>, Option<i64>, Option<i64>),
+    (&'static str, Option<&'a str>, Option<i64>, Option<i64>),
     EpisodeObservationStoreError,
 > {
     if event.event_id.is_empty() || event.episode_id.is_empty() || event.producer_run_id.is_empty()
@@ -319,7 +319,7 @@ mod tests {
     async fn version_and_object_counts(store: &SqliteStore) -> (String, i64, i64) {
         store
             .conn
-            .call(|connection| {
+            .call(|connection| -> RusqliteResult<(String, i64, i64)> {
                 Ok((
                     connection.query_row(
                         "SELECT value FROM schema_meta WHERE key='version'",
@@ -359,7 +359,7 @@ mod tests {
             .expect("open");
         store
             .conn
-            .call(|connection| {
+            .call(|connection| -> RusqliteResult<()> {
                 connection.execute_batch(
                     "DROP INDEX idx_episode_observation_events_episode_id; \
                      DROP TABLE episode_observation_events; \
@@ -385,7 +385,7 @@ mod tests {
             .expect("open");
         store
             .conn
-            .call(|connection| {
+            .call(|connection| -> RusqliteResult<()> {
                 connection.execute_batch(
                     "DROP INDEX idx_episode_observation_events_episode_id; \
                      DROP TABLE episode_observation_events; \

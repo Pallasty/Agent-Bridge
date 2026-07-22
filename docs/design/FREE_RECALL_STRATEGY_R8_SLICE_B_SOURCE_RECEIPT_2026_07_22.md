@@ -62,7 +62,7 @@ otherwise abstains.
   coupling to `memory_save`, `memory_search`, `session_curate`, sync/export,
   MCP, or `StateStore`;
 - Slice B source SHA-256:
-  `b1aaf89709e21873691f019ff67bb16e86e551b23e06a45478ecdfa9d9510d8c`.
+  `157ffab154a4984c1f2a365dacf4adee20bfd1cea297bae5851c7793abb2e4ea`.
 
 ## 5. Claim boundary
 
