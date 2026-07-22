@@ -140,6 +140,25 @@ for unsafe in (
         continue
     raise AssertionError("replay transaction without exact failure-range proof admitted")
 
+sync_unseal = {"type": "shamir", "initialized": True, "sealed": False, "t": 1, "n": 1}
+async_unseal = {"type": "shamir", "initialized": False, "sealed": True, "t": 1, "n": 1}
+assert module.exact_unseal_submission(sync_unseal, False) == sync_unseal
+assert module.exact_unseal_submission(async_unseal, True) == async_unseal
+assert module.exact_unsealed_health(sync_unseal) == sync_unseal
+assert module.exact_unsealed_health(async_unseal) is None
+for unsafe, asynchronous_allowed in (
+    ({**sync_unseal, "type": "recovery"}, False),
+    ({**sync_unseal, "sealed": "false"}, False),
+    ({**sync_unseal, "t": 2}, False),
+    ({**sync_unseal, "n": True}, False),
+    (async_unseal, False),
+):
+    try:
+        module.exact_unseal_submission(unsafe, asynchronous_allowed)
+    except module.SafeFailure:
+        continue
+    raise AssertionError("unsafe OpenBao unseal response admitted")
+
 assert module.classify_loopback_http_error(TimeoutError()) == "E_LOOPBACK_HTTP_TIMEOUT"
 assert module.classify_loopback_http_error(
     module.urllib.error.URLError(TimeoutError())
@@ -222,7 +241,7 @@ authorization.validate_anchor(
     json.loads(authorization.PROPOSAL_PATH.read_text()),
 )
 print("t22_a0_real_process_runner_check\tpass")
-print(f"directed_negative_test_count\t{len(mutations) + 18}")
+print(f"directed_negative_test_count\t{len(mutations) + 27}")
 print("network_attempted\tfalse")
 print("processes_started\t0")
 print("faults_injected\t0")

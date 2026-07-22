@@ -2,19 +2,20 @@
 
 ## Outcome
 
-T22-A0 crossed the real-process boundary twice and remains fail closed.
-The third run proved the three-process etcd cluster, linearizable authorize /
-consume and rejected replay, plus Toxiproxy disconnect and recovery. It then
-timed out while the first OpenBao node initialized: the five-second HTTP
-deadline coincided with OpenBao's default Raft election timing. The third
-authorization was irreversibly consumed, all five owned processes stopped
-without cleanup SIGKILL, all 14 loopback ports were released, and no persisted
-bootstrap secret, host-global network mutation, spend, or production claim
-occurred. The source correction pins OpenBao Raft's documented
-`performance_multiplier = 1`, preserves the five-second contract deadline and
-the no-retry initialization rule, and records HTTP timeout, HTTP status, and
-transport failures separately. A source-bound rerun requires a fresh owner
-signature after this correction lands.
+T22-A0 crossed the real-process boundary three times and remains fail closed.
+The fifth authorized run retained the already-proven etcd and Toxiproxy
+observations, completed OpenBao single-node initialization inside the five-
+second deadline, and started a second OpenBao node. It then rejected the
+second node's immediate `sealed=true` response as `E_BAO_UNSEAL`. OpenBao 2.6.0
+source shows that manual integrated-Raft join with Shamir accepts the share,
+answers the join challenge, waits for replicated keyring material, and unseals
+asynchronously; the immediate response may therefore remain sealed without
+being a share rejection. All six owned processes stopped, all loopback ports
+were released, and the exact bootstrap-secret scan covered 309,648,233 bytes
+with zero matches. The correction validates the share-response shape and then
+waits for exact `initialized=true && sealed=false` health while monitoring the
+owned process. A source-bound rerun requires a fresh owner signature after the
+correction lands.
 
 ## Authorized isolated-lab execution boundary
 
@@ -111,7 +112,7 @@ network boundary. Its present result is
 is constructed and no release artifact is downloaded before authorization.
 
 `scripts/check-biocortex-ab-track-b-t22-a0-real-process-runner-v1-pack.sh`
-adds 38 directed negative cases over the signed execution-contract binding,
+adds 47 directed negative cases over the signed execution-contract binding,
 one-shot authorization use, exact loopback ports, clean environment, etcd CAS
 shape, canonical/hash-chained evidence, process-start boundary, and exact
 ephemeral-bootstrap-value leak rejection. Its current result is
@@ -178,6 +179,26 @@ performance Raft timing. It deliberately does not retry `/sys/init`: a timed-
 out initialization may already have generated the memory-only root token and
 unseal share, so retrying would be unsafe. The consumed third authorization
 must not be reused.
+
+The fourth payload expired before signature verification and never authorized
+tool acquisition or execution. Its signature is retained as expired audit
+material and must not be reused.
+
+The fifth exact signature, bound to integrated source commit `85dcc018`,
+survived two atomically cleaned GitHub DNS failures before acquiring and
+verifying all pinned tools. Real run
+`t22-a0-20260722T161610.405993z-cbaa511ecf45` produced ten hash-chained events:
+the etcd cluster, linearizable consume, rejected replay, and Toxiproxy recovery
+all passed; OpenBao initialization also completed and `bao-2` started. The run
+then terminated with `E_BAO_UNSEAL`; terminal receipt SHA-256 is
+`7269d1accb691491042996a9022eaddd9d0475b4e98aee5acd3f71610dafe611`.
+OpenBao's manual Shamir Raft-join path returns from `unsealWithRaft` after
+launching a background wait for keyring replication, so immediate
+`sealed=true` is not sufficient evidence of unseal failure. The corrected
+runner validates exact Shamir type, boolean states, and the frozen 1-of-1
+threshold, permits the temporary sealed state only for joined/restarted nodes,
+and waits for exact unsealed health with process-liveness monitoring. The
+consumed fifth authorization must not be reused.
 
 After the exact owner signature verifies, the operator sequence is fixed: first
 run the owner-gated pinned-tool acquirer into the exact `tools` directory, then

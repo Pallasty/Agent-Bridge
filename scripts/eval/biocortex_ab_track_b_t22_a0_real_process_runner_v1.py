@@ -363,6 +363,26 @@ def exact_rejected_txn_range(
     return revision
 
 
+def exact_unseal_submission(response: dict, asynchronous_allowed: bool) -> dict:
+    """Verify acceptance of the single Shamir share without assuming sync join."""
+    require(response.get("type") == "shamir", "E_BAO_UNSEAL_TYPE")
+    require(type(response.get("initialized")) is bool, "E_BAO_UNSEAL_INITIALIZED_STATE")
+    require(type(response.get("sealed")) is bool, "E_BAO_UNSEAL_SEALED_STATE")
+    threshold = response.get("t")
+    shares = response.get("n")
+    require(type(threshold) is int and threshold == 1, "E_BAO_UNSEAL_THRESHOLD")
+    require(type(shares) is int and shares == 1, "E_BAO_UNSEAL_THRESHOLD")
+    if not asynchronous_allowed:
+        require(response["sealed"] is False, "E_BAO_UNSEAL")
+    return response
+
+
+def exact_unsealed_health(response: dict) -> dict | None:
+    if response.get("initialized") is True and response.get("sealed") is False:
+        return response
+    return None
+
+
 class EventLog:
     def __init__(self, path: Path):
         self.path = path
@@ -688,11 +708,10 @@ class Runner:
     def wait_bao_listener(self, node: dict, process: ManagedProcess) -> dict:
         return self.wait("E_BAO_LISTENER_NOT_READY", self.contract["timeouts_seconds"]["process_ready"], lambda: self.bao_health(node), process)
 
-    def unseal_bao(self, node: dict) -> dict:
+    def unseal_bao(self, node: dict, asynchronous_allowed: bool = False) -> dict:
         require(self.unseal_key is not None, "E_BAO_UNSEAL_KEY_ABSENT")
         result = self.http_json(self.bao_base(node), "/v1/sys/unseal", "POST", {"key": self.unseal_key})
-        require(result.get("sealed") is False, "E_BAO_UNSEAL")
-        return result
+        return exact_unseal_submission(result, asynchronous_allowed)
 
     def initialize_bao_cluster(self) -> tuple[list[dict], dict]:
         nodes = self.contract["topology"]["openbao"]
@@ -715,9 +734,13 @@ class Runner:
             require(health.get("initialized") is False, "E_BAO_JOINER_ALREADY_INITIALIZED")
             joined = self.http_json(self.bao_base(node), "/v1/sys/storage/raft/join", "POST", {"leader_api_addr": self.bao_base(nodes[0])})
             require(joined.get("joined") is True, "E_BAO_RAFT_JOIN")
-            self.unseal_bao(node)
-            ready = self.wait("E_BAO_JOINER_NOT_READY", self.contract["timeouts_seconds"]["cluster_recovery"], lambda node=node: self.bao_health(node))
-            require(ready.get("initialized") is True and ready.get("sealed") is False, "E_BAO_JOINER_HEALTH")
+            self.unseal_bao(node, asynchronous_allowed=True)
+            self.wait(
+                "E_BAO_JOINER_NOT_READY",
+                self.contract["timeouts_seconds"]["cluster_recovery"],
+                lambda node=node: exact_unsealed_health(self.bao_health(node)),
+                process,
+            )
         active = self.wait("E_BAO_ACTIVE_NOT_ELECTED", self.contract["timeouts_seconds"]["cluster_recovery"], lambda: self.find_bao_active(nodes))
         configuration = self.wait("E_BAO_RAFT_MEMBER_COUNT", self.contract["timeouts_seconds"]["cluster_recovery"], lambda: self.bao_raft_configuration(active))
         self.events.append("OPENBAO_THREE_PROCESS_RAFT_CLUSTER_READY", {
@@ -777,9 +800,13 @@ class Runner:
         killed_node = next(node for node in nodes if node["node"] == killed_label)
         restarted = self.start_bao_node(killed_node, state["configs"][killed_label])
         self.wait_bao_listener(killed_node, restarted)
-        self.unseal_bao(killed_node)
-        recovered = self.wait("E_BAO_RESTART_NOT_READY", self.contract["timeouts_seconds"]["cluster_recovery"], lambda: self.bao_health(killed_node))
-        require(recovered.get("initialized") is True and recovered.get("sealed") is False, "E_BAO_RESTART_HEALTH")
+        self.unseal_bao(killed_node, asynchronous_allowed=True)
+        self.wait(
+            "E_BAO_RESTART_NOT_READY",
+            self.contract["timeouts_seconds"]["cluster_recovery"],
+            lambda: exact_unsealed_health(self.bao_health(killed_node)),
+            restarted,
+        )
         configuration = self.wait("E_BAO_RESTART_MEMBER_COUNT", self.contract["timeouts_seconds"]["cluster_recovery"], lambda: self.bao_raft_configuration(replacement))
         self.events.append("OPENBAO_ACTIVE_PROCESS_KILL_FAILOVER_AND_RESTART_OBSERVED", {
             "killed_active_node": killed_label, "replacement_active_node": replacement["node"],
