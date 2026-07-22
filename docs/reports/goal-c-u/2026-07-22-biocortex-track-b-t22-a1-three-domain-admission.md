@@ -46,7 +46,11 @@ rollback prevention.
   evidence item; and
 - exact owner-signed per-domain collection-challenge schema, trust-anchor
   binding/generation/verification gate, and 42 synthetic negative cases. It
-  performs zero real identity reads and creates zero real attestations.
+  performs zero real identity reads and creates zero real attestations; and
+- a challenge-gated Linux/macOS physical-domain collector with atomic
+  single-use reservation, exact domain-key matching, identity-domain-separated
+  in-memory hashing, canonical packet signing/self-verification, private
+  terminal receipts, one synthetic success, and 10 synthetic failure paths.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -101,11 +105,11 @@ the now-frozen schemas, generate one source-bound execution-contract instance,
 and ask the owner to sign it. Public Rekor submission remains a separate
 explicit choice.
 
-The collector that reads real machine/hardware/boot identifiers remains
-intentionally absent. The now-implemented challenge gate proves the required
-precondition: a future collector must first consume a current, exact, owner-
-signed challenge naming one selected domain, and cloud collection stays closed
-until a provider-specific identity verifier exists.
+The physical collector is implemented but remains unreachable in the current
+state because no T22-A1 owner trust anchor or signed challenge exists. Its KAT
+injects synthetic identity bytes and proves invalid authority, key, host,
+output, and replay paths do not call the identity reader. Cloud collection
+stays closed until a provider-specific identity verifier exists.
 
 Full design and operational conditions are recorded in
 `docs/design/BIOCORTEX_TRACK_B_T22_A1_THREE_DOMAIN_ADMISSION_2026_07_22.md`.
