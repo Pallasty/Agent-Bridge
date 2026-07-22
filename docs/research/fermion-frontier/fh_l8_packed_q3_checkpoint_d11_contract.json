@@ -1,0 +1,532 @@
+{
+  "analysis_class": "PREREGISTERED_DEPTH0_TO_DEPTH3_REPLAY_AND_CHECKPOINT_ONLY",
+  "authority_ceiling": {
+    "byte_table_definition_validation_authorized": true,
+    "checkpointed_full_q3_to_q4_runner_execution_authorized": false,
+    "checkpointed_full_q3_to_q4_runner_protocol_design_eligible": true,
+    "depth0_to_depth3_replay_authorized": true,
+    "depth3_to_depth4_execution_authorized": false,
+    "fourth_krylov_hamiltonian_action_authorized": false,
+    "packed_q3_checkpoint_generation_authorized": true,
+    "upstream_bounded_4096_source_preflight_verified_under_envelope": true
+  },
+  "byte_table_qualification": {
+    "byte_values_per_chunk": 256,
+    "direct_reference": "D5B_generic_mode_action_support_target",
+    "entry_encoding": "unsigned_u128_big_endian_16_bytes",
+    "expected_definition_entries": 32768,
+    "group_elements": 8,
+    "phase_or_amplitude_authority": false,
+    "required_checks": [
+      "all_entries_equal_direct_reference",
+      "zero_entry_maps_to_zero",
+      "each_mode_image_is_one_hot",
+      "each_byte_value_is_disjoint_or_of_one_hot_images",
+      "mode_images_are_pairwise_disjoint",
+      "each_group_mode_permutation_is_bijective"
+    ],
+    "source_byte_chunks": 16
+  },
+  "checkpoint_encoding": {
+    "amplitude": "signed_i64_twos_complement_big_endian_8_bytes",
+    "d5b_insertion_rank": "unsigned_u32_big_endian_permutation_0_to_213098",
+    "field_offsets": {
+      "amplitude": 16,
+      "d5b_insertion_rank": 28,
+      "flags": 25,
+      "orbit_size": 24,
+      "representative": 0,
+      "reserved": 26
+    },
+    "file_header_bytes": 0,
+    "file_trailer_bytes": 0,
+    "flags": "unsigned_u8_must_be_zero",
+    "format": "headerless_fixed_width_records",
+    "format_id": "FH-L8-D11-PACKED-Q3-RECORD-V1",
+    "maximum_absolute_amplitude": 43614208,
+    "orbit_size": "unsigned_u8_allowed_1_4_8",
+    "record_bytes": 32,
+    "record_count": 213099,
+    "record_order": "strictly_ascending_unsigned_representative",
+    "representative": "unsigned_u128_big_endian_16_bytes",
+    "reserved": "unsigned_u16_big_endian_must_be_zero",
+    "total_bytes": 6819168,
+    "zero_amplitudes_allowed": false
+  },
+  "chronology": {
+    "bundle_path": "docs/research/fermion-frontier/fh_l8_packed_q3_checkpoint_d11_bundle",
+    "checkpoint_path": "docs/research/fermion-frontier/fh_l8_packed_q3_checkpoint_d11_bundle/checkpoint.bin",
+    "contract_path": "docs/research/fermion-frontier/fh_l8_packed_q3_checkpoint_d11_contract.json",
+    "evidence_baseline": {
+      "commit": "b620f02ff53ed84472d0f38c775bdeb584fdf736",
+      "parents": [
+        "14b884b2c6a808a8955a13f172051fbb692b8b57"
+      ],
+      "tree": "64dd609322f7c8741f7b6536ad9a78ed9af24e95"
+    },
+    "outputs_must_be_absent_before_official_replay": true,
+    "protocol_source_freeze": {
+      "commit": "49ac8a25faf80c85fab9acaa7390fda7b4c0d7f2",
+      "parents": [
+        "b620f02ff53ed84472d0f38c775bdeb584fdf736"
+      ],
+      "tree": "75f8034aec9c95d02b4647c5908aea17c1835115"
+    },
+    "result_path": "docs/research/fermion-frontier/fh_l8_packed_q3_checkpoint_d11_bundle/result.json",
+    "source_must_precede_contract": true,
+    "terminal_receipt_path": "docs/research/fermion-frontier/fh_l8_packed_q3_checkpoint_d11_terminal_receipt.json"
+  },
+  "contract_id": "FH-L8-D11-PACKED-D3-QUOTIENT-CHECKPOINT-MATERIALIZATION-V1",
+  "decision_rule": {
+    "all_checkpoint_gates_true": "VERIFIED_D11_PACKED_DEPTH3_QUOTIENT_CHECKPOINT_MATERIALIZED_NO_Q4_AUTHORITY",
+    "execution_authority_on_any_outcome": false,
+    "next_gate": "CHECKPOINTED_FULL_QUOTIENT_H_RUNNER_IMPLEMENTATION_AND_AUTHORIZATION",
+    "official_replay_scientific_mismatch": "NO_GO_D11_PACKED_Q3_CHECKPOINT_SEMANTICS",
+    "resource_timeout_oom_cap_or_missing_terminal_receipt": "INDETERMINATE_D11_PACKED_Q3_CHECKPOINT_RESOURCE_ENVELOPE",
+    "source_protocol_schema_encoding_or_committed_artifact_failure": "VERIFICATION_FAILED"
+  },
+  "forbidden_claims": [
+    "The checkpoint contains the pinned depth-3 quotient source only; no depth-3 to depth-4 action is authorized or executed.",
+    "The D11 record format is a separate self-verifying materialization format and does not claim byte compatibility with D8's unmaterialized layout.",
+    "The binary digest is over ascending fixed-width records and is distinct from the D5B insertion-order quotient digest.",
+    "The exhaustive byte-table test certifies support permutation entries, not fermionic phases or quotient amplitudes.",
+    "Observed checkpoint-generation time and memory do not certify q3-to-q4 runtime or memory feasibility.",
+    "No target vector, remainder, cumulative, R100, physical-reference, hardware, quantum-advantage, or READY claim is certified.",
+    "D10 already verified only a bounded 4,096-source preflight under 1 GiB and zero swap; the eligible successor is a separately frozen checkpointed full q3-to-q4 runner protocol, and this result grants no execution authority."
+  ],
+  "protocol_artifacts": [
+    {
+      "blob": "582e0f181692e80d1e608b27c3313b225b9adf4e",
+      "bytes": 109796,
+      "mode": "100644",
+      "path": "fh_l8_packed_q3_checkpoint_d11_checker.py",
+      "sha256": "d7b4f1853f99f80f1a1241d078049d254d414ec0a3f99906d7b0801fe764a74e"
+    },
+    {
+      "blob": "abb2c5e87092d51671a9923b97ebeeda6d11a3ea",
+      "bytes": 97061,
+      "mode": "100644",
+      "path": "fh_l8_packed_q3_checkpoint_d11_runner.py",
+      "sha256": "4a6a138ae56b9e308ef22ebad667982e5cbf488dfed76a7914f5ab4d03bef0ba"
+    }
+  ],
+  "resource_limits": {
+    "internal_deadline_seconds": 300,
+    "max_application_payload_writes_bytes": 16777216,
+    "max_cgroup_peak_bytes": 805306368,
+    "max_checkpoint_bytes": 6819168,
+    "max_checkpoint_records": 213099,
+    "max_created_directories": 1,
+    "max_created_regular_files": 4,
+    "max_initial_cgroup_peak_bytes": 134217728,
+    "max_io_chunk_bytes": 1048576,
+    "max_live_scratch_bytes": 16777216,
+    "max_materialized_full_states": 2000000,
+    "max_open_file_descriptors": 32,
+    "max_orbit_relation_group_images": 16000000,
+    "max_packing_sort_buffer_bytes": 33554432,
+    "max_process_peak_rss_bytes": 536870912,
+    "max_result_bytes": 131072,
+    "max_runner_stderr_capture_bytes": 32768,
+    "max_runner_stdout_capture_bytes": 32768,
+    "max_source_bytes_per_artifact": 1048576,
+    "max_terminal_receipt_bytes": 32768,
+    "minimum_output_free_bytes": 33554432,
+    "outer_deadline_seconds": 330,
+    "outer_memory_high_bytes": 805306368,
+    "outer_memory_max_bytes": 1073741824,
+    "outer_swap_max_bytes": 0
+  },
+  "schema_version": 1,
+  "source_evidence": {
+    "d5a_direct_support_reference": {
+      "artifacts": [
+        {
+          "blob": "0cbf87befd79ad4bc5d48f923c9effa5b13f96da",
+          "bytes": 8716,
+          "mode": "100644",
+          "path": "fh_l8_signed_d4_orbit_d5_checker.py",
+          "sha256": "1edf1275a4fa2e3407c5903876bf6000e0dabe0113a5e403c67ad4f7e0ff7bf7"
+        },
+        {
+          "blob": "33818f489ae04ec7ac381929349b43ee1955f103",
+          "bytes": 2000,
+          "mode": "100644",
+          "path": "fh_l8_signed_d4_orbit_d5_contract.json",
+          "sha256": "0b3e1b53086e3c66af7d42aa3276c3624c14267dc89a77b84a1071cf05770441"
+        },
+        {
+          "blob": "a89c0bcd279f42fc570ad0057f2799f4c8b27991",
+          "bytes": 2048,
+          "mode": "100644",
+          "path": "fh_l8_signed_d4_orbit_d5_result.json",
+          "sha256": "79d5251a0f433b8d79f5f7a5ed9916aea13146c0ff6f869f841ff53699eaa47b"
+        }
+      ],
+      "outcome": {
+        "commit": "72fe3b79a79501d5d523dc959a6a98b36a470bd4",
+        "parents": [
+          "ae3935774d80f37b10f8317d0e17d339f03436cc"
+        ],
+        "tree": "fa4ce50442da0e4c8e617d7d3497fea4cf34c49b"
+      },
+      "route_alias": "FH-L8-D5A-EVIDENCE-DIRECT-SIGNED-D4-SUPPORT-V1",
+      "scope": "direct_mode_permutation_reference_only"
+    },
+    "d5b_full_quotient_lane": {
+      "artifacts": [
+        {
+          "blob": "129b8f7c12b19deaee518c5dfdbcf9047a91c418",
+          "bytes": 48414,
+          "mode": "100644",
+          "path": "fh_l8_symmetry_orbit_quotient_d5_checker.py",
+          "sha256": "681bc63fedce8b71cfb536c66d321467bc8f01cb5947bee59b4291e2ac51a022"
+        },
+        {
+          "blob": "0969f7214db04f771a6533f7bb8ca702f71849fe",
+          "bytes": 4999,
+          "mode": "100644",
+          "path": "fh_l8_symmetry_orbit_quotient_d5_contract.json",
+          "sha256": "1ebd1d38c0c40ca9617f86e09c86d528196260dd6b6b6692c34dacfe7a28d392"
+        },
+        {
+          "blob": "f8b461b0d22e04413f01c49d072941be6d91c43b",
+          "bytes": 9319,
+          "mode": "100644",
+          "path": "fh_l8_symmetry_orbit_quotient_d5_result.json",
+          "sha256": "a04a4d0be6265dcaf9d39c7937fc133d19c7a2050e1434c7cb24be88b795baed"
+        }
+      ],
+      "outcome": {
+        "commit": "2f9556a986c50a42ff3096ded45b75e39c5a61a9",
+        "parents": [
+          "6daf30daeeb375962b9986af5df91517d8a4a8ec"
+        ],
+        "tree": "c1164c1acffb570448038b461cc619ca5164d2f9"
+      },
+      "route_alias": "FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1",
+      "scope": "full_depth3_signed_quotient_semantics_and_source_amplitudes"
+    },
+    "d6_byte_table_support_lane": {
+      "artifacts": [
+        {
+          "blob": "4a3083ae2c511b79d7a560f9a842c67ea10b77fd",
+          "bytes": 6150,
+          "mode": "100644",
+          "path": "fh_l8_byte_table_orbit_d6_checker.py",
+          "sha256": "6877a5ed376a85a77000fe5d46dc39975294b3a266dda188c26a9aba92b647ad"
+        },
+        {
+          "blob": "fc5aa621be228a20d5c3a71db1139f4731dc181e",
+          "bytes": 1146,
+          "mode": "100644",
+          "path": "fh_l8_byte_table_orbit_d6_contract.json",
+          "sha256": "ce2b6f29b86965e392cbf26fe2d6d9aba2f795d4ccc51804101f893c72f65374"
+        },
+        {
+          "blob": "7ff34d654a9a34e4e2a8de86371d13e9ced2c942",
+          "bytes": 1079,
+          "mode": "100644",
+          "path": "fh_l8_byte_table_orbit_d6_result.json",
+          "sha256": "5645aba12743e71853e1f0ace734116fec96203f1a150097a66a8969de3d7418"
+        }
+      ],
+      "outcome": {
+        "commit": "e45b5b9f68520289d3396c0af071019856afe56e",
+        "parents": [
+          "64438c47be710835626dea0ceb2521b6634951dc"
+        ],
+        "tree": "80724d12483ec39e0926ca4bfa341c6483eb27f9"
+      },
+      "route_alias": "FH-L8-D6-EVIDENCE-BYTE-TABLE-SUPPORT-ORBIT-V1",
+      "scope": "byte_table_support_only_no_phase_or_amplitude"
+    },
+    "d7_design_gate": {
+      "artifacts": [
+        {
+          "blob": "7ce1e4325d698f90cbe4f9e06792dfdb76189b8a",
+          "bytes": 38614,
+          "mode": "100644",
+          "path": "fh_l8_depth3_to_depth4_quotient_h_design_gate_checker.py",
+          "sha256": "b43fcf1613fd2f3abd378c66261d2d01ca325446820bea735b5af4605dd379ae"
+        },
+        {
+          "blob": "1ccb6fe77a439ceb643aa3cd5fcb236cb0ec92aa",
+          "bytes": 15890,
+          "mode": "100644",
+          "path": "fh_l8_depth3_to_depth4_quotient_h_design_gate_contract.json",
+          "sha256": "9557b9523b5d5f29d76a3d02dc50b76553879961dae7d168dc90080529fc61ed"
+        },
+        {
+          "blob": "39f198c8434452d78be27ee3dec8af592e0ec3a3",
+          "bytes": 6295,
+          "mode": "100644",
+          "path": "FH_L8_DEPTH3_TO_DEPTH4_QUOTIENT_H_DESIGN_GATE_ZH.md",
+          "sha256": "350d970c8d4d903f8ae21c69699f12aec211461cd173db913876f02946832610"
+        }
+      ],
+      "contract_freeze_commit": "4544d4c0e02103c76e465abea43a08b91367a286",
+      "contract_id": "FH-L8-QUOTIENT-H-D3-TO-D4-DESIGN-GATE-V1",
+      "integration": {
+        "commit": "9e415753383335578d649d88803ce193b16398f5",
+        "parents": [
+          "72e1e56af49b91267738d0b0108640f358fde59a",
+          "6a9b97a0ee0c7d37878f3f267cfc07d002c86ada"
+        ],
+        "tree": "c92dcfab269a56894573921abf5517e5f4ea0844"
+      },
+      "status": "VERIFIED_D7_QUOTIENT_H_DESIGN_GATE_FROZEN_NO_EXECUTION_AUTHORITY"
+    },
+    "relationship": {
+      "D5A_supplies_direct_support_permutations_only": true,
+      "D5B_supplies_signed_CAR_quotient_coordinates_and_amplitudes": true,
+      "D6_or_D5A_supplies_phase_or_amplitude": false,
+      "D6_supplies_support_byte_tables_only": true,
+      "D7_authorizes_checkpoint_protocol_only": true,
+      "bare_legacy_contract_id_lookup_forbidden": true,
+      "evidence_is_additive": false
+    },
+    "upstream_progression": {
+      "d10_cgroup_envelope": {
+        "artifacts": [
+          {
+            "blob": "b8d1b4f58cc7e1f51a7d89a2a8e368bbe03740c1",
+            "bytes": 1018,
+            "mode": "100644",
+            "path": "test_fh_l8_cgroup_envelope_d10.py",
+            "sha256": "5c34a9524291165633d7695b668dc5c48293193a83b72852f16a072c301f6ea7"
+          },
+          {
+            "blob": "f668ff7b579cf99c281bc800adcfe00e9dbe14d6",
+            "bytes": 429,
+            "mode": "100644",
+            "path": "fh_l8_cgroup_envelope_d10_contract.json",
+            "sha256": "9fadd4e58ad65a0ddd9cb12ee09fd0e96dd0e09b270abb06a8858b20eb038ce3"
+          },
+          {
+            "blob": "835fb18bd87c3c867f5747e4c250d8542388496e",
+            "bytes": 630,
+            "mode": "100644",
+            "path": "fh_l8_cgroup_envelope_d10_receipt.json",
+            "sha256": "6f61a66b579969d8319f25e75bdc92e7cd55d013f274483a258e75155d6e9788"
+          }
+        ],
+        "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D10",
+        "integration": {
+          "commit": "782cdcd26196de3e59dd59fc1ac3fc52e73abbbd",
+          "parents": [
+            "dc600faca4b9a438fe9a3f154c87258f6269ee43",
+            "994e528025aeea3883a58eccb5053694181677b2"
+          ],
+          "tree": "58020e45817e481b3b69f5eab38f7512b84294fe"
+        },
+        "outcome": {
+          "commit": "994e528025aeea3883a58eccb5053694181677b2",
+          "parents": [
+            "827e50d5d67dfeae94672ae4ee96252d21908be2"
+          ],
+          "tree": "58020e45817e481b3b69f5eab38f7512b84294fe"
+        },
+        "receipt_status": "VERIFIED_D9_BOUNDED_QUOTIENT_H_PREFLIGHT_NO_FULL_ACTION"
+      },
+      "d8_protocol_only": {
+        "artifacts": [
+          {
+            "blob": "72436ddecb37ab0344223b0343e113d030cbb5cd",
+            "bytes": 4881,
+            "mode": "100644",
+            "path": "fh_l8_packed_depth3_checkpoint_d8_checker.py",
+            "sha256": "c8cbc65a325d47ef92b65498d8f8513565d295a375e503f196f288d5a2529467"
+          },
+          {
+            "blob": "3cab52cd4d5c2785a856a318d4fbca5de17b8e17",
+            "bytes": 1837,
+            "mode": "100644",
+            "path": "fh_l8_packed_depth3_checkpoint_d8_contract.json",
+            "sha256": "fc140ef5af58d2978d8b24e15d63a81b2c30d09ae35526f1513f05f8e17c8a80"
+          },
+          {
+            "blob": "a80d9dec0bdb1be4a2ebb7a837bb8aaa4ed74890",
+            "bytes": 869,
+            "mode": "100644",
+            "path": "fh_l8_packed_depth3_checkpoint_d8_result.json",
+            "sha256": "a987cd1a683d4e4eaf64be9f7d159645c33c1be11f334e998ba49688bcce40e3"
+          }
+        ],
+        "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D8",
+        "integration": {
+          "commit": "14e9a75dd9c455a4a5a87c80cc80c09dd6342341",
+          "parents": [
+            "9e415753383335578d649d88803ce193b16398f5",
+            "bae8f05598d1c94da1d0c66dd67e30cc32e4f3ff"
+          ],
+          "tree": "ac944d406bbe2173efcc23034b5454bee3e40bf3"
+        },
+        "outcome": {
+          "commit": "bae8f05598d1c94da1d0c66dd67e30cc32e4f3ff",
+          "parents": [
+            "9e415753383335578d649d88803ce193b16398f5"
+          ],
+          "tree": "ac944d406bbe2173efcc23034b5454bee3e40bf3"
+        },
+        "result_status": "VERIFIED_D8_PACKED_DEPTH3_QUOTIENT_CHECKPOINT_PROTOCOL_NO_MATERIALIZATION"
+      },
+      "d9_bounded_preflight": {
+        "artifacts": [
+          {
+            "blob": "3d812781070b58c4f3a745468daa2c1292ad5f1a",
+            "bytes": 4107,
+            "mode": "100644",
+            "path": "fh_l8_depth4_preflight_d9.py",
+            "sha256": "90b1590301ffcdc2f5c181a8e4a5ed14bddb032a2b8284f2fd410301e1974d3e"
+          },
+          {
+            "blob": "47cf6217484510caf76c099235039fc336ef18cd",
+            "bytes": 422,
+            "mode": "100644",
+            "path": "fh_l8_depth4_preflight_d9_contract.json",
+            "sha256": "070a9eb93bec73cd2ffb4f979b77d4afb544ab64e6c348fef1c4902c79b939e0"
+          },
+          {
+            "blob": "65a6fb7e56a6337cb88e66e83121a3e83d3db2c2",
+            "bytes": 654,
+            "mode": "100644",
+            "path": "fh_l8_depth4_preflight_d9_receipt.json",
+            "sha256": "b310b09fb68eec400910099aecfe82da63d45b8bb8dd0fd15c9f736fb132c0f4"
+          }
+        ],
+        "clean_branch_tip": {
+          "commit": "827e50d5d67dfeae94672ae4ee96252d21908be2",
+          "parents": [
+            "8693ab2b5c4d2153756c87304f5797976d723ff9"
+          ],
+          "tree": "ce4c5678e6d122ef2b79f0237effc60318ceeddd"
+        },
+        "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D9",
+        "initial_integration": {
+          "commit": "053155a6c53fb23612ed21b589aacc811dd6ecd8",
+          "parents": [
+            "14e9a75dd9c455a4a5a87c80cc80c09dd6342341",
+            "ef9c43ecd8dc6954d303dfdfc457d31d09d39fe8"
+          ],
+          "tree": "14973ecbd25824078e3502d21d532f07e32d34e3"
+        },
+        "integration": {
+          "commit": "dc600faca4b9a438fe9a3f154c87258f6269ee43",
+          "parents": [
+            "053155a6c53fb23612ed21b589aacc811dd6ecd8",
+            "827e50d5d67dfeae94672ae4ee96252d21908be2"
+          ],
+          "tree": "ce4c5678e6d122ef2b79f0237effc60318ceeddd"
+        },
+        "origin": {
+          "commit": "ef9c43ecd8dc6954d303dfdfc457d31d09d39fe8",
+          "parents": [
+            "14e9a75dd9c455a4a5a87c80cc80c09dd6342341"
+          ],
+          "tree": "14973ecbd25824078e3502d21d532f07e32d34e3"
+        },
+        "outcome": {
+          "commit": "8693ab2b5c4d2153756c87304f5797976d723ff9",
+          "parents": [
+            "ef9c43ecd8dc6954d303dfdfc457d31d09d39fe8"
+          ],
+          "tree": "40d47a8b43c972adadd0328f7c5c0634deac6cdd"
+        },
+        "receipt_status": "VERIFIED_D9_PREFLIGHT_CGROUP_ENVELOPE_FAILURE_NO_FULL_RUN_AUTHORIZATION"
+      },
+      "relationship": {
+        "D10_full_run_authorized": false,
+        "D10_memory_envelope_pass": true,
+        "D10_repeats_the_bounded_preflight_under_one_GiB_zero_swap": true,
+        "D11_adds_big_endian_amplitude_and_D5B_insertion_rank": true,
+        "D11_inherits_no_q3_to_q4_execution_authority": true,
+        "D11_materializes_q3_source_only": true,
+        "D8_checkpoint_materialized": false,
+        "D8_layout_reused_byte_for_byte": false,
+        "D9_bounded_preflight_executed": true,
+        "D9_bounded_source_representatives": 4096,
+        "D9_memory_envelope_pass": false
+      }
+    }
+  },
+  "status": "PROTOCOL_FROZEN_BEFORE_PACKED_Q3_REPLAY",
+  "verification_modes": {
+    "heavy_outcome": {
+      "fourth_action_executed": false,
+      "full_q3_rebuilt": true,
+      "hamiltonian_action_calls": 3,
+      "maximum_acted_source_depth": 2,
+      "outcome_commit_required": true
+    },
+    "independent_hamiltonian_implementation_claimed": false,
+    "official_execute": {
+      "full_q3_rebuilt": true,
+      "hamiltonian_action_calls": 3,
+      "launcher": "checker_systemd_scope_capture",
+      "runner_exit_code_required": 0,
+      "terminal_execution_receipt_required": true
+    },
+    "runner_and_checker_use_independent_control_flow_and_serialization": true,
+    "static_outcome": {
+      "full_q3_rebuilt": false,
+      "hamiltonian_action_calls": 0,
+      "outcome_commit_required": true
+    },
+    "static_protocol": {
+      "full_q3_rebuilt": false,
+      "hamiltonian_action_calls": 0,
+      "outcome_commit_required": false
+    }
+  },
+  "workload": {
+    "allowed_acted_source_depths": [
+      0,
+      1,
+      2
+    ],
+    "boundary": "square_open_boundary_no_wrap",
+    "depth3_to_depth4_action_authorized": false,
+    "expected_D5B_insertion_order_quotient_sha256": "7230d8bd0e726535cb5da01bc191313b25e38b83a6b809a7e6e39823a418757e",
+    "expected_D6_sorted_support_orbit_sha256": "7e4f0d2526b49c786b124a8b45dc82cc8892a7798e7c4c362cd4aa15db74ca26",
+    "expected_depth_records": [
+      {
+        "depth": 0,
+        "full_state_count": 1,
+        "full_vector_sha256": "4851eca743653e8f5e4b1aaa7796811bc24f1bca5e23432e5bc96bfd9882bec9"
+      },
+      {
+        "depth": 1,
+        "full_state_count": 225,
+        "full_vector_sha256": "9cbbe6d7e508bd37eef5ec54bfa5b580b80d0b3dc3998146c900d03220a847b3"
+      },
+      {
+        "depth": 2,
+        "full_state_count": 24421,
+        "full_vector_sha256": "c92f2de07caa1a289d7aa27cd0fa64e707e084cf96e06219161ea55ff3f3c88b"
+      },
+      {
+        "depth": 3,
+        "full_state_count": 1704285,
+        "full_vector_sha256": "6f8f53101b8a3ec0b3dfcee624a014426d93a8aa0dfc1300780b0ad99b765e97"
+      }
+    ],
+    "expected_full_state_count": 1704285,
+    "expected_full_vector_sha256": "6f8f53101b8a3ec0b3dfcee624a014426d93a8aa0dfc1300780b0ad99b765e97",
+    "expected_orbit_size_histogram": {
+      "1": 1,
+      "4": 125,
+      "8": 212973
+    },
+    "expected_representative_count": 213099,
+    "hamiltonian_action_call_budget": 3,
+    "linear_size": 8,
+    "materialized_depth": 3,
+    "particle_sector": "N_up=32,N_down=32",
+    "replayed_source_depths": [
+      0,
+      1,
+      2
+    ]
+  }
+}
