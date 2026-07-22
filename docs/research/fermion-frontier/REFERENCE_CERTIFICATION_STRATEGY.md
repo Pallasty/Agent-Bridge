@@ -1358,6 +1358,20 @@ result 前的 protocol freeze。full-quotient lane 则有 `6daf30da → 2f9556a9
 后续只可把 `FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1` 作为 D6 设计输入，并须按
 alias/path/commit/blob/bytes/SHA 全绑定。最高 authority 仍为 `D6_DESIGN_ELIGIBLE_ONLY`。
 
+### D5/D6 descendant scope 对账 R2（2026-07-22）
+
+后续 `e45b5b9f` 以 D5A 的三项 source hashes 为父证据，完成 byte-table signed-support
+canonicalization，并通过共享 D4 输入上的并行实现得到与 D5B 一致的完整 depth-3 count：
+`1,704,285→213,099`。该 D6 的 checker/contract/result 同次出现，未建立预注册；它只在
+4,096-state sample 上比较 byte-table 与基准 support action，也没有构造 quotient-H
+amplitudes。result 只固定 240 秒 cap 内完成，不保存精确 elapsed time；`14.856s` 不是认证值。
+
+R2 将其登记为 `FH-L8-D6-EVIDENCE-BYTE-TABLE-SUPPORT-ORBIT-V1`，并保留 D5B
+`FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1` 作为完整 quotient semantics 输入。两者互补
+而不相加。下一协议不得复用已占用的 legacy D5/D6 IDs，只允许用新 ID 设计 quotient-H /
+fourth-layer cost gate；D5B 的 source-depth 0--2 quotient transitions 已验证，但 depth-3→4
+quotient-H execution、第四次 H action 与所有 error/reference/READY authority 仍关闭。
+
 更一般的 bounded-error quantum simulation 已能把 learned Hamiltonian/Lindbladian 的
 实验不确定度传播到 observable interval，但目前示范对象是 long-range Ising，不是匹配
 的 Hubbard workload，见 [Kraft et al.](https://arxiv.org/abs/2511.23392)。这条路线可作为

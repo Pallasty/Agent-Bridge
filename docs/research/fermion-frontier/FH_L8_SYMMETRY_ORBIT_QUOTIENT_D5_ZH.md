@@ -14,7 +14,8 @@ L8 OBC、`N_up=N_down=32`、checkerboard Néel 初态、两个固定 observable 
 
 合并后发现另一条并行 D5 prefix/custody 证据使用了相同历史内部 `contract_id`。本成果的
 唯一外部 lane alias 为 `FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1`；禁止按裸 D5 ID
-选择证据，详见 `FH_L8_D5_DUAL_TRACK_RECONCILIATION_ZH.md`。
+选择证据，详见 `FH_L8_D5_DUAL_TRACK_RECONCILIATION_ZH.md`。后续 byte-table D6 的 scope
+与当前 authority 另见 `FH_L8_D5_D6_DESCENDANT_RECONCILIATION_ZH.md`。
 
 ## 语义与 Krylov 等价性
 

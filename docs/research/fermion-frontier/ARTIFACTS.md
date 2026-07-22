@@ -57,6 +57,10 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_d5_dual_track_reconciliation.json`: exact route aliases, topology and immutable artifact pins.
 - `fh_l8_d5_dual_track_reconciliation_checker.py`: fail-closed commit/tree/blob/hash and authority verifier.
 - `test_fh_l8_d5_dual_track_reconciliation.py`: collision, chronology, selection and mutation regressions.
+- `FH_L8_D5_D6_DESCENDANT_RECONCILIATION_ZH.md`: current D5/D6 lineage, support-orbit and quotient-H boundary.
+- `fh_l8_d5_d6_descendant_reconciliation.json`: D5 R1, D6 descendant and future-selection pins.
+- `fh_l8_d5_d6_descendant_reconciliation_checker.py`: fail-closed descendant scope and authority verifier.
+- `test_fh_l8_d5_d6_descendant_reconciliation.py`: topology, timing-custody, selection and uplift regressions.
 
 ## Claude source session
 
@@ -2076,4 +2080,5 @@ so they are versioned normally and are not added to the preservation-only
   `FH-L8-D5-EVIDENCE-SIGNED-D4-PREFIX-V1`.
 - `fh_l8_byte_table_orbit_d6_contract.json`, checker, result, tests, and
   `FH_L8_BYTE_TABLE_ORBIT_D6_ZH.md` certify full depth-3 signed-D4 support
-  orbit enumeration by byte-table canonicalization.
+  orbit enumeration by byte-table canonicalization. Reconciliation alias:
+  `FH-L8-D6-EVIDENCE-BYTE-TABLE-SUPPORT-ORBIT-V1`.

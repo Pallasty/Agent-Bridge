@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "reconciliation_id": "FH-L8-D5-D6-DESCENDANT-R2",
+  "status": "VERIFIED_D5_D6_DESCENDANT_SCOPE_RECONCILIATION",
+  "checker_self_sha256": "4133a98f19f55db95b213fc6df8f4f0127b090152d1c1acd51e98794508a4fed",
+  "repository_integration": {
+    "commit": "7a1d02e8e910f1b25547c68b795cf7f4e404a0f0",
+    "tree": "7e6782a2c3324bdf2be64d45235ecc1485be236d",
+    "parents": [
+      "85dcc018fd18c6af5bd58fb930bd2e261ddf0c9e",
+      "17ff4b2677254f1895075d9fcdc69ef400ad601c"
+    ]
+  },
+  "r1_snapshot": {
+    "reconciliation_id": "FH-L8-D5-DUAL-TRACK-R1",
+    "commit_record": {
+      "commit": "cbd5668e42c6a73237a31a07112466dfc8a80739",
+      "tree": "1105e3dc5384e31bc27239966797e13da25c5820",
+      "parents": [
+        "7a1d02e8e910f1b25547c68b795cf7f4e404a0f0"
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "fh_l8_d5_dual_track_reconciliation_checker.py",
+        "mode": "100644",
+        "blob": "77d0181c2ea4676615aea4a5acbad49516827505",
+        "bytes": 16692,
+        "sha256": "278db29e623f763e02e862bbc7f14452341672b42aeb8a3e87ad52c8b42fcd3e"
+      },
+      {
+        "path": "fh_l8_d5_dual_track_reconciliation.json",
+        "mode": "100644",
+        "blob": "c4a2b17f8bdc847961f9791215f2cc269acc8b9b",
+        "bytes": 6232,
+        "sha256": "8274a8771f9c744e7392c1af28f7b997febc3b76bbf91813672f005c64004ce9"
+      },
+      {
+        "path": "FH_L8_D5_DUAL_TRACK_RECONCILIATION_ZH.md",
+        "mode": "100644",
+        "blob": "68f58e5fa26608ce7b61f9d75760b82e0a4f6a2c",
+        "bytes": 2867,
+        "sha256": "11f2f2c14576b0a12463ff9f261de4f667ff3b55d06787f0fa7db182d8c2b9a7"
+      }
+    ]
+  },
+  "known_descendant": {
+    "route_alias": "FH-L8-D6-EVIDENCE-BYTE-TABLE-SUPPORT-ORBIT-V1",
+    "original_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D6",
+    "historical_parent_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D5",
+    "resolved_parent_evidence_lane_alias": "FH-L8-D5-EVIDENCE-SIGNED-D4-PREFIX-V1",
+    "scope": "full_depth3_signed_support_orbit_enumeration_only",
+    "preregistration_evidence": false,
+    "outcome": {
+      "commit": "e45b5b9f68520289d3396c0af071019856afe56e",
+      "tree": "80724d12483ec39e0926ca4bfa341c6483eb27f9",
+      "parents": [
+        "64438c47be710835626dea0ceb2521b6634951dc"
+      ]
+    },
+    "integration": {
+      "commit": "77475550b96dee1a862e9f11046de8b097d9d063",
+      "tree": "559aac3cf352da8152531242374b13688fd83648",
+      "parents": [
+        "ec5777e284585377896e7e50503a54dcd95a9b82",
+        "e45b5b9f68520289d3396c0af071019856afe56e"
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "fh_l8_byte_table_orbit_d6_checker.py",
+        "mode": "100644",
+        "blob": "4a3083ae2c511b79d7a560f9a842c67ea10b77fd",
+        "bytes": 6150,
+        "sha256": "6877a5ed376a85a77000fe5d46dc39975294b3a266dda188c26a9aba92b647ad"
+      },
+      {
+        "path": "fh_l8_byte_table_orbit_d6_contract.json",
+        "mode": "100644",
+        "blob": "fc5aa621be228a20d5c3a71db1139f4731dc181e",
+        "bytes": 1146,
+        "sha256": "ce2b6f29b86965e392cbf26fe2d6d9aba2f795d4ccc51804101f893c72f65374"
+      },
+      {
+        "path": "fh_l8_byte_table_orbit_d6_result.json",
+        "mode": "100644",
+        "blob": "7ff34d654a9a34e4e2a8de86371d13e9ced2c942",
+        "bytes": 1079,
+        "sha256": "5645aba12743e71853e1f0ace734116fec96203f1a150097a66a8969de3d7418"
+      }
+    ],
+    "result_status": "VERIFIED_D6_BYTE_TABLE_SIGNED_D4_DEPTH3_ORBITS",
+    "performance_record": {
+      "maximum_seconds": 240,
+      "within_cap": true,
+      "exact_elapsed_seconds_retained_in_result": false
+    },
+    "selected_as_complementary_support_orbit_input": true
+  },
+  "selection": {
+    "required_full_quotient_semantics_route_alias": "FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1",
+    "complementary_support_orbit_route_alias": "FH-L8-D6-EVIDENCE-BYTE-TABLE-SUPPORT-ORBIT-V1",
+    "future_contract_id_policy": "new_globally_unique_route_specific_id_required",
+    "occupied_legacy_contract_ids": [
+      "FH-L8-INDEPENDENT-REFERENCE-D5",
+      "FH-L8-INDEPENDENT-REFERENCE-D6"
+    ],
+    "authority_ceiling": "FUTURE_QUOTIENT_HAMILTONIAN_DESIGN_ONLY",
+    "evidence_is_additive": false,
+    "relation": "D6_parallel_shared_D4_support_orbit_count_matches_D5B_without_quotient_H_execution"
+  },
+  "authority": {
+    "byte_table_support_orbit_canonicalization_executed": true,
+    "full_depth3_support_orbit_count_verified": true,
+    "depth0_to_depth3_quotient_transitions_executed_and_verified": true,
+    "future_quotient_hamiltonian_design_eligible": true,
+    "depth3_to_depth4_quotient_hamiltonian_action_executed": false,
+    "depth3_to_depth4_execution_authorized": false,
+    "fourth_hamiltonian_action_executed": false,
+    "degree6_remainder_bounded": false,
+    "two_step_cumulative_error_bounded": false,
+    "full_R100_error_bounded": false,
+    "physical_reference_qualified": false,
+    "ready_gate_eligible": false
+  },
+  "limitations": [
+    "The D5A-derived D6 checker, contract, and result first appear together; preregistration is unestablished.",
+    "The exact 14.856-second console observation is not retained in the D6 result and is not certified.",
+    "The byte-table result certifies support-orbit canonicalization, not quotient Hamiltonian amplitudes or a fourth H action.",
+    "The full D5B and D6 support-orbit records agree on counts but are complementary, not additive evidence.",
+    "No remainder, cumulative, R100, physical-reference, hardware, quantum-advantage, or READY claim is certified."
+  ]
+}

@@ -1,5 +1,17 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 D5/D6 descendant scope reconciliation R2
+
+- Bound the historical byte-table D6 outcome to the signed-prefix D5A lane by exact source hashes;
+  its checker/contract/result first appeared together, so preregistration remains unestablished.
+- D6's parallel implementation on the shared D4 inputs matches the full D5B depth-3 count
+  `1,704,285→213,099`, but certifies only support-orbit canonicalization; quotient amplitudes and
+  the fourth H action were not executed.
+- The result retains only completion within the 240-second cap. The previously reported `14.856s`
+  is an unretained console observation and not a certified performance number.
+- Future quotient-H work requires a new globally unique contract ID plus separate D5B semantic and
+  D6 canonicalization pins. Current authority is design-only.
+
 ## 2026-07-22 — FH-L8 D5 dual-track identity reconciliation
 
 - Preserved two immutable D5 children of the same D4-containing base while recording that both use
@@ -2247,5 +2259,6 @@ granted.
 
 FH-L8 D6 closes the D5 depth-3 orbit-prefix boundary with a byte-table signed
 D4 support canonicalizer: all `1704285` states yield `213099` orbits in
-14.856 seconds. This makes complete depth-3 orbit enumeration feasible, but
-does not yet construct a quotient Hamiltonian or certify fourth-layer cost.
+the frozen 240-second cap. The `14.856` console timing is not retained in the
+result and is non-certifying. Complete depth-3 orbit enumeration is feasible,
+but no quotient Hamiltonian or fourth-layer cost is certified.

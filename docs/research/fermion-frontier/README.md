@@ -27,6 +27,12 @@ legacy embedded `FH-L8-INDEPENDENT-REFERENCE-D5` ID, so that bare ID is forbidde
 authorization. The full lane authorizes only a separately frozen D6 design; see
 `FH_L8_SYMMETRY_ORBIT_QUOTIENT_D5_ZH.md` and `FH_L8_D5_DUAL_TRACK_RECONCILIATION_ZH.md`.
 
+The later byte-table lane `FH-L8-D6-EVIDENCE-BYTE-TABLE-SUPPORT-ORBIT-V1` obtains the same 213,099
+depth-3 support orbits through a parallel implementation on the shared D4 inputs, but does not
+execute quotient H. Current selection and authority are in
+`FH_L8_D5_D6_DESCENDANT_RECONCILIATION_ZH.md`; the next quotient-H protocol must use a new globally
+unique ID and remains design-only.
+
 Status date: 2026-07-14
 
 Scope: physical fermions, not the historical Fermion Memory service.
