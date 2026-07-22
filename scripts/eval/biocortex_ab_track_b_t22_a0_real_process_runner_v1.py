@@ -40,6 +40,20 @@ class SafeFailure(RuntimeError):
     """A stable, non-secret failure code suitable for a receipt."""
 
 
+def classify_loopback_http_error(error: BaseException) -> str:
+    """Return a non-secret transport class without inspecting response bodies."""
+    if isinstance(error, urllib.error.HTTPError):
+        status = error.code
+        if type(status) is int and 100 <= status <= 599:
+            return f"E_LOOPBACK_HTTP_STATUS_{status}"
+        return "E_LOOPBACK_HTTP_STATUS"
+    if isinstance(error, TimeoutError):
+        return "E_LOOPBACK_HTTP_TIMEOUT"
+    if isinstance(error, urllib.error.URLError) and isinstance(error.reason, TimeoutError):
+        return "E_LOOPBACK_HTTP_TIMEOUT"
+    return "E_LOOPBACK_HTTP_TRANSPORT"
+
+
 def require(condition: bool, code: str) -> None:
     if not condition:
         raise SafeFailure(code)
@@ -354,6 +368,7 @@ class EventLog:
         self.path = path
         self.sequence = 0
         self.previous = "0" * 64
+        self.event_types: set[str] = set()
 
     def append(self, event_type: str, details: dict) -> dict:
         body = {
@@ -372,6 +387,7 @@ class EventLog:
             os.fsync(handle.fileno())
         self.sequence += 1
         self.previous = body["event_sha256"]
+        self.event_types.add(event_type)
         return body
 
 
@@ -400,6 +416,7 @@ class Runner:
         self.events = EventLog(run_root / "events.jsonl")
         self.processes: list[ManagedProcess] = []
         self.process_generations: dict[str, int] = {}
+        self.maximum_concurrent_process_count = 0
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.started_monotonic = time.monotonic()
         self.deadline_monotonic = self.started_monotonic + min(
@@ -449,6 +466,8 @@ class Runner:
             )
         managed = ManagedProcess(label, generation, process, stdout_path, stderr_path)
         self.processes.append(managed)
+        live_count = sum(item.process.poll() is None for item in self.processes)
+        self.maximum_concurrent_process_count = max(self.maximum_concurrent_process_count, live_count)
         self.events.append("OWNED_PROCESS_STARTED", {"label": label, "generation": generation, "pid": process.pid})
         return managed
 
@@ -511,7 +530,10 @@ class Runner:
                 validate_loopback_url(response.geturl(), self.contract)
                 content = response.read(MAXIMUM_HTTP_RESPONSE_BYTES + 1)
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as error:
-            raise SafeFailure("E_LOOPBACK_HTTP_TRANSPORT") from error
+            if isinstance(error, urllib.error.HTTPError):
+                validate_loopback_url(error.geturl(), self.contract)
+                error.close()
+            raise SafeFailure(classify_loopback_http_error(error)) from error
         require(len(content) <= MAXIMUM_HTTP_RESPONSE_BYTES, "E_HTTP_RESPONSE_TOO_LARGE")
         return content
 
@@ -618,7 +640,7 @@ class Runner:
         try:
             self.http_json(proxied, "/v3/kv/range", "POST", etcd_range_request(etcd_state["key"]), timeout=2)
         except SafeFailure as error:
-            transport_failed = str(error) == "E_LOOPBACK_HTTP_TRANSPORT"
+            transport_failed = str(error) in {"E_LOOPBACK_HTTP_TRANSPORT", "E_LOOPBACK_HTTP_TIMEOUT"}
         require(transport_failed, "E_TOXIPROXY_DISCONNECT_NOT_OBSERVED")
         enabled = self.http_json(api, "/proxies/t22-etcd-client", "POST", {**proxy, "enabled": True})
         require(enabled.get("enabled") is True, "E_TOXIPROXY_REENABLE")
@@ -641,11 +663,11 @@ class Runner:
         data_path.mkdir(mode=0o700)
         text = (
             'ui = false\n'
-            'disable_mlock = true\n'
             'log_level = "warn"\n'
             f'api_addr = "http://127.0.0.1:{node["api_port"]}"\n'
             f'cluster_addr = "https://127.0.0.1:{node["cluster_port"]}"\n'
-            f'storage "raft" {{\n  path = "{data_path}"\n  node_id = "{node["node"]}"\n}}\n'
+            f'storage "raft" {{\n  path = "{data_path}"\n  node_id = "{node["node"]}"\n'
+            '  performance_multiplier = 1\n}\n'
             f'listener "tcp" {{\n  address = "127.0.0.1:{node["api_port"]}"\n'
             f'  cluster_address = "127.0.0.1:{node["cluster_port"]}"\n  tls_disable = 1\n}}\n'
         )
@@ -921,11 +943,11 @@ def execute(payload_path: Path, signature_path: Path) -> dict:
         "event_chain_head_sha256": evidence_validation["event_chain_head_sha256"] if evidence_validation else runner.events.previous,
         "evidence_validation": evidence_validation,
         "process_instance_count": len(runner.processes),
-        "maximum_concurrent_process_count": 7 if success is not None else None,
-        "etcd_linearizable_authorize_consume_observed": success is not None,
-        "etcd_loopback_proxy_disconnect_recovered": success is not None,
-        "openbao_active_process_failover_recovered": success is not None,
-        "openbao_post_failover_signature_verified": success is not None,
+        "maximum_concurrent_process_count": runner.maximum_concurrent_process_count,
+        "etcd_linearizable_authorize_consume_observed": "ETCD_LINEARIZABLE_AUTHORIZE_CONSUME_OBSERVED" in runner.events.event_types,
+        "etcd_loopback_proxy_disconnect_recovered": "ETCD_LOOPBACK_PROXY_DISCONNECT_AND_RECOVERED" in runner.events.event_types,
+        "openbao_active_process_failover_recovered": "OPENBAO_ACTIVE_PROCESS_KILL_FAILOVER_AND_RESTART_OBSERVED" in runner.events.event_types,
+        "openbao_post_failover_signature_verified": "OPENBAO_ACTIVE_PROCESS_KILL_FAILOVER_AND_RESTART_OBSERVED" in runner.events.event_types,
         "faults": success,
         "secret_leak_scan": secret_scan,
         "owned_process_logs": runner.log_evidence(),

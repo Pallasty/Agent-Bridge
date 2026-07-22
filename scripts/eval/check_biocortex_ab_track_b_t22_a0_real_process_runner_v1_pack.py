@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import io
 import importlib.util
 import json
 import sys
@@ -139,6 +140,17 @@ for unsafe in (
         continue
     raise AssertionError("replay transaction without exact failure-range proof admitted")
 
+assert module.classify_loopback_http_error(TimeoutError()) == "E_LOOPBACK_HTTP_TIMEOUT"
+assert module.classify_loopback_http_error(
+    module.urllib.error.URLError(TimeoutError())
+) == "E_LOOPBACK_HTTP_TIMEOUT"
+status_error = module.urllib.error.HTTPError(
+    "http://127.0.0.1:28201/v1/sys/init", 500, "synthetic", {}, io.BytesIO(b"not inspected")
+)
+assert module.classify_loopback_http_error(status_error) == "E_LOOPBACK_HTTP_STATUS_500"
+status_error.close()
+assert module.classify_loopback_http_error(ConnectionError()) == "E_LOOPBACK_HTTP_TRANSPORT"
+
 try:
     module.validate_loopback_url("https://example.com:443/x", contract)
 except module.SafeFailure:
@@ -160,6 +172,7 @@ with tempfile.TemporaryDirectory() as directory:
     second = events.append("SYNTHETIC_SECOND", {"value": 2})
     assert first["sequence"] == 0 and first["previous_event_sha256"] == "0" * 64
     assert second["sequence"] == 1 and second["previous_event_sha256"] == first["event_sha256"]
+    assert events.event_types == {"SYNTHETIC_FIRST", "SYNTHETIC_SECOND"}
     for event in (first, second):
         claimed = event["event_sha256"]
         unsigned = dict(event); unsigned.pop("event_sha256")
@@ -193,6 +206,15 @@ with tempfile.TemporaryDirectory() as directory:
     else:
         raise AssertionError("exact ephemeral bootstrap-material leak admitted")
 
+    synthetic_runner.config = root
+    synthetic_runner.data = root / "data"
+    synthetic_runner.data.mkdir()
+    synthetic_node = {"node": "bao-synthetic", "api_port": 28201, "cluster_port": 28301}
+    config_path = module.Runner.write_bao_config(synthetic_runner, synthetic_node)
+    config_text = config_path.read_text()
+    assert "performance_multiplier = 1" in config_text
+    assert "disable_mlock" not in config_text
+
 authorization = module.load_acquisition_module().load_authorization_module()
 assert authorization.ANCHOR_PATH.is_file()
 authorization.validate_anchor(
@@ -200,7 +222,7 @@ authorization.validate_anchor(
     json.loads(authorization.PROPOSAL_PATH.read_text()),
 )
 print("t22_a0_real_process_runner_check\tpass")
-print(f"directed_negative_test_count\t{len(mutations) + 12}")
+print(f"directed_negative_test_count\t{len(mutations) + 18}")
 print("network_attempted\tfalse")
 print("processes_started\t0")
 print("faults_injected\t0")

@@ -2,19 +2,21 @@
 
 ## Outcome
 
-T22-A0 crossed the real-process boundary once and failed closed before fault
-injection. Hash-pinned etcd 3.7.0, OpenBao 2.6.0, and Toxiproxy 2.12.0 were
-acquired; three etcd processes formed one local cluster; then the runner's
-strict `succeeded is False` check rejected the replay response. Official API
-semantics and protobuf-JSON default-field behavior make an omitted false scalar
-the leading diagnosis, but the original runner did not persist the raw
-response. The authorization was irreversibly consumed, all three
-owned processes stopped without SIGKILL, all 14 loopback ports were released,
-and no OpenBao process, Toxiproxy process, fault, credential, host-global
-network mutation, spend, or production claim occurred. A source-bound rerun
-requires a fresh owner signature after the response verifier correction lands.
+T22-A0 crossed the real-process boundary twice and remains fail closed.
+The third run proved the three-process etcd cluster, linearizable authorize /
+consume and rejected replay, plus Toxiproxy disconnect and recovery. It then
+timed out while the first OpenBao node initialized: the five-second HTTP
+deadline coincided with OpenBao's default Raft election timing. The third
+authorization was irreversibly consumed, all five owned processes stopped
+without cleanup SIGKILL, all 14 loopback ports were released, and no persisted
+bootstrap secret, host-global network mutation, spend, or production claim
+occurred. The source correction pins OpenBao Raft's documented
+`performance_multiplier = 1`, preserves the five-second contract deadline and
+the no-retry initialization rule, and records HTTP timeout, HTTP status, and
+transport failures separately. A source-bound rerun requires a fresh owner
+signature after this correction lands.
 
-## Proposed first real execution
+## Authorized isolated-lab execution boundary
 
 The first authorization is deliberately smaller than production: three local
 etcd processes, three local OpenBao Raft processes, and one loopback Toxiproxy
@@ -62,8 +64,9 @@ binds that proposal, host `tb14`, owner role, canonical public key SHA-256
 and fingerprint
 `SHA256:cKXQiuD9OQ0KD5zykCE0+lcRSXnrURROhzSm7NqH8Jw`.
 
-The remaining owner action is to sign the exact timestamped payload with
-`ssh-keygen -Y sign` under namespace `agent-bridge-t22-a0-owner-v1`.
+After the corrected source lands, the remaining owner action is to sign its
+fresh exact timestamped payload with `ssh-keygen -Y sign` under namespace
+`agent-bridge-t22-a0-owner-v1`.
 
 The signed payload will be valid for at most four hours. The signature grants
 only T22-A0 implementation and execution on the named host. A later T22-A1
@@ -108,7 +111,7 @@ network boundary. Its present result is
 is constructed and no release artifact is downloaded before authorization.
 
 `scripts/check-biocortex-ab-track-b-t22-a0-real-process-runner-v1-pack.sh`
-adds 32 directed negative cases over the signed execution-contract binding,
+adds 38 directed negative cases over the signed execution-contract binding,
 one-shot authorization use, exact loopback ports, clean environment, etcd CAS
 shape, canonical/hash-chained evidence, process-start boundary, and exact
 ephemeral-bootstrap-value leak rejection. Its current result is
@@ -125,9 +128,10 @@ It binds the loopback ports, one-shot consumption, etcd proxy-disconnect
 scenario, OpenBao active-process failover scenario, memory-only bootstrap
 material, timeouts, evidence outputs, and non-production claims.
 
-The proposal confirmation and dedicated public-key binding are complete. The
-trust-anchor commit must land on both remotes before the exact four-hour payload
-is generated. The owner's private key never enters this repository or the lab
+The proposal confirmation and dedicated public-key binding are complete, and
+the trust-anchor commit has landed on both remotes. Every subsequent exact
+four-hour payload is generated only after its source commit lands on both
+remotes. The owner's private key never enters this repository or the lab
 artifact root.
 
 The first exact signature, bound to source commit `ae393577`, verified
@@ -155,6 +159,26 @@ exactly one failure RangeResponse that reads back the same consumed key/value
 at a non-regressing revision. The consumed second authorization must not be
 reused; another source-bound payload and owner signature are required.
 
+The third exact signature, bound to source commit `06787029`, acquired the
+pinned tools and entered real run
+`t22-a0-20260722T093420.701505z-c2dcbab608c5`. Its nine-event hash chain proves
+the three-member etcd cluster, exact consumed-state readback, rejected replay,
+and Toxiproxy disconnect/recovery before `bao-1` started. OpenBao began its
+single-node election about 5.25 seconds after listener start, just beyond the
+contract's five-second individual HTTP deadline, and the runner terminated
+with `E_LOOPBACK_HTTP_TRANSPORT`; the terminal receipt SHA-256 is
+`47d9c785e63743fa48b194388ae0aefac4158c768775300a9135267930a3017f`.
+The receipt's conservative stage booleans are false because that source only
+populated them after complete success; the canonical events are the direct
+evidence of the completed etcd stages. The corrected source derives those
+booleans and peak concurrency from observed events even on a later failure,
+classifies HTTP failures without recording bodies, removes OpenBao 2.6.0's
+unsupported `disable_mlock` field, and configures the documented highest-
+performance Raft timing. It deliberately does not retry `/sys/init`: a timed-
+out initialization may already have generated the memory-only root token and
+unseal share, so retrying would be unsafe. The consumed third authorization
+must not be reused.
+
 After the exact owner signature verifies, the operator sequence is fixed: first
 run the owner-gated pinned-tool acquirer into the exact `tools` directory, then
 invoke the real-process runner with the same payload and signature. The runner
@@ -168,6 +192,7 @@ reusing authority.
 The executor is pinned to the upstream semantics documented for [etcd v3.7
 configuration](https://etcd.io/docs/v3.7/op-guide/configuration/) and its
 [default-linearizable Range API](https://etcd.io/docs/v3.7/learning/api/);
+[OpenBao integrated Raft configuration](https://openbao.org/docs/configuration/storage/raft/),
 [OpenBao integrated Raft join](https://openbao.org/api-docs/system/storage/raft/),
 [unseal](https://openbao.org/api-docs/system/unseal/),
 [health](https://openbao.org/api-docs/system/health/), and
