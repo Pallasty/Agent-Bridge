@@ -1,0 +1,80 @@
+{
+  "schema": "agent_bridge.biocortex.track_b.t22_a0.public_tool_pins.v1",
+  "purpose": "OWNER_AUTHORIZED_SINGLE_HOST_REAL_PROCESS_PILOT_ONLY",
+  "platform": {
+    "os": "linux",
+    "architecture": "amd64"
+  },
+  "network_policy": {
+    "default": "DENY",
+    "authorization_required": "VERIFIED_UNEXPIRED_T22_A0_OWNER_SSHSIG",
+    "allowed_release_host": "github.com",
+    "allowed_redirect_host": "release-assets.githubusercontent.com"
+  },
+  "tools": [
+    {
+      "name": "etcd",
+      "version": "3.7.0",
+      "release_url": "https://github.com/etcd-io/etcd/releases/tag/v3.7.0",
+      "checksum_url": "https://github.com/etcd-io/etcd/releases/download/v3.7.0/SHA256SUMS",
+      "checksum_sha256": "a8ad094ccb09e18a15c3d46d89df8c78142a2c2a9465c952e53b851c5e9f9213",
+      "artifact_name": "etcd-v3.7.0-linux-amd64.tar.gz",
+      "artifact_url": "https://github.com/etcd-io/etcd/releases/download/v3.7.0/etcd-v3.7.0-linux-amd64.tar.gz",
+      "artifact_sha256": "b05cb07f5686dab8f9cdab89986b44f0dd24aaf5c627176aff325e21fa56f9f0",
+      "archive_format": "tar.gz",
+      "maximum_download_bytes": 67108864,
+      "installed_binaries": [
+        {
+          "archive_member": "etcd-v3.7.0-linux-amd64/etcd",
+          "output_name": "etcd"
+        },
+        {
+          "archive_member": "etcd-v3.7.0-linux-amd64/etcdctl",
+          "output_name": "etcdctl"
+        }
+      ]
+    },
+    {
+      "name": "openbao",
+      "version": "2.6.0",
+      "release_url": "https://github.com/openbao/openbao/releases/tag/v2.6.0",
+      "checksum_url": "https://github.com/openbao/openbao/releases/download/v2.6.0/checksums.txt",
+      "checksum_sha256": "6fb382277c6b22fb356af0729f68e8ff28a7d36294c883ff266a62ff37c5bf03",
+      "artifact_name": "openbao_2.6.0_linux_amd64.tar.gz",
+      "artifact_url": "https://github.com/openbao/openbao/releases/download/v2.6.0/openbao_2.6.0_linux_amd64.tar.gz",
+      "artifact_sha256": "42d83073f2d7a28ed408840138b0312111a8d4b2f5617086f009150336dad6d4",
+      "archive_format": "tar.gz",
+      "maximum_download_bytes": 67108864,
+      "installed_binaries": [
+        {
+          "archive_member": "bao",
+          "output_name": "bao"
+        }
+      ]
+    },
+    {
+      "name": "toxiproxy",
+      "version": "2.12.0",
+      "release_url": "https://github.com/Shopify/toxiproxy/releases/tag/v2.12.0",
+      "checksum_url": "https://github.com/Shopify/toxiproxy/releases/download/v2.12.0/checksums.txt",
+      "checksum_sha256": "2377dfe58088e03d24e2848e2ff6cf837c21cced720b1898981e652935396b25",
+      "artifact_name": "toxiproxy-server-linux-amd64",
+      "artifact_url": "https://github.com/Shopify/toxiproxy/releases/download/v2.12.0/toxiproxy-server-linux-amd64",
+      "artifact_sha256": "556d891134a3c582dc1e1a3f7335fd55142e5965769855a00b944e13e48302fc",
+      "archive_format": "raw",
+      "maximum_download_bytes": 33554432,
+      "installed_binaries": [
+        {
+          "archive_member": "toxiproxy-server-linux-amd64",
+          "output_name": "toxiproxy-server"
+        }
+      ]
+    }
+  ],
+  "claims": {
+    "release_artifacts_downloaded": false,
+    "owner_signature_verified": false,
+    "real_process_execution_authorized": false,
+    "production_admissible": false
+  }
+}
