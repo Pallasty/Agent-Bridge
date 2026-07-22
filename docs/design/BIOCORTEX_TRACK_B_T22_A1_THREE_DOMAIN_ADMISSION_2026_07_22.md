@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **OFFLINE_FINAL_EXECUTION_AUTHORIZATION_AND_ADMISSION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
+Status: **OFFLINE_FINAL_EXECUTION_ADMISSION_COMPLETE_RUNNER_AND_HOST_READINESS_FAIL_CLOSED**
 
 Live execution: **NOT AUTHORIZED AND NOT ATTEMPTED**
 
@@ -264,7 +264,7 @@ contracts. No instance exists yet:
    and execution/production claims are structurally forbidden. A stop-service
    command cannot target coordinator `domain-1`.
 
-The future distributed execution contract must bind the raw SHA-256 of all
+The distributed execution contract binds the raw SHA-256 of all
 three schemas, the exact private endpoint- and credential-manifest content
 hashes, and the coordinator runtime public key. The runner may not discover
 ambient credentials, resolve DNS, provision the overlay, or listen on any
@@ -329,9 +329,11 @@ Each domain has a finite lifecycle:
 
 A signed failure response moves the session directly to a no-retry terminal
 state. The core emits transition receipts but explicitly executes zero
-commands, starts zero listeners/services, and injects zero faults. The network
-adapter and actual command executors remain absent until the final owner-signed
-execution contract and private runtime manifests exist.
+commands, starts zero listeners/services, and injects zero faults. Completion
+audit showed that deferring the network adapter and command executors until
+after real source-bound attestations would invalidate those attestations when
+their implementation changes the commit. They must instead be frozen before
+the first real collection challenge.
 
 ### Final execution authorization admission
 
@@ -357,8 +359,23 @@ certificate chains, certificate/private-key matches, EKUs, expiry, overlay-IP
 SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
 a private one-execution admission receipt; failure is terminal and cannot
 retry. The admission step itself opens no socket, starts no listener or
-service, injects no fault and spends nothing. The cross-host runner remains a
-separate successor and must consume that receipt exactly once.
+service, injects no fault and spends nothing. The source-bound cross-host
+runner remains a required pre-sign successor and must consume that receipt
+exactly once.
+
+### Pre-sign execution-readiness correction
+
+The execution-readiness audit found that the repository still lacks a
+source-bound cross-host runner, three host-local runtime-readiness packets,
+credential-placement proof, a single-use admission consumer and a real evidence
+builder. The central material manifest cannot truthfully prove that the matching
+private key and certificate have been placed on each remote domain at an exact
+private path. These are execution blockers, not documentation niceties.
+
+The admission contract now records the runner, readiness contract and placement
+proof as absent. The blocked proposal requires the exact readiness packet and
+signature sets, credential-placement mode, and runner/executor source hash set.
+See the [execution-readiness audit](../reports/goal-c-u/2026-07-22-biocortex-track-b-t22-a1-execution-readiness-audit.md).
 
 ## Third-domain decision
 
@@ -394,28 +411,33 @@ or satisfy the stronger S20 monotonic-CAS requirement.
 
 ## Exact owner inputs still required
 
-1. Choose a third owner physical host, or choose a cloud provider plus exact
+1. Freeze and test the source-bound cross-host runner, domain executor,
+   single-use admission consumer and real evidence builder.
+2. Choose a third owner physical host, or choose a cloud provider plus exact
    region/zone/instance type and numeric spend limit.
-2. Choose a dedicated T22-A1 owner public key or explicitly approve reuse of
+3. Choose a dedicated T22-A1 owner public key or explicitly approve reuse of
    the existing T22-A0 key, then bind it to the current proposal.
-3. Generate and sign one exact collection challenge for each selected domain.
-4. Produce fresh private domain attestations from `tb14`, the Mac, and the
+4. Generate and sign one exact collection challenge for each selected domain.
+5. Produce fresh private domain attestations from `tb14`, the Mac, and the
    selected third host, each under a distinct dedicated public key.
-5. Generate and sign the exact set countersignature under
+6. Generate and sign the exact set countersignature under
    `agent-bridge-t22-a1-owner-attestation-set-v1`, then admit the freshly
    reverified bundle once.
-6. Provide the admitted-set receipt, private-overlay endpoint-set
+7. Provide the admitted-set receipt, private-overlay endpoint-set
    digest, ACL receipt digest, and fault-target domain.
-7. Produce and privately validate the exact endpoint manifest.
-8. Generate and sign the exact zero-network runtime-preparation challenge under
+8. Produce and privately validate the exact endpoint manifest.
+9. Generate and sign the exact zero-network runtime-preparation challenge under
    `agent-bridge-t22-a1-owner-runtime-preparation-v1`, including the reviewed
    OpenSSL and `ssh-keygen` paths and raw binary hashes.
-9. Consume it once to generate the per-run mTLS CA/certificates, credential
+10. Consume it once to generate the per-run mTLS CA/certificates, credential
    manifest, and coordinator runtime signing key; review only their content
    hashes without publishing raw paths, endpoints, or private material.
-10. Review the completed execution payload and sign only that source-bound
+11. Complete the explicitly approved initial credential placement and collect
+    three signed host-local runtime-readiness packets binding the exact tools,
+    roots, ports and placed credential hashes.
+12. Review the completed execution payload and sign only that source-bound
    payload under `agent-bridge-t22-a1-owner-v1`.
-11. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
+13. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
    and remain honest with A1-R disabled.
 
 No current file is a signing request. The proposal remains deliberately
@@ -444,11 +466,11 @@ blocked until these inputs are concrete.
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - admission-contract content SHA-256:
-  `467ab7805ce864da3b7ece06da44e99d4da38bf805c45cefc7ed530858629076`;
+  `a826a537bd4c7cb50bd11bfee16898279b0f69d47e8b127db437fe40a0f2c50e`;
 - blocked owner-proposal content SHA-256:
-  `f549c6dc70b8dfd16e3a903c682d32af416d556006a257c62830933121cef8c9`.
+  `86c2dfb19a196290af835f84a00abd2c4e12a11de1bf4007fc190629beb9ca57`.
 
-The offline admission gate exercises 74 directed negative cases after recomputing
+The offline admission gate exercises 81 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends

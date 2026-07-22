@@ -35,7 +35,7 @@ rollback prevention.
 - frozen three-domain admission contract and conservative claim ceiling;
 - blocked owner-decision proposal with all real endpoint, cloud, budget,
   attestation-set, ACL, fault-target, and public-output choices unset; and
-- offline preflight plus 74 semantic negative mutations that recompute packet
+- offline preflight plus 81 semantic negative mutations that recompute packet
   self-digests before rejection;
 - private three-packet bundle verifier with canonical framing, SSHSIG, public-key
   normalization, four-hour freshness, 300-second clock spread, alias-collapse,
@@ -83,6 +83,10 @@ rollback prevention.
   credential files only after the final owner signature; 37 negative paths
   cover forgery, receipt integrity/currentness, replay, wrong signature and
   post-signature key substitution.
+- a completion audit proving that real collection must wait for the
+  source-bound runner/executor, host-local runtime-readiness packets,
+  credential-placement proof, single-use execution consumer and evidence
+  builder. The decision packet now fails closed on each missing input.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -122,8 +126,8 @@ Frozen packet identities:
 | domain-agent message schema raw bytes | `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee` |
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
-| admission-contract content | `467ab7805ce864da3b7ece06da44e99d4da38bf805c45cefc7ed530858629076` |
-| blocked owner proposal content | `f549c6dc70b8dfd16e3a903c682d32af416d556006a257c62830933121cef8c9` |
+| admission-contract content | `a826a537bd4c7cb50bd11bfee16898279b0f69d47e8b127db437fe40a0f2c50e` |
+| blocked owner proposal content | `86c2dfb19a196290af835f84a00abd2c4e12a11de1bf4007fc190629beb9ca57` |
 
 ## Advancement boundary
 
@@ -150,11 +154,13 @@ new hashes and still requires a separate owner signature under
 `agent-bridge-t22-a1-owner-v1`. None of these real instances exists or is
 accessed yet.
 
-After those exist, the implemented builder can generate one source-bound final
+Before any real collection challenge is generated, a separate unit must freeze
+the cross-host runner/executor and single-use consumption of the resulting
+execution-admission receipt. Otherwise that later source change would invalidate
+the source-bound host attestations. After the runner is frozen and the remaining
+real inputs exist, the implemented builder can generate one source-bound final
 execution-contract instance and admit it only after the exact owner signature.
-A separate unit must still implement the cross-host runner and single-use
-consumption of the resulting execution-admission receipt. Public Rekor
-submission remains a separate explicit choice.
+Public Rekor submission remains a separate explicit choice.
 
 The physical collector is implemented but remains unreachable in the current
 state because no T22-A1 owner trust anchor or signed challenge exists. Its KAT

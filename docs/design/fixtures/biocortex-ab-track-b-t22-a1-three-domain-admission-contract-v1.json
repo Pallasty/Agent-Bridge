@@ -78,6 +78,9 @@
     "distributed_event_schema_sha256": "4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5",
     "terminal_evidence_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json",
     "terminal_evidence_schema_sha256": "f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a",
+    "source_bound_cross_host_runner_present": false,
+    "three_domain_runtime_readiness_contract_present": false,
+    "three_domain_credential_placement_proof_present": false,
     "actual_execution_contract_instance_present": false,
     "actual_terminal_evidence_present": false
   },
@@ -101,5 +104,5 @@
     "external_anti_rollback_proved": false,
     "production_admissible": false
   },
-  "contract_sha256": "467ab7805ce864da3b7ece06da44e99d4da38bf805c45cefc7ed530858629076"
+  "contract_sha256": "a826a537bd4c7cb50bd11bfee16898279b0f69d47e8b127db437fe40a0f2c50e"
 }
