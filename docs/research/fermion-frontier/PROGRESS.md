@@ -1,5 +1,16 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 symmetry-orbit quotient D5
+
+- Official replay verified the eight-element Néel-stabilizing D4/conditional-spin-swap action,
+  exact CAR phases, Hamiltonian equivariance and both trivial observable characters.
+- Full and quotient Krylov transitions agree exactly through source depths 0--2; depth-3 full states
+  `1,704,285` compress to `213,099` representatives.
+- The projected next-action upper bound `47,947,275` is below 300M; audit group actions `13,831,456`
+  remain below 16M under the frozen 1 GiB, zero-swap, 600-second envelope.
+- D6 design is eligible only. No fourth action, D6 remainder, cumulative, R100, reference or READY
+  authority was produced.
+
 ## 2026-07-22 — FH-L8 scalar supremum D4
 
 - Derived exact two-step remainder slacks and M6 ceilings: 3.048B / 3.324B.

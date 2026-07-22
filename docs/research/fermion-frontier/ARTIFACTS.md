@@ -42,6 +42,15 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_scalar_supremum_d4_checker.py`: exact arithmetic and CAR prefix checker.
 - `test_fh_l8_scalar_supremum_d4_checker.py`: budget, boundary and mutation regressions.
 
+## FH-L8 symmetry-orbit quotient D5
+
+- `FH_L8_SYMMETRY_ORBIT_QUOTIENT_D5_ZH.md`: CAR/group proof, orbit ledger, resource gate and D6-design boundary.
+- `fh_l8_symmetry_orbit_quotient_d5_contract.json`: frozen symmetry, quotient-coordinate, resource and authority protocol.
+- `fh_l8_symmetry_orbit_quotient_d5_result.json`: official pre-fourth-action admissibility result.
+- `fh_l8_symmetry_orbit_quotient_d5_checker.py`: exact CAR/orbit/Krylov equivalence and resource checker.
+- `test_fh_l8_symmetry_orbit_quotient_d5_checker.py`: preregistration chronology, phase and failure-gate regressions.
+- `test_fh_l8_symmetry_orbit_quotient_d5_result.py`: frozen result identity, arithmetic and authority regressions.
+
 ## Claude source session
 
 - Session:
