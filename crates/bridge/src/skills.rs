@@ -3021,6 +3021,51 @@ mod tests {
     }
 
     #[test]
+    fn route_recognizes_explicit_formats_in_english_and_chinese_queries() {
+        let cases = [
+            ("read and edit a PDF form", vec!["pdf"]),
+            ("编辑 PDF 表单并验证内容", vec!["pdf"]),
+            ("update the DOCX contract", vec!["docx"]),
+            ("修改 DOCX 合同", vec!["docx"]),
+            ("recalculate the XLSX budget", vec!["xlsx"]),
+            ("重算 XLSX 预算表", vec!["xlsx"]),
+            ("prepare the PPTX presentation", vec!["pptx"]),
+            ("整理 PPTX 演示文稿", vec!["pptx"]),
+        ];
+
+        for (query, expected) in cases {
+            assert_eq!(requested_file_formats(query), expected, "{query}");
+        }
+    }
+
+    #[test]
+    fn route_prioritizes_exact_skill_for_each_supported_file_format() {
+        for format in ROUTE_FILE_FORMATS {
+            let broad = test_skill_hit("skill:docs", 20.0, Some(0.8));
+            let mut partial =
+                test_skill_hit(&format!("skill:community/{format}-official"), 12.0, None);
+            partial
+                .record
+                .tags
+                .push(format!("path:{format}-official/SKILL.md"));
+            let mut exact = test_skill_hit(&format!("skill:official/{format}"), 8.0, None);
+            exact.record.tags.push(format!("path:{format}/SKILL.md"));
+
+            let hits = route_prioritize_explicit_format(
+                &format!("处理 {format} 文件"),
+                vec![broad, partial, exact],
+            );
+
+            assert_eq!(hits[0].record.key, format!("skill:official/{format}"));
+            assert_eq!(
+                hits[1].record.key,
+                format!("skill:community/{format}-official")
+            );
+            assert_eq!(hits[2].record.key, "skill:docs");
+        }
+    }
+
+    #[test]
     fn route_keeps_explicit_file_format_priority_after_feedback_sorting() {
         let mut broad = test_skill_hit("skill:docs", 20.0, Some(0.8));
         broad.record.tags.push("path:docx/SKILL.md".to_string());
