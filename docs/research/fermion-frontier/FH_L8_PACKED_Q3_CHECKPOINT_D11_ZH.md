@@ -54,6 +54,20 @@ D8 只是未物化的早期协议：其 amplitude 规划为小端，尾部字段
 rank。D11 是单独冻结的自验证大端格式，不声称与 D8 byte-for-byte 兼容；二者相同的
 `32-byte × 213,099` 上限不能被解释为编码兼容证据。
 
+在最终合并树中，还可与并行的 `FH-L8-INDEPENDENT-REFERENCE-D11` 基础 source-checkpoint
+回执做一项严格投影检查。对每条 packed 记录保留前 `25` bytes，将末 `7` bytes 置零，
+得到该路线的大端 `>16sqB7x` 基础视图。全文件投影 SHA-256 为
+`09758478e63d21014bdd704e157b1969498fdd4068b6ab4f78c2720324477017`，精确等于该回执登记的
+payload identity；`213,098` 条记录的 rank 非零。因此 packed 格式是基础视图的 rank
+扩展，原始 SHA 不同不是科学结果冲突。该回归只对已登记的内容摘要做兼容性检查，
+不宣称仓库外 payload 的当前可用性，也不扩大任何执行权限。
+
+合并基线中的并行路线还保留了一次 `4,096`-source spill/sort/merge 预飞：它对有界 q3
+source rows 调用 signed quotient column，生成 `424,682` 个 target，并与 naive 计算逐项一致。
+这与本 packed C3 的“`depth3_source_rows_visited=0`”不矛盾：两者是不同单元。该并行预飞
+没有完成全部 `53` shards、跨 shard merge 或 resume，也没有绑定 C3 的 contract/terminal
+receipt/rank 验证。因此它只能作为后续设计输入，不是已授权的完整第四次作用。
+
 ## 四类 digest
 
 四个 digest 绑定不同的字节或语义序列，不能彼此替代：
@@ -111,3 +125,6 @@ q3 orbit 审计与 packing；不得外推为 `q3→q4` 的运行时间、内存�
 `CHECKPOINTED_FULL_QUOTIENT_H_RUNNER_IMPLEMENTATION_AND_AUTHORIZATION` 所要求的 runner、
 资源/停止规则与独立执行授权。在新的 contract freeze 完成以前，D11 的 checkpoint 只能作为
 hash-bound 输入，不能被用来启动第四次 Krylov Hamiltonian action。
+在当前合并树中，为避免两条历史 D11 路线的命名和权限混淆，该新合同应分配全局唯一的 D12
+ID，并精确 pin C3、packed SHA、terminal receipt 与全格式验证，不得沿用旧的外部 manifest
+作为授权。

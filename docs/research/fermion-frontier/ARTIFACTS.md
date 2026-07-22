@@ -103,6 +103,19 @@ All copied JSON files are research-only outputs. They contain no credentials.
   `db2ce0a338a378aef6e4a043e02388c4268addc951d0ae590c2ae1d65f840231`.
 - D11 certifies only the packed q3 checkpoint. It emits no q4 record and grants no fourth-action,
   target-vector, remainder, R100, hardware, quantum-advantage or READY authority.
+- In the integrated tree, zeroing each packed record's seven-byte tail projects it to the parallel
+  `FH-L8-INDEPENDENT-REFERENCE-D11` base format. The projected SHA-256 is
+  `09758478e63d21014bdd704e157b1969498fdd4068b6ab4f78c2720324477017`, exactly the payload
+  identity retained by `fh_l8_checkpointed_quotient_h_d11_receipt.json`; this compatibility check
+  does not assert current availability of that external payload or grant execution authority.
+- The parallel lane is retained as `FH_L8_CHECKPOINTED_QUOTIENT_H_D11_ZH.md`,
+  `fh_l8_checkpointed_quotient_h_d11_contract.json`,
+  `fh_l8_checkpointed_quotient_h_d11_runner.py`,
+  `fh_l8_checkpointed_quotient_h_d11_receipt.json`, `fh_l8_d11_merge4096_receipt.json`,
+  `fh_l8_d11_verify4096_receipt.json` and
+  `test_fh_l8_checkpointed_quotient_h_d11_runner.py`. Its 4,096-source spill/merge result is
+  bounded preflight evidence only; it is not a complete fourth action and is not bound to the
+  packed C3 chronology. A successor consumer therefore needs a new unique D12 contract.
 
 ## Claude source session
 

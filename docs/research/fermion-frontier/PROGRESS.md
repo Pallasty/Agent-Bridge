@@ -20,6 +20,14 @@
 - A post-C3 heavy replay in a separate fresh scope reproduced the committed checkpoint byte for
   byte; it observed a 418,836,480-byte cgroup peak, 427,343,872-byte process max RSS, zero swap and
   no cgroup memory events.
+- After integration, zeroing each packed record's seven-byte tail reproduces the parallel
+  `FH-L8-INDEPENDENT-REFERENCE-D11` base receipt's payload SHA-256 `09758478e...77017` exactly.
+  This establishes a base-view/rank-extension relationship, not external-payload availability or
+  added execution authority.
+- The parallel lane's 4,096-source spill/sort/merge preflight produced 424,682 targets and matched
+  its naive signed quotient calculation. It did visit bounded q3 source rows, unlike the packed
+  C3 generation/replay, but did not run all 53 shards or finish the fourth action. A new unique D12
+  consumer contract must bind C3, its terminal receipt and full packed validation before reuse.
 - Current status is
   `VERIFIED_D11_PACKED_DEPTH3_QUOTIENT_CHECKPOINT_MATERIALIZED_NO_Q4_AUTHORITY`. The next gate is
   `CHECKPOINTED_FULL_QUOTIENT_H_RUNNER_IMPLEMENTATION_AND_AUTHORIZATION`; target cardinality,

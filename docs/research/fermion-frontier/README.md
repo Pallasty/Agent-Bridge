@@ -56,6 +56,16 @@ exactly. D11 emits no q4 records and does not certify q3-to-q4 runtime or memory
 next gate is a separately frozen and authorized checkpointed full quotient-H runner; see
 `FH_L8_PACKED_Q3_CHECKPOINT_D11_ZH.md` and `test_fh_l8_packed_q3_checkpoint_d11.py`.
 
+The integrated tree also cross-checks the parallel `FH-L8-INDEPENDENT-REFERENCE-D11` source
+receipt: zeroing the packed record's seven-byte tail reproduces its registered base-payload
+SHA-256 `09758478e63d21014bdd704e157b1969498fdd4068b6ab4f78c2720324477017`. Thus the packed
+checkpoint is a rank-bearing extension of that big-endian base view. This digest compatibility
+does not assert availability of the external base payload or widen either route's authority.
+The parallel lane has also verified one 4,096-source spill/sort/merge shard against a naive signed
+quotient action, but has not implemented all 53 shards, cross-shard merge or resume. The integrated
+successor must use a new unique D12 contract that pins C3 and validates its full packed format
+before consuming representative/amplitude fields; the old external manifest is not a substitute.
+
 Status date: 2026-07-22
 
 Scope: physical fermions, not the historical Fermion Memory service.

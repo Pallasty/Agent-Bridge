@@ -15,6 +15,7 @@ BUNDLE = HERE / "fh_l8_packed_q3_checkpoint_d11_bundle"
 CHECKPOINT = BUNDLE / "checkpoint.bin"
 RESULT = BUNDLE / "result.json"
 TERMINAL_RECEIPT = HERE / "fh_l8_packed_q3_checkpoint_d11_terminal_receipt.json"
+BASE_SOURCE_RECEIPT = HERE / "fh_l8_checkpointed_quotient_h_d11_receipt.json"
 
 BASE_COMMIT = "b620f02ff53ed84472d0f38c775bdeb584fdf736"
 SOURCE_FREEZE_COMMIT = "49ac8a25faf80c85fab9acaa7390fda7b4c0d7f2"
@@ -192,6 +193,26 @@ class PackedQ3CheckpointD11Tests(unittest.TestCase):
         self.assertEqual(
             self.terminal_summary["result_sha256"], FROZEN_FILES[RESULT][1]
         )
+
+    def test_rank_extension_projects_to_independent_base_checkpoint_identity(self):
+        base_receipt = json.loads(BASE_SOURCE_RECEIPT.read_text(encoding="utf-8"))
+        self.assertEqual(base_receipt["payload_bytes"], len(self.raw_checkpoint))
+        self.assertFalse(base_receipt["fourth_action_executed"])
+
+        projected = hashlib.sha256()
+        nonzero_ranks = 0
+        for offset in range(0, len(self.raw_checkpoint), 32):
+            record = self.raw_checkpoint[offset : offset + 32]
+            projected.update(record[:25])
+            projected.update(b"\x00" * 7)
+            nonzero_ranks += int.from_bytes(record[28:32], "big") != 0
+
+        self.assertEqual(nonzero_ranks, 213098)
+        self.assertEqual(
+            projected.hexdigest(),
+            "09758478e63d21014bdd704e157b1969498fdd4068b6ab4f78c2720324477017",
+        )
+        self.assertEqual(projected.hexdigest(), base_receipt["payload_sha256"])
 
     def test_terminal_receipt_exit_schema_and_hash_mutations_fail_closed(self):
         mutations = []
