@@ -1,0 +1,31 @@
+{
+  "D11_q4_target_sha256": "9769bbcd39cb5d48a83f42e8a8fa838c7577f8ab4978876f0fc4fe582250587c",
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D12",
+  "costs": {
+    "candidate_group_image_upper_bound": 19413981000,
+    "primary_spill_bytes_upper_bound": 77655924000,
+    "q4_sources": 10785545,
+    "raw_candidate_upper_bound": 2426747625,
+    "source_group_image_upper_bound": 86284360,
+    "total_group_image_upper_bound": 19500265360
+  },
+  "current_d10_no_go": {
+    "group_image_cap": true,
+    "raw_candidate_cap": true,
+    "source_checkpoint_cap": true,
+    "spill_cap": true
+  },
+  "degree6_remainder_bounded": false,
+  "full_R100_error_bounded": false,
+  "limitations": [
+    "All counts are static upper bounds from the D11 q4 target cardinality and 225-term row contract.",
+    "No q5 action, target vector, D6 remainder, cumulative, R100, physical reference, or READY authority."
+  ],
+  "next_gate": "Q4_TO_Q5_ALGORITHM_OR_RESOURCE_ENVELOPE_REDESIGN",
+  "physical_reference_qualified": false,
+  "q5_executed": false,
+  "ready_gate_eligible": false,
+  "status": "NO_GO_D12_Q4_TO_Q5_CURRENT_D10_ENVELOPE",
+  "two_step_cumulative_error_bounded": false,
+  "verified": true
+}
