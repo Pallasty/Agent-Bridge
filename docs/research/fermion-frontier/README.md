@@ -53,7 +53,8 @@ rejects a fourth call before the Hamiltonian backend, and commits 213,099 sorted
 `db2ce0a338a378aef6e4a043e02388c4268addc951d0ae590c2ae1d65f840231`) under the frozen cgroup
 envelope. A separate post-outcome heavy replay in a fresh scope reproduces the committed bytes
 exactly. D11 emits no q4 records and does not certify q3-to-q4 runtime or memory feasibility. The
-next gate is a separately frozen and authorized checkpointed full quotient-H runner; see
+gate recorded at D11 close was a separately frozen and authorized checkpointed full quotient-H
+runner; D16-F below now supersedes that active authority boundary. See
 `FH_L8_PACKED_Q3_CHECKPOINT_D11_ZH.md` and `test_fh_l8_packed_q3_checkpoint_d11.py`.
 
 The integrated tree also cross-checks the parallel `FH-L8-INDEPENDENT-REFERENCE-D11` source
@@ -61,10 +62,47 @@ receipt: zeroing the packed record's seven-byte tail reproduces its registered b
 SHA-256 `09758478e63d21014bdd704e157b1969498fdd4068b6ab4f78c2720324477017`. Thus the packed
 checkpoint is a rank-bearing extension of that big-endian base view. This digest compatibility
 does not assert availability of the external base payload or widen either route's authority.
-The parallel lane has also verified one 4,096-source spill/sort/merge shard against a naive signed
-quotient action, but has not implemented all 53 shards, cross-shard merge or resume. The integrated
-successor must use a new unique D12 contract that pins C3 and validates its full packed format
-before consuming representative/amplitude fields; the old external manifest is not a substitute.
+At that earlier preflight stage, the parallel lane had verified one 4,096-source spill/sort/merge
+shard against a naive signed quotient action, but had not yet implemented all 53 shards,
+cross-shard merge or resume. The integrated successor therefore required a separately frozen
+contract that pins C3 and validates its full
+packed format before consuming representative/amplitude fields; the old external manifest is not
+a substitute.
+
+D16-F now closes that source/custody prerequisite under the globally unique full ID
+`FH-L8-INDEPENDENT-REFERENCE-D16-PACKED-Q3-CUSTODY-FORENSIC-V1`. Its immutable
+checker -> contract -> result chain is `ad20d45f14016bbc34bd61a3685c581c9727ef20` ->
+`f7d9fdf2d24e22973d0409737c2182fc9266e6e9` ->
+`6e3230f55ddc68e7ea39e6513f28c2cfb5c0ce6e`. It admits packed C3 as the only q3 source for a
+future clean consumer and executes no Hamiltonian action. See
+`FH_L8_PACKED_CONSUMER_FORENSIC_D16_ZH.md`,
+`fh_l8_packed_consumer_forensic_d16_contract.json` and
+`fh_l8_packed_consumer_forensic_d16_result.json`.
+
+The same forensic result isolates the legacy parallel-D11 full-action target rather than validating
+it. The retained spool contains 6,912 receipt-unbound duplicate gaps totaling 23,126,970 records /
+740,063,040 bytes, while no provenance proves that the retained target was generated from exactly
+that spool. Its reported 10,785,545 records and digest are therefore non-authoritative q3 -> q4
+observations. D12's q4 -> q5 costs are only conditional post-hoc arithmetic, and D13's numeric
+full-q5 no-go and route-exclusivity claim are not authoritative. D14--D15 algebra remains
+design-only and requires a clean numeric lineage.
+
+The later remote D16-W algebra unit uses the distinct full ID `FH-L8-INDEPENDENT-REFERENCE-D16`,
+so it does not collide with or rewrite D16-F. Its atomic hopping-word G-equivariance rejection can
+be retained as design-only. Its full-H moment, pinned q0 -> q4 custody and q4-derived resource path
+remain isolated with the quarantined D11/D12 lineage; D16-W authorizes no execution.
+
+One operational caveat is deliberately visible. The built-in composite `--mode external` first
+runs static verification in the same fresh scope, leaving a 77,021,184-byte initial cgroup peak
+above the frozen 67,108,864-byte cap; it therefore returns
+`INDETERMINATE_D16_EXTERNAL_CUSTODY_AUDIT`, not pass. Separate static verification and a second
+fresh-scope external-only replay pass with the identical manifest SHA-256
+`869008057db5eb93129aca801dce2dab458ec2cfc6f7fa2894bf04538cb4d79b`, 5,472,872,990 ns elapsed,
+98,095,104-byte cgroup peak, 33,546,240-byte RSS, zero swap and zero event deltas. This split replay
+is reproducibility evidence, not a committed terminal execution/resource receipt. The active next
+gate is
+`FRESH_EXCLUSIVE_PACKED_Q3_CONSUMER_IMPLEMENTATION_AND_BOUNDED_4096_PREFLIGHT_AUTHORIZATION`;
+neither bounded-preflight nor full-run execution is authorized.
 
 Status date: 2026-07-22
 
