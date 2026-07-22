@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D5",
+  "status": "PROTOCOL_FROZEN_BEFORE_OFFICIAL_QUOTIENT_REPLAY",
+  "analysis_class": "DESIGN_INFORMED_PREREGISTRATION_BEFORE_QUOTIENT_METRICS",
+  "checker_self_sha256": "681bc63fedce8b71cfb536c66d321467bc8f01cb5947bee59b4291e2ac51a022",
+  "chronology": {
+    "protocol_base_commit": "ae3935774d80f37b10f8317d0e17d339f03436cc",
+    "protocol_base_tree": "accc20f72c9e0e201f87418ed4a1f7d37a9865f4",
+    "official_replay_requires_protocol_commit": true,
+    "result_must_not_exist_in_protocol_commit": true
+  },
+  "parent": {
+    "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D4",
+    "integration_commit": "6ff83b850ee4e2995d1bec89c7519d01c9c92e47",
+    "integration_tree": "17ac5ffb333878312ecf59cffc83c045e2e761fd"
+  },
+  "source_pins": [
+    {
+      "path": "fh_l8_scalar_supremum_d4_checker.py",
+      "mode": "100644",
+      "blob": "f960a7b6f33a25e20d13c1f85fcdb0d053a5e5c8",
+      "bytes": 7801,
+      "sha256": "86692e68cee1475d3cee2dbd0e866f68d5c5514ff37268c601819bd8f4ed48f2"
+    },
+    {
+      "path": "fh_l8_scalar_supremum_d4_contract.json",
+      "mode": "100644",
+      "blob": "33ad80c4b2ca7f9db6e5db691d31e22d00dc76a1",
+      "bytes": 2467,
+      "sha256": "f3a19548cbcb658b7a30e656f09f063ee349646850b487f1e4fb2cd2b2876cb8"
+    },
+    {
+      "path": "fh_l8_scalar_supremum_d4_result.json",
+      "mode": "100644",
+      "blob": "4569cde2cd150f507febfdd9c1e42211c5f7a298",
+      "bytes": 2002,
+      "sha256": "07f01bd87187b02cacd7979450123077804bd996335e127279576bf47122512e"
+    }
+  ],
+  "workload": {
+    "linear_size": 8,
+    "boundary": "square_open_boundary_no_wrap",
+    "mode_order": "site-major_spin-minor_q=2*(r*L+c)+spin_up0_down1",
+    "particle_sector": "N_up=32,N_down=32",
+    "neel_basis_hex": "0x66669999666699996666999966669999",
+    "audited_krylov_depths": [0, 1, 2, 3],
+    "quotient_transition_source_depths": [0, 1, 2],
+    "fourth_hamiltonian_action_authorized": false
+  },
+  "symmetry_group": {
+    "group_id": "NEEL_STABILIZING_D4_WITH_CONDITIONAL_GLOBAL_SPIN_SWAP",
+    "expected_order": 8,
+    "element_order": ["I", "R90", "R180", "R270", "MX", "MY", "MD", "MA"],
+    "checkerboard_parity_shift": {
+      "I": 0,
+      "R90": 1,
+      "R180": 0,
+      "R270": 1,
+      "MX": 1,
+      "MY": 1,
+      "MD": 0,
+      "MA": 0
+    },
+    "spin_swap": {
+      "I": 0,
+      "R90": 1,
+      "R180": 0,
+      "R270": 1,
+      "MX": 1,
+      "MY": 1,
+      "MD": 0,
+      "MA": 0
+    },
+    "initial_character": {
+      "I": 1,
+      "R90": 1,
+      "R180": 1,
+      "R270": 1,
+      "MX": 1,
+      "MY": 1,
+      "MD": 1,
+      "MA": 1
+    },
+    "observable_character": {
+      "staggered_magnetization": 1,
+      "double_occupancy": 1
+    },
+    "car_sign_rule": "(-1)^(inversions_of_site_permutation_on_singly_occupied_sites + spin_swap*number_of_doublons)"
+  },
+  "kpis": {
+    "primary_semantic": "all group/CAR/Hamiltonian/initial/observable/orbit/equivalence gates true",
+    "primary_equivalence": "zero full-vector amplitude-relation failures and exact quotient transitions for source depths 0,1,2",
+    "primary_resource": "depth3 orbit representatives and projected next candidate actions remain within frozen caps",
+    "drivers": ["orbit representative count by depth", "compression ratio", "stabilizer histogram", "projected-zero action outputs"],
+    "guardrails": ["fourth H action not executed", "no D6/two-step/full-R100/reference/READY authority"]
+  },
+  "quotient_coordinates": {
+    "stored_value": "canonical_representative_full_basis_per_state_amplitude",
+    "orbit_reconstruction": "a[g*r]=fermionic_phase(g,r)*a[r]",
+    "inner_product_metric": "diag(orbit_size)",
+    "reduced_column_factor": "source_orbit_size/target_orbit_size",
+    "metric_hermiticity": "target_orbit_size*T[target,source]=source_orbit_size*T[source,target]",
+    "orbit_average_coefficients_used": false
+  },
+  "resource_limits": {
+    "outer_memory_max_bytes": 1073741824,
+    "outer_swap_max_bytes": 0,
+    "maximum_seconds": 600,
+    "max_source_bytes": 1048576,
+    "max_materialized_states": 2000000,
+    "max_orbit_representatives": 2000000,
+    "max_next_action_candidates": 300000000,
+    "max_audit_group_actions": 16000000
+  },
+  "decision_rule": {
+    "protocol_source_or_envelope_failure": "VERIFICATION_FAILED",
+    "any_semantic_gate_false": "NO_GO_D5_SYMMETRY_ORBIT_QUOTIENT_SEMANTICS",
+    "any_resource_gate_false": "NO_GO_D5_SYMMETRY_ORBIT_QUOTIENT_RESOURCE_GATE",
+    "all_gates_true": "VERIFIED_D5_SYMMETRY_ORBIT_QUOTIENT_ADMISSIBLE_FOR_D6_DESIGN"
+  },
+  "forbidden_claims": [
+    "No fourth Hamiltonian action is executed or authorized by D5.",
+    "No degree-six remainder or two-step cumulative error is bounded.",
+    "No full-R100 error, physical reference, hardware result, quantum advantage, or READY state is certified.",
+    "The quotient is qualified only for the exact pinned L8 OBC Hamiltonian, Neel character, observables, and depths in this contract."
+  ]
+}
