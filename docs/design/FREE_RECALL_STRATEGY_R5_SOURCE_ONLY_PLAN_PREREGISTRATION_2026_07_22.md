@@ -36,6 +36,7 @@ R5 validates the plan. It does not implement the plan.
 item_ref = "epr_v1_" || key_epoch || "_" || lower_hex(
   HMAC-SHA-256(K_epoch,
     frame("agent-bridge/episode-item-ref/v1") ||
+    frame(key_epoch) ||
     frame(memory_key_utf8)
   )
 )
