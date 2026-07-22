@@ -30,6 +30,7 @@ SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-co
 ANCHOR_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-owner-trust-anchor-v1.json"
 CHALLENGE_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/domain-collection-challenge/v1\0"
 SIGNATURE_NAMESPACE = "agent-bridge-t22-a1-owner-collection-v1"
+ATTESTATION_SET_SIGNATURE_NAMESPACE = "agent-bridge-t22-a1-owner-attestation-set-v1"
 RUNTIME_PREPARATION_SIGNATURE_NAMESPACE = "agent-bridge-t22-a1-owner-runtime-preparation-v1"
 EXPECTED_SCHEMA_SHA256 = "26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d"
 MAX_PACKET_BYTES = 64 * 1024
@@ -167,7 +168,7 @@ def build_anchor(public_key_path: Path, proposal: dict, confirmed_proposal_sha25
         "public_key": key.decode(),
         "public_key_sha256": key_sha256,
         "public_key_fingerprint": fingerprint,
-        "allowed_signature_namespaces": [SIGNATURE_NAMESPACE, RUNTIME_PREPARATION_SIGNATURE_NAMESPACE, "agent-bridge-t22-a1-owner-v1"],
+        "allowed_signature_namespaces": [SIGNATURE_NAMESPACE, ATTESTATION_SET_SIGNATURE_NAMESPACE, RUNTIME_PREPARATION_SIGNATURE_NAMESPACE, "agent-bridge-t22-a1-owner-v1"],
     }
 
 
@@ -180,7 +181,7 @@ def validate_anchor(anchor: object, proposal: dict) -> bytes:
     require(anchor["schema"] == "agent_bridge.biocortex.track_b.t22_a1.owner_trust_anchor.v1", "E_OWNER_ANCHOR_SCHEMA")
     require(anchor["owner_id"] == "pallasting" and anchor["owner_role"] == "PROJECT_OWNER", "E_OWNER_ANCHOR_ROLE")
     require(anchor["owner_decision_proposal_sha256"] == proposal["proposal_sha256"], "E_OWNER_ANCHOR_PROPOSAL")
-    require(anchor["allowed_signature_namespaces"] == [SIGNATURE_NAMESPACE, RUNTIME_PREPARATION_SIGNATURE_NAMESPACE, "agent-bridge-t22-a1-owner-v1"], "E_OWNER_ANCHOR_NAMESPACES")
+    require(anchor["allowed_signature_namespaces"] == [SIGNATURE_NAMESPACE, ATTESTATION_SET_SIGNATURE_NAMESPACE, RUNTIME_PREPARATION_SIGNATURE_NAMESPACE, "agent-bridge-t22-a1-owner-v1"], "E_OWNER_ANCHOR_NAMESPACES")
     require(isinstance(anchor["public_key"], str), "E_OWNER_ANCHOR_PUBLIC_KEY")
     key, key_sha256, fingerprint = public_key_identity(anchor["public_key"].encode())
     require(anchor["public_key"].encode() == key, "E_OWNER_ANCHOR_PUBLIC_KEY_CANONICAL")

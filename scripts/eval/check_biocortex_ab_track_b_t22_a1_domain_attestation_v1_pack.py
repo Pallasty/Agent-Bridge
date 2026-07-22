@@ -171,6 +171,10 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-attestation-kat-") as directory:
     assert receipt["owner_countersignature_verified"] is False
     assert receipt["execution_authorized"] is False
     assert receipt["network_accessed"] is False
+    unsigned_receipt = dict(receipt)
+    claimed_receipt_sha256 = unsigned_receipt.pop("content_sha256")
+    assert claimed_receipt_sha256 == module.domain_digest(module.SET_RECEIPT_DOMAIN, unsigned_receipt)
+    assert receipt["earliest_attestation_expires_at"] == packets[0]["expires_at"]
 
     packet_mutations = (
         lambda x: x.update(schema="other"),

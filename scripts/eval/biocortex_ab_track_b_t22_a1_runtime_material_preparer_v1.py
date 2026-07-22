@@ -487,6 +487,7 @@ def prepare(
             "challenge_content_sha256": challenge["content_sha256"],
             "owner_signature_sha256": authorization["owner_signature_sha256"],
             "exact_three_domain_attestation_set_sha256": challenge["bindings"]["exact_three_domain_attestation_set_sha256"],
+            "owner_countersigned_attestation_set_receipt_sha256": challenge["bindings"]["owner_countersigned_attestation_set_receipt_sha256"],
             "private_endpoint_manifest_content_sha256": endpoint["content_sha256"],
             "runtime_credential_manifest_content_sha256": manifest["content_sha256"],
             "coordinator_runtime_public_key_sha256": metadata["coordinator_runtime_public_key_sha256"],

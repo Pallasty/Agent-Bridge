@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PREFLIGHT_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_three_domain_preflight_v1.py"
 ATTESTATION_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/domain-attestation/v1\0"
 SET_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/domain-attestation-set/v1\0"
+SET_RECEIPT_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/domain-attestation-set-verification-receipt/v1\0"
 SIGNATURE_NAMESPACE = "agent-bridge-t22-a1-domain-v1"
 MAX_PACKET_BYTES = 64 * 1024
 MAX_KEY_BYTES = 16 * 1024
@@ -293,12 +294,15 @@ def verify_bundle(bundle: Path, source_commit: str, now: datetime) -> dict:
         "packets": packet_bindings,
         "signatures": signature_bindings,
     })
-    return {
+    receipt = {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.domain_attestation_set_verification_receipt.v0",
         "status": "THREE_DOMAIN_INPUT_SET_COMPLETE_PENDING_OWNER_COUNTERSIGNATURE_NON_EXECUTING",
         "verified_at": now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
         "source_commit": source_commit,
         "attestation_set_sha256": set_sha256,
+        "earliest_attestation_expires_at": min(
+            parse_time(packet["expires_at"], "E_ATTESTATION_EXPIRES_AT") for packet in packets
+        ).astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
         "packet_bindings": packet_bindings,
         "signature_bindings": signature_bindings,
         "set_validation": set_validation,
@@ -310,6 +314,8 @@ def verify_bundle(bundle: Path, source_commit: str, now: datetime) -> dict:
         "faults_injected": 0,
         "production_admissible": False,
     }
+    receipt["content_sha256"] = domain_digest(SET_RECEIPT_DOMAIN, receipt)
+    return receipt
 
 
 def current_source_commit() -> str:

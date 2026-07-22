@@ -111,7 +111,8 @@ def create_challenge(
 ) -> tuple[dict, Path, Path]:
     challenge = authorization_module.build_challenge(
         anchor, contract, proposal, SOURCE_COMMIT, endpoint["run_id"],
-        digest(f"attestation-set:{label}"), endpoint_binding or endpoint["content_sha256"], root,
+        digest(f"attestation-set:{label}"), digest(f"admitted-set-receipt:{label}"),
+        endpoint_binding or endpoint["content_sha256"], root,
         OPENSSL, openssl_sha256 or OPENSSL_SHA256,
         SSH_KEYGEN, SSH_KEYGEN_SHA256,
         issued_at, issued_at + timedelta(hours=4), 3600, 3600,

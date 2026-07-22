@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **OFFLINE_ADMISSION_COLLECTION_AND_RUNTIME_MATERIAL_PREPARATION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
+Status: **OFFLINE_THREE_DOMAIN_COUNTERSIGNATURE_AND_RUNTIME_PREPARATION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
 
 Live execution: **NOT AUTHORIZED AND NOT ATTEMPTED**
 
@@ -99,6 +99,32 @@ it is not an execution permit. Real packet collection remains absent until an
 exact owner-signed collection challenge can bind the selected third domain and
 private artifact root. Thus the current verifier can be fully tested without
 reading a real stable host identifier.
+
+### Exact-set owner countersignature
+
+The pending state now has a concrete, non-executing successor. A closed owner
+countersignature packet binds the source commit, current proposal and admission
+contract, attestation schema, exact set digest, all three packet/signature/key
+bindings, endpoint/ACL digests, distinctness results, earliest attestation
+expiry, and private admitted-receipt output path. Its distinct SSHSIG namespace
+is `agent-bridge-t22-a1-owner-attestation-set-v1` and its lifetime is at most
+one hour and never later than the earliest domain-attestation expiry.
+
+Admission verifies the owner signature before reading the private bundle,
+atomically reserves the signed challenge for one use, then independently
+re-runs canonical framing, source/freshness, three domain signatures,
+identity/key/hostname/alias uniqueness, endpoint/ACL equality and clock-spread
+checks. The signed stable set fields must equal the freshly recomputed result.
+Only then is a private, content-addressed
+`THREE_DOMAIN_INPUT_SET_OWNER_COUNTERSIGNED_ADMITTED_NON_EXECUTING` receipt
+written. A failure is terminal with no automatic retry. The receipt contains
+no raw identity, endpoint or credential value and grants no execution,
+network, service, fault, budget, availability or production authority.
+
+The runtime-preparation generator no longer accepts a manually supplied bare
+attestation-set digest. Its CLI parses a current admitted-set receipt and binds
+both the set digest and receipt digest into the separately signed preparation
+challenge.
 
 ### Owner-signed collection challenge
 
@@ -347,18 +373,21 @@ or satisfy the stronger S20 monotonic-CAS requirement.
 3. Generate and sign one exact collection challenge for each selected domain.
 4. Produce fresh private domain attestations from `tb14`, the Mac, and the
    selected third host, each under a distinct dedicated public key.
-5. Provide the sorted three-packet digest set, private-overlay endpoint-set
+5. Generate and sign the exact set countersignature under
+   `agent-bridge-t22-a1-owner-attestation-set-v1`, then admit the freshly
+   reverified bundle once.
+6. Provide the admitted-set receipt, private-overlay endpoint-set
    digest, ACL receipt digest, and fault-target domain.
-6. Produce and privately validate the exact endpoint manifest.
-7. Generate and sign the exact zero-network runtime-preparation challenge under
+7. Produce and privately validate the exact endpoint manifest.
+8. Generate and sign the exact zero-network runtime-preparation challenge under
    `agent-bridge-t22-a1-owner-runtime-preparation-v1`, including the reviewed
    OpenSSL and `ssh-keygen` paths and raw binary hashes.
-8. Consume it once to generate the per-run mTLS CA/certificates, credential
+9. Consume it once to generate the per-run mTLS CA/certificates, credential
    manifest, and coordinator runtime signing key; review only their content
    hashes without publishing raw paths, endpoints, or private material.
-9. Review the completed execution payload and sign only that source-bound
+10. Review the completed execution payload and sign only that source-bound
    payload under `agent-bridge-t22-a1-owner-v1`.
-10. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
+11. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
    and remain honest with A1-R disabled.
 
 No current file is a signing request. The proposal remains deliberately
@@ -370,14 +399,16 @@ blocked until these inputs are concrete.
   `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b`;
 - domain-collection challenge schema raw SHA-256:
   `26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d`;
+- attestation-set countersignature schema raw SHA-256:
+  `615959dbd1fbfe65da7830cd5b2bf4efc2ef9a917c94ae9438f820837d121a1c`;
 - distributed execution-contract schema raw SHA-256:
-  `056f7e555c6e04ac5a9ba1ddc3817771635edf3a0321921b69fa8924d803428a`;
+  `1feed272f9832099b820b94dac1b7909bdce074f7cd6c897f41bfde666ad072d`;
 - private endpoint-manifest schema raw SHA-256:
   `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953`;
 - runtime credential-manifest schema raw SHA-256:
   `b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a`;
 - runtime-preparation challenge schema raw SHA-256:
-  `be45ac3a4d69a67d4f71e2acc2d2cb5f0ca03b23574640a02c50a5937d6c0282`;
+  `1baaddc21592427adad308f2325e4cd6a5f9ba7f1a45db2a5d1d03de734967b3`;
 - domain-agent message schema raw SHA-256:
   `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee`;
 - distributed event schema raw SHA-256:
@@ -385,11 +416,11 @@ blocked until these inputs are concrete.
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - admission-contract content SHA-256:
-  `93d173614eb6214b4fe2bd8009d0ec585017edc0cc52c2ebd3f1220dc7f054ff`;
+  `fa37fa4b94c3601a4d48f620964785223a30fc6a20577c7892f903b72304ca6c`;
 - blocked owner-proposal content SHA-256:
-  `d9cf119b8695187ed487b5d7ff2a1c05b76add858fe54723101a9b42fb328d13`.
+  `3b5657b9d2584b776db55890dcd7d3401426e1856fe480946955fa00c18fa994`.
 
-The offline admission gate exercises 67 directed negative cases after recomputing
+The offline admission gate exercises 70 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends
@@ -402,7 +433,7 @@ clock spread, signature mismatch, and exact bundle contents. Its KAT generates
 only ephemeral synthetic keys and removes them; it reads zero real host
 identifiers and produces zero real attestations.
 
-The execution/event/terminal schema KAT adds 83 directed negatives. It rejects
+The execution/event/terminal schema KAT adds 87 directed negatives. It rejects
 multi-use or overlong authority, incomplete/domain-colliding topology, public
 or credential-bearing network forms, coordinator-targeted faults, broken
 source signatures and event links, incomplete recovery/cleanup, leaked-secret
@@ -425,8 +456,16 @@ declared signer binding, domain binding, and message expiry. All keys and
 messages are synthetic; no real keys, credentials, network, commands, services,
 or faults are used.
 
-The runtime-preparation authorization KAT adds 44 directed negatives over the
-source/proposal/contract, attestation-set, endpoint-manifest and schema
+The exact-set countersignature KAT adds one complete synthetic three-key,
+three-packet owner-countersigned admission and 51 directed negatives over
+envelope closure, owner/signature/namespace, source and contract identities,
+lifetime, private output, bundle-before-owner ordering, one-use replay,
+reverified-set equality, admitted-receipt integrity/currentness, distinctness,
+side effects and claim ceilings. It reads zero real private bundles or stable
+identity sources and performs no credential, network, service or fault action.
+
+The runtime-preparation authorization KAT adds 45 directed negatives over the
+source/proposal/contract, owner-admitted attestation set, endpoint-manifest and schema
 bindings; private path closure; lifetime and planned-execution windows;
 one-use/zero-spend authority; allowed/forbidden actions; claim ceilings;
 canonical framing; owner signature and namespace; and private output

@@ -23,8 +23,9 @@ from jsonschema import Draft202012Validator, FormatChecker
 ROOT = Path(__file__).resolve().parents[2]
 COLLECTION_CHALLENGE_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_domain_collection_challenge_v1.py"
 RUNTIME_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_private_runtime_contracts_v1.py"
+COUNTERSIGNATURE_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_attestation_set_countersignature_v1.py"
 SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-preparation-challenge-schema-v1.json"
-EXPECTED_SCHEMA_SHA256 = "be45ac3a4d69a67d4f71e2acc2d2cb5f0ca03b23574640a02c50a5937d6c0282"
+EXPECTED_SCHEMA_SHA256 = "1baaddc21592427adad308f2325e4cd6a5f9ba7f1a45db2a5d1d03de734967b3"
 PREPARATION_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/runtime-preparation-challenge/v1\0"
 SIGNATURE_NAMESPACE = "agent-bridge-t22-a1-owner-runtime-preparation-v1"
 MAX_PACKET_BYTES = 64 * 1024
@@ -55,6 +56,10 @@ def load_collection_challenge_module():
 
 def load_runtime_module():
     return load_module("t22a1_runtime_for_preparation_authorization", RUNTIME_SOURCE)
+
+
+def load_countersignature_module():
+    return load_module("t22a1_set_countersignature_for_runtime_preparation", COUNTERSIGNATURE_SOURCE)
 
 
 def canonical(value: object) -> bytes:
@@ -120,6 +125,7 @@ def validate_challenge(
     schema: dict,
     expected_source_commit: str,
     expected_attestation_set_sha256: str,
+    expected_admitted_set_receipt_sha256: str,
     expected_endpoint_manifest_sha256: str,
     now: datetime,
 ) -> dict:
@@ -148,6 +154,7 @@ def validate_challenge(
         "owner_decision_proposal_sha256": proposal["proposal_sha256"],
         "admission_contract_sha256": contract["contract_sha256"],
         "exact_three_domain_attestation_set_sha256": expected_attestation_set_sha256,
+        "owner_countersigned_attestation_set_receipt_sha256": expected_admitted_set_receipt_sha256,
         "private_endpoint_manifest_schema_sha256": runtime.EXPECTED_ENDPOINT_SCHEMA_SHA256,
         "private_endpoint_manifest_content_sha256": expected_endpoint_manifest_sha256,
         "runtime_credential_manifest_schema_sha256": runtime.EXPECTED_CREDENTIAL_SCHEMA_SHA256,
@@ -232,6 +239,7 @@ def build_challenge(
     source_commit: str,
     run_id: str,
     attestation_set_sha256: str,
+    admitted_set_receipt_sha256: str,
     endpoint_manifest_sha256: str,
     artifact_root: Path,
     openssl_executable: Path,
@@ -276,6 +284,7 @@ def build_challenge(
             "owner_decision_proposal_sha256": proposal["proposal_sha256"],
             "admission_contract_sha256": contract["contract_sha256"],
             "exact_three_domain_attestation_set_sha256": attestation_set_sha256,
+            "owner_countersigned_attestation_set_receipt_sha256": admitted_set_receipt_sha256,
             "private_endpoint_manifest_schema_sha256": runtime.EXPECTED_ENDPOINT_SCHEMA_SHA256,
             "private_endpoint_manifest_content_sha256": endpoint_manifest_sha256,
             "runtime_credential_manifest_schema_sha256": runtime.EXPECTED_CREDENTIAL_SCHEMA_SHA256,
@@ -316,7 +325,8 @@ def build_challenge(
     value["content_sha256"] = challenge_digest(value)
     validate_challenge(
         value, anchor, contract, proposal, schema, source_commit,
-        attestation_set_sha256, endpoint_manifest_sha256, issued_at,
+        attestation_set_sha256, admitted_set_receipt_sha256,
+        endpoint_manifest_sha256, issued_at,
     )
     return value
 
@@ -331,6 +341,7 @@ def verify_challenge_files(path: Path, signature_path: Path, anchor: dict, sourc
     validate_challenge(
         value, anchor, contract, proposal, schema, source_commit,
         value["bindings"]["exact_three_domain_attestation_set_sha256"],
+        value["bindings"]["owner_countersigned_attestation_set_receipt_sha256"],
         value["bindings"]["private_endpoint_manifest_content_sha256"], now,
     )
     signature_sha256 = verify_signature(raw, signature_path, public_key)
@@ -392,7 +403,7 @@ def main() -> None:
     commands.add_parser("status")
     generate = commands.add_parser("generate")
     generate.add_argument("--run-id", required=True)
-    generate.add_argument("--attestation-set-sha256", required=True)
+    generate.add_argument("--admitted-attestation-set-receipt", type=Path, required=True)
     generate.add_argument("--endpoint-manifest-sha256", required=True)
     generate.add_argument("--artifact-root", type=Path, required=True)
     generate.add_argument("--openssl-executable", type=Path, required=True)
@@ -420,9 +431,18 @@ def main() -> None:
     now = datetime.now(timezone.utc)
     if arguments.command == "generate":
         planned_expiry = parse_time(arguments.planned_execution_expires_at, "E_PREPARATION_PLANNED_EXPIRY")
+        countersignature = load_countersignature_module()
+        try:
+            admitted_set = countersignature.parse_admission_receipt(
+                arguments.admitted_attestation_set_receipt.resolve(strict=True),
+                source_commit, contract, proposal, now,
+            )
+        except (RuntimeError, OSError) as error:
+            raise SafeFailure(str(error)) from error
         challenge = build_challenge(
             anchor, contract, proposal, source_commit, arguments.run_id,
-            arguments.attestation_set_sha256, arguments.endpoint_manifest_sha256,
+            admitted_set["attestation_set_sha256"], admitted_set["content_sha256"],
+            arguments.endpoint_manifest_sha256,
             arguments.artifact_root,
             arguments.openssl_executable, arguments.openssl_executable_sha256,
             arguments.ssh_keygen_executable, arguments.ssh_keygen_executable_sha256,

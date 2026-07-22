@@ -43,6 +43,7 @@ def rejected_challenge(base: dict, anchor: dict, mutate, now: datetime = NOW) ->
         module.validate_challenge(
             candidate, anchor, contract, proposal, schema, SOURCE_COMMIT,
             base["bindings"]["exact_three_domain_attestation_set_sha256"],
+            base["bindings"]["owner_countersigned_attestation_set_receipt_sha256"],
             base["bindings"]["private_endpoint_manifest_content_sha256"], now,
         )
     except module.SafeFailure:
@@ -79,10 +80,12 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-runtime-preparation-kat-") as di
     openssl = Path(shutil.which("openssl") or "").resolve(strict=True)
     ssh_keygen_path = Path(ssh_keygen).resolve(strict=True)
     attestation_set_sha256 = digest("attestation-set")
+    admitted_set_receipt_sha256 = digest("admitted-set-receipt")
     endpoint_manifest_sha256 = digest("endpoint-manifest")
     challenge = module.build_challenge(
         anchor, contract, proposal, SOURCE_COMMIT, RUN_ID,
-        attestation_set_sha256, endpoint_manifest_sha256, artifact_root,
+        attestation_set_sha256, admitted_set_receipt_sha256,
+        endpoint_manifest_sha256, artifact_root,
         openssl, hashlib.sha256(openssl.read_bytes()).hexdigest(),
         ssh_keygen_path, hashlib.sha256(ssh_keygen_path.read_bytes()).hexdigest(),
         NOW, NOW + timedelta(hours=4), 3600, 3600,
@@ -131,6 +134,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-runtime-preparation-kat-") as di
         lambda x: x["bindings"].update(owner_decision_proposal_sha256=digest("other-proposal")),
         lambda x: x["bindings"].update(admission_contract_sha256=digest("other-contract")),
         lambda x: x["bindings"].update(exact_three_domain_attestation_set_sha256=digest("other-attestations")),
+        lambda x: x["bindings"].update(owner_countersigned_attestation_set_receipt_sha256=digest("other-admission")),
         lambda x: x["bindings"].update(private_endpoint_manifest_schema_sha256=digest("other-endpoint-schema")),
         lambda x: x["bindings"].update(private_endpoint_manifest_content_sha256=digest("other-endpoints")),
         lambda x: x["bindings"].update(runtime_credential_manifest_schema_sha256=digest("other-credential-schema")),
@@ -165,7 +169,8 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-runtime-preparation-kat-") as di
     try:
         module.validate_challenge(
             challenge, anchor, contract, proposal, schema, SOURCE_COMMIT,
-            attestation_set_sha256, endpoint_manifest_sha256, datetime(2026, 7, 22, 23, 30),
+            attestation_set_sha256, admitted_set_receipt_sha256,
+            endpoint_manifest_sha256, datetime(2026, 7, 22, 23, 30),
         )
     except module.SafeFailure as error:
         assert str(error) == "E_PREPARATION_VALIDATION_TIME"

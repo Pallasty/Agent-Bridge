@@ -72,6 +72,10 @@ execution = {
         "owner_decision_proposal_sha256": digest("proposal"),
         "domain_attestation_schema_sha256": digest("attestation-schema"),
         "exact_three_domain_attestation_packet_set_sha256": digest("attestation-set"),
+        "attestation_set_countersignature_content_sha256": digest("attestation-set-countersignature"),
+        "owner_attestation_set_countersignature_signature_sha256": digest("attestation-set-owner-signature"),
+        "owner_countersigned_attestation_set_receipt_sha256": digest("attestation-set-admission-receipt"),
+        "admission_bundle_reverification_receipt_sha256": digest("attestation-set-bundle-reverification"),
         "domain_bindings": [
             {
                 "domain_id": f"domain-{number}",
@@ -177,6 +181,10 @@ execution_mutations = (
     lambda x: x["admission_bindings"]["domain_bindings"][1].update(domain_id="domain-1"),
     lambda x: x["admission_bindings"].update(all_domain_attestations_current=False),
     lambda x: x["admission_bindings"].update(owner_countersignature_over_exact_packet_set_verified=False),
+    lambda x: x["admission_bindings"].pop("attestation_set_countersignature_content_sha256"),
+    lambda x: x["admission_bindings"].pop("owner_attestation_set_countersignature_signature_sha256"),
+    lambda x: x["admission_bindings"].pop("owner_countersigned_attestation_set_receipt_sha256"),
+    lambda x: x["admission_bindings"].pop("admission_bundle_reverification_receipt_sha256"),
     lambda x: x["budget"].update(maximum_spend_usd_cents=1),
     lambda x: x["network"].update(raw_endpoints_embedded=True),
     lambda x: x["network"].update(overlay_credentials_embedded=True),

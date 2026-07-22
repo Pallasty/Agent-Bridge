@@ -92,12 +92,16 @@
     "admission_bindings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["admission_contract_sha256", "owner_decision_proposal_sha256", "domain_attestation_schema_sha256", "exact_three_domain_attestation_packet_set_sha256", "domain_bindings", "all_domain_attestation_signatures_verified", "all_domain_attestations_current", "all_domain_distinctness_checks_passed", "owner_countersignature_over_exact_packet_set_verified"],
+      "required": ["admission_contract_sha256", "owner_decision_proposal_sha256", "domain_attestation_schema_sha256", "exact_three_domain_attestation_packet_set_sha256", "attestation_set_countersignature_content_sha256", "owner_attestation_set_countersignature_signature_sha256", "owner_countersigned_attestation_set_receipt_sha256", "admission_bundle_reverification_receipt_sha256", "domain_bindings", "all_domain_attestation_signatures_verified", "all_domain_attestations_current", "all_domain_distinctness_checks_passed", "owner_countersignature_over_exact_packet_set_verified"],
       "properties": {
         "admission_contract_sha256": {"$ref": "#/$defs/sha256"},
         "owner_decision_proposal_sha256": {"$ref": "#/$defs/sha256"},
         "domain_attestation_schema_sha256": {"$ref": "#/$defs/sha256"},
         "exact_three_domain_attestation_packet_set_sha256": {"$ref": "#/$defs/sha256"},
+        "attestation_set_countersignature_content_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_attestation_set_countersignature_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_countersigned_attestation_set_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "admission_bundle_reverification_receipt_sha256": {"$ref": "#/$defs/sha256"},
         "domain_bindings": {
           "type": "array",
           "minItems": 3,

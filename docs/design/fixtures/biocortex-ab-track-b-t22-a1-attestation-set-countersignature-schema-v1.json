@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex.track_b.t22_a1.attestation_set_countersignature.v1",
+  "title": "BioCortex Track B T22-A1 exact attestation-set owner countersignature",
+  "description": "Owner-signable, non-executing admission of one freshly reverified exact three-domain attestation set.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "packet_kind", "decision", "hashing_contract", "owner_binding", "bindings", "verified_set", "artifact_scope", "countersignature_authority", "claims", "content_sha256"],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex.track_b.t22_a1.attestation_set_countersignature.v1"},
+    "packet_kind": {"const": "T22_A1_EXACT_THREE_DOMAIN_ATTESTATION_SET_OWNER_COUNTERSIGNATURE"},
+    "decision": {"const": "COUNTERSIGN_ONE_EXACT_REVERIFIED_T22_A1_THREE_DOMAIN_INPUT_SET_NON_EXECUTING"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "owner_binding": {"$ref": "#/$defs/owner_binding"},
+    "bindings": {"$ref": "#/$defs/bindings"},
+    "verified_set": {"$ref": "#/$defs/verified_set"},
+    "artifact_scope": {"$ref": "#/$defs/artifact_scope"},
+    "countersignature_authority": {"$ref": "#/$defs/countersignature_authority"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "content_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "absolute_path": {"type": "string", "pattern": "^/", "maxLength": 4096},
+    "utc_time": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "hash_scope", "self_hash_field", "self_hash_field_excluded", "detached_owner_signature_covers_complete_canonical_packet", "cross_field_semantic_validation_required"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/track-b/t22-a1/attestation-set-countersignature/v1"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_CONTENT_SHA256"},
+        "self_hash_field": {"const": "content_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "detached_owner_signature_covers_complete_canonical_packet": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true}
+      }
+    },
+    "owner_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_id", "owner_role", "owner_public_key_sha256", "owner_public_key_fingerprint", "signature_scheme", "signature_namespace"],
+      "properties": {
+        "owner_id": {"const": "pallasting"},
+        "owner_role": {"const": "PROJECT_OWNER"},
+        "owner_public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_public_key_fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"},
+        "signature_scheme": {"const": "OPENSSH_SSHSIG_ED25519"},
+        "signature_namespace": {"const": "agent-bridge-t22-a1-owner-attestation-set-v1"}
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_commit", "owner_decision_proposal_sha256", "admission_contract_sha256", "domain_attestation_schema_sha256", "attestation_set_countersignature_schema_sha256"],
+      "properties": {
+        "source_commit": {"$ref": "#/$defs/git_oid"},
+        "owner_decision_proposal_sha256": {"$ref": "#/$defs/sha256"},
+        "admission_contract_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_attestation_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "attestation_set_countersignature_schema_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "packet_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "attestation_sha256"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "attestation_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "signature_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "public_key_sha256", "signature_sha256"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "signature_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "set_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_count", "distinct_machine_identity_count", "distinct_hardware_identity_count", "distinct_hostname_count", "distinct_domain_signing_key_count", "maximum_attestation_time_spread_seconds", "peer_endpoint_set_sha256", "acl_policy_receipt_sha256"],
+      "properties": {
+        "domain_count": {"const": 3},
+        "distinct_machine_identity_count": {"const": 3},
+        "distinct_hardware_identity_count": {"const": 3},
+        "distinct_hostname_count": {"const": 3},
+        "distinct_domain_signing_key_count": {"const": 3},
+        "maximum_attestation_time_spread_seconds": {"type": "integer", "minimum": 0, "maximum": 300},
+        "peer_endpoint_set_sha256": {"$ref": "#/$defs/sha256"},
+        "acl_policy_receipt_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "verified_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestation_set_sha256", "bundle_verification_receipt_sha256", "verified_at", "earliest_attestation_expires_at", "packet_bindings", "signature_bindings", "set_validation"],
+      "properties": {
+        "attestation_set_sha256": {"$ref": "#/$defs/sha256"},
+        "bundle_verification_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "verified_at": {"$ref": "#/$defs/utc_time"},
+        "earliest_attestation_expires_at": {"$ref": "#/$defs/utc_time"},
+        "packet_bindings": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "prefixItems": [
+            {"allOf": [{"$ref": "#/$defs/packet_binding"}, {"properties": {"domain_id": {"const": "domain-1"}}}]},
+            {"allOf": [{"$ref": "#/$defs/packet_binding"}, {"properties": {"domain_id": {"const": "domain-2"}}}]},
+            {"allOf": [{"$ref": "#/$defs/packet_binding"}, {"properties": {"domain_id": {"const": "domain-3"}}}]}
+          ], "items": false
+        },
+        "signature_bindings": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "prefixItems": [
+            {"allOf": [{"$ref": "#/$defs/signature_binding"}, {"properties": {"domain_id": {"const": "domain-1"}}}]},
+            {"allOf": [{"$ref": "#/$defs/signature_binding"}, {"properties": {"domain_id": {"const": "domain-2"}}}]},
+            {"allOf": [{"$ref": "#/$defs/signature_binding"}, {"properties": {"domain_id": {"const": "domain-3"}}}]}
+          ], "items": false
+        },
+        "set_validation": {"$ref": "#/$defs/set_validation"}
+      }
+    },
+    "artifact_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["private_artifact_root", "admitted_set_receipt_output_path", "repository_output_allowed", "directory_mode", "file_mode"],
+      "properties": {
+        "private_artifact_root": {"$ref": "#/$defs/absolute_path"},
+        "admitted_set_receipt_output_path": {"$ref": "#/$defs/absolute_path"},
+        "repository_output_allowed": {"const": false},
+        "directory_mode": {"const": "0700"},
+        "file_mode": {"const": "0600"}
+      }
+    },
+    "countersignature_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issued_at", "not_before", "expires_at", "maximum_lifetime_seconds", "one_admission_per_countersignature_sha256", "allowed_after_signature", "forbidden"],
+      "properties": {
+        "issued_at": {"$ref": "#/$defs/utc_time"},
+        "not_before": {"$ref": "#/$defs/utc_time"},
+        "expires_at": {"$ref": "#/$defs/utc_time"},
+        "maximum_lifetime_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "one_admission_per_countersignature_sha256": {"const": true},
+        "allowed_after_signature": {"const": ["REVERIFY_EXACT_PRIVATE_THREE_DOMAIN_BUNDLE", "WRITE_PRIVATE_NONSECRET_ADMITTED_SET_RECEIPT"]},
+        "forbidden": {"const": ["STABLE_HOST_IDENTITY_SOURCE_READ", "AMBIENT_CREDENTIAL_DISCOVERY_OR_ACCESS", "NETWORK_OR_EXTERNAL_HOST_CONNECTION", "PUBLIC_LISTENER", "OVERLAY_CONFIGURATION_CHANGE", "CLOUD_OR_PROVIDER_API_ACCESS", "NONZERO_SPEND", "SERVICE_PROCESS_START", "FAULT_INJECTION", "WORKLOAD_EXECUTION", "PRODUCTION_OR_CUSTOMER_DATA", "EXECUTION_AUTHORITY_OR_AVAILABILITY_CLAIM", "AUTOMATIC_RETRY"]}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["countersignature_is_execution_authority", "host_power_loss_proved", "site_power_network_independence_proved", "external_anti_rollback_proved", "production_admissible"],
+      "properties": {
+        "countersignature_is_execution_authority": {"const": false},
+        "host_power_loss_proved": {"const": false},
+        "site_power_network_independence_proved": {"const": false},
+        "external_anti_rollback_proved": {"const": false},
+        "production_admissible": {"const": false}
+      }
+    }
+  }
+}

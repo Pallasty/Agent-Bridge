@@ -55,12 +55,13 @@
     "bindings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source_commit", "owner_decision_proposal_sha256", "admission_contract_sha256", "exact_three_domain_attestation_set_sha256", "private_endpoint_manifest_schema_sha256", "private_endpoint_manifest_content_sha256", "runtime_credential_manifest_schema_sha256", "domain_agent_message_schema_sha256", "distributed_execution_contract_schema_sha256", "runtime_preparation_challenge_schema_sha256"],
+      "required": ["source_commit", "owner_decision_proposal_sha256", "admission_contract_sha256", "exact_three_domain_attestation_set_sha256", "owner_countersigned_attestation_set_receipt_sha256", "private_endpoint_manifest_schema_sha256", "private_endpoint_manifest_content_sha256", "runtime_credential_manifest_schema_sha256", "domain_agent_message_schema_sha256", "distributed_execution_contract_schema_sha256", "runtime_preparation_challenge_schema_sha256"],
       "properties": {
         "source_commit": {"$ref": "#/$defs/git_oid"},
         "owner_decision_proposal_sha256": {"$ref": "#/$defs/sha256"},
         "admission_contract_sha256": {"$ref": "#/$defs/sha256"},
         "exact_three_domain_attestation_set_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_countersigned_attestation_set_receipt_sha256": {"$ref": "#/$defs/sha256"},
         "private_endpoint_manifest_schema_sha256": {"$ref": "#/$defs/sha256"},
         "private_endpoint_manifest_content_sha256": {"$ref": "#/$defs/sha256"},
         "runtime_credential_manifest_schema_sha256": {"$ref": "#/$defs/sha256"},
