@@ -35,14 +35,14 @@ rollback prevention.
 - frozen three-domain admission contract and conservative claim ceiling;
 - blocked owner-decision proposal with all real endpoint, cloud, budget,
   attestation-set, ACL, fault-target, and public-output choices unset; and
-- offline preflight plus 55 semantic negative mutations that recompute packet
+- offline preflight plus 64 semantic negative mutations that recompute packet
   self-digests before rejection;
 - private three-packet bundle verifier with canonical framing, SSHSIG, public-key
   normalization, four-hour freshness, 300-second clock spread, alias-collapse,
   identity/key uniqueness, endpoint/ACL equality, and exact directory closure;
   its 30 synthetic negatives create no real attestation; and
 - closed distributed execution-contract, signed-event, and terminal-evidence
-  schemas with 73 synthetic negative cases and no real contract instance or
+  schemas with 83 synthetic negative cases and no real contract instance or
   evidence item; and
 - exact owner-signed per-domain collection-challenge schema, trust-anchor
   binding/generation/verification gate, and 42 synthetic negative cases. It
@@ -50,7 +50,11 @@ rollback prevention.
 - a challenge-gated Linux/macOS physical-domain collector with atomic
   single-use reservation, exact domain-key matching, identity-domain-separated
   in-memory hashing, canonical packet signing/self-verification, private
-  terminal receipts, one synthetic success, and 10 synthetic failure paths.
+  terminal receipts, one synthetic success, and 10 synthetic failure paths;
+  and
+- private endpoint, mTLS credential-source, and signed domain-agent protocol
+  schemas plus semantic validators with 62 synthetic negative paths. No real
+  manifest, credential file, listener, or network connection is used.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -81,11 +85,14 @@ Frozen packet identities:
 |---|---|
 | domain-attestation schema raw bytes | `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b` |
 | domain-collection challenge schema raw bytes | `26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d` |
-| distributed execution-contract schema raw bytes | `2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b` |
+| distributed execution-contract schema raw bytes | `056f7e555c6e04ac5a9ba1ddc3817771635edf3a0321921b69fa8924d803428a` |
+| private endpoint-manifest schema raw bytes | `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953` |
+| runtime credential-manifest schema raw bytes | `b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a` |
+| domain-agent message schema raw bytes | `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee` |
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
-| admission-contract content | `558305fefb13bd0ea877e92ebcf99c8450fdc2e51e275dc1991c3edf9e2131d0` |
-| blocked owner proposal content | `dbc0dc41d022a5b431236347009b493829c8abdc850ecb88d82c8a9f85e37c9f` |
+| admission-contract content | `2fd750a9771827a9d984e915fb607b3dd844929054dba253cc310597dc38ed5d` |
+| blocked owner proposal content | `15f3bbc90cbdaa1692e925709c5239e845b57ad3fcf9881f8dea4a2cea6ed933` |
 
 ## Advancement boundary
 
@@ -99,6 +106,10 @@ No signature is requested yet. The next concrete inputs are:
 4. fresh private attestations from the coordinator, Mac, and third host under
    three distinct dedicated keys; and
 5. the exact private-overlay endpoint-set and ACL receipt digests.
+
+The final execution payload additionally requires the private endpoint and
+runtime credential manifest content hashes, exact per-run mTLS material, and a
+coordinator runtime signing key. None exists or is accessed yet.
 
 After those exist, a separate unit may implement the cross-host runner against
 the now-frozen schemas, generate one source-bound execution-contract instance,

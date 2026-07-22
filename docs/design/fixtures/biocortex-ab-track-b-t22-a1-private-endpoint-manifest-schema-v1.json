@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex.track_b.t22_a1.private_endpoint_manifest.v1",
+  "title": "BioCortex Track B T22-A1 private endpoint manifest",
+  "description": "Private, owner-bound exact overlay endpoint manifest. Instances must never be committed or emitted in public receipts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "packet_kind", "hashing_contract", "run_id", "source_commit", "transport", "acl_policy_receipt_sha256", "domains", "raw_manifest_repository_allowed", "public_address_allowed", "dns_resolution_required", "content_sha256"],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex.track_b.t22_a1.private_endpoint_manifest.v1"},
+    "packet_kind": {"const": "T22_A1_PRIVATE_ENDPOINT_MANIFEST"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "run_id": {"$ref": "#/$defs/run_id"},
+    "source_commit": {"$ref": "#/$defs/git_oid"},
+    "transport": {"const": "OWNER_MANAGED_PRIVATE_OVERLAY"},
+    "acl_policy_receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "domains": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {"allOf": [{"$ref": "#/$defs/domain"}, {"properties": {"domain_id": {"const": "domain-1"}}}]},
+        {"allOf": [{"$ref": "#/$defs/domain"}, {"properties": {"domain_id": {"const": "domain-2"}}}]},
+        {"allOf": [{"$ref": "#/$defs/domain"}, {"properties": {"domain_id": {"const": "domain-3"}}}]}
+      ],
+      "items": false
+    },
+    "raw_manifest_repository_allowed": {"const": false},
+    "public_address_allowed": {"const": false},
+    "dns_resolution_required": {"const": false},
+    "content_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "run_id": {"type": "string", "pattern": "^t22-a1-[0-9]{8}T[0-9]{6}\\.[0-9]{6}z-[0-9a-f]{12}$"},
+    "port": {"type": "integer", "minimum": 1024, "maximum": 65535},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "hash_scope", "self_hash_field", "self_hash_field_excluded", "cross_field_semantic_validation_required"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/track-b/t22-a1/private-endpoint-manifest/v1"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_CONTENT_SHA256"},
+        "self_hash_field": {"const": "content_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true}
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "hostname", "overlay_ip", "agent_control_port", "etcd_client_port", "etcd_peer_port", "openbao_api_port", "openbao_cluster_port", "bind_exact_overlay_ip_only", "public_listener_allowed"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "hostname": {"type": "string", "minLength": 1, "maxLength": 255},
+        "overlay_ip": {"type": "string", "minLength": 2, "maxLength": 64},
+        "agent_control_port": {"$ref": "#/$defs/port"},
+        "etcd_client_port": {"$ref": "#/$defs/port"},
+        "etcd_peer_port": {"$ref": "#/$defs/port"},
+        "openbao_api_port": {"$ref": "#/$defs/port"},
+        "openbao_cluster_port": {"$ref": "#/$defs/port"},
+        "bind_exact_overlay_ip_only": {"const": true},
+        "public_listener_allowed": {"const": false}
+      }
+    }
+  }
+}

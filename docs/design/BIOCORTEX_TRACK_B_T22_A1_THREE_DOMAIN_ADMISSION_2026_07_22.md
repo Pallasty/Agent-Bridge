@@ -212,6 +212,37 @@ documentation. Existing owner-authenticated hosts need no new key merely for
 this experiment; their exact endpoint and ACL receipts still require owner
 binding.
 
+### Private runtime endpoint, credential, and agent protocol
+
+The cross-host control plane is now frozen as three additional private
+contracts. No instance exists yet:
+
+1. The endpoint manifest contains exactly three ordered domain rows with one
+   literal private-overlay IP and the agent/etcd/OpenBao ports for each domain.
+   Public, loopback, link-local, multicast, unspecified, duplicate, DNS-based,
+   and per-host port-colliding forms are rejected. Raw instances are private
+   and forbidden from the repository and public receipts.
+2. The runtime credential manifest binds a private per-run CA, one coordinator
+   client certificate, and three distinct domain server certificates and
+   private-key paths. Every path must be absolute and outside the repository;
+   certificate, SPKI, and path reuse are rejected. Keys must be `0600`, CA
+   private-key paths are absent, client/server EKUs are exact, and every
+   certificate must remain valid through execution expiry. Credential files
+   are read only after the final owner execution signature verifies.
+3. The domain-agent protocol carries only canonical, maximum-60-second,
+   nonce/sequence/previous-hash-bound messages over mTLS. Requests are signed
+   by the exact coordinator runtime key and responses by the domain operator
+   key under distinct SSHSIG namespaces. Commands come from a fixed lifecycle
+   enum; raw endpoints, credentials, secrets, arbitrary commands/shell text,
+   and execution/production claims are structurally forbidden. A stop-service
+   command cannot target coordinator `domain-1`.
+
+The future distributed execution contract must bind the raw SHA-256 of all
+three schemas, the exact private endpoint- and credential-manifest content
+hashes, and the coordinator runtime public key. The runner may not discover
+ambient credentials, resolve DNS, provision the overlay, or listen on any
+address other than its exact manifest-bound overlay IP.
+
 ## Third-domain decision
 
 The preferred zero-spend path is a third owner-controlled physical host. If no
@@ -255,9 +286,12 @@ or satisfy the stronger S20 monotonic-CAS requirement.
    selected third host, each under a distinct dedicated public key.
 5. Provide the sorted three-packet digest set, private-overlay endpoint-set
    digest, ACL receipt digest, and fault-target domain.
-6. Review the completed execution payload and sign only that source-bound
+6. Produce the exact private endpoint manifest, per-run mTLS CA/certificates,
+   credential manifest, and coordinator runtime signing key; review their
+   content hashes without publishing raw paths or endpoints.
+7. Review the completed execution payload and sign only that source-bound
    payload under `agent-bridge-t22-a1-owner-v1`.
-7. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
+8. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
    and remain honest with A1-R disabled.
 
 No current file is a signing request. The proposal remains deliberately
@@ -270,17 +304,23 @@ blocked until these inputs are concrete.
 - domain-collection challenge schema raw SHA-256:
   `26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d`;
 - distributed execution-contract schema raw SHA-256:
-  `2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b`;
+  `056f7e555c6e04ac5a9ba1ddc3817771635edf3a0321921b69fa8924d803428a`;
+- private endpoint-manifest schema raw SHA-256:
+  `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953`;
+- runtime credential-manifest schema raw SHA-256:
+  `b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a`;
+- domain-agent message schema raw SHA-256:
+  `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee`;
 - distributed event schema raw SHA-256:
   `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5`;
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - admission-contract content SHA-256:
-  `558305fefb13bd0ea877e92ebcf99c8450fdc2e51e275dc1991c3edf9e2131d0`;
+  `2fd750a9771827a9d984e915fb607b3dd844929054dba253cc310597dc38ed5d`;
 - blocked owner-proposal content SHA-256:
-  `dbc0dc41d022a5b431236347009b493829c8abdc850ecb88d82c8a9f85e37c9f`.
+  `15f3bbc90cbdaa1692e925709c5239e845b57ad3fcf9881f8dea4a2cea6ed933`.
 
-The offline admission gate exercises 55 directed negative cases after recomputing
+The offline admission gate exercises 64 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends
@@ -293,13 +333,20 @@ clock spread, signature mismatch, and exact bundle contents. Its KAT generates
 only ephemeral synthetic keys and removes them; it reads zero real host
 identifiers and produces zero real attestations.
 
-The execution/event/terminal schema KAT adds 73 directed negatives. It rejects
+The execution/event/terminal schema KAT adds 83 directed negatives. It rejects
 multi-use or overlong authority, incomplete/domain-colliding topology, public
 or credential-bearing network forms, coordinator-targeted faults, broken
 source signatures and event links, incomplete recovery/cleanup, leaked-secret
 states, overspend, and inflated claims. All instances are synthetic; it starts
 zero services, contacts zero hosts, reads zero real identifiers or credentials,
 and injects zero faults.
+
+The private runtime KAT adds 62 directed negatives over endpoint privacy and
+uniqueness, port separation, credential path scope and permissions,
+certificate/SPKI uniqueness, issuer/EKU/expiry bindings, mTLS requirements,
+message direction/signers/namespaces, freshness, replay links, fault targeting,
+and shell/secret/claim escalation. It reads zero real manifest instances or
+credential files, opens zero sockets/listeners, and contacts zero hosts.
 
 The collection-challenge KAT adds 42 directed negatives over schema and
 domain-separated digest binding, source/proposal/contract identities, alias

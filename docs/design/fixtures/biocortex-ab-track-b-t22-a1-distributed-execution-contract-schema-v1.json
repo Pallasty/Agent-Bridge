@@ -17,6 +17,7 @@
     "admission_bindings",
     "budget",
     "network",
+    "private_runtime",
     "topology",
     "fault",
     "evidence_contract",
@@ -35,6 +36,7 @@
     "admission_bindings": {"$ref": "#/$defs/admission_bindings"},
     "budget": {"$ref": "#/$defs/budget"},
     "network": {"$ref": "#/$defs/network"},
+    "private_runtime": {"$ref": "#/$defs/private_runtime"},
     "topology": {"$ref": "#/$defs/topology"},
     "fault": {"$ref": "#/$defs/fault"},
     "evidence_contract": {"$ref": "#/$defs/evidence_contract"},
@@ -156,6 +158,29 @@
         "public_listeners_allowed": {"const": false},
         "host_global_firewall_or_route_mutation_allowed": {"const": false},
         "runner_provisions_or_joins_overlay": {"const": false}
+      }
+    },
+    "private_runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["private_endpoint_manifest_schema_path", "private_endpoint_manifest_schema_sha256", "private_endpoint_manifest_content_sha256", "runtime_credential_manifest_schema_path", "runtime_credential_manifest_schema_sha256", "runtime_credential_manifest_content_sha256", "domain_agent_message_schema_path", "domain_agent_message_schema_sha256", "coordinator_runtime_public_key_sha256", "mutual_tls_required", "certificate_and_key_verification_required", "credentials_read_only_after_owner_signature", "domain_message_signatures_required", "agent_listeners_bind_exact_overlay_ip_only", "arbitrary_remote_shell_allowed", "raw_endpoint_or_credential_manifest_in_repository_or_receipts_allowed"],
+      "properties": {
+        "private_endpoint_manifest_schema_path": {"const": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-private-endpoint-manifest-schema-v1.json"},
+        "private_endpoint_manifest_schema_sha256": {"const": "8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953"},
+        "private_endpoint_manifest_content_sha256": {"$ref": "#/$defs/sha256"},
+        "runtime_credential_manifest_schema_path": {"const": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json"},
+        "runtime_credential_manifest_schema_sha256": {"const": "b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a"},
+        "runtime_credential_manifest_content_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_agent_message_schema_path": {"const": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-agent-message-schema-v1.json"},
+        "domain_agent_message_schema_sha256": {"const": "92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee"},
+        "coordinator_runtime_public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "mutual_tls_required": {"const": true},
+        "certificate_and_key_verification_required": {"const": true},
+        "credentials_read_only_after_owner_signature": {"const": true},
+        "domain_message_signatures_required": {"const": true},
+        "agent_listeners_bind_exact_overlay_ip_only": {"const": true},
+        "arbitrary_remote_shell_allowed": {"const": false},
+        "raw_endpoint_or_credential_manifest_in_repository_or_receipts_allowed": {"const": false}
       }
     },
     "topology_domain": {
