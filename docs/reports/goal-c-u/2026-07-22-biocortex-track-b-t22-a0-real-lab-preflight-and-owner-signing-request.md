@@ -36,6 +36,14 @@ only T22-A0 implementation and execution on the named host. A later T22-A1
 decision is required for three independent failure domains, cloud/provider
 access, non-zero spend, external anti-rollback, or production claims.
 
+The authorization utility remains blocked while the exact repository trust
+anchor is absent. After the owner confirms the proposal and supplies the public
+key, a separate commit will pin that key, host, fingerprint, and proposal hash.
+Only then can the utility generate a timestamped payload. Verification uses
+OpenSSH `sshsig` with the exact owner identity and namespace; it never reads the
+private key. A synthetic ephemeral-key test covers the cryptographic path but
+cannot install or substitute for the repository owner trust anchor.
+
 ## Fail-closed preflight
 
 `scripts/check-biocortex-ab-track-b-t22-a0-real-lab-preflight-v1-pack.sh`
@@ -43,3 +51,9 @@ validates the proposal hash and rejects authority, spend, credentials, cloud,
 production data, host-global networking, false topology claims, signature
 forgery, external anti-rollback claims, and hash drift. It performs no network
 or secret access.
+
+`scripts/check-biocortex-ab-track-b-t22-a0-owner-authorization-v1-pack.sh`
+additionally verifies exact four-hour payload semantics, OpenSSH Ed25519 signing
+and verification, owner identity/namespace binding, and 11 authorization
+mutations. Its repository-facing result remains
+`BLOCKED_OWNER_TRUST_ANCHOR_REQUIRED` until the owner supplies the public key.
