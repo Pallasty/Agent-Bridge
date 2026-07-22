@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **OFFLINE_THREE_DOMAIN_COUNTERSIGNATURE_AND_RUNTIME_PREPARATION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
+Status: **OFFLINE_FINAL_EXECUTION_AUTHORIZATION_AND_ADMISSION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
 
 Live execution: **NOT AUTHORIZED AND NOT ATTEMPTED**
 
@@ -249,8 +249,9 @@ contracts. No instance exists yet:
    and per-host port-colliding forms are rejected. Raw instances are private
    and forbidden from the repository and public receipts.
 2. The runtime credential manifest binds a private per-run CA, one coordinator
-   client certificate, and three distinct domain server certificates and
-   private-key paths. Every path must be absolute and outside the repository;
+   client certificate, three distinct domain server certificates and
+   private-key paths, plus the coordinator runtime Ed25519 public/private key
+   paths and exact public-key digest. Every path must be absolute and outside the repository;
    certificate, SPKI, and path reuse are rejected. Keys must be `0600`, CA
    private-key paths are absent, client/server EKUs are exact, and every
    certificate must remain valid through execution expiry. Credential files
@@ -332,6 +333,33 @@ commands, starts zero listeners/services, and injects zero faults. The network
 adapter and actual command executors remain absent until the final owner-signed
 execution contract and private runtime manifests exist.
 
+### Final execution authorization admission
+
+The final execution layer is now more than a schema. Its offline builder
+revalidates the admitted owner-countersigned three-domain set, the original set
+signature, all three fresh domain signatures, the owner-signed runtime-
+preparation challenge and terminal receipt, the endpoint manifest, credential
+manifest, budget branch, fault target and evidence schemas. It emits one exact
+content-addressed execution contract under the private artifact root without
+reading any credential file.
+
+That contract also binds the artifact root and run-evidence root, preventing a
+single signature from being replayed under a caller-selected directory. It
+binds the preparation challenge/signature/terminal hashes and the exact
+OpenSSL/`ssh-keygen` paths and binary hashes used for post-signature credential
+verification.
+
+Admission verifies the final owner SSHSIG under
+`agent-bridge-t22-a1-owner-v1` before reading any private evidence or credential
+file, then atomically reserves the contract for one admission. Only afterward
+does it rebuild the contract from the private evidence and verify the CA,
+certificate chains, certificate/private-key matches, EKUs, expiry, overlay-IP
+SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
+a private one-execution admission receipt; failure is terminal and cannot
+retry. The admission step itself opens no socket, starts no listener or
+service, injects no fault and spends nothing. The cross-host runner remains a
+separate successor and must consume that receipt exactly once.
+
 ## Third-domain decision
 
 The preferred zero-spend path is a third owner-controlled physical host. If no
@@ -402,11 +430,11 @@ blocked until these inputs are concrete.
 - attestation-set countersignature schema raw SHA-256:
   `615959dbd1fbfe65da7830cd5b2bf4efc2ef9a917c94ae9438f820837d121a1c`;
 - distributed execution-contract schema raw SHA-256:
-  `1feed272f9832099b820b94dac1b7909bdce074f7cd6c897f41bfde666ad072d`;
+  `2ef4bcae59c8eb3ee65611e592e816eaee80d9b977d6c9c4c37c14c3eb4f73fc`;
 - private endpoint-manifest schema raw SHA-256:
   `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953`;
 - runtime credential-manifest schema raw SHA-256:
-  `b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a`;
+  `fe9b257edae7f93d20e81280e54b20da771c432b65ae5ac906231799ad4c10e2`;
 - runtime-preparation challenge schema raw SHA-256:
   `1baaddc21592427adad308f2325e4cd6a5f9ba7f1a45db2a5d1d03de734967b3`;
 - domain-agent message schema raw SHA-256:
@@ -416,11 +444,11 @@ blocked until these inputs are concrete.
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - admission-contract content SHA-256:
-  `fa37fa4b94c3601a4d48f620964785223a30fc6a20577c7892f903b72304ca6c`;
+  `467ab7805ce864da3b7ece06da44e99d4da38bf805c45cefc7ed530858629076`;
 - blocked owner-proposal content SHA-256:
-  `3b5657b9d2584b776db55890dcd7d3401426e1856fe480946955fa00c18fa994`.
+  `f549c6dc70b8dfd16e3a903c682d32af416d556006a257c62830933121cef8c9`.
 
-The offline admission gate exercises 70 directed negative cases after recomputing
+The offline admission gate exercises 74 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends
@@ -433,7 +461,7 @@ clock spread, signature mismatch, and exact bundle contents. Its KAT generates
 only ephemeral synthetic keys and removes them; it reads zero real host
 identifiers and produces zero real attestations.
 
-The execution/event/terminal schema KAT adds 87 directed negatives. It rejects
+The execution/event/terminal schema KAT adds 96 directed negatives. It rejects
 multi-use or overlong authority, incomplete/domain-colliding topology, public
 or credential-bearing network forms, coordinator-targeted faults, broken
 source signatures and event links, incomplete recovery/cleanup, leaked-secret
@@ -441,7 +469,7 @@ states, overspend, and inflated claims. All instances are synthetic; it starts
 zero services, contacts zero hosts, reads zero real identifiers or credentials,
 and injects zero faults.
 
-The private runtime KAT adds 62 directed negatives over endpoint privacy and
+The private runtime KAT adds 69 directed negatives over endpoint privacy and
 uniqueness, port separation, credential path scope and permissions,
 certificate/SPKI uniqueness, issuer/EKU/expiry bindings, mTLS requirements,
 message direction/signers/namespaces, freshness, replay links, fault targeting,
@@ -483,6 +511,17 @@ generation completion after authority expiry, and cleanup after injected
 generation failure. It reads zero real endpoint or
 credential instances and performs no network, listener, service, fault, or
 spend action.
+
+The final execution-authorization KAT drives one complete synthetic chain from
+three independently signed domain packets through set countersignature,
+runtime-material preparation, final owner execution signature and
+post-signature verification of eleven credential files. Its 37 directed negatives
+cover semantic contract escalation, evidence/tool cross-binding forgery, wrong
+owner signature, execution-admission receipt tampering/currentness, both
+output-present and reservation-backed replay, and a post-signature private-key
+substitution. It reads zero real private evidence or
+credential files and performs no network, listener, service, fault or spend
+action.
 
 The collection-challenge KAT adds 42 directed negatives over schema and
 domain-separated digest binding, source/proposal/contract identities, alias

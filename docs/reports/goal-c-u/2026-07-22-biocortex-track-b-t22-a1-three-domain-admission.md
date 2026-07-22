@@ -35,14 +35,14 @@ rollback prevention.
 - frozen three-domain admission contract and conservative claim ceiling;
 - blocked owner-decision proposal with all real endpoint, cloud, budget,
   attestation-set, ACL, fault-target, and public-output choices unset; and
-- offline preflight plus 70 semantic negative mutations that recompute packet
+- offline preflight plus 74 semantic negative mutations that recompute packet
   self-digests before rejection;
 - private three-packet bundle verifier with canonical framing, SSHSIG, public-key
   normalization, four-hour freshness, 300-second clock spread, alias-collapse,
   identity/key uniqueness, endpoint/ACL equality, and exact directory closure;
   its 30 synthetic negatives create no real attestation; and
 - closed distributed execution-contract, signed-event, and terminal-evidence
-  schemas with 87 synthetic negative cases and no real contract instance or
+  schemas with 96 synthetic negative cases and no real contract instance or
   evidence item; and
 - exact owner-signed per-domain collection-challenge schema, trust-anchor
   binding/generation/verification gate, and 42 synthetic negative cases. It
@@ -76,6 +76,13 @@ rollback prevention.
   purpose-separated mTLS leaves, and a coordinator Ed25519 key, verifies chain,
   key, EKU, expiry and endpoint SANs, drops the CA key, writes the private
   manifest, and terminally cleans partial material on failure.
+- a final execution-contract builder and owner-signature admission gate that
+  binds the exact artifact/run roots, set countersignature chain, runtime-
+  preparation challenge/signature/terminal, private manifests, tool binaries,
+  budget and fault target. A complete synthetic chain verifies all eleven
+  credential files only after the final owner signature; 37 negative paths
+  cover forgery, receipt integrity/currentness, replay, wrong signature and
+  post-signature key substitution.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -108,15 +115,15 @@ Frozen packet identities:
 | domain-attestation schema raw bytes | `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b` |
 | domain-collection challenge schema raw bytes | `26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d` |
 | attestation-set countersignature schema raw bytes | `615959dbd1fbfe65da7830cd5b2bf4efc2ef9a917c94ae9438f820837d121a1c` |
-| distributed execution-contract schema raw bytes | `1feed272f9832099b820b94dac1b7909bdce074f7cd6c897f41bfde666ad072d` |
+| distributed execution-contract schema raw bytes | `2ef4bcae59c8eb3ee65611e592e816eaee80d9b977d6c9c4c37c14c3eb4f73fc` |
 | private endpoint-manifest schema raw bytes | `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953` |
-| runtime credential-manifest schema raw bytes | `b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a` |
+| runtime credential-manifest schema raw bytes | `fe9b257edae7f93d20e81280e54b20da771c432b65ae5ac906231799ad4c10e2` |
 | runtime-preparation challenge schema raw bytes | `1baaddc21592427adad308f2325e4cd6a5f9ba7f1a45db2a5d1d03de734967b3` |
 | domain-agent message schema raw bytes | `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee` |
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
-| admission-contract content | `fa37fa4b94c3601a4d48f620964785223a30fc6a20577c7892f903b72304ca6c` |
-| blocked owner proposal content | `3b5657b9d2584b776db55890dcd7d3401426e1856fe480946955fa00c18fa994` |
+| admission-contract content | `467ab7805ce864da3b7ece06da44e99d4da38bf805c45cefc7ed530858629076` |
+| blocked owner proposal content | `f549c6dc70b8dfd16e3a903c682d32af416d556006a257c62830933121cef8c9` |
 
 ## Advancement boundary
 
@@ -143,10 +150,11 @@ new hashes and still requires a separate owner signature under
 `agent-bridge-t22-a1-owner-v1`. None of these real instances exists or is
 accessed yet.
 
-After those exist, a separate unit may implement the cross-host runner against
-the now-frozen schemas, generate one source-bound execution-contract instance,
-and ask the owner to sign it. Public Rekor submission remains a separate
-explicit choice.
+After those exist, the implemented builder can generate one source-bound final
+execution-contract instance and admit it only after the exact owner signature.
+A separate unit must still implement the cross-host runner and single-use
+consumption of the resulting execution-admission receipt. Public Rekor
+submission remains a separate explicit choice.
 
 The physical collector is implemented but remains unreachable in the current
 state because no T22-A1 owner trust anchor or signed challenge exists. Its KAT

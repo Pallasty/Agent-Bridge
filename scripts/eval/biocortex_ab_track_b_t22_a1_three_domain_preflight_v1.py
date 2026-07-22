@@ -29,13 +29,13 @@ RUNTIME_PREPARATION_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-trac
 CONTRACT_DOMAIN = b"AB_TRACK_B_T22_A1_THREE_DOMAIN_ADMISSION_CONTRACT_V1\0"
 PROPOSAL_DOMAIN = b"AB_TRACK_B_T22_A1_OWNER_DECISION_PROPOSAL_V1\0"
 EXPECTED_SCHEMA_SHA256 = "1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b"
-EXPECTED_EXECUTION_SCHEMA_SHA256 = "1feed272f9832099b820b94dac1b7909bdce074f7cd6c897f41bfde666ad072d"
+EXPECTED_EXECUTION_SCHEMA_SHA256 = "2ef4bcae59c8eb3ee65611e592e816eaee80d9b977d6c9c4c37c14c3eb4f73fc"
 EXPECTED_EVENT_SCHEMA_SHA256 = "4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5"
 EXPECTED_TERMINAL_SCHEMA_SHA256 = "f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a"
 EXPECTED_COLLECTION_CHALLENGE_SCHEMA_SHA256 = "26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d"
 EXPECTED_ATTESTATION_SET_COUNTERSIGNATURE_SCHEMA_SHA256 = "615959dbd1fbfe65da7830cd5b2bf4efc2ef9a917c94ae9438f820837d121a1c"
 EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256 = "8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953"
-EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256 = "b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a"
+EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256 = "fe9b257edae7f93d20e81280e54b20da771c432b65ae5ac906231799ad4c10e2"
 EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256 = "92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee"
 EXPECTED_RUNTIME_PREPARATION_SCHEMA_SHA256 = "1baaddc21592427adad308f2325e4cd6a5f9ba7f1a45db2a5d1d03de734967b3"
 STATUS = "BLOCKED_REMOTE_ATTESTATIONS_THIRD_DOMAIN_MODE_ENDPOINT_SET_AND_EXACT_OWNER_DECISION_REQUIRED"
@@ -258,6 +258,7 @@ def validate_proposal(value: dict, contract: dict) -> None:
         "spend_limit_usd_if_cloud_selected": None,
         "exact_three_domain_attestation_packet_sha256_set": None,
         "exact_attestation_set_countersignature_content_sha256": None,
+        "exact_attestation_set_countersignature_signature_sha256": None,
         "exact_owner_countersigned_attestation_set_receipt_sha256": None,
         "exact_three_domain_collection_challenge_sha256_set": None,
         "exact_private_overlay_peer_endpoint_set_sha256": None,
@@ -266,8 +267,11 @@ def validate_proposal(value: dict, contract: dict) -> None:
         "exact_runtime_credential_manifest_content_sha256": None,
         "coordinator_runtime_public_key_sha256": None,
         "exact_runtime_preparation_challenge_content_sha256": None,
+        "exact_runtime_preparation_owner_signature_sha256": None,
+        "exact_runtime_preparation_terminal_receipt_sha256": None,
         "fault_target_domain": None,
         "exact_distributed_execution_contract_content_sha256": None,
+        "exact_owner_execution_signature_sha256": None,
         "t22_a1_r_public_rekor_submission": "SEPARATE_DECISION_REQUIRED",
     }
     assert value["scope_before_exact_owner_signature"] == {

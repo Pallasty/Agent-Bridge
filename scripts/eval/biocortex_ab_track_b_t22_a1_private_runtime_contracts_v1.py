@@ -18,7 +18,7 @@ ENDPOINT_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-
 CREDENTIAL_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json"
 MESSAGE_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-agent-message-schema-v1.json"
 EXPECTED_ENDPOINT_SCHEMA_SHA256 = "8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953"
-EXPECTED_CREDENTIAL_SCHEMA_SHA256 = "b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a"
+EXPECTED_CREDENTIAL_SCHEMA_SHA256 = "fe9b257edae7f93d20e81280e54b20da771c432b65ae5ac906231799ad4c10e2"
 EXPECTED_MESSAGE_SCHEMA_SHA256 = "92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee"
 ENDPOINT_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/private-endpoint-manifest/v1\0"
 CREDENTIAL_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/runtime-credential-manifest/v1\0"
@@ -150,6 +150,20 @@ def validate_credential_manifest(
         paths.extend((credential["certificate_path"], credential["private_key_path"]))
         certificate_hashes.append(credential["certificate_sha256"])
         spki_hashes.append(credential["spki_sha256"])
+    runtime_key = value["coordinator_runtime_signing_key"]
+    require(runtime_key == {
+        "identity": "coordinator-runtime",
+        "public_key_path": runtime_key["public_key_path"],
+        "private_key_path": runtime_key["private_key_path"],
+        "public_key_sha256": runtime_key["public_key_sha256"],
+        "signature_scheme": "OPENSSH_SSHSIG_ED25519",
+        "request_signature_namespace": "agent-bridge-t22-a1-coordinator-message-v1",
+        "private_key_file_mode": "0600",
+        "private_key_export_allowed": False,
+    }, "E_COORDINATOR_RUNTIME_KEY_BINDING")
+    require(path_outside_repository(runtime_key["public_key_path"]) and path_outside_repository(runtime_key["private_key_path"]), "E_CREDENTIAL_PATH_SCOPE")
+    require(runtime_key["public_key_path"] != runtime_key["private_key_path"], "E_COORDINATOR_RUNTIME_KEY_PATH_COLLISION")
+    paths.extend((runtime_key["public_key_path"], runtime_key["private_key_path"]))
     require(len(paths) == len(set(paths)), "E_CREDENTIAL_PATH_REUSE")
     require(len(certificate_hashes) == len(set(certificate_hashes)), "E_CREDENTIAL_CERTIFICATE_REUSE")
     require(len(spki_hashes) == len(set(spki_hashes)), "E_CREDENTIAL_SPKI_REUSE")

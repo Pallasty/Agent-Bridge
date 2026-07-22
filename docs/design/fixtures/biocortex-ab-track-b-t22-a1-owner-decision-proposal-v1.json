@@ -26,6 +26,7 @@
     "spend_limit_usd_if_cloud_selected": null,
     "exact_three_domain_attestation_packet_sha256_set": null,
     "exact_attestation_set_countersignature_content_sha256": null,
+    "exact_attestation_set_countersignature_signature_sha256": null,
     "exact_owner_countersigned_attestation_set_receipt_sha256": null,
     "exact_three_domain_collection_challenge_sha256_set": null,
     "exact_private_overlay_peer_endpoint_set_sha256": null,
@@ -34,8 +35,11 @@
     "exact_runtime_credential_manifest_content_sha256": null,
     "coordinator_runtime_public_key_sha256": null,
     "exact_runtime_preparation_challenge_content_sha256": null,
+    "exact_runtime_preparation_owner_signature_sha256": null,
+    "exact_runtime_preparation_terminal_receipt_sha256": null,
     "fault_target_domain": null,
     "exact_distributed_execution_contract_content_sha256": null,
+    "exact_owner_execution_signature_sha256": null,
     "t22_a1_r_public_rekor_submission": "SEPARATE_DECISION_REQUIRED"
   },
   "scope_before_exact_owner_signature": {
@@ -58,7 +62,7 @@
   "admission_contract": {
     "path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-three-domain-admission-contract-v1.json",
     "schema": "agent_bridge.biocortex.track_b.t22_a1.three_domain_admission_contract.v1",
-    "contract_sha256": "fa37fa4b94c3601a4d48f620964785223a30fc6a20577c7892f903b72304ca6c"
+    "contract_sha256": "467ab7805ce864da3b7ece06da44e99d4da38bf805c45cefc7ed530858629076"
   },
   "signing": {
     "owner_id": "pallasting",
@@ -77,5 +81,5 @@
     "nonzero_spend_authorized": false,
     "production_admissible": false
   },
-  "proposal_sha256": "3b5657b9d2584b776db55890dcd7d3401426e1856fe480946955fa00c18fa994"
+  "proposal_sha256": "f549c6dc70b8dfd16e3a903c682d32af416d556006a257c62830933121cef8c9"
 }
