@@ -2,6 +2,14 @@
 
 All copied JSON files are research-only outputs. They contain no credentials.
 
+## FH-L8 independent reference route S0
+
+- `FH_L8_INDEPENDENT_REFERENCE_ROUTE_S0_ZH.md`: route decision and D1 boundary.
+- `fh_l8_independent_reference_route_contract.json`: exact workload, arithmetic and source pins.
+- `fh_l8_independent_reference_route_result.json`: fail-closed route-selection result.
+- `fh_l8_independent_reference_route_validator.py`: exact arithmetic/source/authority validator.
+- `test_fh_l8_independent_reference_route_validator.py`: mutation and CLI regressions.
+
 ## Claude source session
 
 - Session:

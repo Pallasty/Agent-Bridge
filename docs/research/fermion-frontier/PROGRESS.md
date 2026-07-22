@@ -1,5 +1,14 @@
 # Research progress ledger
 
+## 2026-07-21 — FH-L8 independent reference route S0
+
+- Verified both exact R100 uniform-supremum floors exceed the `1/4000` observable allocation.
+- Closed the ordinary 803-layer support cone because it saturates the L8 OBC diameter 14.
+- Selected `PER_STEP_STATE_SPECIFIC_EXACT_DEFECT_LEDGER`; both observables have exact zero
+  checkerboard-Néel `k0` D3 expectation, while rotated-integrand cancellation remains unassessed.
+- Froze `FH-L8-INDEPENDENT-REFERENCE-D1` as the next unit. No physical reference, full-R100 bound,
+  or READY authority was produced.
+
 Status date: 2026-07-14
 
 ## State labels
