@@ -645,7 +645,10 @@ fn reserved_temp_object_count(c: &rusqlite::Connection) -> RusqliteResult<i64> {
     )
 }
 
-fn verify_v43_connection(c: &rusqlite::Connection) -> RusqliteResult<()> {
+fn verify_v43_connection_at_versions(
+    c: &rusqlite::Connection,
+    allowed_versions: &[&str],
+) -> RusqliteResult<()> {
     let reserved_temp_objects = reserved_temp_object_count(c)?;
     if reserved_temp_objects != 0 {
         return Err(sql_reject(
@@ -662,10 +665,10 @@ fn verify_v43_connection(c: &rusqlite::Connection) -> RusqliteResult<()> {
     }
     let version = read_meta(c, "version")?
         .ok_or_else(|| sql_reject("truth_evidence_identity", "schema_meta.version missing"))?;
-    if version != TEMPORAL_EVIDENCE_SCHEMA_VERSION {
+    if !allowed_versions.iter().any(|allowed| version == *allowed) {
         return Err(sql_reject(
             "truth_evidence_identity",
-            format!("expected schema version 43, got {version:?}"),
+            format!("expected schema version one of {allowed_versions:?}, got {version:?}"),
         ));
     }
     let manifest = live_schema_manifest(c)?;
@@ -742,7 +745,17 @@ fn verify_v43_connection(c: &rusqlite::Connection) -> RusqliteResult<()> {
     Ok(())
 }
 
-pub(super) fn migrate_or_verify_v43(c: &mut rusqlite::Connection) -> RusqliteResult<()> {
+fn verify_v43_connection(c: &rusqlite::Connection) -> RusqliteResult<()> {
+    verify_v43_connection_at_versions(c, &[TEMPORAL_EVIDENCE_SCHEMA_VERSION])
+}
+
+/// Verify the v43 truth-evidence identity, optionally permitting one reviewed
+/// downstream cursor. The truth manifest remains v43-scoped; this is a narrow
+/// schema-owner handoff, not permission for arbitrary successor versions.
+pub(super) fn migrate_or_verify_v43(
+    c: &mut rusqlite::Connection,
+    reviewed_successor_version: Option<&str>,
+) -> RusqliteResult<()> {
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let version = read_meta(&tx, "version")?
         .ok_or_else(|| sql_reject("truth_evidence_migration", "schema_meta.version missing"))?;
@@ -824,6 +837,9 @@ pub(super) fn migrate_or_verify_v43(c: &mut rusqlite::Connection) -> RusqliteRes
             verify_v43_connection(&tx)?;
         }
         "43" => verify_v43_connection(&tx)?,
+        other if reviewed_successor_version == Some(other) => {
+            verify_v43_connection_at_versions(&tx, &[TEMPORAL_EVIDENCE_SCHEMA_VERSION, other])?
+        }
         other => {
             return Err(sql_reject(
                 "truth_evidence_migration",

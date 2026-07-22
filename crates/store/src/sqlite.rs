@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio_rusqlite::{params, rusqlite, Connection};
 
+#[cfg(feature = "episode-observation-slice-b")]
+mod episode_observation_slice_b;
 mod temporal_evidence;
 #[cfg(feature = "temporal-evidence-s4-synthetic")]
 pub use temporal_evidence::{
@@ -1846,7 +1848,15 @@ impl SqliteStore {
             // R2 fusion shadow — version-less additive rung (see the const's
             // comment for why it cannot bump schema_meta.version past v43).
             c.execute_batch(SCHEMA_FUSION_SHADOW)?;
-            temporal_evidence::migrate_or_verify_v43(c)?;
+            #[cfg(feature = "episode-observation-slice-b")]
+            temporal_evidence::migrate_or_verify_v43(
+                c,
+                Some(episode_observation_slice_b::SCHEMA_VERSION),
+            )?;
+            #[cfg(not(feature = "episode-observation-slice-b"))]
+            temporal_evidence::migrate_or_verify_v43(c, None)?;
+            #[cfg(feature = "episode-observation-slice-b")]
+            episode_observation_slice_b::migrate_or_verify(c)?;
             Ok(())
         })
         .await

@@ -11,8 +11,6 @@ pub mod coactivation_latch;
 pub mod codebase;
 pub mod connectivity_repair;
 pub mod embedding;
-#[cfg(feature = "episode-observation-slice-a")]
-mod episode_observation_slice_a;
 #[cfg(feature = "engram-g1-authenticated-envelope-shadow-synthetic")]
 mod engram_g1_authenticated_envelope_shadow;
 #[cfg(all(
@@ -20,6 +18,8 @@ mod engram_g1_authenticated_envelope_shadow;
     target_os = "macos"
 ))]
 mod engram_g1_secure_custody_shadow;
+#[cfg(feature = "episode-observation-slice-a")]
+mod episode_observation_slice_a;
 pub mod lineage_audit;
 pub mod mmr;
 pub use mmr::mmr_rerank_by_text;
