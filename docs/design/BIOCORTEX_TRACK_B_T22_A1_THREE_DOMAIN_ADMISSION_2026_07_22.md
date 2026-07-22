@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **OFFLINE_ADMISSION_AND_SIGNED_COLLECTION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
+Status: **OFFLINE_ADMISSION_COLLECTION_AND_RUNTIME_PREPARATION_AUTHORIZATION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
 
 Live execution: **NOT AUTHORIZED AND NOT ATTEMPTED**
 
@@ -243,6 +243,33 @@ hashes, and the coordinator runtime public key. The runner may not discover
 ambient credentials, resolve DNS, provision the overlay, or listen on any
 address other than its exact manifest-bound overlay IP.
 
+The credential binding creates a deliberate two-stage authorization sequence.
+The final execution contract cannot be generated until the credential-manifest
+hash and coordinator runtime public key exist, while those sensitive materials
+must not be generated merely from ambient intent. A separate closed runtime-
+preparation challenge now resolves that dependency without granting execution:
+
+1. after the exact three-domain attestation set and private endpoint manifest
+   are admitted, generate a canonical challenge that binds their hashes, the
+   source commit, current proposal and admission contract, run ID, private
+   paths, planned execution expiry, and every runtime schema;
+2. the owner signs that complete packet under the distinct SSHSIG namespace
+   `agent-bridge-t22-a1-owner-runtime-preparation-v1` for at most one hour;
+3. only a later material generator may consume the verified one-use challenge
+   to use local CSPRNG, create a per-run CA, one coordinator client identity,
+   three domain server identities, and a coordinator runtime Ed25519 identity,
+   validate them, and write the private credential manifest; and
+4. that preparation still authorizes no network connection, listener, service,
+   workload, fault, cloud API, spend, production data, or retry. The resulting
+   hashes are inputs to a separately reviewed final execution contract and its
+   separate owner signature.
+
+The challenge generator and verifier are implemented. Their `status`,
+`generate`, and `verify` paths do not read the private endpoint-manifest
+instance or any credential file and do not generate material. The actual
+single-use runtime-material generator remains the next offline implementation
+unit after real admitted inputs and a valid preparation signature exist.
+
 The offline agent-session core now implements the protocol's second semantic
 layer without opening a listener. It verifies canonical request/response files,
 coordinator and domain detached Ed25519 signatures, declared signing-key
@@ -309,12 +336,15 @@ or satisfy the stronger S20 monotonic-CAS requirement.
    selected third host, each under a distinct dedicated public key.
 5. Provide the sorted three-packet digest set, private-overlay endpoint-set
    digest, ACL receipt digest, and fault-target domain.
-6. Produce the exact private endpoint manifest, per-run mTLS CA/certificates,
-   credential manifest, and coordinator runtime signing key; review their
-   content hashes without publishing raw paths or endpoints.
-7. Review the completed execution payload and sign only that source-bound
+6. Produce and privately validate the exact endpoint manifest.
+7. Generate and sign the exact zero-network runtime-preparation challenge under
+   `agent-bridge-t22-a1-owner-runtime-preparation-v1`.
+8. Consume it once to generate the per-run mTLS CA/certificates, credential
+   manifest, and coordinator runtime signing key; review only their content
+   hashes without publishing raw paths, endpoints, or private material.
+9. Review the completed execution payload and sign only that source-bound
    payload under `agent-bridge-t22-a1-owner-v1`.
-8. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
+10. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
    and remain honest with A1-R disabled.
 
 No current file is a signing request. The proposal remains deliberately
@@ -332,6 +362,8 @@ blocked until these inputs are concrete.
   `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953`;
 - runtime credential-manifest schema raw SHA-256:
   `b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a`;
+- runtime-preparation challenge schema raw SHA-256:
+  `8d736b86cf7ead0c342f37a5b58fac9f0bb4fb410b0b3ea91c801aa636567a1a`;
 - domain-agent message schema raw SHA-256:
   `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee`;
 - distributed event schema raw SHA-256:
@@ -339,11 +371,11 @@ blocked until these inputs are concrete.
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - admission-contract content SHA-256:
-  `2fd750a9771827a9d984e915fb607b3dd844929054dba253cc310597dc38ed5d`;
+  `5a2d2fcb9d6bda78ab16661d9abcf85b3953bccc5d7796ea9ba15d5b782cf05b`;
 - blocked owner-proposal content SHA-256:
-  `15f3bbc90cbdaa1692e925709c5239e845b57ad3fcf9881f8dea4a2cea6ed933`.
+  `4da58d0e705b0b3e8e96d70922fa1e8f0f3ed20133f9d78a03a733cbf1e02460`.
 
-The offline admission gate exercises 64 directed negative cases after recomputing
+The offline admission gate exercises 67 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends
@@ -378,6 +410,15 @@ request/response nonce-command-payload pairing, sequence and chain links,
 declared signer binding, domain binding, and message expiry. All keys and
 messages are synthetic; no real keys, credentials, network, commands, services,
 or faults are used.
+
+The runtime-preparation authorization KAT adds 42 directed negatives over the
+source/proposal/contract, attestation-set, endpoint-manifest and schema
+bindings; private path closure; lifetime and planned-execution windows;
+one-use/zero-spend authority; allowed/forbidden actions; claim ceilings;
+canonical framing; owner signature and namespace; and private output
+permissions. Its positive verification reads zero real endpoint-manifest or
+credential instances, creates no runtime material, and performs no network,
+listener, service, fault, or spend action.
 
 The collection-challenge KAT adds 42 directed negatives over schema and
 domain-separated digest binding, source/proposal/contract identities, alias

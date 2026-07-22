@@ -31,6 +31,7 @@
     "exact_private_endpoint_manifest_content_sha256": null,
     "exact_runtime_credential_manifest_content_sha256": null,
     "coordinator_runtime_public_key_sha256": null,
+    "exact_runtime_preparation_challenge_content_sha256": null,
     "fault_target_domain": null,
     "exact_distributed_execution_contract_content_sha256": null,
     "t22_a1_r_public_rekor_submission": "SEPARATE_DECISION_REQUIRED"
@@ -39,6 +40,7 @@
     "stable_host_identity_read": false,
     "private_manifest_instances_read": false,
     "runtime_credential_files_read": false,
+    "ephemeral_runtime_material_generated": false,
     "credential_access": false,
     "external_host_connection": false,
     "provider_or_cloud_api_access": false,
@@ -54,7 +56,7 @@
   "admission_contract": {
     "path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-three-domain-admission-contract-v1.json",
     "schema": "agent_bridge.biocortex.track_b.t22_a1.three_domain_admission_contract.v1",
-    "contract_sha256": "2fd750a9771827a9d984e915fb607b3dd844929054dba253cc310597dc38ed5d"
+    "contract_sha256": "5a2d2fcb9d6bda78ab16661d9abcf85b3953bccc5d7796ea9ba15d5b782cf05b"
   },
   "signing": {
     "owner_id": "pallasting",
@@ -73,5 +75,5 @@
     "nonzero_spend_authorized": false,
     "production_admissible": false
   },
-  "proposal_sha256": "15f3bbc90cbdaa1692e925709c5239e845b57ad3fcf9881f8dea4a2cea6ed933"
+  "proposal_sha256": "4da58d0e705b0b3e8e96d70922fa1e8f0f3ed20133f9d78a03a733cbf1e02460"
 }

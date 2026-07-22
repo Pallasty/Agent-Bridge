@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex.track_b.t22_a1.runtime_preparation_challenge.v1",
+  "title": "BioCortex Track B T22-A1 runtime material preparation challenge",
+  "description": "Exact owner-signable, zero-network authority to generate private per-run runtime material after three-domain admission and before final execution authorization.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "packet_kind", "decision", "hashing_contract", "owner_binding", "bindings", "target", "preparation_authority", "claims", "content_sha256"],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex.track_b.t22_a1.runtime_preparation_challenge.v1"},
+    "packet_kind": {"const": "T22_A1_EXACT_RUNTIME_MATERIAL_PREPARATION_CHALLENGE"},
+    "decision": {"const": "AUTHORIZE_ONE_T22_A1_ZERO_NETWORK_PRIVATE_RUNTIME_MATERIAL_PREPARATION_ONLY"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "owner_binding": {"$ref": "#/$defs/owner_binding"},
+    "bindings": {"$ref": "#/$defs/bindings"},
+    "target": {"$ref": "#/$defs/target"},
+    "preparation_authority": {"$ref": "#/$defs/preparation_authority"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "content_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "run_id": {"type": "string", "pattern": "^t22-a1-[0-9]{8}T[0-9]{6}\\.[0-9]{6}z-[0-9a-f]{12}$"},
+    "absolute_path": {"type": "string", "pattern": "^/", "maxLength": 4096},
+    "utc_time": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "hash_scope", "self_hash_field", "self_hash_field_excluded", "detached_owner_signature_covers_complete_canonical_packet", "cross_field_semantic_validation_required"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/track-b/t22-a1/runtime-preparation-challenge/v1"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_CONTENT_SHA256"},
+        "self_hash_field": {"const": "content_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "detached_owner_signature_covers_complete_canonical_packet": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true}
+      }
+    },
+    "owner_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_id", "owner_role", "owner_public_key_sha256", "owner_public_key_fingerprint", "signature_scheme", "signature_namespace"],
+      "properties": {
+        "owner_id": {"const": "pallasting"},
+        "owner_role": {"const": "PROJECT_OWNER"},
+        "owner_public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_public_key_fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"},
+        "signature_scheme": {"const": "OPENSSH_SSHSIG_ED25519"},
+        "signature_namespace": {"const": "agent-bridge-t22-a1-owner-runtime-preparation-v1"}
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_commit", "owner_decision_proposal_sha256", "admission_contract_sha256", "exact_three_domain_attestation_set_sha256", "private_endpoint_manifest_schema_sha256", "private_endpoint_manifest_content_sha256", "runtime_credential_manifest_schema_sha256", "domain_agent_message_schema_sha256", "distributed_execution_contract_schema_sha256", "runtime_preparation_challenge_schema_sha256"],
+      "properties": {
+        "source_commit": {"$ref": "#/$defs/git_oid"},
+        "owner_decision_proposal_sha256": {"$ref": "#/$defs/sha256"},
+        "admission_contract_sha256": {"$ref": "#/$defs/sha256"},
+        "exact_three_domain_attestation_set_sha256": {"$ref": "#/$defs/sha256"},
+        "private_endpoint_manifest_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "private_endpoint_manifest_content_sha256": {"$ref": "#/$defs/sha256"},
+        "runtime_credential_manifest_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_agent_message_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "distributed_execution_contract_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "runtime_preparation_challenge_schema_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "private_artifact_root", "private_endpoint_manifest_path", "runtime_credential_manifest_output_path", "coordinator_runtime_public_key_output_path", "planned_execution_expires_at", "credential_validity_margin_seconds"],
+      "properties": {
+        "run_id": {"$ref": "#/$defs/run_id"},
+        "private_artifact_root": {"$ref": "#/$defs/absolute_path"},
+        "private_endpoint_manifest_path": {"$ref": "#/$defs/absolute_path"},
+        "runtime_credential_manifest_output_path": {"$ref": "#/$defs/absolute_path"},
+        "coordinator_runtime_public_key_output_path": {"$ref": "#/$defs/absolute_path"},
+        "planned_execution_expires_at": {"$ref": "#/$defs/utc_time"},
+        "credential_validity_margin_seconds": {"type": "integer", "minimum": 300, "maximum": 86400}
+      }
+    },
+    "preparation_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issued_at", "not_before", "expires_at", "maximum_lifetime_seconds", "one_preparation_per_challenge_sha256", "spend_limit_usd_cents", "allowed_after_signature", "forbidden"],
+      "properties": {
+        "issued_at": {"$ref": "#/$defs/utc_time"},
+        "not_before": {"$ref": "#/$defs/utc_time"},
+        "expires_at": {"$ref": "#/$defs/utc_time"},
+        "maximum_lifetime_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "one_preparation_per_challenge_sha256": {"const": true},
+        "spend_limit_usd_cents": {"const": 0},
+        "allowed_after_signature": {"const": ["READ_EXACT_PRIVATE_ENDPOINT_MANIFEST", "USE_LOCAL_SYSTEM_CSPRNG", "GENERATE_EPHEMERAL_PRIVATE_RUN_CA", "GENERATE_COORDINATOR_MTLS_CLIENT_KEYPAIR", "GENERATE_THREE_DOMAIN_MTLS_SERVER_KEYPAIRS", "GENERATE_COORDINATOR_RUNTIME_ED25519_KEYPAIR", "VERIFY_CERTIFICATE_CHAINS_KEYS_EKU_EXPIRY_AND_ENDPOINT_BINDINGS", "WRITE_EXACT_PRIVATE_RUNTIME_CREDENTIAL_MANIFEST", "WRITE_NONSECRET_PREPARATION_TERMINAL_RECEIPT"]},
+        "forbidden": {"const": ["AMBIENT_OR_PREEXISTING_CREDENTIAL_DISCOVERY_OR_ACCESS", "NETWORK_OR_EXTERNAL_HOST_CONNECTION", "PUBLIC_LISTENER", "OVERLAY_CONFIGURATION_CHANGE", "CLOUD_OR_PROVIDER_API_ACCESS", "NONZERO_SPEND", "SERVICE_PROCESS_START", "FAULT_INJECTION", "WORKLOAD_EXECUTION", "PRODUCTION_OR_CUSTOMER_DATA", "RAW_ENDPOINT_CREDENTIAL_OR_PRIVATE_KEY_REPOSITORY_OUTPUT", "EXECUTION_AUTHORITY_OR_AVAILABILITY_CLAIM", "AUTOMATIC_RETRY"]}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preparation_is_execution_authority", "three_failure_domain_execution_proved", "external_anti_rollback_proved", "production_admissible"],
+      "properties": {
+        "preparation_is_execution_authority": {"const": false},
+        "three_failure_domain_execution_proved": {"const": false},
+        "external_anti_rollback_proved": {"const": false},
+        "production_admissible": {"const": false}
+      }
+    }
+  }
+}

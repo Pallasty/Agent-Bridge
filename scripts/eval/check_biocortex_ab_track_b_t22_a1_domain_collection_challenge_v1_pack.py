@@ -162,7 +162,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-collection-challenge-kat-") as d
         lambda x: x.update(owner_id="other"),
         lambda x: x.update(owner_decision_proposal_sha256=digest("other-proposal")),
         lambda x: x.update(public_key_sha256=digest("other-key")),
-        lambda x: x.update(allowed_signature_namespaces=[module.SIGNATURE_NAMESPACE]),
+        lambda x: x.update(allowed_signature_namespaces=[module.SIGNATURE_NAMESPACE, "agent-bridge-t22-a1-owner-v1"]),
         lambda x: x.update(unexpected="field"),
     )
     for mutation in anchor_mutations:

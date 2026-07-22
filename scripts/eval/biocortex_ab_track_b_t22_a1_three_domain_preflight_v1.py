@@ -24,6 +24,7 @@ COLLECTION_CHALLENGE_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-tra
 ENDPOINT_MANIFEST_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-private-endpoint-manifest-schema-v1.json"
 CREDENTIAL_MANIFEST_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json"
 AGENT_MESSAGE_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-agent-message-schema-v1.json"
+RUNTIME_PREPARATION_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-preparation-challenge-schema-v1.json"
 CONTRACT_DOMAIN = b"AB_TRACK_B_T22_A1_THREE_DOMAIN_ADMISSION_CONTRACT_V1\0"
 PROPOSAL_DOMAIN = b"AB_TRACK_B_T22_A1_OWNER_DECISION_PROPOSAL_V1\0"
 EXPECTED_SCHEMA_SHA256 = "1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b"
@@ -34,6 +35,7 @@ EXPECTED_COLLECTION_CHALLENGE_SCHEMA_SHA256 = "26d078bb9716cdb443808755ef87c0962
 EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256 = "8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953"
 EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256 = "b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a"
 EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256 = "92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee"
+EXPECTED_RUNTIME_PREPARATION_SCHEMA_SHA256 = "8d736b86cf7ead0c342f37a5b58fac9f0bb4fb410b0b3ea91c801aa636567a1a"
 STATUS = "BLOCKED_REMOTE_ATTESTATIONS_THIRD_DOMAIN_MODE_ENDPOINT_SET_AND_EXACT_OWNER_DECISION_REQUIRED"
 
 
@@ -175,6 +177,8 @@ def validate_contract(value: dict) -> None:
         "private_endpoint_manifest_schema_sha256": EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256,
         "runtime_credential_manifest_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json",
         "runtime_credential_manifest_schema_sha256": EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256,
+        "runtime_preparation_challenge_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-preparation-challenge-schema-v1.json",
+        "runtime_preparation_challenge_schema_sha256": EXPECTED_RUNTIME_PREPARATION_SCHEMA_SHA256,
         "domain_agent_message_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-agent-message-schema-v1.json",
         "domain_agent_message_schema_sha256": EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256,
         "distributed_event_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-event-schema-v1.json",
@@ -212,6 +216,7 @@ def validate_contract(value: dict) -> None:
     assert sha256_file(ENDPOINT_MANIFEST_SCHEMA_PATH) == EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256
     assert sha256_file(CREDENTIAL_MANIFEST_SCHEMA_PATH) == EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256
     assert sha256_file(AGENT_MESSAGE_SCHEMA_PATH) == EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256
+    assert sha256_file(RUNTIME_PREPARATION_SCHEMA_PATH) == EXPECTED_RUNTIME_PREPARATION_SCHEMA_SHA256
     assert value["contract_sha256"] == domain_digest(CONTRACT_DOMAIN, value, "contract_sha256")
 
 
@@ -253,6 +258,7 @@ def validate_proposal(value: dict, contract: dict) -> None:
         "exact_private_endpoint_manifest_content_sha256": None,
         "exact_runtime_credential_manifest_content_sha256": None,
         "coordinator_runtime_public_key_sha256": None,
+        "exact_runtime_preparation_challenge_content_sha256": None,
         "fault_target_domain": None,
         "exact_distributed_execution_contract_content_sha256": None,
         "t22_a1_r_public_rekor_submission": "SEPARATE_DECISION_REQUIRED",
@@ -261,6 +267,7 @@ def validate_proposal(value: dict, contract: dict) -> None:
         "stable_host_identity_read": False,
         "private_manifest_instances_read": False,
         "runtime_credential_files_read": False,
+        "ephemeral_runtime_material_generated": False,
         "credential_access": False,
         "external_host_connection": False,
         "provider_or_cloud_api_access": False,
@@ -346,8 +353,10 @@ def inspect() -> dict:
         "private_endpoint_manifest_schema_sha256": EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256,
         "runtime_credential_manifest_schema_sha256": EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256,
         "domain_agent_message_schema_sha256": EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256,
+        "runtime_preparation_challenge_schema_sha256": EXPECTED_RUNTIME_PREPARATION_SCHEMA_SHA256,
         "private_manifest_instances_read": False,
         "runtime_credential_files_read": False,
+        "ephemeral_runtime_material_generated": False,
         "agent_listeners_started": 0,
         "owner_trust_anchor_present": False,
         "distributed_execution_contract_schema_sha256": EXPECTED_EXECUTION_SCHEMA_SHA256,
