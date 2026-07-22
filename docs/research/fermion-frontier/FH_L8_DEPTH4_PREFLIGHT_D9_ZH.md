@@ -4,4 +4,4 @@ D9 重建了 depth-3 signed quotient 向量，并只处理首个 `4096` represen
 
 该分片耗时 `30.005` 秒，低于 600 秒分片上限。按 53 分片线性估算，计算时间本身尚未越过 1800 秒内部 stop rule，但这不是性能认证。
 
-决定性边界是环境没有提供 D7 强制的 cgroup-v2 `memory.current` 读数。因而无法验证 high-water memory stop rule，full-run authority 保持 false；未执行完整 fourth action，也未物化 target vector。下一门固定为 `CGROUP_V2_MEMORY_CURRENT_REQUIRED_FOR_FULL_RUN_AUTHORIZATION`。
+决定性边界是本会话 cgroup 的实测 envelope 不合格：虽然可读取 `memory.current`，但读数约 9 GiB，且 `memory.max` 与 `memory.swap.max` 都是 `max`，不满足 D7 强制的 1 GiB、零 swap、805 MiB high-water 信封。full-run authority 保持 false；未执行完整 fourth action，也未物化 target vector。下一门固定为 `ONE_GIB_ZERO_SWAP_CGROUP_REQUIRED_FOR_FULL_RUN_AUTHORIZATION`。
