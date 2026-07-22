@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **OFFLINE_ADMISSION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
+Status: **OFFLINE_ADMISSION_AND_SIGNED_COLLECTION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
 
 Live execution: **NOT AUTHORIZED AND NOT ATTEMPTED**
 
@@ -134,6 +134,35 @@ Cloud challenges are deliberately rejected with
 `E_CLOUD_PROVIDER_IDENTITY_VERIFIER_NOT_FROZEN` until the owner selects a
 provider and that provider's signed instance-identity verifier is implemented.
 This prevents a generic self-report from being relabelled as provider proof.
+
+### Physical-domain collector
+
+The challenge-gated physical collector is now implemented for Linux and macOS.
+Its irreversible ordering is:
+
+1. verify the clean exact source commit, committed owner trust anchor, canonical
+   challenge, challenge self-digest, lifetime, and detached owner signature;
+2. validate private artifact scope and bound domain public key;
+3. atomically reserve the challenge digest for one use, with automatic retry
+   disabled even if collection later fails;
+4. access the exact private domain-signing key and prove it matches the bound
+   public key;
+5. observe and match hostname, OS, architecture, and kernel; only then
+6. read machine, hardware, and boot identity sources, domain-separate and hash
+   them in memory, erase the raw identity object, build the canonical domain
+   packet, sign it, verify the new signature, and write a terminal receipt.
+
+Linux sources are the local machine-id, DMI/device-tree hardware identity, and
+kernel boot ID files. macOS sources are local `ioreg` platform UUID/serial and
+`kern.bootsessionuuid`. The collector executes no network command, reads no
+ambient credential, and supports only `OWNER_PHYSICAL`; `CLOUD_VM` remains
+closed at the challenge verifier.
+
+Private output is exactly three `0600` files under the challenge-bound `0700`
+domain directory: canonical attestation, canonical Ed25519 public key, and
+detached SSHSIG. Challenge reservation and terminal receipts live below the
+same private artifact root. Failed reserved challenges are terminal and cannot
+be silently retried.
 
 ## Future execution and evidence contracts
 
@@ -278,3 +307,12 @@ closure, owner key parsing and trust binding, lifetime, signature and namespace,
 cloud-verifier admission, private output paths and permissions, allowed reads,
 forbidden actions, and claim ceilings. Its positive path still reads zero real
 host identifiers and creates zero real attestations.
+
+The physical collector KAT adds one complete synthetic collection and 10
+negative paths covering wrong/expired owner authority, source mismatch,
+public/private domain-key mismatch, unsafe key permissions, host mismatch,
+pre-existing output, one-use replay, and an injected read failure. All identity
+values and signing keys are synthetic and ephemeral. It invokes the injected
+identity reader twice (one success and one deliberate failure), reads zero real
+host identifiers, contacts no host, starts no service, and creates no real
+attestation.
