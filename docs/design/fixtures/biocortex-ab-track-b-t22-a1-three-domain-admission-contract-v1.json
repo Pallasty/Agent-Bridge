@@ -1,0 +1,82 @@
+{
+  "schema": "agent_bridge.biocortex.track_b.t22_a1.three_domain_admission_contract.v1",
+  "state": "NON_EXECUTING_FAIL_CLOSED_ADMISSION_ONLY",
+  "track_id": "SELF_HOSTED_ETCD_OPENBAO_THREE_DOMAIN",
+  "stage": "T22_A1_H",
+  "predecessor": {
+    "stage": "T22_A0",
+    "terminal_receipt_content_sha256": "3d73929854090364a399755fcc417d83f32cd552b4207a449661277413ec31ca",
+    "result": "PASS_T22_A0_REAL_PROCESS_FAULT_EVIDENCE",
+    "claim_ceiling": "SINGLE_PHYSICAL_HOST_PROCESS_EVIDENCE_ONLY"
+  },
+  "domain_admission": {
+    "required_domain_count": 3,
+    "required_current_attestation_count": 3,
+    "required_distinct_machine_identity_count": 3,
+    "required_distinct_hardware_identity_count": 3,
+    "required_distinct_domain_signing_key_count": 3,
+    "required_distinct_hostname_count": 3,
+    "known_alias_equivalence_classes": [["aio2", "pallasting-ThinkBook-14-G5-IRH", "tb14"]],
+    "attestation_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-attestation-schema-v1.json",
+    "attestation_schema_sha256": "1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b",
+    "attestation_maximum_age_seconds": 14400,
+    "candidate_self_reports_are_authoritative": false,
+    "owner_countersignature_over_exact_three_packet_set_required": true
+  },
+  "network": {
+    "transport": "OWNER_MANAGED_PRIVATE_OVERLAY",
+    "public_listeners_allowed": false,
+    "host_global_firewall_or_route_mutation_allowed": false,
+    "ambient_overlay_credentials_access_allowed": false,
+    "exact_peer_endpoint_set_owner_bound_required": true,
+    "exact_acl_receipt_owner_bound_required": true,
+    "runner_provisions_or_joins_overlay": false
+  },
+  "workload": {
+    "etcd_voter_per_domain": 1,
+    "openbao_voter_per_domain": 1,
+    "coordinator_domain_count": 1,
+    "one_linearizable_authorize_consume_required": true,
+    "replay_consume_rejection_required": true,
+    "pre_fault_transit_signature_required": true,
+    "post_fault_signature_verification_required": true
+  },
+  "fault": {
+    "id": "ONE_DOMAIN_ALL_OWNED_CLUSTER_SERVICES_STOP_AND_RESTART",
+    "target_selection": "OBSERVED_NON_COORDINATOR_VOTER_DOMAIN",
+    "allowed_actions": ["OWNED_PROCESS_STOP", "OWNED_PROCESS_KILL_AFTER_TIMEOUT", "OWNED_PROCESS_RESTART"],
+    "forbidden_actions": ["HOST_REBOOT", "HOST_POWER_OFF", "HOST_GLOBAL_IPTABLES_OR_TC", "BLOCK_DEVICE_MUTATION", "PROVIDER_INSTANCE_STOP"],
+    "required_observation": "SURVIVING_TWO_DOMAINS_RETAIN_QUORUM_AND_VERIFY_PREFAULT_STATE_THEN_STOPPED_DOMAIN_REJOINS"
+  },
+  "evidence": {
+    "domain_attestations_independently_signed": true,
+    "owner_exact_packet_set_binding_required": true,
+    "coordinator_hash_chained_event_log_required": true,
+    "per_domain_owned_process_logs_hashed": true,
+    "per_domain_cleanup_receipts_required": true,
+    "exact_secret_value_scan_required": true,
+    "raw_credentials_endpoints_or_bootstrap_secrets_in_repository_or_receipts_allowed": false,
+    "clock_skew_observed_and_bounded_required": true
+  },
+  "external_checkpoint": {
+    "substage": "T22_A1_R",
+    "independent_of_a1_h_admission": true,
+    "candidate": "SIGSTORE_REKOR_HASHEDREKORD",
+    "public_irreversible_output": true,
+    "currently_authorized": false,
+    "claim_if_later_authorized": "PUBLIC_TRANSPARENCY_LOG_INCLUSION_AND_FORK_VISIBILITY_ONLY",
+    "monotonic_compare_and_swap_claim": false,
+    "rollback_prevention_claim": false,
+    "s20_external_checkpoint_satisfied": false
+  },
+  "claim_ceiling": {
+    "admissible_after_pass": "THREE_DISTINCT_PHYSICAL_HOST_PLACEMENT_AND_ONE_HOST_SCOPED_OWNED_SERVICE_SET_LOSS_RECOVERY_NONPRODUCTION",
+    "host_power_loss_proved": false,
+    "site_power_network_independence_proved": false,
+    "storage_device_durability_proved": false,
+    "provider_durability_proved": false,
+    "external_anti_rollback_proved": false,
+    "production_admissible": false
+  },
+  "contract_sha256": "785a7d1295e5936e2b41530548086b136b62022b9c1670581eec11513a993368"
+}

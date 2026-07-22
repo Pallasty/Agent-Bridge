@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex.track_b.t22_a1.domain_attestation.v1",
+  "title": "BioCortex Track B T22-A1 host-domain attestation",
+  "description": "Closed, non-authorizing host-domain input. Three independently signed packets plus an owner decision are required before execution can be considered.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "hashing_contract",
+    "domain_id",
+    "attested_at",
+    "expires_at",
+    "source_commit",
+    "host_identity",
+    "operator_binding",
+    "network_binding",
+    "workload_readiness",
+    "claims",
+    "attestation_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex.track_b.t22_a1.domain_attestation.v1"},
+    "packet_kind": {"const": "T22_A1_HOST_DOMAIN_ATTESTATION"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+    "attested_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "source_commit": {"$ref": "#/$defs/git_oid"},
+    "host_identity": {"$ref": "#/$defs/host_identity"},
+    "operator_binding": {"$ref": "#/$defs/operator_binding"},
+    "network_binding": {"$ref": "#/$defs/network_binding"},
+    "workload_readiness": {"$ref": "#/$defs/workload_readiness"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "attestation_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "hash_scope", "self_hash_field", "self_hash_field_excluded", "detached_signature_covers_complete_canonical_packet", "cross_field_semantic_validation_required", "candidate_reported_matches_authoritative"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/track-b/t22-a1/domain-attestation/v1"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_ATTESTATION_SHA256"},
+        "self_hash_field": {"const": "attestation_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "detached_signature_covers_complete_canonical_packet": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true},
+        "candidate_reported_matches_authoritative": {"const": false}
+      }
+    },
+    "host_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostname",
+        "logical_aliases",
+        "operating_system",
+        "kernel_release",
+        "architecture",
+        "machine_id_sha256",
+        "hardware_identity_sha256",
+        "boot_id_sha256",
+        "physical_host_asserted",
+        "provider_kind",
+        "provider_identity_sha256",
+        "region",
+        "zone",
+        "instance_identity_sha256"
+      ],
+      "properties": {
+        "hostname": {"type": "string", "minLength": 1, "maxLength": 255},
+        "logical_aliases": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+        },
+        "operating_system": {"enum": ["LINUX", "MACOS"]},
+        "kernel_release": {"type": "string", "minLength": 1, "maxLength": 128},
+        "architecture": {"enum": ["X86_64", "AARCH64"]},
+        "machine_id_sha256": {"$ref": "#/$defs/sha256"},
+        "hardware_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "boot_id_sha256": {"$ref": "#/$defs/sha256"},
+        "physical_host_asserted": {"const": true},
+        "provider_kind": {"enum": ["OWNER_PHYSICAL", "CLOUD_VM"]},
+        "provider_identity_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "region": {"type": ["string", "null"], "maxLength": 128},
+        "zone": {"type": ["string", "null"], "maxLength": 128},
+        "instance_identity_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"provider_kind": {"const": "OWNER_PHYSICAL"}}, "required": ["provider_kind"]},
+          "then": {
+            "properties": {
+              "provider_identity_sha256": {"type": "null"},
+              "region": {"type": "null"},
+              "zone": {"type": "null"},
+              "instance_identity_sha256": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"provider_kind": {"const": "CLOUD_VM"}}, "required": ["provider_kind"]},
+          "then": {
+            "properties": {
+              "provider_identity_sha256": {"$ref": "#/$defs/sha256"},
+              "region": {"type": "string", "minLength": 1},
+              "zone": {"type": "string", "minLength": 1},
+              "instance_identity_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        }
+      ]
+    },
+    "operator_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operator_role", "public_key_sha256", "signature_scheme", "signature_namespace", "private_key_exported"],
+      "properties": {
+        "operator_role": {"const": "T22_A1_DOMAIN_OPERATOR"},
+        "public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "signature_scheme": {"const": "OPENSSH_SSHSIG_ED25519"},
+        "signature_namespace": {"const": "agent-bridge-t22-a1-domain-v1"},
+        "private_key_exported": {"const": false}
+      }
+    },
+    "network_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "peer_endpoint_set_sha256", "acl_policy_receipt_sha256", "public_listener_allowed", "credential_material_embedded"],
+      "properties": {
+        "transport": {"const": "OWNER_MANAGED_PRIVATE_OVERLAY"},
+        "peer_endpoint_set_sha256": {"$ref": "#/$defs/sha256"},
+        "acl_policy_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "public_listener_allowed": {"const": false},
+        "credential_material_embedded": {"const": false}
+      }
+    },
+    "workload_readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pinned_tool_receipt_sha256", "private_data_root_sha256", "port_set_sha256", "tracked_tree_clean", "ambient_credentials_required"],
+      "properties": {
+        "pinned_tool_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "private_data_root_sha256": {"$ref": "#/$defs/sha256"},
+        "port_set_sha256": {"$ref": "#/$defs/sha256"},
+        "tracked_tree_clean": {"const": true},
+        "ambient_credentials_required": {"const": false}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_for_distinct_physical_host", "site_or_power_independence_proved", "production_admissible", "attestation_is_execution_authority"],
+      "properties": {
+        "candidate_for_distinct_physical_host": {"const": true},
+        "site_or_power_independence_proved": {"const": false},
+        "production_admissible": {"const": false},
+        "attestation_is_execution_authority": {"const": false}
+      }
+    }
+  }
+}

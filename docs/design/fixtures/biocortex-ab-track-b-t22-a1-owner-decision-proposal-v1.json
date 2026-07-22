@@ -1,0 +1,66 @@
+{
+  "schema": "agent_bridge.biocortex.track_b.t22_a1.owner_decision_proposal.v1",
+  "state": "BLOCKED_AWAITING_EXACT_DOMAIN_INPUTS_AND_OWNER_DECISION",
+  "track_id": "SELF_HOSTED_ETCD_OPENBAO_THREE_DOMAIN",
+  "decision_requested_after_inputs_complete": "AUTHORIZE_T22_A1_H_THREE_HOST_NONPRODUCTION_CANARY_ONLY",
+  "current_observation": {
+    "observed_at": "2026-07-22",
+    "coordinator_hostname": "tb14",
+    "coordinator_identity_binding": "PRIVATE_FRESH_DOMAIN_ATTESTATION_REQUIRED_NOT_REPOSITORY_EMBEDDED",
+    "aio2_tb14_alias_policy": "COLLAPSE_TO_ONE_DOMAIN_UNTIL_DISTINCTNESS_IS_PROVED",
+    "alias_equivalence_is_physical_proof": false,
+    "current_validated_domain_count": 1,
+    "known_distinct_physical_host_candidate_upper_bound": 2,
+    "mac_candidate": {
+      "hostname": "maxiaodeMac-Pro.local",
+      "historical_evidence_date": "2026-06-22",
+      "historical_evidence_path": "docs/reports/goal-c-u/2026-06-22-mac-standing-continuity-dashboard.md",
+      "current_attestation_present": false
+    },
+    "third_domain": "MISSING"
+  },
+  "required_owner_inputs": {
+    "third_domain_mode": "UNSELECTED_OWNER_PHYSICAL_OR_CLOUD_VM",
+    "cloud_provider_region_zone_instance_type_if_selected": null,
+    "spend_limit_usd_if_cloud_selected": null,
+    "exact_three_domain_attestation_packet_sha256_set": null,
+    "exact_private_overlay_peer_endpoint_set_sha256": null,
+    "exact_private_overlay_acl_receipt_sha256": null,
+    "fault_target_domain": null,
+    "t22_a1_r_public_rekor_submission": "SEPARATE_DECISION_REQUIRED"
+  },
+  "scope_before_exact_owner_signature": {
+    "credential_access": false,
+    "external_host_connection": false,
+    "provider_or_cloud_api_access": false,
+    "network_overlay_configuration_change": false,
+    "public_transparency_log_output": false,
+    "spend_authorized_usd": 0,
+    "service_processes_started": 0,
+    "faults_injected": 0,
+    "production_or_customer_data": false,
+    "host_global_network_mutation": false
+  },
+  "admission_contract": {
+    "path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-three-domain-admission-contract-v1.json",
+    "schema": "agent_bridge.biocortex.track_b.t22_a1.three_domain_admission_contract.v1",
+    "contract_sha256": "785a7d1295e5936e2b41530548086b136b62022b9c1670581eec11513a993368"
+  },
+  "signing": {
+    "owner_id": "pallasting",
+    "owner_role": "PROJECT_OWNER",
+    "signature_scheme": "OPENSSH_SSHSIG_ED25519",
+    "signature_namespace": "agent-bridge-t22-a1-owner-v1",
+    "exact_payload_generated": false,
+    "owner_signature_verified": false
+  },
+  "claims": {
+    "three_distinct_physical_hosts_validated": false,
+    "three_failure_domain_execution_authorized": false,
+    "external_anti_rollback_evidence": false,
+    "cloud_or_provider_authorized": false,
+    "nonzero_spend_authorized": false,
+    "production_admissible": false
+  },
+  "proposal_sha256": "abc2e69bc50d02de75c42024b20cbfd97ab77770333678db0e77e56e0c795609"
+}
