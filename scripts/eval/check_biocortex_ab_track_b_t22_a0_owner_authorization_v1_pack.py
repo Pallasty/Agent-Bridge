@@ -20,14 +20,20 @@ with tempfile.TemporaryDirectory() as directory:
     key = root / "synthetic-test-key"
     subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "T22_SYNTHETIC_TEST_ONLY", "-f", str(key)], check=True)
     public_key = key.with_suffix(".pub").read_bytes()
-    anchor = {
-        "schema": "agent_bridge.biocortex.track_b.t22_a0.owner_trust_anchor.v1",
-        "owner_id": "pallasting", "owner_role": "PROJECT_OWNER",
-        "proposal_sha256": proposal["proposal_sha256"], "host": module.socket.gethostname(),
-        "public_key": public_key.decode(),
-        "public_key_sha256": module.hashlib.sha256(public_key).hexdigest(),
-        "public_key_fingerprint": module.public_key_fingerprint(public_key),
-    }
+    anchor = module.build_anchor(key.with_suffix(".pub"), proposal, proposal["proposal_sha256"])
+    module.validate_anchor(anchor, proposal)
+    try:
+        module.build_anchor(key, proposal, proposal["proposal_sha256"])
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("private-key path admitted as owner public trust anchor")
+    try:
+        module.build_anchor(key.with_suffix(".pub"), proposal, "0" * 64)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("unconfirmed proposal hash admitted for owner trust anchor")
     now = datetime.now(timezone.utc)
     payload = module.build_payload(anchor, proposal, now, "1" * 40)
     payload_path = root / "payload.json"
@@ -51,5 +57,5 @@ with tempfile.TemporaryDirectory() as directory:
 
 assert not module.ANCHOR_PATH.exists()
 print("t22_a0_owner_authorization_check\tpass")
-print(f"directed_negative_test_count\t{len(mutations)}")
+print(f"directed_negative_test_count\t{len(mutations) + 2}")
 print("repository_owner_trust_anchor_present\tfalse")

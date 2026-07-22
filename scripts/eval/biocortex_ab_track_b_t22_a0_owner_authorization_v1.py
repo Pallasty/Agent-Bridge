@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import socket
 import subprocess
 import tempfile
@@ -45,6 +46,49 @@ def public_key_fingerprint(public_key: bytes) -> str:
     fields = result.stdout.split()
     assert len(fields) >= 2 and fields[1].startswith("SHA256:")
     return fields[1]
+
+
+def write_exclusive_canonical(path: Path, value: dict, mode: int = 0o600) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(canonical(value) + b"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def build_anchor(public_key_path: Path, proposal: dict, confirmed_proposal_sha256: str) -> dict:
+    assert confirmed_proposal_sha256 == proposal["proposal_sha256"]
+    assert public_key_path.is_absolute() and public_key_path.name.endswith(".pub")
+    assert public_key_path.is_file() and not public_key_path.is_symlink()
+    resolved = public_key_path.resolve(strict=True)
+    assert ROOT.resolve() not in (resolved, *resolved.parents)
+    public_key = resolved.read_bytes()
+    assert 32 <= len(public_key) <= 1024
+    fingerprint = public_key_fingerprint(public_key)
+    return {
+        "schema": "agent_bridge.biocortex.track_b.t22_a0.owner_trust_anchor.v1",
+        "owner_id": "pallasting",
+        "owner_role": "PROJECT_OWNER",
+        "proposal_sha256": proposal["proposal_sha256"],
+        "host": socket.gethostname(),
+        "public_key": public_key.decode(),
+        "public_key_sha256": hashlib.sha256(public_key).hexdigest(),
+        "public_key_fingerprint": fingerprint,
+    }
+
+
+def require_clean_tracked_tree() -> str:
+    subprocess.run(["git", "diff", "--quiet"], cwd=ROOT, check=True)
+    subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=ROOT, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True,
+    ).stdout.strip()
 
 
 def validate_anchor(anchor: dict, proposal: dict) -> bytes:
@@ -170,10 +214,21 @@ def verify_signature(payload_path: Path, signature_path: Path, public_key: bytes
 
 
 def status() -> dict:
+    anchor_present = ANCHOR_PATH.is_file()
+    anchor_valid = False
+    if anchor_present:
+        try:
+            validate_anchor(json.loads(ANCHOR_PATH.read_text()), json.loads(PROPOSAL_PATH.read_text()))
+            anchor_valid = True
+        except (AssertionError, KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+            anchor_valid = False
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a0.owner_authorization_status.v0",
-        "status": "BLOCKED_OWNER_TRUST_ANCHOR_REQUIRED" if not ANCHOR_PATH.is_file() else "READY_TO_GENERATE_EXACT_PAYLOAD",
-        "owner_trust_anchor_present": ANCHOR_PATH.is_file(),
+        "status": "BLOCKED_OWNER_TRUST_ANCHOR_REQUIRED" if not anchor_present else (
+            "READY_TO_GENERATE_EXACT_PAYLOAD" if anchor_valid else "BLOCKED_OWNER_TRUST_ANCHOR_INVALID"
+        ),
+        "owner_trust_anchor_present": anchor_present,
+        "owner_trust_anchor_valid": anchor_valid,
         "owner_signature_verified": False,
         "real_process_execution_authorized": False,
     }
@@ -183,8 +238,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
+    bind = sub.add_parser("bind-anchor")
+    bind.add_argument("--public-key", type=Path, required=True)
+    bind.add_argument("--confirm-proposal-sha256", required=True)
     generate = sub.add_parser("generate")
-    generate.add_argument("--output", type=Path, required=True)
     verify = sub.add_parser("verify")
     verify.add_argument("--payload", type=Path, required=True)
     verify.add_argument("--signature", type=Path, required=True)
@@ -193,13 +250,29 @@ def main() -> None:
         print(json.dumps(status(), sort_keys=True, separators=(",", ":")))
         return
     proposal = json.loads(PROPOSAL_PATH.read_text())
+    if args.command == "bind-anchor":
+        assert not ANCHOR_PATH.exists()
+        anchor = build_anchor(args.public_key, proposal, args.confirm_proposal_sha256)
+        write_exclusive_canonical(ANCHOR_PATH, anchor)
+        print(json.dumps({
+            "status": "OWNER_TRUST_ANCHOR_BOUND_AWAITING_COMMIT",
+            "anchor": str(ANCHOR_PATH.relative_to(ROOT)),
+            "proposal_sha256": proposal["proposal_sha256"],
+            "public_key_fingerprint": anchor["public_key_fingerprint"],
+            "owner_signature_verified": False,
+            "real_process_execution_authorized": False,
+        }, sort_keys=True, separators=(",", ":")))
+        return
     anchor = json.loads(ANCHOR_PATH.read_text())
     now = datetime.now(timezone.utc)
     if args.command == "generate":
-        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+        commit = require_clean_tracked_tree()
         payload = build_payload(anchor, proposal, now, commit)
-        args.output.write_bytes(canonical(payload) + b"\n")
-        print(json.dumps({"status": "EXACT_PAYLOAD_GENERATED_AWAITING_OWNER_SIGNATURE", "payload": str(args.output), "content_sha256": payload["content_sha256"]}, sort_keys=True, separators=(",", ":")))
+        issued = payload["issued_at"].replace(":", "").replace("-", "").replace("Z", "z")
+        authorization_root = Path(proposal["scope"]["artifact_root"]) / "authorizations"
+        output = authorization_root / f"owner-authorization-{issued}.json"
+        write_exclusive_canonical(output, payload)
+        print(json.dumps({"status": "EXACT_PAYLOAD_GENERATED_AWAITING_OWNER_SIGNATURE", "payload": str(output), "content_sha256": payload["content_sha256"]}, sort_keys=True, separators=(",", ":")))
         return
     payload = json.loads(args.payload.read_text())
     public_key = validate_payload(payload, anchor, proposal, now)
