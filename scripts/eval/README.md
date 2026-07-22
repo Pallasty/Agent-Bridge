@@ -139,6 +139,13 @@ triggered by the repository pre-commit hook without treating that check as R6
 evidence. See
 `docs/design/FREE_RECALL_STRATEGY_R6_SLICE_A_SOURCE_RECEIPT_2026_07_22.md`.
 
+The subsequent R6 build gate compiles the feature and runs its five filtered
+tests on local macOS and an isolated aio2 Linux worktree with Rust/Cargo 1.96.0.
+Both pass; the final aio2 run is offline and locked. The result accepts Slice A
+only and keeps SQLite Slice B closed. It also records rustup/toolchain and
+crates.io-cache side effects from the first independent build attempt. See
+`docs/design/FREE_RECALL_STRATEGY_R6_SLICE_A_BUILD_RESULT_2026_07_22.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
