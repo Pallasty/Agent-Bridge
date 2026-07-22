@@ -216,6 +216,19 @@ pub enum ContentBlock {
         #[serde(rename = "mimeType")]
         mime_type: String,
     },
+
+    /// Text-backed MCP EmbeddedResource. This lets a tool return typed content
+    /// without persisting it or advertising a retrievable resource URI.
+    #[serde(rename = "resource")]
+    Resource { resource: EmbeddedTextResource },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddedTextResource {
+    pub uri: String,
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    pub text: String,
 }
 
 impl ContentBlock {
@@ -226,6 +239,19 @@ impl ContentBlock {
         Self::Image {
             data: base64.into(),
             mime_type: mime.into(),
+        }
+    }
+    pub fn embedded_text_resource(
+        uri: impl Into<String>,
+        mime: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Self {
+        Self::Resource {
+            resource: EmbeddedTextResource {
+                uri: uri.into(),
+                mime_type: mime.into(),
+                text: text.into(),
+            },
         }
     }
 }
@@ -386,5 +412,22 @@ mod tests {
 
         let serialized = serde_json::to_value(result).unwrap();
         assert_eq!(serialized["structuredContent"], value);
+    }
+
+    #[test]
+    fn embedded_text_resource_uses_mcp_wire_shape() {
+        let block = ContentBlock::embedded_text_resource(
+            "agent-bridge://a2ui/validated/example",
+            "application/a2ui+json",
+            r#"{"version":"v0.9.1"}"#,
+        );
+        let serialized = serde_json::to_value(block).unwrap();
+        assert_eq!(serialized["type"], "resource");
+        assert_eq!(
+            serialized["resource"]["uri"],
+            "agent-bridge://a2ui/validated/example"
+        );
+        assert_eq!(serialized["resource"]["mimeType"], "application/a2ui+json");
+        assert_eq!(serialized["resource"]["text"], r#"{"version":"v0.9.1"}"#);
     }
 }

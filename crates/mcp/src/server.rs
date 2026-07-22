@@ -389,6 +389,7 @@ fn tool_result_error_summary(result: &ToolResult) -> String {
         match block {
             ContentBlock::Text { text } => parts.push(text.as_str()),
             ContentBlock::Image { .. } => parts.push("(image)"),
+            ContentBlock::Resource { .. } => parts.push("(resource)"),
         }
     }
     let joined = parts.join(" ").trim().to_string();

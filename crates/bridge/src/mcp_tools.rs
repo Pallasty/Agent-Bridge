@@ -7240,6 +7240,8 @@ fn short_head(h: &str) -> String {
 // present_voice audio embodiment lane: TTS synthesis pipeline, playback, and the E3 embodied-mirror dashboard surface. — extracted to mcp_tools/audio.rs (2026-07 split step 2).
 mod audio;
 pub use audio::*;
+mod a2ui;
+pub use a2ui::*;
 // ===========================================================================
 //                       forum (v18) — shared whiteboard
 // ===========================================================================
@@ -45086,6 +45088,12 @@ pub(crate) fn build_registry_with_policy_surface(
     // .monitor loopback) via a spectral-peak falsifier; writes a verified-outcome
     // sidecar that flows into present_outcomes. Honest boundary: verifies the bus,
     // not the physical transducer. Niche (opt-in); thin wrapper over audio_embody.py.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(A2uiValidateTool::new()),
+    );
     reg_if(
         &mut reg,
         policy,
