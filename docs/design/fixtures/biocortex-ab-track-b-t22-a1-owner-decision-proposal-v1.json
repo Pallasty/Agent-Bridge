@@ -56,7 +56,7 @@
   "admission_contract": {
     "path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-three-domain-admission-contract-v1.json",
     "schema": "agent_bridge.biocortex.track_b.t22_a1.three_domain_admission_contract.v1",
-    "contract_sha256": "5a2d2fcb9d6bda78ab16661d9abcf85b3953bccc5d7796ea9ba15d5b782cf05b"
+    "contract_sha256": "93d173614eb6214b4fe2bd8009d0ec585017edc0cc52c2ebd3f1220dc7f054ff"
   },
   "signing": {
     "owner_id": "pallasting",
@@ -75,5 +75,5 @@
     "nonzero_spend_authorized": false,
     "production_admissible": false
   },
-  "proposal_sha256": "4da58d0e705b0b3e8e96d70922fa1e8f0f3ed20133f9d78a03a733cbf1e02460"
+  "proposal_sha256": "d9cf119b8695187ed487b5d7ff2a1c05b76add858fe54723101a9b42fb328d13"
 }

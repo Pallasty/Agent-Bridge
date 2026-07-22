@@ -76,11 +76,15 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-runtime-preparation-kat-") as di
     anchor = collection.build_anchor(Path(str(owner_key) + ".pub"), proposal, proposal["proposal_sha256"])
     collection.validate_anchor(anchor, proposal)
     artifact_root = private_root / "artifacts"
+    openssl = Path(shutil.which("openssl") or "").resolve(strict=True)
+    ssh_keygen_path = Path(ssh_keygen).resolve(strict=True)
     attestation_set_sha256 = digest("attestation-set")
     endpoint_manifest_sha256 = digest("endpoint-manifest")
     challenge = module.build_challenge(
         anchor, contract, proposal, SOURCE_COMMIT, RUN_ID,
         attestation_set_sha256, endpoint_manifest_sha256, artifact_root,
+        openssl, hashlib.sha256(openssl.read_bytes()).hexdigest(),
+        ssh_keygen_path, hashlib.sha256(ssh_keygen_path.read_bytes()).hexdigest(),
         NOW, NOW + timedelta(hours=4), 3600, 3600,
     )
     assert challenge["claims"]["preparation_is_execution_authority"] is False
@@ -138,6 +142,8 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-runtime-preparation-kat-") as di
         lambda x: x["target"].update(private_endpoint_manifest_path=str(artifact_root / "other.json")),
         lambda x: x["target"].update(runtime_credential_manifest_output_path=str(artifact_root / "other.json")),
         lambda x: x["target"].update(coordinator_runtime_public_key_output_path=str(artifact_root / "other.pub")),
+        lambda x: x["target"].update(openssl_executable_path=str(ROOT / "synthetic-openssl")),
+        lambda x: x["target"].update(ssh_keygen_executable_path=str(ROOT / "synthetic-ssh-keygen")),
         lambda x: x["target"].update(planned_execution_expires_at=module.utc_text(NOW + timedelta(minutes=30))),
         lambda x: x["target"].update(planned_execution_expires_at=module.utc_text(NOW + timedelta(hours=25))),
         lambda x: x["target"].update(credential_validity_margin_seconds=299),

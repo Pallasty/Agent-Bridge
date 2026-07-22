@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 COLLECTION_CHALLENGE_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_domain_collection_challenge_v1.py"
 RUNTIME_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_private_runtime_contracts_v1.py"
 SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-preparation-challenge-schema-v1.json"
-EXPECTED_SCHEMA_SHA256 = "8d736b86cf7ead0c342f37a5b58fac9f0bb4fb410b0b3ea91c801aa636567a1a"
+EXPECTED_SCHEMA_SHA256 = "be45ac3a4d69a67d4f71e2acc2d2cb5f0ca03b23574640a02c50a5937d6c0282"
 PREPARATION_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/runtime-preparation-challenge/v1\0"
 SIGNATURE_NAMESPACE = "agent-bridge-t22-a1-owner-runtime-preparation-v1"
 MAX_PACKET_BYTES = 64 * 1024
@@ -98,13 +98,18 @@ def validate_paths(target: dict) -> None:
     endpoint = Path(target["private_endpoint_manifest_path"])
     credentials = Path(target["runtime_credential_manifest_output_path"])
     coordinator_key = Path(target["coordinator_runtime_public_key_output_path"])
-    require(all(path.is_absolute() for path in (root, endpoint, credentials, coordinator_key)), "E_PREPARATION_PATH_ABSOLUTE")
+    openssl = Path(target["openssl_executable_path"])
+    ssh_keygen = Path(target["ssh_keygen_executable_path"])
+    require(all(path.is_absolute() for path in (root, endpoint, credentials, coordinator_key, openssl, ssh_keygen)), "E_PREPARATION_PATH_ABSOLUTE")
     resolved_root = root.resolve(strict=False)
     repository = ROOT.resolve()
     require(repository not in (resolved_root, *resolved_root.parents) and resolved_root not in repository.parents, "E_PREPARATION_ROOT_IN_REPOSITORY")
     require(endpoint.resolve(strict=False) == resolved_root / "manifests" / "private-endpoints.json", "E_PREPARATION_ENDPOINT_PATH")
     require(credentials.resolve(strict=False) == resolved_root / "manifests" / "runtime-credentials.json", "E_PREPARATION_CREDENTIAL_PATH")
     require(coordinator_key.resolve(strict=False) == resolved_root / "credentials" / "coordinator-runtime.pub", "E_PREPARATION_COORDINATOR_KEY_PATH")
+    for executable in (openssl, ssh_keygen):
+        resolved = executable.resolve(strict=False)
+        require(repository not in (resolved, *resolved.parents), "E_PREPARATION_TOOL_IN_REPOSITORY")
 
 
 def validate_challenge(
@@ -229,6 +234,10 @@ def build_challenge(
     attestation_set_sha256: str,
     endpoint_manifest_sha256: str,
     artifact_root: Path,
+    openssl_executable: Path,
+    openssl_executable_sha256: str,
+    ssh_keygen_executable: Path,
+    ssh_keygen_executable_sha256: str,
     issued_at: datetime,
     planned_execution_expires_at: datetime,
     maximum_lifetime_seconds: int = 3600,
@@ -280,6 +289,10 @@ def build_challenge(
             "private_endpoint_manifest_path": str(artifact_root / "manifests" / "private-endpoints.json"),
             "runtime_credential_manifest_output_path": str(artifact_root / "manifests" / "runtime-credentials.json"),
             "coordinator_runtime_public_key_output_path": str(artifact_root / "credentials" / "coordinator-runtime.pub"),
+            "openssl_executable_path": str(openssl_executable),
+            "openssl_executable_sha256": openssl_executable_sha256,
+            "ssh_keygen_executable_path": str(ssh_keygen_executable),
+            "ssh_keygen_executable_sha256": ssh_keygen_executable_sha256,
             "planned_execution_expires_at": utc_text(planned_execution_expires_at),
             "credential_validity_margin_seconds": credential_validity_margin_seconds,
         },
@@ -382,6 +395,10 @@ def main() -> None:
     generate.add_argument("--attestation-set-sha256", required=True)
     generate.add_argument("--endpoint-manifest-sha256", required=True)
     generate.add_argument("--artifact-root", type=Path, required=True)
+    generate.add_argument("--openssl-executable", type=Path, required=True)
+    generate.add_argument("--openssl-executable-sha256", required=True)
+    generate.add_argument("--ssh-keygen-executable", type=Path, required=True)
+    generate.add_argument("--ssh-keygen-executable-sha256", required=True)
     generate.add_argument("--planned-execution-expires-at", required=True)
     generate.add_argument("--maximum-lifetime-seconds", type=int, default=3600)
     generate.add_argument("--credential-validity-margin-seconds", type=int, default=3600)
@@ -406,7 +423,10 @@ def main() -> None:
         challenge = build_challenge(
             anchor, contract, proposal, source_commit, arguments.run_id,
             arguments.attestation_set_sha256, arguments.endpoint_manifest_sha256,
-            arguments.artifact_root, now, planned_expiry,
+            arguments.artifact_root,
+            arguments.openssl_executable, arguments.openssl_executable_sha256,
+            arguments.ssh_keygen_executable, arguments.ssh_keygen_executable_sha256,
+            now, planned_expiry,
             arguments.maximum_lifetime_seconds, arguments.credential_validity_margin_seconds,
         )
         prepare_challenge_output(arguments.out, arguments.artifact_root)

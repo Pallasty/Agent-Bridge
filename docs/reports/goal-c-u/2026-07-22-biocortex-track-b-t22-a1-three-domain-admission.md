@@ -60,10 +60,16 @@ rollback prevention.
   valid synthetic signed transitions, and 15 negative paths. It deliberately
   executes no command and starts no listener or service; and
 - a separate zero-network runtime-material preparation challenge, owner
-  namespace, generator/verifier gate, and 42 synthetic negative paths. This
+  namespace, generator/verifier gate, and 44 synthetic negative paths. This
   stage binds the admitted attestation set and endpoint manifest before any
   per-run CA or runtime identity may be generated, but grants no execution,
-  network, listener, service, fault, cloud, retry, or spend authority.
+  network, listener, service, fault, cloud, retry, or spend authority; and
+- a single-use runtime-material preparer with one complete synthetic
+  cryptographic success and 10 negative paths. It binds and re-hashes the exact
+  OpenSSL and `ssh-keygen` executables, generates a per-run P-256 CA, four
+  purpose-separated mTLS leaves, and a coordinator Ed25519 key, verifies chain,
+  key, EKU, expiry and endpoint SANs, drops the CA key, writes the private
+  manifest, and terminally cleans partial material on failure.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -97,12 +103,12 @@ Frozen packet identities:
 | distributed execution-contract schema raw bytes | `056f7e555c6e04ac5a9ba1ddc3817771635edf3a0321921b69fa8924d803428a` |
 | private endpoint-manifest schema raw bytes | `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953` |
 | runtime credential-manifest schema raw bytes | `b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a` |
-| runtime-preparation challenge schema raw bytes | `8d736b86cf7ead0c342f37a5b58fac9f0bb4fb410b0b3ea91c801aa636567a1a` |
+| runtime-preparation challenge schema raw bytes | `be45ac3a4d69a67d4f71e2acc2d2cb5f0ca03b23574640a02c50a5937d6c0282` |
 | domain-agent message schema raw bytes | `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee` |
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
-| admission-contract content | `5a2d2fcb9d6bda78ab16661d9abcf85b3953bccc5d7796ea9ba15d5b782cf05b` |
-| blocked owner proposal content | `4da58d0e705b0b3e8e96d70922fa1e8f0f3ed20133f9d78a03a733cbf1e02460` |
+| admission-contract content | `93d173614eb6214b4fe2bd8009d0ec585017edc0cc52c2ebd3f1220dc7f054ff` |
+| blocked owner proposal content | `d9cf119b8695187ed487b5d7ff2a1c05b76add858fe54723101a9b42fb328d13` |
 
 ## Advancement boundary
 
@@ -118,10 +124,11 @@ No signature is requested yet. The next concrete inputs are:
 5. the exact private-overlay endpoint-set and ACL receipt digests; and
 6. the private endpoint-manifest content hash.
 
-After those inputs are admitted, the new intermediate payload binds their exact
-hashes and requests only zero-network runtime-material preparation under
-`agent-bridge-t22-a1-owner-runtime-preparation-v1`. A later single-use material
-generator may then create the exact per-run mTLS material, credential manifest,
+After those inputs are admitted, the intermediate payload binds their exact
+hashes plus the reviewed local cryptographic tool binaries and requests only
+zero-network runtime-material preparation under
+`agent-bridge-t22-a1-owner-runtime-preparation-v1`. The implemented single-use
+preparer may then create the exact per-run mTLS material, credential manifest,
 and coordinator runtime signing key. The final execution payload binds those
 new hashes and still requires a separate owner signature under
 `agent-bridge-t22-a1-owner-v1`. None of these real instances exists or is

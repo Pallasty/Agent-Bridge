@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **OFFLINE_ADMISSION_COLLECTION_AND_RUNTIME_PREPARATION_AUTHORIZATION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
+Status: **OFFLINE_ADMISSION_COLLECTION_AND_RUNTIME_MATERIAL_PREPARATION_TOOLING_COMPLETE_REAL_INPUTS_BLOCKED**
 
 Live execution: **NOT AUTHORIZED AND NOT ATTEMPTED**
 
@@ -252,7 +252,8 @@ preparation challenge now resolves that dependency without granting execution:
 1. after the exact three-domain attestation set and private endpoint manifest
    are admitted, generate a canonical challenge that binds their hashes, the
    source commit, current proposal and admission contract, run ID, private
-   paths, planned execution expiry, and every runtime schema;
+   paths, planned execution expiry, every runtime schema, and the exact raw
+   SHA-256 and absolute path of the local OpenSSL and `ssh-keygen` executables;
 2. the owner signs that complete packet under the distinct SSHSIG namespace
    `agent-bridge-t22-a1-owner-runtime-preparation-v1` for at most one hour;
 3. only a later material generator may consume the verified one-use challenge
@@ -264,11 +265,23 @@ preparation challenge now resolves that dependency without granting execution:
    hashes are inputs to a separately reviewed final execution contract and its
    separate owner signature.
 
-The challenge generator and verifier are implemented. Their `status`,
-`generate`, and `verify` paths do not read the private endpoint-manifest
-instance or any credential file and do not generate material. The actual
-single-use runtime-material generator remains the next offline implementation
-unit after real admitted inputs and a valid preparation signature exist.
+The challenge generator/verifier and the single-use material preparer are now
+implemented. Authorization `status`, `generate`, and `verify` paths do not read
+the private endpoint-manifest instance or any credential file and do not
+generate material. The preparer first verifies the exact owner signature,
+atomically reserves the challenge, re-hashes both signed tool executables, and
+only then reads the exact canonical private endpoint manifest.
+
+The preparer creates a P-256 per-run CA, a client-only coordinator certificate,
+three server-only domain certificates whose SANs bind the exact overlay IPs,
+and a coordinator Ed25519 runtime key. It verifies the CA/leaf chains, every
+certificate/private-key match, EKU, expiry margin, endpoint SAN, permissions,
+and all private-runtime manifest invariants before atomically publishing the
+credentials directory and manifest. The CA signing key, CSRs, extension files,
+and serial file are not retained. A failure after reservation is terminal,
+destroys the exact partial staging/output tree when possible, and never enables
+automatic retry. A successful preparation still cannot connect, listen, start
+a service, execute a workload, inject a fault, spend, or claim availability.
 
 The offline agent-session core now implements the protocol's second semantic
 layer without opening a listener. It verifies canonical request/response files,
@@ -338,7 +351,8 @@ or satisfy the stronger S20 monotonic-CAS requirement.
    digest, ACL receipt digest, and fault-target domain.
 6. Produce and privately validate the exact endpoint manifest.
 7. Generate and sign the exact zero-network runtime-preparation challenge under
-   `agent-bridge-t22-a1-owner-runtime-preparation-v1`.
+   `agent-bridge-t22-a1-owner-runtime-preparation-v1`, including the reviewed
+   OpenSSL and `ssh-keygen` paths and raw binary hashes.
 8. Consume it once to generate the per-run mTLS CA/certificates, credential
    manifest, and coordinator runtime signing key; review only their content
    hashes without publishing raw paths, endpoints, or private material.
@@ -363,7 +377,7 @@ blocked until these inputs are concrete.
 - runtime credential-manifest schema raw SHA-256:
   `b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a`;
 - runtime-preparation challenge schema raw SHA-256:
-  `8d736b86cf7ead0c342f37a5b58fac9f0bb4fb410b0b3ea91c801aa636567a1a`;
+  `be45ac3a4d69a67d4f71e2acc2d2cb5f0ca03b23574640a02c50a5937d6c0282`;
 - domain-agent message schema raw SHA-256:
   `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee`;
 - distributed event schema raw SHA-256:
@@ -371,9 +385,9 @@ blocked until these inputs are concrete.
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - admission-contract content SHA-256:
-  `5a2d2fcb9d6bda78ab16661d9abcf85b3953bccc5d7796ea9ba15d5b782cf05b`;
+  `93d173614eb6214b4fe2bd8009d0ec585017edc0cc52c2ebd3f1220dc7f054ff`;
 - blocked owner-proposal content SHA-256:
-  `4da58d0e705b0b3e8e96d70922fa1e8f0f3ed20133f9d78a03a733cbf1e02460`.
+  `d9cf119b8695187ed487b5d7ff2a1c05b76add858fe54723101a9b42fb328d13`.
 
 The offline admission gate exercises 67 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
@@ -411,7 +425,7 @@ declared signer binding, domain binding, and message expiry. All keys and
 messages are synthetic; no real keys, credentials, network, commands, services,
 or faults are used.
 
-The runtime-preparation authorization KAT adds 42 directed negatives over the
+The runtime-preparation authorization KAT adds 44 directed negatives over the
 source/proposal/contract, attestation-set, endpoint-manifest and schema
 bindings; private path closure; lifetime and planned-execution windows;
 one-use/zero-spend authority; allowed/forbidden actions; claim ceilings;
@@ -419,6 +433,17 @@ canonical framing; owner signature and namespace; and private output
 permissions. Its positive verification reads zero real endpoint-manifest or
 credential instances, creates no runtime material, and performs no network,
 listener, service, fault, or spend action.
+
+The runtime-material preparer KAT adds one full synthetic cryptographic success
+and 10 directed negative paths. It generates and validates five synthetic
+certificates and five retained private keys in a temporary private root, proves
+the CA signing key is absent from the published set, and covers atomic replay
+denial, wrong/expired owner authority, signature namespace and source mismatch,
+signed tool-binary mismatch, endpoint-content mismatch, unsafe permissions,
+generation completion after authority expiry, and cleanup after injected
+generation failure. It reads zero real endpoint or
+credential instances and performs no network, listener, service, fault, or
+spend action.
 
 The collection-challenge KAT adds 42 directed negatives over schema and
 domain-separated digest binding, source/proposal/contract identities, alias

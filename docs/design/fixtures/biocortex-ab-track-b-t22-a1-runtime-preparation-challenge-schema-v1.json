@@ -72,13 +72,17 @@
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["run_id", "private_artifact_root", "private_endpoint_manifest_path", "runtime_credential_manifest_output_path", "coordinator_runtime_public_key_output_path", "planned_execution_expires_at", "credential_validity_margin_seconds"],
+      "required": ["run_id", "private_artifact_root", "private_endpoint_manifest_path", "runtime_credential_manifest_output_path", "coordinator_runtime_public_key_output_path", "openssl_executable_path", "openssl_executable_sha256", "ssh_keygen_executable_path", "ssh_keygen_executable_sha256", "planned_execution_expires_at", "credential_validity_margin_seconds"],
       "properties": {
         "run_id": {"$ref": "#/$defs/run_id"},
         "private_artifact_root": {"$ref": "#/$defs/absolute_path"},
         "private_endpoint_manifest_path": {"$ref": "#/$defs/absolute_path"},
         "runtime_credential_manifest_output_path": {"$ref": "#/$defs/absolute_path"},
         "coordinator_runtime_public_key_output_path": {"$ref": "#/$defs/absolute_path"},
+        "openssl_executable_path": {"$ref": "#/$defs/absolute_path"},
+        "openssl_executable_sha256": {"$ref": "#/$defs/sha256"},
+        "ssh_keygen_executable_path": {"$ref": "#/$defs/absolute_path"},
+        "ssh_keygen_executable_sha256": {"$ref": "#/$defs/sha256"},
         "planned_execution_expires_at": {"$ref": "#/$defs/utc_time"},
         "credential_validity_margin_seconds": {"type": "integer", "minimum": 300, "maximum": 86400}
       }
