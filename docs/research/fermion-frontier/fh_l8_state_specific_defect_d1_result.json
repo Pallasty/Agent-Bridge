@@ -1,0 +1,29 @@
+{
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D1",
+  "full_R100_error_bounded": false,
+  "limitations": [
+    "Only the k0 to k1 expectation defect is bounded.",
+    "The degree-five remainder uses operator-norm Pauli-L1 and does not assert later-step cancellation.",
+    "The two single-step bounds cannot be multiplied by 100 without evolved-observable certificates."
+  ],
+  "observables": {
+    "double_occupancy": {
+      "D4": {"L1":"8341/24","Neel_expectation":"-115/12","defect_expansion_sha256":"09bd01a1240a8a34b279b32248ad2f27795213656a0230451e021eb6e7b4e5dc","defect_term_count":89744,"ideal_term_count":157892,"product_term_count":152004},
+      "degree_five_remainder": {"E5_L1":"190901/30","P5_L1":"30297077/3840","cached_prefix_count":2002,"ideal_expansion_sha256":"55a3e04a5f68bfda7d9d3fd4d860c9aa14a7a86222cc859f97ab31fb7f5eabee","ideal_term_count":708448,"maximum_path_term_count":37440,"path_count":1287,"path_records_sha256":"91bce34fcbabdb9c3d5353f33b2117074862e1a1ff3a19348b73af9a7f8c86e5"},
+      "observable_identity": {"definition":"(1/N)*sum_n_up*n_down","full_observable_Pauli_L1":"1/1","n_sites":64,"nonidentity_expansion_sha256":"cc6dc2b8b74795dc326fbbed5b48598663c8998081ed0291cc7ed64b4737698f","nonidentity_term_count":192,"observable_id":"double_occupancy","omitted_commuting_identity_coefficient":"1/4"},
+      "resource_usage": {"pair_products":443025920,"peak_expansion_terms":731693},
+      "single_step": {"allocation":"1/400000","bound_to_allocation_ratio":"11682481/19200000","leading_absolute_contribution":"23/240000000","remainder_bound":"3648827/2560000000000","total_bound":"11682481/7680000000000","within_allocation":true}
+    },
+    "staggered_magnetization": {
+      "D4": {"L1":"32353/48","Neel_expectation":"115/6","defect_expansion_sha256":"3e238fed99dc7ae01807d2eda6bc09dc77630e380c1d23c4661b62a50fbc9413","defect_term_count":45592,"ideal_term_count":50144,"product_term_count":34976},
+      "degree_five_remainder": {"E5_L1":"9339/2","P5_L1":"13707757/1920","cached_prefix_count":2002,"ideal_expansion_sha256":"514616584a478c1c370a6aae961cabdad1c2c41333202721a32d42fd4e8bd85a","ideal_term_count":272832,"maximum_path_term_count":9216,"path_count":1287,"path_records_sha256":"389f86bc713f3d2485244071aeb22ec4c1e89dbd9f2e93eda87875bc3b8062dd"},
+      "observable_identity": {"definition":"(1/N)*sum_(-1)^(r+c)*(n_up-n_down)","full_observable_Pauli_L1":"1/1","n_sites":64,"nonidentity_expansion_sha256":"6dc21a3763f141cc9e9bdcb5610cc91ab8c09dbeac8ba736560df70affdaa9ee","nonidentity_term_count":128,"observable_id":"staggered_magnetization","omitted_commuting_identity_coefficient":"0/1"},
+      "resource_usage": {"pair_products":103506944,"peak_expansion_terms":272832},
+      "single_step": {"allocation":"1/400000","bound_to_allocation_ratio":"8784399/16000000","leading_absolute_contribution":"23/120000000","remainder_bound":"22673197/19200000000000","total_bound":"8784399/6400000000000","within_allocation":true}
+    }
+  },
+  "physical_reference_qualified": false,
+  "ready_gate_eligible": false,
+  "status": "VERIFIED_FH_L8_K0_K1_STATE_SPECIFIC_DEFECT_WITHIN_ALLOCATION",
+  "verified": true
+}

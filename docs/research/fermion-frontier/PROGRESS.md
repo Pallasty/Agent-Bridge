@@ -1,5 +1,15 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 state-specific defect D1
+
+- Exactly merged the degree-four product-minus-ideal observable defect and evaluated it on the
+  checkerboard Néel state: `115/6` for staggered magnetization and `-115/12` for double occupancy.
+- Enumerated all 1,287 degree-five product remainder paths and the ideal fifth commutator.
+- Certified total k0-to-k1 expectation-defect bounds `8784399/6400000000000` and
+  `11682481/7680000000000`, respectively 54.90% and 60.85% of the `1/400000` allocation.
+- The authority remains one-step-only; evolved steps, full R100, physical reference and READY remain
+  unassessed.
+
 ## 2026-07-21 — FH-L8 independent reference route S0
 
 - Verified both exact R100 uniform-supremum floors exceed the `1/4000` observable allocation.
