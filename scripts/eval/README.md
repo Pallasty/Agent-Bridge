@@ -99,6 +99,17 @@ preregistered recoverability gate; the aggregate result and prospective
 write-side instrumentation boundary are recorded in
 `docs/design/FREE_RECALL_STRATEGY_R2_EPISODE_RECOVERABILITY_RESULT_2026_07_21.md`.
 
+`free_recall_strategy_r3_episode_sidecar.py` tests the successor prospective
+contract using public-synthetic data only. Its order-independent reducer must
+reconstruct complete episode membership and position under shuffled,
+duplicated, close-first, and content-permuted delivery, while every incomplete,
+conflicted, or ambiguous episode returns the fixed-budget baseline without
+partial leakage. R3 passes its structural and fail-closed gates and therefore
+opens only a default-off observation-only integration design review; it does
+not authorize a schema, producer, real-session capture, retrieval consumer,
+runtime execution, or deployment. See
+`docs/design/FREE_RECALL_STRATEGY_R3_PROSPECTIVE_EPISODE_SIDECAR_RESULT_2026_07_21.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
