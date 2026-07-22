@@ -1,5 +1,40 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 packed depth-3 quotient checkpoint D8--D11
+
+- D8 froze the 213,099-record, 32-byte packed-checkpoint and 53-shard protocol without executing
+  scientific computation or materializing a checkpoint.
+- D9 rebuilt q3 and measured only the first 4,096-source quotient-H preflight, then failed closed
+  because observed `memory.current` was approximately 9 GiB while memory and swap limits were
+  unlimited.
+- D10 reproduced that bounded preflight in an enforced 1 GiB / 805,306,368-byte (768 MiB)
+  high-water / zero-swap transient scope. This removed the environmental blocker but retained
+  `full_run_authorized=false`.
+- D11 froze checker and contract before outcome, replayed q0→q1→q2→q3 under that envelope and
+  materialized 213,099 sorted fixed-width records. The 6,819,168-byte checkpoint SHA-256 is
+  `db2ce0a338a378aef6e4a043e02388c4268addc951d0ae590c2ae1d65f840231`; its q3 coverage is
+  1,704,285 full states.
+- The D11 execution observed a 406,224,896-byte cgroup peak, 414,253,056-byte process max RSS,
+  zero swap and no cgroup memory events. The fourth call was rejected before the backend and zero
+  q4 records were emitted.
+- A post-C3 heavy replay in a separate fresh scope reproduced the committed checkpoint byte for
+  byte; it observed a 418,836,480-byte cgroup peak, 427,343,872-byte process max RSS, zero swap and
+  no cgroup memory events.
+- After integration, zeroing each packed record's seven-byte tail reproduces the parallel
+  `FH-L8-INDEPENDENT-REFERENCE-D11` base receipt's payload SHA-256 `09758478e...77017` exactly.
+  This establishes a base-view/rank-extension relationship, not external-payload availability or
+  added execution authority.
+- The parallel lane's 4,096-source spill/sort/merge preflight produced 424,682 targets and matched
+  its naive signed quotient calculation. It did visit bounded q3 source rows, unlike the packed
+  C3 generation/replay, but did not run all 53 shards or finish the fourth action. A new unique D12
+  consumer contract must bind C3, its terminal receipt and full packed validation before reuse.
+- Current status is
+  `VERIFIED_D11_PACKED_DEPTH3_QUOTIENT_CHECKPOINT_MATERIALIZED_NO_Q4_AUTHORITY`. The next gate is
+  `CHECKPOINTED_FULL_QUOTIENT_H_RUNNER_IMPLEMENTATION_AND_AUTHORIZATION`; target cardinality,
+  target vector, q3-to-q4 feasibility, remainder, R100, hardware, quantum advantage and READY all
+  remain uncertified. See `FH_L8_PACKED_Q3_CHECKPOINT_D11_ZH.md`, the committed D11 bundle and
+  `test_fh_l8_packed_q3_checkpoint_d11.py`.
+
 ## 2026-07-22 — FH-L8 depth-3→depth-4 quotient-H design gate
 
 - Froze globally unique contract `FH-L8-QUOTIENT-H-D3-TO-D4-DESIGN-GATE-V1` after a checker-only

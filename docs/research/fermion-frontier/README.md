@@ -38,6 +38,34 @@ unique ID and remains design-only.
 external-merge data plane, but executes no scientific action. The next unit must first certify a
 packed depth-3 quotient checkpoint; see `FH_L8_DEPTH3_TO_DEPTH4_QUOTIENT_H_DESIGN_GATE_ZH.md`.
 
+The bounded D8--D10 progression then separates protocol, sampled computation and execution
+environment. D8 freezes the 213,099-record packed-checkpoint protocol without materialization; D9
+executes only the first 4,096-source preflight and rejects its unconstrained cgroup; D10 reproduces
+that preflight inside the required 1 GiB, 805,306,368-byte (768 MiB) high-water, zero-swap scope.
+None of these units authorizes the complete depth-3-to-depth-4 action. See
+`FH_L8_PACKED_DEPTH3_CHECKPOINT_D8_ZH.md`,
+`FH_L8_DEPTH4_PREFLIGHT_D9_ZH.md` and `FH_L8_CGROUP_ENVELOPE_D10_ZH.md`.
+
+`FH-L8-D11-PACKED-D3-QUOTIENT-CHECKPOINT-MATERIALIZATION-V1` now closes the checkpoint
+prerequisite. Its official replay executes exactly the three actions needed to reconstruct q3,
+rejects a fourth call before the Hamiltonian backend, and commits 213,099 sorted 32-byte records
+(6,819,168 bytes; SHA-256
+`db2ce0a338a378aef6e4a043e02388c4268addc951d0ae590c2ae1d65f840231`) under the frozen cgroup
+envelope. A separate post-outcome heavy replay in a fresh scope reproduces the committed bytes
+exactly. D11 emits no q4 records and does not certify q3-to-q4 runtime or memory feasibility. The
+next gate is a separately frozen and authorized checkpointed full quotient-H runner; see
+`FH_L8_PACKED_Q3_CHECKPOINT_D11_ZH.md` and `test_fh_l8_packed_q3_checkpoint_d11.py`.
+
+The integrated tree also cross-checks the parallel `FH-L8-INDEPENDENT-REFERENCE-D11` source
+receipt: zeroing the packed record's seven-byte tail reproduces its registered base-payload
+SHA-256 `09758478e63d21014bdd704e157b1969498fdd4068b6ab4f78c2720324477017`. Thus the packed
+checkpoint is a rank-bearing extension of that big-endian base view. This digest compatibility
+does not assert availability of the external base payload or widen either route's authority.
+The parallel lane has also verified one 4,096-source spill/sort/merge shard against a naive signed
+quotient action, but has not implemented all 53 shards, cross-shard merge or resume. The integrated
+successor must use a new unique D12 contract that pins C3 and validates its full packed format
+before consuming representative/amplitude fields; the old external manifest is not a substitute.
+
 Status date: 2026-07-22
 
 Scope: physical fermions, not the historical Fermion Memory service.

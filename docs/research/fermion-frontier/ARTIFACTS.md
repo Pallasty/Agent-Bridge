@@ -74,6 +74,49 @@ All copied JSON files are research-only outputs. They contain no credentials.
   resource no-go and authority-mutation regressions.
 - This design unit deliberately has no result, runner or action implementation artifact.
 
+## FH-L8 packed depth-3 quotient checkpoint progression D8--D11
+
+- D8 protocol: `FH_L8_PACKED_DEPTH3_CHECKPOINT_D8_ZH.md`,
+  `fh_l8_packed_depth3_checkpoint_d8_contract.json`,
+  `fh_l8_packed_depth3_checkpoint_d8_result.json`,
+  `fh_l8_packed_depth3_checkpoint_d8_checker.py` and
+  `test_fh_l8_packed_depth3_checkpoint_d8_checker.py`. This unit freezes the shard and record
+  protocol without materializing a checkpoint.
+- D9 bounded preflight: `FH_L8_DEPTH4_PREFLIGHT_D9_ZH.md`,
+  `fh_l8_depth4_preflight_d9_contract.json`, `fh_l8_depth4_preflight_d9_receipt.json`,
+  `fh_l8_depth4_preflight_d9.py` and `test_fh_l8_depth4_preflight_d9.py`. It measures one
+  4,096-source shard but fails the required cgroup-envelope gate.
+- D10 envelope replay: `FH_L8_CGROUP_ENVELOPE_D10_ZH.md`,
+  `fh_l8_cgroup_envelope_d10_contract.json`, `fh_l8_cgroup_envelope_d10_receipt.json` and
+  `test_fh_l8_cgroup_envelope_d10.py`. It repeats the bounded preflight under an enforced
+  1 GiB, 805,306,368-byte (768 MiB) high-water and zero-swap scope; it does not authorize the
+  full action.
+- D11 report and protocol: `FH_L8_PACKED_Q3_CHECKPOINT_D11_ZH.md`,
+  `fh_l8_packed_q3_checkpoint_d11_contract.json`,
+  `fh_l8_packed_q3_checkpoint_d11_checker.py`,
+  `fh_l8_packed_q3_checkpoint_d11_runner.py` and
+  `test_fh_l8_packed_q3_checkpoint_d11.py`.
+- D11 committed outcome: `fh_l8_packed_q3_checkpoint_d11_bundle/checkpoint.bin`,
+  `fh_l8_packed_q3_checkpoint_d11_bundle/result.json` and
+  `fh_l8_packed_q3_checkpoint_d11_terminal_receipt.json`. The checkpoint contains 213,099
+  fixed-width 32-byte records (6,819,168 bytes) with SHA-256
+  `db2ce0a338a378aef6e4a043e02388c4268addc951d0ae590c2ae1d65f840231`.
+- D11 certifies only the packed q3 checkpoint. It emits no q4 record and grants no fourth-action,
+  target-vector, remainder, R100, hardware, quantum-advantage or READY authority.
+- In the integrated tree, zeroing each packed record's seven-byte tail projects it to the parallel
+  `FH-L8-INDEPENDENT-REFERENCE-D11` base format. The projected SHA-256 is
+  `09758478e63d21014bdd704e157b1969498fdd4068b6ab4f78c2720324477017`, exactly the payload
+  identity retained by `fh_l8_checkpointed_quotient_h_d11_receipt.json`; this compatibility check
+  does not assert current availability of that external payload or grant execution authority.
+- The parallel lane is retained as `FH_L8_CHECKPOINTED_QUOTIENT_H_D11_ZH.md`,
+  `fh_l8_checkpointed_quotient_h_d11_contract.json`,
+  `fh_l8_checkpointed_quotient_h_d11_runner.py`,
+  `fh_l8_checkpointed_quotient_h_d11_receipt.json`, `fh_l8_d11_merge4096_receipt.json`,
+  `fh_l8_d11_verify4096_receipt.json` and
+  `test_fh_l8_checkpointed_quotient_h_d11_runner.py`. Its 4,096-source spill/merge result is
+  bounded preflight evidence only; it is not a complete fourth action and is not bound to the
+  packed C3 chronology. A successor consumer therefore needs a new unique D12 contract.
+
 ## Claude source session
 
 - Session:

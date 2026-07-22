@@ -1,0 +1,8 @@
+{
+  "fourth_action_executed": false,
+  "next_gate": "D11_FULL_SHARD_SPILL_MERGE_PREFLIGHT",
+  "source_count": 4096,
+  "status": "VERIFIED_D11_BOUNDED_SPILL_MERGE_NAIVE_EQUIVALENCE",
+  "target_count": 424682,
+  "verified": true
+}
