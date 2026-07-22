@@ -2012,3 +2012,21 @@ so they are versioned normally and are not added to the preservation-only
   replay that outcome after reveal.
 - `FERMION_BIOCORTEX_FB_S1_SAME_U_TDHF_RESIDUAL_2026_07_22.md` records the
   `NO_GO_DIRECT_REDUCTION` result and its BioCortex/runtime non-claim boundary.
+
+## Fermion × BioCortex FB-S2
+
+- `fb_s2_hbr_r1_adapter_eligibility_contract.json` freezes a one-sided,
+  source-bound negative qualification against BioCortex commit `1539a6f` and
+  can never grant positive eligibility.
+- `fb_s2_hbr_r1_adapter_eligibility.py` verifies commit/tree/file identities,
+  upstream authority records, opaque candidate-source bindings, the 1 GiB
+  zero-swap envelope and any required Fermion mapping artifacts fail-closed.
+- `fb_s2_hbr_r1_adapter_eligibility_result.json` preserves the distinct
+  `INDETERMINATE_SOURCE_AUTHORITY` machine status and
+  `OPERATIONAL_NO_GO_CURRENT_CHAIN` operating decision after the upstream gate
+  OOMed in its toolchain-copy stage; no candidate execution occurred.
+- `test_fb_s2_hbr_r1_adapter_eligibility.py` covers mutation, status separation,
+  authority closure and result provenance; synthetic all-green cases are logic
+  controls only.
+- `FERMION_BIOCORTEX_FB_S2_HBR_R1_ADAPTER_ELIGIBILITY_2026_07_22.md` is the
+  human-readable evidence boundary and v2 reopening handoff.

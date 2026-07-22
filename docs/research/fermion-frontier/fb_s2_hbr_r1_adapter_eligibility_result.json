@@ -1,0 +1,204 @@
+{
+  "schema": "agent_bridge.fermion_biocortex.fb_s2_hbr_r1_adapter_eligibility_result.v1",
+  "protocol_id": "FB-S2-HBR-R1-ADAPTER-ELIGIBILITY-V1",
+  "result_date": "2026-07-22",
+  "analysis_class": "ONE_SIDED_SOURCE_BOUND_PUBLIC_EVIDENCE_NEGATIVE_QUALIFICATION_NOT_OUTCOME_BLIND_PREREGISTRATION",
+  "protocol_freeze": {
+    "initial_commit": "fb77dc02833c40f8f509f492acada1f94cde222a",
+    "final_pre_receipt_commit": "3236468ccffb05163860f602f321fbfd364735d0",
+    "final_pre_receipt_tree": "49c316543a28578e5b8c5a01e0023ff021b67f47",
+    "contract_sha256": "f4b64721b8a04c8a0e9225224b125bc452e0acbf58375b184b0b4b1d35214049",
+    "checker_sha256": "7d9f18be87a3cac3369d84411b126d31b72c18961dd992e71a0dafd839fc4234",
+    "protocol_commit_verified_before_static_replay": true,
+    "positive_qualification_authority": false
+  },
+  "upstream": {
+    "repository": "git@github.com:pallasting/biocortex-rs.git",
+    "commit": "1539a6ff33867e4cb34f5530cfc137229f7f63f5",
+    "tree": "1b4eeda4bba8b0d564a216e6841de99a9dd590a2",
+    "ref_observed_after_successful_fetch": "refs/remotes/origin/main",
+    "exact_commit_tree_and_bound_file_identities_pass": true
+  },
+  "machine_qualification": {
+    "status": "INDETERMINATE_SOURCE_AUTHORITY",
+    "static_replay_reason": "ARTIFACT_INTEGRITY_GATE_NOT_REQUESTED_IN_STATIC_REPLAY",
+    "completion_blocker": "GATE_RESOURCE_ENVELOPE_INCOMPATIBILITY_UNRUNNABLE_UNDER_FROZEN_1_GIB",
+    "source_snapshot_identity_trustworthy": true,
+    "artifact_integrity_gate_completed": false,
+    "artifact_integrity_observed": false,
+    "must_not_be_relabelled_as_machine_no_go": true
+  },
+  "operational_adapter_disposition": {
+    "status": "OPERATIONAL_NO_GO_CURRENT_CHAIN",
+    "scope": "BIOCORTEX_COMMIT_1539A6F_TREE_1B4EEDA_CURRENT_HBR_R1_CHAIN_ONLY",
+    "adapter_construction_authorized": false,
+    "candidate_execution_authorized": false,
+    "fb_s2b_design_authorized": false,
+    "fb_s2b_execution_authorized": false,
+    "stop_rules_activated": true,
+    "basis": [
+      "CURRENT_ROUTE_CLOSED_AND_REOPEN_NOT_AUTHORIZED",
+      "IMPLEMENTATION_COMPILATION_EXECUTION_AUTHORITIES_FALSE",
+      "MATERIALIZED_ADAPTER_ROOT_ENTRY_IMPL_CALL_EDGE_AND_REGISTRY_ABSENT",
+      "FERMION_MAPPING_AND_EQUIVALENCE_EVIDENCE_ABSENT"
+    ],
+    "reopen_requires": "NEW_HASH_BOUND_OWNER_PACKET_INDEPENDENT_1_GIB_SAFE_GATE_AND_NEW_POSITIVE_QUALIFICATION_V2"
+  },
+  "static_replay": {
+    "raw_receipt_sha256": "1b79cdd07aef85a2f04ef02fc467d2d33e9e091e91a96146622c031b685e622c",
+    "raw_receipt_bytes": 50454,
+    "scientific_result_sha256": "78335d3c274db2038868074f3ef204da595b1b5b5207912b411c2f25c88ac1ad",
+    "status": "INDETERMINATE_SOURCE_AUTHORITY",
+    "required_gate_count": 57,
+    "passed_gate_count": 5,
+    "unmet_gate_partition": {
+      "unobserved_artifact_integrity_and_resource_fields": 5,
+      "explicitly_negative_authority_and_implementation_fields": 28,
+      "missing_fermion_mapping_and_receipt_fields": 19
+    },
+    "path_hash_records": {
+      "runtime": {
+        "pair_count": 22,
+        "pass": true
+      },
+      "custody": {
+        "pair_count": 9,
+        "pass": true
+      },
+      "root": {
+        "pair_count": 7,
+        "pass": true
+      },
+      "owner_hold": {
+        "pair_count": 7,
+        "pass": true
+      },
+      "route_closure": {
+        "pair_count": 12,
+        "pass": true
+      }
+    },
+    "all_identified_path_hash_pairs_pass": true,
+    "cross_record_authority_consistency_pass": true,
+    "candidate_source_manifest": {
+      "schema": "biocortex.language_p3a2_hbr_r1_candidate_artifact_sources.v2",
+      "source_count": 9,
+      "opaque_hash_bindings_pass": true,
+      "source_media": "UTF8_RS_TEXT_OUTSIDE_ALL_CARGO_AND_MODULE_TARGETS",
+      "candidate_source_content_decoded_or_lexically_inspected": false
+    },
+    "authority_record": {
+      "route_closed_current_chain": true,
+      "reopen_currently_authorized": false,
+      "runtime_adapter_contract_authority": false,
+      "runtime_adapter_implementation_authority": false,
+      "materialized_adapter_anchor_authority": false,
+      "candidate_artifact_construction_authority": false,
+      "candidate_compilation_authority": false,
+      "candidate_implementation_authority": false,
+      "candidate_execution_authority": false,
+      "source_execution_authority": false
+    },
+    "implementation_record": {
+      "materialized_runtime_adapter_root_present": false,
+      "materialized_entry_anchor_present": false,
+      "runtime_adapter_impl_present": false,
+      "registered_arm_executor_impl_head_count": 0,
+      "adapter_call_edge_count": 0,
+      "bound_runtime_subject_count": 0,
+      "accepted_registry_instance_count": 0,
+      "case_path_registry_present": false,
+      "case_path_closure_complete": false,
+      "candidate_artifact_constructed": false,
+      "candidate_constructed": false,
+      "candidate_compiled": false,
+      "candidate_linked": false,
+      "source_parsed": false,
+      "source_compiled": false,
+      "source_linked": false
+    },
+    "fermion_mapping_manifest_present": false,
+    "resource_observation": {
+      "memory_max_bytes": 1073741824,
+      "memory_swap_max_bytes": 0,
+      "elapsed_seconds": 0.20981346000917256,
+      "process_peak_rss_kib": 26888
+    }
+  },
+  "artifact_integrity_resource_attempt": {
+    "classification": "GATE_RESOURCE_ENVELOPE_INCOMPATIBILITY_UNRUNNABLE_UNDER_FROZEN_1_GIB",
+    "systemd_scope": "run-p3246649-i20016839.scope",
+    "completed": false,
+    "json_receipt_emitted": false,
+    "zero_byte_file_created_by_outer_redirection": true,
+    "json_receipt_bytes": 0,
+    "json_receipt_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cgroup_oom_killed": true,
+    "systemd_memory_peak_bytes": 1073741824,
+    "cgroup_memory_usage_kib_at_oom": 1048576,
+    "cgroup_memory_limit_kib": 1048576,
+    "cgroup_swap_usage_kib": 0,
+    "cgroup_swap_limit_kib": 0,
+    "kernel_oom_invoker": "cp",
+    "cgroup_oom_victim_comm_counts": {
+      "python3": 1,
+      "bash": 2
+    },
+    "kernel_file_bytes_at_oom": 1043861504,
+    "kernel_shmem_bytes_at_oom": 1043836928,
+    "tmp_filesystem": "tmpfs",
+    "gate_toolchain_snapshot_operation": "cp -a --reflink=never TRUSTED_TOOLCHAIN_ROOT/lib TMP/toolchain/lib",
+    "trusted_toolchain_lib_bytes": 1042649166,
+    "trusted_toolchain_lib_file_count": 2539,
+    "gate_sha256": "4c83b347061bd451e2c69171701445632489a17d1a70045ac6ac10fa2bab7bd0",
+    "candidate_execution_requested": false,
+    "candidate_execution_observed": false,
+    "performance_result": false,
+    "interpretation": "HOST_GATE_RESOURCE_FAILURE_NOT_SOURCE_INTEGRITY_FAILURE_NOT_CANDIDATE_OOM"
+  },
+  "chronology": [
+    {
+      "step": 1,
+      "event": "PROTOCOL_AND_CHECKER_INITIAL_FREEZE",
+      "commit": "fb77dc02833c40f8f509f492acada1f94cde222a"
+    },
+    {
+      "step": 2,
+      "event": "NONSCIENTIFIC_PREFLIGHT_FOUND_FILESYSTEM_MODE_AND_GENERIC_UNPAIRED_PATH_HANDLING",
+      "scientific_receipt_valid": false
+    },
+    {
+      "step": 3,
+      "event": "PARSER_AND_RECORD_SEMANTICS_FIXED_BEFORE_FINAL_REPLAY",
+      "commit": "3236468ccffb05163860f602f321fbfd364735d0"
+    },
+    {
+      "step": 4,
+      "event": "MANDATORY_GATE_ATTEMPT_OOM_KILLED_BY_FROZEN_1_GIB_ZERO_SWAP_CGROUP",
+      "scientific_receipt_valid": false
+    },
+    {
+      "step": 5,
+      "event": "SOURCE_BOUND_STATIC_REPLAY_COMPLETED_WITHOUT_GATE_OR_CANDIDATE_EXECUTION",
+      "machine_status": "INDETERMINATE_SOURCE_AUTHORITY"
+    }
+  ],
+  "nonclaims": {
+    "artifact_integrity_gate_returned_nonzero": false,
+    "source_integrity_failure": false,
+    "candidate_oom": false,
+    "candidate_performance_failure": false,
+    "fermion_mapping_leakage_observed": false,
+    "fermion_mapping_equivalence_failure_observed": false,
+    "biocortex_runtime_authority": false,
+    "agent_bridge_runtime_authority": false,
+    "agent_bridge_memory_read_or_write": false,
+    "mainline_parameter_influence": false,
+    "bgl_accessed": false,
+    "physical_l8_instance_assessed": false,
+    "hardware_evidence": false,
+    "quantum_advantage": false,
+    "fermionic_non_gaussianity_assessed": false,
+    "performance_result": false
+  }
+}

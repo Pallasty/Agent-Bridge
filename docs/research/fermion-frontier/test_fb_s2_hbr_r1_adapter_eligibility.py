@@ -9,6 +9,8 @@ import unittest
 HERE = pathlib.Path(__file__).resolve().parent
 MODULE_PATH = HERE / "fb_s2_hbr_r1_adapter_eligibility.py"
 CONTRACT_PATH = HERE / "fb_s2_hbr_r1_adapter_eligibility_contract.json"
+RESULT_PATH = HERE / "fb_s2_hbr_r1_adapter_eligibility_result.json"
+FROZEN_RESULT_SHA256 = "35f393e28ea2c676361b75bb046c2cf27bab0f97151eac330ffa99df74946ff9"
 SPEC = importlib.util.spec_from_file_location("fb_s2_eligibility", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -232,6 +234,76 @@ class FbS2EligibilityTests(unittest.TestCase):
         self.assertTrue(all(self.contract["stop_rules"].values()))
         self.assertFalse(self.contract["conditional_fb_s2b"]["performance_execution_authority_granted_here"])
         self.assertFalse(self.contract["positive_qualification_authority"])
+
+    def test_result_keeps_machine_and_operational_statuses_separate(self):
+        result = MODULE.load_json(RESULT_PATH)
+        self.assertEqual(MODULE.sha256_path(RESULT_PATH), FROZEN_RESULT_SHA256)
+        self.assertEqual(
+            result["machine_qualification"]["status"],
+            MODULE.INDETERMINATE,
+        )
+        self.assertTrue(
+            result["machine_qualification"]["must_not_be_relabelled_as_machine_no_go"]
+        )
+        self.assertEqual(
+            result["operational_adapter_disposition"]["status"],
+            "OPERATIONAL_NO_GO_CURRENT_CHAIN",
+        )
+        self.assertFalse(
+            result["operational_adapter_disposition"]["fb_s2b_design_authorized"]
+        )
+
+    def test_result_gate_partition_and_bound_static_evidence(self):
+        result = MODULE.load_json(RESULT_PATH)
+        static = result["static_replay"]
+        partition = static["unmet_gate_partition"]
+        self.assertEqual(static["passed_gate_count"], 5)
+        self.assertEqual(sum(partition.values()), 52)
+        self.assertEqual(static["passed_gate_count"] + sum(partition.values()), 57)
+        self.assertTrue(static["all_identified_path_hash_pairs_pass"])
+        self.assertTrue(static["cross_record_authority_consistency_pass"])
+        self.assertEqual(
+            {key: value["pair_count"] for key, value in static["path_hash_records"].items()},
+            {"runtime": 22, "custody": 9, "root": 7, "owner_hold": 7, "route_closure": 12},
+        )
+        self.assertFalse(static["authority_record"]["candidate_execution_authority"])
+        self.assertEqual(
+            static["implementation_record"]["registered_arm_executor_impl_head_count"],
+            0,
+        )
+        self.assertFalse(static["fermion_mapping_manifest_present"])
+
+    def test_result_records_resource_failure_not_candidate_failure(self):
+        result = MODULE.load_json(RESULT_PATH)
+        attempt = result["artifact_integrity_resource_attempt"]
+        self.assertTrue(attempt["cgroup_oom_killed"])
+        self.assertFalse(attempt["completed"])
+        self.assertFalse(attempt["json_receipt_emitted"])
+        self.assertTrue(attempt["zero_byte_file_created_by_outer_redirection"])
+        self.assertEqual(attempt["json_receipt_bytes"], 0)
+        self.assertEqual(attempt["kernel_oom_invoker"], "cp")
+        self.assertEqual(
+            attempt["cgroup_oom_victim_comm_counts"],
+            {"python3": 1, "bash": 2},
+        )
+        self.assertEqual(attempt["cgroup_memory_limit_kib"], 1048576)
+        self.assertEqual(attempt["cgroup_swap_limit_kib"], 0)
+        self.assertGreater(attempt["trusted_toolchain_lib_bytes"], 1_000_000_000)
+        self.assertFalse(attempt["candidate_execution_requested"])
+        self.assertFalse(attempt["performance_result"])
+        self.assertLessEqual(
+            set(self.contract["nonclaims"]),
+            set(result["nonclaims"]),
+        )
+        self.assertFalse(result["nonclaims"]["performance_result"])
+        self.assertTrue(all(value is False for value in result["nonclaims"].values()))
+
+    def test_result_binds_frozen_sources(self):
+        result = MODULE.load_json(RESULT_PATH)
+        self.assertEqual(result["protocol_freeze"]["contract_sha256"], MODULE.sha256_path(CONTRACT_PATH))
+        self.assertEqual(result["protocol_freeze"]["checker_sha256"], MODULE.sha256_path(MODULE_PATH))
+        self.assertEqual(result["upstream"]["commit"], self.contract["upstream"]["commit"])
+        self.assertEqual(result["upstream"]["tree"], self.contract["upstream"]["tree"])
 
 
 if __name__ == "__main__":

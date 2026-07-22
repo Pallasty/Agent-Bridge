@@ -2163,3 +2163,25 @@ and the matched evidence manifest all remain unresolved for lack of real externa
 evidence. The baseline is explicitly
 `BASELINE_UNRESOLVED_EXTERNAL_EVIDENCE_REQUIRED`; it cannot be upgraded by a
 synthetic fixture, assumed hardware value, empty template or uncertified reference.
+
+## FB-S2 closes the current HBR-R1 adapter chain without a performance run
+
+FB-S2 binds BioCortex commit `1539a6f` / tree `1b4eeda`. Static replay verified
+the fixed snapshot, all identified record path/hash pairs and cross-record
+authority consistency. Of 57 eligibility gates, 5 passed; 5 integrity/resource
+fields were unobserved, 28 authority/implementation fields were explicitly
+negative, and 19 Fermion mapping/receipt fields were missing. The nine bound
+`.rs` source-media files remain outside Cargo/module targets; no materialized
+adapter, call edge, registry instance or Fermion mapping is present.
+
+The mandatory upstream integrity gate could not complete inside the frozen
+1 GiB, zero-swap cgroup: its pre-check attempted to copy a 1,042,649,166-byte
+toolchain library tree into tmpfs, `cp` invoked the OOM killer, and the recorded
+victims were the checker/parent `python3` and `bash` processes. Therefore the
+machine status is
+`INDETERMINATE_SOURCE_AUTHORITY`, not machine `NO_GO`. Independently, the bound
+negative authority and implementation records activate
+`OPERATIONAL_NO_GO_CURRENT_CHAIN`, so adapter construction, candidate execution
+and FB-S2B stop now. This is not a source-integrity, candidate-OOM or performance
+result. Reopen requires new owner authority, a hash-bound 1-GiB-safe gate,
+materialized adapter/mapping evidence and a new positive-qualification v2.
