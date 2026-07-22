@@ -87,6 +87,9 @@ impl HubBuilder {
         self
     }
     #[cfg(feature = "episode-observation-slice-c1")]
+    // C1 keeps this injection seam unreachable from production startup; tests
+    // and a future separately authorized C2 implementation are its callers.
+    #[allow(dead_code)]
     pub(crate) fn curation_batch_observer(
         mut self,
         observer: Arc<dyn CurationBatchObservationCapability>,

@@ -7,6 +7,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// C1 deliberately ships no production capability implementation; variants are
+// constructed only by synthetic test capabilities until C2 is separately open.
+#[allow(dead_code)]
 pub(crate) enum CurationBatchObservationError {
     Begin,
     Item,
