@@ -26,10 +26,11 @@ real collection challenge is generated.
    signed transcript transitions but deliberately opens no socket and executes
    no command. The final execution admission receipt consequently has no
    consumer capable of producing T22-A1-H evidence.
-2. **No three-host runtime-readiness contract.** Attestations carry digests for
-   a pinned-tool receipt, private data root, and port set, but no private packet
-   binds the exact `etcd`, `etcdctl`, `bao`, agent runtime, local data/log roots,
-   or host-local credential paths that a runner would use.
+2. **Three-host runtime-readiness contract — closed after this audit.** The new
+   private packet binds exact executable, local-root, port, credential-placement
+   and operator/coordinator identities for each role. Its semantic KAT validates
+   all three positions. The three real packets and detached signatures remain
+   uncollected.
 3. **No credential-placement proof.** The material preparer creates all leaf
    private keys beneath the coordinator artifact root. Its manifest does not
    prove that each exact domain host possesses the matching key/certificate at
@@ -88,3 +89,8 @@ caller-selected source commit, replay, runner failure, post-run expiry, missing
 terminal evidence, terminal cross-binding forgery, cleanup and budget
 escalation. It reads zero real instances and performs no network, listener,
 workload, fault or credential action.
+
+`biocortex_ab_track_b_t22_a1_domain_runtime_readiness_v1.py`, its closed schema
+and KAT now close the contract portion of item 2. Three synthetic domain-role
+packets pass and 44 mutations fail; real packet/signature collection remains a
+later owner-authorized step.

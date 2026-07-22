@@ -26,6 +26,7 @@ ENDPOINT_MANIFEST_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-
 CREDENTIAL_MANIFEST_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json"
 AGENT_MESSAGE_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-agent-message-schema-v1.json"
 RUNTIME_PREPARATION_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-preparation-challenge-schema-v1.json"
+DOMAIN_RUNTIME_READINESS_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-runtime-readiness-schema-v1.json"
 CONTRACT_DOMAIN = b"AB_TRACK_B_T22_A1_THREE_DOMAIN_ADMISSION_CONTRACT_V1\0"
 PROPOSAL_DOMAIN = b"AB_TRACK_B_T22_A1_OWNER_DECISION_PROPOSAL_V1\0"
 EXPECTED_SCHEMA_SHA256 = "1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b"
@@ -38,6 +39,7 @@ EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256 = "8741f130384d246077c281a8200a174f92c6
 EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256 = "fe9b257edae7f93d20e81280e54b20da771c432b65ae5ac906231799ad4c10e2"
 EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256 = "92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee"
 EXPECTED_RUNTIME_PREPARATION_SCHEMA_SHA256 = "1baaddc21592427adad308f2325e4cd6a5f9ba7f1a45db2a5d1d03de734967b3"
+EXPECTED_DOMAIN_RUNTIME_READINESS_SCHEMA_SHA256 = "4c44d3e4617007999af5812d0332fa22f98d1d6302349123bb7c7adb43aa014d"
 STATUS = "BLOCKED_REMOTE_ATTESTATIONS_THIRD_DOMAIN_MODE_ENDPOINT_SET_AND_EXACT_OWNER_DECISION_REQUIRED"
 
 
@@ -189,8 +191,10 @@ def validate_contract(value: dict) -> None:
         "distributed_event_schema_sha256": EXPECTED_EVENT_SCHEMA_SHA256,
         "terminal_evidence_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json",
         "terminal_evidence_schema_sha256": EXPECTED_TERMINAL_SCHEMA_SHA256,
+        "domain_runtime_readiness_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-runtime-readiness-schema-v1.json",
+        "domain_runtime_readiness_schema_sha256": EXPECTED_DOMAIN_RUNTIME_READINESS_SCHEMA_SHA256,
         "source_bound_cross_host_runner_present": False,
-        "three_domain_runtime_readiness_contract_present": False,
+        "three_domain_runtime_readiness_contract_present": True,
         "three_domain_credential_placement_proof_present": False,
         "actual_execution_contract_instance_present": False,
         "actual_terminal_evidence_present": False,
@@ -225,6 +229,7 @@ def validate_contract(value: dict) -> None:
     assert sha256_file(CREDENTIAL_MANIFEST_SCHEMA_PATH) == EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256
     assert sha256_file(AGENT_MESSAGE_SCHEMA_PATH) == EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256
     assert sha256_file(RUNTIME_PREPARATION_SCHEMA_PATH) == EXPECTED_RUNTIME_PREPARATION_SCHEMA_SHA256
+    assert sha256_file(DOMAIN_RUNTIME_READINESS_SCHEMA_PATH) == EXPECTED_DOMAIN_RUNTIME_READINESS_SCHEMA_SHA256
     assert value["contract_sha256"] == domain_digest(CONTRACT_DOMAIN, value, "contract_sha256")
 
 
@@ -381,8 +386,9 @@ def inspect() -> dict:
         "distributed_execution_contract_schema_sha256": EXPECTED_EXECUTION_SCHEMA_SHA256,
         "distributed_event_schema_sha256": EXPECTED_EVENT_SCHEMA_SHA256,
         "terminal_evidence_schema_sha256": EXPECTED_TERMINAL_SCHEMA_SHA256,
+        "domain_runtime_readiness_schema_sha256": EXPECTED_DOMAIN_RUNTIME_READINESS_SCHEMA_SHA256,
         "source_bound_cross_host_runner_present": False,
-        "three_domain_runtime_readiness_contract_present": False,
+        "three_domain_runtime_readiness_contract_present": True,
         "three_domain_credential_placement_proof_present": False,
         "actual_execution_contract_instance_present": False,
         "actual_terminal_evidence_present": False,

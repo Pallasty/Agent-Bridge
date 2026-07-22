@@ -35,7 +35,7 @@ rollback prevention.
 - frozen three-domain admission contract and conservative claim ceiling;
 - blocked owner-decision proposal with all real endpoint, cloud, budget,
   attestation-set, ACL, fault-target, and public-output choices unset; and
-- offline preflight plus 81 semantic negative mutations that recompute packet
+- offline preflight plus 82 semantic negative mutations that recompute packet
   self-digests before rejection;
 - private three-packet bundle verifier with canonical framing, SSHSIG, public-key
   normalization, four-hour freshness, 300-second clock spread, alias-collapse,
@@ -92,6 +92,11 @@ rollback prevention.
   dispatch, requires exact validated terminal evidence for PASS, and records
   failure without retry. Its KAT has one synthetic success and 42 negative
   paths with zero real network, listener, workload, fault or credential access.
+- a private domain-runtime-readiness schema and semantic gate with three
+  synthetic role/domain successes and 44 negative paths. It closes the contract
+  for exact host-local tools, roots, ports, placed credentials, operator keys,
+  coordinator-only material and process boundaries while reading zero real
+  host, tool, endpoint or credential input.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -131,8 +136,9 @@ Frozen packet identities:
 | domain-agent message schema raw bytes | `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee` |
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
-| admission-contract content | `a826a537bd4c7cb50bd11bfee16898279b0f69d47e8b127db437fe40a0f2c50e` |
-| blocked owner proposal content | `86c2dfb19a196290af835f84a00abd2c4e12a11de1bf4007fc190629beb9ca57` |
+| domain runtime-readiness schema raw bytes | `4c44d3e4617007999af5812d0332fa22f98d1d6302349123bb7c7adb43aa014d` |
+| admission-contract content | `be31fbf18bf31850a97088e5107c0aec48c432b25f0d1fa6413de5c075a8ff04` |
+| blocked owner proposal content | `5cee76bddc2a373776e8a42f9e086e41314b4ba9e8aaf516f3cc1b6d20b7c2cc` |
 
 ## Advancement boundary
 

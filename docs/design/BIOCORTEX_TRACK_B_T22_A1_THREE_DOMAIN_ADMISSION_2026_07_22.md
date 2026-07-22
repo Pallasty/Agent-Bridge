@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **OFFLINE_FINAL_EXECUTION_ADMISSION_COMPLETE_RUNNER_AND_HOST_READINESS_FAIL_CLOSED**
+Status: **OFFLINE_RUNTIME_READINESS_CONTRACT_COMPLETE_RUNNER_AND_REAL_INPUTS_FAIL_CLOSED**
 
 Live execution: **NOT AUTHORIZED AND NOT ATTEMPTED**
 
@@ -381,10 +381,21 @@ central material manifest cannot truthfully prove that the matching
 private key and certificate have been placed on each remote domain at an exact
 private path. These are execution blockers, not documentation niceties.
 
-The admission contract now records the runner, readiness contract and placement
-proof as absent. The blocked proposal requires the exact readiness packet and
+The admission contract now records the readiness contract as present while the
+runner and real placement proof remain absent. The blocked proposal requires the exact readiness packet and
 signature sets, credential-placement mode, and runner/executor source hash set.
 See the [execution-readiness audit](../reports/goal-c-u/2026-07-22-biocortex-track-b-t22-a1-execution-readiness-audit.md).
+
+The private per-domain runtime-readiness contract is now frozen. Each of the
+three ordered, detached-domain-signed packets binds the admitted attestation,
+endpoint and credential manifests, runtime-preparation terminal, exact local
+host identity, ports, six executable paths/hashes/version digests, run-local
+data/log/evidence/reservation roots, exact placed certificate/key identities,
+domain operator key and coordinator-only material. It structurally forbids
+ambient path or credential discovery, shell text/evaluation, proxy inheritance,
+public listeners, host-global mutation, power actions, key redistribution,
+network collection side effects and production claims. No real packet or
+signature has been collected.
 
 ## Third-domain decision
 
@@ -474,12 +485,14 @@ blocked until these inputs are concrete.
   `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5`;
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
+- domain runtime-readiness schema raw SHA-256:
+  `4c44d3e4617007999af5812d0332fa22f98d1d6302349123bb7c7adb43aa014d`;
 - admission-contract content SHA-256:
-  `a826a537bd4c7cb50bd11bfee16898279b0f69d47e8b127db437fe40a0f2c50e`;
+  `be31fbf18bf31850a97088e5107c0aec48c432b25f0d1fa6413de5c075a8ff04`;
 - blocked owner-proposal content SHA-256:
-  `86c2dfb19a196290af835f84a00abd2c4e12a11de1bf4007fc190629beb9ca57`.
+  `5cee76bddc2a373776e8a42f9e086e41314b4ba9e8aaf516f3cc1b6d20b7c2cc`.
 
-The offline admission gate exercises 81 directed negative cases after recomputing
+The offline admission gate exercises 82 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends
@@ -560,6 +573,14 @@ ordering, admission replay, runner failure and expiry, runner-result closure,
 terminal-evidence schema/digest/cross-bindings, cleanup, budget and claim
 boundaries. It reads no real execution/admission/credential instance, opens no
 network or listener, starts no workload process and injects no fault.
+
+The domain runtime-readiness KAT validates one synthetic packet for each of the
+three role/domain positions and rejects 44 directed negatives over evidence,
+host, endpoint, port, tool ordering/path/hash uniqueness, private-root closure,
+certificate/key/SPKI/CA/operator/coordinator placement, time, signature,
+process-policy, side-effect and claim bindings. It reads no real packet, host
+identity, tool or credential and performs no network, listener, service or
+fault action.
 
 The collection-challenge KAT adds 42 directed negatives over schema and
 domain-separated digest binding, source/proposal/contract identities, alias
