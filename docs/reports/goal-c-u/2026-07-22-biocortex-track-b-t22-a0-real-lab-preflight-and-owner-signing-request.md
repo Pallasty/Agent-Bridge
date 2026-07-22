@@ -2,20 +2,18 @@
 
 ## Outcome
 
-T22-A0 crossed the real-process boundary three times and remains fail closed.
-The fifth authorized run retained the already-proven etcd and Toxiproxy
-observations, completed OpenBao single-node initialization inside the five-
-second deadline, and started a second OpenBao node. It then rejected the
-second node's immediate `sealed=true` response as `E_BAO_UNSEAL`. OpenBao 2.6.0
-source shows that manual integrated-Raft join with Shamir accepts the share,
-answers the join challenge, waits for replicated keyring material, and unseals
-asynchronously; the immediate response may therefore remain sealed without
-being a share rejection. All six owned processes stopped, all loopback ports
-were released, and the exact bootstrap-secret scan covered 309,648,233 bytes
-with zero matches. The correction validates the share-response shape and then
-waits for exact `initialized=true && sealed=false` health while monitoring the
-owned process. A source-bound rerun requires a fresh owner signature after the
-correction lands.
+T22-A0 crossed the real-process boundary four times and remains fail closed.
+The sixth authorized run retained the already-proven etcd and Toxiproxy
+observations and proved that all three OpenBao processes can join and unseal.
+It then reported three Raft members and killed the sole active process only
+about one second after the final join. OpenBao had admitted both joiners as
+non-voters, so neither could elect a replacement; the run correctly terminated
+as `E_BAO_FAILOVER_NOT_OBSERVED`. All seven owned processes stopped, all
+loopback ports were released, and the exact bootstrap-secret scan covered
+343,254,086 bytes with zero matches. The correction now waits for the exact
+three-node set to contain three voters at their expected addresses with one
+matching active leader before fault injection. A source-bound rerun requires a
+fresh owner signature after the correction lands.
 
 ## Authorized isolated-lab execution boundary
 
@@ -119,7 +117,7 @@ network boundary. Its present result is
 is constructed and no release artifact is downloaded before authorization.
 
 `scripts/check-biocortex-ab-track-b-t22-a0-real-process-runner-v1-pack.sh`
-adds 47 directed negative cases over the signed execution-contract binding,
+adds 52 directed negative cases over the signed execution-contract binding,
 one-shot authorization use, exact loopback ports, clean environment, etcd CAS
 shape, canonical/hash-chained evidence, process-start boundary, and exact
 ephemeral-bootstrap-value leak rejection. Its current result is

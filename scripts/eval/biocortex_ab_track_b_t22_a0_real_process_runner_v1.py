@@ -386,6 +386,35 @@ def exact_unsealed_health(response: dict) -> dict | None:
     return None
 
 
+def exact_three_voter_configuration(
+    response: dict, expected_nodes: list[dict], active_node: str,
+) -> list[dict] | None:
+    """Admit a Raft cluster only after all three expected peers are voters."""
+    servers = response.get("data", {}).get("config", {}).get("servers")
+    if not isinstance(servers, list) or len(servers) != 3:
+        return None
+    expected = {
+        node["node"]: f'127.0.0.1:{node["cluster_port"]}'
+        for node in expected_nodes
+    }
+    observed: dict[str, dict] = {}
+    for server in servers:
+        if not isinstance(server, dict):
+            return None
+        node_id = server.get("node_id")
+        if not isinstance(node_id, str) or node_id in observed:
+            return None
+        if node_id not in expected or server.get("address") != expected[node_id]:
+            return None
+        if server.get("voter") is not True or type(server.get("leader")) is not bool:
+            return None
+        observed[node_id] = server
+    if set(observed) != set(expected):
+        return None
+    leaders = [node_id for node_id, server in observed.items() if server["leader"] is True]
+    return servers if leaders == [active_node] else None
+
+
 class EventLog:
     def __init__(self, path: Path):
         self.path = path
@@ -745,9 +774,10 @@ class Runner:
                 process,
             )
         active = self.wait("E_BAO_ACTIVE_NOT_ELECTED", self.contract["timeouts_seconds"]["cluster_recovery"], lambda: self.find_bao_active(nodes))
-        configuration = self.wait("E_BAO_RAFT_MEMBER_COUNT", self.contract["timeouts_seconds"]["cluster_recovery"], lambda: self.bao_raft_configuration(active))
+        configuration = self.wait("E_BAO_RAFT_VOTER_SET", self.contract["timeouts_seconds"]["cluster_recovery"], lambda: self.bao_raft_configuration(active))
         self.events.append("OPENBAO_THREE_PROCESS_RAFT_CLUSTER_READY", {
             "cluster_id": cluster_id, "raft_member_count": len(configuration),
+            "raft_voter_count": sum(server["voter"] is True for server in configuration),
             "active_node": active["node"], "bootstrap_material_persisted": False,
         })
         return nodes, {"configs": configs, "cluster_id": cluster_id, "active": active}
@@ -772,11 +802,9 @@ class Runner:
             response = self.http_json(self.bao_base(active), "/v1/sys/storage/raft/configuration", token=self.root_token)
         except SafeFailure:
             return None
-        servers = response.get("data", {}).get("config", {}).get("servers")
-        if not isinstance(servers, list) or len(servers) != 3:
-            return None
-        node_ids = {server.get("node_id") for server in servers}
-        return servers if node_ids == {"bao-1", "bao-2", "bao-3"} else None
+        return exact_three_voter_configuration(
+            response, self.contract["topology"]["openbao"], active["node"],
+        )
 
     def execute_bao_fault(self, nodes: list[dict], state: dict) -> dict:
         require(self.root_token is not None, "E_BAO_TOKEN_ABSENT")

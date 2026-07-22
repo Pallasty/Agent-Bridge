@@ -159,6 +159,32 @@ for unsafe, asynchronous_allowed in (
         continue
     raise AssertionError("unsafe OpenBao unseal response admitted")
 
+bao_nodes = contract["topology"]["openbao"]
+voting_servers = [
+    {
+        "address": f'127.0.0.1:{node["cluster_port"]}',
+        "leader": index == 0,
+        "node_id": node["node"],
+        "protocol_version": "3",
+        "voter": True,
+    }
+    for index, node in enumerate(bao_nodes)
+]
+voting_response = {"data": {"config": {"index": 42, "servers": voting_servers}}}
+assert module.exact_three_voter_configuration(voting_response, bao_nodes, "bao-1") == voting_servers
+unsafe_configurations = []
+for mutation in (
+    lambda x: x["data"]["config"]["servers"][1].update(voter=False),
+    lambda x: x["data"]["config"]["servers"][0].update(leader=False),
+    lambda x: x["data"]["config"]["servers"][1].update(leader=True),
+    lambda x: x["data"]["config"]["servers"][2].update(address="127.0.0.1:9999"),
+    lambda x: x["data"]["config"]["servers"][2].update(node_id="bao-2"),
+):
+    candidate = copy.deepcopy(voting_response)
+    mutation(candidate)
+    assert module.exact_three_voter_configuration(candidate, bao_nodes, "bao-1") is None
+    unsafe_configurations.append(candidate)
+
 assert module.classify_loopback_http_error(TimeoutError()) == "E_LOOPBACK_HTTP_TIMEOUT"
 assert module.classify_loopback_http_error(
     module.urllib.error.URLError(TimeoutError())
@@ -241,7 +267,7 @@ authorization.validate_anchor(
     json.loads(authorization.PROPOSAL_PATH.read_text()),
 )
 print("t22_a0_real_process_runner_check\tpass")
-print(f"directed_negative_test_count\t{len(mutations) + 27}")
+print(f"directed_negative_test_count\t{len(mutations) + len(unsafe_configurations) + 27}")
 print("network_attempted\tfalse")
 print("processes_started\t0")
 print("faults_injected\t0")
