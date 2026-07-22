@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex.track_b.t22_a1.domain_collection_challenge.v1",
+  "title": "BioCortex Track B T22-A1 domain collection challenge",
+  "description": "Exact owner-signable authorization envelope for one private host-domain attestation collection. It is not distributed execution authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "packet_kind", "decision", "hashing_contract", "owner_binding", "target", "bindings", "network_binding", "workload_binding", "collection_authority", "artifact_scope", "claims", "content_sha256"],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex.track_b.t22_a1.domain_collection_challenge.v1"},
+    "packet_kind": {"const": "T22_A1_EXACT_DOMAIN_COLLECTION_CHALLENGE"},
+    "decision": {"const": "AUTHORIZE_ONE_T22_A1_PRIVATE_DOMAIN_ATTESTATION_COLLECTION_ONLY"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "owner_binding": {"$ref": "#/$defs/owner_binding"},
+    "target": {"$ref": "#/$defs/target"},
+    "bindings": {"$ref": "#/$defs/bindings"},
+    "network_binding": {"$ref": "#/$defs/network_binding"},
+    "workload_binding": {"$ref": "#/$defs/workload_binding"},
+    "collection_authority": {"$ref": "#/$defs/collection_authority"},
+    "artifact_scope": {"$ref": "#/$defs/artifact_scope"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "content_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "utc_time": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "hash_scope", "self_hash_field", "self_hash_field_excluded", "detached_owner_signature_covers_complete_canonical_packet", "cross_field_semantic_validation_required"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/track-b/t22-a1/domain-collection-challenge/v1"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_CONTENT_SHA256"},
+        "self_hash_field": {"const": "content_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "detached_owner_signature_covers_complete_canonical_packet": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true}
+      }
+    },
+    "owner_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_id", "owner_role", "owner_public_key_sha256", "owner_public_key_fingerprint", "signature_scheme", "signature_namespace"],
+      "properties": {
+        "owner_id": {"const": "pallasting"},
+        "owner_role": {"const": "PROJECT_OWNER"},
+        "owner_public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_public_key_fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"},
+        "signature_scheme": {"const": "OPENSSH_SSHSIG_ED25519"},
+        "signature_namespace": {"const": "agent-bridge-t22-a1-owner-collection-v1"}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "expected_hostname", "logical_aliases", "operating_system", "architecture", "provider_kind", "provider_identity_verifier_id"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "expected_hostname": {"type": "string", "minLength": 1, "maxLength": 255},
+        "logical_aliases": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+        "operating_system": {"enum": ["LINUX", "MACOS"]},
+        "architecture": {"enum": ["X86_64", "AARCH64"]},
+        "provider_kind": {"enum": ["OWNER_PHYSICAL", "CLOUD_VM"]},
+        "provider_identity_verifier_id": {"type": ["string", "null"], "maxLength": 128}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"provider_kind": {"const": "OWNER_PHYSICAL"}}, "required": ["provider_kind"]},
+          "then": {"properties": {"provider_identity_verifier_id": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"provider_kind": {"const": "CLOUD_VM"}}, "required": ["provider_kind"]},
+          "then": {"properties": {"provider_identity_verifier_id": {"type": "string", "minLength": 1}}}
+        }
+      ]
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_commit", "owner_decision_proposal_sha256", "admission_contract_sha256", "domain_attestation_schema_sha256", "collection_challenge_schema_sha256"],
+      "properties": {
+        "source_commit": {"$ref": "#/$defs/git_oid"},
+        "owner_decision_proposal_sha256": {"$ref": "#/$defs/sha256"},
+        "admission_contract_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_attestation_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "collection_challenge_schema_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "network_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "peer_endpoint_set_sha256", "acl_policy_receipt_sha256", "raw_endpoints_embedded", "overlay_credentials_embedded"],
+      "properties": {
+        "transport": {"const": "OWNER_MANAGED_PRIVATE_OVERLAY"},
+        "peer_endpoint_set_sha256": {"$ref": "#/$defs/sha256"},
+        "acl_policy_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "raw_endpoints_embedded": {"const": false},
+        "overlay_credentials_embedded": {"const": false}
+      }
+    },
+    "workload_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pinned_tool_receipt_sha256", "private_data_root_sha256", "port_set_sha256", "domain_public_key_sha256", "private_key_export_allowed"],
+      "properties": {
+        "pinned_tool_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "private_data_root_sha256": {"$ref": "#/$defs/sha256"},
+        "port_set_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "private_key_export_allowed": {"const": false}
+      }
+    },
+    "collection_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issued_at", "not_before", "expires_at", "maximum_lifetime_seconds", "one_collection_per_challenge_sha256", "allowed_reads_after_signature", "allowed_actions_after_signature", "forbidden"],
+      "properties": {
+        "issued_at": {"$ref": "#/$defs/utc_time"},
+        "not_before": {"$ref": "#/$defs/utc_time"},
+        "expires_at": {"$ref": "#/$defs/utc_time"},
+        "maximum_lifetime_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "one_collection_per_challenge_sha256": {"const": true},
+        "allowed_reads_after_signature": {"const": ["HOSTNAME", "OS_KERNEL_ARCHITECTURE", "MACHINE_ID_SOURCE", "HARDWARE_IDENTITY_SOURCE", "BOOT_ID_SOURCE"]},
+        "allowed_actions_after_signature": {"const": ["HASH_IDENTITY_VALUES_IN_MEMORY", "WRITE_ONE_PRIVATE_DOMAIN_ATTESTATION", "SIGN_WITH_EXACT_BOUND_DOMAIN_KEY", "WRITE_NONSECRET_COLLECTION_RECEIPT"]},
+        "forbidden": {"const": ["NETWORK_OR_EXTERNAL_HOST_CONNECTION", "AMBIENT_CREDENTIAL_DISCOVERY", "OVERLAY_CONFIGURATION_CHANGE", "CLOUD_OR_PROVIDER_API_ACCESS_WITHOUT_EXACT_PROVIDER_VERIFIER", "SERVICE_PROCESS_START", "FAULT_INJECTION", "NONZERO_SPEND", "PRODUCTION_OR_CUSTOMER_DATA", "RAW_IDENTITY_VALUE_PERSISTENCE", "EXECUTION_AUTHORITY_OR_AVAILABILITY_CLAIM"]}
+      }
+    },
+    "artifact_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_root", "domain_output_directory", "repository_output_allowed", "directory_mode", "file_mode", "raw_identity_values_allowed"],
+      "properties": {
+        "artifact_root": {"type": "string", "pattern": "^/", "maxLength": 4096},
+        "domain_output_directory": {"type": "string", "pattern": "^/", "maxLength": 4096},
+        "repository_output_allowed": {"const": false},
+        "directory_mode": {"const": "0700"},
+        "file_mode": {"const": "0600"},
+        "raw_identity_values_allowed": {"const": false}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["challenge_is_execution_authority", "distinct_physical_host_proved", "site_or_power_independence_proved", "external_anti_rollback_proved", "production_admissible"],
+      "properties": {
+        "challenge_is_execution_authority": {"const": false},
+        "distinct_physical_host_proved": {"const": false},
+        "site_or_power_independence_proved": {"const": false},
+        "external_anti_rollback_proved": {"const": false},
+        "production_admissible": {"const": false}
+      }
+    }
+  }
+}

@@ -35,7 +35,7 @@ rollback prevention.
 - frozen three-domain admission contract and conservative claim ceiling;
 - blocked owner-decision proposal with all real endpoint, cloud, budget,
   attestation-set, ACL, fault-target, and public-output choices unset; and
-- offline preflight plus 51 semantic negative mutations that recompute packet
+- offline preflight plus 55 semantic negative mutations that recompute packet
   self-digests before rejection;
 - private three-packet bundle verifier with canonical framing, SSHSIG, public-key
   normalization, four-hour freshness, 300-second clock spread, alias-collapse,
@@ -43,7 +43,10 @@ rollback prevention.
   its 30 synthetic negatives create no real attestation; and
 - closed distributed execution-contract, signed-event, and terminal-evidence
   schemas with 73 synthetic negative cases and no real contract instance or
-  evidence item.
+  evidence item; and
+- exact owner-signed per-domain collection-challenge schema, trust-anchor
+  binding/generation/verification gate, and 42 synthetic negative cases. It
+  performs zero real identity reads and creates zero real attestations.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -73,11 +76,12 @@ Frozen packet identities:
 | Packet | SHA-256 |
 |---|---|
 | domain-attestation schema raw bytes | `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b` |
+| domain-collection challenge schema raw bytes | `26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d` |
 | distributed execution-contract schema raw bytes | `2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b` |
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
-| admission-contract content | `eef3c45497e20483bc302bca925546f5f5c5858f7254b4024f5cc8343108076c` |
-| blocked owner proposal content | `84d0f15cbd92a65d0c1aa0686f92c9aa33749dcb2bd409bca85ef5de54a9dcd8` |
+| admission-contract content | `558305fefb13bd0ea877e92ebcf99c8450fdc2e51e275dc1991c3edf9e2131d0` |
+| blocked owner proposal content | `dbc0dc41d022a5b431236347009b493829c8abdc850ecb88d82c8a9f85e37c9f` |
 
 ## Advancement boundary
 
@@ -85,19 +89,23 @@ No signature is requested yet. The next concrete inputs are:
 
 1. a third owner physical host, or an exact cloud provider/region/zone/instance
    type and numeric USD limit;
-2. fresh private attestations from the coordinator, Mac, and third host under
+2. an explicit choice of a T22-A1 owner public key (dedicated is preferred; A0
+   reuse is never inferred);
+3. three owner-signed, source-bound collection challenges;
+4. fresh private attestations from the coordinator, Mac, and third host under
    three distinct dedicated keys; and
-3. the exact private-overlay endpoint-set and ACL receipt digests.
+5. the exact private-overlay endpoint-set and ACL receipt digests.
 
 After those exist, a separate unit may implement the cross-host runner against
 the now-frozen schemas, generate one source-bound execution-contract instance,
 and ask the owner to sign it. Public Rekor submission remains a separate
 explicit choice.
 
-The collector that reads real machine/hardware/boot identifiers is
-intentionally not unlocked by this unit. It must first consume an exact signed
-collection challenge naming the selected domains; this prevents a generic
-inventory utility from silently harvesting stable identifiers.
+The collector that reads real machine/hardware/boot identifiers remains
+intentionally absent. The now-implemented challenge gate proves the required
+precondition: a future collector must first consume a current, exact, owner-
+signed challenge naming one selected domain, and cloud collection stays closed
+until a provider-specific identity verifier exists.
 
 Full design and operational conditions are recorded in
 `docs/design/BIOCORTEX_TRACK_B_T22_A1_THREE_DOMAIN_ADMISSION_2026_07_22.md`.

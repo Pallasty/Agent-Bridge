@@ -100,6 +100,41 @@ exact owner-signed collection challenge can bind the selected third domain and
 private artifact root. Thus the current verifier can be fully tested without
 reading a real stable host identifier.
 
+### Owner-signed collection challenge
+
+The repository now defines a separate, exact, one-domain collection challenge
+and verifier. It prevents the future collector from becoming an ambient host
+inventory utility:
+
+- a T22-A1 owner public key must first be bound to the current proposal as a
+  committed trust anchor; T22-A0 key reuse is not inferred;
+- every challenge binds one domain ID, expected hostname and complete logical
+  alias class, OS/architecture, domain signing key, source commit, proposal,
+  admission contract, attestation schema, endpoint/ACL digests, tool/data/port
+  digests, and exact private artifact directory;
+- challenge lifetime is at most one hour and each challenge digest permits at
+  most one future collection;
+- the distinct SSHSIG namespace is
+  `agent-bridge-t22-a1-owner-collection-v1`;
+- only hostname, OS/kernel/architecture, machine identity, hardware identity,
+  and boot identity may be read after signature verification; raw values may
+  only be hashed in memory and never persisted; and
+- network access, ambient credential discovery, overlay changes, services,
+  faults, cloud APIs without a frozen provider verifier, spend, production
+  data, execution authority, and availability claims remain forbidden.
+
+The current gate can bind an explicitly confirmed public key, generate a
+canonical private challenge, and verify its detached owner signature. Its
+`status` and `verify` paths perform zero stable-identity reads. Verification
+returns `OWNER_SIGNED_DOMAIN_COLLECTION_CHALLENGE_VERIFIED_NO_COLLECTION_PERFORMED`;
+the actual identity collector remains a separate next unit and must reuse this
+exact verification path before its first read.
+
+Cloud challenges are deliberately rejected with
+`E_CLOUD_PROVIDER_IDENTITY_VERIFIER_NOT_FROZEN` until the owner selects a
+provider and that provider's signed instance-identity verifier is implemented.
+This prevents a generic self-report from being relabelled as provider proof.
+
 ## Future execution and evidence contracts
 
 Three additional closed Draft 2020-12 schemas now freeze the shape of the
@@ -184,13 +219,16 @@ or satisfy the stronger S20 monotonic-CAS requirement.
 
 1. Choose a third owner physical host, or choose a cloud provider plus exact
    region/zone/instance type and numeric spend limit.
-2. Produce fresh private domain attestations from `tb14`, the Mac, and the
+2. Choose a dedicated T22-A1 owner public key or explicitly approve reuse of
+   the existing T22-A0 key, then bind it to the current proposal.
+3. Generate and sign one exact collection challenge for each selected domain.
+4. Produce fresh private domain attestations from `tb14`, the Mac, and the
    selected third host, each under a distinct dedicated public key.
-3. Provide the sorted three-packet digest set, private-overlay endpoint-set
+5. Provide the sorted three-packet digest set, private-overlay endpoint-set
    digest, ACL receipt digest, and fault-target domain.
-4. Review the completed execution payload and sign only that source-bound
+6. Review the completed execution payload and sign only that source-bound
    payload under `agent-bridge-t22-a1-owner-v1`.
-5. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
+7. Separately decide whether A1-R may create a public Rekor entry. A1-H can run
    and remain honest with A1-R disabled.
 
 No current file is a signing request. The proposal remains deliberately
@@ -200,6 +238,8 @@ blocked until these inputs are concrete.
 
 - domain-attestation schema raw SHA-256:
   `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b`;
+- domain-collection challenge schema raw SHA-256:
+  `26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d`;
 - distributed execution-contract schema raw SHA-256:
   `2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b`;
 - distributed event schema raw SHA-256:
@@ -207,11 +247,11 @@ blocked until these inputs are concrete.
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - admission-contract content SHA-256:
-  `eef3c45497e20483bc302bca925546f5f5c5858f7254b4024f5cc8343108076c`;
+  `558305fefb13bd0ea877e92ebcf99c8450fdc2e51e275dc1991c3edf9e2131d0`;
 - blocked owner-proposal content SHA-256:
-  `84d0f15cbd92a65d0c1aa0686f92c9aa33749dcb2bd409bca85ef5de54a9dcd8`.
+  `dbc0dc41d022a5b431236347009b493829c8abdc850ecb88d82c8a9f85e37c9f`.
 
-The offline admission gate exercises 51 directed negative cases after recomputing
+The offline admission gate exercises 55 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends
@@ -231,3 +271,10 @@ source signatures and event links, incomplete recovery/cleanup, leaked-secret
 states, overspend, and inflated claims. All instances are synthetic; it starts
 zero services, contacts zero hosts, reads zero real identifiers or credentials,
 and injects zero faults.
+
+The collection-challenge KAT adds 42 directed negatives over schema and
+domain-separated digest binding, source/proposal/contract identities, alias
+closure, owner key parsing and trust binding, lifetime, signature and namespace,
+cloud-verifier admission, private output paths and permissions, allowed reads,
+forbidden actions, and claim ceilings. Its positive path still reads zero real
+host identifiers and creates zero real attestations.
