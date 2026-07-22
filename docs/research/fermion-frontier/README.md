@@ -20,7 +20,25 @@ proof. See `FH_L8_DEGREE6_STREAMING_D3_ZH.md`.
 numerically inadequate and stops exact sector Krylov before its 383,464,125-candidate fourth action.
 See `FH_L8_SCALAR_SUPREMUM_D4_ZH.md`.
 
-Status date: 2026-07-14
+The evidence lane `FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1` verifies the fixed quotient through
+depth 3, compressing 1,704,285 full states to 213,099 representatives and placing the projected next
+action at 47,947,275 candidates below the frozen cap. A parallel prefix/custody lane shares its
+legacy embedded `FH-L8-INDEPENDENT-REFERENCE-D5` ID, so that bare ID is forbidden for lookup or
+authorization. The full lane authorizes only a separately frozen D6 design; see
+`FH_L8_SYMMETRY_ORBIT_QUOTIENT_D5_ZH.md` and `FH_L8_D5_DUAL_TRACK_RECONCILIATION_ZH.md`.
+
+The later byte-table lane `FH-L8-D6-EVIDENCE-BYTE-TABLE-SUPPORT-ORBIT-V1` obtains the same 213,099
+depth-3 support orbits through a parallel implementation on the shared D4 inputs, but does not
+execute quotient H. Current selection and authority are in
+`FH_L8_D5_D6_DESCENDANT_RECONCILIATION_ZH.md`; the next quotient-H protocol must use a new globally
+unique ID and remains design-only.
+
+`FH-L8-QUOTIENT-H-D3-TO-D4-DESIGN-GATE-V1` now freezes that design boundary. It separates
+47,947,275 raw row-term visits from 385,282,992 total group images and specifies a bounded
+external-merge data plane, but executes no scientific action. The next unit must first certify a
+packed depth-3 quotient checkpoint; see `FH_L8_DEPTH3_TO_DEPTH4_QUOTIENT_H_DESIGN_GATE_ZH.md`.
+
+Status date: 2026-07-22
 
 Scope: physical fermions, not the historical Fermion Memory service.
 

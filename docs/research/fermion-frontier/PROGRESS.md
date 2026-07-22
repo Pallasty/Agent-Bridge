@@ -1,5 +1,52 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 depth-3→depth-4 quotient-H design gate
+
+- Froze globally unique contract `FH-L8-QUOTIENT-H-D3-TO-D4-DESIGN-GATE-V1` after a checker-only
+  commit and before any contract, result, runner or implementation existed.
+- Bound D5B signed quotient semantics and D6 support-only byte-table evidence as distinct,
+  non-additive inputs on shared D4 data.
+- Separated `47,947,275` raw candidate actions, `383,578,200` candidate group images and
+  `1,704,792` source-canonicality images; total planned group images are `385,282,992`.
+- Designed 53 source shards, 32-byte fixed records, deterministic 256-way partitioning and bounded
+  external merge under a future 1 GiB / zero-swap envelope. No runtime/RSS feasibility is certified.
+- The next bounded unit is a separate packed depth-3 quotient checkpoint protocol. No fourth Krylov
+  Hamiltonian action, target vector, remainder, R100, reference or READY authority was created.
+
+## 2026-07-22 — FH-L8 D5/D6 descendant scope reconciliation R2
+
+- Bound the historical byte-table D6 outcome to the signed-prefix D5A lane by exact source hashes;
+  its checker/contract/result first appeared together, so preregistration remains unestablished.
+- D6's parallel implementation on the shared D4 inputs matches the full D5B depth-3 count
+  `1,704,285→213,099`, but certifies only support-orbit canonicalization; quotient amplitudes and
+  the fourth H action were not executed.
+- The result retains only completion within the 240-second cap. The previously reported `14.856s`
+  is an unretained console observation and not a certified performance number.
+- Future quotient-H work requires a new globally unique contract ID plus separate D5B semantic and
+  D6 canonicalization pins. Current authority is design-only.
+
+## 2026-07-22 — FH-L8 D5 dual-track identity reconciliation
+
+- Preserved two immutable D5 children of the same D4-containing base while recording that both use
+  the ambiguous legacy internal ID `FH-L8-INDEPENDENT-REFERENCE-D5`.
+- Assigned unique aliases to the signed-D4 prefix/custody lane and the fully preregistered
+  symmetry-quotient lane; bare-ID evidence lookup or authorization is now forbidden.
+- The full lane closes the other lane's unmeasured full-depth-3 and quotient-transition gaps without
+  replacing its provenance or validating its prefix digest. Evidence is not additive.
+- The reconciled ceiling is D6 design only; D6 execution and every error/reference/READY claim remain
+  unauthorized.
+
+## 2026-07-22 — FH-L8 symmetry-orbit quotient D5
+
+- Official replay verified the eight-element Néel-stabilizing D4/conditional-spin-swap action,
+  exact CAR phases, Hamiltonian equivariance and both trivial observable characters.
+- Full and quotient Krylov transitions agree exactly through source depths 0--2; depth-3 full states
+  `1,704,285` compress to `213,099` representatives.
+- The projected next-action upper bound `47,947,275` is below 300M; audit group actions `13,831,456`
+  remain below 16M under the frozen 1 GiB, zero-swap, 600-second envelope.
+- This lane is now named `FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1`; D6 design is eligible only.
+  No fourth action, D6 remainder, cumulative, R100, reference or READY authority was produced.
+
 ## 2026-07-22 — FH-L8 scalar supremum D4
 
 - Derived exact two-step remainder slacks and M6 ceilings: 3.048B / 3.324B.
@@ -2215,14 +2262,16 @@ and FB-S2B stop now. This is not a source-integrity, candidate-OOM or performanc
 result. Reopen requires new owner authority, a hash-bound 1-GiB-safe gate,
 materialized adapter/mapping evidence and a new positive-qualification v2.
 
-FH-L8 D5 verifies the eight signed D4 spatial symmetries, all `+1` Néel
-characters, observable-map invariance, and exact orbit compression through
-depth 2 (`225→29`, `24421→3116`). Depth 3 has `1704285` states; only a
+The historical lane `FH-L8-D5-EVIDENCE-SIGNED-D4-PREFIX-V1` verifies the eight
+signed D4 spatial symmetries, all `+1` Néel characters, observable-map
+invariance, and exact orbit compression through depth 2 (`225→29`,
+`24421→3116`). Depth 3 has `1704285` states; only a
 100000-state prefix (`71064` orbits) is certified. The next branch is the
 byte-table signed bit-permutation canonicalizer; no D6 or error authority is
 granted.
 
 FH-L8 D6 closes the D5 depth-3 orbit-prefix boundary with a byte-table signed
 D4 support canonicalizer: all `1704285` states yield `213099` orbits in
-14.856 seconds. This makes complete depth-3 orbit enumeration feasible, but
-does not yet construct a quotient Hamiltonian or certify fourth-layer cost.
+the frozen 240-second cap. The `14.856` console timing is not retained in the
+result and is non-certifying. Complete depth-3 orbit enumeration is feasible,
+but no quotient Hamiltonian or fourth-layer cost is certified.

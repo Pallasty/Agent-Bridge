@@ -1,0 +1,20 @@
+{
+  "elapsed_seconds": 30.121,
+  "fourth_action_executed": false,
+  "full_run_authorized": false,
+  "integral_amplitudes": true,
+  "memory_current_after": 9029697536,
+  "memory_current_before": 9239035904,
+  "memory_envelope_pass": false,
+  "memory_max": "max",
+  "memory_probe_available": true,
+  "memory_swap_max": "max",
+  "next_gate": "ONE_GIB_ZERO_SWAP_CGROUP_REQUIRED_FOR_FULL_RUN_AUTHORIZATION",
+  "nonzero_targets": 317124,
+  "projected_zero_terms": 44,
+  "raw_terms": 877976,
+  "reduced_terms": 864300,
+  "source_representatives": 4096,
+  "status": "VERIFIED_D9_PREFLIGHT_CGROUP_ENVELOPE_FAILURE_NO_FULL_RUN_AUTHORIZATION",
+  "verified": true
+}
