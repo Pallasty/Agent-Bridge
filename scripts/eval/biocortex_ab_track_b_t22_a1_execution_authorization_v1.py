@@ -587,7 +587,7 @@ def verify_runtime_credential_files(execution: dict, endpoint: dict, credential:
     for identity, row, overlay_ip in rows:
         observed = material.validate_leaf_certificate(
             openssl, ca, credentials_root / f"{identity}.crt", credentials_root / f"{identity}.key",
-            row["extended_key_usage"][0], expiry, overlay_ip,
+            row["extended_key_usage"], expiry, overlay_ip,
         )
         require(observed == {"certificate_sha256": row["certificate_sha256"], "spki_sha256": row["spki_sha256"], "not_after": row["not_after"]}, "E_EXECUTION_LEAF_BINDING")
     runtime_public = credentials_root / "coordinator-runtime.pub"

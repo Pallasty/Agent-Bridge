@@ -99,6 +99,10 @@ rollback prevention.
   coordinator-only material and process boundaries, then freshly revalidates
   the attestation bundle and purpose-separated domain signatures. The KAT reads
   zero real host, tool, endpoint or credential input.
+- corrected per-domain runtime leaves with both TLS server and client EKUs, as
+  required for an etcd peer that both accepts and initiates authenticated peer
+  connections. The coordinator leaf remains client-only; schema bytes and
+  activation authority are unchanged.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only

@@ -47,6 +47,22 @@ real collection challenge is generated.
    synthetic packets, but there is no implementation that creates, verifies,
    secret-scans, and terminalizes the real signed three-domain chain.
 
+## TLS applicability correction
+
+The initial runtime-material implementation issued each domain leaf with only
+`serverAuth`. That is insufficient for an etcd peer identity: the same peer
+certificate is used when accepting and initiating peer TLS, and peer-client
+authentication requires both `serverAuth` and `clientAuth`. The frozen
+pre-run implementation now issues and independently verifies both EKUs on each
+domain leaf while keeping the coordinator leaf client-only. This also permits a
+domain node to present its own client certificate during an mTLS OpenBao Raft
+join without creating another unbound identity.
+
+Primary specifications: [etcd v3.7 transport security](https://etcd.io/docs/v3.7/op-guide/security/)
+and [OpenBao integrated storage TLS](https://openbao.org/docs/2.4.x/concepts/integrated-storage/).
+This correction changes no schema bytes, grants no runtime authority, and reads
+no real credential.
+
 ## Required closure order
 
 1. Freeze a private domain-runtime-readiness packet and detached domain

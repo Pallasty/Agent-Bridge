@@ -215,7 +215,7 @@ def validate_leaf_certificate(
     ca_certificate: Path,
     certificate: Path,
     private_key: Path,
-    usage: str,
+    usages: list[str],
     required_not_after: datetime,
     overlay_ip: str | None,
 ) -> dict:
@@ -224,10 +224,12 @@ def validate_leaf_certificate(
     certificate_key = certificate_spki(openssl, certificate)
     require(certificate_key == private_key_spki(openssl, private_key), "E_CERTIFICATE_KEY_MISMATCH")
     purpose = run_tool(openssl, ["x509", "-in", str(certificate), "-noout", "-purpose"], "E_CERTIFICATE_PURPOSE")
-    if usage == "TLS_WEB_CLIENT_AUTHENTICATION":
-        require(b"SSL client : Yes" in purpose and b"SSL server : No" in purpose, "E_CERTIFICATE_PURPOSE")
-    else:
-        require(b"SSL server : Yes" in purpose and b"SSL client : No" in purpose, "E_CERTIFICATE_PURPOSE")
+    require(
+        (b"SSL client : Yes" in purpose) == ("TLS_WEB_CLIENT_AUTHENTICATION" in usages)
+        and (b"SSL server : Yes" in purpose) == ("TLS_WEB_SERVER_AUTHENTICATION" in usages),
+        "E_CERTIFICATE_PURPOSE",
+    )
+    if "TLS_WEB_SERVER_AUTHENTICATION" in usages:
         san = run_tool(openssl, ["x509", "-in", str(certificate), "-noout", "-ext", "subjectAltName"], "E_CERTIFICATE_SAN")
         require(overlay_ip is not None and f"IP Address:{overlay_ip}".encode() in san, "E_CERTIFICATE_SAN")
     not_after = certificate_not_after(openssl, certificate)
@@ -275,7 +277,7 @@ def generate_materials(
             extensions = staging / f"{identity}.ext"
             run_tool(openssl, ["genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256", "-out", str(private_key)], "E_LEAF_KEY_GENERATION")
             run_tool(openssl, ["req", "-new", "-key", str(private_key), "-subj", f"/CN={identity}.{challenge['target']['run_id']}", "-out", str(request)], "E_CERTIFICATE_REQUEST")
-            usage = "clientAuth" if identity == "coordinator" else "serverAuth"
+            usage = "clientAuth" if identity == "coordinator" else "clientAuth,serverAuth"
             extension_lines = [
                 "basicConstraints=critical,CA:FALSE",
                 "keyUsage=critical,digitalSignature",
@@ -307,11 +309,13 @@ def generate_materials(
     leaf_metadata: dict[str, dict] = {}
     endpoint_by_id = {domain["domain_id"]: domain for domain in endpoint["domains"]}
     for identity in ("coordinator", "domain-1", "domain-2", "domain-3"):
-        usage = "TLS_WEB_CLIENT_AUTHENTICATION" if identity == "coordinator" else "TLS_WEB_SERVER_AUTHENTICATION"
+        usages = ["TLS_WEB_CLIENT_AUTHENTICATION"] if identity == "coordinator" else [
+            "TLS_WEB_CLIENT_AUTHENTICATION", "TLS_WEB_SERVER_AUTHENTICATION",
+        ]
         overlay_ip = None if identity == "coordinator" else endpoint_by_id[identity]["overlay_ip"]
         leaf_metadata[identity] = validate_leaf_certificate(
             openssl, ca_certificate, staging / f"{identity}.crt", staging / f"{identity}.key",
-            usage, required_not_after, overlay_ip,
+            usages, required_not_after, overlay_ip,
         )
     runtime_private = staging / "coordinator-runtime"
     runtime_public = staging / "coordinator-runtime.pub"
@@ -347,7 +351,7 @@ def generate_materials(
 def build_credential_manifest(challenge: dict, endpoint: dict, metadata: dict, credentials_directory: Path, runtime) -> dict:  # noqa: ANN001
     ca_spki = metadata["ca"]["spki_sha256"]
 
-    def credential(identity: str, usage: str) -> dict:
+    def credential(identity: str, usages: list[str]) -> dict:
         leaf = metadata["leaves"][identity]
         return {
             "identity": identity,
@@ -357,7 +361,7 @@ def build_credential_manifest(challenge: dict, endpoint: dict, metadata: dict, c
             "spki_sha256": leaf["spki_sha256"],
             "issuer_spki_sha256": ca_spki,
             "not_after": leaf["not_after"],
-            "extended_key_usage": [usage],
+            "extended_key_usage": usages,
             "private_key_file_mode": "0600",
             "private_key_export_allowed": False,
         }
@@ -384,8 +388,10 @@ def build_credential_manifest(challenge: dict, endpoint: dict, metadata: dict, c
             "self_signed_private_run_ca": True,
             "private_key_path_present": False,
         },
-        "coordinator": credential("coordinator", "TLS_WEB_CLIENT_AUTHENTICATION"),
-        "domains": [credential(f"domain-{number}", "TLS_WEB_SERVER_AUTHENTICATION") for number in (1, 2, 3)],
+        "coordinator": credential("coordinator", ["TLS_WEB_CLIENT_AUTHENTICATION"]),
+        "domains": [credential(f"domain-{number}", [
+            "TLS_WEB_CLIENT_AUTHENTICATION", "TLS_WEB_SERVER_AUTHENTICATION",
+        ]) for number in (1, 2, 3)],
         "coordinator_runtime_signing_key": {
             "identity": "coordinator-runtime",
             "public_key_path": str(credentials_directory / "coordinator-runtime.pub"),

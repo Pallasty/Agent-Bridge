@@ -138,7 +138,9 @@ def validate_credential_manifest(
     credentials = [value["coordinator"], *value["domains"]]
     require(value["coordinator"]["extended_key_usage"] == ["TLS_WEB_CLIENT_AUTHENTICATION"], "E_COORDINATOR_CERTIFICATE_USAGE")
     for credential in value["domains"]:
-        require(credential["extended_key_usage"] == ["TLS_WEB_SERVER_AUTHENTICATION"], "E_DOMAIN_CERTIFICATE_USAGE")
+        require(credential["extended_key_usage"] == [
+            "TLS_WEB_CLIENT_AUTHENTICATION", "TLS_WEB_SERVER_AUTHENTICATION",
+        ], "E_DOMAIN_CERTIFICATE_USAGE")
     paths: list[str] = [ca["certificate_path"]]
     certificate_hashes: list[str] = [ca["certificate_sha256"]]
     spki_hashes: list[str] = [ca["spki_sha256"]]

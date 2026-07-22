@@ -104,7 +104,7 @@ for mutation in endpoint_mutations:
     rejected_endpoint(mutation)
 
 
-def credential(identity: str, usage: str) -> dict:
+def credential(identity: str, usages: list[str]) -> dict:
     return {
         "identity": identity,
         "certificate_path": f"/private/t22-a1/{identity}.crt",
@@ -113,7 +113,7 @@ def credential(identity: str, usage: str) -> dict:
         "spki_sha256": digest(f"spki:{identity}"),
         "issuer_spki_sha256": digest("spki:ca"),
         "not_after": "2026-07-23T04:00:00Z",
-        "extended_key_usage": [usage],
+        "extended_key_usage": usages,
         "private_key_file_mode": "0600",
         "private_key_export_allowed": False,
     }
@@ -141,8 +141,10 @@ credentials = {
         "self_signed_private_run_ca": True,
         "private_key_path_present": False,
     },
-    "coordinator": credential("coordinator", "TLS_WEB_CLIENT_AUTHENTICATION"),
-    "domains": [credential(f"domain-{number}", "TLS_WEB_SERVER_AUTHENTICATION") for number in (1, 2, 3)],
+    "coordinator": credential("coordinator", ["TLS_WEB_CLIENT_AUTHENTICATION"]),
+    "domains": [credential(f"domain-{number}", [
+        "TLS_WEB_CLIENT_AUTHENTICATION", "TLS_WEB_SERVER_AUTHENTICATION",
+    ]) for number in (1, 2, 3)],
     "coordinator_runtime_signing_key": {
         "identity": "coordinator-runtime",
         "public_key_path": "/private/t22-a1/coordinator-runtime.pub",
@@ -187,7 +189,7 @@ credential_mutations = (
     lambda x: x["ca"].update(certificate_path="relative/ca.crt"),
     lambda x: x["ca"].update(private_key_path_present=True),
     lambda x: x["coordinator"].update(extended_key_usage=["TLS_WEB_SERVER_AUTHENTICATION"]),
-    lambda x: x["domains"][0].update(extended_key_usage=["TLS_WEB_CLIENT_AUTHENTICATION"]),
+    lambda x: x["domains"][0].update(extended_key_usage=["TLS_WEB_SERVER_AUTHENTICATION"]),
     lambda x: x["domains"].pop(),
     lambda x: x["domains"][1].update(identity="domain-1"),
     lambda x: x["domains"][1].update(issuer_spki_sha256=digest("wrong-ca")),
