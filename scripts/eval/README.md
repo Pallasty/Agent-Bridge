@@ -87,6 +87,12 @@ snapshot clone per observation. The aggregate-only blocked result and the
 requirements for a separate frozen-clock adapter are recorded in
 `docs/design/FREE_RECALL_STRATEGY_R1_FROZEN_SNAPSHOT_RESULT_2026_07_21.md`.
 
+R1.1 subsequently added a store-only frozen-clock adapter and passed exact-page
+equality for all three modes. The unchanged strategy gates then rejected the
+current temporal/graph proxy family; the aggregate result and claim boundary
+are recorded in
+`docs/design/FREE_RECALL_STRATEGY_R1_1_FROZEN_CLOCK_RESULT_2026_07_21.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
