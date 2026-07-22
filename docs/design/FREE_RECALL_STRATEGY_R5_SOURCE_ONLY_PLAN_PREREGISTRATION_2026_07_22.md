@@ -45,7 +45,9 @@ item_ref = "epr_v1_" || key_epoch || "_" || lower_hex(
 `frame(x)` is an unsigned 64-bit big-endian byte length followed by exact bytes.
 The output is not truncated. `key_epoch` is a non-secret opaque identifier and
 is authenticated inside the HMAC frame as well as carried in the textual
-prefix; substitution must fail.
+prefix; substitution must fail. Its wire grammar is lowercase ASCII
+`[a-z0-9-]{1,32}`, excluding the `_` delimiter. `memory_key_utf8` must contain
+between 1 and 4096 bytes; empty, oversized, or invalid UTF-8 input fails closed.
 
 The construction follows the keyed-hash model of RFC 2104. The proposed Rust
 source should use a reviewed HMAC implementation compatible with the existing

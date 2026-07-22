@@ -8,12 +8,14 @@ import copy
 import hashlib
 import hmac
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 
 
 SCHEMA = "agent_bridge.episode_source_plan.v0"
 DOMAIN = b"agent-bridge/episode-item-ref/v1"
+EPOCH_RE = re.compile(r"^[a-z0-9-]{1,32}$")
 AUTHORITY_FIELDS = {
     "dependency_change",
     "rust_source",
@@ -36,8 +38,13 @@ def frame(value: bytes) -> bytes:
 def derive_item_ref(key: bytes, epoch: str, memory_key: str) -> str:
     if len(key) < 32:
         raise ValueError("weak key")
+    if not EPOCH_RE.fullmatch(epoch):
+        raise ValueError("invalid epoch")
     epoch_bytes = epoch.encode("utf-8")
-    message = frame(DOMAIN) + frame(epoch_bytes) + frame(memory_key.encode("utf-8"))
+    memory_key_bytes = memory_key.encode("utf-8")
+    if not 1 <= len(memory_key_bytes) <= 4096:
+        raise ValueError("invalid memory key length")
+    message = frame(DOMAIN) + frame(epoch_bytes) + frame(memory_key_bytes)
     digest = hmac.new(key, message, hashlib.sha256).hexdigest()
     return f"epr_v1_{epoch}_{digest}"
 
@@ -53,6 +60,9 @@ def canonical_plan() -> dict[str, Any]:
             "domain": DOMAIN.decode("ascii"),
             "framing": "u64be_length_prefix_each_part",
             "authenticated_parts": ["domain", "key_epoch", "memory_key_utf8"],
+            "key_epoch_grammar": "[a-z0-9-]{1,32}",
+            "memory_key_utf8_min_bytes": 1,
+            "memory_key_utf8_max_bytes": 4096,
             "unkeyed_fallback": False,
             "persistent_reverse_map": False,
         },
@@ -145,6 +155,10 @@ def validate(plan: dict[str, Any]) -> list[str]:
         errors.append("length_framing_missing")
     if ref.get("authenticated_parts") != ["domain", "key_epoch", "memory_key_utf8"]:
         errors.append("authenticated_part_missing")
+    if ref.get("key_epoch_grammar") != "[a-z0-9-]{1,32}":
+        errors.append("epoch_grammar_drift")
+    if ref.get("memory_key_utf8_min_bytes") != 1 or ref.get("memory_key_utf8_max_bytes") != 4096:
+        errors.append("memory_key_bounds_drift")
     if ref.get("unkeyed_fallback") is not False:
         errors.append("unkeyed_fallback")
     if ref.get("persistent_reverse_map") is not False:
@@ -271,6 +285,8 @@ def mutations() -> list[tuple[str, str, Callable[[dict[str, Any]], None]]]:
             ("drop_domain", "domain_separation_missing", lambda p: set_path(p, ("item_ref", "domain"), "")),
             ("drop_framing", "length_framing_missing", lambda p: set_path(p, ("item_ref", "framing"), "concat")),
             ("drop_epoch_auth", "authenticated_part_missing", lambda p: p["item_ref"]["authenticated_parts"].remove("key_epoch")),
+            ("allow_epoch_delimiter", "epoch_grammar_drift", lambda p: set_path(p, ("item_ref", "key_epoch_grammar"), ".+")),
+            ("allow_empty_memory_key", "memory_key_bounds_drift", lambda p: set_path(p, ("item_ref", "memory_key_utf8_min_bytes"), 0)),
             ("allow_unkeyed_fallback", "unkeyed_fallback", lambda p: set_path(p, ("item_ref", "unkeyed_fallback"), True)),
             ("allow_weak_key", "weak_key_allowed", lambda p: set_path(p, ("key_provider", "minimum_key_bytes"), 16)),
             ("read_env_secret", "unsafe_key_provider", lambda p: set_path(p, ("key_provider", "environment_secret"), True)),
@@ -322,11 +338,23 @@ def run() -> dict[str, Any]:
         "epoch_authenticated": known != derive_item_ref(key, "epoch-test-0002", memory_key),
         "memory_key_bound": known != derive_item_ref(key, epoch, memory_key + "x"),
         "weak_key_rejected": False,
+        "invalid_epoch_rejected": False,
+        "empty_memory_key_rejected": False,
+        "oversized_memory_key_rejected": False,
     }
     try:
         derive_item_ref(b"short", epoch, memory_key)
     except ValueError:
         crypto_checks["weak_key_rejected"] = True
+    for field, args in (
+        ("invalid_epoch_rejected", (key, "bad_epoch", memory_key)),
+        ("empty_memory_key_rejected", (key, epoch, "")),
+        ("oversized_memory_key_rejected", (key, epoch, "x" * 4097)),
+    ):
+        try:
+            derive_item_ref(*args)
+        except ValueError:
+            crypto_checks[field] = True
 
     reversed_plan = {key: plan[key] for key in reversed(list(plan))}
     gates = {
