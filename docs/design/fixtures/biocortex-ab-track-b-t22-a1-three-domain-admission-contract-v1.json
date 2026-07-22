@@ -63,7 +63,13 @@
     "domain_collection_challenge_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-collection-challenge-schema-v1.json",
     "domain_collection_challenge_schema_sha256": "26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d",
     "distributed_execution_contract_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-execution-contract-schema-v1.json",
-    "distributed_execution_contract_schema_sha256": "2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b",
+    "distributed_execution_contract_schema_sha256": "056f7e555c6e04ac5a9ba1ddc3817771635edf3a0321921b69fa8924d803428a",
+    "private_endpoint_manifest_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-private-endpoint-manifest-schema-v1.json",
+    "private_endpoint_manifest_schema_sha256": "8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953",
+    "runtime_credential_manifest_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json",
+    "runtime_credential_manifest_schema_sha256": "b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a",
+    "domain_agent_message_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-agent-message-schema-v1.json",
+    "domain_agent_message_schema_sha256": "92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee",
     "distributed_event_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-event-schema-v1.json",
     "distributed_event_schema_sha256": "4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5",
     "terminal_evidence_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json",
@@ -91,5 +97,5 @@
     "external_anti_rollback_proved": false,
     "production_admissible": false
   },
-  "contract_sha256": "558305fefb13bd0ea877e92ebcf99c8450fdc2e51e275dc1991c3edf9e2131d0"
+  "contract_sha256": "2fd750a9771827a9d984e915fb607b3dd844929054dba253cc310597dc38ed5d"
 }

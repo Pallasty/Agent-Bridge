@@ -21,13 +21,19 @@ EXECUTION_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1
 EVENT_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-event-schema-v1.json"
 TERMINAL_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json"
 COLLECTION_CHALLENGE_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-collection-challenge-schema-v1.json"
+ENDPOINT_MANIFEST_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-private-endpoint-manifest-schema-v1.json"
+CREDENTIAL_MANIFEST_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json"
+AGENT_MESSAGE_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-agent-message-schema-v1.json"
 CONTRACT_DOMAIN = b"AB_TRACK_B_T22_A1_THREE_DOMAIN_ADMISSION_CONTRACT_V1\0"
 PROPOSAL_DOMAIN = b"AB_TRACK_B_T22_A1_OWNER_DECISION_PROPOSAL_V1\0"
 EXPECTED_SCHEMA_SHA256 = "1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b"
-EXPECTED_EXECUTION_SCHEMA_SHA256 = "2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b"
+EXPECTED_EXECUTION_SCHEMA_SHA256 = "056f7e555c6e04ac5a9ba1ddc3817771635edf3a0321921b69fa8924d803428a"
 EXPECTED_EVENT_SCHEMA_SHA256 = "4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5"
 EXPECTED_TERMINAL_SCHEMA_SHA256 = "f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a"
 EXPECTED_COLLECTION_CHALLENGE_SCHEMA_SHA256 = "26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d"
+EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256 = "8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953"
+EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256 = "b729e53c775af8350badd72660b8adb36e97ca717228e129411c2b5c4ebb3d8a"
+EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256 = "92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee"
 STATUS = "BLOCKED_REMOTE_ATTESTATIONS_THIRD_DOMAIN_MODE_ENDPOINT_SET_AND_EXACT_OWNER_DECISION_REQUIRED"
 
 
@@ -165,6 +171,12 @@ def validate_contract(value: dict) -> None:
         "domain_collection_challenge_schema_sha256": EXPECTED_COLLECTION_CHALLENGE_SCHEMA_SHA256,
         "distributed_execution_contract_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-execution-contract-schema-v1.json",
         "distributed_execution_contract_schema_sha256": EXPECTED_EXECUTION_SCHEMA_SHA256,
+        "private_endpoint_manifest_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-private-endpoint-manifest-schema-v1.json",
+        "private_endpoint_manifest_schema_sha256": EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256,
+        "runtime_credential_manifest_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json",
+        "runtime_credential_manifest_schema_sha256": EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256,
+        "domain_agent_message_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-agent-message-schema-v1.json",
+        "domain_agent_message_schema_sha256": EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256,
         "distributed_event_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-event-schema-v1.json",
         "distributed_event_schema_sha256": EXPECTED_EVENT_SCHEMA_SHA256,
         "terminal_evidence_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json",
@@ -197,6 +209,9 @@ def validate_contract(value: dict) -> None:
     assert sha256_file(EVENT_SCHEMA_PATH) == EXPECTED_EVENT_SCHEMA_SHA256
     assert sha256_file(TERMINAL_SCHEMA_PATH) == EXPECTED_TERMINAL_SCHEMA_SHA256
     assert sha256_file(COLLECTION_CHALLENGE_SCHEMA_PATH) == EXPECTED_COLLECTION_CHALLENGE_SCHEMA_SHA256
+    assert sha256_file(ENDPOINT_MANIFEST_SCHEMA_PATH) == EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256
+    assert sha256_file(CREDENTIAL_MANIFEST_SCHEMA_PATH) == EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256
+    assert sha256_file(AGENT_MESSAGE_SCHEMA_PATH) == EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256
     assert value["contract_sha256"] == domain_digest(CONTRACT_DOMAIN, value, "contract_sha256")
 
 
@@ -235,12 +250,17 @@ def validate_proposal(value: dict, contract: dict) -> None:
         "exact_three_domain_collection_challenge_sha256_set": None,
         "exact_private_overlay_peer_endpoint_set_sha256": None,
         "exact_private_overlay_acl_receipt_sha256": None,
+        "exact_private_endpoint_manifest_content_sha256": None,
+        "exact_runtime_credential_manifest_content_sha256": None,
+        "coordinator_runtime_public_key_sha256": None,
         "fault_target_domain": None,
         "exact_distributed_execution_contract_content_sha256": None,
         "t22_a1_r_public_rekor_submission": "SEPARATE_DECISION_REQUIRED",
     }
     assert value["scope_before_exact_owner_signature"] == {
         "stable_host_identity_read": False,
+        "private_manifest_instances_read": False,
+        "runtime_credential_files_read": False,
         "credential_access": False,
         "external_host_connection": False,
         "provider_or_cloud_api_access": False,
@@ -248,6 +268,7 @@ def validate_proposal(value: dict, contract: dict) -> None:
         "public_transparency_log_output": False,
         "spend_authorized_usd": 0,
         "service_processes_started": 0,
+        "agent_listeners_started": 0,
         "faults_injected": 0,
         "production_or_customer_data": False,
         "host_global_network_mutation": False,
@@ -322,6 +343,12 @@ def inspect() -> dict:
         "production_admissible": False,
         "attestation_schema_sha256": EXPECTED_SCHEMA_SHA256,
         "collection_challenge_schema_sha256": EXPECTED_COLLECTION_CHALLENGE_SCHEMA_SHA256,
+        "private_endpoint_manifest_schema_sha256": EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256,
+        "runtime_credential_manifest_schema_sha256": EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256,
+        "domain_agent_message_schema_sha256": EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256,
+        "private_manifest_instances_read": False,
+        "runtime_credential_files_read": False,
+        "agent_listeners_started": 0,
         "owner_trust_anchor_present": False,
         "distributed_execution_contract_schema_sha256": EXPECTED_EXECUTION_SCHEMA_SHA256,
         "distributed_event_schema_sha256": EXPECTED_EVENT_SCHEMA_SHA256,
