@@ -1,0 +1,69 @@
+{
+  "Neel_characters": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D5",
+  "degree6_remainder_bounded": false,
+  "depth3_full_orbit_count_certified": false,
+  "full_R100_error_bounded": false,
+  "hamiltonian_equivariance": true,
+  "limitations": [
+    "Depth-3 full orbit count is not certified; only the first 100,000 states are measured.",
+    "The quotient is custody-positive but no compressed H action or D6 remainder was executed.",
+    "No cumulative, R100, physical reference or READY authority."
+  ],
+  "next_branch": "BYTE_TABLE_SIGNED_BIT_PERMUTATION_ORBIT_CANONICALIZATION",
+  "observable_invariance": true,
+  "orbit_records": {
+    "depth0": {
+      "equivariance": true,
+      "orbit_measurement": {
+        "digest": "4851eca743653e8f5e4b1aaa7796811bc24f1bca5e23432e5bc96bfd9882bec9",
+        "orbits": 1,
+        "processed": 1
+      },
+      "state_count": 1
+    },
+    "depth1": {
+      "equivariance": true,
+      "orbit_measurement": {
+        "digest": "b34e89f3629213e0c12a6624e4179abefb6c30eb313aa60465dbe21211b62dd6",
+        "orbits": 29,
+        "processed": 225
+      },
+      "state_count": 225
+    },
+    "depth2": {
+      "equivariance": true,
+      "orbit_measurement": {
+        "digest": "17264b376d6167662b634929201c041e4168f5c825af76bc6f544963466b58e8",
+        "orbits": 3116,
+        "processed": 24421
+      },
+      "state_count": 24421
+    },
+    "depth3": {
+      "equivariance": null,
+      "orbit_measurement": {
+        "digest": "fef172646dbf2ddadd913a0b67cc4f0360cc25dd48a261decaf6b9a5cbf5c68a",
+        "orbits": 71064,
+        "processed": 100000
+      },
+      "state_count": 1704285
+    }
+  },
+  "physical_reference_qualified": false,
+  "ready_gate_eligible": false,
+  "signed_group_order": 8,
+  "status": "VERIFIED_D5_SIGNED_D4_CUSTODY_AND_DEPTH3_ORBIT_PREFIX_BOUNDARY",
+  "terminal_branch": "SIGNED_D4_CUSTODY_POSITIVE_DEPTH3_CANONICALIZATION_PREFIX_TIME_BOUNDARY",
+  "two_step_cumulative_error_bounded": false,
+  "verified": true
+}
