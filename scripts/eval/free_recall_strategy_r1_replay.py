@@ -174,6 +174,10 @@ class McpClient:
                 "AGENT_BRIDGE_RETRIEVAL_TRAFFIC_CLASS": "eval",
                 "AB_BIOCORTEX_RETRIEVAL_DISABLE": "1",
                 "AGENT_BRIDGE_SEED_BOOST_DISABLE": "1",
+                # Bind the tb14 deployment's retrieval policy explicitly. The
+                # replay launches agent-bridge.real directly, so the wrapper's
+                # machine.env is otherwise not sourced.
+                "AGENT_BRIDGE_COACTIVATION_RERANK_DISABLE": "1",
                 "AGENT_BRIDGE_OUTCOME_COLLECTOR": "0",
             }
         )
