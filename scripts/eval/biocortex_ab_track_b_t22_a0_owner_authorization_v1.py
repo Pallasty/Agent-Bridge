@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PROPOSAL_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a0-real-lab-owner-authorization-proposal-v1.json"
+CONTRACT_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a0-real-process-execution-contract-v1.json"
 ANCHOR_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a0-owner-trust-anchor-v1.json"
 NAMESPACE = "agent-bridge-t22-a0-owner-v1"
 PAYLOAD_DOMAIN = b"AB_TRACK_B_T22_A0_EXACT_OWNER_AUTHORIZATION_V1\0"
@@ -69,6 +70,7 @@ def build_payload(anchor: dict, proposal: dict, issued_at: datetime, source_comm
         "host": socket.gethostname(),
         "source_commit": source_commit,
         "proposal_sha256": proposal["proposal_sha256"],
+        "execution_contract_sha256": proposal["execution_contract"]["contract_sha256"],
         "owner_public_key_sha256": anchor["public_key_sha256"],
         "owner_public_key_fingerprint": anchor["public_key_fingerprint"],
         "issued_at": issued_at.isoformat().replace("+00:00", "Z"),
@@ -80,13 +82,13 @@ def build_payload(anchor: dict, proposal: dict, issued_at: datetime, source_comm
         "failure_domain_claim": "PROCESS_ONLY_SINGLE_PHYSICAL_HOST",
         "allowed_after_signature": [
             "HASH_PINNED_PUBLIC_RELEASE_DOWNLOAD",
+            "EPHEMERAL_LAB_BOOTSTRAP_MATERIAL_GENERATE_AND_MEMORY_ONLY_USE",
             "OWNED_PROCESS_START_STOP_KILL_RESTART",
             "LOOPBACK_TOXIPROXY_FAULT",
-            "OWNED_LAB_SNAPSHOT_ROLLBACK",
             "NONSECRET_REAL_EVIDENCE_WRITE_UNDER_EXACT_ARTIFACT_ROOT",
         ],
         "forbidden": [
-            "CREDENTIAL_DISCOVERY_OR_ACCESS",
+            "PREEXISTING_AMBIENT_OR_EXTERNAL_CREDENTIAL_DISCOVERY_OR_ACCESS",
             "CLOUD_OR_PROVIDER_ACCESS",
             "NONZERO_SPEND",
             "PRODUCTION_OR_CUSTOMER_DATA",
@@ -113,6 +115,19 @@ def validate_payload(payload: dict, anchor: dict, proposal: dict, now: datetime)
     assert payload["host"] == anchor["host"] == socket.gethostname()
     assert len(payload["source_commit"]) == 40 and all(c in "0123456789abcdef" for c in payload["source_commit"])
     assert payload["proposal_sha256"] == proposal["proposal_sha256"]
+    contract = json.loads(CONTRACT_PATH.read_text())
+    unsigned_contract = dict(contract)
+    claimed_contract_sha256 = unsigned_contract.pop("contract_sha256")
+    calculated_contract_sha256 = hashlib.sha256(
+        b"AB_TRACK_B_T22_A0_REAL_PROCESS_EXECUTION_CONTRACT_V1\0" + canonical(unsigned_contract)
+    ).hexdigest()
+    assert claimed_contract_sha256 == calculated_contract_sha256
+    assert payload["execution_contract_sha256"] == claimed_contract_sha256
+    assert proposal["execution_contract"] == {
+        "path": str(CONTRACT_PATH.relative_to(ROOT)),
+        "schema": contract["schema"],
+        "contract_sha256": claimed_contract_sha256,
+    }
     assert payload["owner_public_key_sha256"] == anchor["public_key_sha256"]
     assert payload["owner_public_key_fingerprint"] == anchor["public_key_fingerprint"]
     issued, not_before, expires = map(parse_time, (payload["issued_at"], payload["not_before"], payload["expires_at"]))
@@ -122,12 +137,15 @@ def validate_payload(payload: dict, anchor: dict, proposal: dict, now: datetime)
     assert payload["physical_host_count"] == 1
     assert payload["failure_domain_claim"] == "PROCESS_ONLY_SINGLE_PHYSICAL_HOST"
     assert payload["allowed_after_signature"] == [
-        "HASH_PINNED_PUBLIC_RELEASE_DOWNLOAD", "OWNED_PROCESS_START_STOP_KILL_RESTART",
-        "LOOPBACK_TOXIPROXY_FAULT", "OWNED_LAB_SNAPSHOT_ROLLBACK",
+        "HASH_PINNED_PUBLIC_RELEASE_DOWNLOAD",
+        "EPHEMERAL_LAB_BOOTSTRAP_MATERIAL_GENERATE_AND_MEMORY_ONLY_USE",
+        "OWNED_PROCESS_START_STOP_KILL_RESTART",
+        "LOOPBACK_TOXIPROXY_FAULT",
         "NONSECRET_REAL_EVIDENCE_WRITE_UNDER_EXACT_ARTIFACT_ROOT",
     ]
     assert payload["forbidden"] == [
-        "CREDENTIAL_DISCOVERY_OR_ACCESS", "CLOUD_OR_PROVIDER_ACCESS", "NONZERO_SPEND",
+        "PREEXISTING_AMBIENT_OR_EXTERNAL_CREDENTIAL_DISCOVERY_OR_ACCESS",
+        "CLOUD_OR_PROVIDER_ACCESS", "NONZERO_SPEND",
         "PRODUCTION_OR_CUSTOMER_DATA", "HOST_GLOBAL_IPTABLES_OR_TC_MUTATION",
         "THREE_FAILURE_DOMAIN_EXTERNAL_ANTI_ROLLBACK_OR_PRODUCTION_CLAIM",
     ]

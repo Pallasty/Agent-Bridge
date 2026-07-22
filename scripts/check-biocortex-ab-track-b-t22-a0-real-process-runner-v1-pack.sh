@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+status="$(python3 scripts/eval/biocortex_ab_track_b_t22_a0_real_process_runner_v1.py status)"
+python3 - "$status" <<'PY'
+import json, sys
+x = json.loads(sys.argv[1])
+assert x == {
+    "schema": "agent_bridge.biocortex.track_b.t22_a0.real_process_runner_status.v1",
+    "status": "BLOCKED_OWNER_TRUST_ANCHOR_AND_EXACT_SIGNATURE_REQUIRED",
+    "proposal_sha256": "854862a6dd71935590ef0f01072b25dd289221b296c7979964afa7155faaa92b",
+    "execution_contract_sha256": "f84fe9ea9d8948afa7eca516f486bb40d690acfd19437a7b3469af8c4dc37616",
+    "owner_trust_anchor_present": False,
+    "owner_signature_verified": False,
+    "pinned_tools_present": False,
+    "network_attempted": False,
+    "processes_started": 0,
+    "faults_injected": 0,
+    "real_evidence_items_created": 0,
+    "production_admissible": False,
+}
+PY
+python3 scripts/eval/check_biocortex_ab_track_b_t22_a0_real_process_runner_v1_pack.py
+printf 't22_a0_real_process_runner_gate\tpass\n'

@@ -9,6 +9,9 @@
     "spend_limit_usd": 0,
     "maximum_runtime_seconds": 14400,
     "credential_access_before_signature": false,
+    "preexisting_or_ambient_credential_access": false,
+    "ephemeral_lab_bootstrap_material_after_signature": true,
+    "ephemeral_lab_bootstrap_material_persisted": false,
     "provider_or_cloud_access": false,
     "production_or_customer_data": false,
     "host_global_network_mutation": false,
@@ -20,12 +23,15 @@
     "openbao_processes": 3,
     "toxiproxy_processes": 1
   },
+  "execution_contract": {
+    "path": "docs/design/fixtures/biocortex-ab-track-b-t22-a0-real-process-execution-contract-v1.json",
+    "schema": "agent_bridge.biocortex.track_b.t22_a0.real_process_execution_contract.v1",
+    "contract_sha256": "f84fe9ea9d8948afa7eca516f486bb40d690acfd19437a7b3469af8c4dc37616"
+  },
   "allowed_faults_after_signature": [
     "OWNED_PROCESS_KILL",
-    "LOOPBACK_PROXY_LATENCY",
     "LOOPBACK_PROXY_DISCONNECT",
-    "OWNED_SERVICE_RESTART",
-    "OWNED_LAB_SNAPSHOT_ROLLBACK"
+    "OWNED_SERVICE_RESTART"
   ],
   "acceptance": [
     "HASH_PINNED_PUBLIC_RELEASE_ARTIFACTS_VERIFIED",
@@ -52,5 +58,5 @@
     "external_anti_rollback_evidence": false,
     "production_admissible": false
   },
-  "proposal_sha256": "dc4ed8f36954f28695044dbc2a93b2c367160058bf62b9f2647db668b7b06eac"
+  "proposal_sha256": "854862a6dd71935590ef0f01072b25dd289221b296c7979964afa7155faaa92b"
 }

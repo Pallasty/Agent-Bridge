@@ -33,12 +33,36 @@ def validate_proposal(value: dict) -> None:
     assert value["scope"]["spend_limit_usd"] == 0
     assert value["scope"]["maximum_runtime_seconds"] == 14400
     assert value["scope"]["credential_access_before_signature"] is False
+    assert value["scope"]["preexisting_or_ambient_credential_access"] is False
+    assert value["scope"]["ephemeral_lab_bootstrap_material_after_signature"] is True
+    assert value["scope"]["ephemeral_lab_bootstrap_material_persisted"] is False
     assert value["scope"]["provider_or_cloud_access"] is False
     assert value["scope"]["production_or_customer_data"] is False
     assert value["scope"]["host_global_network_mutation"] is False
     assert value["scope"]["public_hash_pinned_downloads_after_signature"] is True
     assert value["topology"] == {"etcd_processes": 3, "openbao_processes": 3, "toxiproxy_processes": 1}
+    assert value["execution_contract"] == {
+        "path": "docs/design/fixtures/biocortex-ab-track-b-t22-a0-real-process-execution-contract-v1.json",
+        "schema": "agent_bridge.biocortex.track_b.t22_a0.real_process_execution_contract.v1",
+        "contract_sha256": "f84fe9ea9d8948afa7eca516f486bb40d690acfd19437a7b3469af8c4dc37616",
+    }
+    assert value["allowed_faults_after_signature"] == [
+        "OWNED_PROCESS_KILL", "LOOPBACK_PROXY_DISCONNECT", "OWNED_SERVICE_RESTART",
+    ]
+    assert value["acceptance"] == [
+        "HASH_PINNED_PUBLIC_RELEASE_ARTIFACTS_VERIFIED",
+        "THREE_ETCD_PROCESSES_FORM_ONE_LOCAL_CLUSTER",
+        "THREE_OPENBAO_PROCESSES_FORM_ONE_LOCAL_RAFT_CLUSTER",
+        "ONE_LINEARIZABLE_AUTHORIZE_AND_CONSUME_TRANSITION_OBSERVED",
+        "ONE_PROCESS_OR_LOOPBACK_PROXY_FAULT_INJECTED_AND_RECOVERED",
+        "RAW_CANONICAL_VALIDATION_AND_CLEANUP_RECEIPTS_WRITTEN",
+        "NO_STDOUT_LOG_CALLBACK_OR_SUBPROCESS_MODEL_OUTPUT",
+        "ALL_SERVICES_STOPPED_AND_ARTIFACT_ROOT_SCOPED_AT_END",
+    ]
     assert value["signing"]["owner_id"] == "pallasting"
+    assert value["signing"]["owner_role"] == "PROJECT_OWNER"
+    assert value["signing"]["signature_scheme"] == "OPENSSH_SSHSIG_ED25519"
+    assert value["signing"]["signature_namespace"] == "agent-bridge-t22-a0-owner-v1"
     assert value["signing"]["owner_public_key"] == "UNBOUND"
     assert value["signing"]["owner_signature"] == "UNBOUND"
     assert value["signing"]["exact_payload_generated"] is False
