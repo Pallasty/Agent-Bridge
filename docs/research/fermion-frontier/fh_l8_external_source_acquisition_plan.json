@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "plan_id": "FH-L8-EXTERNAL-SOURCE-ACQUISITION-PLAN-V1",
+  "audit_date": "2026-07-21",
+  "intake_contract_id": "FH-L8-EXTERNAL-EVIDENCE-INTAKE-V1",
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "global_disposition": "NO_IMMEDIATE_ADMISSION_CANDIDATE; EXTERNAL_PRIMARY_EXPORTS_REQUIRED",
+  "prohibitions": {
+    "download_or_execute_third_party_code": false,
+    "derive_export_from_paper_or_figure": false,
+    "admit_method_source_as_target_export": false
+  },
+  "route_requests": [
+    {
+      "priority": 1,
+      "route": "dynamic_jw_local_grid_source_leading",
+      "classification": "PAPER_ONLY_EXTERNAL_EXPORT_REQUIRED",
+      "responsible_source_path": "arXiv submitter/team for 2605.12600v1 (Martin Lanthaler listed as submitter)",
+      "primary_sources": [
+        "https://arxiv.org/abs/2605.12600",
+        "https://www.uibk.ac.at/en/th-physik/quantum-computing/publications/"
+      ],
+      "observed_public_material": "versioned paper and TeX source; no machine-readable FH-L8 compiler export identified",
+      "request": "Provide the source-leading dynamic-JW FH-L8 raw export and its immutable release/commit, with all intake custody fields."
+    },
+    {
+      "priority": 1,
+      "route": "dynamic_jw_local_grid_figure_candidate_fit",
+      "classification": "PAPER_ONLY_EXTERNAL_EXPORT_REQUIRED",
+      "responsible_source_path": "arXiv submitter/team for 2605.12600v1 (Martin Lanthaler listed as submitter)",
+      "primary_sources": ["https://arxiv.org/abs/2605.12600"],
+      "observed_public_material": "versioned paper and TeX source; no machine-readable FH-L8 compiler export identified",
+      "request": "Provide the figure-candidate-fit dynamic-JW FH-L8 raw export as a distinct artifact; do not substitute a graph reconstruction."
+    },
+    {
+      "priority": 2,
+      "route": "fsn_standard_figure_candidate_fit",
+      "classification": "PUBLIC_CODE_NO_FH_L8_TARGET_EXPORT",
+      "responsible_source_path": "OpenFermion maintainers and/or original FSN authors",
+      "primary_sources": [
+        "https://arxiv.org/abs/1711.04789",
+        "https://github.com/quantumlib/OpenFermion/blob/v1.7.1/src/openfermion/circuits/trotter/low_depth_trotter_error.py"
+      ],
+      "observed_public_material": "OpenFermion v1.7.1 exposes a generic ordered-term helper tied to the FSN Hamiltonian form, but no FH-L8 standard-FSN exported event list",
+      "request": "Provide a release-pinned standard-FSN FH-L8 export, compiler configuration and environment lock; a library function or generated reconstruction is insufficient."
+    },
+    {
+      "priority": 2,
+      "route": "fsn_ladder_figure_candidate_fit",
+      "classification": "PUBLIC_CODE_NO_FH_L8_TARGET_EXPORT",
+      "responsible_source_path": "OpenFermion maintainers and/or original FSN authors",
+      "primary_sources": [
+        "https://arxiv.org/abs/1711.04789",
+        "https://github.com/quantumlib/OpenFermion/blob/v1.7.1/src/openfermion/circuits/trotter/low_depth_trotter_error.py"
+      ],
+      "observed_public_material": "public generic FSN implementation, but no FH-L8 ladder-FSN exported event list",
+      "request": "Provide a release-pinned ladder-FSN FH-L8 export as a distinct raw artifact with its route-specific configuration and environment lock."
+    },
+    {
+      "priority": 3,
+      "route": "native_fermions",
+      "classification": "PAPER_DATA_ONLY_EXTERNAL_EXPORT_REQUIRED",
+      "responsible_source_path": "corresponding-author/team path for PNAS 2023 fermionic processor paper",
+      "primary_sources": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC10468619/",
+        "https://arxiv.org/abs/2303.06985"
+      ],
+      "observed_public_material": "open article states study data are in the main text; no versioned FH-L8 compiler/event export identified",
+      "request": "Provide the native-fermion FH-L8 event/export artifact plus hardware/compiler realization metadata; gate diagrams and article data alone are insufficient."
+    }
+  ],
+  "minimum_per_route_intake_payload": [
+    "artifact_path and raw artifact SHA-256",
+    "HTTPS authoritative source URL and immutable release_or_commit",
+    "PRIMARY_EXTERNAL_RAW_EXPORT evidence_class and provenance_attestation",
+    "compiler identity/version/configuration SHA-256 and environment-lock SHA-256",
+    "FH_L8_UoverT8_tT1_half_filling, linear_size=8, trotter_steps=100",
+    "complete ordered individual-term event list"
+  ],
+  "handoff_rule": "Only a supplied raw artifact that passes fh_l8_external_evidence_intake.py may move from this acquisition plan into cross-route comparison."
+}
