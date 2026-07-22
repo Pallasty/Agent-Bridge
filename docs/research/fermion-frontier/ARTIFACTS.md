@@ -115,7 +115,46 @@ All copied JSON files are research-only outputs. They contain no credentials.
   `fh_l8_d11_verify4096_receipt.json` and
   `test_fh_l8_checkpointed_quotient_h_d11_runner.py`. Its 4,096-source spill/merge result is
   bounded preflight evidence only; it is not a complete fourth action and is not bound to the
-  packed C3 chronology. A successor consumer therefore needs a new unique D12 contract.
+  packed C3 chronology. D16-F now closes the packed-source/custody admission requirement, but it
+  does not authorize a consumer execution.
+
+## FH-L8 D16-F packed-consumer custody forensic
+
+- `FH_L8_PACKED_CONSUMER_FORENSIC_D16_ZH.md`: D16-F source admission, legacy-spool custody
+  diagnosis, D12--D16-W authority impact, replay caveat and next-gate report.
+- `fh_l8_packed_consumer_forensic_d16_checker.py`: independently validates packed C3 and performs
+  bounded, read-only external custody forensics; it has no Hamiltonian-action entrypoint.
+- `fh_l8_packed_consumer_forensic_d16_contract.json`: exact Git chronology, packed/external pins,
+  cgroup limits, clean-consumer design and authority ceiling.
+- `fh_l8_packed_consumer_forensic_d16_result.json`: committed single-file forensic result. It admits
+  packed C3 as a future source, quarantines the legacy target and embeds the complete
+  130,568-byte forensic manifest with SHA-256
+  `869008057db5eb93129aca801dce2dab458ec2cfc6f7fa2894bf04538cb4d79b`; its narrow status is
+  `NO_GO_D16_LEGACY_TARGET_CUSTODY_BROKEN_ASSOCIATED_SPOOL_DUPLICATED_TARGET_QUARANTINED`.
+- `test_fh_l8_packed_consumer_forensic_d16_checker.py`: frozen-file, chronology, static isolation,
+  authority, manifest, resource, publication and CLI mutation regressions.
+- The immutable checker -> contract -> result commits are respectively
+  `ad20d45f14016bbc34bd61a3685c581c9727ef20`,
+  `f7d9fdf2d24e22973d0409737c2182fc9266e6e9` and
+  `6e3230f55ddc68e7ea39e6513f28c2cfb5c0ce6e`; each commit adds only its designated frozen
+  artifact.
+- The retained spool has 6,912 exact duplicate gaps totaling 23,126,970 records / 740,063,040
+  bytes, but `target_to_spool_provenance_proven=false`. The legacy parallel-D11 full-action
+  target's 10,785,545 records and digest are recorded observations only, not authoritative
+  q3 -> q4 evidence. D12's conditional q4 -> q5 arithmetic and D13's numeric no-go/exclusivity
+  therefore have no scientific authority; D14--D15 remain design-only.
+- The built-in composite external mode is intentionally recorded as
+  `INDETERMINATE_D16_EXTERNAL_CUSTODY_AUDIT`: static work raised its initial same-scope peak to
+  77,021,184 bytes, above the 67,108,864-byte cap. Separate static verification and fresh-scope
+  external replay passed with the identical manifest digest, 5,472,872,990 ns elapsed,
+  98,095,104-byte cgroup peak, 33,546,240-byte RSS, zero swap and zero memory-event deltas. This is
+  a transparent split replay, not a committed terminal execution/resource receipt.
+- D16-F's complete contract ID is distinct from the later remote D16-W ID
+  `FH-L8-INDEPENDENT-REFERENCE-D16`. D16-W's atomic G-equivariance rejection is retained only as
+  algebra design; its full-H moment, pinned q0 -> q4 custody and q4-derived resource path are
+  isolated with the quarantined D11/D12 lineage, and no D16-W execution is authorized.
+- Next gate:
+  `FRESH_EXCLUSIVE_PACKED_Q3_CONSUMER_IMPLEMENTATION_AND_BOUNDED_4096_PREFLIGHT_AUTHORIZATION`.
 
 ## Claude source session
 

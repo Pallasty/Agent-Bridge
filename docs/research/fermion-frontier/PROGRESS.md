@@ -1,5 +1,53 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 D16-F packed-consumer custody forensic
+
+- Froze the globally unique
+  `FH-L8-INDEPENDENT-REFERENCE-D16-PACKED-Q3-CUSTODY-FORENSIC-V1` unit as a strict
+  checker -> contract -> result chain:
+  `ad20d45f14016bbc34bd61a3685c581c9727ef20` ->
+  `f7d9fdf2d24e22973d0409737c2182fc9266e6e9` ->
+  `6e3230f55ddc68e7ea39e6513f28c2cfb5c0ce6e`. The result was absent at both freezes;
+  D16-F executed no Hamiltonian action.
+- Independently admitted packed C3 `784f01b8e3c589b7c6ab25773f93937d5a1344f8` as the only
+  q3 source for a future clean consumer: all 213,099 fixed-width records, the
+  `db2ce0a338a...f840231` checkpoint digest, the 53-shard manifest and the C3 result/terminal
+  receipt were rebound exactly. This is source admission, not q3 -> q4 execution authority.
+- The retained 256-partition spool contains the intended shards 0--52 plus one extra copy of
+  shards 25--51: 6,912 receipt-unbound gaps, 23,126,970 duplicate records and 740,063,040
+  duplicate bytes. Every gap exactly matches one receipt-bound chunk, and the complete forensic
+  manifest SHA-256 is `869008057db5eb93129aca801dce2dab458ec2cfc6f7fa2894bf04538cb4d79b`.
+- No provenance proves that the retained target was produced from exactly that contaminated spool.
+  The legacy parallel-D11 full-action target's reported 10,785,545 records and digest are therefore
+  quarantined as broken production custody and are not authoritative q3 -> q4 results. The D16-F
+  result status is
+  `NO_GO_D16_LEGACY_TARGET_CUSTODY_BROKEN_ASSOCIATED_SPOOL_DUPLICATED_TARGET_QUARANTINED`.
+  This `NO_GO` is the narrow custody/admission decision; it is not a numerical feasibility no-go.
+- D12's q4 -> q5 costs remain reproducible only as post-hoc arithmetic conditional on the
+  quarantined q4 count, so D12 has no scientific no-go authority. D13 inherits that invalid input;
+  neither its full-q5 no-go nor its route-exclusivity claim is authoritative. D14--D15 abstract
+  algebra may remain design-only but must be reattached to a clean numeric lineage.
+- The later remote D16-W word-family unit has the distinct full ID
+  `FH-L8-INDEPENDENT-REFERENCE-D16`; it does not collide with D16-F's complete contract ID and
+  does not rewrite the frozen D16-F chain. D16-W's atomic hopping-word G-equivariance rejection may
+  be retained as design-only. Its full-H moment, pinned q0 -> q4 custody and q4-count/byte resource
+  path depend on the quarantined D11/D12 lineage and are isolated; D16-W execution authority was
+  already false.
+- The official read-only audit scanned 2,523,861,175 external bytes with 1 MiB reads in 8.997 s.
+  Its fresh cgroup peaked at 112,730,112 bytes, process RSS peaked at 38,510,592 bytes, and swap and
+  all memory-event deltas were zero. This snapshot ends before result serialization/publication;
+  D16-F does not claim a terminal execution/resource receipt or publication-resource attestation.
+- The built-in composite `--mode external` transparently remains
+  `INDETERMINATE_D16_EXTERNAL_CUSTODY_AUDIT`: its preceding static phase raised the same-scope
+  initial peak to 77,021,184 bytes, above the frozen 67,108,864-byte initial cap. An independent
+  static CLI replay passed, and a second fresh scope running only frozen external custody plus the
+  embedded-manifest comparison also passed: identical manifest SHA-256, 5,472,872,990 ns elapsed,
+  98,095,104-byte cgroup peak, 33,546,240-byte RSS, zero swap and zero event deltas. This split
+  replay is reproducibility evidence, not a newly committed terminal receipt.
+- Active next gate:
+  `FRESH_EXCLUSIVE_PACKED_Q3_CONSUMER_IMPLEMENTATION_AND_BOUNDED_4096_PREFLIGHT_AUTHORIZATION`.
+  Neither the bounded preflight nor the full 53-shard action is yet execution-authorized.
+
 ## 2026-07-22 — FH-L8 packed depth-3 quotient checkpoint D8--D11
 
 - D8 froze the 213,099-record, 32-byte packed-checkpoint and 53-shard protocol without executing
@@ -26,14 +74,15 @@
   added execution authority.
 - The parallel lane's 4,096-source spill/sort/merge preflight produced 424,682 targets and matched
   its naive signed quotient calculation. It did visit bounded q3 source rows, unlike the packed
-  C3 generation/replay, but did not run all 53 shards or finish the fourth action. A new unique D12
-  consumer contract must bind C3, its terminal receipt and full packed validation before reuse.
-- Current status is
-  `VERIFIED_D11_PACKED_DEPTH3_QUOTIENT_CHECKPOINT_MATERIALIZED_NO_Q4_AUTHORITY`. The next gate is
-  `CHECKPOINTED_FULL_QUOTIENT_H_RUNNER_IMPLEMENTATION_AND_AUTHORIZATION`; target cardinality,
-  target vector, q3-to-q4 feasibility, remainder, R100, hardware, quantum advantage and READY all
-  remain uncertified. See `FH_L8_PACKED_Q3_CHECKPOINT_D11_ZH.md`, the committed D11 bundle and
-  `test_fh_l8_packed_q3_checkpoint_d11.py`.
+  C3 generation/replay, but did not run all 53 shards or finish the fourth action. At D11 close a
+  separately frozen consumer still had to bind C3, its terminal receipt and full packed validation;
+  D16-F now satisfies that source/custody gate without authorizing execution.
+- The D11 artifact status remains
+  `VERIFIED_D11_PACKED_DEPTH3_QUOTIENT_CHECKPOINT_MATERIALIZED_NO_Q4_AUTHORITY`, while active
+  downstream authority is now controlled by D16-F's fresh-exclusive-consumer gate. Target
+  cardinality, target vector, q3-to-q4 feasibility, remainder, R100, hardware, quantum advantage
+  and READY all remain uncertified. See `FH_L8_PACKED_Q3_CHECKPOINT_D11_ZH.md`, the committed D11
+  bundle and `test_fh_l8_packed_q3_checkpoint_d11.py`.
 
 ## 2026-07-22 — FH-L8 depth-3→depth-4 quotient-H design gate
 
