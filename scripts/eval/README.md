@@ -130,6 +130,15 @@ known-answer and directed-mutation checks open only an owner-gated R6 Slice A
 SQLite, build, execution, real capture, retrieval, merge, or deployment. See
 `docs/design/FREE_RECALL_STRATEGY_R5_SOURCE_ONLY_PLAN_RESULT_2026_07_22.md`.
 
+R6 Slice A lands the corresponding default-off source primitives in
+`crates/store/src/episode_observation_slice_a.rs`, reusing the already optional
+`ring` dependency. Its source receipt records local static checks, an identical
+tb14 source hash, and the fact that the feature itself remains unbuilt and its
+Rust tests unexecuted. It also records an unplanned default-feature Cargo check
+triggered by the repository pre-commit hook without treating that check as R6
+evidence. See
+`docs/design/FREE_RECALL_STRATEGY_R6_SLICE_A_SOURCE_RECEIPT_2026_07_22.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
