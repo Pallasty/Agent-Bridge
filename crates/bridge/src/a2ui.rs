@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 pub const PROTOCOL_VERSION: &str = "v0.9.1";
 pub const REPORT_SCHEMA: &str = "agent_bridge.a2ui.validation_report.v0";
+pub const PREVIEW_REPORT_SCHEMA: &str = "agent_bridge.a2ui.preview_report.v0";
 
 const BASIC_CATALOG_ID: &str = "https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json";
 const MESSAGE_KEYS: [&str; 4] = [
@@ -59,6 +60,30 @@ pub struct ValidationReport {
     pub action_count: usize,
     pub errors: Vec<ValidationIssue>,
     pub warnings: Vec<ValidationIssue>,
+}
+
+/// The authority-free result of rendering a validated A2UI stream as static HTML.
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewReport {
+    pub schema: &'static str,
+    pub protocol_version: &'static str,
+    pub valid: bool,
+    pub preview_generated: bool,
+    pub execution_allowed: bool,
+    pub interactive: bool,
+    pub message_count: usize,
+    pub surface_count: usize,
+    pub rendered_component_count: usize,
+    pub placeholder_count: usize,
+    pub disabled_action_count: usize,
+    pub errors: Vec<ValidationIssue>,
+    pub warnings: Vec<ValidationIssue>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HtmlPreview {
+    pub report: PreviewReport,
+    pub html: Option<String>,
 }
 
 #[derive(Default)]
@@ -124,6 +149,258 @@ pub fn validate_stream(input: &str) -> ValidationReport {
 
     report.valid = report.errors.is_empty();
     report
+}
+
+/// Render a deliberately limited, non-interactive HTML preview of a valid stream.
+///
+/// This does not interpret data-model updates, resolve remote assets, or dispatch
+/// A2UI actions. Unsupported components and bindings are rendered as placeholders.
+pub fn render_html_preview(input: &str) -> HtmlPreview {
+    let validation = validate_stream(input);
+    let mut report = PreviewReport {
+        schema: PREVIEW_REPORT_SCHEMA,
+        protocol_version: PROTOCOL_VERSION,
+        valid: validation.valid,
+        preview_generated: false,
+        execution_allowed: false,
+        interactive: false,
+        message_count: validation.message_count,
+        surface_count: validation.surface_count,
+        rendered_component_count: 0,
+        placeholder_count: 0,
+        disabled_action_count: 0,
+        errors: validation.errors.clone(),
+        warnings: validation.warnings.clone(),
+    };
+    if !validation.valid {
+        return HtmlPreview { report, html: None };
+    }
+
+    let messages = match parse_messages(input) {
+        Ok(messages) => messages,
+        Err(error) => {
+            report.valid = false;
+            report.errors.push(ValidationIssue {
+                code: "preview_parse_failed".into(),
+                message: error,
+                message_index: None,
+                path: None,
+            });
+            return HtmlPreview { report, html: None };
+        }
+    };
+
+    let mut surfaces: HashMap<String, PreviewSurface> = HashMap::new();
+    let mut surface_order = Vec::new();
+    for (index, message) in messages.iter().enumerate() {
+        let Some(object) = message.as_object() else {
+            continue;
+        };
+        if let Some(payload) = object.get("createSurface").and_then(Value::as_object) {
+            if let Some(surface_id) = payload.get("surfaceId").and_then(Value::as_str) {
+                surfaces.insert(surface_id.to_string(), PreviewSurface::default());
+                surface_order.push(surface_id.to_string());
+            }
+        } else if let Some(payload) = object.get("updateComponents").and_then(Value::as_object) {
+            let Some(surface_id) = payload.get("surfaceId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(surface) = surfaces.get_mut(surface_id) else {
+                continue;
+            };
+            let Some(components) = payload.get("components").and_then(Value::as_array) else {
+                continue;
+            };
+            for component in components {
+                if let Some(id) = component.get("id").and_then(Value::as_str) {
+                    surface.components.insert(id.to_string(), component.clone());
+                }
+            }
+        } else if object.contains_key("updateDataModel") {
+            report.warnings.push(ValidationIssue {
+                code: "data_model_not_evaluated".into(),
+                message: "data-model updates are not evaluated by the read-only HTML preview"
+                    .into(),
+                message_index: Some(index),
+                path: Some("/updateDataModel".into()),
+            });
+        } else if let Some(payload) = object.get("deleteSurface").and_then(Value::as_object) {
+            if let Some(surface_id) = payload.get("surfaceId").and_then(Value::as_str) {
+                surfaces.remove(surface_id);
+                surface_order.retain(|id| id != surface_id);
+            }
+        }
+    }
+
+    let mut body = String::new();
+    for surface_id in surface_order {
+        let Some(surface) = surfaces.get(&surface_id) else {
+            continue;
+        };
+        body.push_str("<section class=\"ab-a2ui-surface\"><h2>");
+        body.push_str(&escape_html(&surface_id));
+        body.push_str("</h2>");
+        let mut stack = HashSet::new();
+        render_component("root", surface, &mut stack, 0, &mut report, &mut body);
+        body.push_str("</section>");
+    }
+
+    report.preview_generated = true;
+    HtmlPreview {
+        report,
+        html: Some(format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>A2UI read-only preview</title><style>{}</style></head><body><main>{body}</main></body></html>",
+            preview_css()
+        )),
+    }
+}
+
+#[derive(Default)]
+struct PreviewSurface {
+    components: HashMap<String, Value>,
+}
+
+fn render_component(
+    id: &str,
+    surface: &PreviewSurface,
+    stack: &mut HashSet<String>,
+    depth: usize,
+    report: &mut PreviewReport,
+    output: &mut String,
+) {
+    if depth > 64 {
+        placeholder("component depth limit reached", report, output);
+        return;
+    }
+    if !stack.insert(id.to_string()) {
+        placeholder(&format!("component cycle at '{id}'"), report, output);
+        return;
+    }
+    let Some(component) = surface.components.get(id).and_then(Value::as_object) else {
+        placeholder(&format!("missing component '{id}'"), report, output);
+        stack.remove(id);
+        return;
+    };
+    let kind = component
+        .get("component")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    match kind {
+        "Text" => {
+            report.rendered_component_count += 1;
+            output.push_str("<p class=\"ab-a2ui-text\">");
+            output.push_str(&render_property(component.get("text"), "text", report));
+            output.push_str("</p>");
+        }
+        "Row" | "Column" | "List" => {
+            report.rendered_component_count += 1;
+            output.push_str("<div class=\"ab-a2ui-");
+            output.push_str(&kind.to_ascii_lowercase());
+            output.push_str("\">");
+            render_children(component, surface, stack, depth + 1, report, output);
+            output.push_str("</div>");
+        }
+        "Card" | "Modal" | "Tabs" => {
+            report.rendered_component_count += 1;
+            output.push_str("<section class=\"ab-a2ui-card\">");
+            render_children(component, surface, stack, depth + 1, report, output);
+            output.push_str("</section>");
+        }
+        "Divider" => {
+            report.rendered_component_count += 1;
+            output.push_str("<hr class=\"ab-a2ui-divider\">");
+        }
+        "Button" => {
+            report.rendered_component_count += 1;
+            if component.contains_key("action") {
+                report.disabled_action_count += 1;
+            }
+            output.push_str("<button class=\"ab-a2ui-button\" disabled aria-disabled=\"true\">");
+            if component.contains_key("child") || component.contains_key("children") {
+                render_children(component, surface, stack, depth + 1, report, output);
+            } else {
+                output.push_str(&render_property(component.get("text"), "button", report));
+            }
+            output.push_str("</button>");
+        }
+        "Image" | "Icon" => {
+            report.rendered_component_count += 1;
+            output.push_str("<span class=\"ab-a2ui-media\">");
+            output.push_str(kind);
+            output.push_str(": ");
+            output.push_str(&render_property(
+                component.get("src").or_else(|| component.get("name")),
+                kind,
+                report,
+            ));
+            output.push_str("</span>");
+        }
+        _ => placeholder(
+            &format!("unsupported A2UI component '{kind}'"),
+            report,
+            output,
+        ),
+    }
+    stack.remove(id);
+}
+
+fn render_children(
+    component: &Map<String, Value>,
+    surface: &PreviewSurface,
+    stack: &mut HashSet<String>,
+    depth: usize,
+    report: &mut PreviewReport,
+    output: &mut String,
+) {
+    if let Some(child) = component.get("child").and_then(Value::as_str) {
+        render_component(child, surface, stack, depth, report, output);
+    }
+    if let Some(children) = component.get("children").and_then(Value::as_array) {
+        for child in children.iter().filter_map(Value::as_str) {
+            render_component(child, surface, stack, depth, report, output);
+        }
+    }
+}
+
+fn render_property(value: Option<&Value>, label: &str, report: &mut PreviewReport) -> String {
+    match value {
+        Some(Value::String(value)) => escape_html(value),
+        Some(Value::Object(value)) if value.contains_key("path") => {
+            report.placeholder_count += 1;
+            format!(
+                "<span class=\"ab-a2ui-binding\">[data binding: {}]</span>",
+                escape_html(&value["path"].to_string())
+            )
+        }
+        Some(_) => {
+            report.placeholder_count += 1;
+            format!("<span class=\"ab-a2ui-binding\">[{label}: dynamic value]</span>")
+        }
+        None => {
+            report.placeholder_count += 1;
+            format!("<span class=\"ab-a2ui-binding\">[{label}: unavailable]</span>")
+        }
+    }
+}
+
+fn placeholder(message: &str, report: &mut PreviewReport, output: &mut String) {
+    report.placeholder_count += 1;
+    output.push_str("<div class=\"ab-a2ui-placeholder\">");
+    output.push_str(&escape_html(message));
+    output.push_str("</div>");
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn preview_css() -> &'static str {
+    "body{font:14px system-ui,sans-serif;margin:0;background:#f7f7f8;color:#1b1b1d}main{max-width:760px;margin:0 auto;padding:24px}.ab-a2ui-surface{background:#fff;border:1px solid #d8d8dc;padding:20px;margin-bottom:16px}.ab-a2ui-surface h2{font-size:14px;margin:0 0 16px}.ab-a2ui-row{display:flex;gap:12px;align-items:flex-start}.ab-a2ui-column,.ab-a2ui-list{display:flex;flex-direction:column;gap:10px}.ab-a2ui-card{border:1px solid #d8d8dc;padding:14px}.ab-a2ui-button{padding:8px 12px}.ab-a2ui-media,.ab-a2ui-binding,.ab-a2ui-placeholder{display:inline-block;color:#5b5b62}.ab-a2ui-placeholder{border:1px dashed #a36b00;background:#fff7e5;padding:8px}.ab-a2ui-divider{border:0;border-top:1px solid #ddd;width:100%}"
 }
 
 fn validate_complete_surface(
@@ -592,5 +869,42 @@ mod tests {
         let report = validate_stream(r#"{"version":"v0.9.1"#);
         assert!(!report.valid);
         assert_eq!(report.errors[0].code, "invalid_json");
+    }
+
+    #[test]
+    fn preview_is_static_and_disables_actions() {
+        let input = format!(
+            "{CREATE}\n{}",
+            r#"{"version":"v0.9.1","updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Button","child":"label","action":{"event":{"name":"submit"}}},{"id":"label","component":"Text","text":"<Submit & continue>"}]}}"#
+        );
+        let preview = render_html_preview(&input);
+        let html = preview.html.expect("valid stream should render");
+        assert!(preview.report.preview_generated);
+        assert!(!preview.report.execution_allowed);
+        assert!(!preview.report.interactive);
+        assert_eq!(preview.report.disabled_action_count, 1);
+        assert!(html.contains("disabled aria-disabled=\"true\""));
+        assert!(html.contains("&lt;Submit &amp; continue&gt;"));
+        assert!(!html.contains("onclick"));
+    }
+
+    #[test]
+    fn preview_uses_placeholders_without_evaluating_bindings() {
+        let input = format!(
+            "{CREATE}\n{}",
+            r#"{"version":"v0.9.1","updateComponents":{"surfaceId":"main","components":[{"id":"root","component":"Text","text":{"path":"/user/name"}}]}}"#
+        );
+        let preview = render_html_preview(&input);
+        let html = preview.html.expect("valid stream should render");
+        assert!(html.contains("data binding"));
+        assert!(preview.report.placeholder_count > 0);
+    }
+
+    #[test]
+    fn invalid_stream_never_generates_preview() {
+        let preview = render_html_preview(r#"{"version":"v0.8","beginRendering":{}}"#);
+        assert!(!preview.report.valid);
+        assert!(!preview.report.preview_generated);
+        assert!(preview.html.is_none());
     }
 }
