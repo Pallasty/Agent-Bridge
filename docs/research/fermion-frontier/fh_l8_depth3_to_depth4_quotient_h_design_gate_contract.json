@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-QUOTIENT-H-D3-TO-D4-DESIGN-GATE-V1",
+  "status": "FROZEN_DESIGN_ONLY_NO_DEPTH3_TO_DEPTH4_EXECUTION_AUTHORITY",
+  "analysis_class": "STATIC_GIT_HASH_JSON_AND_INTEGER_ARITHMETIC_DESIGN_GATE",
+  "checker_self_sha256": "b43fcf1613fd2f3abd378c66261d2d01ca325446820bea735b5af4605dd379ae",
+  "chronology": {
+    "evidence_baseline": {
+      "commit": "72e1e56af49b91267738d0b0108640f358fde59a",
+      "tree": "bd49157c6aa367b802cc724d27763a6c4903f590",
+      "parents": [
+        "cbd5668e42c6a73237a31a07112466dfc8a80739"
+      ]
+    },
+    "checker_freeze": {
+      "commit": "8ecf55a7355bef2d76c4ce56ad3d37bf821adfeb",
+      "tree": "7c4d702336456898e4d269636568cf824511c3c8",
+      "parents": [
+        "72e1e56af49b91267738d0b0108640f358fde59a"
+      ]
+    },
+    "checker_artifact": {
+      "path": "fh_l8_depth3_to_depth4_quotient_h_design_gate_checker.py",
+      "mode": "100644",
+      "blob": "7ce1e4325d698f90cbe4f9e06792dfdb76189b8a",
+      "bytes": 38614,
+      "sha256": "b43fcf1613fd2f3abd378c66261d2d01ca325446820bea735b5af4605dd379ae"
+    },
+    "contract_path": "docs/research/fermion-frontier/fh_l8_depth3_to_depth4_quotient_h_design_gate_contract.json",
+    "forbidden_design_paths": [
+      "docs/research/fermion-frontier/fh_l8_depth3_to_depth4_quotient_h_design_gate_result.json",
+      "docs/research/fermion-frontier/fh_l8_depth3_to_depth4_quotient_h_runner.py",
+      "docs/research/fermion-frontier/fh_l8_depth3_to_depth4_quotient_h_implementation.py"
+    ],
+    "checker_must_precede_contract": true
+  },
+  "source_evidence": {
+    "reconciliation": {
+      "reconciliation_id": "FH-L8-D5-D6-DESCENDANT-R2",
+      "status": "VERIFIED_D5_D6_DESCENDANT_SCOPE_RECONCILIATION",
+      "commit_record": {
+        "commit": "72e1e56af49b91267738d0b0108640f358fde59a",
+        "tree": "bd49157c6aa367b802cc724d27763a6c4903f590",
+        "parents": [
+          "cbd5668e42c6a73237a31a07112466dfc8a80739"
+        ]
+      },
+      "artifacts": [
+        {
+          "path": "fh_l8_d5_d6_descendant_reconciliation_checker.py",
+          "mode": "100644",
+          "blob": "5603bb299f97637a89bebb8055383fc65eb4d660",
+          "bytes": 15391,
+          "sha256": "4133a98f19f55db95b213fc6df8f4f0127b090152d1c1acd51e98794508a4fed"
+        },
+        {
+          "path": "fh_l8_d5_d6_descendant_reconciliation.json",
+          "mode": "100644",
+          "blob": "cc66769b97d9f8a8211ac1892e73c67ecc4ceed4",
+          "bytes": 5537,
+          "sha256": "4f169897212704091b120d1380782cc2a61c17de0d01611259e97a7cb99e852e"
+        },
+        {
+          "path": "FH_L8_D5_D6_DESCENDANT_RECONCILIATION_ZH.md",
+          "mode": "100644",
+          "blob": "e8367b32914cd15f3dbd44fd927d63894cec688a",
+          "bytes": 2578,
+          "sha256": "8d1f4afbb44e1d7f2885cbb4dcd13860261b0b447d1395fa6fd666d675ec482a"
+        }
+      ]
+    },
+    "full_quotient_semantics_lane": {
+      "route_alias": "FH-L8-D5-EVIDENCE-SYMMETRY-ORBIT-QUOTIENT-V1",
+      "legacy_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D5",
+      "scope": "full_depth3_symmetry_quotient_and_depth0_to_depth3_transition_semantics",
+      "preregistration_evidence": true,
+      "protocol_freeze": {
+        "commit": "6daf30daeeb375962b9986af5df91517d8a4a8ec",
+        "tree": "9c7096bca41a1da8c440f37d93a08a4f51e5cef0",
+        "parents": [
+          "ae3935774d80f37b10f8317d0e17d339f03436cc"
+        ]
+      },
+      "outcome": {
+        "commit": "2f9556a986c50a42ff3096ded45b75e39c5a61a9",
+        "tree": "c1164c1acffb570448038b461cc619ca5164d2f9",
+        "parents": [
+          "6daf30daeeb375962b9986af5df91517d8a4a8ec"
+        ]
+      },
+      "artifacts": [
+        {
+          "path": "fh_l8_symmetry_orbit_quotient_d5_checker.py",
+          "mode": "100644",
+          "blob": "129b8f7c12b19deaee518c5dfdbcf9047a91c418",
+          "bytes": 48414,
+          "sha256": "681bc63fedce8b71cfb536c66d321467bc8f01cb5947bee59b4291e2ac51a022"
+        },
+        {
+          "path": "fh_l8_symmetry_orbit_quotient_d5_contract.json",
+          "mode": "100644",
+          "blob": "0969f7214db04f771a6533f7bb8ca702f71849fe",
+          "bytes": 4999,
+          "sha256": "1ebd1d38c0c40ca9617f86e09c86d528196260dd6b6b6692c34dacfe7a28d392"
+        },
+        {
+          "path": "fh_l8_symmetry_orbit_quotient_d5_result.json",
+          "mode": "100644",
+          "blob": "f8b461b0d22e04413f01c49d072941be6d91c43b",
+          "bytes": 9319,
+          "sha256": "a04a4d0be6265dcaf9d39c7937fc133d19c7a2050e1434c7cb24be88b795baed"
+        }
+      ]
+    },
+    "support_orbit_lane": {
+      "route_alias": "FH-L8-D6-EVIDENCE-BYTE-TABLE-SUPPORT-ORBIT-V1",
+      "legacy_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D6",
+      "resolved_parent_evidence_lane_alias": "FH-L8-D5-EVIDENCE-SIGNED-D4-PREFIX-V1",
+      "scope": "full_depth3_signed_support_orbit_enumeration_only",
+      "preregistration_evidence": false,
+      "outcome": {
+        "commit": "e45b5b9f68520289d3396c0af071019856afe56e",
+        "tree": "80724d12483ec39e0926ca4bfa341c6483eb27f9",
+        "parents": [
+          "64438c47be710835626dea0ceb2521b6634951dc"
+        ]
+      },
+      "integration": {
+        "commit": "77475550b96dee1a862e9f11046de8b097d9d063",
+        "tree": "559aac3cf352da8152531242374b13688fd83648",
+        "parents": [
+          "ec5777e284585377896e7e50503a54dcd95a9b82",
+          "e45b5b9f68520289d3396c0af071019856afe56e"
+        ]
+      },
+      "artifacts": [
+        {
+          "path": "fh_l8_byte_table_orbit_d6_checker.py",
+          "mode": "100644",
+          "blob": "4a3083ae2c511b79d7a560f9a842c67ea10b77fd",
+          "bytes": 6150,
+          "sha256": "6877a5ed376a85a77000fe5d46dc39975294b3a266dda188c26a9aba92b647ad"
+        },
+        {
+          "path": "fh_l8_byte_table_orbit_d6_contract.json",
+          "mode": "100644",
+          "blob": "fc5aa621be228a20d5c3a71db1139f4731dc181e",
+          "bytes": 1146,
+          "sha256": "ce2b6f29b86965e392cbf26fe2d6d9aba2f795d4ccc51804101f893c72f65374"
+        },
+        {
+          "path": "fh_l8_byte_table_orbit_d6_result.json",
+          "mode": "100644",
+          "blob": "7ff34d654a9a34e4e2a8de86371d13e9ced2c942",
+          "bytes": 1079,
+          "sha256": "5645aba12743e71853e1f0ace734116fec96203f1a150097a66a8969de3d7418"
+        }
+      ]
+    },
+    "relationship": {
+      "shared_D4_inputs": true,
+      "evidence_is_additive": false,
+      "bare_legacy_contract_id_lookup_forbidden": true,
+      "full_lane_supplies_signed_quotient_amplitude_semantics": true,
+      "support_lane_supplies_complementary_byte_table_support_canonicalization": true,
+      "support_lane_does_not_supply_quotient_hamiltonian_amplitudes": true
+    }
+  },
+  "workload": {
+    "linear_size": 8,
+    "boundary": "square_open_boundary_no_wrap",
+    "particle_sector": "N_up=32,N_down=32",
+    "source_depth": 3,
+    "target_depth": 4,
+    "operation": "fourth_krylov_hamiltonian_action_in_symmetry_quotient_coordinates",
+    "source_full_state_count": 1704285,
+    "source_representative_count": 213099,
+    "source_full_vector_digest": "6f8f53101b8a3ec0b3dfcee624a014426d93a8aa0dfc1300780b0ad99b765e97",
+    "source_quotient_digest": "7230d8bd0e726535cb5da01bc191313b25e38b83a6b809a7e6e39823a418757e",
+    "source_orbit_size_histogram": {
+      "1": 1,
+      "4": 125,
+      "8": 212973
+    },
+    "support_orbit_digest": "7e4f0d2526b49c786b124a8b45dc82cc8892a7798e7c4c362cd4aa15db74ca26",
+    "source_vector_artifact_present": false,
+    "source_replay_required_before_future_run": true,
+    "action_executed_in_this_unit": false
+  },
+  "coordinate_convention": {
+    "stored_source_value": "canonical_representative_full_basis_per_state_amplitude",
+    "orbit_reconstruction": "a[g*r]=fermionic_phase(g,r)*a[r]",
+    "orbit_average_coefficients_used": false,
+    "target_update": "q4[t]+=q3[s]*H[x,s]*phase(x_to_t)*source_orbit_size/target_orbit_size",
+    "streaming_integer_scale": 8,
+    "D6_support_table_supplies_phase": false,
+    "D5B_signed_CAR_semantics_mandatory": true
+  },
+  "design_arithmetic": {
+    "source_representatives": 213099,
+    "row_term_upper_bound_per_source": 225,
+    "hopping_terms_per_source": 224,
+    "diagonal_terms_per_source": 1,
+    "symmetry_group_order": 8,
+    "raw_candidate_action_upper_bound": 47947275,
+    "candidate_canonicalization_upper_bound": 47947275,
+    "candidate_group_image_upper_bound": 383578200,
+    "source_canonicality_group_image_upper_bound": 1704792,
+    "total_group_image_upper_bound": 385282992,
+    "byte_table_lookups_per_group_image": 16,
+    "candidate_byte_table_lookup_upper_bound": 6137251200,
+    "source_byte_table_lookup_upper_bound": 27276672,
+    "total_byte_table_lookup_upper_bound": 6164527872,
+    "inherited_d5b_raw_candidate_cap": 300000000
+  },
+  "numeric_bounds": {
+    "common_denominator": 8,
+    "row_absolute_l1_upper_bound": 352,
+    "source_amplitude_absolute_upper_bound": 43614208,
+    "target_amplitude_absolute_upper_bound": 15352201216,
+    "scaled_target_amplitude_absolute_upper_bound": 122817609728,
+    "single_raw_scaled_delta_absolute_upper_bound": 357287591936,
+    "all_raw_records_partial_sum_absolute_upper_bound": 17130966424643174400,
+    "raw_scaled_delta_fits_signed_i64": true,
+    "global_merge_accumulator_requires_signed_i128": true
+  },
+  "kpis": {
+    "semantic_input": "D5B_signed_quotient_semantics_and_D6_support_canonicalization_remain_distinct",
+    "equivalence_input": "shared_depth3_counts_only_no_digest_or_quotient_H_equivalence_claim",
+    "resource_primary": "raw_candidate_actions_and_group_images_are_independent_counters",
+    "guardrails": [
+      "no_scientific_action_in_design_checker",
+      "no_runtime_or_target_cardinality_inference",
+      "no_execution_authority"
+    ]
+  },
+  "algorithm_contract": {
+    "source_order": "ascending_128bit_representative",
+    "row_term_order": "224_sorted_hopping_terms_then_one_diagonal_term",
+    "source_preparation": "separate_hash_bound_packed_D5B_depth3_quotient_checkpoint_required",
+    "candidate_materialization": "one_candidate_at_a_time_never_full_candidate_set",
+    "support_canonicalization": "D6_byte_tables_may_nominate_support_representative_only",
+    "signed_quotient_semantics": "D5B_CAR_phase_orbit_size_and_projected_zero_rules_are_mandatory",
+    "cross_lane_check": "byte_table_support_representative_must_equal_D5B_signed_representative",
+    "coefficient_arithmetic": "scaled8_signed_i64_records_checked_signed_i128_merge_then_exact_divide_by_8",
+    "contribution_formula": "scaled8=q3_amp*H_coeff*CAR_phase*source_orbit_size*(8/target_orbit_size)",
+    "partitioning": "first_SHA256_digest_byte_of_u128_big_endian_target_selects_one_of_256_partitions",
+    "merge": "bounded_32_way_target_order_checked_i128_sum_divisibility_drop_zero_then_digest",
+    "checkpoint": "fsync_manifest_after_each_source_shard_with_exact_counters_and_hashes",
+    "resume": "only_from_hash_bound_complete_shard_boundary",
+    "memory_probe": "read_cgroup_v2_memory.current_before_microbatch_spill_and_merge",
+    "page_cache_policy": "bounded_IO_and_fadvise_DONTNEED_or_equivalent_after_durable_spill",
+    "scratch_filesystem": "non_tmpfs_non_ramfs_required",
+    "workers": 1,
+    "abort_policy": "fail_closed_before_next_allocation_on_any_cap_or_digest_drift"
+  },
+  "design_checker_limits": {
+    "max_source_bytes_per_artifact": 1048576,
+    "maximum_seconds": 15,
+    "allowed_operations": [
+      "git_metadata",
+      "raw_sha256",
+      "json_parse",
+      "integer_arithmetic"
+    ],
+    "scientific_state_iteration_allowed": false,
+    "scientific_action_execution_allowed": false
+  },
+  "future_runner_planning_caps": {
+    "outer_memory_max_bytes": 1073741824,
+    "outer_swap_max_bytes": 0,
+    "memory_high_water_abort_bytes": 805306368,
+    "max_process_peak_rss_bytes": 536870912,
+    "max_live_algorithm_buffer_bytes": 134217728,
+    "internal_deadline_seconds": 1800,
+    "outer_deadline_seconds": 1830,
+    "max_raw_candidate_actions": 47947275,
+    "max_candidate_canonicalizations": 47947275,
+    "max_candidate_group_images": 383578200,
+    "max_source_canonicality_group_images": 1704792,
+    "max_total_group_images": 385282992,
+    "schedule": {
+      "source_shard_size": 4096,
+      "source_shard_count": 53,
+      "full_source_shards": 52,
+      "last_source_shard_size": 107,
+      "source_microbatch_size": 512,
+      "max_raw_candidate_actions_per_full_shard": 921600,
+      "max_candidate_group_images_per_full_shard": 7372800,
+      "max_source_group_images_per_full_shard": 32768,
+      "max_total_group_images_per_full_shard": 7405568,
+      "target_hash_partitions": 256,
+      "fixed_width_spill_record_bytes": 32,
+      "max_primary_spool_bytes": 1534312800,
+      "max_sort_chunk_records": 262144,
+      "max_sort_chunk_bytes": 8388608,
+      "max_double_sort_buffer_bytes": 16777216,
+      "max_merge_fan_in": 32,
+      "merge_fd_reserve": 4,
+      "max_open_file_descriptors": 64,
+      "max_io_chunk_bytes": 8388608
+    },
+    "packed_source_checkpoint": {
+      "required_before_action": true,
+      "record_bytes": 32,
+      "record_count": 213099,
+      "maximum_bytes": 6819168,
+      "certified_in_this_unit": false
+    },
+    "max_live_scratch_bytes": 4294967296,
+    "max_cumulative_spill_write_bytes": 8589934592,
+    "max_created_files": 1024,
+    "preflight": {
+      "required_before_any_full_run": true,
+      "max_source_representatives": 4096,
+      "new_authorization_required": true,
+      "scientific_authority": false,
+      "full_run_authority": false
+    },
+    "performance_evidence": {
+      "runtime_projection_available": false,
+      "measured_peak_RSS_available": false,
+      "target_cardinality_available": false,
+      "D6_240_second_cap_reusable": false,
+      "D6_unretained_14_856_seconds_certifying": false,
+      "deadlines_are_provisional_stop_rules_not_predictions": true
+    }
+  },
+  "decision_rule": {
+    "source_chronology_schema_or_arithmetic_failure": "VERIFICATION_FAILED",
+    "any_static_resource_cap_below_bound": "NO_GO_D7_QUOTIENT_H_STATIC_RESOURCE_CEILING",
+    "all_design_gates_true": "VERIFIED_D7_QUOTIENT_H_DESIGN_GATE_FROZEN_NO_EXECUTION_AUTHORITY",
+    "execution_authority_on_any_outcome": false,
+    "next_gate": "SEPARATE_PACKED_DEPTH3_QUOTIENT_CHECKPOINT_PROTOCOL_REQUIRED"
+  },
+  "authority": {
+    "design_protocol_frozen": true,
+    "static_integer_arithmetic_verified": true,
+    "next_packed_source_checkpoint_protocol_design_eligible": true,
+    "implementation_present": false,
+    "source_vector_materialized_in_this_unit": false,
+    "bounded_preflight_executed": false,
+    "runtime_feasibility_certified": false,
+    "memory_feasibility_certified": false,
+    "target_cardinality_known": false,
+    "depth3_to_depth4_execution_authorized": false,
+    "depth3_to_depth4_quotient_hamiltonian_action_executed": false,
+    "fourth_krylov_hamiltonian_action_executed": false,
+    "target_vector_materialized": false,
+    "degree6_remainder_bounded": false,
+    "two_step_cumulative_error_bounded": false,
+    "full_R100_error_bounded": false,
+    "physical_reference_qualified": false,
+    "hardware_result_available": false,
+    "quantum_advantage_claimed": false,
+    "ready_gate_eligible": false
+  },
+  "forbidden_claims": [
+    "No depth-3 to depth-4 quotient Hamiltonian action is authorized or executed.",
+    "No packed depth-3 source checkpoint, fourth Krylov Hamiltonian action, target vector, target cardinality, runtime, or memory feasibility is certified.",
+    "The D6 240-second cap and unretained 14.856-second console observation are not extrapolated.",
+    "D5B and D6 share D4 inputs and provide complementary non-additive scopes; digest or quotient-H equivalence is not claimed.",
+    "No degree-six remainder, cumulative, R100, physical-reference, hardware, quantum-advantage, or READY claim is certified."
+  ]
+}

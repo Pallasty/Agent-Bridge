@@ -62,6 +62,18 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_d5_d6_descendant_reconciliation_checker.py`: fail-closed descendant scope and authority verifier.
 - `test_fh_l8_d5_d6_descendant_reconciliation.py`: topology, timing-custody, selection and uplift regressions.
 
+## FH-L8 depth-3 to depth-4 quotient-H design gate
+
+- `FH_L8_DEPTH3_TO_DEPTH4_QUOTIENT_H_DESIGN_GATE_ZH.md`: input semantics, dual resource budgets,
+  streaming design and authority boundary.
+- `fh_l8_depth3_to_depth4_quotient_h_design_gate_checker.py`: static Git/hash/JSON/integer checker;
+  it contains no scientific action entrypoint.
+- `fh_l8_depth3_to_depth4_quotient_h_design_gate_contract.json`: checker-before-contract chronology,
+  exact D5B/D6/R2 pins, arithmetic, provisional runner caps and closed execution authority.
+- `test_fh_l8_depth3_to_depth4_quotient_h_design_gate_checker.py`: chronology, arithmetic, AST,
+  resource no-go and authority-mutation regressions.
+- This design unit deliberately has no result, runner or action implementation artifact.
+
 ## Claude source session
 
 - Session:
