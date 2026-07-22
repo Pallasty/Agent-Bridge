@@ -98,22 +98,25 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 }
 
 use crate::{
-    memory_scope_visible_in_context, AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert,
-    CoactivationEdge, CoactivationStats, CodebaseIndexStats, CodebaseIndexStatus, CodebaseSymbol,
-    CompactPolicy, DecayUnusedStats, EmbeddingProfile, ForumExportResult, ForumImportReport,
-    ForumPostExport, ForumPostOutcome, ForumPostRecord, ForumSearchPostRecord, ForumSearchRecord,
-    ForumThreadExport, ForumThreadRecord, FusionShadowSample, GraphTopology, HebbianCluster,
-    IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow,
-    McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge,
-    MemoryEdgeExport, MemoryEvidenceProfile, MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot,
-    MemoryEvidenceSnapshotLimits, MemoryExportFilter, MemoryExportResult, MemoryListSort,
-    MemoryLiveMeta, MemoryPeekResult, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
-    MemorySearchHit, MemoryStats, MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord,
-    OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats,
-    RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts,
-    SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
-    AMBIENT_SURFACING_MODE, FUSION_SHADOW_RING_CAP, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
-    MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
+    agent_world_capture_digest, agent_world_capture_row_hash, memory_scope_visible_in_context,
+    AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, AgentWorldCaptureRow,
+    AgentWorldWorkspaceSummaryCapture, CoactivationEdge, CoactivationStats, CodebaseIndexStats,
+    CodebaseIndexStatus, CodebaseSymbol, CompactPolicy, DecayUnusedStats, EmbeddingProfile,
+    ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
+    ForumSearchPostRecord, ForumSearchRecord, ForumThreadExport, ForumThreadRecord,
+    FusionShadowSample, GraphTopology, HebbianCluster, IdentityWindow, ImportConflictPolicy,
+    ImportReport, McpToolCallFilter, McpToolCallRow, McpToolCallStats, McpToolErrorRecord,
+    McpToolSourceStats, MemoryCosineHit, MemoryEdge, MemoryEdgeExport, MemoryEvidenceProfile,
+    MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot, MemoryEvidenceSnapshotLimits,
+    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryLiveMeta, MemoryPeekResult,
+    MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats,
+    MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord, OverlapPair, PlanRecord,
+    PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, RetrievalOutcomeMemory,
+    RetrievalOutcomeShadowRow, RetrievalOutcomeSummary, S234Counts, SessionFilter,
+    SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
+    AGENT_WORLD_CAPTURE_RING_CAP, AMBIENT_SURFACING_MODE, FUSION_SHADOW_RING_CAP,
+    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP,
+    RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -679,6 +682,24 @@ CREATE TABLE IF NOT EXISTS fusion_shadow (
     skip_reason    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_fusion_shadow_at ON fusion_shadow(at DESC);
+"#;
+
+// P1 Qwen-AgentWorld local probe capture. Version-less for the same v43
+// ownership reason as fusion_shadow. No sync/export path reads this table.
+const SCHEMA_AGENT_WORLD_CAPTURE: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_world_capture (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    at                 INTEGER NOT NULL,
+    capture_id         TEXT NOT NULL UNIQUE,
+    probe_kind         TEXT NOT NULL,
+    action_json        TEXT NOT NULL,
+    observation_json   TEXT NOT NULL,
+    action_sha256      TEXT NOT NULL,
+    observation_sha256 TEXT NOT NULL,
+    prev_hash          TEXT NOT NULL,
+    row_hash           TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_world_capture_at ON agent_world_capture(at DESC, id DESC);
 "#;
 
 // v32 — timestamp integrity guard for sync/export tables.
@@ -1846,6 +1867,7 @@ impl SqliteStore {
             // R2 fusion shadow — version-less additive rung (see the const's
             // comment for why it cannot bump schema_meta.version past v43).
             c.execute_batch(SCHEMA_FUSION_SHADOW)?;
+            c.execute_batch(SCHEMA_AGENT_WORLD_CAPTURE)?;
             temporal_evidence::migrate_or_verify_v43(c)?;
             Ok(())
         })
@@ -8155,6 +8177,125 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("fusion_shadow_rows: {e}")))
+    }
+
+    async fn record_agent_world_capture(
+        &self,
+        capture: AgentWorldWorkspaceSummaryCapture,
+    ) -> Result<AgentWorldCaptureRow> {
+        self.conn
+            .call(move |c| -> RusqliteResult<AgentWorldCaptureRow> {
+                let tx = c.transaction()?;
+                let at = now_secs();
+                let probe_kind = "workspace_summary".to_string();
+                let action_json = serde_json::json!({
+                    "schema": "agent_bridge.workspace_summary_action.v0",
+                    "probe": "workspace_summary"
+                })
+                .to_string();
+                let observation_json = serde_json::json!({
+                    "schema": "agent_bridge.workspace_summary_observation.v0",
+                    "files": capture.files,
+                    "directories": capture.directories,
+                    "symlinks": capture.symlinks,
+                    "other": capture.other
+                })
+                .to_string();
+                let prev_hash: String = tx
+                    .query_row(
+                        "SELECT row_hash FROM agent_world_capture ORDER BY id DESC LIMIT 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or_else(|| "0".repeat(64));
+                let action_sha256 = agent_world_capture_digest("action", &action_json);
+                let observation_sha256 =
+                    agent_world_capture_digest("observation", &observation_json);
+                let row_hash = agent_world_capture_row_hash(&AgentWorldCaptureRow {
+                    at,
+                    capture_id: capture.capture_id.clone(),
+                    probe_kind: probe_kind.clone(),
+                    action_json: action_json.clone(),
+                    observation_json: observation_json.clone(),
+                    action_sha256: action_sha256.clone(),
+                    observation_sha256: observation_sha256.clone(),
+                    prev_hash: prev_hash.clone(),
+                    row_hash: String::new(),
+                });
+                tx.execute(
+                    "INSERT INTO agent_world_capture
+                       (at, capture_id, probe_kind, action_json, observation_json,
+                        action_sha256, observation_sha256, prev_hash, row_hash)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    rusqlite::params![
+                        at,
+                        capture.capture_id,
+                        probe_kind,
+                        action_json,
+                        observation_json,
+                        action_sha256,
+                        observation_sha256,
+                        prev_hash,
+                        row_hash,
+                    ],
+                )?;
+                tx.execute(
+                    "DELETE FROM agent_world_capture
+                      WHERE id NOT IN (
+                        SELECT id FROM agent_world_capture ORDER BY id DESC LIMIT ?1
+                      )",
+                    rusqlite::params![AGENT_WORLD_CAPTURE_RING_CAP],
+                )?;
+                tx.commit()?;
+                Ok(AgentWorldCaptureRow {
+                    at,
+                    capture_id: capture.capture_id,
+                    probe_kind,
+                    action_json,
+                    observation_json,
+                    action_sha256,
+                    observation_sha256,
+                    prev_hash,
+                    row_hash,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("record_agent_world_capture: {e}")))
+    }
+
+    async fn agent_world_capture_rows(&self, limit: u32) -> Result<Vec<AgentWorldCaptureRow>> {
+        let limit = limit.clamp(1, AGENT_WORLD_CAPTURE_RING_CAP as u32) as i64;
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<AgentWorldCaptureRow>> {
+                let mut stmt = c.prepare(
+                    "SELECT at, capture_id, probe_kind, action_json, observation_json,
+                            action_sha256, observation_sha256, prev_hash, row_hash
+                       FROM agent_world_capture
+                      WHERE id IN (
+                        SELECT id FROM agent_world_capture ORDER BY id DESC LIMIT ?1
+                      )
+                   ORDER BY id ASC",
+                )?;
+                let rows = stmt
+                    .query_map(rusqlite::params![limit], |row| {
+                        Ok(AgentWorldCaptureRow {
+                            at: row.get(0)?,
+                            capture_id: row.get(1)?,
+                            probe_kind: row.get(2)?,
+                            action_json: row.get(3)?,
+                            observation_json: row.get(4)?,
+                            action_sha256: row.get(5)?,
+                            observation_sha256: row.get(6)?,
+                            prev_hash: row.get(7)?,
+                            row_hash: row.get(8)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("agent_world_capture_rows: {e}")))
     }
 
     /// Apply-pass raw material — the shadow aggregate restricted to the
@@ -26649,5 +26790,35 @@ mod tests {
         assert!(!before.is_empty(), "shadow is non-empty");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn agent_world_capture_is_chained_bounded_and_reconstructable() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&temp_dir.path().join("state.db"))
+            .await
+            .expect("open");
+        for index in 0..(AGENT_WORLD_CAPTURE_RING_CAP + 5) {
+            store
+                .record_agent_world_capture(AgentWorldWorkspaceSummaryCapture {
+                    capture_id: format!("capture-{index}"),
+                    files: index as u64,
+                    directories: 1,
+                    symlinks: 0,
+                    other: 0,
+                })
+                .await
+                .expect("record");
+        }
+        let rows = store.agent_world_capture_rows(500).await.expect("rows");
+        assert_eq!(rows.len(), AGENT_WORLD_CAPTURE_RING_CAP as usize);
+        assert_eq!(rows.first().expect("first").capture_id, "capture-5");
+        assert!(crate::verify_agent_world_capture_chain(&rows));
+        assert!(rows
+            .iter()
+            .all(|row| !row.action_json.is_empty() && !row.observation_json.is_empty()));
+        let mut tampered = rows.clone();
+        tampered[10].observation_json.push_str("tampered");
+        assert!(!crate::verify_agent_world_capture_chain(&tampered));
     }
 }

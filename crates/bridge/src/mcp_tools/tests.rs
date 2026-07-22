@@ -7921,6 +7921,137 @@ fn agent_world_source_cap_sentinel_detects_incomplete_source() {
 }
 
 #[test]
+fn agent_world_capture_gate_is_default_off_unless_truthy() {
+    assert!(!agent_world_capture_enabled_from(None));
+    assert!(!agent_world_capture_enabled_from(Some("")));
+    assert!(!agent_world_capture_enabled_from(Some("0")));
+    assert!(!agent_world_capture_enabled_from(Some("yes")));
+    assert!(agent_world_capture_enabled_from(Some("1")));
+    assert!(agent_world_capture_enabled_from(Some("TRUE")));
+}
+
+#[test]
+fn agent_world_capture_tools_are_high_surface_profile_only() {
+    for profile in ["essential", "compact", "standard"] {
+        let policy = ToolPolicy::from_values(None, None, None, Some(profile));
+        let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), policy)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+        assert!(!names.iter().any(|name| name == "agent_world_probe_capture"));
+        assert!(!names
+            .iter()
+            .any(|name| name == "agent_world_capture_report"));
+    }
+    let all = ToolPolicy::from_values(None, None, None, Some("all"));
+    let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    assert!(names.iter().any(|name| name == "agent_world_probe_capture"));
+    assert!(names
+        .iter()
+        .any(|name| name == "agent_world_capture_report"));
+
+    let all_dev = ToolPolicy::from_values(Some("all-dev"), None, None, None);
+    let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all_dev)
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    assert!(names.iter().any(|name| name == "agent_world_probe_capture"));
+}
+
+#[test]
+fn workspace_summary_exports_counts_not_entry_names() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::fs::write(temp.path().join("secret-name.txt"), b"secret").expect("file");
+    std::fs::create_dir(temp.path().join("private-dir")).expect("dir");
+    let value = workspace_summary_observation(temp.path()).expect("summary");
+    let serialized = value.to_string();
+    assert_eq!(value["files"], 1);
+    assert_eq!(value["directories"], 1);
+    assert!(!serialized.contains("secret-name"));
+    assert!(!serialized.contains("private-dir"));
+}
+
+#[test]
+fn agent_world_workspace_root_requires_real_top_level_and_rejects_symlink() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::fs::write(temp.path().join(".git"), b"fake").expect("fake git marker");
+    assert!(resolve_agent_world_workspace_root(temp.path().to_str().expect("utf8")).is_err());
+    std::fs::remove_file(temp.path().join(".git")).expect("remove fake marker");
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git init");
+    assert!(status.success());
+    let canonical_temp = std::fs::canonicalize(temp.path()).expect("canonical");
+    assert_eq!(
+        resolve_agent_world_workspace_root(canonical_temp.to_str().expect("utf8")).expect("root"),
+        canonical_temp
+    );
+    #[cfg(unix)]
+    {
+        let link_parent = tempfile::tempdir().expect("link parent");
+        let link = link_parent.path().join("workspace-link");
+        std::os::unix::fs::symlink(temp.path(), &link).expect("symlink");
+        assert!(resolve_agent_world_workspace_root(link.to_str().expect("utf8")).is_err());
+
+        let ancestor = link_parent.path().join("ancestor-link");
+        std::os::unix::fs::symlink(temp.path().parent().expect("parent"), &ancestor)
+            .expect("ancestor symlink");
+        let through_ancestor = ancestor.join(temp.path().file_name().expect("name"));
+        assert!(
+            resolve_agent_world_workspace_root(through_ancestor.to_str().expect("utf8")).is_err()
+        );
+    }
+}
+
+#[test]
+fn agent_world_report_verifies_full_ring_and_never_exports_raw_pairs() {
+    let mut rows = Vec::new();
+    let mut previous = "0".repeat(64);
+    for index in 0..21 {
+        let action_json = r#"{"probe":"workspace_summary","private":"secret-action"}"#.to_string();
+        let observation_json = format!(r#"{{"files":{index},"private":"secret-observation"}}"#);
+        let mut row = ab_store::AgentWorldCaptureRow {
+            at: 100 + index,
+            capture_id: format!("capture-{index}"),
+            probe_kind: "workspace_summary".to_string(),
+            action_sha256: ab_store::agent_world_capture_digest("action", &action_json),
+            observation_sha256: ab_store::agent_world_capture_digest(
+                "observation",
+                &observation_json,
+            ),
+            action_json,
+            observation_json,
+            prev_hash: previous,
+            row_hash: String::new(),
+        };
+        row.row_hash = ab_store::agent_world_capture_row_hash(&row);
+        previous = row.row_hash.clone();
+        rows.push(row);
+    }
+    let ready = agent_world_capture_report_payload(&rows, 20);
+    let encoded = ready.to_string();
+    assert_eq!(ready["status"], "acceptance_sample_ready");
+    assert_eq!(ready["samples"].as_array().expect("samples").len(), 20);
+    assert!(!encoded.contains("secret-action"));
+    assert!(!encoded.contains("secret-observation"));
+    assert!(!encoded.contains("action_sha256"));
+    assert!(!encoded.contains("observation_sha256"));
+
+    rows[0].observation_json.push_str("tampered");
+    let blocked = agent_world_capture_report_payload(&rows, 20);
+    assert_eq!(blocked["status"], "collecting");
+    assert_eq!(blocked["retained_slice_consistent"], false);
+}
+
+#[test]
 fn registry_exposes_tool_atlas_snapshot_tool() {
     let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
     let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)

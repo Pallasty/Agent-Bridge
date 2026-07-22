@@ -270,6 +270,10 @@ pub const RETRIEVAL_SURFACING_RING_CAP: i64 = 50_000;
 /// each write — same bound rationale as `memory_query_log` (one row/query).
 pub const FUSION_SHADOW_RING_CAP: i64 = 5_000;
 
+/// P1 AgentWorld local probe captures. Deliberately small: these rows contain
+/// reconstructable, local-only action/observation JSON rather than telemetry.
+pub const AGENT_WORLD_CAPTURE_RING_CAP: i64 = 200;
+
 /// `retrieval_surfacing.mode` value for AMBIENT bootstrap injections — the
 /// session_bootstrap semantic page (hook-driven or agent-called), logged so
 /// injected memories participate in used_at attribution at all.
@@ -1590,6 +1594,80 @@ pub struct FusionShadowSample {
     pub max_abs_shift: u32,
     pub skipped: bool,
     pub skip_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentWorldWorkspaceSummaryCapture {
+    pub capture_id: String,
+    pub files: u64,
+    pub directories: u64,
+    pub symlinks: u64,
+    pub other: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentWorldCaptureRow {
+    pub at: i64,
+    pub capture_id: String,
+    pub probe_kind: String,
+    pub action_json: String,
+    pub observation_json: String,
+    pub action_sha256: String,
+    pub observation_sha256: String,
+    pub prev_hash: String,
+    pub row_hash: String,
+}
+
+pub fn agent_world_capture_digest(domain: &str, value: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [domain, value] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub fn agent_world_capture_row_hash(row: &AgentWorldCaptureRow) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [
+        "agent-world-capture-v1".to_string(),
+        row.capture_id.clone(),
+        row.at.to_string(),
+        row.probe_kind.clone(),
+        row.action_sha256.clone(),
+        row.observation_sha256.clone(),
+        row.prev_hash.clone(),
+    ] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub fn verify_agent_world_capture_chain(rows: &[AgentWorldCaptureRow]) -> bool {
+    let Some(first) = rows.first() else {
+        return true;
+    };
+    let mut previous = first.prev_hash.clone();
+    rows.iter().all(|row| {
+        let valid = row.prev_hash == previous
+            && row.action_sha256 == agent_world_capture_digest("action", &row.action_json)
+            && row.observation_sha256
+                == agent_world_capture_digest("observation", &row.observation_json)
+            && row.row_hash == agent_world_capture_row_hash(row);
+        previous = row.row_hash.clone();
+        valid
+    })
 }
 
 /// Sort order for `list_memories`.
@@ -4052,6 +4130,22 @@ pub trait StateStore: Send + Sync {
     /// first, bounded by [`FUSION_SHADOW_RING_CAP`]. Default returns empty
     /// (an honest "no data yet" for a read-only report, never a wrong answer).
     async fn fusion_shadow_rows(&self, _window_secs: i64) -> Result<Vec<FusionShadowSample>> {
+        Ok(Vec::new())
+    }
+
+    /// Append one Bridge-produced, local-only AgentWorld probe capture.
+    /// Implementations must chain and ring-cap rows atomically.
+    async fn record_agent_world_capture(
+        &self,
+        _capture: AgentWorldWorkspaceSummaryCapture,
+    ) -> Result<AgentWorldCaptureRow> {
+        Err(ab_core::Error::Backend(
+            "agent-world capture is unsupported by this store".to_string(),
+        ))
+    }
+
+    /// Read bounded local capture rows oldest-first for chain verification.
+    async fn agent_world_capture_rows(&self, _limit: u32) -> Result<Vec<AgentWorldCaptureRow>> {
         Ok(Vec::new())
     }
 

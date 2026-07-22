@@ -21726,6 +21726,306 @@ fn agent_world_source_cap_reached<const N: usize>(
     source_lengths.into_iter().any(|count| count >= fetch_limit)
 }
 
+fn agent_world_capture_enabled_from(value: Option<&str>) -> bool {
+    matches!(value.map(str::trim), Some("1"))
+        || value.is_some_and(|value| value.trim().eq_ignore_ascii_case("true"))
+}
+
+fn agent_world_capture_enabled() -> bool {
+    agent_world_capture_enabled_from(
+        std::env::var("AGENT_BRIDGE_AGENT_WORLD_CAPTURE")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn agent_world_output_commitment(domain: &str, value: &str) -> String {
+    static KEY: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::new();
+    let key = KEY.get_or_init(|| *uuid::Uuid::new_v4().as_bytes());
+    let mut hasher = Sha256::new();
+    ShaDigest::update(&mut hasher, domain.as_bytes());
+    ShaDigest::update(&mut hasher, [0]);
+    ShaDigest::update(&mut hasher, value.as_bytes());
+    ShaDigest::update(&mut hasher, [0]);
+    ShaDigest::update(&mut hasher, key);
+    format!("{:x}", ShaDigest::finalize(hasher))
+}
+
+fn workspace_summary_observation(root: &std::path::Path) -> std::io::Result<Value> {
+    let mut files = 0_u64;
+    let mut directories = 0_u64;
+    let mut symlinks = 0_u64;
+    let mut other = 0_u64;
+    for entry in std::fs::read_dir(root)? {
+        let kind = entry?.file_type()?;
+        if kind.is_file() {
+            files += 1;
+        } else if kind.is_dir() {
+            directories += 1;
+        } else if kind.is_symlink() {
+            symlinks += 1;
+        } else {
+            other += 1;
+        }
+    }
+    Ok(json!({
+        "schema": "agent_bridge.workspace_summary_observation.v0",
+        "files": files,
+        "directories": directories,
+        "symlinks": symlinks,
+        "other": other
+    }))
+}
+
+fn resolve_agent_world_workspace_root(
+    value: &str,
+) -> std::result::Result<std::path::PathBuf, String> {
+    let supplied = std::path::Path::new(value);
+    if !supplied.is_absolute() {
+        return Err("root must be an absolute canonical path".to_string());
+    }
+    if std::fs::symlink_metadata(value)
+        .map_err(|error| format!("inspect root: {error}"))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("symlink roots are not admissible".to_string());
+    }
+    let root =
+        std::fs::canonicalize(value).map_err(|error| format!("canonicalize root: {error}"))?;
+    if supplied != root {
+        return Err(
+            "root path must already be canonical and contain no symlinked ancestors".to_string(),
+        );
+    }
+    if root == std::path::Path::new("/") {
+        return Err("filesystem root is not an admissible workspace".to_string());
+    }
+    if std::env::var_os("HOME").is_some_and(|home| root == std::path::PathBuf::from(home)) {
+        return Err("home directory is not an admissible workspace".to_string());
+    }
+    validate_agent_world_git_root(&root)?;
+    Ok(root)
+}
+
+#[cfg(unix)]
+fn agent_world_workspace_identity(root: &std::path::Path) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(root)?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(not(unix))]
+fn agent_world_workspace_identity(root: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    std::fs::canonicalize(root)
+}
+
+fn validate_agent_world_git_root(root: &std::path::Path) -> std::result::Result<(), String> {
+    let root_text = root.to_str().ok_or("root is not valid UTF-8")?;
+    let output = std::process::Command::new("git")
+        .args(["-C", root_text, "rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|error| format!("run git worktree validation: {error}"))?;
+    if !output.status.success() {
+        return Err("root must be an actual git worktree".to_string());
+    }
+    let top =
+        String::from_utf8(output.stdout).map_err(|_| "git top-level is not UTF-8".to_string())?;
+    let top = std::fs::canonicalize(top.trim())
+        .map_err(|error| format!("canonicalize git top-level: {error}"))?;
+    if top != root {
+        return Err("root must equal the git worktree top-level".to_string());
+    }
+    Ok(())
+}
+
+/// Default-off P1 producer: Bridge executes one fixed read-only probe and
+/// stores the exact structured pair in the local SQLite ring.
+pub struct AgentWorldProbeCaptureTool {
+    hub: Hub,
+}
+
+impl AgentWorldProbeCaptureTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for AgentWorldProbeCaptureTool {
+    fn name(&self) -> &'static str {
+        "agent_world_probe_capture"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Run one fixed local read-only workspace-summary probe and append its exact action/observation pair to a 200-row local-only ring. Requires AGENT_BRIDGE_AGENT_WORLD_CAPTURE=1 and per_call_opt_in=true. It cannot execute caller-supplied commands, accept caller-supplied observations, export data, or authorize runtime.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["root", "per_call_opt_in"],
+                "properties": {
+                    "root": { "type": "string", "description": "Canonicalizable git worktree root; / and HOME are rejected." },
+                    "per_call_opt_in": { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if !agent_world_capture_enabled() {
+            return Ok(ToolResult::error(
+                "agent-world capture is disabled; set AGENT_BRIDGE_AGENT_WORLD_CAPTURE=1",
+            ));
+        }
+        if !args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Ok(ToolResult::error("per_call_opt_in=true is required"));
+        }
+        let root_value = args.get("root").and_then(Value::as_str).unwrap_or("");
+        let root = match resolve_agent_world_workspace_root(root_value) {
+            Ok(root) => root,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let identity_before = match agent_world_workspace_identity(&root) {
+            Ok(identity) => identity,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "inspect workspace identity: {error}"
+                )))
+            }
+        };
+        let observation = match workspace_summary_observation(&root) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "workspace summary probe: {error}"
+                )))
+            }
+        };
+        if let Err(error) = validate_agent_world_git_root(&root) {
+            return Ok(ToolResult::error(format!(
+                "workspace changed during probe: {error}"
+            )));
+        }
+        let identity_after = match agent_world_workspace_identity(&root) {
+            Ok(identity) => identity,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "reinspect workspace identity: {error}"
+                )))
+            }
+        };
+        if identity_before != identity_after {
+            return Ok(ToolResult::error("workspace identity changed during probe"));
+        }
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("no store configured".to_string()))?;
+        let row = store
+            .record_agent_world_capture(ab_store::AgentWorldWorkspaceSummaryCapture {
+                capture_id: uuid::Uuid::new_v4().to_string(),
+                files: observation["files"].as_u64().unwrap_or(0),
+                directories: observation["directories"].as_u64().unwrap_or(0),
+                symlinks: observation["symlinks"].as_u64().unwrap_or(0),
+                other: observation["other"].as_u64().unwrap_or(0),
+            })
+            .await?;
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.agent_world_probe_capture_receipt.v0",
+            "status": "captured",
+            "capture_id": row.capture_id,
+            "at": row.at,
+            "probe_kind": row.probe_kind,
+            "receipt_commitment": agent_world_output_commitment("capture-row", &row.row_hash),
+            "raw_content_exported": false,
+            "local_only": true,
+            "can_authorize_runtime": false
+        })))
+    }
+}
+
+pub struct AgentWorldCaptureReportTool {
+    hub: Hub,
+}
+
+fn agent_world_capture_report_payload(
+    rows: &[ab_store::AgentWorldCaptureRow],
+    limit: usize,
+) -> Value {
+    let retained_slice_consistent = ab_store::verify_agent_world_capture_chain(rows);
+    let samples = rows
+        .iter()
+        .rev()
+        .take(limit)
+        .rev()
+        .map(|row| {
+            json!({
+                "capture_ref": agent_world_output_commitment("capture-id", &row.capture_id),
+                "probe_kind": row.probe_kind,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "schema": "agent_bridge.agent_world_capture_report.v0",
+        "status": if rows.len() >= 20 && retained_slice_consistent { "acceptance_sample_ready" } else { "collecting" },
+        "sample_count": rows.len(),
+        "target_count": 20,
+        "retained_slice_consistent": retained_slice_consistent,
+        "raw_content_exported": false,
+        "samples": samples
+    })
+}
+
+impl AgentWorldCaptureReportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for AgentWorldCaptureReportTool {
+    fn name(&self) -> &'static str {
+        "agent_world_capture_report"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read a digest-only local AgentWorld capture coverage report. Raw actions and observations remain in the local store and are never returned.".into(),
+            input_schema: json!({"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":200,"default":200}}}),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(200)
+            .clamp(1, 200) as u32;
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("no store configured".to_string()))?;
+        if !agent_world_capture_enabled() {
+            return Ok(ToolResult::error(
+                "agent-world capture report is disabled with the capture feature",
+            ));
+        }
+        let rows = store.agent_world_capture_rows(200).await?;
+        Ok(ToolResult::json_text(&agent_world_capture_report_payload(
+            &rows,
+            limit as usize,
+        )))
+    }
+}
+
 pub struct ToolAtlasSnapshotTool {
     hub: Hub,
 }
@@ -43288,6 +43588,18 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(AgentWorldTrajectoryAuditTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(AgentWorldProbeCaptureTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(AgentWorldCaptureReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
