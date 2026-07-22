@@ -257,6 +257,39 @@ def parse_search_keys(text: str) -> list[str]:
     return keys
 
 
+def order_difference_summary(
+    forward: dict[str, list[str]], reverse: dict[str, list[str]]
+) -> dict[str, Any]:
+    """Return aggregate-only diagnostics: never expose memory keys or queries."""
+    changed: list[dict[str, Any]] = []
+    for case_id in sorted(forward):
+        left = forward[case_id]
+        right = reverse.get(case_id, [])
+        if left == right:
+            continue
+        first_difference = next(
+            (
+                rank
+                for rank, pair in enumerate(zip(left, right), start=1)
+                if pair[0] != pair[1]
+            ),
+            min(len(left), len(right)) + 1,
+        )
+        changed.append(
+            {
+                "case_id": case_id,
+                "first_difference_rank": first_difference,
+                "forward_page_sha256": hashlib.sha256(
+                    "\n".join(left).encode("utf-8")
+                ).hexdigest(),
+                "reverse_page_sha256": hashlib.sha256(
+                    "\n".join(right).encode("utf-8")
+                ).hexdigest(),
+            }
+        )
+    return {"changed_case_count": len(changed), "changed_cases": changed}
+
+
 def process_has_snapshot_fd(pid: int, snapshot: Path) -> bool:
     """Prove the child opened the clone before any query is issued."""
     fd_dir = Path(f"/proc/{pid}/fd")
@@ -671,7 +704,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             if reverse_identity != identities[0]:
                 raise ReplayError("binary identity changed during order falsifier")
             if searches[mode] != reversed_rows:
-                raise ReplayError(f"ORDER_DEPENDENT_BLOCKED: {mode}")
+                diagnostic = order_difference_summary(searches[mode], reversed_rows)
+                raise ReplayError(
+                    f"ORDER_DEPENDENT_BLOCKED: {mode}: "
+                    f"{json.dumps(diagnostic, sort_keys=True)}"
+                )
 
         result_cases, summary = evaluate(cases, searches, timings, structure)
         base_sha_after = sha256_file(base_snapshot)
@@ -735,6 +772,13 @@ def selftest() -> None:
         with tempfile.NamedTemporaryFile() as handle:
             if not process_has_snapshot_fd(os.getpid(), Path(handle.name)):
                 raise AssertionError("snapshot FD binding proof drift")
+    diagnostic = order_difference_summary(
+        {"Q-1": ["private-a", "private-b"], "Q-2": ["private-c"]},
+        {"Q-1": ["private-b", "private-a"], "Q-2": ["private-c"]},
+    )
+    encoded = json.dumps(diagnostic, sort_keys=True)
+    if diagnostic["changed_case_count"] != 1 or "private-" in encoded:
+        raise AssertionError("order diagnostic privacy drift")
 
 
 def main() -> int:
