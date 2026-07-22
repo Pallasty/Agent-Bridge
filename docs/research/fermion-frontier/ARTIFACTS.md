@@ -2054,3 +2054,6 @@ so they are versioned normally and are not added to the preservation-only
   controls only.
 - `FERMION_BIOCORTEX_FB_S2_HBR_R1_ADAPTER_ELIGIBILITY_2026_07_22.md` is the
   human-readable evidence boundary and v2 reopening handoff.
+- `fh_l8_signed_d4_orbit_d5_contract.json`, checker, result, tests, and
+  `FH_L8_SIGNED_D4_ORBIT_D5_ZH.md` bind the signed D4 custody-positive orbit
+  result and the depth-3 prefix boundary.

@@ -1,0 +1,26 @@
+{
+  "schema_version":1,
+  "contract_id":"FH-L8-INDEPENDENT-REFERENCE-D5",
+  "checker_self_sha256":"1edf1275a4fa2e3407c5903876bf6000e0dabe0113a5e403c67ad4f7e0ff7bf7",
+  "parent_contract_id":"FH-L8-INDEPENDENT-REFERENCE-D4",
+  "group":"D4_spatial_with_spin_exchange_on_checkerboard_flipping_elements",
+  "group_order":8,
+  "mode_count":128,
+  "elements":["id","r90_spinflip","r180","r270_spinflip","fv_spinflip","fh_spinflip","diag","adiag"],
+  "all_Neel_characters":"+1",
+  "expected_orbits":{
+    "depth0":{"states":1,"orbits":1,"digest":"4851eca743653e8f5e4b1aaa7796811bc24f1bca5e23432e5bc96bfd9882bec9"},
+    "depth1":{"states":225,"orbits":29,"digest":"b34e89f3629213e0c12a6624e4179abefb6c30eb313aa60465dbe21211b62dd6"},
+    "depth2":{"states":24421,"orbits":3116,"digest":"17264b376d6167662b634929201c041e4168f5c825af76bc6f544963466b58e8"},
+    "depth3":{"states":1704285,"full_orbits":"NOT_COMPLETED_UNDER_PREFIX_CAP","prefix_states_processed":100000,"prefix_orbits":71064,"prefix_digest":"fef172646dbf2ddadd913a0b67cc4f0360cc25dd48a261decaf6b9a5cbf5c68a"}
+  },
+  "resource_limits":{"max_materialized_states":2000000,"max_depth3_prefix_states":100000,"max_live_canonicalization_seconds":120,"max_source_bytes":1048576},
+  "next_branch":"BYTE_TABLE_SIGNED_BIT_PERMUTATION_ORBIT_CANONICALIZATION",
+  "source_pins":[
+    {"path":"fh_l8_scalar_supremum_d4_checker.py","sha256":"86692e68cee1475d3cee2dbd0e866f68d5c5514ff37268c601819bd8f4ed48f2"},
+    {"path":"fh_l8_scalar_supremum_d4_contract.json","sha256":"f3a19548cbcb658b7a30e656f09f063ee349646850b487f1e4fb2cd2b2876cb8"},
+    {"path":"fh_l8_scalar_supremum_d4_result.json","sha256":"07f01bd87187b02cacd7979450123077804bd996335e127279576bf47122512e"}
+  ],
+  "terminal_branch":"SIGNED_D4_CUSTODY_POSITIVE_DEPTH3_CANONICALIZATION_PREFIX_TIME_BOUNDARY",
+  "forbidden_claims":["full_depth3_orbit_count","degree6_remainder_bounded","two_step_cumulative_error_bounded","full_R100_error_bounded","physical_reference_qualified","ready_gate_eligible"]
+}
