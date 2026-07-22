@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D2",
+  "checker_self_sha256": "0c471f3a07a1260c27289f0da07a7c122a85a96c6c3ee17552e09e1c0ae6225f",
+  "parent_contract_id": "FH-L8-INDEPENDENT-REFERENCE-D1",
+  "workload": {
+    "linear_size": 8,
+    "boundary": "open",
+    "interaction_over_hopping": "8/1",
+    "step_duration": "1/100",
+    "composed_steps": 2,
+    "initial_state": "checkerboard_Neel_N_up_32_N_down_32",
+    "merged_stage_count": 17
+  },
+  "method": {
+    "quantity": "<q|(P_delta^2)^dagger O P_delta^2-(E_2delta)^dagger O E_2delta|q>",
+    "reason_direct_cumulative_is_required": "D1_is_a_scalar_expectation_certificate_and_is_not_an_operator_norm_telescoping_addend",
+    "exactly_merged_through_degree": 5,
+    "first_uncontrolled_remainder_degree": 6,
+    "required_observables": ["staggered_magnetization", "double_occupancy"]
+  },
+  "two_step_cumulative_allocation": "1/200000",
+  "expected_exact_values": {
+    "staggered_magnetization": {
+      "D3_Neel_expectation": "0/1",
+      "D3_L1": "1703/12",
+      "D4_Neel_expectation": "230/3",
+      "D4_L1": "32353/12",
+      "D5_Neel_expectation": "0/1",
+      "D5_L1": "33969203/960",
+      "D5_defect_sha256": "d3b1e7c5160c40b7be580d1a352aec61f17377ae117de391bb8721cf56e38fd1"
+    },
+    "double_occupancy": {
+      "D3_Neel_expectation": "0/1",
+      "D3_L1": "423/8",
+      "D4_Neel_expectation": "-115/3",
+      "D4_L1": "8341/6",
+      "D5_Neel_expectation": "0/1",
+      "D5_L1": "12128913/640",
+      "D5_defect_sha256": "76ff780c1d6d050302070eca9126aaad915389c90b7d9e17e3c148f6ad2dd333"
+    }
+  },
+  "degree_six_requirements": {
+    "weak_composition_count": 74613,
+    "full_prefix_count": 100947
+  },
+  "resource_limits": {
+    "max_pair_products_per_observable": 650000000,
+    "max_expansion_terms": 800000,
+    "max_degree_six_weak_compositions": 4096,
+    "max_degree_six_prefixes": 4096,
+    "max_source_bytes": 1048576
+  },
+  "source_pins": [
+    {"path":"hubbard_strang_observable_taylor_step_checker.py","sha256":"c0cf77034d97f713c47ae666f015729d4595f445df5b58a36b61adb6274b98b5"},
+    {"path":"fh_l8_state_specific_defect_d1_checker.py","sha256":"3fa6d195398576a7e92356d83bb708e97332beacff6f5f587fba06eabae93766"},
+    {"path":"fh_l8_state_specific_defect_d1_contract.json","sha256":"a1a8eb8298ed2f5453d0d4fbeeb554393e9d845ff792402fa4265fb5cf6c1ff2"},
+    {"path":"fh_l8_state_specific_defect_d1_result.json","sha256":"7dc35d8fd87c85465c85d3ab13b85037bb36be7f0e2257e52982800bf3155a3f"}
+  ],
+  "terminal_branch": "DEGREE6_REMAINDER_EXCEEDS_PREFIX_AND_PATH_CAPS",
+  "next_branch": "DEGREE6_SCALAR_REMAINDER_STREAMING_OR_MEET_IN_THE_MIDDLE",
+  "forbidden_claims": ["two_step_cumulative_error_bounded", "full_R100_error_bounded", "physical_reference_qualified", "ready_gate_eligible"]
+}

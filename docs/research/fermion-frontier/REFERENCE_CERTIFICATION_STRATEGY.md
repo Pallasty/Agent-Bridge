@@ -1291,6 +1291,20 @@ weak compositions，并以 ideal `ad_H^5/5!` 与 product path Pauli-L1 控制积
 该 authority 只覆盖初始态第一步，不能乘 100；D2 必须另行托管 evolved-state identity、
 第二步 scalar defect 与新增资源增长。
 
+### D2：两步 direct scalar 的 degree-6 remainder 边界（2026-07-22）
+
+D1 是 fixed-state expectation 证书，不是 operator-norm telescoping addend；因此 D2 没有把它
+乘二，而是直接构造 17-stage `P_delta^2` 与 `E_2delta` 的标量差。exact merge 到 D5 后，
+两项 observable 的 D3/D5 Néel coefficients 都为零；D4 分别为 `230/3` 与 `-115/3`。
+
+首个未控项严格定位为 degree-6 scalar Taylor remainder。17 stages 需要 74,613 条 weak
+compositions 与 100,947 个 full prefixes，均超过冻结的 4,096 caps。D3--D5 阶段本身仍在
+650M pair / 800k-term caps 内：磁化量为 152,605,696 / 272,832，双占据为
+575,512,064 / 731,693。terminal branch 因而是
+`DEGREE6_REMAINDER_EXCEEDS_PREFIX_AND_PATH_CAPS`，不是数值误差超预算或 D5 merge 失败。
+下一路线必须另发 streaming/meet-in-the-middle scalar remainder 契约；本门不认证两步累计
+error、full R100、physical reference 或 READY。
+
 更一般的 bounded-error quantum simulation 已能把 learned Hamiltonian/Lindbladian 的
 实验不确定度传播到 observable interval，但目前示范对象是 long-range Ising，不是匹配
 的 Hubbard workload，见 [Kraft et al.](https://arxiv.org/abs/2511.23392)。这条路线可作为
