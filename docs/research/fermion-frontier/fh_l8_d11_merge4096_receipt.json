@@ -1,0 +1,9 @@
+{
+  "fourth_action_executed": false,
+  "merged_records": 424682,
+  "merged_sha256": "8b43b76f1e7a45f12e220905bcba41dc7cfef9fce66f0257cb3c9dff9623fa5f",
+  "next_gate": "D11_NAIVE_EQUIVALENCE_CHECK",
+  "payload_bytes": 13589824,
+  "status": "VERIFIED_D11_BOUNDED_SORT_MERGE_NO_FULL_ACTION",
+  "verified": true
+}
