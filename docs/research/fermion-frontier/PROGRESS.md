@@ -1,5 +1,18 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 depth-3→depth-4 quotient-H design gate
+
+- Froze globally unique contract `FH-L8-QUOTIENT-H-D3-TO-D4-DESIGN-GATE-V1` after a checker-only
+  commit and before any contract, result, runner or implementation existed.
+- Bound D5B signed quotient semantics and D6 support-only byte-table evidence as distinct,
+  non-additive inputs on shared D4 data.
+- Separated `47,947,275` raw candidate actions, `383,578,200` candidate group images and
+  `1,704,792` source-canonicality images; total planned group images are `385,282,992`.
+- Designed 53 source shards, 32-byte fixed records, deterministic 256-way partitioning and bounded
+  external merge under a future 1 GiB / zero-swap envelope. No runtime/RSS feasibility is certified.
+- The next bounded unit is a separate packed depth-3 quotient checkpoint protocol. No fourth Krylov
+  Hamiltonian action, target vector, remainder, R100, reference or READY authority was created.
+
 ## 2026-07-22 — FH-L8 D5/D6 descendant scope reconciliation R2
 
 - Bound the historical byte-table D6 outcome to the signed-prefix D5A lane by exact source hashes;

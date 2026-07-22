@@ -33,7 +33,12 @@ execute quotient H. Current selection and authority are in
 `FH_L8_D5_D6_DESCENDANT_RECONCILIATION_ZH.md`; the next quotient-H protocol must use a new globally
 unique ID and remains design-only.
 
-Status date: 2026-07-14
+`FH-L8-QUOTIENT-H-D3-TO-D4-DESIGN-GATE-V1` now freezes that design boundary. It separates
+47,947,275 raw row-term visits from 385,282,992 total group images and specifies a bounded
+external-merge data plane, but executes no scientific action. The next unit must first certify a
+packed depth-3 quotient checkpoint; see `FH_L8_DEPTH3_TO_DEPTH4_QUOTIENT_H_DESIGN_GATE_ZH.md`.
+
+Status date: 2026-07-22
 
 Scope: physical fermions, not the historical Fermion Memory service.
 
