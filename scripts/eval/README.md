@@ -110,6 +110,16 @@ not authorize a schema, producer, real-session capture, retrieval consumer,
 runtime execution, or deployment. See
 `docs/design/FREE_RECALL_STRATEGY_R3_PROSPECTIVE_EPISODE_SIDECAR_RESULT_2026_07_21.md`.
 
+`free_recall_strategy_r4_observation_contract.py` is the design-only successor.
+It validates that a proposed default-off integration remains separate from
+`MemoryRecord`, memory content, retrieval indexes and consumers, MCP, real
+capture, and runtime authority. Its directed mutations exercise every authority
+flag, forbidden field class, ordering/abstention invariant, and kill-switch
+claim. A pass opens only an R5 source-plan review, with `item_ref` derivation
+and custody still unresolved; it creates no schema or executable integration.
+See
+`docs/design/FREE_RECALL_STRATEGY_R4_OBSERVATION_ONLY_INTEGRATION_RESULT_2026_07_21.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
