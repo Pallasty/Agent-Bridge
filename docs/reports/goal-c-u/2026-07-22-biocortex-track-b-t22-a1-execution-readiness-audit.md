@@ -44,9 +44,11 @@ real collection challenge is generated.
    before reading the private admission receipt, reserves it atomically before
    runner dispatch, requires bound terminal evidence for PASS, and makes
    failure terminal with no retry. The network runner itself remains absent.
-5. **No executable evidence builder.** Event and terminal schemas reject unsafe
-   synthetic packets, but there is no implementation that creates, verifies,
-   secret-scans, and terminalizes the real signed three-domain chain.
+5. **No persistent evidence writer or runner integration.** The signed-event
+   and terminal-evidence compiler now constructs, independently replays and
+   secret-scans the complete in-memory chain. It deliberately writes no files;
+   the source-bound runner still must durably collect the signed inputs and
+   atomically publish the compiler-verified event set and terminal evidence.
 
 ## TLS applicability correction
 
@@ -121,13 +123,13 @@ runner-side source component. It purely compiles each verified private endpoint
 and readiness position into exact etcd argv, mTLS OpenBao HCL, owner-only paths,
 cleared process environment, deterministic workload values and a role-specific
 command allowlist. Three synthetic plans pass and 42 unsafe input/plan mutations
-fail. It starts nothing and does not close the still-missing executor, transport
-or evidence-builder findings.
+fail. It starts nothing and does not close the still-missing live process
+backend, socket adapter or persistent evidence-writer findings.
 
 `biocortex_ab_track_b_t22_a1_domain_executor_core_v1.py` closes the fixed-command
 dispatch/state/evidence-core portion, but not the live backend. Three synthetic
 domain lifecycles produce 23 independently replay-verified private command
-receipts; 19 mutations fail, including dispatch-after-failure, timeout, spend,
+receipts; 20 mutations fail, including dispatch-after-failure, timeout, spend,
 observation, transition, chain and timing attacks. Any failure after backend
 dispatch becomes an absorbing terminal state. Non-synthetic backends remain
 hard-disabled, so no process, listener, credential or network action is enabled.
@@ -142,3 +144,15 @@ the exact plan-selected CA and leaf certificate files, require owner-only files,
 verify the exact peer certificate digest after TLS authentication, and keep
 transport activation false. The KAT opens no socket, starts no listener and
 contacts no host.
+
+`biocortex_ab_track_b_t22_a1_evidence_compiler_v1.py` now closes the in-memory
+signed-event and terminal-compilation portion of item 5. It replays all 23
+fixed-command receipts, requires each domain terminal to bind its preceding
+receipt-chain head, verifies 21 source-domain Ed25519 SSHSIG payloads with the
+execution-bound `ssh-keygen`, constructs and independently replays the 21-event
+coordinator chain, hashes four bounded logs per domain, binds the exact in-memory
+OpenBao secret frame, scans for exact secret leakage, zeroizes the transferred
+secret buffer, and emits one schema-valid T22-A1-H value in memory. Fifteen
+directed mutations fail. Persistent writing, real input reads and activation
+remain absent, and the KAT performs no network, listener, workload or fault
+action.

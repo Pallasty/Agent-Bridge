@@ -602,8 +602,8 @@ The private workload-plan KAT compiles all three roles and rejects 42 directed
 mutations over topology, endpoints, paths, tool hashes, credential certificate
 and private-key SPKI bindings, runtime limits, coordinator scope and exact
 commands. The executor-core KAT then completes three synthetic lifecycles with
-23 hash-chained receipts and rejects 19 state, timing, spend, observation and
-post-dispatch mutations. Both activation gates remain false and neither KAT
+23 hash-chained receipts and rejects 20 state, timing, spend, observation,
+terminal-chain-head and post-dispatch mutations. Both activation gates remain false and neither KAT
 reads a credential, starts a process, opens a listener or injects a fault.
 
 The mTLS transport-core KAT performs one mutual TLS handshake using only
@@ -614,3 +614,13 @@ It binds exact plan-selected CA/leaf file hashes and requires explicit
 post-handshake peer-certificate matching. The live socket adapter is still
 absent, transport activation remains false, and the KAT opens zero sockets or
 listeners and contacts zero hosts.
+
+The evidence-compiler KAT replays all 23 fixed-command receipts, verifies 21
+source-domain Ed25519 SSHSIG payloads under the purpose-separated event
+namespace, constructs and independently replays the 21-event coordinator chain,
+hashes four bounded logs for each domain, binds the exact OpenBao secret frame,
+detects exact secret leakage and zeroizes the transferred secret bytearray. It
+returns one schema-valid synthetic T22-A1-H value in memory and rejects 15
+directed chain, signature, receipt, log, secret, timing and canonical-form mutations.
+Persistent output creation and real-input activation remain absent; the KAT
+uses no network, listener, service, fault or provider operation.

@@ -86,7 +86,7 @@ rollback prevention.
 - a completion audit proving that real collection must wait for the
   source-bound runner/executor, host-local runtime-readiness packets,
   credential-placement proof, single-use execution consumer and evidence
-  builder. The decision packet now fails closed on each missing input.
+  writer. The decision packet now fails closed on each missing input.
 - a single-use execution consumer that independently rechecks the clean source
   commit, owner signature and admission receipt, reserves before runner
   dispatch, requires exact validated terminal evidence for PASS, and records
@@ -109,16 +109,23 @@ rollback prevention.
   command allowlist, but deliberately does not start a process or claim that
   the cross-host executor/transport/evidence builder exists.
 - a fixed-command executor core with three synthetic lifecycles, 23 chained
-  command receipts and 19 negative paths. It revalidates the exact plan,
+  command receipts and 20 negative paths. It revalidates the exact plan,
   enforces role/state/time/spend boundaries, independently replays each receipt
-  chain and makes every post-dispatch failure terminal. Its live backend and
-  activation constant are intentionally absent/false.
+  chain, binds each domain terminal to its preceding receipt-chain head, and
+  makes every post-dispatch failure terminal. Its live backend and activation
+  constant are intentionally absent/false.
 - a bounded mTLS framing and context core with one real in-memory mutual-TLS
   handshake, one signed-message-frame round trip, one bounded ephemeral secret-
   frame round trip, and 27 negative paths. It binds exact plan-selected
   certificate files, owner-only file modes, hostname and peer-certificate
   identity while keeping live socket adaptation and transport activation
   absent/false; no socket, listener or external host is used.
+- an in-memory evidence compiler that replays 23 command receipts, verifies 21
+  source-domain Ed25519 SSHSIG payloads, independently reconstructs and replays
+  the 21-event coordinator hash chain, binds and scans four bounded logs per
+  domain plus the exact OpenBao secret frame, zeroizes the transferred secret,
+  and returns one schema-valid T22-A1-H value. Fifteen negative paths fail;
+  persistent evidence writing and activation remain absent/false.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only

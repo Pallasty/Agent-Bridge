@@ -164,7 +164,7 @@ class Backend(Protocol):
     def restart_owned_service_set(self, plan: dict) -> dict: ...
     def verify_target_rejoin(self, plan: dict) -> dict: ...
     def cleanup_owned_processes(self, plan: dict) -> dict: ...
-    def terminal_status(self, plan: dict) -> dict: ...
+    def terminal_status(self, plan: dict, previous_receipt_sha256: str) -> dict: ...
 
 
 def validate_effects(value: object) -> dict:
@@ -312,6 +312,11 @@ def validate_receipt(
     require(value["state_after"] == expected_after, "E_DOMAIN_EXECUTOR_RECEIPT_STATE")
     require(value["result"] == "SUCCEEDED" and value["failure_code"] is None, "E_DOMAIN_EXECUTOR_RECEIPT_RESULT")
     validate_observation(command, value["observation"], plan, prior_observations)
+    if command == "TERMINAL_STATUS":
+        require(
+            value["observation"]["domain_evidence_head_sha256"] == value["previous_receipt_sha256"],
+            "E_DOMAIN_EXECUTOR_TERMINAL_CHAIN_HEAD",
+        )
     validate_backend_result(command, {"observation": value["observation"], "effects": value["effects"]}, plan, prior_observations)
     expected_spend = prior_spend_usd_cents + value["effects"]["spend_usd_cents"]
     require(value["cumulative_spend_usd_cents"] == expected_spend, "E_DOMAIN_EXECUTOR_RECEIPT_SPEND")
@@ -405,7 +410,7 @@ class FixedCommandExecutor:
         if command == "CLEANUP_OWNED_PROCESSES":
             return self.backend.cleanup_owned_processes(self.plan)
         if command == "TERMINAL_STATUS":
-            return self.backend.terminal_status(self.plan)
+            return self.backend.terminal_status(self.plan, self.previous_receipt_sha256)
         raise SafeFailure("E_DOMAIN_EXECUTOR_COMMAND")
 
     def execute(self, command: str, now: datetime) -> dict:

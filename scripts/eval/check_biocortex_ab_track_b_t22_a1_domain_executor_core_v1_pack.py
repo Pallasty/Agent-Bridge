@@ -245,11 +245,11 @@ class SyntheticBackend:
             "secret_value_scan_passed": True, "exact_secret_match_count": 0,
         })
 
-    def terminal_status(self, plan: dict) -> dict:
+    def terminal_status(self, plan: dict, previous_receipt_sha256: str) -> dict:
         return self.result("TERMINAL_STATUS", {
             "lifecycle_succeeded": True,
             "command_receipt_count": len(plan["command_policy"]["allowed_commands"]),
-            "domain_evidence_head_sha256": sha(f"evidence-head:{self.domain_id}"),
+            "domain_evidence_head_sha256": previous_receipt_sha256,
         })
 
 
@@ -419,6 +419,15 @@ wrong_time[2].pop("content_sha256")
 wrong_time[2]["content_sha256"] = module.receipt_digest(wrong_time[2])
 expect_failure(lambda: module.validate_receipt_chain(wrong_time, PLANS[0]), "E_DOMAIN_EXECUTOR_RECEIPT_TIME_ORDER")
 
+wrong_terminal_head = copy.deepcopy(executors[0].receipts)
+wrong_terminal_head[-1]["observation"]["domain_evidence_head_sha256"] = sha("wrong-terminal-head")
+wrong_terminal_head[-1].pop("content_sha256")
+wrong_terminal_head[-1]["content_sha256"] = module.receipt_digest(wrong_terminal_head[-1])
+expect_failure(
+    lambda: module.validate_receipt_chain(wrong_terminal_head, PLANS[0]),
+    "E_DOMAIN_EXECUTOR_TERMINAL_CHAIN_HEAD",
+)
+
 status = module.status()
 assert status["status"] == "OFFLINE_FIXED_COMMAND_EXECUTOR_CORE_READY_LIVE_BACKEND_AND_ACTIVATION_ABSENT"
 assert status["executor_activation_ready"] is False
@@ -428,7 +437,7 @@ assert status["listeners_started"] == status["processes_started"] == status["ser
 assert status["faults_injected"] == status["spend_usd_cents"] == 0
 assert status["execution_authorized"] is False and status["production_admissible"] is False
 
-negative_count = 19
+negative_count = 20
 print("t22_a1_domain_executor_core_check\tpass")
 print("synthetic_valid_domain_lifecycle_count\t3")
 print(f"synthetic_valid_command_receipt_count\t{receipt_count}")
