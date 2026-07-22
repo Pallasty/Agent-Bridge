@@ -45098,6 +45098,12 @@ pub(crate) fn build_registry_with_policy_surface(
         &mut reg,
         policy,
         Tier::Niche,
+        Arc::new(A2uiPreviewTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
         Arc::new(PresentVoiceTool::new(hub.clone())),
     );
     // Host-confirm path B (Linux Computer Use): present an Approve/Reject card for a
