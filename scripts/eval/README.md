@@ -81,6 +81,12 @@ misbinding, cross-scope expansion, or a source write stops the run. Its result
 is aggregate-only and grants no runtime authority. See
 `docs/design/FREE_RECALL_STRATEGY_R1_FROZEN_SNAPSHOT_PREREGISTRATION_2026_07_21.md`.
 
+The first real replay stopped before scoring because Hybrid pages were not
+exactly stable under the forward/reverse order falsifier, even with one fresh
+snapshot clone per observation. The aggregate-only blocked result and the
+requirements for a separate frozen-clock adapter are recorded in
+`docs/design/FREE_RECALL_STRATEGY_R1_FROZEN_SNAPSHOT_RESULT_2026_07_21.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
