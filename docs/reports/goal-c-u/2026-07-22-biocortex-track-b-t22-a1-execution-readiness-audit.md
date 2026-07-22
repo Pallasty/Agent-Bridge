@@ -22,10 +22,11 @@ real collection challenge is generated.
 
 ## Confirmed gaps
 
-1. **No cross-host runner or command executor.** The agent-session core checks
-   signed transcript transitions but deliberately opens no socket and executes
-   no command. The final execution admission receipt consequently has no
-   consumer capable of producing T22-A1-H evidence.
+1. **No live cross-host runner or process backend.** The fixed-command executor
+   and mTLS framing/context cores are now frozen, but their activation constants
+   remain false. No socket adapter, owned-process backend, or end-to-end runner
+   can yet consume the final execution admission receipt and produce T22-A1-H
+   evidence.
 2. **Three-host runtime-readiness contract and signed-set verifier — closed
    after this audit.** The private packet binds exact executable, local-root,
    port, credential-placement and operator/coordinator identities for each role.
@@ -119,7 +120,7 @@ owner-authorized step.
 runner-side source component. It purely compiles each verified private endpoint
 and readiness position into exact etcd argv, mTLS OpenBao HCL, owner-only paths,
 cleared process environment, deterministic workload values and a role-specific
-command allowlist. Three synthetic plans pass and 40 unsafe input/plan mutations
+command allowlist. Three synthetic plans pass and 42 unsafe input/plan mutations
 fail. It starts nothing and does not close the still-missing executor, transport
 or evidence-builder findings.
 
@@ -130,3 +131,14 @@ receipts; 19 mutations fail, including dispatch-after-failure, timeout, spend,
 observation, transition, chain and timing attacks. Any failure after backend
 dispatch becomes an absorbing terminal state. Non-synthetic backends remain
 hard-disabled, so no process, listener, credential or network action is enabled.
+
+`biocortex_ab_track_b_t22_a1_mtls_transport_v1.py` closes the bounded wire-frame
+and TLS-context portion, but not the live socket adapter. Its KAT performs one
+real TLS 1.2/1.3-capable mutual-authentication handshake entirely through
+`ssl.MemoryBIO`, round-trips one signed-message envelope and one bounded
+ephemeral OpenBao unseal-secret frame, and rejects 27 framing, route, digest,
+certificate, hostname, permission and activation mutations. The contexts bind
+the exact plan-selected CA and leaf certificate files, require owner-only files,
+verify the exact peer certificate digest after TLS authentication, and keep
+transport activation false. The KAT opens no socket, starts no listener and
+contacts no host.

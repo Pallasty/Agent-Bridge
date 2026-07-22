@@ -96,6 +96,19 @@ def openbao_config(
     certificate = private_absolute_path(credentials["domain_identity"]["certificate_path"])
     private_key = private_absolute_path(credentials["domain_identity"]["private_key_path"])
     ca_certificate = private_absolute_path(credentials["ca_certificate_path"])
+    require(
+        is_sha256(credentials.get("ca_certificate_sha256"))
+        and is_sha256(credentials["domain_identity"].get("certificate_sha256"))
+        and is_sha256(credentials["domain_identity"].get("spki_sha256")),
+        "E_WORKLOAD_PLAN_CREDENTIAL_DIGEST",
+    )
+    require(
+        credentials["domain_identity"].get("private_key_spki_sha256")
+        == credentials["domain_identity"]["spki_sha256"]
+        and credentials["domain_identity"].get("certificate_private_key_match_verified") is True
+        and credentials["domain_identity"].get("private_key_file_mode") == "0600",
+        "E_WORKLOAD_PLAN_CREDENTIAL_KEY_BINDING",
+    )
     api = https(endpoint["overlay_ip"], endpoint["openbao_api_port"])
     cluster = https(endpoint["overlay_ip"], endpoint["openbao_cluster_port"])
     lines = [
@@ -229,9 +242,23 @@ def _compile(execution: dict, endpoint_manifest: dict, readiness: dict) -> dict:
         coordinator_paths = {
             "certificate_path": private_absolute_path(coordinator["client_identity"]["certificate_path"]),
             "private_key_path": private_absolute_path(coordinator["client_identity"]["private_key_path"]),
+            "certificate_sha256": coordinator["client_identity"]["certificate_sha256"],
+            "spki_sha256": coordinator["client_identity"]["spki_sha256"],
+            "private_key_spki_sha256": coordinator["client_identity"]["private_key_spki_sha256"],
             "runtime_public_key_path": private_absolute_path(coordinator["runtime_public_key_path"]),
             "runtime_private_key_path": private_absolute_path(coordinator["runtime_private_key_path"]),
         }
+        require(
+            is_sha256(coordinator_paths["certificate_sha256"])
+            and is_sha256(coordinator_paths["spki_sha256"]),
+            "E_WORKLOAD_PLAN_COORDINATOR_CREDENTIAL_DIGEST",
+        )
+        require(
+            coordinator_paths["private_key_spki_sha256"] == coordinator_paths["spki_sha256"]
+            and coordinator["client_identity"].get("certificate_private_key_match_verified") is True
+            and coordinator["client_identity"].get("private_key_file_mode") == "0600",
+            "E_WORKLOAD_PLAN_COORDINATOR_KEY_BINDING",
+        )
     else:
         require(coordinator is None, "E_WORKLOAD_PLAN_COORDINATOR_SCOPE")
         coordinator_paths = None
@@ -291,8 +318,12 @@ def _compile(execution: dict, endpoint_manifest: dict, readiness: dict) -> dict:
         },
         "credentials": {
             "ca_certificate_path": ca_certificate,
+            "ca_certificate_sha256": credentials["ca_certificate_sha256"],
             "domain_certificate_path": certificate,
             "domain_private_key_path": private_key,
+            "domain_certificate_sha256": credentials["domain_identity"]["certificate_sha256"],
+            "domain_spki_sha256": credentials["domain_identity"]["spki_sha256"],
+            "domain_private_key_spki_sha256": credentials["domain_identity"]["private_key_spki_sha256"],
             "domain_operator_public_key_path": private_absolute_path(credentials["domain_operator_public_key_path"]),
             "domain_operator_private_key_path": private_absolute_path(credentials["domain_operator_private_key_path"]),
             "coordinator_material": coordinator_paths,

@@ -597,3 +597,20 @@ values and signing keys are synthetic and ephemeral. It invokes the injected
 identity reader twice (one success and one deliberate failure), reads zero real
 host identifiers, contacts no host, starts no service, and creates no real
 attestation.
+
+The private workload-plan KAT compiles all three roles and rejects 42 directed
+mutations over topology, endpoints, paths, tool hashes, credential certificate
+and private-key SPKI bindings, runtime limits, coordinator scope and exact
+commands. The executor-core KAT then completes three synthetic lifecycles with
+23 hash-chained receipts and rejects 19 state, timing, spend, observation and
+post-dispatch mutations. Both activation gates remain false and neither KAT
+reads a credential, starts a process, opens a listener or injects a fault.
+
+The mTLS transport-core KAT performs one mutual TLS handshake using only
+`ssl.MemoryBIO`, round-trips one bounded signed-message frame and one bounded
+ephemeral OpenBao unseal-secret frame, and rejects 27 route, framing, digest,
+certificate, peer-identity, hostname, file-permission and activation mutations.
+It binds exact plan-selected CA/leaf file hashes and requires explicit
+post-handshake peer-certificate matching. The live socket adapter is still
+absent, transport activation remains false, and the KAT opens zero sockets or
+listeners and contacts zero hosts.

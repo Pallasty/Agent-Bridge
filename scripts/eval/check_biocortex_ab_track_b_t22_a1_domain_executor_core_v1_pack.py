@@ -62,7 +62,15 @@ EXECUTION = {
 
 
 def identity(root: Path, name: str) -> dict:
-    return {"certificate_path": str(root / f"{name}.crt"), "private_key_path": str(root / f"{name}.key")}
+    return {
+        "certificate_path": str(root / f"{name}.crt"),
+        "private_key_path": str(root / f"{name}.key"),
+        "certificate_sha256": sha(f"certificate:{root}:{name}"),
+        "spki_sha256": sha(f"spki:{root}:{name}"),
+        "private_key_spki_sha256": sha(f"spki:{root}:{name}"),
+        "private_key_file_mode": "0600",
+        "certificate_private_key_match_verified": True,
+    }
 
 
 def readiness(number: int) -> dict:
@@ -100,6 +108,7 @@ def readiness(number: int) -> dict:
             "mode": "OWNER_MEDIATED_OUT_OF_BAND_EXACT_HASH_PLACEMENT",
             "all_paths_local_to_attested_host": True,
             "ca_certificate_path": str(credentials / "ca.crt"),
+            "ca_certificate_sha256": sha(f"ca:{number}"),
             "domain_identity": identity(credentials, "domain"),
             "domain_operator_public_key_path": str(credentials / "domain-operator.pub"),
             "domain_operator_private_key_path": str(credentials / "domain-operator"),

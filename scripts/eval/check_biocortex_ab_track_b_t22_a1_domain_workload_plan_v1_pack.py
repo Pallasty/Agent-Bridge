@@ -73,6 +73,11 @@ def placed_identity(root: Path, prefix: str) -> dict:
     return {
         "certificate_path": str(root / f"{prefix}.crt"),
         "private_key_path": str(root / f"{prefix}.key"),
+        "certificate_sha256": sha(f"certificate:{root}:{prefix}"),
+        "spki_sha256": sha(f"spki:{root}:{prefix}"),
+        "private_key_spki_sha256": sha(f"spki:{root}:{prefix}"),
+        "private_key_file_mode": "0600",
+        "certificate_private_key_match_verified": True,
     }
 
 
@@ -122,6 +127,7 @@ def readiness(number: int) -> dict:
             "mode": "OWNER_MEDIATED_OUT_OF_BAND_EXACT_HASH_PLACEMENT",
             "all_paths_local_to_attested_host": True,
             "ca_certificate_path": str(credentials / "ca.crt"),
+            "ca_certificate_sha256": sha(f"ca:{number}"),
             "domain_identity": placed_identity(credentials, "domain"),
             "domain_operator_public_key_path": str(credentials / "domain-operator.pub"),
             "domain_operator_private_key_path": str(credentials / "domain-operator"),
@@ -192,6 +198,8 @@ input_mutations = (
     ("readiness", lambda x: x["local_paths"].update(etcd_data_dir="/private/other/etcd")),
     ("readiness", lambda x: x["credential_placement"].update(mode="CENTRAL_ONLY")),
     ("readiness", lambda x: x["credential_placement"].update(all_paths_local_to_attested_host=False)),
+    ("readiness", lambda x: x["credential_placement"]["domain_identity"].update(certificate_sha256="0" * 64)),
+    ("readiness", lambda x: x["credential_placement"]["domain_identity"].update(private_key_spki_sha256=sha("other-private-key"))),
     ("readiness", lambda x: x["credential_placement"].update(coordinator_material=None)),
 )
 for target, mutation in input_mutations:
