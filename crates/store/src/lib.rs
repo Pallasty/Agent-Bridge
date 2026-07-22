@@ -1861,6 +1861,18 @@ pub struct CodebaseIndexStats {
     pub root_path: String,
 }
 
+/// Read-only exact-root inventory for an existing codebase index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexStatus {
+    pub root_path: String,
+    pub symbols: u64,
+    pub imports: u64,
+    pub calls: u64,
+    pub indexed_files: u64,
+    pub oldest_indexed_at: Option<i64>,
+    pub newest_indexed_at: Option<i64>,
+}
+
 /// One `use` / `import` statement extracted from a source file. First slice
 /// of the cross-language reference graph (Phase 2 #3 second part) — the
 /// goal is to let `codebase_search` resolve "who imports X" and eventually
@@ -4530,6 +4542,16 @@ pub trait StateStore: Send + Sync {
         let _ = (root_path, languages);
         Err(ab_core::Error::Backend(
             "codebase_index not implemented".into(),
+        ))
+    }
+
+    /// Return exact-root index inventory without walking source or mutating
+    /// index rows. Consumers must treat all row counts being zero as a missing
+    /// usable index, not as proof that the repository contains no code.
+    async fn codebase_index_status(&self, root_path: &str) -> Result<CodebaseIndexStatus> {
+        let _ = root_path;
+        Err(ab_core::Error::Backend(
+            "codebase_index_status not implemented".into(),
         ))
     }
 

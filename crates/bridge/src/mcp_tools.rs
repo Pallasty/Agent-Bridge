@@ -38321,6 +38321,128 @@ impl McpTool for CodebaseCallersTool {
 pub struct CodebaseImpactTool {
     hub: Hub,
 }
+
+pub struct CodeReviewContextPreviewTool {
+    hub: Hub,
+}
+
+const CODE_REVIEW_CONTEXT_DESCRIPTION: &str = "Read-only bounded Git-diff review packet from the AB graph: changed symbols, capped callers, and heuristic test callers. Never indexes, writes Git, or persists inferred edges.";
+const CODE_REVIEW_CONTEXT_CODEX_NOTE: &str =
+    "Use after codebase_index; prefer native search for spot checks.";
+
+impl CodeReviewContextPreviewTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for CodeReviewContextPreviewTool {
+    fn name(&self) -> &'static str {
+        "code_review_context_preview"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: mcp_schema_description(
+                CODE_REVIEW_CONTEXT_DESCRIPTION,
+                CODE_REVIEW_CONTEXT_CODEX_NOTE,
+            ),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Git repository directory (default: process cwd)."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["working_tree"],
+                        "default": "working_tree"
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 12
+                    },
+                    "max_symbols": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 20
+                    },
+                    "max_impact_nodes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 60
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 3,
+                        "default": 2
+                    },
+                    "per_hop_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 20
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let cwd = match resolve_cwd(args.get("cwd").and_then(Value::as_str)) {
+            Ok(cwd) => cwd,
+            Err(error) => return Ok(ToolResult::error(error.to_string())),
+        };
+        let scope = args
+            .get("scope")
+            .and_then(Value::as_str)
+            .unwrap_or("working_tree")
+            .to_string();
+        let limits = crate::code_review_context::ReviewContextLimits {
+            max_files: args.get("max_files").and_then(Value::as_u64).unwrap_or(12) as usize,
+            max_symbols: args
+                .get("max_symbols")
+                .and_then(Value::as_u64)
+                .unwrap_or(20) as usize,
+            max_impact_nodes: args
+                .get("max_impact_nodes")
+                .and_then(Value::as_u64)
+                .unwrap_or(60) as usize,
+            max_depth: args.get("max_depth").and_then(Value::as_u64).unwrap_or(2) as u32,
+            per_hop_limit: args
+                .get("per_hop_limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(20) as u32,
+        }
+        .bounded();
+        let seed_limits = limits;
+        let seed = tokio::task::spawn_blocking(move || {
+            crate::code_review_context::collect_review_seed(&cwd, &scope, seed_limits)
+        })
+        .await
+        .map_err(|error| {
+            ab_core::Error::Backend(format!("code_review_context_preview task: {error}"))
+        })?;
+        let seed = match seed {
+            Ok(seed) => seed,
+            Err(error) => return Ok(ToolResult::error(error.to_string())),
+        };
+        let preview = crate::code_review_context::enrich_review_seed(store, seed, limits).await;
+        Ok(ToolResult::json_text(&preview))
+    }
+}
 impl CodebaseImpactTool {
     pub fn new(hub: Hub) -> Self {
         Self { hub }
@@ -43241,7 +43363,7 @@ pub(crate) fn build_registry_with_policy_surface(
         Arc::new(WorktreeCreateTool::new(hub.clone())),
     );
     // Indexed codebase graph queries overlap Codex native search surfaces and
-    // are kept behind the broader Standard profile for explicit diagnostics.
+    // remain Niche/default-off for explicit diagnostics.
     reg_if(
         &mut reg,
         policy,
@@ -43271,6 +43393,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(CodebaseImpactTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(CodeReviewContextPreviewTool::new(hub.clone())),
     );
 
     // Mobile Device Bridge: Android-first install/debug/control via ADB.

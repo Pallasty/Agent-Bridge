@@ -26,6 +26,7 @@ pub mod browser_lite;
 pub mod build_identity;
 pub mod c3_self_check;
 pub mod cloudflare_api;
+pub mod code_review_context;
 pub mod context_budget;
 /// Pure, shadow-only admission contract for typed context lanes.
 #[cfg_attr(not(test), allow(dead_code))]

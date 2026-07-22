@@ -6688,6 +6688,7 @@ fn tool_policy_codex_essential_excludes_cold_native_overlap_tools() {
         "codebase_calls",
         "codebase_callers",
         "codebase_impact",
+        "code_review_context_preview",
     ] {
         assert!(
             !codex.includes(Tier::Standard, tool_name),
@@ -6708,6 +6709,33 @@ fn tool_policy_codex_essential_excludes_cold_native_overlap_tools() {
             "{tool_name} schema should remain available in the all profile"
         );
     }
+}
+
+#[test]
+fn code_review_context_preview_schema_stays_bounded_and_default_off() {
+    let description = append_codex_native_hint(
+        CODE_REVIEW_CONTEXT_DESCRIPTION,
+        CODE_REVIEW_CONTEXT_CODEX_NOTE,
+        true,
+    );
+    assert!(
+        description.chars().count() <= 256,
+        "Codex description is {} chars",
+        description.chars().count()
+    );
+
+    let tool = CodeReviewContextPreviewTool::new(Hub::builder().build());
+    let schema = tool.schema();
+    assert_eq!(schema.name, "code_review_context_preview");
+    assert_eq!(
+        schema.input_schema["properties"]["scope"]["enum"],
+        json!(["working_tree"])
+    );
+    assert_eq!(schema.input_schema["properties"]["max_depth"]["maximum"], 3);
+    assert_eq!(
+        schema.input_schema["properties"]["max_impact_nodes"]["maximum"],
+        200
+    );
 }
 
 #[test]

@@ -99,13 +99,13 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 
 use crate::{
     memory_scope_visible_in_context, AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert,
-    CoactivationEdge, CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy,
-    DecayUnusedStats, EmbeddingProfile, ForumExportResult, ForumImportReport, ForumPostExport,
-    ForumPostOutcome, ForumPostRecord, ForumSearchPostRecord, ForumSearchRecord, ForumThreadExport,
-    ForumThreadRecord, FusionShadowSample, GraphTopology, HebbianCluster, IdentityWindow,
-    ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow, McpToolCallStats,
-    McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
-    MemoryEvidenceProfile, MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot,
+    CoactivationEdge, CoactivationStats, CodebaseIndexStats, CodebaseIndexStatus, CodebaseSymbol,
+    CompactPolicy, DecayUnusedStats, EmbeddingProfile, ForumExportResult, ForumImportReport,
+    ForumPostExport, ForumPostOutcome, ForumPostRecord, ForumSearchPostRecord, ForumSearchRecord,
+    ForumThreadExport, ForumThreadRecord, FusionShadowSample, GraphTopology, HebbianCluster,
+    IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow,
+    McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge,
+    MemoryEdgeExport, MemoryEvidenceProfile, MemoryEvidenceRecordMarker, MemoryEvidenceSnapshot,
     MemoryEvidenceSnapshotLimits, MemoryExportFilter, MemoryExportResult, MemoryListSort,
     MemoryLiveMeta, MemoryPeekResult, MemoryQueryRecord, MemoryQueryStats, MemoryRecord,
     MemorySearchHit, MemoryStats, MemoryTombstoneMarker, MisrankRow, ModeStats, NotificationRecord,
@@ -9152,6 +9152,45 @@ impl StateStore for SqliteStore {
             duration_ms: start.elapsed().as_millis() as u64,
             root_path: root_for_return,
         })
+    }
+
+    async fn codebase_index_status(&self, root_path: &str) -> Result<CodebaseIndexStatus> {
+        let root = root_path.to_string();
+        let root_for_result = root.clone();
+        self.conn
+            .call(move |connection| -> RusqliteResult<CodebaseIndexStatus> {
+                connection.query_row(
+                    "WITH indexed_rows(file_path, indexed_at) AS (
+                        SELECT file_path, indexed_at FROM codebase_symbols WHERE root_path = ?1
+                        UNION ALL
+                        SELECT file_path, indexed_at FROM codebase_imports WHERE root_path = ?1
+                        UNION ALL
+                        SELECT file_path, indexed_at FROM codebase_calls WHERE root_path = ?1
+                     )
+                     SELECT
+                        (SELECT COUNT(*) FROM codebase_symbols WHERE root_path = ?1),
+                        COUNT(DISTINCT file_path),
+                        MIN(indexed_at),
+                        MAX(indexed_at),
+                        (SELECT COUNT(*) FROM codebase_imports WHERE root_path = ?1),
+                        (SELECT COUNT(*) FROM codebase_calls WHERE root_path = ?1)
+                     FROM indexed_rows",
+                    params![root],
+                    |row| {
+                        Ok(CodebaseIndexStatus {
+                            root_path: root_for_result,
+                            symbols: row.get::<_, i64>(0)? as u64,
+                            indexed_files: row.get::<_, i64>(1)? as u64,
+                            oldest_indexed_at: row.get(2)?,
+                            newest_indexed_at: row.get(3)?,
+                            imports: row.get::<_, i64>(4)? as u64,
+                            calls: row.get::<_, i64>(5)? as u64,
+                        })
+                    },
+                )
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("codebase_index_status: {error}")))
     }
 
     async fn codebase_search(
@@ -23331,6 +23370,29 @@ mod tests {
             .expect("imports query");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].target, "std::collections::BTreeSet");
+
+        let status = store
+            .codebase_index_status(temp_dir.to_str().unwrap())
+            .await
+            .expect("index status");
+        assert_eq!(status.root_path, temp_dir.to_str().unwrap());
+        assert_eq!(status.symbols, stats.symbols as u64);
+        assert_eq!(status.imports, stats.imports as u64);
+        assert_eq!(status.calls, stats.calls as u64);
+        assert_eq!(status.indexed_files, stats.indexed_files as u64);
+        assert!(status.oldest_indexed_at.is_some());
+        assert!(status.newest_indexed_at.is_some());
+
+        let missing = store
+            .codebase_index_status("/definitely/not/this/index/root")
+            .await
+            .expect("missing index status");
+        assert_eq!(missing.symbols, 0);
+        assert_eq!(missing.imports, 0);
+        assert_eq!(missing.calls, 0);
+        assert_eq!(missing.indexed_files, 0);
+        assert!(missing.oldest_indexed_at.is_none());
+        assert!(missing.newest_indexed_at.is_none());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
