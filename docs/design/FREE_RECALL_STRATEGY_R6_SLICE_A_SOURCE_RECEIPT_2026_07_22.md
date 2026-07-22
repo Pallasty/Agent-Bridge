@@ -80,4 +80,3 @@ cargo test -p ab-store --no-default-features --features episode-observation-slic
 
 Run locally first and then on a Rust-equipped independent node. Passing that
 gate would verify Slice A only and would not open Slice B.
-
