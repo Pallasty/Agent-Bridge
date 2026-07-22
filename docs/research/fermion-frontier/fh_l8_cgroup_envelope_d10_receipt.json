@@ -1,0 +1,20 @@
+{
+  "elapsed_seconds": 29.922,
+  "fourth_action_executed": false,
+  "full_run_authorized": false,
+  "integral_amplitudes": true,
+  "memory_current_after": 116690944,
+  "memory_current_before": 78999552,
+  "memory_envelope_pass": true,
+  "memory_max": "1073741824",
+  "memory_probe_available": true,
+  "memory_swap_max": "0",
+  "next_gate": "FULL_RUN_AUTHORITY_DECISION_FROM_MEASURED_PREFLIGHT",
+  "nonzero_targets": 317124,
+  "projected_zero_terms": 44,
+  "raw_terms": 877976,
+  "reduced_terms": 864300,
+  "source_representatives": 4096,
+  "status": "VERIFIED_D9_BOUNDED_QUOTIENT_H_PREFLIGHT_NO_FULL_ACTION",
+  "verified": true
+}
