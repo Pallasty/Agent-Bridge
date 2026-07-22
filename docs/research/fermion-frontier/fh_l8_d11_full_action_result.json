@@ -1,0 +1,13 @@
+{
+  "degree6_remainder_bounded": false,
+  "fourth_action_executed": true,
+  "full_R100_error_bounded": false,
+  "physical_reference_qualified": false,
+  "ready_gate_eligible": false,
+  "status": "VERIFIED_D11_FULL_DEPTH3_TO_DEPTH4_SIGNED_QUOTIENT_ACTION",
+  "target_payload_bytes": 345137440,
+  "target_records": 10785545,
+  "target_sha256": "9769bbcd39cb5d48a83f42e8a8fa838c7577f8ab4978876f0fc4fe582250587c",
+  "two_step_cumulative_error_bounded": false,
+  "verified": true
+}

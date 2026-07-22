@@ -1,0 +1,8 @@
+{
+  "completed_shards": 53,
+  "fourth_action_executed": false,
+  "new_spill_records": 23126970,
+  "next_gate": "D11_FULL_PARTITION_SORT_MERGE",
+  "status": "VERIFIED_D11_FULL_SPILL_CHECKPOINTS_COMPLETE_NO_MERGE",
+  "verified": true
+}
