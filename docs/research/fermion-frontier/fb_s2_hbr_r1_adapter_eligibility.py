@@ -264,10 +264,6 @@ def verify_record_path_hashes(
         sha_key = key[: -len("_path")] + "_sha256"
         expected_sha = record.get(sha_key)
         if expected_sha is None or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None:
-            present_key = key[: -len("_path")] + "_present"
-            if expected_sha == "UNSET" and record.get(present_key) == "false":
-                continue
-            mismatches.append(sha_key)
             continue
         entry = tree.get(path_value)
         passed = False
