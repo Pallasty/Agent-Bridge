@@ -11,6 +11,8 @@ pub mod coactivation_latch;
 pub mod codebase;
 pub mod connectivity_repair;
 pub mod embedding;
+#[cfg(feature = "episode-observation-slice-a")]
+mod episode_observation_slice_a;
 #[cfg(feature = "engram-g1-authenticated-envelope-shadow-synthetic")]
 mod engram_g1_authenticated_envelope_shadow;
 #[cfg(all(

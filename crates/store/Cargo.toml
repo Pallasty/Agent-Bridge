@@ -27,6 +27,7 @@ temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic = ["t
 engram-g1-secure-custody-shadow-synthetic = ["dep:libc"]
 temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic = ["temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic"]
 temporal-evidence-s21a-owned-lab-final-refreeze-admission-synthetic = ["temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic"]
+episode-observation-slice-a = ["dep:ring"]
 
 [dependencies]
 ab-core.workspace = true
