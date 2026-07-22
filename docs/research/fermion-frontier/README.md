@@ -8,6 +8,10 @@ The first selected-route unit is now positive: `FH-L8-INDEPENDENT-REFERENCE-D1` 
 `k0 -> k1` PF-to-exact expectation defect for both observables below `1/400000`. See
 `FH_L8_STATE_SPECIFIC_DEFECT_D1_ZH.md`; this does not authorize multiplication by 100.
 
+`FH-L8-INDEPENDENT-REFERENCE-D2` now closes the direct two-step scalar expansion through D5 and
+localizes the first missing proof to the degree-six remainder: 74,613 paths / 100,947 prefixes exceed
+the fixed caps. See `FH_L8_TWO_STEP_SCALAR_DEFECT_D2_ZH.md`.
+
 Status date: 2026-07-14
 
 Scope: physical fermions, not the historical Fermion Memory service.

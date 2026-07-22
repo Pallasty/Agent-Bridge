@@ -18,6 +18,14 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `fh_l8_state_specific_defect_d1_checker.py`: exact D4 and complete degree-five remainder recomputation.
 - `test_fh_l8_state_specific_defect_d1_checker.py`: positive, mutation, authority and resource regressions.
 
+## FH-L8 two-step scalar defect D2
+
+- `FH_L8_TWO_STEP_SCALAR_DEFECT_D2_ZH.md`: scalar composition correction and degree-six boundary.
+- `fh_l8_two_step_scalar_defect_d2_contract.json`: 17-stage workload, exact coefficients and caps.
+- `fh_l8_two_step_scalar_defect_d2_result.json`: failure-local degree-six resource result.
+- `fh_l8_two_step_scalar_defect_d2_checker.py`: exact D3--D5 merge and combinatorial gate.
+- `test_fh_l8_two_step_scalar_defect_d2_checker.py`: coefficient, mutation, authority and cap tests.
+
 ## Claude source session
 
 - Session:

@@ -1,0 +1,36 @@
+{
+  "contract_id":"FH-L8-INDEPENDENT-REFERENCE-D2",
+  "degree_six_gate":{"full_prefix_count":100947,"prefix_cap":4096,"prefix_cap_exceeded":true,"remainder_numerically_evaluated":false,"weak_composition_cap":4096,"weak_composition_cap_exceeded":true,"weak_composition_count":74613},
+  "full_R100_error_bounded":false,
+  "limitations":["D3 through D5 scalar coefficients are exact, but the degree-six remainder is not bounded.","The D4 contribution alone is not a two-step cumulative error certificate.","D1 is not added as a scalar telescoping term."],
+  "merged_stage_count":17,
+  "next_branch":"DEGREE6_SCALAR_REMAINDER_STREAMING_OR_MEET_IN_THE_MIDDLE",
+  "observables":{
+    "double_occupancy":{
+      "degree_four_absolute_contribution":"23/60000000",
+      "degrees":{
+        "3":{"L1":"423/8","Neel_expectation":"0/1","defect_expansion_sha256":"7573790b1f20e29f3bda97d368cea3ef1564c4812d34b520dcc99567722eeca3","ideal_term_count":30912,"product_term_count":31296,"term_count":8928},
+        "4":{"L1":"8341/6","Neel_expectation":"-115/3","defect_expansion_sha256":"a8ee3c2ee7ef6e7dfe237412ee9e73fe0d8213edd15a0385483bc79b976c6dbf","ideal_term_count":157892,"product_term_count":157892,"term_count":89744},
+        "5":{"L1":"12128913/640","Neel_expectation":"0/1","defect_expansion_sha256":"76ff780c1d6d050302070eca9126aaad915389c90b7d9e17e3c148f6ad2dd333","ideal_term_count":708448,"product_term_count":741584,"term_count":582704}
+      },
+      "observable_identity":{"definition":"(1/N)*sum_n_up*n_down","full_observable_Pauli_L1":"1/1","n_sites":64,"nonidentity_expansion_sha256":"cc6dc2b8b74795dc326fbbed5b48598663c8998081ed0291cc7ed64b4737698f","nonidentity_term_count":192,"observable_id":"double_occupancy","omitted_commuting_identity_coefficient":"1/4"},
+      "resource_usage":{"pair_products":575512064,"peak_expansion_terms":731693}
+    },
+    "staggered_magnetization":{
+      "degree_four_absolute_contribution":"23/30000000",
+      "degrees":{
+        "3":{"L1":"1703/12","Neel_expectation":"0/1","defect_expansion_sha256":"6cb2d36f820a7c96b4b0f11f230a3dd687f7c00c46ae9102ef96f92bdd493fd0","ideal_term_count":9008,"product_term_count":9008,"term_count":6784},
+        "4":{"L1":"32353/12","Neel_expectation":"230/3","defect_expansion_sha256":"0cd5b024da5a9b3bea71ab42e9c8925c40e5f0b21262d035f52cbc4c8ee9185a","ideal_term_count":50144,"product_term_count":51488,"term_count":45592},
+        "5":{"L1":"33969203/960","Neel_expectation":"0/1","defect_expansion_sha256":"d3b1e7c5160c40b7be580d1a352aec61f17377ae117de391bb8721cf56e38fd1","ideal_term_count":272832,"product_term_count":279872,"term_count":283328}
+      },
+      "observable_identity":{"definition":"(1/N)*sum_(-1)^(r+c)*(n_up-n_down)","full_observable_Pauli_L1":"1/1","n_sites":64,"nonidentity_expansion_sha256":"6dc21a3763f141cc9e9bdcb5610cc91ab8c09dbeac8ba736560df70affdaa9ee","nonidentity_term_count":128,"observable_id":"staggered_magnetization","omitted_commuting_identity_coefficient":"0/1"},
+      "resource_usage":{"pair_products":152605696,"peak_expansion_terms":272832}
+    }
+  },
+  "physical_reference_qualified":false,
+  "ready_gate_eligible":false,
+  "status":"VERIFIED_D2_DEGREE6_REMAINDER_RESOURCE_THRESHOLD",
+  "terminal_branch":"DEGREE6_REMAINDER_EXCEEDS_PREFIX_AND_PATH_CAPS",
+  "two_step_cumulative_error_bounded":false,
+  "verified":true
+}

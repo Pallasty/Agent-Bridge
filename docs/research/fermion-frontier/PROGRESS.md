@@ -1,5 +1,15 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 two-step scalar defect D2
+
+- Corrected the scalar telescoping architecture: D1 cannot be multiplied or added as an operator-norm
+  telescoping term, so D2 directly evaluates the 17-stage two-step cumulative scalar difference.
+- Exactly merged D3--D5. Both odd Néel coefficients vanish; D4 is `230/3` for magnetization and
+  `-115/3` for double occupancy.
+- Localized the first uncontrolled object to the degree-six remainder, requiring 74,613 weak
+  compositions and 100,947 prefixes versus fixed 4,096 caps.
+- Status is failure-local only; no two-step cumulative bound, full R100, reference or READY authority.
+
 ## 2026-07-22 — FH-L8 state-specific defect D1
 
 - Exactly merged the degree-four product-minus-ideal observable defect and evaluated it on the
