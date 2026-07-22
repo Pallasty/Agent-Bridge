@@ -168,6 +168,14 @@ compilation, test execution, database access, C2 integration, merge, release,
 and deployment remain closed. See
 `docs/design/FREE_RECALL_STRATEGY_R11_C1_SOURCE_RECEIPT_2026_07_22.md`.
 
+R12 records the C1 build gate. The exact tip passes the default-off feature
+check plus its four orchestration and one ledger regression tests locally with
+locked offline inputs. Its independent Linux replay remains explicitly pending:
+aio2 could not receive the verified source bundle over currently degraded
+transport, while tb14 has no Rust toolchain. This is not C1 acceptance and does
+not open C2. See
+`docs/design/FREE_RECALL_STRATEGY_R12_C1_BUILD_RESULT_2026_07_22.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,
