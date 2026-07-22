@@ -119,6 +119,14 @@ owner-authorized step.
 runner-side source component. It purely compiles each verified private endpoint
 and readiness position into exact etcd argv, mTLS OpenBao HCL, owner-only paths,
 cleared process environment, deterministic workload values and a role-specific
-command allowlist. Three synthetic plans pass and 36 unsafe input/plan mutations
+command allowlist. Three synthetic plans pass and 40 unsafe input/plan mutations
 fail. It starts nothing and does not close the still-missing executor, transport
 or evidence-builder findings.
+
+`biocortex_ab_track_b_t22_a1_domain_executor_core_v1.py` closes the fixed-command
+dispatch/state/evidence-core portion, but not the live backend. Three synthetic
+domain lifecycles produce 23 independently replay-verified private command
+receipts; 19 mutations fail, including dispatch-after-failure, timeout, spend,
+observation, transition, chain and timing attacks. Any failure after backend
+dispatch becomes an absorbing terminal state. Non-synthetic backends remain
+hard-disabled, so no process, listener, credential or network action is enabled.

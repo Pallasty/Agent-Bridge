@@ -63,6 +63,9 @@ EXECUTION = {
         ],
     },
     "fault": {"target_domain_id": "domain-3"},
+    "authorization": {"maximum_runtime_seconds": 3600, "automatic_retry_allowed": False},
+    "budget": {"maximum_spend_usd_cents": 0},
+    "expires_at": "2026-07-22T23:00:00Z",
 }
 
 
@@ -179,6 +182,10 @@ input_mutations = (
     ("execution", lambda x: x["topology"]["domains"].reverse()),
     ("execution", lambda x: x["topology"]["domains"][0].update(etcd_member="etcd-other")),
     ("execution", lambda x: x["fault"].update(target_domain_id="domain-1")),
+    ("execution", lambda x: x["authorization"].update(maximum_runtime_seconds=14401)),
+    ("execution", lambda x: x["authorization"].update(automatic_retry_allowed=True)),
+    ("execution", lambda x: x["budget"].update(maximum_spend_usd_cents=100001)),
+    ("execution", lambda x: x.update(expires_at="not-a-time")),
     ("readiness", lambda x: x["toolchain"]["executables"].reverse()),
     ("readiness", lambda x: x["toolchain"]["executables"][0].update(path="relative/python3")),
     ("readiness", lambda x: x["toolchain"]["executables"][0].update(sha256="0" * 64)),

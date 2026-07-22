@@ -104,10 +104,15 @@ rollback prevention.
   connections. The coordinator leaf remains client-only; schema bytes and
   activation authority are unchanged.
 - a pure private workload-plan compiler with three synthetic domain successes
-  and 36 negative paths. It freezes exact etcd argv, mTLS OpenBao HCL, cleared
+  and 40 negative paths. It freezes exact etcd argv, mTLS OpenBao HCL, cleared
   environment, local paths, deterministic workload state and the per-role
   command allowlist, but deliberately does not start a process or claim that
   the cross-host executor/transport/evidence builder exists.
+- a fixed-command executor core with three synthetic lifecycles, 23 chained
+  command receipts and 19 negative paths. It revalidates the exact plan,
+  enforces role/state/time/spend boundaries, independently replays each receipt
+  chain and makes every post-dispatch failure terminal. Its live backend and
+  activation constant are intentionally absent/false.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only

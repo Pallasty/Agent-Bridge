@@ -167,6 +167,21 @@ def _compile(execution: dict, endpoint_manifest: dict, readiness: dict) -> dict:
     require(topology_row.get("etcd_member") == f"etcd-{domain_id[-1]}" and topology_row.get("openbao_member") == f"bao-{domain_id[-1]}", "E_WORKLOAD_PLAN_MEMBER_BINDING")
     fault_target = execution.get("fault", {}).get("target_domain_id")
     require(fault_target in {"domain-2", "domain-3"}, "E_WORKLOAD_PLAN_FAULT_TARGET")
+    authorization = execution.get("authorization", {})
+    budget = execution.get("budget", {})
+    maximum_runtime_seconds = authorization.get("maximum_runtime_seconds")
+    maximum_spend_usd_cents = budget.get("maximum_spend_usd_cents")
+    require(
+        isinstance(maximum_runtime_seconds, int) and 0 < maximum_runtime_seconds <= 14400
+        and authorization.get("automatic_retry_allowed") is False,
+        "E_WORKLOAD_PLAN_RUNTIME_LIMIT",
+    )
+    require(
+        isinstance(maximum_spend_usd_cents, int) and 0 <= maximum_spend_usd_cents <= 100000,
+        "E_WORKLOAD_PLAN_SPEND_LIMIT",
+    )
+    expires_at = execution.get("expires_at")
+    require(isinstance(expires_at, str) and expires_at.endswith("Z"), "E_WORKLOAD_PLAN_EXPIRY")
 
     tool_rows = readiness.get("toolchain", {}).get("executables")
     require(isinstance(tool_rows, list) and [row.get("name") for row in tool_rows] == list(TOOL_NAMES), "E_WORKLOAD_PLAN_TOOL_SET")
@@ -246,6 +261,12 @@ def _compile(execution: dict, endpoint_manifest: dict, readiness: dict) -> dict:
             "topology_role": topology_row["role"],
             "fault_target_domain_id": fault_target,
             "this_domain_is_fault_target": domain_id == fault_target,
+        },
+        "limits": {
+            "execution_expires_at": expires_at,
+            "maximum_runtime_seconds": maximum_runtime_seconds,
+            "maximum_spend_usd_cents": maximum_spend_usd_cents,
+            "automatic_retry_allowed": False,
         },
         "network": {
             "overlay_ip": endpoint["overlay_ip"],
