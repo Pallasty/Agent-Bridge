@@ -54,6 +54,13 @@ Archive extraction selects only the four named regular files, and a canonical
 acquisition receipt records both archive and installed-binary hashes. The
 acquisition destination is fixed to
 `/Data/CascadeProjects/.artifacts/agent-bridge/biocortex-track-b-t22-a0-real-lab/tools`.
+After a fresh signature verifies, a later source-bound acquisition may instead
+reuse one prior `tools.authorization-<authorization-digest>` directory under
+the same artifact root. That path constructs no network opener: it verifies
+the prior canonical receipt and current pins, recopies only exact checksum and
+release files whose byte counts and hashes match, freshly installs the four
+binaries, and emits a new receipt bound to the new authorization and source
+commit. Cache inspection remains forbidden before signature verification.
 
 ## Owner authorization state
 
@@ -104,7 +111,7 @@ result is `READY_TO_GENERATE_EXACT_PAYLOAD`; signature and real-execution flags
 remain false.
 
 `scripts/check-biocortex-ab-track-b-t22-a0-acquire-pinned-tools-v1-pack.sh`
-adds 20 directed safety checks for pin drift, exact byte-size enforcement, URL
+adds 24 directed safety checks for pin drift, exact byte-size enforcement, URL
 and size policy, output path
 escape, duplicate checksums, archive extraction, and the authorization-before-
 network boundary. Its present result is

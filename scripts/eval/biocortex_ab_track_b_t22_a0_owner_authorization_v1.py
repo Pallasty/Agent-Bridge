@@ -134,6 +134,7 @@ def build_payload(anchor: dict, proposal: dict, issued_at: datetime, source_comm
         "failure_domain_claim": "PROCESS_ONLY_SINGLE_PHYSICAL_HOST",
         "allowed_after_signature": [
             "HASH_PINNED_PUBLIC_RELEASE_DOWNLOAD",
+            "HASH_PINNED_PUBLIC_RELEASE_CACHE_REVALIDATION",
             "EPHEMERAL_LAB_BOOTSTRAP_MATERIAL_GENERATE_AND_MEMORY_ONLY_USE",
             "OWNED_PROCESS_START_STOP_KILL_RESTART",
             "LOOPBACK_TOXIPROXY_FAULT",
@@ -190,6 +191,7 @@ def validate_payload(payload: dict, anchor: dict, proposal: dict, now: datetime)
     assert payload["failure_domain_claim"] == "PROCESS_ONLY_SINGLE_PHYSICAL_HOST"
     assert payload["allowed_after_signature"] == [
         "HASH_PINNED_PUBLIC_RELEASE_DOWNLOAD",
+        "HASH_PINNED_PUBLIC_RELEASE_CACHE_REVALIDATION",
         "EPHEMERAL_LAB_BOOTSTRAP_MATERIAL_GENERATE_AND_MEMORY_ONLY_USE",
         "OWNED_PROCESS_START_STOP_KILL_RESTART",
         "LOOPBACK_TOXIPROXY_FAULT",

@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import tarfile
@@ -27,6 +28,7 @@ ALLOWED_INITIAL_HOSTS = frozenset({"github.com"})
 ALLOWED_REDIRECT_HOSTS = frozenset({"github.com", "release-assets.githubusercontent.com"})
 CHECKSUM_MAXIMUM_BYTES = 2 * 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
+CACHE_DIRECTORY_PATTERN = re.compile(r"tools\.authorization-[0-9a-f]{12}")
 
 
 def load_authorization_module():
@@ -116,6 +118,7 @@ def verify_authorization(payload_path: Path, signature_path: Path) -> tuple[dict
     assert payload["source_commit"] == current_commit()
     assert payload["artifact_root"] == proposal["scope"]["artifact_root"]
     assert "HASH_PINNED_PUBLIC_RELEASE_DOWNLOAD" in payload["allowed_after_signature"]
+    assert "HASH_PINNED_PUBLIC_RELEASE_CACHE_REVALIDATION" in payload["allowed_after_signature"]
     require_clean_tracked_tree()
     return payload, authorization
 
@@ -223,12 +226,56 @@ def validate_exact_destination(destination: Path, payload: dict) -> tuple[Path, 
     return artifact_root, expected
 
 
-def acquire(payload_path: Path, signature_path: Path, destination: Path) -> dict:
+def validate_cache_source(cache_source: Path, artifact_root: Path, pins_sha256: str) -> str:
+    assert cache_source.is_absolute() and cache_source.parent == artifact_root
+    assert CACHE_DIRECTORY_PATTERN.fullmatch(cache_source.name)
+    assert cache_source.is_dir() and not cache_source.is_symlink()
+    for parent in reversed(cache_source.parents):
+        if parent.exists():
+            assert not parent.is_symlink()
+    receipt_path = cache_source / "acquisition-receipt.json"
+    downloads = cache_source / "downloads"
+    assert downloads.is_dir() and not downloads.is_symlink()
+    assert receipt_path.is_file() and not receipt_path.is_symlink()
+    raw = receipt_path.read_bytes()
+    receipt = json.loads(raw)
+    assert raw == canonical(receipt) + b"\n"
+    assert receipt["schema"] == "agent_bridge.biocortex.track_b.t22_a0.pinned_tool_acquisition_receipt.v1"
+    assert receipt["status"] == "PINNED_PUBLIC_RELEASE_TOOLS_ACQUIRED"
+    assert receipt["pins_sha256"] == pins_sha256
+    assert receipt["production_admissible"] is False
+    assert len(receipt["owner_authorization_content_sha256"]) == 64
+    assert len(receipt["source_commit"]) == 40
+    assert all(character in "0123456789abcdef" for character in receipt["owner_authorization_content_sha256"] + receipt["source_commit"])
+    return hashlib.sha256(raw).hexdigest()
+
+
+def copy_exact_cached_file(
+    source: Path, destination: Path, expected_bytes: int, expected_sha256: str,
+) -> None:
+    assert source.is_file() and not source.is_symlink()
+    assert not destination.exists()
+    assert source.stat().st_size == expected_bytes
+    assert sha256_file(source) == expected_sha256
+    shutil.copyfile(source, destination)
+    assert destination.stat().st_size == expected_bytes
+    assert sha256_file(destination) == expected_sha256
+
+
+def acquire(
+    payload_path: Path, signature_path: Path, destination: Path,
+    cache_source: Path | None = None,
+) -> dict:
     # This is the sole transition from offline validation to network access.
     payload, _authorization = verify_authorization(payload_path, signature_path)
     pins = json.loads(PINS_PATH.read_text())
     validate_pins(pins)
     artifact_root, destination = validate_exact_destination(destination, payload)
+    pins_sha256 = hashlib.sha256(PINS_PATH.read_bytes()).hexdigest()
+    cache_receipt_sha256 = None
+    if cache_source is not None:
+        assert "HASH_PINNED_PUBLIC_RELEASE_CACHE_REVALIDATION" in payload["allowed_after_signature"]
+        cache_receipt_sha256 = validate_cache_source(cache_source, artifact_root, pins_sha256)
     artifact_root.mkdir(parents=True, exist_ok=True)
     assert not artifact_root.is_symlink()
     stage = Path(tempfile.mkdtemp(prefix=".t22-a0-tools-", dir=artifact_root))
@@ -237,21 +284,37 @@ def acquire(payload_path: Path, signature_path: Path, destination: Path) -> dict
         binaries = stage / "bin"
         downloads.mkdir(mode=0o700)
         binaries.mkdir(mode=0o700)
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), RestrictedRedirectHandler(),
-        )
+        opener = None
+        if cache_source is None:
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}), RestrictedRedirectHandler(),
+            )
         evidence: list[dict] = []
         installed: list[dict] = []
         for tool in pins["tools"]:
             checksum = downloads / f"{tool['name']}-checksums.txt"
             artifact = downloads / tool["artifact_name"]
-            download(opener, tool["checksum_url"], checksum, CHECKSUM_MAXIMUM_BYTES)
+            if cache_source is None:
+                download(opener, tool["checksum_url"], checksum, CHECKSUM_MAXIMUM_BYTES)
+            else:
+                cached_checksum = cache_source / "downloads" / checksum.name
+                assert cached_checksum.stat().st_size <= CHECKSUM_MAXIMUM_BYTES
+                copy_exact_cached_file(
+                    cached_checksum, checksum, cached_checksum.stat().st_size,
+                    tool["checksum_sha256"],
+                )
             assert sha256_file(checksum) == tool["checksum_sha256"]
             assert checksum_document_entry(checksum, tool["artifact_name"]) == tool["artifact_sha256"]
-            download(
-                opener, tool["artifact_url"], artifact,
-                tool["maximum_download_bytes"], tool["artifact_size_bytes"],
-            )
+            if cache_source is None:
+                download(
+                    opener, tool["artifact_url"], artifact,
+                    tool["maximum_download_bytes"], tool["artifact_size_bytes"],
+                )
+            else:
+                copy_exact_cached_file(
+                    cache_source / "downloads" / tool["artifact_name"], artifact,
+                    tool["artifact_size_bytes"], tool["artifact_sha256"],
+                )
             assert sha256_file(artifact) == tool["artifact_sha256"]
             tool_binaries = install_tool(tool, artifact, binaries)
             installed.extend(tool_binaries)
@@ -265,9 +328,11 @@ def acquire(payload_path: Path, signature_path: Path, destination: Path) -> dict
         receipt = {
             "schema": "agent_bridge.biocortex.track_b.t22_a0.pinned_tool_acquisition_receipt.v1",
             "status": "PINNED_PUBLIC_RELEASE_TOOLS_ACQUIRED",
+            "acquisition_mode": "AUTHORIZED_NETWORK_DOWNLOAD" if cache_source is None else "VERIFIED_LOCAL_PINNED_ARCHIVE_REUSE",
+            "cache_source_receipt_sha256": cache_receipt_sha256,
             "owner_authorization_content_sha256": payload["content_sha256"],
             "source_commit": payload["source_commit"],
-            "pins_sha256": hashlib.sha256(PINS_PATH.read_bytes()).hexdigest(),
+            "pins_sha256": pins_sha256,
             "acquired_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "tools": evidence,
             "installed_binaries": installed,
@@ -307,11 +372,15 @@ def main() -> None:
     acquire_parser.add_argument("--payload", type=Path, required=True)
     acquire_parser.add_argument("--signature", type=Path, required=True)
     acquire_parser.add_argument("--destination", type=Path, required=True)
+    acquire_parser.add_argument("--cache-source", type=Path)
     arguments = parser.parse_args()
     if arguments.command == "status":
         print(json.dumps(status(), sort_keys=True, separators=(",", ":")))
         return
-    receipt = acquire(arguments.payload, arguments.signature, arguments.destination)
+    receipt = acquire(
+        arguments.payload, arguments.signature, arguments.destination,
+        arguments.cache_source,
+    )
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
 
 

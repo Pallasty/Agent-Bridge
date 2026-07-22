@@ -139,6 +139,51 @@ with tempfile.TemporaryDirectory() as directory:
     assert installed[0]["sha256"] == module.hashlib.sha256(content).hexdigest()
     assert (binary_root / "tool").stat().st_mode & 0o111
 
+    artifact_root = root / "artifact-root"
+    artifact_root.mkdir()
+    cache = artifact_root / ("tools.authorization-" + "a" * 12)
+    cache.mkdir()
+    (cache / "downloads").mkdir()
+    pins_sha256 = module.hashlib.sha256(module.PINS_PATH.read_bytes()).hexdigest()
+    cache_receipt = {
+        "schema": "agent_bridge.biocortex.track_b.t22_a0.pinned_tool_acquisition_receipt.v1",
+        "status": "PINNED_PUBLIC_RELEASE_TOOLS_ACQUIRED",
+        "owner_authorization_content_sha256": "b" * 64,
+        "source_commit": "c" * 40,
+        "pins_sha256": pins_sha256,
+        "production_admissible": False,
+    }
+    receipt_path = cache / "acquisition-receipt.json"
+    receipt_path.write_bytes(module.canonical(cache_receipt) + b"\n")
+    assert module.validate_cache_source(cache, artifact_root, pins_sha256) == module.sha256_file(receipt_path)
+    try:
+        module.validate_cache_source(artifact_root / "tools", artifact_root, pins_sha256)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("unbound cache directory name admitted")
+    cache_receipt["pins_sha256"] = "0" * 64
+    receipt_path.write_bytes(module.canonical(cache_receipt) + b"\n")
+    try:
+        module.validate_cache_source(cache, artifact_root, pins_sha256)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("cache receipt with wrong pins admitted")
+    cached = root / "cached"
+    cached.write_bytes(b"exact cached release")
+    copied = root / "copied"
+    module.copy_exact_cached_file(
+        cached, copied, cached.stat().st_size, module.sha256_file(cached),
+    )
+    assert copied.read_bytes() == cached.read_bytes()
+    try:
+        module.copy_exact_cached_file(cached, root / "wrong-copy", cached.stat().st_size, "0" * 64)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("cache artifact with wrong hash admitted")
+
 authorization = module.load_authorization_module()
 assert authorization.ANCHOR_PATH.is_file()
 authorization.validate_anchor(
@@ -146,6 +191,6 @@ authorization.validate_anchor(
     json.loads(authorization.PROPOSAL_PATH.read_text()),
 )
 print("t22_a0_pinned_tool_acquisition_check\tpass")
-print(f"directed_negative_test_count\t{len(mutations) + 5}")
+print(f"directed_negative_test_count\t{len(mutations) + 9}")
 print("network_attempted\tfalse")
 print("release_artifacts_downloaded\tfalse")

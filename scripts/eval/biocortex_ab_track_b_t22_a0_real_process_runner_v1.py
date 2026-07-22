@@ -275,6 +275,9 @@ def verify_tool_receipt(payload: dict, contract: dict, acquisition) -> tuple[Pat
     receipt = json.loads(receipt_path.read_text())
     require(receipt["schema"] == "agent_bridge.biocortex.track_b.t22_a0.pinned_tool_acquisition_receipt.v1", "E_TOOL_RECEIPT_SCHEMA")
     require(receipt["status"] == "PINNED_PUBLIC_RELEASE_TOOLS_ACQUIRED", "E_TOOL_RECEIPT_STATUS")
+    require(receipt["acquisition_mode"] in {"AUTHORIZED_NETWORK_DOWNLOAD", "VERIFIED_LOCAL_PINNED_ARCHIVE_REUSE"}, "E_TOOL_RECEIPT_MODE")
+    if receipt["acquisition_mode"] == "VERIFIED_LOCAL_PINNED_ARCHIVE_REUSE":
+        require("HASH_PINNED_PUBLIC_RELEASE_CACHE_REVALIDATION" in payload["allowed_after_signature"], "E_TOOL_CACHE_AUTHORITY_MISSING")
     require(receipt["owner_authorization_content_sha256"] == payload["content_sha256"], "E_TOOL_RECEIPT_AUTH_BINDING")
     require(receipt["source_commit"] == payload["source_commit"], "E_TOOL_RECEIPT_SOURCE_BINDING")
     require(receipt["pins_sha256"] == hashlib.sha256(acquisition.PINS_PATH.read_bytes()).hexdigest(), "E_TOOL_RECEIPT_PINS")
