@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex.track_b.t22_a1.distributed_execution_contract.v1",
+  "title": "BioCortex Track B T22-A1 distributed execution contract",
+  "description": "Closed schema for a future exact, owner-signed, single-use, non-production three-host execution contract. This schema is not execution authority and no instance is committed by admission planning.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packet_kind",
+    "hashing_contract",
+    "run_id",
+    "source_commit",
+    "issued_at",
+    "expires_at",
+    "authorization",
+    "admission_bindings",
+    "budget",
+    "network",
+    "topology",
+    "fault",
+    "evidence_contract",
+    "claims",
+    "content_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex.track_b.t22_a1.distributed_execution_contract.v1"},
+    "packet_kind": {"const": "T22_A1_H_FINAL_UNSIGNED_EXECUTION_CONTRACT"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "run_id": {"type": "string", "pattern": "^t22-a1-[0-9]{8}T[0-9]{6}\\.[0-9]{6}z-[0-9a-f]{12}$"},
+    "source_commit": {"$ref": "#/$defs/git_oid"},
+    "issued_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+    "expires_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+    "authorization": {"$ref": "#/$defs/authorization"},
+    "admission_bindings": {"$ref": "#/$defs/admission_bindings"},
+    "budget": {"$ref": "#/$defs/budget"},
+    "network": {"$ref": "#/$defs/network"},
+    "topology": {"$ref": "#/$defs/topology"},
+    "fault": {"$ref": "#/$defs/fault"},
+    "evidence_contract": {"$ref": "#/$defs/evidence_contract"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "content_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "hash_scope", "self_hash_field", "self_hash_field_excluded", "detached_owner_signature_covers_complete_canonical_packet", "cross_field_semantic_validation_required"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/track-b/t22-a1/distributed-execution-contract/v1"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_CONTENT_SHA256"},
+        "self_hash_field": {"const": "content_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "detached_owner_signature_covers_complete_canonical_packet": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true}
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_id", "owner_role", "signature_scheme", "signature_namespace", "verified_unexpired_owner_signature_required", "exact_source_commit_required", "clean_tracked_tree_required", "one_run_per_authorization_content_sha256", "maximum_runtime_seconds", "automatic_retry_allowed"],
+      "properties": {
+        "owner_id": {"const": "pallasting"},
+        "owner_role": {"const": "PROJECT_OWNER"},
+        "signature_scheme": {"const": "OPENSSH_SSHSIG_ED25519"},
+        "signature_namespace": {"const": "agent-bridge-t22-a1-owner-v1"},
+        "verified_unexpired_owner_signature_required": {"const": true},
+        "exact_source_commit_required": {"const": true},
+        "clean_tracked_tree_required": {"const": true},
+        "one_run_per_authorization_content_sha256": {"const": true},
+        "maximum_runtime_seconds": {"type": "integer", "minimum": 1, "maximum": 14400},
+        "automatic_retry_allowed": {"const": false}
+      }
+    },
+    "domain_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "attestation_packet_sha256", "attestation_signature_sha256", "domain_public_key_sha256"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "attestation_packet_sha256": {"$ref": "#/$defs/sha256"},
+        "attestation_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_public_key_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "admission_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["admission_contract_sha256", "owner_decision_proposal_sha256", "domain_attestation_schema_sha256", "exact_three_domain_attestation_packet_set_sha256", "domain_bindings", "all_domain_attestation_signatures_verified", "all_domain_attestations_current", "all_domain_distinctness_checks_passed", "owner_countersignature_over_exact_packet_set_verified"],
+      "properties": {
+        "admission_contract_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_decision_proposal_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_attestation_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "exact_three_domain_attestation_packet_set_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_bindings": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {"allOf": [{"$ref": "#/$defs/domain_binding"}, {"properties": {"domain_id": {"const": "domain-1"}}}]},
+            {"allOf": [{"$ref": "#/$defs/domain_binding"}, {"properties": {"domain_id": {"const": "domain-2"}}}]},
+            {"allOf": [{"$ref": "#/$defs/domain_binding"}, {"properties": {"domain_id": {"const": "domain-3"}}}]}
+          ],
+          "items": false
+        },
+        "all_domain_attestation_signatures_verified": {"const": true},
+        "all_domain_attestations_current": {"const": true},
+        "all_domain_distinctness_checks_passed": {"const": true},
+        "owner_countersignature_over_exact_packet_set_verified": {"const": true}
+      }
+    },
+    "budget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "provider", "region", "zone", "instance_type", "maximum_spend_usd_cents"],
+          "properties": {
+            "mode": {"const": "THREE_OWNER_PHYSICAL_HOSTS_ZERO_SPEND"},
+            "provider": {"type": "null"},
+            "region": {"type": "null"},
+            "zone": {"type": "null"},
+            "instance_type": {"type": "null"},
+            "maximum_spend_usd_cents": {"const": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "provider", "region", "zone", "instance_type", "maximum_spend_usd_cents"],
+          "properties": {
+            "mode": {"const": "EXACT_OWNER_AUTHORIZED_CLOUD_VM"},
+            "provider": {"type": "string", "minLength": 1, "maxLength": 128},
+            "region": {"type": "string", "minLength": 1, "maxLength": 128},
+            "zone": {"type": "string", "minLength": 1, "maxLength": 128},
+            "instance_type": {"type": "string", "minLength": 1, "maxLength": 128},
+            "maximum_spend_usd_cents": {"type": "integer", "minimum": 1, "maximum": 100000}
+          }
+        }
+      ]
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "peer_endpoint_set_sha256", "acl_policy_receipt_sha256", "raw_endpoints_embedded", "overlay_credentials_embedded", "public_listeners_allowed", "host_global_firewall_or_route_mutation_allowed", "runner_provisions_or_joins_overlay"],
+      "properties": {
+        "transport": {"const": "OWNER_MANAGED_PRIVATE_OVERLAY"},
+        "peer_endpoint_set_sha256": {"$ref": "#/$defs/sha256"},
+        "acl_policy_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "raw_endpoints_embedded": {"const": false},
+        "overlay_credentials_embedded": {"const": false},
+        "public_listeners_allowed": {"const": false},
+        "host_global_firewall_or_route_mutation_allowed": {"const": false},
+        "runner_provisions_or_joins_overlay": {"const": false}
+      }
+    },
+    "topology_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "role", "etcd_member", "openbao_member", "owned_process_count"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "role": {"enum": ["COORDINATOR_VOTER", "PARTICIPANT_VOTER"]},
+        "etcd_member": {"type": "string", "pattern": "^etcd-[123]$"},
+        "openbao_member": {"type": "string", "pattern": "^bao-[123]$"},
+        "owned_process_count": {"const": 2}
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domains", "etcd_voter_count", "openbao_voter_count", "coordinator_domain_id", "production_or_customer_data_allowed"],
+      "properties": {
+        "domains": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {"allOf": [{"$ref": "#/$defs/topology_domain"}, {"properties": {"domain_id": {"const": "domain-1"}, "role": {"const": "COORDINATOR_VOTER"}, "etcd_member": {"const": "etcd-1"}, "openbao_member": {"const": "bao-1"}}}]},
+            {"allOf": [{"$ref": "#/$defs/topology_domain"}, {"properties": {"domain_id": {"const": "domain-2"}, "role": {"const": "PARTICIPANT_VOTER"}, "etcd_member": {"const": "etcd-2"}, "openbao_member": {"const": "bao-2"}}}]},
+            {"allOf": [{"$ref": "#/$defs/topology_domain"}, {"properties": {"domain_id": {"const": "domain-3"}, "role": {"const": "PARTICIPANT_VOTER"}, "etcd_member": {"const": "etcd-3"}, "openbao_member": {"const": "bao-3"}}}]}
+          ],
+          "items": false
+        },
+        "etcd_voter_count": {"const": 3},
+        "openbao_voter_count": {"const": 3},
+        "coordinator_domain_id": {"const": "domain-1"},
+        "production_or_customer_data_allowed": {"const": false}
+      }
+    },
+    "fault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "target_domain_id", "target_selection", "allowed_actions", "forbidden_actions", "required_observation"],
+      "properties": {
+        "id": {"const": "ONE_DOMAIN_ALL_OWNED_CLUSTER_SERVICES_STOP_AND_RESTART"},
+        "target_domain_id": {"enum": ["domain-2", "domain-3"]},
+        "target_selection": {"const": "OBSERVED_NON_COORDINATOR_VOTER_DOMAIN"},
+        "allowed_actions": {"const": ["OWNED_PROCESS_STOP", "OWNED_PROCESS_KILL_AFTER_TIMEOUT", "OWNED_PROCESS_RESTART"]},
+        "forbidden_actions": {"const": ["HOST_REBOOT", "HOST_POWER_OFF", "HOST_GLOBAL_IPTABLES_OR_TC", "BLOCK_DEVICE_MUTATION", "PROVIDER_INSTANCE_STOP"]},
+        "required_observation": {"const": "SURVIVING_TWO_DOMAINS_RETAIN_QUORUM_AND_VERIFY_PREFAULT_STATE_THEN_STOPPED_DOMAIN_REJOINS"}
+      }
+    },
+    "evidence_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distributed_event_schema_path", "distributed_event_schema_sha256", "terminal_evidence_schema_path", "terminal_evidence_schema_sha256", "coordinator_hash_chain_required", "source_domain_detached_signatures_required", "per_domain_cleanup_receipts_required", "exact_secret_value_scan_required", "raw_credentials_endpoints_or_bootstrap_secrets_allowed"],
+      "properties": {
+        "distributed_event_schema_path": {"const": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-event-schema-v1.json"},
+        "distributed_event_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "terminal_evidence_schema_path": {"const": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json"},
+        "terminal_evidence_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "coordinator_hash_chain_required": {"const": true},
+        "source_domain_detached_signatures_required": {"const": true},
+        "per_domain_cleanup_receipts_required": {"const": true},
+        "exact_secret_value_scan_required": {"const": true},
+        "raw_credentials_endpoints_or_bootstrap_secrets_allowed": {"const": false}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maximum_success_claim", "host_power_loss_proved", "site_power_network_independence_proved", "storage_device_durability_proved", "provider_durability_proved", "external_anti_rollback_proved", "production_admissible", "t22_a1_r_authorized"],
+      "properties": {
+        "maximum_success_claim": {"const": "THREE_DISTINCT_PHYSICAL_HOST_PLACEMENT_AND_ONE_HOST_SCOPED_OWNED_SERVICE_SET_LOSS_RECOVERY_NONPRODUCTION"},
+        "host_power_loss_proved": {"const": false},
+        "site_power_network_independence_proved": {"const": false},
+        "storage_device_durability_proved": {"const": false},
+        "provider_durability_proved": {"const": false},
+        "external_anti_rollback_proved": {"const": false},
+        "production_admissible": {"const": false},
+        "t22_a1_r_authorized": {"const": false}
+      }
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex.track_b.t22_a1.distributed_event.v1",
+  "title": "BioCortex Track B T22-A1 distributed event",
+  "description": "Canonical coordinator-chain event carrying only digests of separately signed source-domain evidence. Raw endpoints and secret material are forbidden.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "run_id", "source_commit", "execution_contract_sha256", "sequence", "previous_event_sha256", "observed_at", "source_domain_id", "event_type", "observation_sha256", "source_domain_evidence", "contains_raw_endpoint", "contains_secret_material", "event_sha256"],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex.track_b.t22_a1.distributed_event.v1"},
+    "run_id": {"type": "string", "pattern": "^t22-a1-[0-9]{8}T[0-9]{6}\\.[0-9]{6}z-[0-9a-f]{12}$"},
+    "source_commit": {"$ref": "#/$defs/git_oid"},
+    "execution_contract_sha256": {"$ref": "#/$defs/sha256"},
+    "sequence": {"type": "integer", "minimum": 0},
+    "previous_event_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "observed_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+    "source_domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+    "event_type": {
+      "enum": [
+        "EXECUTION_PREFLIGHT_ACCEPTED",
+        "DOMAIN_PROCESS_STARTED",
+        "ETCD_CLUSTER_READY",
+        "OPENBAO_CLUSTER_READY",
+        "LINEARIZABLE_AUTHORIZE_CONSUME_OBSERVED",
+        "REPLAY_CONSUME_REJECTED",
+        "PREFAULT_TRANSIT_SIGNATURE_CREATED",
+        "FAULT_TARGET_OWNED_SERVICES_STOPPED",
+        "SURVIVING_TWO_DOMAIN_ETCD_QUORUM_OBSERVED",
+        "SURVIVING_TWO_DOMAIN_OPENBAO_AVAILABLE",
+        "POSTFAULT_TRANSIT_SIGNATURE_VERIFIED",
+        "FAULT_TARGET_OWNED_SERVICES_RESTARTED",
+        "FAULT_TARGET_REJOINED",
+        "DOMAIN_CLEANUP_COMPLETE",
+        "EXECUTION_TERMINALIZED"
+      ]
+    },
+    "observation_sha256": {"$ref": "#/$defs/sha256"},
+    "source_domain_evidence": {"$ref": "#/$defs/source_domain_evidence"},
+    "contains_raw_endpoint": {"const": false},
+    "contains_secret_material": {"const": false},
+    "event_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"sequence": {"const": 0}}, "required": ["sequence"]},
+      "then": {"properties": {"previous_event_sha256": {"const": "0000000000000000000000000000000000000000000000000000000000000000"}}},
+      "else": {"properties": {"previous_event_sha256": {"pattern": "^(?!0{64}$)[0-9a-f]{64}$"}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_domain_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestation_packet_sha256", "domain_event_payload_sha256", "detached_signature_sha256", "domain_public_key_sha256", "signature_scheme", "signature_namespace", "signature_verified"],
+      "properties": {
+        "attestation_packet_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_event_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "detached_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "signature_scheme": {"const": "OPENSSH_SSHSIG_ED25519"},
+        "signature_namespace": {"const": "agent-bridge-t22-a1-domain-event-v1"},
+        "signature_verified": {"const": true}
+      }
+    }
+  }
+}

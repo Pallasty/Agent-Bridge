@@ -17,9 +17,15 @@ ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-attestation-schema-v1.json"
 CONTRACT_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-three-domain-admission-contract-v1.json"
 PROPOSAL_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-owner-decision-proposal-v1.json"
+EXECUTION_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-execution-contract-schema-v1.json"
+EVENT_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-event-schema-v1.json"
+TERMINAL_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json"
 CONTRACT_DOMAIN = b"AB_TRACK_B_T22_A1_THREE_DOMAIN_ADMISSION_CONTRACT_V1\0"
 PROPOSAL_DOMAIN = b"AB_TRACK_B_T22_A1_OWNER_DECISION_PROPOSAL_V1\0"
 EXPECTED_SCHEMA_SHA256 = "1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b"
+EXPECTED_EXECUTION_SCHEMA_SHA256 = "2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b"
+EXPECTED_EVENT_SCHEMA_SHA256 = "4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5"
+EXPECTED_TERMINAL_SCHEMA_SHA256 = "f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a"
 STATUS = "BLOCKED_REMOTE_ATTESTATIONS_THIRD_DOMAIN_MODE_ENDPOINT_SET_AND_EXACT_OWNER_DECISION_REQUIRED"
 
 
@@ -89,7 +95,7 @@ def validate_attestation_schema(value: dict) -> None:
 def validate_contract(value: dict) -> None:
     assert set(value) == {
         "schema", "state", "track_id", "stage", "predecessor", "domain_admission",
-        "network", "workload", "fault", "evidence", "external_checkpoint",
+        "network", "workload", "fault", "evidence", "future_execution_evidence_contracts", "external_checkpoint",
         "claim_ceiling", "contract_sha256",
     }
     assert value["schema"] == "agent_bridge.biocortex.track_b.t22_a1.three_domain_admission_contract.v1"
@@ -152,6 +158,16 @@ def validate_contract(value: dict) -> None:
         "clock_skew_observed_and_bounded_required": True,
         "maximum_attestation_time_spread_seconds": 300,
     }
+    assert value["future_execution_evidence_contracts"] == {
+        "distributed_execution_contract_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-execution-contract-schema-v1.json",
+        "distributed_execution_contract_schema_sha256": EXPECTED_EXECUTION_SCHEMA_SHA256,
+        "distributed_event_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-event-schema-v1.json",
+        "distributed_event_schema_sha256": EXPECTED_EVENT_SCHEMA_SHA256,
+        "terminal_evidence_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json",
+        "terminal_evidence_schema_sha256": EXPECTED_TERMINAL_SCHEMA_SHA256,
+        "actual_execution_contract_instance_present": False,
+        "actual_terminal_evidence_present": False,
+    }
     assert value["external_checkpoint"] == {
         "substage": "T22_A1_R",
         "independent_of_a1_h_admission": True,
@@ -173,6 +189,9 @@ def validate_contract(value: dict) -> None:
         "production_admissible": False,
     }
     assert sha256_file(SCHEMA_PATH) == EXPECTED_SCHEMA_SHA256
+    assert sha256_file(EXECUTION_SCHEMA_PATH) == EXPECTED_EXECUTION_SCHEMA_SHA256
+    assert sha256_file(EVENT_SCHEMA_PATH) == EXPECTED_EVENT_SCHEMA_SHA256
+    assert sha256_file(TERMINAL_SCHEMA_PATH) == EXPECTED_TERMINAL_SCHEMA_SHA256
     assert value["contract_sha256"] == domain_digest(CONTRACT_DOMAIN, value, "contract_sha256")
 
 
@@ -210,6 +229,7 @@ def validate_proposal(value: dict, contract: dict) -> None:
         "exact_private_overlay_peer_endpoint_set_sha256": None,
         "exact_private_overlay_acl_receipt_sha256": None,
         "fault_target_domain": None,
+        "exact_distributed_execution_contract_content_sha256": None,
         "t22_a1_r_public_rekor_submission": "SEPARATE_DECISION_REQUIRED",
     }
     assert value["scope_before_exact_owner_signature"] == {
@@ -292,6 +312,11 @@ def inspect() -> dict:
         "external_anti_rollback_evidence": False,
         "production_admissible": False,
         "attestation_schema_sha256": EXPECTED_SCHEMA_SHA256,
+        "distributed_execution_contract_schema_sha256": EXPECTED_EXECUTION_SCHEMA_SHA256,
+        "distributed_event_schema_sha256": EXPECTED_EVENT_SCHEMA_SHA256,
+        "terminal_evidence_schema_sha256": EXPECTED_TERMINAL_SCHEMA_SHA256,
+        "actual_execution_contract_instance_present": False,
+        "actual_terminal_evidence_present": False,
         "contract_sha256": contract["contract_sha256"],
         "proposal_sha256": proposal["proposal_sha256"],
     }

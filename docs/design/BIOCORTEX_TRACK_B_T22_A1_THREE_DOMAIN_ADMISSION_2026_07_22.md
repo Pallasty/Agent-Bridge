@@ -100,6 +100,35 @@ exact owner-signed collection challenge can bind the selected third domain and
 private artifact root. Thus the current verifier can be fully tested without
 reading a real stable host identifier.
 
+## Future execution and evidence contracts
+
+Three additional closed Draft 2020-12 schemas now freeze the shape of the
+future authorized run without creating a runnable instance:
+
+1. The distributed execution-contract schema requires an exact source commit,
+   a verified and unexpired detached owner signature, one-use authorization,
+   a maximum four-hour runtime, all three signed attestation bindings, and one
+   of two explicit budget branches: three owner hosts at zero spend, or a named
+   provider/region/zone/instance type with a positive bounded USD ceiling.
+2. The event schema requires every coordinator-chain event to carry the digest
+   and verified detached-signature binding of its source-domain evidence. It
+   prohibits raw endpoints and secret material and distinguishes genesis from
+   non-genesis chain links.
+3. The terminal-evidence schema requires exactly three ordered domain rows,
+   hashed per-domain process evidence and cleanup receipts, all required fault
+   observations, a verified coordinator chain, all source-domain signatures,
+   bounded clock/runtime/spend observations, complete process/port cleanup,
+   and an exact-value secret scan.
+
+`PASS_T22_A1_THREE_HOST_OWNED_SERVICE_SET_LOSS_RECOVERY` is structurally
+unavailable if any required domain, signature, recovery, event-chain, cleanup,
+or secret-scan flag is false. A failure receipt must carry an `E_*` failure
+code and cannot earn the admissible claim. Both PASS and FAIL receipts keep
+power, site, storage, provider, anti-rollback, and production claims false.
+
+These are schemas only. No distributed execution-contract instance, owner
+authorization, real distributed event, or terminal evidence item exists yet.
+
 ## Private network boundary
 
 The contract selects an owner-managed private overlay and forbids public
@@ -171,12 +200,18 @@ blocked until these inputs are concrete.
 
 - domain-attestation schema raw SHA-256:
   `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b`;
+- distributed execution-contract schema raw SHA-256:
+  `2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b`;
+- distributed event schema raw SHA-256:
+  `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5`;
+- terminal-evidence schema raw SHA-256:
+  `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - admission-contract content SHA-256:
-  `88fe5e0198e096fd2a7e93951b10db843166b94b99b0de8471cc411e22a2631e`;
+  `eef3c45497e20483bc302bca925546f5f5c5858f7254b4024f5cc8343108076c`;
 - blocked owner-proposal content SHA-256:
-  `62c26d44d929830c04cdacfbdffa8e71183e4e1a951f5cbc4dc95aef1decc05c`.
+  `84d0f15cbd92a65d0c1aa0686f92c9aa33749dcb2bd409bca85ef5de54a9dcd8`.
 
-The offline gate exercises 46 directed negative cases after recomputing
+The offline admission gate exercises 51 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
 the hash. It constructs no network socket, reads no stable host identifier or
 credential, contacts no external host or provider, starts no service, spends
@@ -188,3 +223,11 @@ claims, cross-domain identity/key/alias uniqueness, endpoint/ACL equality,
 clock spread, signature mismatch, and exact bundle contents. Its KAT generates
 only ephemeral synthetic keys and removes them; it reads zero real host
 identifiers and produces zero real attestations.
+
+The execution/event/terminal schema KAT adds 73 directed negatives. It rejects
+multi-use or overlong authority, incomplete/domain-colliding topology, public
+or credential-bearing network forms, coordinator-targeted faults, broken
+source signatures and event links, incomplete recovery/cleanup, leaked-secret
+states, overspend, and inflated claims. All instances are synthetic; it starts
+zero services, contacts zero hosts, reads zero real identifiers or credentials,
+and injects zero faults.

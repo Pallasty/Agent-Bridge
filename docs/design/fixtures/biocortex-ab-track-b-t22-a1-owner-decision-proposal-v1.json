@@ -27,6 +27,7 @@
     "exact_private_overlay_peer_endpoint_set_sha256": null,
     "exact_private_overlay_acl_receipt_sha256": null,
     "fault_target_domain": null,
+    "exact_distributed_execution_contract_content_sha256": null,
     "t22_a1_r_public_rekor_submission": "SEPARATE_DECISION_REQUIRED"
   },
   "scope_before_exact_owner_signature": {
@@ -44,7 +45,7 @@
   "admission_contract": {
     "path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-three-domain-admission-contract-v1.json",
     "schema": "agent_bridge.biocortex.track_b.t22_a1.three_domain_admission_contract.v1",
-    "contract_sha256": "88fe5e0198e096fd2a7e93951b10db843166b94b99b0de8471cc411e22a2631e"
+    "contract_sha256": "eef3c45497e20483bc302bca925546f5f5c5858f7254b4024f5cc8343108076c"
   },
   "signing": {
     "owner_id": "pallasting",
@@ -62,5 +63,5 @@
     "nonzero_spend_authorized": false,
     "production_admissible": false
   },
-  "proposal_sha256": "62c26d44d929830c04cdacfbdffa8e71183e4e1a951f5cbc4dc95aef1decc05c"
+  "proposal_sha256": "84d0f15cbd92a65d0c1aa0686f92c9aa33749dcb2bd409bca85ef5de54a9dcd8"
 }

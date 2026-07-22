@@ -59,6 +59,16 @@
     "clock_skew_observed_and_bounded_required": true,
     "maximum_attestation_time_spread_seconds": 300
   },
+  "future_execution_evidence_contracts": {
+    "distributed_execution_contract_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-execution-contract-schema-v1.json",
+    "distributed_execution_contract_schema_sha256": "2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b",
+    "distributed_event_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-event-schema-v1.json",
+    "distributed_event_schema_sha256": "4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5",
+    "terminal_evidence_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json",
+    "terminal_evidence_schema_sha256": "f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a",
+    "actual_execution_contract_instance_present": false,
+    "actual_terminal_evidence_present": false
+  },
   "external_checkpoint": {
     "substage": "T22_A1_R",
     "independent_of_a1_h_admission": true,
@@ -79,5 +89,5 @@
     "external_anti_rollback_proved": false,
     "production_admissible": false
   },
-  "contract_sha256": "88fe5e0198e096fd2a7e93951b10db843166b94b99b0de8471cc411e22a2631e"
+  "contract_sha256": "eef3c45497e20483bc302bca925546f5f5c5858f7254b4024f5cc8343108076c"
 }

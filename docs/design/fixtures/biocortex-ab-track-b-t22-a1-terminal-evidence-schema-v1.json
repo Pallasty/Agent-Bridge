@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.biocortex.track_b.t22_a1.terminal_evidence.v1",
+  "title": "BioCortex Track B T22-A1 terminal evidence",
+  "description": "Closed terminal receipt schema. PASS requires complete three-domain signed evidence, the bounded owned-service-set fault, cleanup, secret scanning, and conservative claims.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "packet_kind", "hashing_contract", "status", "failure_code", "run_id", "source_commit", "bindings", "timing", "domains", "cluster_evidence", "event_chain", "cleanup", "claims", "completed_at", "content_sha256"],
+  "properties": {
+    "schema": {"const": "agent_bridge.biocortex.track_b.t22_a1.terminal_evidence.v1"},
+    "packet_kind": {"const": "T22_A1_H_TERMINAL_EVIDENCE"},
+    "hashing_contract": {"$ref": "#/$defs/hashing_contract"},
+    "status": {"enum": ["PASS_T22_A1_THREE_HOST_OWNED_SERVICE_SET_LOSS_RECOVERY", "FAIL_T22_A1_DISTRIBUTED_EXECUTION"]},
+    "failure_code": {"type": ["string", "null"], "pattern": "^E_[A-Z0-9_]+$"},
+    "run_id": {"type": "string", "pattern": "^t22-a1-[0-9]{8}T[0-9]{6}\\.[0-9]{6}z-[0-9a-f]{12}$"},
+    "source_commit": {"$ref": "#/$defs/git_oid"},
+    "bindings": {"$ref": "#/$defs/bindings"},
+    "timing": {"$ref": "#/$defs/timing"},
+    "domains": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {"allOf": [{"$ref": "#/$defs/domain_evidence"}, {"properties": {"domain_id": {"const": "domain-1"}}}]},
+        {"allOf": [{"$ref": "#/$defs/domain_evidence"}, {"properties": {"domain_id": {"const": "domain-2"}}}]},
+        {"allOf": [{"$ref": "#/$defs/domain_evidence"}, {"properties": {"domain_id": {"const": "domain-3"}}}]}
+      ],
+      "items": false
+    },
+    "cluster_evidence": {"$ref": "#/$defs/cluster_evidence"},
+    "event_chain": {"$ref": "#/$defs/event_chain"},
+    "cleanup": {"$ref": "#/$defs/cleanup"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "completed_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+    "content_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS_T22_A1_THREE_HOST_OWNED_SERVICE_SET_LOSS_RECOVERY"}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "failure_code": {"type": "null"},
+          "domains": {"items": {"properties": {"attestation_signature_verified": {"const": true}, "domain_event_signatures_verified": {"const": true}, "owned_process_logs_hashed": {"const": true}, "cleanup_receipt_verified": {"const": true}, "all_owned_processes_stopped": {"const": true}, "all_owned_ports_released": {"const": true}, "secret_value_scan_passed": {"const": true}}}},
+          "cluster_evidence": {"properties": {"linearizable_authorize_consume_observed": {"const": true}, "replay_consume_rejected": {"const": true}, "prefault_transit_signature_created": {"const": true}, "target_owned_service_set_stopped": {"const": true}, "surviving_two_domain_etcd_quorum_observed": {"const": true}, "surviving_two_domain_openbao_available": {"const": true}, "postfault_transit_signature_verified": {"const": true}, "target_owned_service_set_restarted": {"const": true}, "target_domain_rejoined": {"const": true}}},
+          "event_chain": {"properties": {"canonical_coordinator_hash_chain_verified": {"const": true}, "all_source_domain_signatures_verified": {"const": true}, "terminal_event_present": {"const": true}}},
+          "cleanup": {"properties": {"all_owned_processes_stopped": {"const": true}, "all_owned_ports_released": {"const": true}, "all_domain_cleanup_receipts_verified": {"const": true}, "secret_value_scan_passed": {"const": true}, "spend_within_signed_limit": {"const": true}}},
+          "claims": {"properties": {"admissible_claim_earned": {"const": true}}}
+        }
+      },
+      "else": {
+        "properties": {
+          "failure_code": {"type": "string", "pattern": "^E_[A-Z0-9_]+$"},
+          "claims": {"properties": {"admissible_claim_earned": {"const": false}}}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "git_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "hashing_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "canonicalization", "digest_domain", "hash_scope", "self_hash_field", "self_hash_field_excluded", "cross_field_semantic_validation_required"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "canonicalization": {"const": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT"},
+        "digest_domain": {"const": "agent-bridge/biocortex/track-b/t22-a1/terminal-evidence/v1"},
+        "hash_scope": {"const": "ENTIRE_PACKET_EXCEPT_CONTENT_SHA256"},
+        "self_hash_field": {"const": "content_sha256"},
+        "self_hash_field_excluded": {"const": true},
+        "cross_field_semantic_validation_required": {"const": true}
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_contract_sha256", "owner_authorization_content_sha256", "admission_contract_sha256", "owner_decision_proposal_sha256", "exact_three_domain_attestation_packet_set_sha256", "peer_endpoint_set_sha256", "acl_policy_receipt_sha256"],
+      "properties": {
+        "execution_contract_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_authorization_content_sha256": {"$ref": "#/$defs/sha256"},
+        "admission_contract_sha256": {"$ref": "#/$defs/sha256"},
+        "owner_decision_proposal_sha256": {"$ref": "#/$defs/sha256"},
+        "exact_three_domain_attestation_packet_set_sha256": {"$ref": "#/$defs/sha256"},
+        "peer_endpoint_set_sha256": {"$ref": "#/$defs/sha256"},
+        "acl_policy_receipt_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "completed_at", "runtime_seconds", "signed_maximum_runtime_seconds", "runtime_within_signed_limit", "maximum_observed_clock_skew_seconds", "clock_skew_within_bound"],
+      "properties": {
+        "started_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+        "completed_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+        "runtime_seconds": {"type": "integer", "minimum": 0, "maximum": 14400},
+        "signed_maximum_runtime_seconds": {"type": "integer", "minimum": 1, "maximum": 14400},
+        "runtime_within_signed_limit": {"const": true},
+        "maximum_observed_clock_skew_seconds": {"type": "integer", "minimum": 0, "maximum": 300},
+        "clock_skew_within_bound": {"const": true}
+      }
+    },
+    "domain_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "attestation_packet_sha256", "attestation_signature_verified", "signed_event_chain_head_sha256", "domain_event_count", "domain_event_signatures_verified", "preflight_receipt_sha256", "process_receipt_sha256", "cleanup_receipt_sha256", "owned_process_log_set_sha256", "owned_process_logs_hashed", "cleanup_receipt_verified", "all_owned_processes_stopped", "all_owned_ports_released", "secret_value_scan_passed"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "attestation_packet_sha256": {"$ref": "#/$defs/sha256"},
+        "attestation_signature_verified": {"type": "boolean"},
+        "signed_event_chain_head_sha256": {"$ref": "#/$defs/sha256"},
+        "domain_event_count": {"type": "integer", "minimum": 1},
+        "domain_event_signatures_verified": {"type": "boolean"},
+        "preflight_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "process_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "cleanup_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "owned_process_log_set_sha256": {"$ref": "#/$defs/sha256"},
+        "owned_process_logs_hashed": {"type": "boolean"},
+        "cleanup_receipt_verified": {"type": "boolean"},
+        "all_owned_processes_stopped": {"type": "boolean"},
+        "all_owned_ports_released": {"type": "boolean"},
+        "secret_value_scan_passed": {"type": "boolean"}
+      }
+    },
+    "cluster_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["etcd_distinct_voter_domain_count", "openbao_distinct_voter_domain_count", "linearizable_authorize_consume_observed", "replay_consume_rejected", "prefault_transit_signature_created", "fault_target_domain_id", "fault_target_was_non_coordinator", "target_owned_service_set_stopped", "surviving_two_domain_etcd_quorum_observed", "surviving_two_domain_openbao_available", "postfault_transit_signature_verified", "target_owned_service_set_restarted", "target_domain_rejoined"],
+      "properties": {
+        "etcd_distinct_voter_domain_count": {"const": 3},
+        "openbao_distinct_voter_domain_count": {"const": 3},
+        "linearizable_authorize_consume_observed": {"type": "boolean"},
+        "replay_consume_rejected": {"type": "boolean"},
+        "prefault_transit_signature_created": {"type": "boolean"},
+        "fault_target_domain_id": {"enum": ["domain-2", "domain-3"]},
+        "fault_target_was_non_coordinator": {"const": true},
+        "target_owned_service_set_stopped": {"type": "boolean"},
+        "surviving_two_domain_etcd_quorum_observed": {"type": "boolean"},
+        "surviving_two_domain_openbao_available": {"type": "boolean"},
+        "postfault_transit_signature_verified": {"type": "boolean"},
+        "target_owned_service_set_restarted": {"type": "boolean"},
+        "target_domain_rejoined": {"type": "boolean"}
+      }
+    },
+    "event_chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_count", "event_chain_head_sha256", "canonical_coordinator_hash_chain_verified", "all_source_domain_signatures_verified", "terminal_event_present"],
+      "properties": {
+        "event_count": {"type": "integer", "minimum": 15},
+        "event_chain_head_sha256": {"$ref": "#/$defs/sha256"},
+        "canonical_coordinator_hash_chain_verified": {"type": "boolean"},
+        "all_source_domain_signatures_verified": {"type": "boolean"},
+        "terminal_event_present": {"type": "boolean"}
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all_owned_processes_stopped", "all_owned_ports_released", "all_domain_cleanup_receipts_verified", "secret_value_scan_passed", "host_global_network_mutated", "ambient_or_external_credentials_accessed", "public_listeners_created", "spend_usd_cents", "signed_maximum_spend_usd_cents", "spend_within_signed_limit"],
+      "properties": {
+        "all_owned_processes_stopped": {"type": "boolean"},
+        "all_owned_ports_released": {"type": "boolean"},
+        "all_domain_cleanup_receipts_verified": {"type": "boolean"},
+        "secret_value_scan_passed": {"type": "boolean"},
+        "host_global_network_mutated": {"const": false},
+        "ambient_or_external_credentials_accessed": {"const": false},
+        "public_listeners_created": {"const": false},
+        "spend_usd_cents": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "signed_maximum_spend_usd_cents": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "spend_within_signed_limit": {"type": "boolean"}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maximum_claim", "admissible_claim_earned", "host_power_loss_proved", "site_power_network_independence_proved", "storage_device_durability_proved", "provider_durability_proved", "external_anti_rollback_proved", "production_admissible"],
+      "properties": {
+        "maximum_claim": {"const": "THREE_DISTINCT_PHYSICAL_HOST_PLACEMENT_AND_ONE_HOST_SCOPED_OWNED_SERVICE_SET_LOSS_RECOVERY_NONPRODUCTION"},
+        "admissible_claim_earned": {"type": "boolean"},
+        "host_power_loss_proved": {"const": false},
+        "site_power_network_independence_proved": {"const": false},
+        "storage_device_durability_proved": {"const": false},
+        "provider_durability_proved": {"const": false},
+        "external_anti_rollback_proved": {"const": false},
+        "production_admissible": {"const": false}
+      }
+    }
+  }
+}

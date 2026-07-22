@@ -35,12 +35,15 @@ rollback prevention.
 - frozen three-domain admission contract and conservative claim ceiling;
 - blocked owner-decision proposal with all real endpoint, cloud, budget,
   attestation-set, ACL, fault-target, and public-output choices unset; and
-- offline preflight plus 46 semantic negative mutations that recompute packet
-  self-digests before rejection.
+- offline preflight plus 51 semantic negative mutations that recompute packet
+  self-digests before rejection;
 - private three-packet bundle verifier with canonical framing, SSHSIG, public-key
   normalization, four-hour freshness, 300-second clock spread, alias-collapse,
   identity/key uniqueness, endpoint/ACL equality, and exact directory closure;
-  its 30 synthetic negatives create no real attestation.
+  its 30 synthetic negatives create no real attestation; and
+- closed distributed execution-contract, signed-event, and terminal-evidence
+  schemas with 73 synthetic negative cases and no real contract instance or
+  evidence item.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -70,8 +73,11 @@ Frozen packet identities:
 | Packet | SHA-256 |
 |---|---|
 | domain-attestation schema raw bytes | `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b` |
-| admission-contract content | `88fe5e0198e096fd2a7e93951b10db843166b94b99b0de8471cc411e22a2631e` |
-| blocked owner proposal content | `62c26d44d929830c04cdacfbdffa8e71183e4e1a951f5cbc4dc95aef1decc05c` |
+| distributed execution-contract schema raw bytes | `2974616587d4462b718fb5dae0a621c0d16ff4f844830b8b37c8bafd9a27429b` |
+| distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
+| terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
+| admission-contract content | `eef3c45497e20483bc302bca925546f5f5c5858f7254b4024f5cc8343108076c` |
+| blocked owner proposal content | `84d0f15cbd92a65d0c1aa0686f92c9aa33749dcb2bd409bca85ef5de54a9dcd8` |
 
 ## Advancement boundary
 
@@ -83,9 +89,10 @@ No signature is requested yet. The next concrete inputs are:
    three distinct dedicated keys; and
 3. the exact private-overlay endpoint-set and ACL receipt digests.
 
-After those exist, a separate unit may build the cross-host runner, generate a
-source-bound execution payload, and ask the owner to sign it. Public Rekor
-submission remains a separate explicit choice.
+After those exist, a separate unit may implement the cross-host runner against
+the now-frozen schemas, generate one source-bound execution-contract instance,
+and ask the owner to sign it. Public Rekor submission remains a separate
+explicit choice.
 
 The collector that reads real machine/hardware/boot identifiers is
 intentionally not unlocked by this unit. It must first consume an exact signed
