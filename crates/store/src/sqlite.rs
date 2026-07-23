@@ -3851,6 +3851,9 @@ impl StateStore for SqliteStore {
         // Pre-compute overlap tokens for contradiction detection (outside closure).
         let new_tokens = overlap_tokens(&content);
         let kind_clone = kind.clone();
+        // Source-admission rows are independent audit facts keyed by source.
+        // Similar review templates must coexist rather than retire each other.
+        let auto_supersede_enabled = kind_clone != "skill_source_admission";
         // Caller-supplied `dedupe:<id>` tags collapse near-duplicate writes
         // to a single active row (Phase 2 #2). E.g. P5 dream replay sets
         // `dedupe:cluster:<hash>` so different LLMs summarizing the same
@@ -4061,7 +4064,7 @@ impl StateStore for SqliteStore {
 
                 // ── Contradiction detection ──────────────────────────────────
                 // Only run if we have enough tokens to compare meaningfully.
-                if new_tokens.len() >= 3 {
+                if auto_supersede_enabled && new_tokens.len() >= 3 {
                     let mut cand_stmt = c.prepare(
                         "SELECT key, content FROM memories
                          WHERE kind = ?1
@@ -19285,6 +19288,31 @@ mod tests {
             .expect_err("missing thread");
         assert!(format!("{err}").contains("not found"));
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn source_admissions_do_not_auto_supersede_by_template_overlap() {
+        let (dir, store) = fresh_store("source-admission-coexist").await;
+        for (key, source) in [
+            ("skill_source_admission:alpha/skills", "alpha/skills"),
+            ("skill_source_admission:bravo/skills", "bravo/skills"),
+        ] {
+            let mut record = make_memrec(
+                key,
+                &format!("Source admission for {source}. Verdict approved SPDX MIT Evidence reviewed"),
+            );
+            record.kind = "skill_source_admission".to_string();
+            store.memory_save(&record).await.expect("save source admission");
+        }
+        for key in [
+            "skill_source_admission:alpha/skills",
+            "skill_source_admission:bravo/skills",
+        ] {
+            let record = store.memory_get(key).await.expect("get").expect("record");
+            assert_eq!(record.status, "active", "{key} must remain independently active");
+            assert!(record.superseded_by.is_none());
+        }
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
