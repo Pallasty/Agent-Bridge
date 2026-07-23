@@ -23,7 +23,10 @@
       "language": "en",
       "query": "create a presentation from a project brief",
       "expectation": "must_match",
-      "expected_keys": ["skill:daymade/claude-code-skills/slides-creator"]
+      "expected_keys": [
+        "skill:daymade/claude-code-skills/slides-creator",
+        "skill:daymade/claude-code-skills/daymade-docs/ppt-creator"
+      ]
     },
     {
       "id": "rust-review-en",
@@ -39,7 +42,10 @@
       "language": "zh",
       "query": "根据项目简报制作演示文稿",
       "expectation": "known_gap",
-      "expected_keys": ["skill:daymade/claude-code-skills/slides-creator"]
+      "expected_keys": [
+        "skill:daymade/claude-code-skills/slides-creator",
+        "skill:daymade/claude-code-skills/daymade-docs/ppt-creator"
+      ]
     },
     {
       "id": "rust-review-zh-known-gap",
