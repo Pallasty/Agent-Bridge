@@ -2,19 +2,20 @@
 
 Date: 2026-07-22
 
-Status: **LOCAL BUILD PASS / INDEPENDENT LINUX PENDING / C1 NOT YET ACCEPTED**
+Status: **LOCAL BUILD PASS / INDEPENDENT LINUX PASS / C1 ACCEPTED**
 
 Source receipt:
 `docs/design/FREE_RECALL_STRATEGY_R11_C1_SOURCE_RECEIPT_2026_07_22.md`
 
 ## 1. Decision
 
-The exact branch tip `59f8c1a3897e56f87c833eb4782a5712d5a96c0e` passes
-the isolated C1 build and targeted tests locally. The required independent
-Linux replay did not complete, so R12 does **not** accept C1 and does not open
-C2.
+The exact C1 source tip `59f8c1a3897e56f87c833eb4782a5712d5a96c0e` passes
+the isolated C1 build and targeted tests locally and on independent Linux
+node tb14. The source bundle was made from `e685b1da`, a docs-only descendant
+of the C1 tip; R11's canonical C1 source-hash report remains unchanged and
+passed on the local branch.
 
-This is a transport/toolchain blocker, not a source-test failure.
+R12 therefore accepts C1. This acceptance does **not** open C2.
 
 ## 2. Local macOS evidence
 
@@ -55,44 +56,61 @@ The R11 source checker was rerun after the final source tip: PASS, `14 / 14`
 directed mutations rejected, report SHA-256
 `37908892f8e5b8debbe0d76d33683618631ed5e0b31d00b4da97ead2158ff41a`.
 
-## 3. Independent Linux attempt
+## 3. Independent Linux replay — tb14
 
-The intended aio2 replay could not obtain the exact source tree:
+The aio2 transport attempt remains non-evidence: it could not receive a
+complete source bundle. The independent replay was instead completed on
+tb14 (Linux x86_64) after a private, fixed Rustup minimal-profile install.
 
-- aio2 is reachable and reports Linux x86_64, but has no existing
-  `agent-bridge` checkout;
-- public GitHub clone fails there because `github.com` cannot be resolved;
-- standard SSH archive, SCP, and Tailscale File transfers stalled before a
-  complete 10MB workspace bundle arrived. Observed partial limits were 4.8MB
-  for the initial archive, 3,932,160 bytes for SCP, and 753,664 bytes for a
-  2MB SCP fragment;
-- the candidate fallback tb14 is reachable through Tailscale SSH and reports
-  Linux x86_64, but has no `rustc`/`cargo` in PATH, `~/.cargo`, `/opt`, or
-  `/usr/local`.
+Environment:
 
-No remote Cargo command ran, no remote database was opened, and no remote
-result is claimed. Incomplete aio2 transfer artifacts were never used as
-source input.
+- `rustc 1.94.0 (4a4ef493e 2026-03-02)`;
+- `cargo 1.94.0 (85eff7c80 2026-01-15)`;
+- source bundle SHA-256:
+  `39d1ca358021281fb8c537427cf33d2e20749d919d87c593d3d51f7aa5fe5252`;
+- a missing compile-time fixture from the intentionally reduced source bundle
+  was copied from the same local source and SHA-256 verified as
+  `4d336f8884e3296e25dc4f8422a302a3df97e54ad343225b4b71fba996d3392e`.
+
+Public dependencies were fetched only through `cargo fetch --locked`; the
+acceptance replay itself used `--locked --offline`:
+
+```text
+cargo check -p ab-bridge --no-default-features \
+  --features episode-observation-slice-c1 --locked --offline
+
+cargo test -p ab-bridge --lib --no-default-features \
+  --features episode-observation-slice-c1 \
+  episode_observation_curation_batch --locked --offline
+
+cargo test -p ab-bridge --lib --no-default-features \
+  --features episode-observation-slice-c1 \
+  session_curate_candidate_ledger --locked --offline
+```
+
+Results:
+
+- feature-isolated `cargo check`: PASS;
+- orchestration module: `4 passed, 0 failed`;
+- candidate-ledger regression: `1 passed, 0 failed`.
+
+The Linux build emitted the same unrelated `ab-store` mixed-script/dead-code
+warnings and pre-existing `mcp_tools` private-interface/dead-code warnings;
+no C1 source warning or failure occurred. No database was opened, no runtime
+producer was enabled, and no deployment occurred.
 
 ## 4. Authority ledger
 
 - C1 source: landed;
 - local C1 feature check/tests: passed;
-- independent Linux replay: pending;
-- C1 acceptance: **false**;
+- independent Linux replay: passed on tb14;
+- C1 acceptance: **true**;
 - C2 store capability, trusted keys, runtime enablement, real producer event,
   retrieval, merge, release, and deployment: **closed**.
 
 ## 5. Next gate
 
-One of these independent-infrastructure remedies is required before resuming
-R12:
-
-1. repair/restore aio2 source transport (Git DNS/connectivity or a reliable
-   Tailscale/SSH file channel), then replay the exact `59f8c1a3` source after
-   SHA-256 verification; or
-2. separately authorize installing a fixed Rust/Cargo toolchain on tb14, then
-   perform the same source-hash-verified Linux replay there.
-
-Neither remedy opens C2. After an independent PASS, C1 can be accepted; only
-then may a separate C2 design/authorization gate be considered.
+C1 is closed. The next possible lane is a separate C2 design and authority
+gate. It must define the narrow `StateStore` capability, trusted-key custody,
+runtime enablement, and observation/retrieval boundaries before any C2 source
+or runtime work begins.
