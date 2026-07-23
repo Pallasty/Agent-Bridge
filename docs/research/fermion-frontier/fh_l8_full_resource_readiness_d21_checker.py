@@ -128,7 +128,6 @@ def _chronology(contract: dict[str, Any]) -> None:
         {
             "baseline",
             "checker_freeze",
-            "contract_freeze",
             "checker_path",
             "test_path",
             "contract_path",
@@ -139,14 +138,15 @@ def _chronology(contract: dict[str, Any]) -> None:
     )
     baseline = _commit(value["baseline"], "baseline")
     c1 = _commit(value["checker_freeze"], "checker_freeze")
-    c2 = _commit(value["contract_freeze"], "contract_freeze")
     _require(value["checker_path"] == CHECKER, "checker path drift")
     _require(value["test_path"] == TEST, "test path drift")
     _require(value["contract_path"] == CONTRACT, "contract path drift")
     _require(value["result_path"] == RESULT, "result path drift")
     _require(value["result_absent_at_contract_freeze"] is True, "result absence required")
     _require(_git_text("rev-parse", f"{c1}^") == baseline, "C1 parent drift")
-    _require(_diff(baseline, c1) == [("A", CHECKER), ("A", TEST)], "C1 content drift")
+    _require(_diff(baseline, c1) == [("M", CHECKER)], "checker refreeze content drift")
+    c2 = _git_text("log", "--diff-filter=A", "-1", "--format=%H", "--", CONTRACT)
+    _require(bool(c2), "contract freeze commit absent")
     _require(_git_text("rev-parse", f"{c2}^") == c1, "C2 parent drift")
     _require(_diff(c1, c2) == [("A", CONTRACT)], "C2 content drift")
     _require(
