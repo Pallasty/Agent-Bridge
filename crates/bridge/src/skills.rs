@@ -3074,6 +3074,62 @@ fn src_to_clone_url(src: &str) -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloneMode {
+    Partial,
+    FullHttp11,
+}
+
+fn clone_args(url: &str, dir: &Path, checkout_ref: Option<&str>, mode: CloneMode) -> Vec<String> {
+    let mut args = Vec::new();
+    if mode == CloneMode::FullHttp11 {
+        // Some GitHub partial-clone checkouts reset while lazy-fetching a
+        // promised blob. The fallback trades a small amount of bandwidth for a
+        // complete shallow checkout over HTTP/1.1.
+        args.extend(["-c".to_string(), "http.version=HTTP/1.1".to_string()]);
+    }
+    args.extend([
+        "clone".to_string(),
+        "--depth=1".to_string(),
+        "--quiet".to_string(),
+    ]);
+    if mode == CloneMode::Partial {
+        args.push("--filter=blob:none".to_string());
+    }
+    if mode == CloneMode::FullHttp11 {
+        args.push("--single-branch".to_string());
+    }
+    if let Some(r) = checkout_ref {
+        args.push("--branch".to_string());
+        args.push(r.to_string());
+        if mode == CloneMode::Partial {
+            args.push("--single-branch".to_string());
+        }
+    }
+    args.push(url.to_string());
+    args.push(dir.to_string_lossy().to_string());
+    args
+}
+
+fn run_clone(args: &[String], url: &str) -> Result<std::process::ExitStatus> {
+    Command::new("git")
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("git clone {} failed to launch", url))
+}
+
+fn fallback_checkout_ref(checkout_ref: Option<&str>) -> Option<&str> {
+    // `main` is the current default for the affected source. Omitting it lets
+    // Git select the remote HEAD, which avoids the failing advertised-ref
+    // partial-checkout path while retaining explicit non-default refs.
+    match checkout_ref {
+        Some("main") => None,
+        other => other,
+    }
+}
+
 fn clone_shallow(url: &str, src_id: &str, checkout_ref: Option<&str>) -> Result<PathBuf> {
     let nonce = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -3081,28 +3137,33 @@ fn clone_shallow(url: &str, src_id: &str, checkout_ref: Option<&str>) -> Result<
         .unwrap_or(0);
     let safe_id = src_id.replace('/', "_");
     let dir = std::env::temp_dir().join(format!("ab-skills-{}-{}", safe_id, nonce));
-    let mut args = vec![
-        "clone".to_string(),
-        "--depth=1".to_string(),
-        "--quiet".to_string(),
-        "--filter=blob:none".to_string(),
-    ];
-    if let Some(r) = checkout_ref {
-        args.push("--branch".to_string());
-        args.push(r.to_string());
-        args.push("--single-branch".to_string());
-    }
-    args.push(url.to_string());
-    args.push(dir.to_string_lossy().to_string());
-
-    let status = Command::new("git")
-        .args(&args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .status()
-        .with_context(|| format!("git clone {} failed to launch", url))?;
+    let status = run_clone(
+        &clone_args(url, &dir, checkout_ref, CloneMode::Partial),
+        url,
+    )?;
     if !status.success() {
-        bail!("git clone {} exited with {:?}", url, status.code());
+        eprintln!(
+            "[skills] partial clone failed for {}; retrying full shallow clone over HTTP/1.1",
+            src_id
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let fallback = run_clone(
+            &clone_args(
+                url,
+                &dir,
+                fallback_checkout_ref(checkout_ref),
+                CloneMode::FullHttp11,
+            ),
+            url,
+        )?;
+        if !fallback.success() {
+            bail!(
+                "git clone {} failed: partial exited {:?}, HTTP/1.1 fallback exited {:?}",
+                url,
+                status.code(),
+                fallback.code()
+            );
+        }
     }
     Ok(dir)
 }
@@ -5021,5 +5082,62 @@ mod tests {
         assert!(has("risk:server_start"), "tags={:?}", rec.tags);
         assert!(has("risk:model_download"), "tags={:?}", rec.tags);
         assert!(has("risk:apple_mlx"), "tags={:?}", rec.tags);
+    }
+
+    #[test]
+    fn partial_clone_plan_keeps_the_existing_fast_path() {
+        let args = clone_args(
+            "https://github.com/example/skills.git",
+            Path::new("/tmp/skills"),
+            Some("release"),
+            CloneMode::Partial,
+        );
+        assert_eq!(
+            args,
+            vec![
+                "clone",
+                "--depth=1",
+                "--quiet",
+                "--filter=blob:none",
+                "--branch",
+                "release",
+                "--single-branch",
+                "https://github.com/example/skills.git",
+                "/tmp/skills",
+            ]
+        );
+    }
+
+    #[test]
+    fn full_clone_fallback_disables_filter_and_forces_http11() {
+        let args = clone_args(
+            "https://github.com/example/skills.git",
+            Path::new("/tmp/skills"),
+            None,
+            CloneMode::FullHttp11,
+        );
+        assert_eq!(
+            args[..6],
+            [
+                "-c",
+                "http.version=HTTP/1.1",
+                "clone",
+                "--depth=1",
+                "--quiet",
+                "--single-branch"
+            ]
+        );
+        assert!(!args.iter().any(|arg| arg == "--filter=blob:none"));
+        assert_eq!(
+            args[6..],
+            ["https://github.com/example/skills.git", "/tmp/skills"]
+        );
+    }
+
+    #[test]
+    fn fallback_uses_remote_head_only_for_main() {
+        assert_eq!(fallback_checkout_ref(Some("main")), None);
+        assert_eq!(fallback_checkout_ref(Some("release")), Some("release"));
+        assert_eq!(fallback_checkout_ref(None), None);
     }
 }
