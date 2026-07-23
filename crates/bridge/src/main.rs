@@ -4212,6 +4212,9 @@ enum SkillsOp {
         /// Filter by vendor class, for example community or vendor-curated.
         #[arg(long)]
         vendor: Option<String>,
+        /// Filter source evidence: verified (origin+commit), partial, or unknown.
+        #[arg(long)]
+        provenance: Option<String>,
         /// Maximum records to print in the `items`/record section. 0 = all.
         #[arg(long, default_value_t = 100)]
         limit: usize,
@@ -4659,6 +4662,7 @@ async fn real_main() -> Result<()> {
                 risk,
                 lint,
                 vendor,
+                provenance,
                 limit,
             } => {
                 skills::run_audit(
@@ -4667,6 +4671,7 @@ async fn real_main() -> Result<()> {
                     risk,
                     lint.as_deref(),
                     vendor.as_deref(),
+                    provenance.as_deref(),
                     *limit,
                 )
                 .await

@@ -125,6 +125,11 @@ pick a skill on demand. It walks `**/SKILL.md`, `.claude/skills/*.md`,
 and `skills/*.md`, parses YAML frontmatter, and runs a heuristic safety
 lint (`pipe-to-shell`, `dangerous-rm`, `creds-path`, `eval-substitution`).
 
+Each record also carries an explicit provenance state: `verified` requires a
+recorded Git origin and commit pin; `partial` has incomplete Git metadata; and
+`unknown` covers legacy/local imports with no Git evidence. This is a review
+signal only: it never installs, executes, deletes, or silently reorders Skills.
+
 ### Sway workstation runbook
 
 For the local Sway workstation integration covering keyboard hotkeys, Wi-Fi
@@ -147,6 +152,9 @@ agent-bridge skills search "review pdf document"
 # List recent / show one.
 agent-bridge skills list --limit 20
 agent-bridge skills show skill:anthropics/skills/pdf
+
+# Audit only Skills whose upstream source and commit can be reproduced.
+agent-bridge skills audit --provenance verified --json
 
 # Install one — re-clones source, copies SKILL.md plus any sibling
 # scripts/data into ~/.claude/skills/<name>/. Lint warnings require --yes.

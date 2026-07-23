@@ -1289,6 +1289,7 @@ fn route_item_json(rank: usize, routed: &RoutedSkillHit, body_chars: usize) -> s
         "summary": first_line(&rec.content),
         "source": tag_value(&rec.tags, "src:"),
         "path": tag_value(&rec.tags, "path:"),
+        "provenance": skill_provenance(&rec.tags).as_str(),
         "lint": lint,
         "risks": risks,
         "tools": tools,
@@ -1494,6 +1495,7 @@ pub async fn run_sources(json: bool, limit: usize) -> Result<()> {
         );
         println!("  lint: {}", display_counts(&s.lint));
         println!("  vendor: {}", display_counts(&s.vendor));
+        println!("  provenance: {}", display_counts(&s.provenance));
         if !s.risks.is_empty() {
             println!("  risks: {}", display_counts(&s.risks));
         }
@@ -1514,6 +1516,7 @@ pub async fn run_audit(
     risks: &[String],
     lint: Option<&str>,
     vendor: Option<&str>,
+    provenance: Option<&str>,
     limit: usize,
 ) -> Result<()> {
     let store = open_store().await?;
@@ -1521,7 +1524,7 @@ pub async fn run_audit(
         .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
         .await
         .context("list_memories failed")?;
-    let filters = SkillAuditFilters::new(src, risks, lint, vendor);
+    let filters = SkillAuditFilters::new(src, risks, lint, vendor, provenance)?;
     let matched: Vec<MemoryRecord> = rows
         .iter()
         .filter(|r| filters.matches(r))
@@ -1562,6 +1565,7 @@ pub async fn run_audit(
     print_count_map("sources", &summary.sources);
     print_count_map("lint", &summary.lint);
     print_count_map("vendor", &summary.vendor);
+    print_count_map("provenance", &summary.provenance);
     print_count_map("risks", &summary.risks);
     if matched.is_empty() {
         return Ok(());
@@ -1572,9 +1576,10 @@ pub async fn run_audit(
         let lint = tag_value(&r.tags, "lint:").unwrap_or_else(|| "?".to_string());
         let risks = tag_values(&r.tags, "risk:");
         println!(
-            "- {}  [src={}, lint={}, risks={}]",
+            "- {}  [src={}, provenance={}, lint={}, risks={}]",
             r.key,
             src,
+            skill_provenance(&r.tags).as_str(),
             lint,
             if risks.is_empty() {
                 "none".to_string()
@@ -1598,11 +1603,18 @@ struct SkillAuditFilters {
     risks: Vec<String>,
     lint: Option<String>,
     vendor: Option<String>,
+    provenance: Option<SkillProvenance>,
 }
 
 impl SkillAuditFilters {
-    fn new(src: Option<&str>, risks: &[String], lint: Option<&str>, vendor: Option<&str>) -> Self {
-        Self {
+    fn new(
+        src: Option<&str>,
+        risks: &[String],
+        lint: Option<&str>,
+        vendor: Option<&str>,
+        provenance: Option<&str>,
+    ) -> Result<Self> {
+        Ok(Self {
             src: src.map(str::to_string),
             risks: risks
                 .iter()
@@ -1615,7 +1627,8 @@ impl SkillAuditFilters {
             vendor: vendor
                 .map(|v| v.strip_prefix("vendor:").unwrap_or(v).to_string())
                 .filter(|v| !v.trim().is_empty()),
-        }
+            provenance: provenance.map(SkillProvenance::parse).transpose()?,
+        })
     }
 
     fn matches(&self, rec: &MemoryRecord) -> bool {
@@ -1639,6 +1652,11 @@ impl SkillAuditFilters {
                 return false;
             }
         }
+        if let Some(expected) = self.provenance {
+            if skill_provenance(&rec.tags) != expected {
+                return false;
+            }
+        }
         let actual_risks: BTreeSet<String> = tag_values(&rec.tags, "risk:").into_iter().collect();
         self.risks.iter().all(|r| actual_risks.contains(r))
     }
@@ -1657,6 +1675,9 @@ impl SkillAuditFilters {
         if let Some(vendor) = &self.vendor {
             parts.push(format!("vendor={vendor}"));
         }
+        if let Some(provenance) = self.provenance {
+            parts.push(format!("provenance={}", provenance.as_str()));
+        }
         if parts.is_empty() {
             String::new()
         } else {
@@ -1670,6 +1691,7 @@ impl SkillAuditFilters {
             "risks": self.risks,
             "lint": self.lint,
             "vendor": self.vendor,
+            "provenance": self.provenance.map(SkillProvenance::as_str),
         })
     }
 }
@@ -1679,6 +1701,7 @@ struct SkillAuditSummary {
     sources: BTreeMap<String, usize>,
     lint: BTreeMap<String, usize>,
     vendor: BTreeMap<String, usize>,
+    provenance: BTreeMap<String, usize>,
     risks: BTreeMap<String, usize>,
 }
 
@@ -1688,6 +1711,7 @@ impl SkillAuditSummary {
             "sources": self.sources,
             "lint": self.lint,
             "vendor": self.vendor,
+            "provenance": self.provenance,
             "risks": self.risks,
         })
     }
@@ -1707,6 +1731,10 @@ fn skill_audit_summary(rows: &[MemoryRecord]) -> SkillAuditSummary {
         bump(
             &mut summary.vendor,
             tag_value(&r.tags, "vendor:").unwrap_or_else(|| "?".to_string()),
+        );
+        bump(
+            &mut summary.provenance,
+            skill_provenance(&r.tags).as_str().to_string(),
         );
         for risk in tag_values(&r.tags, "risk:") {
             bump(&mut summary.risks, risk);
@@ -1738,6 +1766,7 @@ struct SkillSourceSummary {
     git_commits: BTreeSet<String>,
     lint: BTreeMap<String, usize>,
     vendor: BTreeMap<String, usize>,
+    provenance: BTreeMap<String, usize>,
     risks: BTreeMap<String, usize>,
 }
 
@@ -1755,6 +1784,7 @@ impl SkillSourceSummary {
             },
             "lint": self.lint,
             "vendor": self.vendor,
+            "provenance": self.provenance,
             "risks": self.risks,
         })
     }
@@ -1791,6 +1821,10 @@ fn skill_source_inventory(rows: &[MemoryRecord]) -> Vec<SkillSourceSummary> {
         bump(
             &mut entry.vendor,
             tag_value(&r.tags, "vendor:").unwrap_or_else(|| "?".to_string()),
+        );
+        bump(
+            &mut entry.provenance,
+            skill_provenance(&r.tags).as_str().to_string(),
         );
         for risk in tag_values(&r.tags, "risk:") {
             bump(&mut entry.risks, risk);
@@ -2140,6 +2174,7 @@ fn skill_show_json_payload(rec: &MemoryRecord) -> serde_json::Value {
         "status": &rec.status,
         "source": tag_value(&rec.tags, "src:"),
         "path": tag_value(&rec.tags, "path:"),
+        "provenance": skill_provenance(&rec.tags).as_str(),
         "lint": tag_value(&rec.tags, "lint:"),
         "vendor": tag_value(&rec.tags, "vendor:"),
         "license": tag_value(&rec.tags, "license:"),
@@ -2154,6 +2189,58 @@ fn tag_values(tags: &[String], prefix: &str) -> Vec<String> {
     tags.iter()
         .filter_map(|t| t.strip_prefix(prefix).map(str::to_string))
         .collect()
+}
+
+/// Reproducibility state for an indexed external Skill.
+///
+/// `verified` means the record has both a clone origin and a commit pin. A
+/// branch is useful for refresh but is not sufficient to reproduce content.
+/// `partial` retains any incomplete Git metadata without overstating trust;
+/// `unknown` covers legacy or local imports that have no Git evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkillProvenance {
+    Verified,
+    Partial,
+    Unknown,
+}
+
+impl SkillProvenance {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Partial => "partial",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    fn parse(raw: &str) -> Result<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "verified" => Ok(Self::Verified),
+            "partial" => Ok(Self::Partial),
+            "unknown" => Ok(Self::Unknown),
+            other => bail!("unknown provenance {other:?}; expected verified|partial|unknown"),
+        }
+    }
+}
+
+fn has_nonempty_tag(tags: &[String], prefix: &str) -> bool {
+    tag_value(tags, prefix).is_some_and(|value| !value.trim().is_empty())
+}
+
+fn skill_provenance(tags: &[String]) -> SkillProvenance {
+    let has_origin = has_nonempty_tag(tags, "git_origin:");
+    let has_commit = has_nonempty_tag(tags, "git_commit:");
+    if has_origin && has_commit {
+        SkillProvenance::Verified
+    } else if has_origin
+        || has_commit
+        || has_nonempty_tag(tags, "git_branch:")
+        || has_nonempty_tag(tags, "git_src:")
+    {
+        SkillProvenance::Partial
+    } else {
+        SkillProvenance::Unknown
+    }
 }
 
 fn split_csv_tag(s: &str) -> Vec<String> {
@@ -3104,8 +3191,13 @@ mod tests {
 
     #[test]
     fn route_item_confidence_uses_semantic_cosine() {
+        let mut raw = test_skill_hit("skill:semantic", 2.0, Some(0.49));
+        raw.record.tags.extend([
+            "git_origin:https://github.com/acme/skills.git".to_string(),
+            "git_commit:abc123".to_string(),
+        ]);
         let hit = RoutedSkillHit {
-            hit: test_skill_hit("skill:semantic", 2.0, Some(0.49)),
+            hit: raw,
             score: 2.0,
             feedback: SkillRouteFeedback::default(),
         };
@@ -3114,6 +3206,7 @@ mod tests {
 
         assert_eq!(item["confidence"], "low");
         assert_eq!(item["retrieval"], "semantic");
+        assert_eq!(item["provenance"], "verified");
         let cosine = item["cosine"].as_f64().expect("cosine");
         assert!((cosine - 0.49).abs() < 1e-6);
     }
@@ -3775,12 +3868,44 @@ mod tests {
             &["risk:server_start".to_string()],
             Some("warn"),
             Some("community"),
-        );
+            None,
+        )
+        .expect("filters");
         assert!(filters.matches(&rec));
 
         let missing_risk =
-            SkillAuditFilters::new(None, &["checkpoint_write".to_string()], None, None);
+            SkillAuditFilters::new(None, &["checkpoint_write".to_string()], None, None, None)
+                .expect("filters");
         assert!(!missing_risk.matches(&rec));
+    }
+
+    #[test]
+    fn skill_provenance_requires_origin_and_commit_for_verified() {
+        let verified = vec![
+            "git_origin:https://github.com/acme/skills.git".to_string(),
+            "git_commit:abc123".to_string(),
+        ];
+        let partial = vec!["git_branch:main".to_string()];
+
+        assert_eq!(skill_provenance(&verified), SkillProvenance::Verified);
+        assert_eq!(skill_provenance(&partial), SkillProvenance::Partial);
+        assert_eq!(skill_provenance(&[]), SkillProvenance::Unknown);
+        assert!(SkillProvenance::parse("bad").is_err());
+    }
+
+    #[test]
+    fn skill_audit_filters_by_provenance() {
+        let mut verified = mk_skill("OpenBMB/MiniCPM", 42);
+        verified.tags.extend([
+            "git_origin:https://github.com/OpenBMB/MiniCPM.git".to_string(),
+            "git_commit:abc123".to_string(),
+        ]);
+        let unknown = mk_skill("local-skills", 43);
+        let filter = SkillAuditFilters::new(None, &[], None, None, Some("verified"))
+            .expect("verified filter");
+
+        assert!(filter.matches(&verified));
+        assert!(!filter.matches(&unknown));
     }
 
     #[test]
