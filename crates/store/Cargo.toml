@@ -35,6 +35,9 @@ episode-observation-c2-keychain-macos = [
     "dep:security-framework",
     "dep:zeroize",
 ]
+episode-observation-c2-keychain-macos-live-lab = [
+    "episode-observation-c2-keychain-macos",
+]
 
 [dependencies]
 ab-core.workspace = true

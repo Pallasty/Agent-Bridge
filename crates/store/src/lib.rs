@@ -25,6 +25,12 @@ mod episode_observation_slice_a;
     target_os = "macos"
 ))]
 mod episode_observation_c2_keychain_macos;
+#[cfg(all(
+    test,
+    feature = "episode-observation-c2-keychain-macos-live-lab",
+    target_os = "macos"
+))]
+mod episode_observation_c2_keychain_macos_live_lab;
 #[cfg(feature = "episode-observation-slice-c2-synthetic")]
 pub mod episode_observation_c2_synthetic;
 pub mod lineage_audit;
