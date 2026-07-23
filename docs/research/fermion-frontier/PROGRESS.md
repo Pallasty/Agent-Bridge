@@ -1,5 +1,25 @@
 # Research progress ledger
 
+## 2026-07-23 — FH-L8 D22 synthetic executable/recovery validation
+
+- The concurrent D22 lane at `4ad711c775b0079dc4554710805a2bbdee47e86f` exercised 53
+  two-row synthetic shards, eight partitions, frontier-17 resume and basic gap/orphan/hash/
+  no-replace failures. It performed no packed-q3 read or scientific action.
+- D22-R independently implemented a three-shard/four-partition fixed-record data plane with
+  exclusive lock, manifest-enumerated partition admission, per-shard receipt SHA-256 chain,
+  exact-frontier resume, signed merge, target manifest and terminal-receipt-last publication.
+- Clean execution and one-shard interruption/resume produced identical 208-byte targets
+  (`f68d75d3...a2ca2876`) and identical terminal receipts (`dbe9f4bb...442efef3`).
+- Live fault replay verified exact classifications for gap, overlap, orphan bytes, partition hash
+  drift, busy lock, partial final publication and production attempt.
+- Frozen D22-R chronology after a pre-contract refreeze:
+  `bb85c6734a92aad27731c3d6d8561a95fed2aa25` ->
+  `7362c8b434e3aedf056ca355db4dc9fb3b5f659e` ->
+  `7a3f8bbfedc1e589fd14a9a77e1597752f5aeb12`.
+- Production checkpoint reads, q3 rows, scientific-kernel calls, full-53 authorization and full q4
+  remain zero/false. Next gate:
+  `FULL_53_SHARD_SCIENTIFIC_KERNEL_BINDING_AND_WORST_CASE_RESOURCE_PROOF`.
+
 ## 2026-07-23 — FH-L8 D21 full-53 resource-authorization readiness
 
 - Audited the merged D20 source rather than accepting its status label as executable evidence.

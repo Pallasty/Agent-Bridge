@@ -255,6 +255,24 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D21 executes no scientific action. Its next gate is
   `FULL_53_SHARD_EXECUTABLE_CONSUMER_AND_TINY_FIXTURE_RECOVERY_VALIDATION`.
 
+## FH-L8 D22 synthetic executable/recovery lanes
+
+- `FH_L8_FULL_CONSUMER_D22_ZH.md`, `fh_l8_full_consumer_d22.py`, its contract/result and test:
+  concurrent 53-shard/eight-partition synthetic state-machine validation at `4ad711c7`.
+- `FH_L8_TINY_RECOVERY_D22_ZH.md`: D22-R receipt-chain, recovery, fault-matrix and authority report.
+- `fh_l8_tiny_recovery_d22_runner.py`: executable three-shard/four-partition fixed-record fixture
+  runner with exclusive lock, no-replace shard/target publication and production rejection.
+- `fh_l8_tiny_recovery_d22_checker.py`: Git/implementation identity verifier that live-replays the
+  clean/resume/fault matrix whenever the committed result is checked.
+- `fh_l8_tiny_recovery_d22_contract.json`: synthetic-only fixture, protocol, implementation pins,
+  deterministic target/terminal identities and zero production authority.
+- `fh_l8_tiny_recovery_d22_result.json`: live-replayed
+  `VERIFIED_D22_TINY_FIXTURE_SUCCESS_RESUME_AND_FAULT_MATRIX` result.
+- `test_fh_l8_tiny_recovery_d22.py`: clean/resume equivalence, seven fault classifications,
+  production rejection and mutation regressions.
+- Both lanes execute zero packed-q3/scientific actions. The next gate is
+  `FULL_53_SHARD_SCIENTIFIC_KERNEL_BINDING_AND_WORST_CASE_RESOURCE_PROOF`.
+
 ## Claude source session
 
 - Session:
