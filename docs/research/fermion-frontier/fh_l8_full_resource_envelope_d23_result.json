@@ -1,0 +1,8 @@
+{
+  "status": "NO_GO_D23_FULL_53_RESOURCE_ENVELOPE_INCOMPLETE",
+  "required_free_scratch_bytes": 2750812950,
+  "max_files": 13622,
+  "scientific_action_calls": 0,
+  "full_53_scientific_execution_authorized": false,
+  "next_gate": "FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION"
+}

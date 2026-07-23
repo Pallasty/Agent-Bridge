@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D23-RESOURCE-ENVELOPE-V1",
+  "scope": "non_authoritative_capacity_guardrail_and_host_snapshot_only",
+  "full_geometry": {"shards": 53, "partitions": 256, "max_spill_files": 13568, "max_manifest_files": 53, "max_target_files": 1, "max_files": 13622},
+  "required_free_scratch_bytes": 2750812950,
+  "required_evidence": ["explicit_memory_bound", "explicit_runtime_bound", "external_resource_reservation", "fresh_full_execution_contract"],
+  "authorization": {"real_packed_q3_read_authorized": false, "scientific_kernel_authorized": false, "full_53_scientific_execution_authorized": false, "scientific_action_calls": 0},
+  "next_gate": "FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION"
+}
