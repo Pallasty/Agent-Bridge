@@ -156,6 +156,7 @@ def _validate_contract(contract: dict[str, Any]) -> None:
         "schema_version",
         "contract_id",
         "analysis_class",
+        "chronology",
         "implementation",
         "fixture",
         "protocol",

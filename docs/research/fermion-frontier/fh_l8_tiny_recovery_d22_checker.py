@@ -115,7 +115,8 @@ def _diff(parent: str, child: str) -> list[tuple[str, str]]:
 def _verify_chronology(contract: dict[str, Any]) -> None:
     chronology = contract["chronology"]
     expected_keys = {
-        "baseline",
+        "evidence_baseline",
+        "scaffold",
         "implementation_freeze",
         "runner_path",
         "checker_path",
@@ -125,9 +126,10 @@ def _verify_chronology(contract: dict[str, Any]) -> None:
         "result_absent_at_contract_freeze",
     }
     _require(set(chronology) == expected_keys, "chronology key drift")
-    baseline = chronology["baseline"]
+    evidence_baseline = chronology["evidence_baseline"]
+    scaffold = chronology["scaffold"]
     c1 = chronology["implementation_freeze"]
-    for value in (baseline, c1):
+    for value in (evidence_baseline, scaffold, c1):
         _require(
             isinstance(value, str)
             and len(value) == 40
@@ -143,11 +145,19 @@ def _verify_chronology(contract: dict[str, Any]) -> None:
         chronology["result_absent_at_contract_freeze"] is True,
         "result absence required",
     )
-    _require(_git_text("rev-parse", f"{c1}^") == baseline, "C1 parent drift")
     _require(
-        _diff(baseline, c1)
+        _git_text("rev-parse", f"{scaffold}^") == evidence_baseline,
+        "scaffold parent drift",
+    )
+    _require(
+        _diff(evidence_baseline, scaffold)
         == [("A", CHECKER_PATH), ("A", RUNNER_PATH), ("A", TEST_PATH)],
-        "C1 must add runner/checker/test only",
+        "scaffold must add runner/checker/test only",
+    )
+    _require(_git_text("rev-parse", f"{c1}^") == scaffold, "C1 parent drift")
+    _require(
+        _diff(scaffold, c1) == [("M", CHECKER_PATH), ("M", RUNNER_PATH)],
+        "C1 refreeze must modify checker/runner only",
     )
     c2 = _git_text("log", "--diff-filter=A", "-1", "--format=%H", "--", CONTRACT_PATH)
     _require(bool(c2), "contract freeze absent")
