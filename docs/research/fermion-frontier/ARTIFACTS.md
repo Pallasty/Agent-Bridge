@@ -156,6 +156,81 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - Next gate:
   `FRESH_EXCLUSIVE_PACKED_Q3_CONSUMER_IMPLEMENTATION_AND_BOUNDED_4096_PREFLIGHT_AUTHORIZATION`.
 
+## FH-L8 D17 vector custody gate
+
+- `FH_L8_VECTOR_CUSTODY_D17_ZH.md`: q0--q4 vector-custody decision and fresh-consumer successor
+  boundary.
+- `fh_l8_vector_custody_d17_checker.py`: verifies packed-q3 admission, legacy-q4 quarantine,
+  unavailable lower-vector states and closed execution authority.
+- `fh_l8_vector_custody_d17_contract.json`: fixed source/custody inputs and fail-closed decision
+  rule.
+- `fh_l8_vector_custody_d17_result.json`: records
+  `NO_GO_D17_Q0_TO_Q4_DUAL_VECTOR_CUSTODY_INCOMPLETE`; packed q3 is admissible, but complete
+  q0--q4 dual-vector custody is not.
+- `test_fh_l8_vector_custody_d17_checker.py`: source, custody, schema and authority regressions.
+- These artifacts first appeared together in
+  `ad72b33fa2e14e2bf8a742baa753ca779eac7c1b`. D17 authorizes no scientific action; its next
+  gate is a separately frozen fresh-exclusive packed-q3 consumer and bounded-4096 authorization.
+
+## FH-L8 D18 legacy clean bounded observation
+
+- `FH_L8_CLEAN_PREFLIGHT_D18_ZH.md`: concise bounded-run observation and full-shard decision
+  boundary.
+- `fh_l8_clean_q3_preflight_d18_runner.py` and
+  `fh_l8_clean_q3_preflight_d18_contract.json`: legacy fresh-scratch 4,096-source runner/contract,
+  first added in `13529967711670879fa1274ba809e2c98f205bb0`.
+- `fh_l8_clean_q3_preflight_d18_result.json`: result added by
+  `51643e67fbb33148b231a4bf1251923c621fd11b`; it reports 868,786 spill records, 424,682 partial
+  targets, 13,589,824 target bytes and SHA-256
+  `8b43b76f1e7a45f12e220905bcba41dc7cfef9fce66f0257cb3c9dff9623fa5f`.
+- `test_fh_l8_clean_q3_preflight_d18_runner.py` and
+  `test_fh_l8_clean_q3_preflight_d18_result.py`: legacy runner/result regressions.
+- D18-C pins the complete legacy result SHA-256
+  `7fa505485fc718db39d9918ec459094f3766f014fd2ddee7d108f01fae4842c4` only as a
+  non-authoritative reproducibility guard. The match does not admit the D18 execution or restore
+  D12/D13 or D16-W numerical authority.
+
+## FH-L8 D18-C fresh-exclusive packed-q3 bounded consumer V2
+
+- `FH_L8_FRESH_CONSUMER_D18C_ZH.md`: V1 zero-action failure, V2 chronology, source/kernel
+  custody, bounded arithmetic, resources, checker scopes, authority ceiling and next-gate report.
+- `fh_l8_fresh_consumer_d18c_runner.py`: validates all 213,099 packed-q3 records, snapshots the four
+  frozen kernel artifacts and executes exactly 4,096 spill plus 4,096 naive-replay kernel calls.
+- `fh_l8_fresh_consumer_d18c_checker.py`: independently checks implementation/contract/result
+  chronology and separates static Git/schema provenance from external terminal-evidence
+  verification.
+- `fh_l8_fresh_consumer_d18c_launcher.py`: runs the bounded action in the frozen systemd cgroup,
+  captures post-exit properties, stops the unit and publishes a no-replace launcher receipt.
+- `fh_l8_fresh_consumer_d18c_contract.json`: C2 authorization for 4,096 unique rows / 8,192 kernel
+  evaluations only; full 53-shard execution is false.
+- `fh_l8_fresh_consumer_d18c_result.json`: C3 committed bounded result. Its status is
+  `VERIFIED_D18C_FRESH_EXCLUSIVE_PACKED_Q3_BOUNDED_4096_PREFLIGHT`; it records 868,786 spill
+  records / 27,801,152 bytes and a 424,682-record partial target whose global semantic digest
+  `da049d945738630c66b8118ec58627a09910887e7263f91e4b08417ef7bafb34` matches the second-pass
+  replay.
+- `test_fh_l8_fresh_consumer_d18c.py`: strict schema, narrow legacy-float reader, real authority
+  lineage, source/kernel custody, scratch, resource, publication, launcher and checker regressions.
+- The abandoned V1 chain is `732643eb856da31e68541df603ed88481a9063cd` ->
+  `34006de5f3548432c7f6e24e1fd3527fab49cb53`. Its contract checker rejected legacy D18's finite
+  decimal before launch; it created no action scratch and has no result commit. It is deprecated
+  zero-action audit history.
+- The authoritative V2 chronology is
+  `8cf944e42fd9a981cd78f584885a5c525dd2abd9` ->
+  `9e4266600439143d7fdaaf76331dc9780cecd55c` ->
+  `10d56da28318d622e791f5f5d39932d7a4a39e11`; each commit adds only implementation/test,
+  contract, or result respectively.
+- The retained external scratch is
+  `/Data/CascadeProjects/.ab-experiments/fh-l8-d18c-official-v2-20260722`. It is not a Git
+  artifact. Its exact 264-file set binds terminal receipt SHA-256
+  `ae2867319f8e7af8a6a691aa85ca68c6ff0960e04b03aadd1ef3da42a67a9905` and launcher receipt
+  SHA-256 `61e6799f5d7f4cee6e34bd32b4acdedc4aa7b2548fafb018f45d337bbf46e973`.
+- Static checking alone returns schema/Git provenance only and explicitly does not verify external
+  scratch, executed authority or scientific outcome. Supplying the retained scratch returns
+  `VERIFIED_D18C_RESULT_AND_EXTERNAL_TERMINAL_EVIDENCE`.
+- The bounded partial target is not a full q4 operand. The active next gate is
+  `CLEAN_BOUNDED_PREFLIGHT_REVIEW_AND_FULL_53_SHARD_AUTHORIZATION_DECISION`; no full-shard action
+  is currently authorized.
+
 ## Claude source session
 
 - Session:
