@@ -231,6 +231,30 @@ All copied JSON files are research-only outputs. They contain no credentials.
   `CLEAN_BOUNDED_PREFLIGHT_REVIEW_AND_FULL_53_SHARD_AUTHORIZATION_DECISION`; no full-shard action
   is currently authorized.
 
+## FH-L8 D19/D20 full-run decision and protocol plan
+
+- `FH_L8_FULL_RUN_DECISION_D19_ZH.md`, `fh_l8_full_run_decision_d19_checker.py`,
+  `fh_l8_full_run_decision_d19_contract.json`, `fh_l8_full_run_decision_d19_result.json` and its
+  test record the bounded-evidence review and keep full-53 authorization false.
+- `FH_L8_FULL_CONSUMER_D20_ZH.md`, `fh_l8_full_consumer_d20.py`, its contract/result and test pin a
+  53-shard declarative protocol with zero authorized rows/evaluations. The action entrypoint
+  unconditionally rejects, so D20 is not executable-consumer evidence.
+
+## FH-L8 D21 full resource-readiness review
+
+- `FH_L8_FULL_RESOURCE_READINESS_D21_ZH.md`: Chinese decision report, planning projections,
+  chronology, authority ceiling and next gate.
+- `fh_l8_full_resource_readiness_d21_checker.py`: strict JSON/Git chronology checker plus AST-level
+  discrimination between a declarative plan and executable action paths.
+- `fh_l8_full_resource_readiness_d21_contract.json`: pins D20 bytes, static findings, bounded D18-C
+  inputs, integer-only planning projections and fail-closed authorization rule.
+- `fh_l8_full_resource_readiness_d21_result.json`: deterministic
+  `NO_GO_D21_FULL_53_RESOURCE_AUTHORIZATION_EXECUTABLE_IMPLEMENTATION_ABSENT` result.
+- `test_fh_l8_full_resource_readiness_d21.py`: result, AST finding, projection and mutation
+  regressions.
+- D21 executes no scientific action. Its next gate is
+  `FULL_53_SHARD_EXECUTABLE_CONSUMER_AND_TINY_FIXTURE_RECOVERY_VALIDATION`.
+
 ## Claude source session
 
 - Session:
