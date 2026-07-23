@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D26-KERNEL-FIXTURE-BOUNDARY-V1",
+  "scope": "static_source_bound_kernel_boundary_audit_no_kernel_invocation",
+  "kernel": {"path": "fh_l8_symmetry_orbit_quotient_d5_checker.py", "symbol": "_reduced_column", "parameters": ["d4", "backend", "bonds", "representative", "symmetries"]},
+  "authorization": {"synthetic_kernel_fixture_authorized": false, "real_packed_q3_read_authorized": false, "scientific_kernel_authorized": false, "full_53_scientific_execution_authorized": false, "scientific_action_calls": 0},
+  "next_gate": "SOURCE_BOUND_MICRO_ACTION_AUTHORIZATION_AND_MEASURED_MEMORY_RUNTIME_RECEIPT"
+}

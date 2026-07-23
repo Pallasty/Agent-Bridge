@@ -1,0 +1,10 @@
+{
+  "status": "NO_GO_D26_SYNTHETIC_KERNEL_FIXTURE_ACTION_UNAUTHORIZED",
+  "kernel_name": "_reduced_column",
+  "structural_candidate_action_upper_bound": 225,
+  "synthetic_kernel_fixture_executed": false,
+  "real_packed_q3_reads": 0,
+  "scientific_action_calls": 0,
+  "full_53_scientific_execution_authorized": false,
+  "next_gate": "SOURCE_BOUND_MICRO_ACTION_AUTHORIZATION_AND_MEASURED_MEMORY_RUNTIME_RECEIPT"
+}
