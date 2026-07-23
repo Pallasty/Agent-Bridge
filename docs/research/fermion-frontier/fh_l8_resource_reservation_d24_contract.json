@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D24-RESOURCE-RECEIPT-V1",
+  "role": "external_receipt_admission_only_not_execution_authorization",
+  "d23_minimums": {"scratch_free_bytes": 2750812950, "scratch_free_inodes": 13622},
+  "mandatory_receipt_fields": ["issuer", "immutable_receipt_sha256", "exclusive_execution_slot", "isolation_id", "memory_max_bytes", "runtime_upper_bound_ns"],
+  "authorization": {"external_receipt_present": false, "real_packed_q3_read_authorized": false, "scientific_kernel_authorized": false, "full_53_scientific_execution_authorized": false, "scientific_action_calls": 0},
+  "next_gate": "FULL_53_MEMORY_RUNTIME_REQUIREMENT_PROOF_AND_INDEPENDENT_RECEIPT_VERIFICATION"
+}

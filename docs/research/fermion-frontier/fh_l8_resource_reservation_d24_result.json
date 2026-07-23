@@ -1,0 +1,7 @@
+{
+  "status": "NO_GO_D24_EXTERNAL_RESOURCE_RECEIPT_ABSENT",
+  "receipt_admissible": false,
+  "full_53_scientific_execution_authorized": false,
+  "scientific_action_calls": 0,
+  "next_gate": "FULL_53_MEMORY_RUNTIME_REQUIREMENT_PROOF_AND_INDEPENDENT_RECEIPT_VERIFICATION"
+}
