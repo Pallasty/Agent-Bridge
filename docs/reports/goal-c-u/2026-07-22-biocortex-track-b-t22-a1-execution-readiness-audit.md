@@ -44,11 +44,11 @@ real collection challenge is generated.
    before reading the private admission receipt, reserves it atomically before
    runner dispatch, requires bound terminal evidence for PASS, and makes
    failure terminal with no retry. The network runner itself remains absent.
-5. **No persistent evidence writer or runner integration.** The signed-event
-   and terminal-evidence compiler now constructs, independently replays and
-   secret-scans the complete in-memory chain. It deliberately writes no files;
-   the source-bound runner still must durably collect the signed inputs and
-   atomically publish the compiler-verified event set and terminal evidence.
+5. **No runner-integrated evidence collection.** The signed-event compiler and
+   atomic private evidence-set writer now construct, independently replay,
+   secret-scan, persist and read back the complete chain. The source-bound
+   runner still must collect the real signed inputs and invoke these closed
+   components after live execution.
 
 ## TLS applicability correction
 
@@ -104,7 +104,7 @@ inject faults, spend money, or make production claims.
 ## Implemented closure evidence
 
 `biocortex_ab_track_b_t22_a1_execution_consumer_v1.py` and its KAT now close
-item 4. The KAT exercises one complete synthetic single-use dispatch and 42
+item 4. The KAT exercises one complete synthetic single-use dispatch and 47
 negative cases, including wrong signature before private receipt reads,
 caller-selected source commit, replay, runner failure, post-run expiry, missing
 terminal evidence, terminal cross-binding forgery, cleanup and budget
@@ -154,5 +154,18 @@ coordinator chain, hashes four bounded logs per domain, binds the exact in-memor
 OpenBao secret frame, scans for exact secret leakage, zeroizes the transferred
 secret buffer, and emits one schema-valid T22-A1-H value in memory. Fifteen
 directed mutations fail. Persistent writing, real input reads and activation
-remain absent, and the KAT performs no network, listener, workload or fault
-action.
+are delegated to a separately gated writer, and the compiler KAT performs no
+network, listener, workload or fault action.
+
+`biocortex_ab_track_b_t22_a1_evidence_writer_v1.py` reserves one irreversible
+publication attempt, re-verifies all source signatures and both event/terminal
+chains, writes 65 owner-only artifacts into a private staging directory,
+fsyncs them, atomically renames the closed `evidence-set`, and reads back the
+exact manifest/file set. Replay, wrong signature, unsafe directory permission
+and injected mid-write failure all fail; a failed reserved attempt retains its
+no-retry reservation and removes staging. The execution consumer now binds the
+runner result to the manifest, re-hashes all 64 listed artifacts, rejects extra
+files/directories/symlinks, cross-binds every source payload and signature hash,
+independently replays the 21 coordinator events and then verifies the terminal
+evidence. Its total directed negatives increase to
+47. Real writer activation and runner integration remain false/absent.

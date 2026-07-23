@@ -23,9 +23,11 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 ROOT = Path(__file__).resolve().parents[2]
 EXECUTION_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_execution_authorization_v1.py"
+EVIDENCE_COMPILER_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_compiler_v1.py"
 TERMINAL_EVIDENCE_SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json"
 EXPECTED_TERMINAL_EVIDENCE_SCHEMA_SHA256 = "f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a"
 TERMINAL_EVIDENCE_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/terminal-evidence/v1\0"
+EVIDENCE_MANIFEST_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/evidence-set-manifest/v1\0"
 RUNNER_RESULT_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/source-bound-runner-result/v1\0"
 TERMINAL_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/execution-consumption-terminal/v1\0"
 MAX_JSON_BYTES = 256 * 1024
@@ -49,6 +51,15 @@ def foreign_call(function, *arguments, **keywords):  # noqa: ANN001, ANN002, ANN
 
 def load_execution_module():
     spec = importlib.util.spec_from_file_location("t22a1_execution_for_consumer", EXECUTION_SOURCE)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_evidence_compiler_module():
+    spec = importlib.util.spec_from_file_location("t22a1_evidence_compiler_for_consumer", EVIDENCE_COMPILER_SOURCE)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -80,6 +91,7 @@ def ensure_private_directory(path: Path, create: bool) -> None:
         path.chmod(0o700)
     require(
         path.is_dir() and not path.is_symlink()
+        and path.stat().st_uid == os.geteuid()
         and stat.S_IMODE(path.stat().st_mode) & 0o077 == 0,
         "E_CONSUMER_PRIVATE_DIRECTORY",
     )
@@ -144,7 +156,8 @@ def validate_runner_result(value: object, execution: dict, admission: dict) -> d
     required = {
         "schema", "status", "failure_code", "run_id", "source_commit",
         "execution_contract_sha256", "execution_admission_receipt_sha256",
-        "terminal_evidence_content_sha256", "all_owned_processes_cleaned",
+        "evidence_manifest_content_sha256", "terminal_evidence_content_sha256",
+        "all_owned_processes_cleaned",
         "all_owned_ports_released", "secret_value_scan_passed",
         "automatic_retry_allowed", "production_admissible",
     }
@@ -156,17 +169,26 @@ def validate_runner_result(value: object, execution: dict, admission: dict) -> d
     require(value["execution_contract_sha256"] == execution["content_sha256"], "E_CONSUMER_RUNNER_RESULT_EXECUTION")
     require(value["execution_admission_receipt_sha256"] == admission["content_sha256"], "E_CONSUMER_RUNNER_RESULT_ADMISSION")
     if value["status"].startswith("PASS_"):
-        require(value["failure_code"] is None and is_sha256(value["terminal_evidence_content_sha256"]), "E_CONSUMER_RUNNER_RESULT_PASS")
+        require(
+            value["failure_code"] is None
+            and is_sha256(value["evidence_manifest_content_sha256"])
+            and is_sha256(value["terminal_evidence_content_sha256"]),
+            "E_CONSUMER_RUNNER_RESULT_PASS",
+        )
         require(value["all_owned_processes_cleaned"] is True and value["all_owned_ports_released"] is True and value["secret_value_scan_passed"] is True, "E_CONSUMER_RUNNER_RESULT_CLEANUP")
     else:
         require(isinstance(value["failure_code"], str) and value["failure_code"].startswith("E_"), "E_CONSUMER_RUNNER_RESULT_FAIL")
-        require(value["terminal_evidence_content_sha256"] is None or is_sha256(value["terminal_evidence_content_sha256"]), "E_CONSUMER_RUNNER_RESULT_FAIL")
+        require(
+            (value["evidence_manifest_content_sha256"] is None or is_sha256(value["evidence_manifest_content_sha256"]))
+            and (value["terminal_evidence_content_sha256"] is None or is_sha256(value["terminal_evidence_content_sha256"])),
+            "E_CONSUMER_RUNNER_RESULT_FAIL",
+        )
     require(value["automatic_retry_allowed"] is False and value["production_admissible"] is False, "E_CONSUMER_RUNNER_RESULT_CLAIMS")
     return value
 
 
 def validate_terminal_evidence(path: Path, execution: dict, admission: dict) -> dict:
-    expected = Path(execution["artifact_scope"]["run_evidence_root"]) / "terminal-evidence.json"
+    expected = Path(execution["artifact_scope"]["run_evidence_root"]) / "evidence-set" / "terminal-evidence.json"
     require(path.is_absolute() and path.resolve(strict=False) == expected.resolve(strict=False), "E_CONSUMER_TERMINAL_EVIDENCE_PATH")
     execution_module = load_execution_module()
     value, _raw = foreign_call(execution_module.read_canonical_json, path, "E_CONSUMER_TERMINAL_EVIDENCE")
@@ -209,6 +231,115 @@ def validate_terminal_evidence(path: Path, execution: dict, admission: dict) -> 
     require(claimed == observed, "E_CONSUMER_TERMINAL_EVIDENCE_DIGEST")
     require(admission["execution_contract_sha256"] == execution["content_sha256"], "E_CONSUMER_TERMINAL_EVIDENCE_ADMISSION")
     return value
+
+
+def validate_evidence_set(execution: dict, admission: dict, result: dict) -> tuple[dict, dict]:
+    root = Path(execution["artifact_scope"]["run_evidence_root"]) / "evidence-set"
+    require(root.exists(), "E_CONSUMER_EVIDENCE_SET_MISSING")
+    ensure_private_directory(root, create=False)
+    execution_module = load_execution_module()
+    manifest_path = root / "evidence-manifest.json"
+    manifest, _manifest_raw = foreign_call(
+        execution_module.read_canonical_json, manifest_path, "E_CONSUMER_EVIDENCE_MANIFEST",
+    )
+    required = {
+        "schema", "packet_kind", "run_id", "source_commit", "execution_contract_sha256",
+        "source_domain_signed_event_count", "coordinator_event_count",
+        "coordinator_event_chain_head_sha256", "terminal_evidence_content_sha256",
+        "artifact_file_count_excluding_manifest", "artifact_files", "all_files_owner_only",
+        "single_publication_attempt_reserved", "automatic_retry_allowed",
+        "raw_endpoint_or_secret_in_manifest", "production_admissible", "content_sha256",
+    }
+    require(isinstance(manifest, dict) and set(manifest) == required, "E_CONSUMER_EVIDENCE_MANIFEST_SHAPE")
+    require(manifest["schema"] == "agent_bridge.biocortex.track_b.t22_a1.evidence_set_manifest.v1", "E_CONSUMER_EVIDENCE_MANIFEST_SCHEMA")
+    require(manifest["packet_kind"] == "T22_A1_PRIVATE_ATOMIC_EVIDENCE_SET_MANIFEST", "E_CONSUMER_EVIDENCE_MANIFEST_KIND")
+    require(manifest["run_id"] == execution["run_id"] and manifest["source_commit"] == execution["source_commit"], "E_CONSUMER_EVIDENCE_MANIFEST_RUN")
+    require(manifest["execution_contract_sha256"] == execution["content_sha256"], "E_CONSUMER_EVIDENCE_MANIFEST_EXECUTION")
+    require(manifest["source_domain_signed_event_count"] == manifest["coordinator_event_count"] == 21, "E_CONSUMER_EVIDENCE_MANIFEST_COUNT")
+    require(manifest["artifact_file_count_excluding_manifest"] == 64, "E_CONSUMER_EVIDENCE_MANIFEST_COUNT")
+    require(manifest["all_files_owner_only"] is True and manifest["single_publication_attempt_reserved"] is True, "E_CONSUMER_EVIDENCE_MANIFEST_BOUNDARY")
+    require(manifest["automatic_retry_allowed"] is False and manifest["raw_endpoint_or_secret_in_manifest"] is False, "E_CONSUMER_EVIDENCE_MANIFEST_BOUNDARY")
+    require(manifest["production_admissible"] is False, "E_CONSUMER_EVIDENCE_MANIFEST_CLAIMS")
+    unsigned = dict(manifest)
+    claimed = unsigned.pop("content_sha256")
+    require(claimed == hashlib.sha256(EVIDENCE_MANIFEST_DOMAIN + canonical(unsigned)).hexdigest(), "E_CONSUMER_EVIDENCE_MANIFEST_DIGEST")
+    require(claimed == result["evidence_manifest_content_sha256"], "E_CONSUMER_RUNNER_MANIFEST_BINDING")
+    rows = manifest["artifact_files"]
+    require(isinstance(rows, list) and len(rows) == 64, "E_CONSUMER_EVIDENCE_FILE_SET")
+    expected_row_keys = {"relative_path", "size_bytes", "sha256"}
+    relative_names: list[str] = []
+    for row in rows:
+        require(isinstance(row, dict) and set(row) == expected_row_keys, "E_CONSUMER_EVIDENCE_FILE_ROW")
+        relative_text = row["relative_path"]
+        relative = Path(relative_text) if isinstance(relative_text, str) else Path("/")
+        require(
+            isinstance(relative_text, str) and relative.as_posix() == relative_text
+            and not relative.is_absolute() and relative.parts
+            and all(part not in {"", ".", ".."} for part in relative.parts),
+            "E_CONSUMER_EVIDENCE_FILE_PATH",
+        )
+        path = root / relative
+        require(path.is_file() and not path.is_symlink(), "E_CONSUMER_EVIDENCE_FILE")
+        metadata = path.stat()
+        require(
+            metadata.st_uid == os.geteuid() and metadata.st_mode & 0o077 == 0
+            and 0 < metadata.st_size <= 4 * 1024 * 1024,
+            "E_CONSUMER_EVIDENCE_FILE",
+        )
+        raw = path.read_bytes()
+        require(row["size_bytes"] == len(raw) and row["sha256"] == hashlib.sha256(raw).hexdigest(), "E_CONSUMER_EVIDENCE_FILE_DIGEST")
+        relative_names.append(relative_text)
+    require(relative_names == sorted(relative_names) and len(relative_names) == len(set(relative_names)), "E_CONSUMER_EVIDENCE_FILE_ORDER")
+    coordinator_names = [name for name in relative_names if name.startswith("coordinator-events/") and name.endswith(".json")]
+    source_payload_names = [name for name in relative_names if name.startswith("source-domain-events/") and name.endswith(".event.json")]
+    source_signature_names = [name for name in relative_names if name.startswith("source-domain-events/") and name.endswith(".event.sshsig")]
+    require(len(coordinator_names) == len(source_payload_names) == len(source_signature_names) == 21, "E_CONSUMER_EVIDENCE_FILE_CLASS")
+    require(relative_names.count("terminal-evidence.json") == 1, "E_CONSUMER_EVIDENCE_FILE_CLASS")
+    entries = list(root.rglob("*"))
+    require(all(not path.is_symlink() for path in entries), "E_CONSUMER_EVIDENCE_FILE_SET")
+    actual_files = {path.relative_to(root).as_posix() for path in entries if path.is_file()}
+    actual_directories = {path.relative_to(root).as_posix() for path in entries if path.is_dir()}
+    require(actual_files == set(relative_names) | {"evidence-manifest.json"}, "E_CONSUMER_EVIDENCE_FILE_SET")
+    require(actual_directories == {"coordinator-events", "source-domain-events"}, "E_CONSUMER_EVIDENCE_FILE_SET")
+    coordinator_events = [
+        foreign_call(execution_module.read_canonical_json, root / name, "E_CONSUMER_COORDINATOR_EVENT")[0]
+        for name in coordinator_names
+    ]
+    compiler = load_evidence_compiler_module()
+    for event, payload_name, signature_name in zip(
+        coordinator_events, source_payload_names, source_signature_names, strict=True,
+    ):
+        try:
+            payload = compiler.decode_domain_event((root / payload_name).read_bytes())
+        except RuntimeError as error:
+            raise SafeFailure(str(error)) from error
+        source = event["source_domain_evidence"]
+        require(
+            payload["domain_id"] == event["source_domain_id"]
+            and payload["event_type"] == event["event_type"]
+            and payload["observation_sha256"] == event["observation_sha256"]
+            and payload["attestation_packet_sha256"] == source["attestation_packet_sha256"]
+            and payload["domain_public_key_sha256"] == source["domain_public_key_sha256"]
+            and payload["content_sha256"] == source["domain_event_payload_sha256"],
+            "E_CONSUMER_SOURCE_EVENT_BINDING",
+        )
+        require(
+            hashlib.sha256((root / signature_name).read_bytes()).hexdigest()
+            == source["detached_signature_sha256"],
+            "E_CONSUMER_SOURCE_SIGNATURE_BINDING",
+        )
+    try:
+        observed_head = compiler.validate_coordinator_chain(coordinator_events, execution)
+    except RuntimeError as error:
+        raise SafeFailure(str(error)) from error
+    require(observed_head == manifest["coordinator_event_chain_head_sha256"], "E_CONSUMER_EVIDENCE_EVENT_HEAD")
+    terminal = validate_terminal_evidence(root / "terminal-evidence.json", execution, admission)
+    require(
+        terminal["content_sha256"] == manifest["terminal_evidence_content_sha256"]
+        == result["terminal_evidence_content_sha256"],
+        "E_CONSUMER_RUNNER_TERMINAL_EVIDENCE_BINDING",
+    )
+    return terminal, manifest
 
 
 def reserve(root: Path, execution: dict, admission: dict, now: datetime) -> Path:
@@ -268,11 +399,7 @@ def consume_and_dispatch(
         completion_time = clock()
         require(completion_time.tzinfo is not None and completion_time.utcoffset().total_seconds() == 0, "E_CONSUMER_COMPLETION_TIME")
         require(completion_time < execution_module.parse_time(execution["expires_at"], "E_CONSUMER_EXECUTION_EXPIRY"), "E_CONSUMER_EXECUTION_EXPIRED_AFTER_RUNNER")
-        terminal_evidence = validate_terminal_evidence(
-            Path(execution["artifact_scope"]["run_evidence_root"]) / "terminal-evidence.json",
-            execution, admission,
-        )
-        require(result["terminal_evidence_content_sha256"] == terminal_evidence["content_sha256"], "E_CONSUMER_RUNNER_TERMINAL_EVIDENCE_BINDING")
+        terminal_evidence, _manifest = validate_evidence_set(execution, admission, result)
         terminal = terminal_value({
             "schema": "agent_bridge.biocortex.track_b.t22_a1.execution_consumption_terminal.v1",
             "status": "PASS_T22_A1_RUNNER_RESULT_RECORDED", "failure_code": None,

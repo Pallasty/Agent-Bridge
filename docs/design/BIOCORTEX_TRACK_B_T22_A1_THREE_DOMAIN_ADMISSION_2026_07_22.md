@@ -568,8 +568,9 @@ credential files and performs no network, listener, service, fault or spend
 action.
 
 The execution-consumer KAT adds one synthetic single-use dispatch success and
-42 directed negatives over the closed activation gate, caller-selected source commits, owner-signature/read
+47 directed negatives over the closed activation gate, caller-selected source commits, owner-signature/read
 ordering, admission replay, runner failure and expiry, runner-result closure,
+atomic manifest/file-set closure, coordinator-chain replay,
 terminal-evidence schema/digest/cross-bindings, cleanup, budget and claim
 boundaries. It reads no real execution/admission/credential instance, opens no
 network or listener, starts no workload process and injects no fault.
@@ -622,5 +623,14 @@ hashes four bounded logs for each domain, binds the exact OpenBao secret frame,
 detects exact secret leakage and zeroizes the transferred secret bytearray. It
 returns one schema-valid synthetic T22-A1-H value in memory and rejects 15
 directed chain, signature, receipt, log, secret, timing and canonical-form mutations.
-Persistent output creation and real-input activation remain absent; the KAT
-uses no network, listener, service, fault or provider operation.
+The atomic writer then re-verifies all 21 signatures, reserves one terminal
+publication attempt, writes 65 owner-only files through a private staging
+directory, fsyncs and atomically publishes the closed set, and validates the
+exact manifest and readback. Four writer mutations cover replay, wrong
+signature, unsafe directory mode and injected partial write; failure preserves
+the no-retry reservation and removes staging. The consumer binds the returned
+manifest digest, re-hashes all 64 listed artifacts, rejects extra paths and
+symlinks, independently cross-binds source payload/signature hashes, replays
+the coordinator chain, and reaches 47 total
+negative paths. Real-input activation remains absent; the KAT uses no network,
+listener, service, fault or provider operation.

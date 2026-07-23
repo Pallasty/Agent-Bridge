@@ -14,11 +14,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_compiler_v1.py"
+WRITER_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_writer_v1.py"
 spec = importlib.util.spec_from_file_location("t22a1evidencecompiler", SOURCE)
 assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
+writer_spec = importlib.util.spec_from_file_location("t22a1evidencewriter", WRITER_SOURCE)
+assert writer_spec and writer_spec.loader
+writer_module = importlib.util.module_from_spec(writer_spec)
+sys.modules[writer_spec.name] = writer_module
+writer_spec.loader.exec_module(writer_module)
 executor_module = module.load_executor_module()
 plan_module = executor_module.load_plan_module()
 transport_module = module.load_transport_module()
@@ -227,6 +233,15 @@ def expect_failure(action, expected: str) -> None:  # noqa: ANN001
     raise AssertionError(f"unsafe evidence compiler input admitted: {expected}")
 
 
+def expect_writer_failure(action, expected: str) -> None:  # noqa: ANN001
+    try:
+        action()
+    except writer_module.SafeFailure as error:
+        assert str(error) == expected, (str(error), expected)
+        return
+    raise AssertionError(f"unsafe evidence writer input admitted: {expected}")
+
+
 with tempfile.TemporaryDirectory(prefix="t22-a1-evidence-kat-") as directory:
     root = Path(directory).resolve()
     keys: dict[str, tuple[Path, bytes, str]] = {}
@@ -297,7 +312,10 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-evidence-kat-") as directory:
             "domain_bindings": domain_bindings,
         },
         "network": {"peer_endpoint_set_sha256": sha("endpoint-set"), "acl_policy_receipt_sha256": sha("acl")},
+        "artifact_scope": {"run_evidence_root": str(root / "run-evidence")},
     }
+    Path(execution["artifact_scope"]["run_evidence_root"]).mkdir(mode=0o700)
+    Path(execution["artifact_scope"]["run_evidence_root"]).chmod(0o700)
 
     readiness_packets = []
     for number in (1, 2, 3):
@@ -396,6 +414,83 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-evidence-kat-") as directory:
     assert terminal["cleanup"]["secret_value_scan_passed"] is True
     assert terminal["claims"]["production_admissible"] is False
     assert result["synthetic_only"] is True and result["persistent_outputs_created"] == 0
+
+    domain_public_keys = {domain_id: row[1] for domain_id, row in keys.items()}
+    publication = writer_module.persist_evidence_set(
+        execution, result, signed_events, domain_public_keys, True,
+    )
+    assert publication["status"] == "PASS_T22_A1_PRIVATE_EVIDENCE_SET_ATOMICALLY_PUBLISHED"
+    assert publication["artifact_file_count_including_manifest"] == 65
+    assert publication["readback_and_signature_reverification_passed"] is True
+    evidence_set = Path(execution["artifact_scope"]["run_evidence_root"]) / "evidence-set"
+    persisted_manifest = writer_module.validate_persisted_set(
+        evidence_set, execution, result, signed_events, domain_public_keys, True,
+    )
+    assert persisted_manifest["content_sha256"] == publication["evidence_manifest_content_sha256"]
+
+    writer_negative_count = 0
+    expect_writer_failure(
+        lambda: writer_module.persist_evidence_set(
+            execution, result, signed_events, domain_public_keys, True,
+        ),
+        "E_EVIDENCE_WRITER_OUTPUT_EXISTS",
+    )
+    writer_negative_count += 1
+
+    wrong_writer_events = copy.deepcopy(signed_events)
+    wrong_writer_events[0]["signature_raw"] = signed_events[1]["signature_raw"]
+    wrong_writer_execution = copy.deepcopy(execution)
+    wrong_writer_root = root / "wrong-writer-signature"
+    wrong_writer_root.mkdir(mode=0o700)
+    wrong_writer_execution["artifact_scope"]["run_evidence_root"] = str(wrong_writer_root)
+    expect_writer_failure(
+        lambda: writer_module.persist_evidence_set(
+            wrong_writer_execution, result, wrong_writer_events, domain_public_keys, True,
+        ),
+        "E_EVIDENCE_DOMAIN_EVENT_SIGNATURE",
+    )
+    assert not (wrong_writer_root / ".evidence-set.publication-reserved.json").exists()
+    writer_negative_count += 1
+
+    unsafe_writer_execution = copy.deepcopy(execution)
+    unsafe_writer_root = root / "unsafe-writer-root"
+    unsafe_writer_root.mkdir(mode=0o755)
+    unsafe_writer_execution["artifact_scope"]["run_evidence_root"] = str(unsafe_writer_root)
+    expect_writer_failure(
+        lambda: writer_module.persist_evidence_set(
+            unsafe_writer_execution, result, signed_events, domain_public_keys, True,
+        ),
+        "E_EVIDENCE_WRITER_PRIVATE_DIRECTORY",
+    )
+    writer_negative_count += 1
+
+    failed_writer_execution = copy.deepcopy(execution)
+    failed_writer_root = root / "failed-writer-root"
+    failed_writer_root.mkdir(mode=0o700)
+    failed_writer_execution["artifact_scope"]["run_evidence_root"] = str(failed_writer_root)
+    original_write_private_file = writer_module.write_private_file
+    injected_write_count = [0]
+
+    def fail_second_write(path: Path, raw: bytes) -> None:
+        injected_write_count[0] += 1
+        if injected_write_count[0] == 2:
+            raise OSError("synthetic injected writer failure")
+        original_write_private_file(path, raw)
+
+    writer_module.write_private_file = fail_second_write
+    try:
+        expect_writer_failure(
+            lambda: writer_module.persist_evidence_set(
+                failed_writer_execution, result, signed_events, domain_public_keys, True,
+            ),
+            "E_EVIDENCE_WRITER_LOCAL_IO",
+        )
+    finally:
+        writer_module.write_private_file = original_write_private_file
+    assert (failed_writer_root / ".evidence-set.publication-reserved.json").is_file()
+    assert not (failed_writer_root / "evidence-set").exists()
+    assert not any(path.name.startswith(".evidence-set.staging-") for path in failed_writer_root.iterdir())
+    writer_negative_count += 1
 
     negative_count = 0
     broken_coordinator_chain = copy.deepcopy(result["coordinator_events"])
@@ -542,12 +637,24 @@ assert status["real_secret_values_read"] == status["persistent_outputs_created"]
 assert status["network_accessed"] is False and status["listeners_started"] == status["processes_started"] == 0
 assert status["services_started"] == status["faults_injected"] == status["spend_usd_cents"] == 0
 assert status["execution_authorized"] is False and status["production_admissible"] is False
+writer_status = writer_module.status()
+assert writer_status["status"] == "ATOMIC_PRIVATE_EVIDENCE_WRITER_READY_REAL_ACTIVATION_AND_RUNNER_INTEGRATION_ABSENT"
+assert writer_status["evidence_writer_activation_ready"] is False
+assert writer_status["real_execution_or_signature_inputs_read"] == 0
+assert writer_status["persistent_evidence_sets_created"] == 0
+assert writer_status["network_accessed"] is False and writer_status["listeners_started"] == 0
+assert writer_status["processes_started"] == writer_status["services_started"] == 0
+assert writer_status["faults_injected"] == writer_status["spend_usd_cents"] == 0
+assert writer_status["execution_authorized"] is False and writer_status["production_admissible"] is False
 
 print("t22_a1_evidence_compiler_check\tpass")
 print("synthetic_signed_source_domain_event_count\t21")
 print("synthetic_coordinator_event_count\t21")
 print("synthetic_terminal_evidence_count\t1")
 print(f"directed_negative_test_count\t{negative_count}")
+print("synthetic_atomic_evidence_set_count\t1")
+print("synthetic_persisted_evidence_file_count\t65")
+print(f"writer_directed_negative_test_count\t{writer_negative_count}")
 print("real_execution_or_receipt_inputs_read\t0")
 print("real_domain_signatures_read\t0")
 print("real_secret_values_read\t0")

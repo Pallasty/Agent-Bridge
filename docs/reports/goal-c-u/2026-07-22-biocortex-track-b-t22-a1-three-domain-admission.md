@@ -90,7 +90,10 @@ rollback prevention.
 - a single-use execution consumer that independently rechecks the clean source
   commit, owner signature and admission receipt, reserves before runner
   dispatch, requires exact validated terminal evidence for PASS, and records
-  failure without retry. Its KAT has one synthetic success and 42 negative
+  failure without retry. It now also binds the runner manifest, re-hashes the
+  closed 64-artifact evidence set, rejects extra paths/symlinks and independently
+  replays the coordinator chain before accepting terminal evidence. Its KAT has
+  one synthetic success and 47 negative
   paths with zero real network, listener, workload, fault or credential access.
 - a private domain-runtime-readiness schema, semantic gate and signed-set
   verifier with three synthetic role/domain successes, one complete same-key
@@ -124,8 +127,13 @@ rollback prevention.
   source-domain Ed25519 SSHSIG payloads, independently reconstructs and replays
   the 21-event coordinator hash chain, binds and scans four bounded logs per
   domain plus the exact OpenBao secret frame, zeroizes the transferred secret,
-  and returns one schema-valid T22-A1-H value. Fifteen negative paths fail;
-  persistent evidence writing and activation remain absent/false.
+  and returns one schema-valid T22-A1-H value. Fifteen negative paths fail.
+- an atomic private evidence writer that re-verifies all 21 source signatures,
+  reserves one no-retry publication attempt, writes and fsyncs 65 owner-only
+  evidence files through staging, atomically publishes the closed directory and
+  revalidates its exact manifest/file set. Four writer-specific negative paths
+  reject replay, wrong signatures, unsafe permissions and injected partial
+  writes. Real activation and runner integration remain absent/false.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only

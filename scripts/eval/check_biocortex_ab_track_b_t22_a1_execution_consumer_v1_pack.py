@@ -20,6 +20,7 @@ consumer = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = consumer
 spec.loader.exec_module(consumer)
 execution = consumer.load_execution_module()
+evidence_compiler = consumer.load_evidence_compiler_module()
 counter, collection, attestation, runtime, preparation, material, contract, proposal, schema = execution.load_inputs()
 consumer.load_execution_module = lambda: execution
 execution.load_inputs = lambda: (counter, collection, attestation, runtime, preparation, material, contract, proposal, schema)
@@ -138,7 +139,13 @@ def admission_receipt(value: dict, owner_signature_sha256: str, admitted_at: dat
     return receipt
 
 
-def runner_result(value: dict, receipt: dict, status: str = "PASS_T22_A1_TERMINAL_EVIDENCE_READY", terminal_sha256: str | None = None) -> dict:
+def runner_result(
+    value: dict,
+    receipt: dict,
+    status: str = "PASS_T22_A1_TERMINAL_EVIDENCE_READY",
+    terminal_sha256: str | None = None,
+    manifest_sha256: str | None = None,
+) -> dict:
     success = status.startswith("PASS_")
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.source_bound_runner_result.v1",
@@ -147,6 +154,7 @@ def runner_result(value: dict, receipt: dict, status: str = "PASS_T22_A1_TERMINA
         "run_id": value["run_id"], "source_commit": value["source_commit"],
         "execution_contract_sha256": value["content_sha256"],
         "execution_admission_receipt_sha256": receipt["content_sha256"],
+        "evidence_manifest_content_sha256": manifest_sha256 if success else None,
         "terminal_evidence_content_sha256": terminal_sha256 if success else None,
         "all_owned_processes_cleaned": success,
         "all_owned_ports_released": success,
@@ -155,7 +163,13 @@ def runner_result(value: dict, receipt: dict, status: str = "PASS_T22_A1_TERMINA
     }
 
 
-def terminal_evidence(value: dict, started: datetime, completed: datetime) -> dict:
+def terminal_evidence(
+    value: dict,
+    started: datetime,
+    completed: datetime,
+    event_count: int,
+    event_head_sha256: str,
+) -> dict:
     rows = [{
         "domain_id": row["domain_id"],
         "attestation_packet_sha256": row["attestation_packet_sha256"],
@@ -211,7 +225,7 @@ def terminal_evidence(value: dict, started: datetime, completed: datetime) -> di
             "target_owned_service_set_restarted": True, "target_domain_rejoined": True,
         },
         "event_chain": {
-            "event_count": 15, "event_chain_head_sha256": sha(f"coordinator-chain:{value['synthetic_label']}"),
+            "event_count": event_count, "event_chain_head_sha256": event_head_sha256,
             "canonical_coordinator_hash_chain_verified": True,
             "all_source_domain_signatures_verified": True, "terminal_event_present": True,
         },
@@ -236,6 +250,120 @@ def terminal_evidence(value: dict, started: datetime, completed: datetime) -> di
         consumer.TERMINAL_EVIDENCE_DOMAIN + consumer.canonical(evidence),
     ).hexdigest()
     return evidence
+
+
+def coordinator_events(value: dict, started: datetime) -> tuple[list[dict], list[dict]]:
+    events = []
+    sources = []
+    previous = "0" * 64
+    domain_sequences = {domain_id: 0 for domain_id in evidence_compiler.DOMAIN_IDS}
+    domain_heads = {domain_id: "0" * 64 for domain_id in evidence_compiler.DOMAIN_IDS}
+    for sequence, (domain_id, command, event_type) in enumerate(
+        evidence_compiler.resolve_event_plan(value["fault"]["target_domain_id"]),
+    ):
+        observed_at = execution.utc_text(started + timedelta(microseconds=sequence))
+        observation = {"synthetic_observation_sha256": sha(f"observation:{value['synthetic_label']}:{sequence}")}
+        attestation_sha256 = next(
+            row["attestation_packet_sha256"]
+            for row in value["admission_bindings"]["domain_bindings"] if row["domain_id"] == domain_id
+        )
+        domain_key_sha256 = sha(f"domain-key:{value['synthetic_label']}:{domain_id}")
+        receipt = {
+            "run_id": value["run_id"], "source_commit": value["source_commit"],
+            "execution_contract_sha256": value["content_sha256"], "domain_id": domain_id,
+            "command": command, "content_sha256": sha(f"receipt:{value['synthetic_label']}:{sequence}"),
+            "observation": observation, "observed_at": observed_at,
+        }
+        payload = evidence_compiler.build_domain_event_payload(
+            receipt, event_type, domain_sequences[domain_id], domain_heads[domain_id],
+            attestation_sha256, domain_key_sha256,
+        )
+        payload_raw = evidence_compiler.canonical(payload) + b"\n"
+        signature_raw = f"SYNTHETIC-CONSUMER-SIGNATURE:{sequence}\n".encode()
+        event = {
+            "schema": "agent_bridge.biocortex.track_b.t22_a1.distributed_event.v1",
+            "run_id": value["run_id"], "source_commit": value["source_commit"],
+            "execution_contract_sha256": value["content_sha256"],
+            "sequence": sequence, "previous_event_sha256": previous,
+            "observed_at": observed_at,
+            "source_domain_id": domain_id, "event_type": event_type,
+            "observation_sha256": payload["observation_sha256"],
+            "source_domain_evidence": {
+                "attestation_packet_sha256": attestation_sha256,
+                "domain_event_payload_sha256": payload["content_sha256"],
+                "detached_signature_sha256": hashlib.sha256(signature_raw).hexdigest(),
+                "domain_public_key_sha256": domain_key_sha256,
+                "signature_scheme": "OPENSSH_SSHSIG_ED25519",
+                "signature_namespace": evidence_compiler.SIGNATURE_NAMESPACE,
+                "signature_verified": True,
+            },
+            "contains_raw_endpoint": False, "contains_secret_material": False,
+        }
+        event["event_sha256"] = evidence_compiler.digest(evidence_compiler.EVENT_DOMAIN, event)
+        events.append(event)
+        sources.append({"payload_raw": payload_raw, "signature_raw": signature_raw})
+        previous = event["event_sha256"]
+        domain_sequences[domain_id] += 1
+        domain_heads[domain_id] = payload["content_sha256"]
+    evidence_compiler.validate_coordinator_chain(events, value)
+    return events, sources
+
+
+def write_closed_evidence_set(
+    value: dict,
+    evidence: dict,
+    events: list[dict],
+    sources: list[dict],
+) -> dict:
+    root = Path(value["artifact_scope"]["run_evidence_root"]) / "evidence-set"
+    root.mkdir(mode=0o700, parents=True, exist_ok=False)
+    root.chmod(0o700)
+    rows = []
+    for sequence, (event, source) in enumerate(zip(events, sources, strict=True)):
+        source_stem = f"{sequence:04d}-{event['source_domain_id']}-{event['event_type'].lower()}"
+        files = {
+            Path("source-domain-events") / f"{source_stem}.event.json": (
+                source["payload_raw"]
+            ),
+            Path("source-domain-events") / f"{source_stem}.event.sshsig": (
+                source["signature_raw"]
+            ),
+            Path("coordinator-events") / f"{sequence:04d}-{event['event_type'].lower()}.json": (
+                consumer.canonical(event) + b"\n"
+            ),
+        }
+        for relative, raw in files.items():
+            path = root / relative
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            path.parent.chmod(0o700)
+            path.write_bytes(raw)
+            path.chmod(0o600)
+    terminal_path = root / "terminal-evidence.json"
+    write_private(terminal_path, evidence)
+    for path in sorted((path for path in root.rglob("*") if path.is_file()), key=lambda item: item.relative_to(root).as_posix()):
+        raw = path.read_bytes()
+        rows.append({
+            "relative_path": path.relative_to(root).as_posix(),
+            "size_bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+        })
+    manifest = {
+        "schema": "agent_bridge.biocortex.track_b.t22_a1.evidence_set_manifest.v1",
+        "packet_kind": "T22_A1_PRIVATE_ATOMIC_EVIDENCE_SET_MANIFEST",
+        "run_id": value["run_id"], "source_commit": value["source_commit"],
+        "execution_contract_sha256": value["content_sha256"],
+        "source_domain_signed_event_count": 21, "coordinator_event_count": 21,
+        "coordinator_event_chain_head_sha256": events[-1]["event_sha256"],
+        "terminal_evidence_content_sha256": evidence["content_sha256"],
+        "artifact_file_count_excluding_manifest": len(rows), "artifact_files": rows,
+        "all_files_owner_only": True, "single_publication_attempt_reserved": True,
+        "automatic_retry_allowed": False, "raw_endpoint_or_secret_in_manifest": False,
+        "production_admissible": False,
+    }
+    manifest["content_sha256"] = hashlib.sha256(
+        consumer.EVIDENCE_MANIFEST_DOMAIN + consumer.canonical(manifest),
+    ).hexdigest()
+    write_private(root / "evidence-manifest.json", manifest)
+    return manifest
 
 
 with tempfile.TemporaryDirectory(prefix="t22-a1-execution-consumer-kat-") as directory:
@@ -271,9 +399,16 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-consumer-kat-") as dir
         callback_count += 1
         reservation = Path(value["artifact_scope"]["private_artifact_root"]) / "execution-consumption-uses" / f"{receipt['content_sha256']}.reserved.json"
         assert reservation.is_file()
-        evidence = terminal_evidence(value, NOW + timedelta(seconds=2), NOW + timedelta(seconds=3))
-        write_private(Path(value["artifact_scope"]["run_evidence_root"]) / "terminal-evidence.json", evidence)
-        return runner_result(value, receipt, terminal_sha256=evidence["content_sha256"])
+        events, sources = coordinator_events(value, NOW + timedelta(seconds=2))
+        evidence = terminal_evidence(
+            value, NOW + timedelta(seconds=2), NOW + timedelta(seconds=3),
+            len(events), events[-1]["event_sha256"],
+        )
+        manifest = write_closed_evidence_set(value, evidence, events, sources)
+        return runner_result(
+            value, receipt, terminal_sha256=evidence["content_sha256"],
+            manifest_sha256=manifest["content_sha256"],
+        )
 
     terminal = consumer.consume_and_dispatch(
         execution_path, signature_path, admission_path, SOURCE_COMMIT,
@@ -289,7 +424,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-consumer-kat-") as dir
     assert terminal["consumer_core_listeners_started"] == terminal["consumer_core_workload_processes_started"] == terminal["consumer_core_faults_injected"] == 0
     terminal_path = Path(execution_value["artifact_scope"]["private_artifact_root"]) / "execution-consumption-uses" / f"{admission_value['content_sha256']}.terminal.json"
     assert json.loads(terminal_path.read_text()) == terminal
-    evidence_path = Path(execution_value["artifact_scope"]["run_evidence_root"]) / "terminal-evidence.json"
+    evidence_path = Path(execution_value["artifact_scope"]["run_evidence_root"]) / "evidence-set" / "terminal-evidence.json"
     original_evidence = json.loads(evidence_path.read_text())
     evidence_mutations = (
         lambda x: x.update(status="FAIL_T22_A1_DISTRIBUTED_EXECUTION"),
@@ -319,6 +454,99 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-consumer-kat-") as dir
             continue
         raise AssertionError("unsafe terminal evidence admitted by consumer")
     write_private(evidence_path, original_evidence)
+
+    evidence_root = evidence_path.parent
+    manifest_path = evidence_root / "evidence-manifest.json"
+    original_manifest = json.loads(manifest_path.read_text())
+    closure_result = runner_result(
+        execution_value, admission_value,
+        terminal_sha256=original_evidence["content_sha256"],
+        manifest_sha256=original_manifest["content_sha256"],
+    )
+    evidence_set_negative_count = 0
+    source_signature_path = sorted((evidence_root / "source-domain-events").glob("*.event.sshsig"))[0]
+    original_source_signature = source_signature_path.read_bytes()
+    source_signature_path.write_bytes(original_source_signature + b"tampered")
+    source_signature_path.chmod(0o600)
+    try:
+        consumer.validate_evidence_set(execution_value, admission_value, closure_result)
+    except consumer.SafeFailure as error:
+        assert str(error) == "E_CONSUMER_EVIDENCE_FILE_DIGEST"
+    else:
+        raise AssertionError("tampered source signature admitted by evidence-set closure")
+    source_signature_path.write_bytes(original_source_signature)
+    source_signature_path.chmod(0o600)
+    evidence_set_negative_count += 1
+
+    source_signature_path.write_bytes(original_source_signature + b"reclosed-tamper")
+    source_signature_path.chmod(0o600)
+    reclosed_signature_manifest = copy.deepcopy(original_manifest)
+    signature_relative = source_signature_path.relative_to(evidence_root).as_posix()
+    signature_row = next(
+        item for item in reclosed_signature_manifest["artifact_files"]
+        if item["relative_path"] == signature_relative
+    )
+    reclosed_signature_raw = source_signature_path.read_bytes()
+    signature_row["size_bytes"] = len(reclosed_signature_raw)
+    signature_row["sha256"] = hashlib.sha256(reclosed_signature_raw).hexdigest()
+    reclosed_signature_manifest.pop("content_sha256")
+    reclosed_signature_manifest["content_sha256"] = hashlib.sha256(
+        consumer.EVIDENCE_MANIFEST_DOMAIN + consumer.canonical(reclosed_signature_manifest),
+    ).hexdigest()
+    write_private(manifest_path, reclosed_signature_manifest)
+    reclosed_signature_result = copy.deepcopy(closure_result)
+    reclosed_signature_result["evidence_manifest_content_sha256"] = reclosed_signature_manifest["content_sha256"]
+    try:
+        consumer.validate_evidence_set(execution_value, admission_value, reclosed_signature_result)
+    except consumer.SafeFailure as error:
+        assert str(error) == "E_CONSUMER_SOURCE_SIGNATURE_BINDING"
+    else:
+        raise AssertionError("reclosed source signature tamper admitted")
+    source_signature_path.write_bytes(original_source_signature)
+    source_signature_path.chmod(0o600)
+    write_private(manifest_path, original_manifest)
+    evidence_set_negative_count += 1
+
+    forged_manifest = copy.deepcopy(original_manifest)
+    forged_manifest["content_sha256"] = sha("forged-manifest")
+    write_private(manifest_path, forged_manifest)
+    try:
+        consumer.validate_evidence_set(execution_value, admission_value, closure_result)
+    except consumer.SafeFailure as error:
+        assert str(error) == "E_CONSUMER_EVIDENCE_MANIFEST_DIGEST"
+    else:
+        raise AssertionError("forged evidence manifest admitted")
+    write_private(manifest_path, original_manifest)
+    evidence_set_negative_count += 1
+
+    coordinator_path = sorted((evidence_root / "coordinator-events").glob("*.json"))[0]
+    original_coordinator_raw = coordinator_path.read_bytes()
+    forged_coordinator = json.loads(original_coordinator_raw)
+    forged_coordinator["event_sha256"] = sha("forged-coordinator-event")
+    write_private(coordinator_path, forged_coordinator)
+    coordinator_relative = coordinator_path.relative_to(evidence_root).as_posix()
+    reclosed_manifest = copy.deepcopy(original_manifest)
+    row = next(item for item in reclosed_manifest["artifact_files"] if item["relative_path"] == coordinator_relative)
+    forged_coordinator_raw = coordinator_path.read_bytes()
+    row["size_bytes"] = len(forged_coordinator_raw)
+    row["sha256"] = hashlib.sha256(forged_coordinator_raw).hexdigest()
+    reclosed_manifest.pop("content_sha256")
+    reclosed_manifest["content_sha256"] = hashlib.sha256(
+        consumer.EVIDENCE_MANIFEST_DOMAIN + consumer.canonical(reclosed_manifest),
+    ).hexdigest()
+    write_private(manifest_path, reclosed_manifest)
+    reclosed_result = copy.deepcopy(closure_result)
+    reclosed_result["evidence_manifest_content_sha256"] = reclosed_manifest["content_sha256"]
+    try:
+        consumer.validate_evidence_set(execution_value, admission_value, reclosed_result)
+    except consumer.SafeFailure as error:
+        assert str(error) == "E_EVIDENCE_COORDINATOR_EVENT_DIGEST"
+    else:
+        raise AssertionError("reclosed forged coordinator event admitted")
+    coordinator_path.write_bytes(original_coordinator_raw)
+    coordinator_path.chmod(0o600)
+    write_private(manifest_path, original_manifest)
+    evidence_set_negative_count += 1
 
     try:
         consumer.consume_and_dispatch(
@@ -358,12 +586,16 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-consumer-kat-") as dir
             continue
         raise AssertionError("unsafe execution-consumption terminal admitted")
 
-    result = runner_result(execution_value, admission_value, terminal_sha256=sha("synthetic-terminal"))
+    result = runner_result(
+        execution_value, admission_value, terminal_sha256=sha("synthetic-terminal"),
+        manifest_sha256=sha("synthetic-manifest"),
+    )
     result_mutations = (
         lambda x: x.update(status="PRODUCTION_PASS"),
         lambda x: x.update(run_id="t22-a1-20260722T000000.000000z-000000000000"),
         lambda x: x.update(execution_contract_sha256=sha("wrong-execution")),
         lambda x: x.update(execution_admission_receipt_sha256=sha("wrong-admission")),
+        lambda x: x.update(evidence_manifest_content_sha256=None),
         lambda x: x.update(terminal_evidence_content_sha256=None),
         lambda x: x.update(all_owned_processes_cleaned=False),
         lambda x: x.update(all_owned_ports_released=False),
@@ -450,7 +682,10 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-consumer-kat-") as dir
         consumer.consume_and_dispatch(
             expiry_execution_path, expiry_signature_path, expiry_admission_path,
             SOURCE_COMMIT, NOW + timedelta(seconds=2),
-            lambda value, receipt: runner_result(value, receipt, terminal_sha256=sha("late-terminal")),
+            lambda value, receipt: runner_result(
+                value, receipt, terminal_sha256=sha("late-terminal"),
+                manifest_sha256=sha("late-manifest"),
+            ),
             clock=lambda: NOW + timedelta(minutes=31),
         )
     except consumer.SafeFailure as error:
@@ -467,11 +702,14 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-consumer-kat-") as dir
         consumer.consume_and_dispatch(
             missing_execution_path, missing_signature_path, missing_admission_path,
             SOURCE_COMMIT, NOW + timedelta(seconds=2),
-            lambda value, receipt: runner_result(value, receipt, terminal_sha256=sha("missing-terminal")),
+            lambda value, receipt: runner_result(
+                value, receipt, terminal_sha256=sha("missing-terminal"),
+                manifest_sha256=sha("missing-manifest"),
+            ),
             clock=lambda: NOW + timedelta(seconds=3),
         )
     except consumer.SafeFailure as error:
-        assert str(error) == "E_CONSUMER_TERMINAL_EVIDENCE_FILE"
+        assert str(error) == "E_CONSUMER_EVIDENCE_SET_MISSING"
     else:
         raise AssertionError("runner success admitted without terminal evidence file")
 
@@ -494,7 +732,7 @@ assert ready["private_admission_receipt_read"] is False and ready["credential_fi
 assert ready["network_accessed"] is False and ready["listeners_started"] == ready["workload_processes_started"] == ready["faults_injected"] == 0
 assert ready["runner_invoked"] is False and ready["production_admissible"] is False
 
-negative_count = len(terminal_mutations) + len(result_mutations) + len(evidence_mutations) + 7
+negative_count = len(terminal_mutations) + len(result_mutations) + len(evidence_mutations) + evidence_set_negative_count + 7
 print("t22_a1_execution_consumer_check\tpass")
 print("synthetic_single_use_dispatch_success_count\t1")
 print(f"directed_negative_test_count\t{negative_count}")
