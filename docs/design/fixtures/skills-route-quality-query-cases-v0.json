@@ -54,6 +54,54 @@
       "query": "审查 Rust 服务的安全风险",
       "expectation": "known_gap",
       "expected_keys": ["skill:Jeffallan/claude-skills/rust-engineer"]
+    },
+    {
+      "id": "cicd-en",
+      "pair_id": "cicd",
+      "language": "en",
+      "query": "design a CI/CD deployment pipeline for a web service",
+      "expectation": "must_match",
+      "expected_keys": ["skill:alirezarezvani/claude-skills/engineering-team/skills/senior-devops"]
+    },
+    {
+      "id": "cicd-zh",
+      "pair_id": "cicd",
+      "language": "zh",
+      "query": "为 Web 服务设计 CI/CD 部署流水线",
+      "expectation": "must_match",
+      "expected_keys": ["skill:alirezarezvani/claude-skills/engineering-team/skills/senior-devops"]
+    },
+    {
+      "id": "grafana-en",
+      "pair_id": "grafana",
+      "language": "en",
+      "query": "create a Grafana dashboard from service metrics",
+      "expectation": "must_match",
+      "expected_keys": ["skill:skills/grafana-dashboards"]
+    },
+    {
+      "id": "grafana-zh",
+      "pair_id": "grafana",
+      "language": "zh",
+      "query": "根据服务指标创建 Grafana 仪表板",
+      "expectation": "must_match",
+      "expected_keys": ["skill:skills/grafana-dashboards"]
+    },
+    {
+      "id": "web-security-en",
+      "pair_id": "web-security",
+      "language": "en",
+      "query": "perform a web application security vulnerability audit",
+      "expectation": "must_match",
+      "expected_keys": ["skill:skills/top-web-vulnerabilities"]
+    },
+    {
+      "id": "web-security-zh",
+      "pair_id": "web-security",
+      "language": "zh",
+      "query": "执行 Web 应用安全漏洞审计",
+      "expectation": "must_match",
+      "expected_keys": ["skill:skills/top-web-vulnerabilities"]
     }
   ]
 }
