@@ -108,3 +108,11 @@ full q4、q5 和 READY 全部保持 false。
 D18-C kernel snapshots 接入一个仍默认拒绝 production action 的实现，并从 kernel fan-out、
 53×256 文件布局、merge fan-in 和 recovery overhead 推导可验证的最坏资源上界；在新的
 authorization commit 前仍不得读取真实 q3 或启动 full action。
+
+本门冻结后，远端并发 D23
+`FH-L8-INDEPENDENT-REFERENCE-D23-RESOURCE-ENVELOPE-V1` 已把样本规划值整理为
+2,750,812,950-byte / 13,622-file capacity guardrail，并返回
+`NO_GO_D23_FULL_53_RESOURCE_ENVELOPE_INCOMPLETE`。它的资源侧下一 gate 是
+`FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`。该 guardrail 仍非
+worst-case proof，也没有完成 scientific-kernel binding；两个缺口必须在未来 authorization
+前同时闭合。

@@ -1,5 +1,16 @@
 # Research progress ledger
 
+## 2026-07-23 — FH-L8 D23 non-authoritative resource guardrail
+
+- Concurrent D23 converts the D21 5/4-margin planning values into a
+  2,750,812,950-byte / 13,622-file capacity guardrail for 53 × 256 spill files, manifests and one
+  target.
+- Returned `NO_GO_D23_FULL_53_RESOURCE_ENVELOPE_INCOMPLETE`: no auditable worst-case memory or
+  runtime bound and no external resource reservation exists.
+- D23's resource next gate is
+  `FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`. D22-R's production
+  scientific-kernel binding remains a separate unmet prerequisite.
+
 ## 2026-07-23 — FH-L8 D22 synthetic executable/recovery validation
 
 - The concurrent D22 lane at `4ad711c775b0079dc4554710805a2bbdee47e86f` exercised 53

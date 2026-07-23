@@ -165,9 +165,10 @@ and terminal receipt SHA-256
 See `FH_L8_FULL_CONSUMER_D22_ZH.md` and `FH_L8_TINY_RECOVERY_D22_ZH.md`.
 
 Both D22 lanes report zero production checkpoint reads, q3 rows and scientific-kernel calls.
-The active next gate is
-`FULL_53_SHARD_SCIENTIFIC_KERNEL_BINDING_AND_WORST_CASE_RESOURCE_PROOF`; no full-53 action is
-authorized.
+Concurrent D23 then records a 2,750,812,950-byte / 13,622-file non-authoritative capacity
+guardrail and returns `NO_GO_D23_FULL_53_RESOURCE_ENVELOPE_INCOMPLETE`. Its resource-side next gate
+is `FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`; D22-R's scientific-kernel
+binding and worst-case fan-out proof also remain open. No full-53 action is authorized.
 
 Status date: 2026-07-23
 

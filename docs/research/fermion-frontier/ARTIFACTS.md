@@ -273,6 +273,15 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - Both lanes execute zero packed-q3/scientific actions. The next gate is
   `FULL_53_SHARD_SCIENTIFIC_KERNEL_BINDING_AND_WORST_CASE_RESOURCE_PROOF`.
 
+## FH-L8 D23 resource/file capacity guardrail
+
+- `FH_L8_FULL_RESOURCE_ENVELOPE_D23_ZH.md`, `fh_l8_full_resource_envelope_d23.py`, its
+  contract/result and test record a non-authoritative 2,750,812,950-byte / 13,622-file guardrail.
+- D23 returns `NO_GO_D23_FULL_53_RESOURCE_ENVELOPE_INCOMPLETE`; explicit worst-case memory/runtime
+  evidence, external reservation and D22-R scientific-kernel binding remain absent.
+- Resource-side next gate:
+  `FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`.
+
 ## Claude source session
 
 - Session:
