@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: **FAIL_CLOSED_REAL_HOST_READINESS_PLACEMENT_AND_EXACT_LAUNCH_BINDING_REQUIRED**
+Status: **FAIL_CLOSED_REAL_HOST_READINESS_PLACEMENT_AND_FINAL_ACTIVATION_REQUIRED**
 
 No host, endpoint, private credential, external service, provider API, or
 production system was accessed for this audit.
@@ -13,8 +13,7 @@ Do not bind an A1 owner key to the prior proposal and do not collect real
 source-bound attestations yet. The runner, authenticated domain lane, bounded
 local backend and exact evidence finalizer are now frozen, but the final
 three-host run still cannot honestly be activated without three real
-host-local readiness packets, placement proof and exact coordinator/domain
-launch binding.
+host-local readiness packets, placement proof and a final activation audit.
 
 The source ordering matters: every domain attestation and later authorization
 binds the exact Git commit. Adding a runner after collecting those signatures
@@ -24,12 +23,14 @@ real collection challenge is generated.
 
 ## Confirmed gaps
 
-1. **Live components present, exact launch binding still absent.** The
+1. **Exact launch binding — closed after this audit.** The
    fixed-command executor, mTLS socket adapter, authenticated domain lane,
    bounded owned-process backend, source-bound scheduler and evidence
-   finalizer are frozen. Every live activation constant remains false; no
-   coordinator CLI or domain-agent service may yet load the exact final owner
-   authorization and host-local placement set and launch the three roles.
+   finalizer and unique coordinator/domain-agent CLI are frozen. Each role
+   independently revalidates the final owner signature and admission; each
+   domain reserves before listening, while coordinator runtime inputs remain
+   lazy until the consumer reservation. Every live activation constant remains
+   false until real inputs and the final audit exist.
 2. **Three-host runtime-readiness contract and signed-set verifier — closed
    after this audit.** The private packet binds exact executable, local-root,
    port, credential-placement and operator/coordinator identities for each role.
@@ -46,12 +47,16 @@ real collection challenge is generated.
    independently verifies the clean source commit and exact final owner SSHSIG
    before reading the private admission receipt, reserves it atomically before
    runner dispatch, requires bound terminal evidence for PASS, and makes
-   failure terminal with no retry. The network runner itself remains absent.
+   failure terminal with no retry. The exact runner/launch path is now present
+   but activation-closed.
 5. **Runner-integrated evidence collection — closed after this audit.** The
    authenticated lanes now return source-signed events and bounded raw log
    bundles. A one-shot finalizer verifies the exact 23-row runner transcript,
    transfers the sole in-memory bootstrap secret, invokes the compiler and
    atomic writer, requires cleanup and secret-scan PASS, and rejects retry.
+   It derives the conservative observed clock-offset bound from each
+   coordinator-send/domain-observe/coordinator-receive interval instead of
+   copying the 300-second policy ceiling into evidence.
    The KAT publishes and reads back 65 temporary owner-only files; no real
    evidence set exists.
 
@@ -77,8 +82,8 @@ no real credential.
    signature for each host. It must bind exact executable hashes, local roots,
    ports, credential placement and domain signing identity without exposing raw
    endpoints or paths publicly.
-2. Bind the frozen bounded mTLS agent and coordinator runner to an exact
-   non-production launch entry point. It must accept only the
+2. Review the frozen bounded mTLS agent and exact non-production coordinator/
+   domain launch entry point against the real placement set. It accepts only the
    existing command enum, perform no shell evaluation, clear ambient proxy and
    credential variables, bind listeners to exact overlay IPs, and confine
    process/fault actions to owned PIDs and run roots.
@@ -186,3 +191,15 @@ rejected. The authenticated-lane integration KAT additionally compiles 21
 source-signed events and three log bundles into a 65-file temporary evidence
 set. No real private input, OS socket, listener, process, fault or persistent
 real evidence output is used.
+
+`biocortex_ab_track_b_t22_a1_exact_launch_binding_v1.py` closes the launch
+entry-point gap. The `domain-agent` and `coordinator` subcommands are the only
+live role surfaces. Both independently call the owner-signature/admission
+verifier; runtime files are unread before that succeeds. A domain re-verifies
+its exact readiness SSHSIG using the packet-bound executable/key, creates an
+owner-only single-use reservation, and only then constructs its one-accept
+listener. The coordinator delegates reservation to the consumer and keeps all
+endpoint, readiness, attestation and credential reads inside the injected
+runner callback. Six directed failures and ordering doubles pass with zero real
+private read, socket, listener, process or fault; committed activation remains
+closed.

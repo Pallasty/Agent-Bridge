@@ -445,7 +445,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
     exact_finalizer = finalizer_module.ExactEvidenceFinalizer(
         evidence_collector, bootstrap_store,
         {domain_id: Path(str(key) + ".pub").read_bytes() for domain_id, key in domain_keys.items()},
-        2, False,
+        False,
     )
     runner_result = runner_module.run_source_bound(
         execution, admission, endpoint, readiness_packets,
@@ -461,11 +461,14 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
     assert sum(lane.receipt_sequence for lane in lanes.values()) == 23
     evidence_collector.validate_complete()
     assert len(evidence_collector.signed_events) == 21 and len(evidence_collector.log_sets) == 3
+    assert evidence_collector.maximum_observed_clock_skew_seconds == 1
     # The exact finalizer retained the one memory-only value through cleanup,
     # scanned it against all evidence, and zeroized it before publication.
     assert bootstrap_store.frame is None and bootstrap_store.frame_sha256 is None and bootstrap_store.secret is None
     evidence_set = Path(execution["artifact_scope"]["run_evidence_root"]) / "evidence-set"
     assert evidence_set.is_dir() and len([path for path in evidence_set.rglob("*") if path.is_file()]) == 65
+    terminal_evidence = json.loads((evidence_set / "terminal-evidence.json").read_bytes())
+    assert terminal_evidence["timing"]["maximum_observed_clock_skew_seconds"] == 1
     expect_failure(
         lambda: exact_finalizer(execution, admission, plans, {}, []),
         "E_EXACT_FINALIZER_SINGLE_ATTEMPT",
@@ -481,6 +484,13 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
             "all_owned_processes_cleaned": True, "all_owned_ports_released": True,
         }
     negative_count = 0
+    expect_failure(
+        lambda: evidence_collector.record_clock_observation(
+            NOW, module.utc_text(NOW + timedelta(seconds=301)), NOW + timedelta(seconds=1),
+        ),
+        "E_AUTH_LANE_CLOCK_SKEW",
+    )
+    negative_count += 1
     expect_failure(
         lambda: module.request_payload(plans[0], "PREFLIGHT", "NORMAL", sha("unexpected")),
         "E_AUTH_LANE_SECRET_BINDING",
@@ -606,6 +616,7 @@ print("memory_only_bootstrap_consume_count\t3")
 print("signed_emergency_cleanup_count\t1")
 print("kat_exact_evidence_finalization_count\t1")
 print("kat_atomic_evidence_file_count\t65")
+print("kat_maximum_observed_clock_skew_seconds\t1")
 print(f"directed_negative_test_count\t{negative_count}")
 print("real_private_inputs_read\t0")
 print("real_certificate_or_key_files_read\t0")

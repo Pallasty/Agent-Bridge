@@ -81,7 +81,7 @@ rollback prevention.
   preparation challenge/signature/terminal, private manifests, tool binaries,
   budget, fault target, three signed runtime-readiness packets and exact
   runner/executor/live-backend/authenticated-lane/transport/evidence/compiler/
-  writer/exact-finalizer/consumer source-artifact
+  writer/exact-finalizer/exact-launch/consumer source-artifact
   set. A complete
   synthetic chain verifies all eleven credential files only after the final
   owner signature; 50 negative paths cover forgery, readiness/source
@@ -91,8 +91,8 @@ rollback prevention.
   receipt is created and bound by the later private admission receipt.
 - a completion audit that originally proved real collection had to wait for a
   source-bound execution/evidence chain. Those offline components now exist;
-  real activation still waits for exact launch binding, three signed host-local
-  runtime-readiness packets and credential-placement proof. The
+  real activation still waits for three signed host-local runtime-readiness
+  packets, credential-placement proof and the final activation audit. The
   decision packet fails closed on every remaining input.
 - a single-use execution consumer that independently rechecks the clean source
   commit, owner signature and admission receipt, reserves before runner
@@ -165,7 +165,9 @@ rollback prevention.
   event SSHSIG chains, preserves source-IP and peer-certificate binding,
   transfers the memory-only bootstrap frame only in permitted directions,
   returns three exact bounded log bundles and performs signed emergency
-  cleanup. Its end-to-end KAT completes all 23 commands and 21 signed events
+  cleanup. It also records a conservative clock-offset upper bound from each
+  command round trip instead of substituting the allowed ceiling. Its
+  end-to-end KAT completes all 23 commands and 21 signed events
   with no real key read, socket, listener, process or fault.
 - a one-shot exact evidence finalizer that revalidates the 23-row runner
   transcript, transfers the sole coordinator bootstrap value to exact-value
@@ -173,6 +175,13 @@ rollback prevention.
   compiler and atomic writer, and returns only the five runner-finalization
   fields. Its integrated KAT publishes and reads back one 65-file temporary
   evidence set; every real activation remains false.
+- one exact non-production launch CLI with separate `domain-agent` and
+  `coordinator` roles. All four role processes independently reverify the final
+  owner SSHSIG and admission receipt. Domain agents reverify their exact
+  readiness signature with the packet-pinned tool/key and reserve before the
+  first listener; coordinator runtime files are loaded only inside the
+  consumer's post-reservation callback. Six negative/order tests pass with no
+  real runtime read or side effect, and activation remains false.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -242,9 +251,9 @@ new hashes and still requires a separate owner signature under
 accessed yet.
 
 Before any real collection challenge is generated, the now-frozen runner,
-live domain lane/backend and exact finalizer must be bound to the exact
-coordinator/domain launch entry point and included, together with the
-executor/transport/evidence sources, in the final execution contract.
+live domain lane/backend, exact finalizer and exact coordinator/domain launch
+entry point must remain included, together with the executor/transport/evidence
+sources, in the final execution contract.
 Otherwise a later source change would invalidate the source-bound host
 attestations. After that source set is frozen and the remaining
 real inputs exist, the implemented builder can generate one source-bound final

@@ -360,7 +360,8 @@ SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
 a private one-execution admission receipt; it also freshly revalidates the
 three signed host-readiness packets and re-hashes the exact source-bound
 runner, executor, authenticated domain lane, live local-process backend,
-transport, evidence compiler/writer, exact finalizer and consumer artifacts named by the
+transport, evidence compiler/writer, exact finalizer, exact launch binding and
+consumer artifacts named by the
 owner-signed contract. The owner payload binds the stable readiness-set and
 source-artifact-set digests; the time-varying readiness verification-receipt
 digest is emitted only by admission. Failure is terminal and cannot
@@ -376,7 +377,11 @@ exact schema-valid, digest-valid terminal-evidence file bound back to the
 execution contract. Both final admission and the consumer are additionally
 blocked by source constants that remain false until exact coordinator/domain
 launch binding, three real host-readiness packets, credential-placement proof
-and the final lane/backend/evidence activation audit are complete. Failure is
+and the final lane/backend/evidence activation audit are complete. The exact
+launch module exposes only `domain-agent` and `coordinator`: all four processes
+independently reverify owner authority and admission, every domain reserves
+before listening, and coordinator runtime inputs remain lazy until the consumer
+reservation. Failure is
 terminal and cannot retry. The consumer itself
 opens no socket and starts no listener, workload, or service process.
 
@@ -446,9 +451,9 @@ or satisfy the stronger S20 monotonic-CAS requirement.
 
 ## Exact owner inputs still required
 
-1. Complete the final activation audit and exact coordinator/domain launch
-   binding over the now-frozen authenticated lane; keep every live activation
-   constant false until the remaining owner-bound runtime inputs exist.
+1. Complete the final activation audit over the now-frozen exact coordinator/
+   domain launch binding; keep every live activation constant false until the
+   remaining owner-bound runtime inputs exist.
 2. Choose a third owner physical host, or choose a cloud provider plus exact
    region/zone/instance type and numeric spend limit.
 3. Choose a dedicated T22-A1 owner public key or explicitly approve reuse of
@@ -712,4 +717,15 @@ transferred bootstrap secret, and rejects a second attempt. The authenticated-
 lane integration KAT then drives that finalizer over 21 source-signed events
 and three bounded log bundles, atomically publishes and reads back 65 temporary
 owner-only evidence files, and returns the five closed runner finalization
-fields. All committed live activation constants remain false.
+fields. The lane derives the reported clock-offset upper bound from every
+coordinator-send/domain-observe/coordinator-receive interval; it never writes
+the 300-second policy limit as though it were observed. All committed live
+activation constants remain false.
+
+The exact-launch-binding KAT independently verifies one packet-bound readiness
+SSHSIG, rejects endpoint drift, expiry, signature mutation and reservation
+replay, and proves the concrete domain order is authorization, private runtime
+input, local reservation, then listener. A coordinator double proves endpoint,
+readiness, attestation and credential loading occurs only inside the consumer's
+post-reservation callback. The CLI status path and all committed activation
+flags read no real private input and open no socket.

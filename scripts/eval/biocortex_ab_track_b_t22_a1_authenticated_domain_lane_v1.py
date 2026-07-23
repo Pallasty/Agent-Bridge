@@ -13,6 +13,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import secrets
 import shutil
@@ -795,6 +796,35 @@ class EvidenceCollector:
         self.event_plan = evidence.resolve_event_plan(fault_target_domain_id)
         self.signed_events: list[dict] = []
         self.log_sets: dict[str, list[dict]] = {}
+        self.maximum_observed_clock_skew_seconds = 0
+
+    def record_clock_observation(
+        self,
+        coordinator_sent_at: datetime,
+        domain_observed_at: str,
+        coordinator_received_at: datetime,
+    ) -> None:
+        observed = parse_time(domain_observed_at, "E_AUTH_LANE_CLOCK_OBSERVATION")
+        require(
+            coordinator_sent_at.tzinfo is not None
+            and coordinator_sent_at.utcoffset().total_seconds() == 0
+            and coordinator_received_at.tzinfo is not None
+            and coordinator_received_at.utcoffset().total_seconds() == 0
+            and coordinator_sent_at <= coordinator_received_at,
+            "E_AUTH_LANE_CLOCK_OBSERVATION",
+        )
+        # The domain observation must have occurred inside the request/response
+        # interval.  The maximum distance to either coordinator endpoint is a
+        # conservative upper bound that includes network delay rather than
+        # pretending to isolate clock skew more precisely than the evidence can.
+        upper_bound = math.ceil(max(
+            abs((observed - coordinator_sent_at).total_seconds()),
+            abs((observed - coordinator_received_at).total_seconds()),
+        ))
+        require(0 <= upper_bound <= 300, "E_AUTH_LANE_CLOCK_SKEW")
+        self.maximum_observed_clock_skew_seconds = max(
+            self.maximum_observed_clock_skew_seconds, upper_bound,
+        )
 
     def record_events(self, domain_id: str, command: str, rows: list[dict]) -> None:
         evidence = load_evidence_module()
@@ -1239,6 +1269,9 @@ class AuthenticatedDomainLane:
                 require(outgoing is None and log_bundle is None, "E_AUTH_LANE_CLEANUP_TRAILING_FRAME")
                 return value
             receipt = value["receipt"]
+            self.evidence_collector.record_clock_observation(
+                now, receipt["observed_at"], received_at,
+            )
             self.evidence_collector.record_events(
                 self.domain_id, command, value["signed_events"],
             )

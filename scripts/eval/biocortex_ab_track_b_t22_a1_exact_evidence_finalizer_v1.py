@@ -143,7 +143,6 @@ class ExactEvidenceFinalizer:
         collector,  # noqa: ANN001
         bootstrap_store,  # noqa: ANN001
         domain_public_keys: dict[str, bytes],
-        maximum_observed_clock_skew_seconds: int,
         synthetic_only: bool,
     ) -> None:
         require(
@@ -155,15 +154,9 @@ class ExactEvidenceFinalizer:
             and all(isinstance(raw, bytes) and raw for raw in domain_public_keys.values()),
             "E_EXACT_FINALIZER_DOMAIN_KEY_SET",
         )
-        require(
-            isinstance(maximum_observed_clock_skew_seconds, int)
-            and 0 <= maximum_observed_clock_skew_seconds <= 300,
-            "E_EXACT_FINALIZER_CLOCK_SKEW",
-        )
         self.collector = collector
         self.bootstrap_store = bootstrap_store
         self.domain_public_keys = dict(domain_public_keys)
-        self.maximum_observed_clock_skew_seconds = maximum_observed_clock_skew_seconds
         self.synthetic_only = synthetic_only
         self.attempted = False
 
@@ -189,6 +182,14 @@ class ExactEvidenceFinalizer:
             "E_EXACT_FINALIZER_ACTIVATION_CHAIN",
         )
         foreign_call(self.collector.validate_complete)
+        maximum_observed_clock_skew_seconds = getattr(
+            self.collector, "maximum_observed_clock_skew_seconds", None,
+        )
+        require(
+            isinstance(maximum_observed_clock_skew_seconds, int)
+            and 0 <= maximum_observed_clock_skew_seconds <= 300,
+            "E_EXACT_FINALIZER_CLOCK_SKEW",
+        )
         validate_transcript(transcript, receipt_chains, execution.get("fault", {}).get("target_domain_id"))
         signed_events = list(self.collector.signed_events)
         log_sets = {domain_id: list(self.collector.log_sets[domain_id]) for domain_id in DOMAIN_IDS}
@@ -199,7 +200,7 @@ class ExactEvidenceFinalizer:
                 compiler.compile_terminal_evidence,
                 execution, admission, plans, receipt_chains, signed_events,
                 self.domain_public_keys, log_sets, [secret],
-                self.maximum_observed_clock_skew_seconds, self.synthetic_only,
+                maximum_observed_clock_skew_seconds, self.synthetic_only,
             )
             require(not any(secret), "E_EXACT_FINALIZER_SECRET_ZEROIZATION")
             publication = foreign_call(

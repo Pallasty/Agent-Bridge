@@ -646,7 +646,7 @@ def status() -> dict:
     load_validators()
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.evidence_compiler_status.v0",
-        "status": "OFFLINE_SIGNED_EVENT_AND_TERMINAL_COMPILER_READY_PERSISTENT_WRITER_AND_ACTIVATION_ABSENT",
+        "status": "SIGNED_EVENT_COMPILER_AND_ATOMIC_WRITER_READY_EXACT_FINALIZER_PRESENT_REAL_ACTIVATION_CLOSED",
         "evidence_activation_ready": EVIDENCE_ACTIVATION_READY,
         "real_execution_or_receipt_inputs_read": 0, "real_domain_signatures_read": 0,
         "real_secret_values_read": 0, "persistent_outputs_created": 0,

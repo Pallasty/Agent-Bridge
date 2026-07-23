@@ -361,15 +361,14 @@ def reserve(root: Path, execution: dict, admission: dict, now: datetime) -> Path
     return terminal
 
 
-def consume_and_dispatch(
+def verify_execution_authorization(
     execution_contract_path: Path,
     owner_signature_path: Path,
     admission_receipt_path: Path,
     source_commit: str,
     now: datetime,
-    runner: Callable[[dict, dict], dict],
-    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-) -> dict:
+) -> tuple[dict, dict, str]:
+    """Verify final owner authority before the first admission-receipt read."""
     execution_module = load_execution_module()
     require(execution_module.EXECUTION_ACTIVATION_READY, "E_EXECUTION_ACTIVATION_NOT_READY")
     observed_source_commit = foreign_call(execution_module.require_clean_tracked_tree)
@@ -380,14 +379,45 @@ def consume_and_dispatch(
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise SafeFailure("E_CONSUMER_OWNER_ANCHOR") from error
     public_key = foreign_call(collection.validate_anchor, anchor, proposal)
-    execution, raw = foreign_call(execution_module.read_canonical_json, execution_contract_path, "E_CONSUMER_EXECUTION_CONTRACT")
-    foreign_call(execution_module.validate_execution_contract, execution, schema, contract, proposal, source_commit, now)
-    owner_signature_sha256 = foreign_call(execution_module.verify_owner_signature, raw, owner_signature_path, public_key)
+    execution, raw = foreign_call(
+        execution_module.read_canonical_json,
+        execution_contract_path, "E_CONSUMER_EXECUTION_CONTRACT",
+    )
+    foreign_call(
+        execution_module.validate_execution_contract,
+        execution, schema, contract, proposal, source_commit, now,
+    )
+    owner_signature_sha256 = foreign_call(
+        execution_module.verify_owner_signature,
+        raw, owner_signature_path, public_key,
+    )
 
-    # This is the first private admission-receipt read; it is intentionally
-    # ordered after the exact final owner signature verification above.
-    admission = foreign_call(execution_module.parse_admission_receipt, admission_receipt_path, execution, now)
-    require(admission["owner_execution_signature_sha256"] == owner_signature_sha256, "E_CONSUMER_OWNER_SIGNATURE_BINDING")
+    # This is intentionally the first private admission-receipt read.
+    admission = foreign_call(
+        execution_module.parse_admission_receipt,
+        admission_receipt_path, execution, now,
+    )
+    require(
+        admission["owner_execution_signature_sha256"] == owner_signature_sha256,
+        "E_CONSUMER_OWNER_SIGNATURE_BINDING",
+    )
+    return execution, admission, owner_signature_sha256
+
+
+def consume_and_dispatch(
+    execution_contract_path: Path,
+    owner_signature_path: Path,
+    admission_receipt_path: Path,
+    source_commit: str,
+    now: datetime,
+    runner: Callable[[dict, dict], dict],
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> dict:
+    execution_module = load_execution_module()
+    execution, admission, owner_signature_sha256 = verify_execution_authorization(
+        execution_contract_path, owner_signature_path, admission_receipt_path,
+        source_commit, now,
+    )
     root = foreign_call(execution_module.validate_artifact_scope, execution["artifact_scope"], execution["run_id"])
     terminal_path = reserve(root, execution, admission, now)
     invoked = False

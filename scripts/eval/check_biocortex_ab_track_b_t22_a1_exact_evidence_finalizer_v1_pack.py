@@ -72,7 +72,7 @@ negative_count += 1
 
 domain_public_keys = {domain_id: f"ssh-ed25519 SYNTHETIC-{domain_id}\n".encode() for domain_id in module.DOMAIN_IDS}
 expect_failure(
-    lambda: module.ExactEvidenceFinalizer(object(), object(), domain_public_keys, 2, False),
+    lambda: module.ExactEvidenceFinalizer(object(), object(), domain_public_keys, False),
     "E_EXACT_FINALIZER_ACTIVATION_NOT_READY",
 )
 negative_count += 1
@@ -82,6 +82,7 @@ class Collector:
     event_plan = []
     signed_events = []
     log_sets = {domain_id: [] for domain_id in module.DOMAIN_IDS}
+    maximum_observed_clock_skew_seconds = 2
 
     def validate_complete(self) -> None:
         return None
@@ -98,7 +99,7 @@ class BootstrapStore:
 
 
 store = BootstrapStore()
-finalizer = module.ExactEvidenceFinalizer(Collector(), store, domain_public_keys, 2, True)
+finalizer = module.ExactEvidenceFinalizer(Collector(), store, domain_public_keys, True)
 owned_secret = store.secret
 expect_failure(
     lambda: finalizer({"fault": {"target_domain_id": "domain-3"}}, {}, [], receipt_chains, transcript),

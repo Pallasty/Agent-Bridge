@@ -250,7 +250,7 @@ def run_source_bound(
 def status() -> dict:
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.source_bound_runner_status.v0",
-        "status": "OFFLINE_SOURCE_BOUND_SCHEDULER_AUTHENTICATED_LANE_AND_LOCAL_BACKEND_PRESENT_ACTIVATION_CLOSED",
+        "status": "SOURCE_BOUND_SCHEDULER_AUTHENTICATED_LANE_BACKEND_AND_EXACT_FINALIZER_PRESENT_ACTIVATION_CLOSED",
         "runner_activation_ready": RUNNER_ACTIVATION_READY,
         "global_command_count": 23, "automatic_retry_allowed": False,
         "real_private_inputs_read": 0, "network_accessed": False,

@@ -639,7 +639,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-evidence-kat-") as directory:
     negative_count += 1
 
 status = module.status()
-assert status["status"] == "OFFLINE_SIGNED_EVENT_AND_TERMINAL_COMPILER_READY_PERSISTENT_WRITER_AND_ACTIVATION_ABSENT"
+assert status["status"] == "SIGNED_EVENT_COMPILER_AND_ATOMIC_WRITER_READY_EXACT_FINALIZER_PRESENT_REAL_ACTIVATION_CLOSED"
 assert status["evidence_activation_ready"] is False
 assert status["real_execution_or_receipt_inputs_read"] == status["real_domain_signatures_read"] == 0
 assert status["real_secret_values_read"] == status["persistent_outputs_created"] == 0
@@ -647,7 +647,7 @@ assert status["network_accessed"] is False and status["listeners_started"] == st
 assert status["services_started"] == status["faults_injected"] == status["spend_usd_cents"] == 0
 assert status["execution_authorized"] is False and status["production_admissible"] is False
 writer_status = writer_module.status()
-assert writer_status["status"] == "ATOMIC_PRIVATE_EVIDENCE_WRITER_READY_REAL_ACTIVATION_AND_RUNNER_INTEGRATION_ABSENT"
+assert writer_status["status"] == "ATOMIC_PRIVATE_EVIDENCE_WRITER_READY_EXACT_RUNNER_FINALIZER_PRESENT_REAL_ACTIVATION_CLOSED"
 assert writer_status["evidence_writer_activation_ready"] is False
 assert writer_status["real_execution_or_signature_inputs_read"] == 0
 assert writer_status["persistent_evidence_sets_created"] == 0

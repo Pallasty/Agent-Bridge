@@ -375,7 +375,7 @@ def persist_evidence_set(
 def status() -> dict:
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.evidence_writer_status.v0",
-        "status": "ATOMIC_PRIVATE_EVIDENCE_WRITER_READY_REAL_ACTIVATION_AND_RUNNER_INTEGRATION_ABSENT",
+        "status": "ATOMIC_PRIVATE_EVIDENCE_WRITER_READY_EXACT_RUNNER_FINALIZER_PRESENT_REAL_ACTIVATION_CLOSED",
         "evidence_writer_activation_ready": EVIDENCE_WRITER_ACTIVATION_READY,
         "real_execution_or_signature_inputs_read": 0, "persistent_evidence_sets_created": 0,
         "network_accessed": False, "listeners_started": 0, "processes_started": 0,
