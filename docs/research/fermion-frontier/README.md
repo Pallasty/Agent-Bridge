@@ -153,10 +153,22 @@ after a 25% margin. These are not worst-case resource bounds and cannot authoriz
 is `NO_GO_D21_FULL_53_RESOURCE_AUTHORIZATION_EXECUTABLE_IMPLEMENTATION_ABSENT`; see
 `FH_L8_FULL_RESOURCE_READINESS_D21_ZH.md`.
 
-The active next gate is
-`FULL_53_SHARD_EXECUTABLE_CONSUMER_AND_TINY_FIXTURE_RECOVERY_VALIDATION`. It must implement and
-fault-test the real execution/recovery/publication paths on synthetic data before any production
-resource contract or full-53 authorization can be frozen.
+Two complementary synthetic D22 lanes now close that mechanism gate without reading packed q3.
+The concurrent `FH-L8-INDEPENDENT-REFERENCE-D22-SYNTHETIC-CONSUMER-V1` exercises 53 tiny shards,
+8 partitions, interruption/resume and basic custody failures. The independent D22-R lane adds
+exclusive locking, per-shard receipt hash chains, exact manifest admission, overlap/hash/partial-
+publication faults and a live-replaying checker. Its clean and resumed runs produce the same
+13-record / 208-byte target SHA-256
+`f68d75d32458e4d5f89f5c4221105086ed7546c4e6eb7643e3f7a89ca2ca2876`
+and terminal receipt SHA-256
+`dbe9f4bb291e4f90ddd26fdb1a3715fd7879338cf69818e82b533dd0442efef3`.
+See `FH_L8_FULL_CONSUMER_D22_ZH.md` and `FH_L8_TINY_RECOVERY_D22_ZH.md`.
+
+Both D22 lanes report zero production checkpoint reads, q3 rows and scientific-kernel calls.
+Concurrent D23 then records a 2,750,812,950-byte / 13,622-file non-authoritative capacity
+guardrail and returns `NO_GO_D23_FULL_53_RESOURCE_ENVELOPE_INCOMPLETE`. Its resource-side next gate
+is `FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`; D22-R's scientific-kernel
+binding and worst-case fan-out proof also remain open. No full-53 action is authorized.
 
 Status date: 2026-07-23
 

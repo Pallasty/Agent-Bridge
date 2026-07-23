@@ -1,5 +1,36 @@
 # Research progress ledger
 
+## 2026-07-23 — FH-L8 D23 non-authoritative resource guardrail
+
+- Concurrent D23 converts the D21 5/4-margin planning values into a
+  2,750,812,950-byte / 13,622-file capacity guardrail for 53 × 256 spill files, manifests and one
+  target.
+- Returned `NO_GO_D23_FULL_53_RESOURCE_ENVELOPE_INCOMPLETE`: no auditable worst-case memory or
+  runtime bound and no external resource reservation exists.
+- D23's resource next gate is
+  `FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`. D22-R's production
+  scientific-kernel binding remains a separate unmet prerequisite.
+
+## 2026-07-23 — FH-L8 D22 synthetic executable/recovery validation
+
+- The concurrent D22 lane at `4ad711c775b0079dc4554710805a2bbdee47e86f` exercised 53
+  two-row synthetic shards, eight partitions, frontier-17 resume and basic gap/orphan/hash/
+  no-replace failures. It performed no packed-q3 read or scientific action.
+- D22-R independently implemented a three-shard/four-partition fixed-record data plane with
+  exclusive lock, manifest-enumerated partition admission, per-shard receipt SHA-256 chain,
+  exact-frontier resume, signed merge, target manifest and terminal-receipt-last publication.
+- Clean execution and one-shard interruption/resume produced identical 208-byte targets
+  (`f68d75d3...a2ca2876`) and identical terminal receipts (`dbe9f4bb...442efef3`).
+- Live fault replay verified exact classifications for gap, overlap, orphan bytes, partition hash
+  drift, busy lock, partial final publication and production attempt.
+- Frozen D22-R chronology after a pre-contract refreeze:
+  `bb85c6734a92aad27731c3d6d8561a95fed2aa25` ->
+  `7362c8b434e3aedf056ca355db4dc9fb3b5f659e` ->
+  `7a3f8bbfedc1e589fd14a9a77e1597752f5aeb12`.
+- Production checkpoint reads, q3 rows, scientific-kernel calls, full-53 authorization and full q4
+  remain zero/false. Next gate:
+  `FULL_53_SHARD_SCIENTIFIC_KERNEL_BINDING_AND_WORST_CASE_RESOURCE_PROOF`.
+
 ## 2026-07-23 — FH-L8 D21 full-53 resource-authorization readiness
 
 - Audited the merged D20 source rather than accepting its status label as executable evidence.
