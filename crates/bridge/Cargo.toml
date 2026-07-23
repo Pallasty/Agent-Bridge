@@ -19,6 +19,9 @@ episode-observation-slice-c2-synthetic = [
     "episode-observation-slice-c1",
     "ab-store/episode-observation-slice-c2-synthetic",
 ]
+episode-observation-c2c-runtime-assembly-synthetic = [
+    "episode-observation-slice-c2-synthetic",
+]
 temporal-evidence-s4-synthetic = ["ab-store/temporal-evidence-s4-synthetic"]
 temporal-evidence-s5-candidate-synthetic = [
     "temporal-evidence-s4-synthetic",

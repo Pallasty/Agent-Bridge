@@ -44,6 +44,8 @@ pub mod embedding_dim_guard;
 pub(crate) mod episode_observation_curation_batch;
 #[cfg(feature = "episode-observation-slice-c2-synthetic")]
 pub(crate) mod episode_observation_curation_batch_c2_synthetic;
+#[cfg(feature = "episode-observation-c2c-runtime-assembly-synthetic")]
+pub(crate) mod episode_observation_c2c_runtime_assembly_synthetic;
 pub mod event_spine;
 pub mod github_api;
 pub mod gitlab_api;
