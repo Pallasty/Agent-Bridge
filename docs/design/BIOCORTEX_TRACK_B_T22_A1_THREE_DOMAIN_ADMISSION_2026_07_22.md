@@ -190,6 +190,16 @@ detached SSHSIG. Challenge reservation and terminal receipts live below the
 same private artifact root. Failed reserved challenges are terminal and cannot
 be silently retried.
 
+Before a collection challenge can bind a domain key, the standalone
+`biocortex_ab_track_b_t22_a1_domain_operator_key_preparer_v1.py` creates that
+key without reading stable host identity or any existing credential. Its
+explicit `prepare` command binds domain ID, expected hostname, clean source
+commit, private host-local root, exact `ssh-keygen` path and caller-confirmed
+binary SHA-256. It reserves one attempt, refuses overwrite/replay, verifies the
+private/public pair, writes an owner-only terminal receipt and removes partial
+key files on failure. Key preparation alone grants no collection, network,
+listener, workload, fault or execution authority.
+
 ## Future execution and evidence contracts
 
 Three additional closed Draft 2020-12 schemas now freeze the shape of the
@@ -729,3 +739,9 @@ input, local reservation, then listener. A coordinator double proves endpoint,
 readiness, attestation and credential loading occurs only inside the consumer's
 post-reservation callback. The CLI status path and all committed activation
 flags read no real private input and open no socket.
+
+The domain-operator-key-preparer KAT creates one temporary Ed25519 pair and
+rejects six tool-hash, host, domain, path, replay and injected-generation
+failures. It proves no real key is created by the status path and no stable
+identity, ambient credential, network, listener, service or fault surface is
+used.

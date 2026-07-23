@@ -52,6 +52,13 @@ rollback prevention.
   in-memory hashing, canonical packet signing/self-verification, private
   terminal receipts, one synthetic success, and 10 synthetic failure paths;
   and
+- an explicit zero-network domain-operator key preparer that binds the exact
+  domain ID, expected hostname, clean source commit and caller-confirmed
+  `ssh-keygen` binary hash before creating one owner-only Ed25519 pair beneath
+  a host-local private root. It reserves one attempt, verifies the derived
+  public key, removes partial material on failure and never reads stable host
+  identity or existing credentials. One synthetic success and six negative
+  paths pass; it grants neither collection nor execution authority; and
 - an exact-set owner countersignature schema and admission gate that verifies
   owner authority before reading the private bundle, reserves one use, reruns
   all three packet/signature/distinctness/freshness checks, and emits only a
