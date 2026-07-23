@@ -43,6 +43,11 @@
   scratch, executed authority or scientific outcome. Rechecking the retained exact 264-file scratch
   verifies terminal/launcher receipts, captured outputs, all spill/target bytes and semantic
   digests, returning `VERIFIED_D18C_RESULT_AND_EXTERNAL_TERMINAL_EVIDENCE`.
+- The launcher command digest binds the official execution worktree's absolute runner, contract and
+  capture paths. External checking from another worktree therefore fails closed with
+  `launcher command digest drift`; a normal clone can recover only static provenance unless the
+  original custody path and untracked scratch are retained or a future evidence-transfer contract
+  is separately frozen.
 - Authority is limited to `bounded_4096_preflight_executed=true` and
   `partial_q3_to_q4_action_executed=true`. The partial target is forbidden as q4, contraction, q5
   or downstream numerical input. Full q4, all 53 shards, D12/D13 and D16-W numeric authority,

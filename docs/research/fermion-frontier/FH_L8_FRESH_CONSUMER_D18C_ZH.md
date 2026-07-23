@@ -146,6 +146,15 @@ systemd 的 post-exit `MemoryCurrent` 返回 `[not set]`；空 `ControlGroup` �
 该 external scratch 当前占用 41,465,952 bytes，未纳入 Git 且仍是可变的本地证据；
 它一旦遗失或发生漂移，C3 不再足以恢复 executed/scientific verification。
 
+launcher receipt 的 `command_sha256` 还绑定官方执行工作树
+`/Data/CascadeProjects/.ab-worktrees/agent-bridge-fh-l8-d18c-fresh-consumer-v2-20260722`
+中的绝对 runner、contract 和 capture 路径。因而把 checker 与同一 scratch 移到另一个
+worktree 后，会按设计返回 `launcher command digest drift`；这说明 external evidence
+具有 execution-custody location binding，并非结果失效。完整 external 复核必须保留这条
+原始 custody 路径，或在未来先冻结独立的 evidence-transfer/verifier contract；当前集成
+worktree 和普通远端 clone 只能独立恢复 static Git/schema provenance，不能改写 receipt
+来伪造可移植性。
+
 ## Authority ceiling
 
 本门新增的正 authority 只有：
