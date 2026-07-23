@@ -4171,6 +4171,18 @@ enum SkillsOp {
         #[arg(long)]
         json: bool,
     },
+    /// Show strict per-lane evidence behind a route decision.
+    /// This is observation-only and never changes routing policy.
+    RouteDiagnose {
+        /// Task description to inspect.
+        query: String,
+        /// Maximum Skills retained per diagnostic lane.
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+    },
     /// Record whether a routed skill was used/helpful, and link that feedback into memory.
     Feedback {
         /// Skill memory key, usually copied from `skills route` / `skills_route`.
@@ -4578,9 +4590,7 @@ async fn prepare_skills_semantic_route() -> Result<()> {
         .unwrap_or(30_000)
         .min(120_000);
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
-    while ab_store::vector::local_model_ready().is_none()
-        && std::time::Instant::now() < deadline
-    {
+    while ab_store::vector::local_model_ready().is_none() && std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
 
@@ -4710,7 +4720,10 @@ async fn real_main() -> Result<()> {
 
     // Skills subcommand: short-lived; no daemon hub needed.
     if let Cmd::Skills { op } = &cmd {
-        if matches!(op, SkillsOp::Route { .. } | SkillsOp::RouteEval { .. }) {
+        if matches!(
+            op,
+            SkillsOp::Route { .. } | SkillsOp::RouteEval { .. } | SkillsOp::RouteDiagnose { .. }
+        ) {
             prepare_skills_semantic_route().await?;
         }
         return match op {
@@ -4733,6 +4746,9 @@ async fn real_main() -> Result<()> {
                 json,
             } => skills::run_route(query, *limit, *body_chars, *json).await,
             SkillsOp::RouteEval { limit, json } => skills::run_route_eval(*limit, *json).await,
+            SkillsOp::RouteDiagnose { query, limit, json } => {
+                skills::run_route_diagnose(query, *limit, *json).await
+            }
             SkillsOp::Feedback {
                 skill_key,
                 query,

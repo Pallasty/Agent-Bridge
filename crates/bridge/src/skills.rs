@@ -759,13 +759,142 @@ pub async fn run_route(query: &str, limit: usize, body_chars: usize, json: bool)
     Ok(())
 }
 
+/// Show the strict retrieval lanes behind a route decision without changing
+/// ranking, provenance, admission, memory, or execution authority.
+pub async fn run_route_diagnose(query: &str, limit: usize, json: bool) -> Result<()> {
+    let query = query.trim();
+    if query.is_empty() {
+        bail!("query is required");
+    }
+    let limit = limit.clamp(1, 20);
+    let store = open_store_read_only().await?;
+    let overfetch = route_retrieval_limit(limit);
+    let tag_filter = vec!["skill".to_string()];
+    let formats = requested_file_formats(query);
+
+    // Keep the evaluator's strict error behavior: diagnostics must not turn an
+    // unhealthy search lane into a plausible empty result.
+    let semantic = store
+        .memory_search_semantic(query, overfetch, 0.25_f32)
+        .await
+        .context("route diagnostic semantic search failed")?;
+    let primary_fts = store
+        .memory_search(query, &tag_filter, overfetch)
+        .await
+        .context("route diagnostic FTS search failed")?;
+    let (relaxed_query, relaxed_fts) = if primary_fts.is_empty() {
+        if let Some(relaxed) = relaxed_fts_query(query) {
+            let hits = store
+                .memory_search(&relaxed, &tag_filter, overfetch)
+                .await
+                .context("route diagnostic relaxed FTS search failed")?;
+            (Some(relaxed), Some(hits))
+        } else {
+            (None, None)
+        }
+    } else {
+        (None, None)
+    };
+    let mut format_lanes = Vec::new();
+    for format in &formats {
+        let hits = store
+            .memory_search(format, &tag_filter, route_candidate_limit(limit) as u32)
+            .await
+            .context("route diagnostic format FTS search failed")?;
+        format_lanes.push((*format, hits));
+    }
+
+    let mut merged_fts = primary_fts.clone();
+    if let Some(relaxed) = &relaxed_fts {
+        merged_fts = relaxed.clone();
+    }
+    for (_, hits) in &format_lanes {
+        merged_fts.extend(hits.clone());
+    }
+    // Match the runtime boundary exactly: feedback only observes the routed
+    // top-k candidates, never the wider merge set.
+    let pre_feedback: Vec<MemorySearchHit> = route_prioritize_explicit_format(
+        query,
+        route_merge_hits(semantic.clone(), merged_fts, route_candidate_limit(limit)),
+    )
+    .into_iter()
+    .take(limit)
+    .collect();
+    let feedback = route_feedback_for_hits_strict(&store, &pre_feedback).await?;
+    let final_hits = route_prioritize_explicit_format_routed(
+        query,
+        route_apply_feedback(pre_feedback.clone(), &feedback),
+    );
+
+    let payload = serde_json::json!({
+        "schema_version": "skills-route-diagnostic-v0",
+        "mode": "offline_observation_only",
+        "query": query,
+        "limit": limit,
+        "policy_change": "none",
+        "lanes": {
+            "semantic": route_diagnostic_hits_json(&semantic, limit),
+            "fts_primary": route_diagnostic_hits_json(&primary_fts, limit),
+            "fts_relaxed": {
+                "query": relaxed_query,
+                "hits": relaxed_fts.as_ref().map(|hits| route_diagnostic_hits_json(hits, limit)),
+            },
+            "format": format_lanes.iter().map(|(format, hits)| serde_json::json!({
+                "format": format,
+                "hits": route_diagnostic_hits_json(hits, limit),
+            })).collect::<Vec<_>>(),
+            "merged_pre_feedback": route_diagnostic_hits_json(&pre_feedback, limit),
+            "final": final_hits.iter().take(limit).map(|hit| serde_json::json!({
+                "key": hit.hit.record.key,
+                "score": hit.score,
+                "feedback_score": hit.feedback.score,
+                "feedback_count": hit.feedback.count,
+            })).collect::<Vec<_>>(),
+        },
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!(
+            "[route-diagnose] semantic={} fts={} relaxed={} format_lanes={} final={}",
+            payload["lanes"]["semantic"].as_array().map_or(0, Vec::len),
+            payload["lanes"]["fts_primary"]
+                .as_array()
+                .map_or(0, Vec::len),
+            payload["lanes"]["fts_relaxed"]["hits"]
+                .as_array()
+                .map_or(0, Vec::len),
+            formats.len(),
+            payload["lanes"]["final"].as_array().map_or(0, Vec::len),
+        );
+        for hit in payload["lanes"]["final"].as_array().into_iter().flatten() {
+            println!("- {} score={}", hit["key"], hit["score"]);
+        }
+    }
+    Ok(())
+}
+
+fn route_diagnostic_hits_json(hits: &[MemorySearchHit], limit: usize) -> Vec<serde_json::Value> {
+    hits.iter()
+        .filter(|hit| is_skill_hit(hit))
+        .take(limit)
+        .map(|hit| {
+            serde_json::json!({
+                "key": hit.record.key,
+                "score": hit.score,
+                "cosine": hit.cosine,
+            })
+        })
+        .collect()
+}
+
 /// Evaluate the current router against a small checked-in bilingual corpus.
 /// This is an offline observation surface: it never changes retrieval order,
 /// source provenance, memory, or Skill execution authority.
 pub async fn run_route_eval(limit: usize, json: bool) -> Result<()> {
     let corpus = parse_route_quality_corpus()?;
     let limit = limit.clamp(1, 20);
-    let store = open_store().await?;
+    let store = open_store_read_only().await?;
     let mut cases = Vec::with_capacity(corpus.cases.len());
     let mut required = 0usize;
     let mut required_matched = 0usize;
@@ -801,6 +930,7 @@ pub async fn run_route_eval(limit: usize, json: bool) -> Result<()> {
         };
         cases.push(serde_json::json!({
             "id": case.id,
+            "pair_id": case.pair_id,
             "language": case.language,
             "query": case.query,
             "expectation": case.expectation,
@@ -862,6 +992,7 @@ struct RouteQualityCorpus {
 #[derive(Debug, Deserialize)]
 struct RouteQualityCase {
     id: String,
+    pair_id: String,
     language: String,
     query: String,
     expectation: String,
@@ -1154,7 +1285,7 @@ async fn route_feedback_for_hits_strict(
         let edges = store
             .memory_neighbors(key)
             .await
-            .with_context(|| format!("route evaluation feedback lookup failed for {key}"))?;
+            .with_context(|| format!("route strict feedback lookup failed for {key}"))?;
         let stats = route_feedback_stats_from_edges(key, &edges);
         if stats.count > 0 {
             out.insert(key.clone(), stats);
@@ -3531,6 +3662,19 @@ async fn open_store() -> Result<SqliteStore> {
         .with_context(|| format!("open SqliteStore at {}", db_path.display()))
 }
 
+/// Open the existing state database without directory creation, migration, or
+/// write-capable SQLite initialization. Observation commands fail closed when
+/// the database is absent or cannot be read as-is.
+async fn open_store_read_only() -> Result<SqliteStore> {
+    let db_path = std::env::var("AGENT_BRIDGE_DB")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(ab_store::default_db_path);
+    SqliteStore::open_read_only(&db_path)
+        .await
+        .with_context(|| format!("open read-only SqliteStore at {}", db_path.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4653,6 +4797,30 @@ mod tests {
     }
 
     #[test]
+    fn route_diagnostic_hits_include_only_skills_and_respect_limit() {
+        let skill = mk_skill("example/skill", 1);
+        let mut non_skill = mk_skill("example/non-skill", 1);
+        non_skill.tags.clear();
+        let rows = vec![
+            MemorySearchHit {
+                record: skill,
+                score: 0.8,
+                cosine: Some(0.7),
+            },
+            MemorySearchHit {
+                record: non_skill,
+                score: 1.0,
+                cosine: None,
+            },
+        ];
+        let payload = route_diagnostic_hits_json(&rows, 1);
+        assert_eq!(payload.len(), 1);
+        assert_eq!(payload[0]["key"], "skill:example/skill/x");
+        let cosine = payload[0]["cosine"].as_f64().unwrap();
+        assert!((cosine - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
     fn route_quality_corpus_has_bilingual_required_and_gap_cases() {
         let corpus = parse_route_quality_corpus().unwrap();
         assert_eq!(corpus.schema_version, "skills-route-quality-v0");
@@ -4672,6 +4840,18 @@ mod tests {
             .cases
             .iter()
             .all(|case| !case.expected_keys.is_empty()));
+
+        let mut cases_by_pair = BTreeMap::<&str, Vec<&RouteQualityCase>>::new();
+        for case in &corpus.cases {
+            cases_by_pair.entry(&case.pair_id).or_default().push(case);
+        }
+        for pair in cases_by_pair.values() {
+            assert_eq!(pair.len(), 2, "each pair must contain exactly two cases");
+            let languages: BTreeSet<&str> =
+                pair.iter().map(|case| case.language.as_str()).collect();
+            assert_eq!(languages, BTreeSet::from(["en", "zh"]));
+            assert_eq!(pair[0].expected_keys, pair[1].expected_keys);
+        }
     }
 
     #[test]

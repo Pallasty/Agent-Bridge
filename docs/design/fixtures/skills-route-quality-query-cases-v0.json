@@ -3,6 +3,7 @@
   "cases": [
     {
       "id": "pdf-en",
+      "pair_id": "pdf",
       "language": "en",
       "query": "read, edit, and verify a PDF form",
       "expectation": "must_match",
@@ -10,6 +11,7 @@
     },
     {
       "id": "pdf-zh",
+      "pair_id": "pdf",
       "language": "zh",
       "query": "读取、编辑并核对 PDF 表单",
       "expectation": "must_match",
@@ -17,6 +19,7 @@
     },
     {
       "id": "slides-en",
+      "pair_id": "slides",
       "language": "en",
       "query": "create a presentation from a project brief",
       "expectation": "must_match",
@@ -24,6 +27,7 @@
     },
     {
       "id": "rust-review-en",
+      "pair_id": "rust-review",
       "language": "en",
       "query": "review a Rust service for security risks",
       "expectation": "must_match",
@@ -31,6 +35,7 @@
     },
     {
       "id": "slides-zh-known-gap",
+      "pair_id": "slides",
       "language": "zh",
       "query": "根据项目简报制作演示文稿",
       "expectation": "known_gap",
@@ -38,6 +43,7 @@
     },
     {
       "id": "rust-review-zh-known-gap",
+      "pair_id": "rust-review",
       "language": "zh",
       "query": "审查 Rust 服务的安全风险",
       "expectation": "known_gap",
