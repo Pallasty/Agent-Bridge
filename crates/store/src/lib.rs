@@ -20,6 +20,11 @@ mod engram_g1_authenticated_envelope_shadow;
 mod engram_g1_secure_custody_shadow;
 #[cfg(feature = "episode-observation-slice-a")]
 mod episode_observation_slice_a;
+#[cfg(all(
+    feature = "episode-observation-c2-keychain-macos",
+    target_os = "macos"
+))]
+mod episode_observation_c2_keychain_macos;
 #[cfg(feature = "episode-observation-slice-c2-synthetic")]
 pub mod episode_observation_c2_synthetic;
 pub mod lineage_audit;

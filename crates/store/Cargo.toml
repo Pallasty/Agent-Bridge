@@ -30,6 +30,11 @@ temporal-evidence-s21a-owned-lab-final-refreeze-admission-synthetic = ["temporal
 episode-observation-slice-a = ["dep:ring"]
 episode-observation-slice-b = ["episode-observation-slice-a"]
 episode-observation-slice-c2-synthetic = ["episode-observation-slice-b"]
+episode-observation-c2-keychain-macos = [
+    "episode-observation-slice-b",
+    "dep:security-framework",
+    "dep:zeroize",
+]
 
 [dependencies]
 ab-core.workspace = true
@@ -47,6 +52,10 @@ walkdir.workspace = true
 # Optional: real sentence-transformer embedding via ONNX (all-MiniLM-L6-v2, 384-dim).
 # Activated by default; disable with --no-default-features for hash-only builds.
 fastembed = { version = "5", optional = true, default-features = false, features = ["hf-hub", "ort-download-binaries"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "3.7.0", optional = true }
+zeroize = { version = "1.8.2", optional = true }
 
 [[bin]]
 name = "backfill-embeddings"
