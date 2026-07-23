@@ -127,6 +127,12 @@ rollback prevention.
   single-accept and failure-close behavior. The adapter is tested through
   in-memory fake sockets while both activation gates remain false; no OS socket,
   listener or external host is used.
+- a source-bound global scheduler that compiles all three exact plans,
+  dispatches only the 23-command cross-domain schedule, replays all terminal
+  receipt chains, and requires cleanup before evidence finalization. One full
+  synthetic schedule and nine directed negative paths pass with activation,
+  private inputs, sockets, processes and faults all absent/false. Live domain
+  lanes/backend remain the next implementation boundary.
 - an in-memory evidence compiler that replays 23 command receipts, verifies 21
   source-domain Ed25519 SSHSIG payloads, independently reconstructs and replays
   the 21-event coordinator hash chain, binds and scans four bounded logs per
@@ -137,7 +143,7 @@ rollback prevention.
   evidence files through staging, atomically publishes the closed directory and
   revalidates its exact manifest/file set. Four writer-specific negative paths
   reject replay, wrong signatures, unsafe permissions and injected partial
-  writes. Real activation and runner integration remain absent/false.
+  writes. Real activation and live-runner integration remain absent/false.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -206,10 +212,11 @@ new hashes and still requires a separate owner signature under
 `agent-bridge-t22-a1-owner-v1`. None of these real instances exists or is
 accessed yet.
 
-Before any real collection challenge is generated, a separate unit must freeze
-the cross-host runner/executor and single-use consumption of the resulting
-execution-admission receipt. Otherwise that later source change would invalidate
-the source-bound host attestations. After the runner is frozen and the remaining
+Before any real collection challenge is generated, the new runner scheduler
+must be completed with live domain lanes/backend and bound, together with the
+executor/transport/evidence sources, into the final execution contract.
+Otherwise a later source change would invalidate the source-bound host
+attestations. After that source set is frozen and the remaining
 real inputs exist, the implemented builder can generate one source-bound final
 execution-contract instance and admit it only after the exact owner signature.
 Public Rekor submission remains a separate explicit choice.

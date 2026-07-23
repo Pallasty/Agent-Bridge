@@ -359,21 +359,23 @@ certificate chains, certificate/private-key matches, EKUs, expiry, overlay-IP
 SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
 a private one-execution admission receipt; failure is terminal and cannot
 retry. The admission step itself opens no socket, starts no listener or
-service, injects no fault and spends nothing. The source-bound cross-host
-runner remains a required pre-sign successor. Its single-use consumer core is
-now implemented: it independently checks the clean source commit, exact final
+service, injects no fault and spends nothing. The source-bound runner core and
+its single-use consumer are now implemented: the runner compiles the exact
+three plans, permits only the 23-command inter-domain schedule, replays all
+receipt chains, invokes an evidence finalizer only after terminal success and
+requires best-effort cleanup on every abort. The consumer independently checks the clean source commit, exact final
 owner signature and private admission receipt, atomically reserves one
 execution, then dispatches an injected runner. A PASS is accepted only with an
 exact schema-valid, digest-valid terminal-evidence file bound back to the
 execution contract. Both final admission and the consumer are additionally
-blocked by a source constant that remains false until the runner, three host
-readiness packets and credential-placement proof are implemented. Failure is
+blocked by source constants that remain false until live domain lanes/backend,
+three real host-readiness packets and credential-placement proof are present. Failure is
 terminal and cannot retry. The consumer itself
 opens no socket and starts no listener, workload, or service process.
 
 ### Pre-sign execution-readiness correction
 
-The execution-readiness audit found that the repository still lacks a
+The execution-readiness audit originally found that the repository lacked a
 source-bound cross-host runner, three host-local runtime-readiness packets,
 credential-placement proof and a real evidence builder. The single-use
 admission consumer identified by the audit has since been implemented. The
@@ -381,8 +383,9 @@ central material manifest cannot truthfully prove that the matching
 private key and certificate have been placed on each remote domain at an exact
 private path. These are execution blockers, not documentation niceties.
 
-The admission contract now records the readiness contract as present while the
-runner and real placement proof remain absent. The blocked proposal requires the exact readiness packet and
+The admission contract now records the readiness contract as present; the
+runner scheduler is implemented while live lanes/backend and real placement
+proof remain absent. The blocked proposal requires the exact readiness packet and
 signature sets, credential-placement mode, and runner/executor source hash set.
 See the [execution-readiness audit](../reports/goal-c-u/2026-07-22-biocortex-track-b-t22-a1-execution-readiness-audit.md).
 
@@ -622,7 +625,15 @@ adapter now enforces literal-IP endpoints without DNS, exact source IP,
 30-second maximum timeouts, single-accept listeners, bounded frames and
 failure-close behavior. Its KAT uses injected in-memory fake sockets: both
 transport activations remain false, zero OS sockets/listeners are opened and
-zero hosts are contacted. Source-bound runner orchestration remains absent.
+zero hosts are contacted.
+
+The source-bound runner KAT completes the exact 23-command global schedule over
+three synthetic lanes and rejects nine admission, endpoint, readiness ordering,
+lane identity, mid-fault failure, evidence-finalization, activation, expiry and
+coordinator-fault mutations. The core compiles all domain plans, replays each
+terminal receipt chain and passes a closed transcript to evidence finalization;
+live lanes/backend and runner activation remain absent/false, with zero private
+input, network, listener, process or fault use.
 
 The evidence-compiler KAT replays all 23 fixed-command receipts, verifies 21
 source-domain Ed25519 SSHSIG payloads under the purpose-separated event
