@@ -134,6 +134,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-agent-session-kat-") as director
             direction="DOMAIN_TO_COORDINATOR",
             sequence=request["sequence"] + 1,
             previous_message_sha256=request["content_sha256"],
+            payload_sha256=digest(f"response-payload:{session.domain_id}:{command}:{pair_counter}"),
             result=result,
             failure_code=failure_code,
         )
@@ -244,7 +245,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-agent-session-kat-") as director
 
     pair_mutations = (
         ("response-command", "response", lambda x: x.update(command="QUERY_CLUSTER_STATE"), "E_AGENT_SESSION_COMMAND_PAIR"),
-        ("response-payload", "response", lambda x: x.update(payload_sha256=digest("other-payload")), "E_AGENT_SESSION_PAYLOAD_PAIR"),
+        ("response-payload-reuse", "response", lambda x: x.update(payload_sha256=request["payload_sha256"]), "E_AGENT_SESSION_RESPONSE_PAYLOAD_REUSE"),
         ("response-sequence", "response", lambda x: x.update(sequence=3), "E_AGENT_SESSION_RESPONSE_SEQUENCE"),
         ("request-previous", "request", lambda x: x.update(previous_message_sha256=digest("wrong-previous")), "E_AGENT_MESSAGE_SCHEMA"),
         ("response-domain", "response", lambda x: x.update(domain_id="domain-3"), "E_AGENT_SESSION_DOMAIN_BINDING"),

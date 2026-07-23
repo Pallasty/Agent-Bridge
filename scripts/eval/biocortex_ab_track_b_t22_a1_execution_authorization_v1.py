@@ -45,14 +45,16 @@ SOURCE_ARTIFACT_PATHS = (
     ("domain_agent_session", "scripts/eval/biocortex_ab_track_b_t22_a1_domain_agent_session_v1.py"),
     ("domain_executor_core", "scripts/eval/biocortex_ab_track_b_t22_a1_domain_executor_core_v1.py"),
     ("live_local_backend", "scripts/eval/biocortex_ab_track_b_t22_a1_live_local_backend_v1.py"),
+    ("authenticated_domain_lane", "scripts/eval/biocortex_ab_track_b_t22_a1_authenticated_domain_lane_v1.py"),
     ("mtls_transport", "scripts/eval/biocortex_ab_track_b_t22_a1_mtls_transport_v1.py"),
     ("evidence_compiler", "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_compiler_v1.py"),
     ("evidence_writer", "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_writer_v1.py"),
     ("execution_consumer", "scripts/eval/biocortex_ab_track_b_t22_a1_execution_consumer_v1.py"),
 )
-# This may become True only in the same reviewed source commit that contains
-# the cross-host runner, three host-readiness validators, credential-placement
-# proof, and terminal evidence builder. Synthetic KATs opt in explicitly.
+# This may become True only in the final reviewed source commit after exact
+# coordinator/domain launch binding, three real readiness packets, placement
+# proof, and the complete lane/backend/evidence activation audit. Synthetic
+# KATs opt in explicitly.
 EXECUTION_ACTIVATION_READY = False
 
 

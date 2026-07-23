@@ -359,8 +359,8 @@ certificate chains, certificate/private-key matches, EKUs, expiry, overlay-IP
 SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
 a private one-execution admission receipt; it also freshly revalidates the
 three signed host-readiness packets and re-hashes the exact source-bound
-runner, executor, live local-process backend, transport, evidence and consumer
-artifacts named by the
+runner, executor, authenticated domain lane, live local-process backend,
+transport, evidence and consumer artifacts named by the
 owner-signed contract. The owner payload binds the stable readiness-set and
 source-artifact-set digests; the time-varying readiness verification-receipt
 digest is emitted only by admission. Failure is terminal and cannot
@@ -374,8 +374,9 @@ owner signature and private admission receipt, atomically reserves one
 execution, then dispatches an injected runner. A PASS is accepted only with an
 exact schema-valid, digest-valid terminal-evidence file bound back to the
 execution contract. Both final admission and the consumer are additionally
-blocked by source constants that remain false until live domain lanes/backend,
-three real host-readiness packets and credential-placement proof are present. Failure is
+blocked by source constants that remain false until exact coordinator/domain
+launch binding, three real host-readiness packets, credential-placement proof
+and the final lane/backend/evidence activation audit are complete. Failure is
 terminal and cannot retry. The consumer itself
 opens no socket and starts no listener, workload, or service process.
 
@@ -390,8 +391,8 @@ private key and certificate have been placed on each remote domain at an exact
 private path. These are execution blockers, not documentation niceties.
 
 The admission contract now records the readiness contract as present; the
-runner scheduler and live local-process backend are implemented while the
-authenticated live lanes and real placement proof remain absent. The blocked
+runner scheduler, authenticated domain lane and live local-process backend are
+implemented while real placement proof remains absent. The blocked
 proposal requires the exact readiness packet and
 signature sets, credential-placement mode, and runner/executor source hash set.
 See the [execution-readiness audit](../reports/goal-c-u/2026-07-22-biocortex-track-b-t22-a1-execution-readiness-audit.md).
@@ -444,9 +445,9 @@ or satisfy the stronger S20 monotonic-CAS requirement.
 
 ## Exact owner inputs still required
 
-1. Freeze and test the authenticated domain-lane integration that connects the
-   source-bound runner, fixed executor, live local-process backend, bounded mTLS
-   transport, single-use consumer and evidence builder.
+1. Complete the final activation audit and exact coordinator/domain launch
+   binding over the now-frozen authenticated lane; keep every live activation
+   constant false until the remaining owner-bound runtime inputs exist.
 2. Choose a third owner physical host, or choose a cloud provider plus exact
    region/zone/instance type and numeric spend limit.
 3. Choose a dedicated T22-A1 owner public key or explicitly approve reuse of
@@ -642,9 +643,23 @@ three synthetic lanes and rejects nine admission, endpoint, readiness ordering,
 lane identity, mid-fault failure, evidence-finalization, activation, expiry and
 coordinator-fault mutations. The core compiles all domain plans, replays each
 terminal receipt chain and passes a closed transcript to evidence finalization;
-the live local-process backend is present while authenticated live lanes and
-runner activation remain absent/false, with zero private input, network,
+the authenticated live lane and local-process backend are present while every
+runner/lane/backend activation remains false, with zero private input, network,
 listener, process or fault use.
+
+The authenticated-domain-lane KAT drives the exact 23-command schedule through
+three distinct coordinator/domain Ed25519 SSHSIG session chains, strict real-
+receipt replay and an in-memory transport double. It publishes one OpenBao
+bootstrap frame, consumes it for both followers and the fault-target restart,
+then zeroizes the coordinator copy at the last legitimate consumer. Nine
+directed negatives cover closed activation, invalid secret direction/hash,
+invalid emergency cleanup, pinned-tool drift, in-memory secret mutation,
+signed backend failure cleanup, detached-signature mutation and endpoint-set
+drift. The concrete adapter binds the coordinator socket to its planned source
+IP, verifies exact mTLS leaves, verifies a signed request before accepting any
+secret frame, forbids command retry and auto-cleans the owned process set on a
+post-admission failure. Its activation remains false; the KAT opens no socket,
+listener, process or fault and reads no real credential.
 
 The live local-process backend KAT drives all three non-synthetic backend
 objects through the exact 23-command schedule using injected process, cluster

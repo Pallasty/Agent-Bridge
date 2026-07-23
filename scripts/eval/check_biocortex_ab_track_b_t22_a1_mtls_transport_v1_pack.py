@@ -447,8 +447,20 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-mtls-kat-") as directory:
             client_plan, target_plan, hashlib.sha256(server_der).hexdigest(), 5,
         )
         assert connected is fake_client_tls
+        assert fake_client_raw.bound == ("100.64.50.1", 0)
         assert fake_client_raw.connected == ("100.64.50.2", 29000)
         assert fake_client_raw.timeout == 5 and fake_client_context.server_hostname == "100.64.50.2"
+
+        ipv6_target_plan = copy.deepcopy(target_plan)
+        ipv6_target_plan["network"]["overlay_ip"] = "fd00::2"
+        ipv6_target_plan["network"]["agent_control_endpoint"] = "https://[fd00::2]:29000"
+        expect_failure(
+            lambda: module.connect_coordinator_to_domain(
+                client_plan, ipv6_target_plan, hashlib.sha256(server_der).hexdigest(), 5,
+            ),
+            "E_MTLS_COORDINATOR_ADDRESS_FAMILY",
+        )
+        negative_count += 1
 
         fake_received = FakeTLSSocket(server_der, frame + secret_frame)
         assert module.receive_message_frame(fake_received) == frame

@@ -195,7 +195,7 @@ class AgentSession:
         require(request["nonce_sha256"] == response["nonce_sha256"], "E_AGENT_SESSION_NONCE_PAIR")
         require(request["nonce_sha256"] not in self.seen_nonce_sha256, "E_AGENT_SESSION_NONCE_REPLAY")
         require(request["command"] == response["command"], "E_AGENT_SESSION_COMMAND_PAIR")
-        require(request["payload_sha256"] == response["payload_sha256"], "E_AGENT_SESSION_PAYLOAD_PAIR")
+        require(request["payload_sha256"] != response["payload_sha256"], "E_AGENT_SESSION_RESPONSE_PAYLOAD_REUSE")
         require(request["signature_binding"]["signer_public_key_sha256"] == self.coordinator_public_key_sha256, "E_AGENT_SESSION_COORDINATOR_KEY_BINDING")
         require(response["signature_binding"]["signer_public_key_sha256"] == self.domain_public_key_sha256, "E_AGENT_SESSION_DOMAIN_KEY_BINDING")
         request_signature_sha256 = verify_signature(

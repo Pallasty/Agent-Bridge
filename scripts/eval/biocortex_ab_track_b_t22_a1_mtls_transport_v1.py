@@ -372,12 +372,15 @@ def connect_coordinator_to_domain(
     require(is_sha256(expected_domain_certificate_der_sha256), "E_MTLS_DOMAIN_PEER_EXPECTED_DIGEST")
     timeout = bounded_timeout(timeout_seconds)
     family, ip_text, port = agent_address(domain_plan)
+    coordinator_family, coordinator_ip_text, _coordinator_port = agent_address(coordinator_plan)
+    require(coordinator_family == family, "E_MTLS_COORDINATOR_ADDRESS_FAMILY")
     context = build_client_context(coordinator_plan)
     raw_socket: socket.socket | None = None
     tls_socket: ssl.SSLSocket | None = None
     try:
         raw_socket = socket.socket(family, socket.SOCK_STREAM)
         raw_socket.settimeout(timeout)
+        raw_socket.bind((coordinator_ip_text, 0))
         raw_socket.connect((ip_text, port))
         tls_socket = context.wrap_socket(raw_socket, server_hostname=ip_text)
         verify_peer_certificate_sha256(tls_socket, expected_domain_certificate_der_sha256)
