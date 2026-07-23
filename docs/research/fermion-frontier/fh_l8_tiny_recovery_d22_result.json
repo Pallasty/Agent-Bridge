@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D22-TINY-RECOVERY-V1",
+  "status": "VERIFIED_D22_TINY_FIXTURE_SUCCESS_RESUME_AND_FAULT_MATRIX",
+  "verified": true,
+  "live_tiny_fixture_replayed": true,
+  "fixture": {
+    "source_records": 11,
+    "shards": 3,
+    "partitions": 4,
+    "clean_target": {
+      "path": "target.bin",
+      "bytes": 208,
+      "sha256": "f68d75d32458e4d5f89f5c4221105086ed7546c4e6eb7643e3f7a89ca2ca2876"
+    },
+    "resumed_target": {
+      "path": "target.bin",
+      "bytes": 208,
+      "sha256": "f68d75d32458e4d5f89f5c4221105086ed7546c4e6eb7643e3f7a89ca2ca2876"
+    },
+    "clean_terminal_receipt_sha256": "dbe9f4bb291e4f90ddd26fdb1a3715fd7879338cf69818e82b533dd0442efef3",
+    "resumed_terminal_receipt_sha256": "dbe9f4bb291e4f90ddd26fdb1a3715fd7879338cf69818e82b533dd0442efef3",
+    "interrupted_completed_shards": 1
+  },
+  "fault_matrix": {
+    "gap": "FRONTIER_GAP",
+    "overlap": "MANIFEST_DRIFT",
+    "orphan": "ORPHAN",
+    "hash_drift": "PARTITION_HASH",
+    "stale_lock": "LOCK_BUSY",
+    "partial_publication": "PARTIAL_PUBLICATION",
+    "production_rejection": "PRODUCTION_NOT_AUTHORIZED"
+  },
+  "production_authority": {
+    "production_checkpoint_reads": 0,
+    "production_q3_rows_acted": 0,
+    "production_scientific_kernel_calls": 0,
+    "full_53_shard_execution_authorized": false,
+    "full_q4_target_materialized": false
+  },
+  "authority": {
+    "tiny_fixture_executable_protocol_verified": true,
+    "tiny_fixture_exact_frontier_resume_verified": true,
+    "tiny_fixture_fault_matrix_verified": true,
+    "production_scientific_kernel_bound": false,
+    "production_worst_case_resource_bound": false,
+    "full_53_shard_execution_authorized": false,
+    "full_53_shard_executed": false,
+    "full_q4_target_materialized": false,
+    "q5_executed": false,
+    "ready_gate_eligible": false
+  },
+  "limitations": [
+    "The fixture is synthetic u64/i64 data and is not packed q3 or a scientific Hamiltonian action.",
+    "Production checkpoint reads, q3 rows, scientific kernel calls and full-53 execution remain zero-authorized.",
+    "The three-shard/four-partition fixture validates protocol mechanics, not production-scale resource bounds.",
+    "Temporary fixture directories may use the host temporary filesystem because no scientific payload or performance claim is involved.",
+    "No full q4, q5, remainder, cumulative, R100, physical-reference, hardware, advantage or READY authority is granted."
+  ],
+  "next_gate": "FULL_53_SHARD_SCIENTIFIC_KERNEL_BINDING_AND_WORST_CASE_RESOURCE_PROOF"
+}
