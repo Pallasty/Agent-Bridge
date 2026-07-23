@@ -1531,7 +1531,17 @@ pub async fn run_sources(json: bool, limit: usize) -> Result<()> {
         println!("  vendor: {}", display_counts(&s.vendor));
         println!("  provenance: {}", display_counts(&s.provenance));
         if let Some(admission) = &s.admission {
-            println!("  admission: verdict={} spdx={} reviewed_at={}", admission.verdict.as_str(), admission.spdx, admission.reviewed_at);
+            let freshness = s.admission_freshness.unwrap_or(AdmissionFreshness::Unknown);
+            println!(
+                "  admission: verdict={} spdx={} freshness={} reviewed_at={}",
+                admission.verdict.as_str(),
+                admission.spdx,
+                freshness.as_str(),
+                admission.reviewed_at
+            );
+            if freshness == AdmissionFreshness::Stale {
+                println!("  action: re-review this source before relying on its admission");
+            }
         }
         if !s.risks.is_empty() {
             println!("  risks: {}", display_counts(&s.risks));
@@ -1569,6 +1579,11 @@ pub async fn run_audit(
         .collect();
     let admission_rows = store.list_memories(Some("skill_source_admission"), MemoryListSort::Recent, u32::MAX).await.context("list source admissions failed")?;
     let admissions = source_admission_inventory(&admission_rows);
+    let sources = skill_source_inventory(&rows, &admissions);
+    let source_index: BTreeMap<&str, &SkillSourceSummary> = sources
+        .iter()
+        .map(|source| (source.source.as_str(), source))
+        .collect();
     let summary = skill_audit_summary(&matched);
     let returned = if limit == 0 {
         matched.len()
@@ -1580,7 +1595,10 @@ pub async fn run_audit(
         let items = matched
             .iter()
             .take(returned)
-            .map(|record| skill_audit_item_json(record, admissions.get(&tag_value(&record.tags, "src:").unwrap_or_default())))
+            .map(|record| {
+                let source = tag_value(&record.tags, "src:").unwrap_or_default();
+                skill_audit_item_json(record, source_index.get(source.as_str()).copied())
+            })
             .collect::<Vec<_>>();
         let payload = serde_json::json!({
             "total": rows.len(),
@@ -1782,7 +1800,10 @@ fn skill_audit_summary(rows: &[MemoryRecord]) -> SkillAuditSummary {
     summary
 }
 
-fn skill_audit_item_json(rec: &MemoryRecord, admission: Option<&SkillSourceAdmission>) -> serde_json::Value {
+fn skill_audit_item_json(
+    rec: &MemoryRecord,
+    source: Option<&SkillSourceSummary>,
+) -> serde_json::Value {
     let mut item = skill_show_json_payload(rec);
     if let Some(obj) = item.as_object_mut() {
         obj.remove("content");
@@ -1790,7 +1811,16 @@ fn skill_audit_item_json(rec: &MemoryRecord, admission: Option<&SkillSourceAdmis
             "summary".to_string(),
             serde_json::json!(first_line(&rec.content)),
         );
-        obj.insert("source_admission".to_string(), admission.map(SkillSourceAdmission::to_json).unwrap_or(serde_json::Value::Null));
+        obj.insert(
+            "source_admission".to_string(),
+            source
+                .and_then(|source| source.admission.as_ref().map(|admission| {
+                    admission.to_json_with_freshness(
+                        source.admission_freshness.unwrap_or(AdmissionFreshness::Unknown),
+                    )
+                }))
+                .unwrap_or(serde_json::Value::Null),
+        );
     }
     item
 }
@@ -1812,6 +1842,23 @@ impl SourceAdmissionVerdict {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdmissionFreshness {
+    Current,
+    Stale,
+    Unknown,
+}
+
+impl AdmissionFreshness {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Stale => "stale",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SkillSourceAdmission {
     verdict: SourceAdmissionVerdict, spdx: String, evidence_url: Option<String>,
@@ -1819,8 +1866,8 @@ struct SkillSourceAdmission {
 }
 
 impl SkillSourceAdmission {
-    fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({"verdict": self.verdict.as_str(), "spdx": self.spdx, "evidence_url": self.evidence_url, "reviewed_at": self.reviewed_at, "git": {"origin": self.git_origin, "commit": self.git_commit}})
+    fn to_json_with_freshness(&self, freshness: AdmissionFreshness) -> serde_json::Value {
+        serde_json::json!({"verdict": self.verdict.as_str(), "spdx": self.spdx, "freshness": freshness.as_str(), "evidence_url": self.evidence_url, "reviewed_at": self.reviewed_at, "git": {"origin": self.git_origin, "commit": self.git_commit}})
     }
 }
 
@@ -1849,6 +1896,7 @@ struct SkillSourceSummary {
     provenance: BTreeMap<String, usize>,
     risks: BTreeMap<String, usize>,
     admission: Option<SkillSourceAdmission>,
+    admission_freshness: Option<AdmissionFreshness>,
 }
 
 impl SkillSourceSummary {
@@ -1867,7 +1915,11 @@ impl SkillSourceSummary {
             "vendor": self.vendor,
             "provenance": self.provenance,
             "risks": self.risks,
-            "admission": self.admission.as_ref().map(SkillSourceAdmission::to_json),
+            "admission": self.admission.as_ref().map(|admission| {
+                admission.to_json_with_freshness(
+                    self.admission_freshness.unwrap_or(AdmissionFreshness::Unknown),
+                )
+            }),
         })
     }
 }
@@ -1912,8 +1964,35 @@ fn skill_source_inventory(rows: &[MemoryRecord], admissions: &BTreeMap<String, S
             bump(&mut entry.risks, risk);
         }
     }
-    for summary in by_source.values_mut() { summary.admission = admissions.get(&summary.source).cloned(); }
+    for summary in by_source.values_mut() {
+        summary.admission = admissions.get(&summary.source).cloned();
+        summary.admission_freshness = summary
+            .admission
+            .as_ref()
+            .map(|admission| source_admission_freshness(summary, admission));
+    }
     by_source.into_values().collect()
+}
+
+fn source_admission_freshness(
+    source: &SkillSourceSummary,
+    admission: &SkillSourceAdmission,
+) -> AdmissionFreshness {
+    let (Some(origin), Some(commit)) = (&admission.git_origin, &admission.git_commit) else {
+        return AdmissionFreshness::Unknown;
+    };
+    if source.git_origins.is_empty() || source.git_commits.is_empty() {
+        return AdmissionFreshness::Unknown;
+    }
+    if source.git_origins.len() == 1
+        && source.git_commits.len() == 1
+        && source.git_origins.contains(origin)
+        && source.git_commits.contains(commit)
+    {
+        AdmissionFreshness::Current
+    } else {
+        AdmissionFreshness::Stale
+    }
 }
 
 fn bump(map: &mut BTreeMap<String, usize>, key: String) {
@@ -4070,7 +4149,11 @@ mod tests {
 
     #[test]
     fn source_admission_is_joined_without_changing_skill_metadata() {
-        let skill = mk_skill("example/skills", 10);
+        let mut skill = mk_skill("example/skills", 10);
+        skill.tags.extend([
+            "git_origin:https://github.com/example/skills.git".to_string(),
+            "git_commit:abc123".to_string(),
+        ]);
         let mut admission = mk_skill("example/skills", 20);
         admission.kind = "skill_source_admission".to_string();
         admission.tags.extend([
@@ -4083,10 +4166,37 @@ mod tests {
         let source = &inventory[0];
         assert_eq!(source.admission.as_ref().unwrap().spdx, "MIT");
         assert_eq!(source.admission.as_ref().unwrap().verdict, SourceAdmissionVerdict::Approved);
+        assert_eq!(source.admission_freshness, Some(AdmissionFreshness::Current));
         assert!(tag_value(&skill.tags, "license:").is_none());
-        let item = skill_audit_item_json(&skill, source.admission.as_ref());
+        let item = skill_audit_item_json(&skill, Some(source));
         assert_eq!(item["source_admission"]["spdx"], "MIT");
+        assert_eq!(item["source_admission"]["freshness"], "current");
         assert_eq!(item["license"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn source_admission_freshness_requires_exact_single_provenance() {
+        let admission = SkillSourceAdmission {
+            verdict: SourceAdmissionVerdict::Approved,
+            spdx: "MIT".to_string(),
+            evidence_url: None,
+            reviewed_at: 1,
+            git_origin: Some("https://github.com/example/skills.git".to_string()),
+            git_commit: Some("abc123".to_string()),
+        };
+        let mut source = SkillSourceSummary {
+            source: "example/skills".to_string(),
+            ..SkillSourceSummary::default()
+        };
+        source.git_origins.insert("https://github.com/example/skills.git".to_string());
+        source.git_commits.insert("abc123".to_string());
+        assert_eq!(source_admission_freshness(&source, &admission), AdmissionFreshness::Current);
+
+        source.git_commits.insert("def456".to_string());
+        assert_eq!(source_admission_freshness(&source, &admission), AdmissionFreshness::Stale);
+
+        source.git_commits.clear();
+        assert_eq!(source_admission_freshness(&source, &admission), AdmissionFreshness::Unknown);
     }
 
     #[test]
