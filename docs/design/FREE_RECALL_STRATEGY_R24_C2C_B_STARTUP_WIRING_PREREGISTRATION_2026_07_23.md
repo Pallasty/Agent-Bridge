@@ -2,7 +2,7 @@
 
 Date: 2026-07-23
 
-Status: **DESIGN DECISION / R25 SOURCE NOT AUTHORIZED / LIVE C2C CLOSED**
+Status: **AMENDED DESIGN DECISION / R25 SOURCE NOT AUTHORIZED / LIVE C2C CLOSED**
 
 Parents: R22 C2C runtime design and R23 source commit `929ea5cc`. R23 passed local gates; its independent Linux replay was explicitly waived by the owner and is not represented as independent acceptance.
 
@@ -87,3 +87,17 @@ After R25, a live C2C run still needs new owner authorization naming an exact di
 ## 8. Negative authority
 
 R24 authorizes this document only. It grants no R25 edits, Keychain read/write, CLI addition, normal-process provider construction, user database access, live observation, merge, release, deployment, retrieval, sync/export, MCP/API exposure, training, or BioCortex integration. The next valid action is explicit owner authorization for exactly the R25 surface and gates above; R26 remains closed.
+
+## Amendment A — binary/library visibility correction
+
+Review of the actual Rust crate boundary found that `main.rs` is a separate binary crate. It cannot call the existing crate-private `HubBuilder::curation_batch_observer`, and a public HubBuilder method taking the crate-private capability trait would be unusable. The original private bridge adapter therefore could not perform the proposed startup wiring.
+
+R25 replaces that adapter row with `ab-bridge/src/episode_observation_c2c_keychain_macos_runtime.rs`, a feature-gated public attachment function with this narrow shape:
+
+```text
+attach_explicit_keychain_macos_observer(HubBuilder, Arc<SqliteStore>) -> HubBuilder
+```
+
+It is the only public binary-to-library bridge. It receives no key, account, epoch, provider trait, event, or Keychain error. It constructs the store-owned opaque handle, maps failure to no injection, and invokes the existing crate-private HubBuilder seam inside the library crate. `hub.rs` remains unchanged.
+
+The store runtime module exports only its opaque handle/factory under the default-off macOS feature; it exports no provider interface or raw custody material. This correction changes no live authority, test gate, or R26 boundary.
