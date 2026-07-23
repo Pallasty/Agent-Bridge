@@ -1443,6 +1443,38 @@ pub async fn run_list(limit: usize) -> Result<()> {
     Ok(())
 }
 
+/// Persist a source-level review record. This consumes operator-reviewed
+/// evidence and never changes routing or execution authority.
+pub async fn run_admit(source: &str, spdx: &str, verdict: &str, evidence_url: Option<&str>, note: Option<&str>) -> Result<()> {
+    let verdict = SourceAdmissionVerdict::parse(verdict)?;
+    let spdx = spdx.trim();
+    if spdx.is_empty() || !spdx.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
+        bail!("SPDX identifier must contain only ASCII letters, digits, '.', '-', or '+'");
+    }
+    let store = open_store().await?;
+    let rows = store.list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX).await.context("list_memories failed")?;
+    let inventory = skill_source_inventory(&rows, &BTreeMap::new());
+    let summary = inventory.iter().find(|item| item.source == source)
+        .ok_or_else(|| anyhow!("no indexed Skills found for source {:?}", source))?;
+    if summary.git_origins.len() != 1 || summary.git_commits.len() != 1 {
+        bail!("source {:?} needs exactly one origin and commit before admission", source);
+    }
+    let now = unix_now();
+    let mut tags = vec![
+        "skill_source_admission".to_string(), format!("src:{}", source),
+        format!("admission:{}", verdict.as_str()), format!("spdx:{}", spdx),
+        format!("git_origin:{}", summary.git_origins.iter().next().unwrap()),
+        format!("git_commit:{}", summary.git_commits.iter().next().unwrap()),
+    ];
+    if let Some(branch) = summary.git_branches.iter().next() { tags.push(format!("git_branch:{}", branch)); }
+    if let Some(url) = evidence_url.filter(|url| !url.trim().is_empty()) { tags.push(format!("evidence_url:{}", tag_safe_value(url.trim()))); }
+    let content = format!("Source admission for {source}.\n\nVerdict: {}\nSPDX: {spdx}\nEvidence: {}\nNote: {}", verdict.as_str(), evidence_url.unwrap_or("not provided"), note.unwrap_or("not provided").trim());
+    let record = MemoryRecord { key: format!("skill_source_admission:{source}"), kind: "skill_source_admission".to_string(), content, tags, related_keys: Vec::new(), scope: Some("global".to_string()), created_at: now, updated_at: now, last_accessed_at: now, access_count: 0, importance: 0.7, status: "active".to_string(), trigger_pattern: None, superseded_by: None };
+    store.memory_save(&record).await.context("save source admission")?;
+    println!("[skills] admitted source={} verdict={} spdx={} commit={}", source, verdict.as_str(), spdx, summary.git_commits.iter().next().unwrap());
+    Ok(())
+}
+
 /// Summarize indexed skill sources without touching upstream repos.
 pub async fn run_sources(json: bool, limit: usize) -> Result<()> {
     let store = open_store().await?;
@@ -1450,7 +1482,9 @@ pub async fn run_sources(json: bool, limit: usize) -> Result<()> {
         .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
         .await
         .context("list_memories failed")?;
-    let sources = skill_source_inventory(&rows);
+    let admission_rows = store.list_memories(Some("skill_source_admission"), MemoryListSort::Recent, u32::MAX).await.context("list source admissions failed")?;
+    let admissions = source_admission_inventory(&admission_rows);
+    let sources = skill_source_inventory(&rows, &admissions);
     let returned = if limit == 0 {
         sources.len()
     } else {
@@ -1496,6 +1530,9 @@ pub async fn run_sources(json: bool, limit: usize) -> Result<()> {
         println!("  lint: {}", display_counts(&s.lint));
         println!("  vendor: {}", display_counts(&s.vendor));
         println!("  provenance: {}", display_counts(&s.provenance));
+        if let Some(admission) = &s.admission {
+            println!("  admission: verdict={} spdx={} reviewed_at={}", admission.verdict.as_str(), admission.spdx, admission.reviewed_at);
+        }
         if !s.risks.is_empty() {
             println!("  risks: {}", display_counts(&s.risks));
         }
@@ -1530,6 +1567,8 @@ pub async fn run_audit(
         .filter(|r| filters.matches(r))
         .cloned()
         .collect();
+    let admission_rows = store.list_memories(Some("skill_source_admission"), MemoryListSort::Recent, u32::MAX).await.context("list source admissions failed")?;
+    let admissions = source_admission_inventory(&admission_rows);
     let summary = skill_audit_summary(&matched);
     let returned = if limit == 0 {
         matched.len()
@@ -1541,7 +1580,7 @@ pub async fn run_audit(
         let items = matched
             .iter()
             .take(returned)
-            .map(skill_audit_item_json)
+            .map(|record| skill_audit_item_json(record, admissions.get(&tag_value(&record.tags, "src:").unwrap_or_default())))
             .collect::<Vec<_>>();
         let payload = serde_json::json!({
             "total": rows.len(),
@@ -1743,7 +1782,7 @@ fn skill_audit_summary(rows: &[MemoryRecord]) -> SkillAuditSummary {
     summary
 }
 
-fn skill_audit_item_json(rec: &MemoryRecord) -> serde_json::Value {
+fn skill_audit_item_json(rec: &MemoryRecord, admission: Option<&SkillSourceAdmission>) -> serde_json::Value {
     let mut item = skill_show_json_payload(rec);
     if let Some(obj) = item.as_object_mut() {
         obj.remove("content");
@@ -1751,8 +1790,49 @@ fn skill_audit_item_json(rec: &MemoryRecord) -> serde_json::Value {
             "summary".to_string(),
             serde_json::json!(first_line(&rec.content)),
         );
+        obj.insert("source_admission".to_string(), admission.map(SkillSourceAdmission::to_json).unwrap_or(serde_json::Value::Null));
     }
     item
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceAdmissionVerdict { Approved, Quarantined, ReviewRequired }
+
+impl SourceAdmissionVerdict {
+    fn parse(value: &str) -> Result<Self> {
+        match value.trim() {
+            "approved" => Ok(Self::Approved),
+            "quarantined" => Ok(Self::Quarantined),
+            "review-required" => Ok(Self::ReviewRequired),
+            other => bail!("invalid admission verdict {:?}; expected approved, quarantined, or review-required", other),
+        }
+    }
+    fn as_str(self) -> &'static str {
+        match self { Self::Approved => "approved", Self::Quarantined => "quarantined", Self::ReviewRequired => "review-required" }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SkillSourceAdmission {
+    verdict: SourceAdmissionVerdict, spdx: String, evidence_url: Option<String>,
+    reviewed_at: i64, git_origin: Option<String>, git_commit: Option<String>,
+}
+
+impl SkillSourceAdmission {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({"verdict": self.verdict.as_str(), "spdx": self.spdx, "evidence_url": self.evidence_url, "reviewed_at": self.reviewed_at, "git": {"origin": self.git_origin, "commit": self.git_commit}})
+    }
+}
+
+fn source_admission_inventory(rows: &[MemoryRecord]) -> BTreeMap<String, SkillSourceAdmission> {
+    let mut admissions = BTreeMap::new();
+    for record in rows {
+        let (Some(source), Some(verdict), Some(spdx)) = (tag_value(&record.tags, "src:"), tag_value(&record.tags, "admission:"), tag_value(&record.tags, "spdx:")) else { continue; };
+        let Ok(verdict) = SourceAdmissionVerdict::parse(&verdict) else { continue; };
+        let candidate = SkillSourceAdmission { verdict, spdx, evidence_url: tag_value(&record.tags, "evidence_url:"), reviewed_at: record.updated_at, git_origin: tag_value(&record.tags, "git_origin:"), git_commit: tag_value(&record.tags, "git_commit:") };
+        if admissions.get(&source).is_none_or(|existing: &SkillSourceAdmission| candidate.reviewed_at >= existing.reviewed_at) { admissions.insert(source, candidate); }
+    }
+    admissions
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -1768,6 +1848,7 @@ struct SkillSourceSummary {
     vendor: BTreeMap<String, usize>,
     provenance: BTreeMap<String, usize>,
     risks: BTreeMap<String, usize>,
+    admission: Option<SkillSourceAdmission>,
 }
 
 impl SkillSourceSummary {
@@ -1786,11 +1867,12 @@ impl SkillSourceSummary {
             "vendor": self.vendor,
             "provenance": self.provenance,
             "risks": self.risks,
+            "admission": self.admission.as_ref().map(SkillSourceAdmission::to_json),
         })
     }
 }
 
-fn skill_source_inventory(rows: &[MemoryRecord]) -> Vec<SkillSourceSummary> {
+fn skill_source_inventory(rows: &[MemoryRecord], admissions: &BTreeMap<String, SkillSourceAdmission>) -> Vec<SkillSourceSummary> {
     let mut by_source: BTreeMap<String, SkillSourceSummary> = BTreeMap::new();
     for r in rows {
         let Some(source) = tag_value(&r.tags, "src:") else {
@@ -1830,6 +1912,7 @@ fn skill_source_inventory(rows: &[MemoryRecord]) -> Vec<SkillSourceSummary> {
             bump(&mut entry.risks, risk);
         }
     }
+    for summary in by_source.values_mut() { summary.admission = admissions.get(&summary.source).cloned(); }
     by_source.into_values().collect()
 }
 
@@ -3959,7 +4042,7 @@ mod tests {
             .tags
             .extend(["lint:clean".to_string(), "vendor:community".to_string()]);
 
-        let inventory = skill_source_inventory(&[a, b, local]);
+        let inventory = skill_source_inventory(&[a, b, local], &BTreeMap::new());
         assert_eq!(inventory.len(), 2);
 
         let local_summary = inventory
@@ -3983,6 +4066,33 @@ mod tests {
         assert_eq!(remote.lint.get("warn:1"), Some(&1));
         assert_eq!(remote.risks.get("model_download"), Some(&2));
         assert_eq!(remote.risks.get("server_start"), Some(&1));
+    }
+
+    #[test]
+    fn source_admission_is_joined_without_changing_skill_metadata() {
+        let skill = mk_skill("example/skills", 10);
+        let mut admission = mk_skill("example/skills", 20);
+        admission.kind = "skill_source_admission".to_string();
+        admission.tags.extend([
+            "admission:approved".to_string(), "spdx:MIT".to_string(),
+            "evidence_url:https://github.com/example/skills/blob/main/LICENSE".to_string(),
+            "git_origin:https://github.com/example/skills.git".to_string(), "git_commit:abc123".to_string(),
+        ]);
+        let admissions = source_admission_inventory(&[admission]);
+        let inventory = skill_source_inventory(&[skill.clone()], &admissions);
+        let source = &inventory[0];
+        assert_eq!(source.admission.as_ref().unwrap().spdx, "MIT");
+        assert_eq!(source.admission.as_ref().unwrap().verdict, SourceAdmissionVerdict::Approved);
+        assert!(tag_value(&skill.tags, "license:").is_none());
+        let item = skill_audit_item_json(&skill, source.admission.as_ref());
+        assert_eq!(item["source_admission"]["spdx"], "MIT");
+        assert_eq!(item["license"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn source_admission_verdict_is_closed_set() {
+        assert_eq!(SourceAdmissionVerdict::parse("quarantined").unwrap(), SourceAdmissionVerdict::Quarantined);
+        assert!(SourceAdmissionVerdict::parse("trusted").is_err());
     }
 
     #[test]

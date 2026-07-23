@@ -4195,6 +4195,24 @@ enum SkillsOp {
         #[arg(long, default_value_t = 100)]
         limit: usize,
     },
+    /// Persist a reviewed source-level license/admission record. This never
+    /// installs Skills, changes routing, or grants execution authority.
+    Admit {
+        /// Indexed source id, for example `anthropics/skills`.
+        source: String,
+        /// Reviewed SPDX identifier, for example `MIT` or `Apache-2.0`.
+        #[arg(long)]
+        spdx: String,
+        /// Admission verdict: approved, quarantined, or review-required.
+        #[arg(long, default_value = "approved")]
+        verdict: String,
+        /// Read-only evidence URL used for this review.
+        #[arg(long)]
+        evidence_url: Option<String>,
+        /// Optional compact review note.
+        #[arg(long)]
+        note: Option<String>,
+    },
     /// Batch-audit indexed skills by provenance, lint, and operational risk.
     Audit {
         /// Emit machine-readable JSON for automation.
@@ -4656,6 +4674,13 @@ async fn real_main() -> Result<()> {
             }
             SkillsOp::List { limit } => skills::run_list(*limit).await,
             SkillsOp::Sources { json, limit } => skills::run_sources(*json, *limit).await,
+            SkillsOp::Admit { source, spdx, verdict, evidence_url, note } => skills::run_admit(
+                source,
+                spdx,
+                verdict,
+                evidence_url.as_deref(),
+                note.as_deref(),
+            ).await,
             SkillsOp::Audit {
                 json,
                 src,
