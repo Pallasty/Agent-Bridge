@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D25-KERNEL-RESOURCE-AUDIT-V1",
+  "role": "read_only_source_bound_no_q3_read_no_scientific_action",
+  "source_hashes": {
+    "d20_consumer": "27f744bd454613487931733a0675be1c7a72a3bcfb676c18a3a8dd7e23663d23",
+    "d20_contract": "d87caa10714947d5e13e8ec72b269271ab1606e59af738fe2709e7b6a71ba016",
+    "d23_envelope": "abbbd5e44c4321b1748404724ec5d82ceda81e200267b7993febc476c2db1d47",
+    "d23_contract": "ce6baf3161db6094fd3d80079527b0a8bf8f91f48c3b384ceb09366406ab8535",
+    "d24_reservation": "5957fdf0761b8f1644d3816eed151c80fa46acbf395f1776cde8abc0366fb6c7",
+    "d24_contract": "68d109e2b9cfdf0851c9545ef99095205cea5487c024b2c2b5ad8af5609f2ec4"
+  },
+  "required_proofs": [
+    "source_bound_scientific_kernel",
+    "per_input_output_memory_model",
+    "peak_memory_composition",
+    "worst_case_runtime_model",
+    "independent_receipt_verification"
+  ],
+  "authority": {
+    "real_packed_q3_read_authorized": false,
+    "scientific_kernel_authorized": false,
+    "full_53_scientific_execution_authorized": false,
+    "scientific_action_calls": 0
+  },
+  "expected_status": "NO_GO_D25_FULL_53_KERNEL_AND_RESOURCE_REQUIREMENT_PROOF_ABSENT",
+  "next_gate": "FULL_53_SOURCE_BOUND_SCIENTIFIC_KERNEL_AND_WORST_CASE_MEMORY_RUNTIME_PROOF"
+}
