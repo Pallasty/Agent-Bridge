@@ -250,6 +250,39 @@ impl SqliteStore {
         .map_err(|_| ())
     }
 
+    #[cfg(all(test, feature = "episode-observation-slice-c2-synthetic"))]
+    pub(crate) async fn c2_synthetic_event_count_for_test(&self) -> std::result::Result<usize, ()> {
+        self.conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM episode_observation_events",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .await
+            .map(|count| count as usize)
+            .map_err(|_| ())
+    }
+
+    #[cfg(all(test, feature = "episode-observation-slice-c2-synthetic"))]
+    pub(crate) async fn c2_synthetic_is_finalized_for_test(
+        &self,
+        episode_id: &str,
+    ) -> std::result::Result<bool, ()> {
+        match self
+            .read_finalized_episode_projection_inert(
+                EpisodeObservationRuntimeGate::SyntheticTestOnly,
+                episode_id,
+            )
+            .await
+        {
+            Ok(EpisodeObservationProjectionDisposition::Finalized(_)) => Ok(true),
+            Ok(_) => Ok(false),
+            Err(_) => Err(()),
+        }
+    }
+
     async fn append_episode_observation_event_inert(
         &self,
         gate: EpisodeObservationRuntimeGate,
