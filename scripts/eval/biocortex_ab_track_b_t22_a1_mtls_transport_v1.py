@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
+import socket
 import ssl
 import stat
 import struct
 from pathlib import Path
+from urllib.parse import urlsplit
 
 MESSAGE_FRAME_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/mtls-message-frame/v1\0"
 MESSAGE_MAGIC = b"T22A1M1\0"
@@ -25,6 +28,8 @@ MAX_SIGNATURE_BYTES = 64 * 1024
 MAX_PAYLOAD_BYTES = 256 * 1024
 MAX_SECRET_BYTES = 4096
 TRANSPORT_ACTIVATION_READY = False
+SOCKET_ADAPTER_ACTIVATION_READY = False
+MAX_SOCKET_TIMEOUT_SECONDS = 30.0
 
 
 class SafeFailure(RuntimeError):
@@ -303,11 +308,223 @@ def verify_peer_certificate_sha256(
     return observed
 
 
+def agent_address(plan: dict) -> tuple[int, str, int]:
+    network = plan.get("network", {})
+    ip_text = network.get("overlay_ip")
+    endpoint_text = network.get("agent_control_endpoint")
+    require(isinstance(ip_text, str) and isinstance(endpoint_text, str), "E_MTLS_AGENT_ENDPOINT")
+    try:
+        address = ipaddress.ip_address(ip_text)
+        parsed = urlsplit(endpoint_text)
+        port = parsed.port
+        parsed_hostname = parsed.hostname
+        parsed_username = parsed.username
+        parsed_password = parsed.password
+    except (ValueError, TypeError) as error:
+        raise SafeFailure("E_MTLS_AGENT_ENDPOINT") from error
+    require(
+        parsed.scheme == "https" and parsed_hostname == address.compressed
+        and parsed_username is None and parsed_password is None
+        and parsed.path == "" and parsed.query == "" and parsed.fragment == ""
+        and isinstance(port, int) and 1 <= port <= 65535,
+        "E_MTLS_AGENT_ENDPOINT",
+    )
+    canonical_host = f"[{address.compressed}]" if address.version == 6 else address.compressed
+    require(endpoint_text == f"https://{canonical_host}:{port}", "E_MTLS_AGENT_ENDPOINT")
+    family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+    return family, address.compressed, port
+
+
+def bounded_timeout(value: object) -> float:
+    require(
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        and 0 < float(value) <= MAX_SOCKET_TIMEOUT_SECONDS,
+        "E_MTLS_SOCKET_TIMEOUT",
+    )
+    return float(value)
+
+
+def validate_connection_plans(coordinator_plan: dict, domain_plan: dict) -> None:
+    require(coordinator_plan.get("domain_id") == "domain-1", "E_MTLS_COORDINATOR_PLAN")
+    require(domain_plan.get("domain_id") in {"domain-1", "domain-2", "domain-3"}, "E_MTLS_DOMAIN_PLAN")
+    for field in ("run_id", "source_commit"):
+        require(
+            coordinator_plan.get(field) == domain_plan.get(field)
+            and isinstance(coordinator_plan.get(field), str),
+            "E_MTLS_PLAN_RUN_BINDING",
+        )
+    coordinator_execution = coordinator_plan.get("bindings", {}).get("execution_contract_sha256")
+    domain_execution = domain_plan.get("bindings", {}).get("execution_contract_sha256")
+    require(
+        is_sha256(coordinator_execution) and coordinator_execution == domain_execution,
+        "E_MTLS_PLAN_EXECUTION_BINDING",
+    )
+
+
+def connect_coordinator_to_domain(
+    coordinator_plan: dict,
+    domain_plan: dict,
+    expected_domain_certificate_der_sha256: str,
+    timeout_seconds: float,
+) -> ssl.SSLSocket:
+    require(SOCKET_ADAPTER_ACTIVATION_READY, "E_MTLS_SOCKET_ADAPTER_ACTIVATION_NOT_READY")
+    validate_connection_plans(coordinator_plan, domain_plan)
+    require(is_sha256(expected_domain_certificate_der_sha256), "E_MTLS_DOMAIN_PEER_EXPECTED_DIGEST")
+    timeout = bounded_timeout(timeout_seconds)
+    family, ip_text, port = agent_address(domain_plan)
+    context = build_client_context(coordinator_plan)
+    raw_socket: socket.socket | None = None
+    tls_socket: ssl.SSLSocket | None = None
+    try:
+        raw_socket = socket.socket(family, socket.SOCK_STREAM)
+        raw_socket.settimeout(timeout)
+        raw_socket.connect((ip_text, port))
+        tls_socket = context.wrap_socket(raw_socket, server_hostname=ip_text)
+        verify_peer_certificate_sha256(tls_socket, expected_domain_certificate_der_sha256)
+        return tls_socket
+    except SafeFailure:
+        if tls_socket is not None:
+            tls_socket.close()
+        elif raw_socket is not None:
+            raw_socket.close()
+        raise
+    except (OSError, ssl.SSLError, ValueError) as error:
+        if tls_socket is not None:
+            tls_socket.close()
+        elif raw_socket is not None:
+            raw_socket.close()
+        raise SafeFailure("E_MTLS_CLIENT_CONNECTION") from error
+
+
+class DomainAgentListener:
+    """One-shot exact-address listener; no retry or second accept is exposed."""
+
+    def __init__(self, plan: dict, listener: socket.socket, context: ssl.SSLContext, timeout_seconds: float) -> None:
+        self.plan = plan
+        self.listener = listener
+        self.context = context
+        self.timeout_seconds = timeout_seconds
+        self.consumed = False
+
+    def close(self) -> None:
+        self.listener.close()
+
+    def accept_exact_coordinator(self, coordinator_plan: dict) -> ssl.SSLSocket:
+        require(not self.consumed, "E_MTLS_LISTENER_ALREADY_CONSUMED")
+        self.consumed = True
+        validate_connection_plans(coordinator_plan, self.plan)
+        _family, expected_ip, _port = agent_address(coordinator_plan)
+        accepted: socket.socket | None = None
+        tls_socket: ssl.SSLSocket | None = None
+        try:
+            accepted, peer = self.listener.accept()
+            self.listener.close()
+            require(isinstance(peer, tuple) and len(peer) >= 2 and isinstance(peer[0], str), "E_MTLS_COORDINATOR_SOURCE_IP")
+            try:
+                observed_ip = ipaddress.ip_address(peer[0]).compressed
+            except ValueError as error:
+                raise SafeFailure("E_MTLS_COORDINATOR_SOURCE_IP") from error
+            require(observed_ip == expected_ip, "E_MTLS_COORDINATOR_SOURCE_IP")
+            accepted.settimeout(self.timeout_seconds)
+            tls_socket = self.context.wrap_socket(accepted, server_side=True)
+            verify_coordinator_peer_certificate(self.plan, tls_socket)
+            return tls_socket
+        except SafeFailure:
+            if tls_socket is not None:
+                tls_socket.close()
+            elif accepted is not None:
+                accepted.close()
+            self.listener.close()
+            raise
+        except (OSError, ssl.SSLError, ValueError) as error:
+            if tls_socket is not None:
+                tls_socket.close()
+            elif accepted is not None:
+                accepted.close()
+            self.listener.close()
+            raise SafeFailure("E_MTLS_SERVER_CONNECTION") from error
+
+
+def open_domain_agent_listener(plan: dict, timeout_seconds: float) -> DomainAgentListener:
+    require(SOCKET_ADAPTER_ACTIVATION_READY, "E_MTLS_SOCKET_ADAPTER_ACTIVATION_NOT_READY")
+    timeout = bounded_timeout(timeout_seconds)
+    family, ip_text, port = agent_address(plan)
+    context = build_server_context(plan)
+    listener: socket.socket | None = None
+    try:
+        listener = socket.socket(family, socket.SOCK_STREAM)
+        listener.settimeout(timeout)
+        listener.bind((ip_text, port))
+        listener.listen(1)
+        return DomainAgentListener(plan, listener, context, timeout)
+    except (OSError, ssl.SSLError, ValueError) as error:
+        if listener is not None:
+            listener.close()
+        raise SafeFailure("E_MTLS_SERVER_LISTENER") from error
+
+
+def receive_exact(tls_socket: ssl.SSLSocket, length: int, code: str) -> bytes:
+    require(isinstance(length, int) and 0 < length <= MAX_MESSAGE_FRAME_BYTES, code)
+    value = bytearray()
+    while len(value) < length:
+        try:
+            chunk = tls_socket.recv(length - len(value))
+        except (OSError, ssl.SSLError) as error:
+            raise SafeFailure(code) from error
+        require(isinstance(chunk, bytes) and chunk, code)
+        value.extend(chunk)
+    return bytes(value)
+
+
+def _send_bounded_frame(tls_socket: ssl.SSLSocket, frame: bytes, expected_magic: bytes, maximum: int) -> None:
+    require(isinstance(frame, bytes) and len(frame) <= maximum and frame.startswith(expected_magic), "E_MTLS_SEND_FRAME")
+    try:
+        tls_socket.sendall(frame)
+    except (OSError, ssl.SSLError) as error:
+        raise SafeFailure("E_MTLS_SEND_FRAME") from error
+
+
+def send_message_frame(tls_socket: ssl.SSLSocket, frame: bytes) -> None:
+    require(
+        isinstance(frame, bytes) and len(frame) >= 12
+        and struct.unpack("!I", frame[8:12])[0] == len(frame) - 12,
+        "E_MTLS_SEND_FRAME",
+    )
+    _send_bounded_frame(tls_socket, frame, MESSAGE_MAGIC, 12 + MAX_MESSAGE_FRAME_BYTES)
+
+
+def send_secret_frame(tls_socket: ssl.SSLSocket, frame: bytes) -> None:
+    require(
+        isinstance(frame, bytes) and len(frame) >= 45
+        and frame[8] == SECRET_KIND_OPENBAO_UNSEAL_SHARE
+        and struct.unpack("!I", frame[9:13])[0] == len(frame) - 45,
+        "E_MTLS_SEND_FRAME",
+    )
+    _send_bounded_frame(tls_socket, frame, SECRET_MAGIC, 45 + MAX_SECRET_BYTES)
+
+
+def receive_message_frame(tls_socket: ssl.SSLSocket) -> bytes:
+    header = receive_exact(tls_socket, 12, "E_MTLS_RECEIVE_MESSAGE")
+    require(header[:8] == MESSAGE_MAGIC, "E_MTLS_RECEIVE_MESSAGE")
+    length = struct.unpack("!I", header[8:])[0]
+    require(0 < length <= MAX_MESSAGE_FRAME_BYTES, "E_MTLS_RECEIVE_MESSAGE")
+    return header + receive_exact(tls_socket, length, "E_MTLS_RECEIVE_MESSAGE")
+
+
+def receive_secret_frame(tls_socket: ssl.SSLSocket) -> bytes:
+    header = receive_exact(tls_socket, 45, "E_MTLS_RECEIVE_SECRET")
+    require(header[:8] == SECRET_MAGIC and header[8] == SECRET_KIND_OPENBAO_UNSEAL_SHARE, "E_MTLS_RECEIVE_SECRET")
+    length = struct.unpack("!I", header[9:13])[0]
+    require(16 <= length <= MAX_SECRET_BYTES, "E_MTLS_RECEIVE_SECRET")
+    return header + receive_exact(tls_socket, length, "E_MTLS_RECEIVE_SECRET")
+
+
 def status() -> dict:
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.mtls_transport_status.v0",
-        "status": "OFFLINE_MTLS_FRAMING_READY_LIVE_SOCKET_ADAPTER_AND_ACTIVATION_ABSENT",
+        "status": "OFFLINE_MTLS_FRAMING_AND_LIVE_SOCKET_ADAPTER_READY_ACTIVATION_GATE_CLOSED",
         "transport_activation_ready": TRANSPORT_ACTIVATION_READY,
+        "socket_adapter_activation_ready": SOCKET_ADAPTER_ACTIVATION_READY,
         "real_certificate_or_key_files_read": 0,
         "network_accessed": False,
         "listeners_started": 0,

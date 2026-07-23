@@ -613,13 +613,16 @@ reads a credential, starts a process, opens a listener or injects a fault.
 
 The mTLS transport-core KAT performs one mutual TLS handshake using only
 `ssl.MemoryBIO`, round-trips one bounded signed-message frame and one bounded
-ephemeral OpenBao unseal-secret frame, and rejects 28 route, framing, digest,
+ephemeral OpenBao unseal-secret frame, and rejects 36 route, framing, digest,
 certificate, peer-identity, hostname, file-permission and activation mutations.
 It binds exact plan-selected CA/leaf file hashes and requires explicit
 post-handshake peer-certificate matching, including rejection of a different
-client certificate issued by the same trusted CA. The live socket adapter is still
-absent, transport activation remains false, and the KAT opens zero sockets or
-listeners and contacts zero hosts.
+client certificate issued by the same trusted CA. The one-shot live socket
+adapter now enforces literal-IP endpoints without DNS, exact source IP,
+30-second maximum timeouts, single-accept listeners, bounded frames and
+failure-close behavior. Its KAT uses injected in-memory fake sockets: both
+transport activations remain false, zero OS sockets/listeners are opened and
+zero hosts are contacted. Source-bound runner orchestration remains absent.
 
 The evidence-compiler KAT replays all 23 fixed-command receipts, verifies 21
 source-domain Ed25519 SSHSIG payloads under the purpose-separated event

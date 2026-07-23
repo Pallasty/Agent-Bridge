@@ -77,7 +77,15 @@ def create_leaf(root: Path, ca_key: Path, ca_certificate: Path, name: str, usage
     return key, certificate
 
 
-def plan(ca: Path, domain_certificate: Path, domain_key: Path, coordinator_trust_certificate: Path, coordinator_key: Path | None = None) -> dict:
+def plan(
+    ca: Path,
+    domain_certificate: Path,
+    domain_key: Path,
+    coordinator_trust_certificate: Path,
+    coordinator_key: Path | None = None,
+    domain_id: str = "domain-1",
+    overlay_ip: str = "100.64.50.1",
+) -> dict:
     coordinator = None
     if coordinator_key is not None:
         coordinator = {
@@ -88,8 +96,14 @@ def plan(ca: Path, domain_certificate: Path, domain_key: Path, coordinator_trust
             "private_key_spki_sha256": hashlib.sha256(b"synthetic-coordinator-spki").hexdigest(),
         }
     return {
-        "domain_id": "domain-1",
-        "network": {"overlay_ip": "100.64.50.1"},
+        "domain_id": domain_id,
+        "run_id": RUN_ID,
+        "source_commit": SOURCE_COMMIT,
+        "bindings": {"execution_contract_sha256": EXECUTION_SHA256},
+        "network": {
+            "overlay_ip": overlay_ip,
+            "agent_control_endpoint": f"https://{overlay_ip}:29000",
+        },
         "credentials": {
             "ca_certificate_path": str(ca), "ca_certificate_sha256": sha_file(ca),
             "domain_certificate_path": str(domain_certificate),
@@ -340,11 +354,153 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-mtls-kat-") as directory:
     expect_failure(lambda: module.build_server_context(server_plan), "E_MTLS_SERVER_PRIVATE_KEY")
     server_key.chmod(0o600)
     negative_count += 1
+
+    target_plan = plan(
+        ca_certificate, server_certificate, server_key, client_certificate,
+        domain_id="domain-2", overlay_ip="100.64.50.2",
+    )
+    expect_failure(
+        lambda: module.connect_coordinator_to_domain(
+            client_plan, target_plan, certificate_der_sha256(server_certificate), 5,
+        ),
+        "E_MTLS_SOCKET_ADAPTER_ACTIVATION_NOT_READY",
+    )
+    negative_count += 1
+
+    class FakeTLSSocket:
+        def __init__(self, peer_der: bytes, incoming: bytes = b"") -> None:
+            self.peer_der = peer_der
+            self.incoming = bytearray(incoming)
+            self.sent = bytearray()
+            self.closed = False
+            self.timeout: float | None = None
+
+        def getpeercert(self, binary_form: bool = False):  # noqa: ANN201
+            return self.peer_der if binary_form else {}
+
+        def settimeout(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        def sendall(self, value: bytes) -> None:
+            self.sent.extend(value)
+
+        def recv(self, length: int) -> bytes:
+            value = bytes(self.incoming[:length])
+            del self.incoming[:length]
+            return value
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeRawSocket:
+        def __init__(self, accepted: tuple[FakeTLSSocket, tuple] | None = None) -> None:
+            self.accepted = accepted
+            self.timeout: float | None = None
+            self.connected: tuple | None = None
+            self.bound: tuple | None = None
+            self.backlog: int | None = None
+            self.closed = False
+
+        def settimeout(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        def connect(self, address: tuple) -> None:
+            self.connected = address
+
+        def bind(self, address: tuple) -> None:
+            self.bound = address
+
+        def listen(self, backlog: int) -> None:
+            self.backlog = backlog
+
+        def accept(self) -> tuple[FakeTLSSocket, tuple]:
+            assert self.accepted is not None
+            return self.accepted
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeContext:
+        def __init__(self, tls_socket: FakeTLSSocket) -> None:
+            self.tls_socket = tls_socket
+            self.server_hostname: str | None = None
+            self.server_side: bool | None = None
+
+        def wrap_socket(self, _raw_socket, server_hostname=None, server_side=False):  # noqa: ANN001, ANN201
+            self.server_hostname = server_hostname
+            self.server_side = server_side
+            return self.tls_socket
+
+    server_der = ssl.PEM_cert_to_DER_cert(server_certificate.read_text())
+    coordinator_der = ssl.PEM_cert_to_DER_cert(client_certificate.read_text())
+    original_socket_factory = module.socket.socket
+    original_client_context_builder = module.build_client_context
+    original_server_context_builder = module.build_server_context
+    module.SOCKET_ADAPTER_ACTIVATION_READY = True
+    try:
+        fake_client_raw = FakeRawSocket()
+        fake_client_tls = FakeTLSSocket(server_der)
+        fake_client_context = FakeContext(fake_client_tls)
+        module.socket.socket = lambda _family, _kind: fake_client_raw
+        module.build_client_context = lambda _plan: fake_client_context
+        connected = module.connect_coordinator_to_domain(
+            client_plan, target_plan, hashlib.sha256(server_der).hexdigest(), 5,
+        )
+        assert connected is fake_client_tls
+        assert fake_client_raw.connected == ("100.64.50.2", 29000)
+        assert fake_client_raw.timeout == 5 and fake_client_context.server_hostname == "100.64.50.2"
+
+        fake_received = FakeTLSSocket(server_der, frame + secret_frame)
+        assert module.receive_message_frame(fake_received) == frame
+        assert module.receive_secret_frame(fake_received) == secret_frame
+        module.send_message_frame(fake_received, frame)
+        module.send_secret_frame(fake_received, secret_frame)
+        assert bytes(fake_received.sent) == frame + secret_frame
+
+        accepted_socket = FakeTLSSocket(coordinator_der)
+        fake_listener_raw = FakeRawSocket((accepted_socket, ("100.64.50.1", 45000)))
+        fake_server_context = FakeContext(accepted_socket)
+        module.socket.socket = lambda _family, _kind: fake_listener_raw
+        module.build_server_context = lambda _plan: fake_server_context
+        listener = module.open_domain_agent_listener(target_plan, 5)
+        assert fake_listener_raw.bound == ("100.64.50.2", 29000) and fake_listener_raw.backlog == 1
+        accepted_tls = listener.accept_exact_coordinator(client_plan)
+        assert accepted_tls is accepted_socket and fake_server_context.server_side is True
+        expect_failure(lambda: listener.accept_exact_coordinator(client_plan), "E_MTLS_LISTENER_ALREADY_CONSUMED")
+        negative_count += 1
+
+        wrong_source_socket = FakeTLSSocket(coordinator_der)
+        wrong_source_listener = FakeRawSocket((wrong_source_socket, ("100.64.50.9", 45000)))
+        module.socket.socket = lambda _family, _kind: wrong_source_listener
+        second_listener = module.open_domain_agent_listener(target_plan, 5)
+        expect_failure(lambda: second_listener.accept_exact_coordinator(client_plan), "E_MTLS_COORDINATOR_SOURCE_IP")
+        negative_count += 1
+    finally:
+        module.socket.socket = original_socket_factory
+        module.build_client_context = original_client_context_builder
+        module.build_server_context = original_server_context_builder
+        module.SOCKET_ADAPTER_ACTIVATION_READY = False
+
+    malformed_endpoint_plan = copy.deepcopy(target_plan)
+    malformed_endpoint_plan["network"]["agent_control_endpoint"] = "https://example.invalid:29000"
+    expect_failure(lambda: module.agent_address(malformed_endpoint_plan), "E_MTLS_AGENT_ENDPOINT")
+    negative_count += 1
+    expect_failure(lambda: module.bounded_timeout(31), "E_MTLS_SOCKET_TIMEOUT")
+    negative_count += 1
+    mismatched_run_plan = copy.deepcopy(target_plan)
+    mismatched_run_plan["run_id"] = "other-run"
+    expect_failure(lambda: module.validate_connection_plans(client_plan, mismatched_run_plan), "E_MTLS_PLAN_RUN_BINDING")
+    negative_count += 1
+    expect_failure(lambda: module.receive_message_frame(FakeTLSSocket(server_der, b"short")), "E_MTLS_RECEIVE_MESSAGE")
+    negative_count += 1
+    expect_failure(lambda: module.send_message_frame(FakeTLSSocket(server_der), frame[:-1]), "E_MTLS_SEND_FRAME")
+    negative_count += 1
     module.TRANSPORT_ACTIVATION_READY = False
 
 status = module.status()
-assert status["status"] == "OFFLINE_MTLS_FRAMING_READY_LIVE_SOCKET_ADAPTER_AND_ACTIVATION_ABSENT"
+assert status["status"] == "OFFLINE_MTLS_FRAMING_AND_LIVE_SOCKET_ADAPTER_READY_ACTIVATION_GATE_CLOSED"
 assert status["transport_activation_ready"] is False
+assert status["socket_adapter_activation_ready"] is False
 assert status["real_certificate_or_key_files_read"] == 0
 assert status["network_accessed"] is False and status["listeners_started"] == status["external_hosts_contacted"] == 0
 assert status["secret_frames_persisted"] == status["services_started"] == status["faults_injected"] == 0

@@ -118,13 +118,15 @@ rollback prevention.
   chain, binds each domain terminal to its preceding receipt-chain head, and
   makes every post-dispatch failure terminal. Its live backend and activation
   constant are intentionally absent/false.
-- a bounded mTLS framing and context core with one real in-memory mutual-TLS
+- a bounded mTLS framing, context and one-shot socket-adapter core with one real in-memory mutual-TLS
   handshake, one signed-message-frame round trip, one bounded ephemeral secret-
-  frame round trip, and 28 negative paths. It binds exact plan-selected
+  frame round trip, and 36 negative paths. It binds exact plan-selected
   certificate files, owner-only file modes, hostname and peer-certificate
   identity, including exact rejection of a different same-CA client leaf,
-  while keeping live socket adaptation and transport activation
-  absent/false; no socket, listener or external host is used.
+  and adds literal-IP/no-DNS routing, exact source IP, bounded timeout/frame,
+  single-accept and failure-close behavior. The adapter is tested through
+  in-memory fake sockets while both activation gates remain false; no OS socket,
+  listener or external host is used.
 - an in-memory evidence compiler that replays 23 command receipts, verifies 21
   source-domain Ed25519 SSHSIG payloads, independently reconstructs and replays
   the 21-event coordinator hash chain, binds and scans four bounded logs per
