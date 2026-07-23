@@ -360,7 +360,7 @@ SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
 a private one-execution admission receipt; it also freshly revalidates the
 three signed host-readiness packets and re-hashes the exact source-bound
 runner, executor, authenticated domain lane, live local-process backend,
-transport, evidence and consumer artifacts named by the
+transport, evidence compiler/writer, exact finalizer and consumer artifacts named by the
 owner-signed contract. The owner payload binds the stable readiness-set and
 source-artifact-set digests; the time-varying readiness verification-receipt
 digest is emitted only by admission. Failure is terminal and cannot
@@ -368,7 +368,7 @@ retry. The admission step itself opens no socket, starts no listener or
 service, injects no fault and spends nothing. The source-bound runner core and
 its single-use consumer are now implemented: the runner compiles the exact
 three plans, permits only the 23-command inter-domain schedule, replays all
-receipt chains, invokes an evidence finalizer only after terminal success and
+receipt chains, invokes the one-shot exact evidence finalizer only after terminal success and
 requires best-effort cleanup on every abort. The consumer independently checks the clean source commit, exact final
 owner signature and private admission receipt, atomically reserves one
 execution, then dispatches an injected runner. A PASS is accepted only with an
@@ -384,8 +384,9 @@ opens no socket and starts no listener, workload, or service process.
 
 The execution-readiness audit originally found that the repository lacked a
 source-bound cross-host runner, three host-local runtime-readiness packets,
-credential-placement proof and a real evidence builder. The single-use
-admission consumer identified by the audit has since been implemented. The
+credential-placement proof and a real evidence builder. The runner,
+authenticated lane, bounded local backend, exact finalizer and single-use
+admission consumer identified by the audit have since been implemented. The
 central material manifest cannot truthfully prove that the matching
 private key and certificate have been placed on each remote domain at an exact
 private path. These are execution blockers, not documentation niceties.
@@ -627,7 +628,8 @@ reads a credential, starts a process, opens a listener or injects a fault.
 
 The mTLS transport-core KAT performs one mutual TLS handshake using only
 `ssl.MemoryBIO`, round-trips one bounded signed-message frame and one bounded
-ephemeral OpenBao bootstrap-bundle frame, and rejects 36 route, framing, digest,
+ephemeral OpenBao bootstrap-bundle frame, one bounded four-file raw-log bundle,
+and rejects 38 route, framing, digest,
 certificate, peer-identity, hostname, file-permission and activation mutations.
 It binds exact plan-selected CA/leaf file hashes and requires explicit
 post-handshake peer-certificate matching, including rejection of a different
@@ -651,7 +653,8 @@ The authenticated-domain-lane KAT drives the exact 23-command schedule through
 three distinct coordinator/domain Ed25519 SSHSIG session chains, strict real-
 receipt replay and an in-memory transport double. It publishes one OpenBao
 bootstrap frame, consumes it for both followers and the fault-target restart,
-then zeroizes the coordinator copy at the last legitimate consumer. Nine
+retains exactly one coordinator bytearray through cleanup for exact-value leak
+scanning, then transfers and zeroizes it in the finalizer. Nine
 directed negatives cover closed activation, invalid secret direction/hash,
 invalid emergency cleanup, pinned-tool drift, in-memory secret mutation,
 signed backend failure cleanup, detached-signature mutation and endpoint-set
@@ -702,3 +705,11 @@ symlinks, independently cross-binds source payload/signature hashes, replays
 the coordinator chain, and reaches 47 total
 negative paths. Real-input activation remains absent; the KAT uses no network,
 listener, service, fault or provider operation.
+
+The exact-evidence-finalizer KAT independently rechecks the 23-command order,
+receipt bindings and transcript hashes, proves early failure zeroizes the
+transferred bootstrap secret, and rejects a second attempt. The authenticated-
+lane integration KAT then drives that finalizer over 21 source-signed events
+and three bounded log bundles, atomically publishes and reads back 65 temporary
+owner-only evidence files, and returns the five closed runner finalization
+fields. All committed live activation constants remain false.

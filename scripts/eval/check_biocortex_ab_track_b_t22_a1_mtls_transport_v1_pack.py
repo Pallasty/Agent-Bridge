@@ -254,6 +254,25 @@ decoded_secret = module.decode_secret_frame(secret_frame, secret_sha256)
 assert decoded_secret == secret
 module.zeroize(decoded_secret)
 assert decoded_secret == bytearray(len(decoded_secret))
+log_rows = [
+    {"name": name, "raw": f"T22_A1_SYNTHETIC_ONLY:{name}\n".encode()}
+    for name in module.EXPECTED_LOG_NAMES
+]
+log_frame = module.encode_log_bundle_frame(
+    "domain-1", RUN_ID, SOURCE_COMMIT, EXECUTION_SHA256, log_rows,
+)
+assert module.decode_log_bundle_frame(
+    log_frame, "domain-1", RUN_ID, SOURCE_COMMIT, EXECUTION_SHA256,
+) == log_rows
+tampered_log_frame = bytearray(log_frame)
+tampered_log_frame[-1] ^= 1
+expect_failure(
+    lambda: module.decode_log_bundle_frame(
+        bytes(tampered_log_frame), "domain-1", RUN_ID, SOURCE_COMMIT, EXECUTION_SHA256,
+    ),
+    "E_MTLS_LOG_FRAME_DIGEST",
+)
+negative_count += 1
 for candidate, expected in (
     (b"BADMAGIC" + secret_frame[8:], "E_MTLS_SECRET_MAGIC"),
     (secret_frame[:8] + b"\x02" + secret_frame[9:], "E_MTLS_SECRET_KIND"),
@@ -462,12 +481,14 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-mtls-kat-") as directory:
         )
         negative_count += 1
 
-        fake_received = FakeTLSSocket(server_der, frame + secret_frame)
+        fake_received = FakeTLSSocket(server_der, frame + secret_frame + log_frame)
         assert module.receive_message_frame(fake_received) == frame
         assert module.receive_secret_frame(fake_received) == secret_frame
+        assert module.receive_log_bundle_frame(fake_received) == log_frame
         module.send_message_frame(fake_received, frame)
         module.send_secret_frame(fake_received, secret_frame)
-        assert bytes(fake_received.sent) == frame + secret_frame
+        module.send_log_bundle_frame(fake_received, log_frame)
+        assert bytes(fake_received.sent) == frame + secret_frame + log_frame
 
         accepted_socket = FakeTLSSocket(coordinator_der)
         fake_listener_raw = FakeRawSocket((accepted_socket, ("100.64.50.1", 45000)))
@@ -522,6 +543,7 @@ print("t22_a1_mtls_transport_check\tpass")
 print("synthetic_memory_bio_mutual_tls_handshake_count\t1")
 print("synthetic_tls_message_frame_roundtrip_count\t1")
 print("synthetic_secret_frame_roundtrip_count\t1")
+print("synthetic_log_bundle_roundtrip_count\t1")
 print(f"directed_negative_test_count\t{negative_count}")
 print("real_certificate_or_key_files_read\t0")
 print("network_accessed\tfalse")

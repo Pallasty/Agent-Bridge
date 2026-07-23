@@ -40,6 +40,7 @@ HEALTH_WAIT_SECONDS = 90.0
 HEALTH_POLL_SECONDS = 0.25
 PROCESS_STOP_GRACE_SECONDS = 10.0
 BACKEND_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/live-local-backend/v1\0"
+LOG_SET_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/owned-process-log-set/v1\0"
 SECRET_MAGIC = b"T22A1S1\0"
 SECRET_KIND_OPENBAO_BOOTSTRAP_BUNDLE = 1
 BOOTSTRAP_SCHEMA = "agent_bridge.biocortex.track_b.t22_a1.openbao_bootstrap_bundle.v1"
@@ -95,6 +96,21 @@ def secret_frame_sha256(secret: bytearray) -> str:
     return hashlib.sha256(frame).hexdigest()
 
 
+def evidence_log_set_sha256(domain_id: str, rows: list[dict]) -> str:
+    require(domain_id in {"domain-1", "domain-2", "domain-3"}, "E_LIVE_BACKEND_LOG_DOMAIN")
+    expected = ("etcd.stderr.log", "etcd.stdout.log", "openbao.stderr.log", "openbao.stdout.log")
+    require(
+        isinstance(rows, list) and [row.get("name") for row in rows] == list(expected)
+        and all(set(row) == {"name", "raw"} and isinstance(row["raw"], bytes) for row in rows),
+        "E_LIVE_BACKEND_LOG_SET",
+    )
+    manifest = [
+        {"name": row["name"], "size_bytes": len(row["raw"]), "sha256": hashlib.sha256(row["raw"]).hexdigest()}
+        for row in rows
+    ]
+    return hashlib.sha256(LOG_SET_DOMAIN + canonical({"domain_id": domain_id, "logs": manifest})).hexdigest()
+
+
 def effects(
     *,
     network_accessed: bool = False,
@@ -142,6 +158,7 @@ class ProcessRuntime(Protocol):
     def services_alive(self) -> bool: ...
     def cleanup(self, plan: dict, secret_values: list[bytes]) -> dict: ...
     def abort_cleanup(self, plan: dict) -> dict: ...
+    def evidence_logs(self, plan: dict) -> list[dict]: ...
 
 
 class ClusterControl(Protocol):
@@ -486,15 +503,31 @@ class BoundedLocalProcessRuntime:
             self._write_log(path, raw)
             rows.append({"name": name, "sha256": hash_file(path), "bytes": path.stat().st_size})
         require(self._ports_available(plan), "E_LIVE_BACKEND_PORT_NOT_RELEASED")
+        evidence_logs = self.evidence_logs(plan)
         return {
             "all_owned_processes_stopped": True,
             "all_owned_ports_released": True,
-            "owned_process_log_set_sha256": digest(rows),
+            "owned_process_log_set_sha256": evidence_log_set_sha256(plan["domain_id"], evidence_logs),
             "owned_process_log_count": 4,
             "cleanup_receipt_sha256": digest({"domain_id": plan["domain_id"], "logs": rows, "ports_released": True}),
             "secret_value_scan_passed": True,
             "exact_secret_match_count": 0,
         }
+
+    def evidence_logs(self, plan: dict) -> list[dict]:
+        require(not self._owned, "E_LIVE_BACKEND_LOG_PROCESS_STATE")
+        paths = {
+            "etcd.stderr.log": Path(plan["processes"]["etcd"]["stderr_log_path"]),
+            "etcd.stdout.log": Path(plan["processes"]["etcd"]["stdout_log_path"]),
+            "openbao.stderr.log": Path(plan["processes"]["openbao"]["stderr_log_path"]),
+            "openbao.stdout.log": Path(plan["processes"]["openbao"]["stdout_log_path"]),
+        }
+        rows = []
+        for name, path in paths.items():
+            self._regular_owner_file(path, MAX_SERVICE_LOG_BYTES, True, "E_LIVE_BACKEND_LOG_FILE")
+            rows.append({"name": name, "raw": path.read_bytes()})
+        evidence_log_set_sha256(plan["domain_id"], rows)
+        return rows
 
     def abort_cleanup(self, plan: dict) -> dict:
         try:
@@ -1112,6 +1145,12 @@ class LiveLocalBackend:
         self.bootstrap = None
         self.cleaned = True
         return result
+
+    def evidence_logs(self) -> list[dict]:
+        require(self.cleaned and not self.runtime.services_alive(), "E_LIVE_BACKEND_LOG_STATE")
+        rows = self.runtime.evidence_logs(self.plan)
+        evidence_log_set_sha256(self.plan["domain_id"], rows)
+        return rows
 
 
 def status() -> dict:

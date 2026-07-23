@@ -215,14 +215,21 @@ class FakeRuntime:
         else:
             exact_matches = 0
         self.alive = False
+        logs = self.evidence_logs(plan)
         return {
             "all_owned_processes_stopped": True, "all_owned_ports_released": True,
-            "owned_process_log_set_sha256": sha(f"logs:{plan['domain_id']}"),
+            "owned_process_log_set_sha256": module.evidence_log_set_sha256(plan["domain_id"], logs),
             "owned_process_log_count": 4,
             "cleanup_receipt_sha256": sha(f"cleanup:{plan['domain_id']}"),
             "secret_value_scan_passed": exact_matches == 0,
             "exact_secret_match_count": exact_matches,
         }
+
+    def evidence_logs(self, plan: dict) -> list[dict]:
+        return [
+            {"name": name, "raw": f"T22_A1_SYNTHETIC_ONLY:{plan['domain_id']}:{name}\n".encode()}
+            for name in ("etcd.stderr.log", "etcd.stdout.log", "openbao.stderr.log", "openbao.stdout.log")
+        ]
 
     def abort_cleanup(self, plan: dict) -> dict:
         self.alive = False
@@ -329,6 +336,10 @@ for value in executors:
     assert summary["synthetic_backend"] is False
 assert exchange.master is not None and exchange.frame_sha256 == module.secret_frame_sha256(exchange.master)
 assert all(runtime.alive is False for runtime in runtimes)
+for backend in backends:
+    logs = backend.evidence_logs()
+    cleanup = next(receipt for receipt in by_domain[backend.plan["domain_id"]].receipts if receipt["command"] == "CLEANUP_OWNED_PROCESSES")
+    assert module.evidence_log_set_sha256(backend.plan["domain_id"], logs) == cleanup["observation"]["owned_process_log_set_sha256"]
 
 
 def fresh(number: int, *, runtime_fail: str | None = None, control_bad: str | None = None, shared: MemoryExchange | None = None):

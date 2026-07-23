@@ -19,14 +19,20 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MESSAGE_FRAME_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/mtls-message-frame/v1\0"
+LOG_BUNDLE_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/log-bundle-frame/v1\0"
 MESSAGE_MAGIC = b"T22A1M1\0"
 SECRET_MAGIC = b"T22A1S1\0"
+LOG_BUNDLE_MAGIC = b"T22A1L1\0"
 SECRET_KIND_OPENBAO_BOOTSTRAP_BUNDLE = 1
 MAX_MESSAGE_FRAME_BYTES = 512 * 1024
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_SIGNATURE_BYTES = 64 * 1024
 MAX_PAYLOAD_BYTES = 256 * 1024
 MAX_SECRET_BYTES = 4096
+MAX_LOG_BYTES = 4 * 1024 * 1024
+MAX_LOG_BUNDLE_BYTES = 16 * 1024 * 1024
+MAX_LOG_MANIFEST_BYTES = 64 * 1024
+EXPECTED_LOG_NAMES = ("etcd.stderr.log", "etcd.stdout.log", "openbao.stderr.log", "openbao.stdout.log")
 TRANSPORT_ACTIVATION_READY = False
 SOCKET_ADAPTER_ACTIVATION_READY = False
 MAX_SOCKET_TIMEOUT_SECONDS = 30.0
@@ -185,6 +191,114 @@ def decode_secret_frame(frame: bytes, expected_sha256: str) -> bytearray:
 def zeroize(secret: bytearray) -> None:
     require(isinstance(secret, bytearray), "E_MTLS_SECRET_ZEROIZE_TYPE")
     secret[:] = b"\0" * len(secret)
+
+
+def encode_log_bundle_frame(
+    domain_id: str,
+    run_id: str,
+    source_commit: str,
+    execution_contract_sha256: str,
+    rows: list[dict],
+) -> bytes:
+    require(domain_id in {"domain-1", "domain-2", "domain-3"}, "E_MTLS_LOG_DOMAIN")
+    require(
+        isinstance(rows, list) and [row.get("name") for row in rows] == list(EXPECTED_LOG_NAMES),
+        "E_MTLS_LOG_SET",
+    )
+    raw_values: list[bytes] = []
+    manifest_rows = []
+    offset = 0
+    for row in rows:
+        require(set(row) == {"name", "raw"} and isinstance(row["raw"], bytes), "E_MTLS_LOG_ROW")
+        raw = row["raw"]
+        require(len(raw) <= MAX_LOG_BYTES, "E_MTLS_LOG_SIZE")
+        raw_values.append(raw)
+        manifest_rows.append({
+            "name": row["name"], "offset": offset, "size_bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        })
+        offset += len(raw)
+    require(offset <= MAX_LOG_BUNDLE_BYTES, "E_MTLS_LOG_BUNDLE_SIZE")
+    value = {
+        "schema": "agent_bridge.biocortex.track_b.t22_a1.log_bundle_frame.v1",
+        "domain_id": domain_id, "run_id": run_id, "source_commit": source_commit,
+        "execution_contract_sha256": execution_contract_sha256,
+        "logs": manifest_rows, "total_log_bytes": offset,
+        "contains_endpoint_or_secret": False, "production_admissible": False,
+    }
+    value["content_sha256"] = hashlib.sha256(LOG_BUNDLE_DOMAIN + canonical(value)).hexdigest()
+    manifest_raw = canonical(value) + b"\n"
+    require(len(manifest_raw) <= MAX_LOG_MANIFEST_BYTES, "E_MTLS_LOG_MANIFEST_SIZE")
+    data = b"".join(raw_values)
+    return (
+        LOG_BUNDLE_MAGIC + struct.pack("!II", len(manifest_raw), len(data))
+        + hashlib.sha256(manifest_raw + data).digest() + manifest_raw + data
+    )
+
+
+def decode_log_bundle_frame(
+    frame: bytes,
+    expected_domain_id: str,
+    expected_run_id: str,
+    expected_source_commit: str,
+    expected_execution_contract_sha256: str,
+) -> list[dict]:
+    header_size = 48
+    require(len(frame) >= header_size and frame[:8] == LOG_BUNDLE_MAGIC, "E_MTLS_LOG_MAGIC")
+    manifest_length, data_length = struct.unpack("!II", frame[8:16])
+    require(
+        0 < manifest_length <= MAX_LOG_MANIFEST_BYTES
+        and data_length <= MAX_LOG_BUNDLE_BYTES
+        and len(frame) == header_size + manifest_length + data_length,
+        "E_MTLS_LOG_LENGTH",
+    )
+    manifest_raw = frame[header_size:header_size + manifest_length]
+    data = frame[header_size + manifest_length:]
+    require(hashlib.sha256(manifest_raw + data).digest() == frame[16:48], "E_MTLS_LOG_FRAME_DIGEST")
+    value = canonical_json_line(manifest_raw, MAX_LOG_MANIFEST_BYTES, "E_MTLS_LOG_MANIFEST")
+    required = {
+        "schema", "domain_id", "run_id", "source_commit", "execution_contract_sha256",
+        "logs", "total_log_bytes", "contains_endpoint_or_secret",
+        "production_admissible", "content_sha256",
+    }
+    require(set(value) == required, "E_MTLS_LOG_MANIFEST_SHAPE")
+    require(value["schema"] == "agent_bridge.biocortex.track_b.t22_a1.log_bundle_frame.v1", "E_MTLS_LOG_MANIFEST_SCHEMA")
+    require(
+        value["domain_id"] == expected_domain_id and value["run_id"] == expected_run_id
+        and value["source_commit"] == expected_source_commit
+        and value["execution_contract_sha256"] == expected_execution_contract_sha256,
+        "E_MTLS_LOG_BINDING",
+    )
+    require(
+        value["contains_endpoint_or_secret"] is False and value["production_admissible"] is False,
+        "E_MTLS_LOG_BOUNDARY",
+    )
+    unsigned = dict(value)
+    claimed = unsigned.pop("content_sha256")
+    require(claimed == hashlib.sha256(LOG_BUNDLE_DOMAIN + canonical(unsigned)).hexdigest(), "E_MTLS_LOG_MANIFEST_DIGEST")
+    logs = value["logs"]
+    require(
+        isinstance(logs, list) and [row.get("name") for row in logs] == list(EXPECTED_LOG_NAMES)
+        and value["total_log_bytes"] == data_length,
+        "E_MTLS_LOG_SET",
+    )
+    rows = []
+    offset = 0
+    for row in logs:
+        require(
+            set(row) == {"name", "offset", "size_bytes", "sha256"}
+            and row["offset"] == offset and isinstance(row["size_bytes"], int)
+            and 0 <= row["size_bytes"] <= MAX_LOG_BYTES and is_sha256(row["sha256"]),
+            "E_MTLS_LOG_ROW",
+        )
+        end = offset + row["size_bytes"]
+        require(end <= len(data), "E_MTLS_LOG_ROW")
+        raw = data[offset:end]
+        require(hashlib.sha256(raw).hexdigest() == row["sha256"], "E_MTLS_LOG_DIGEST")
+        rows.append({"name": row["name"], "raw": raw})
+        offset = end
+    require(offset == len(data), "E_MTLS_LOG_LENGTH")
+    return rows
 
 
 def read_bound_certificate_file(path_text: object, expected_sha256: object, code: str) -> Path:
@@ -466,8 +580,13 @@ def open_domain_agent_listener(plan: dict, timeout_seconds: float) -> DomainAgen
         raise SafeFailure("E_MTLS_SERVER_LISTENER") from error
 
 
-def receive_exact(tls_socket: ssl.SSLSocket, length: int, code: str) -> bytes:
-    require(isinstance(length, int) and 0 < length <= MAX_MESSAGE_FRAME_BYTES, code)
+def receive_exact(
+    tls_socket: ssl.SSLSocket,
+    length: int,
+    code: str,
+    maximum: int = MAX_MESSAGE_FRAME_BYTES,
+) -> bytes:
+    require(isinstance(length, int) and 0 < length <= maximum, code)
     value = bytearray()
     while len(value) < length:
         try:
@@ -506,6 +625,19 @@ def send_secret_frame(tls_socket: ssl.SSLSocket, frame: bytes) -> None:
     _send_bounded_frame(tls_socket, frame, SECRET_MAGIC, 45 + MAX_SECRET_BYTES)
 
 
+def send_log_bundle_frame(tls_socket: ssl.SSLSocket, frame: bytes) -> None:
+    require(
+        isinstance(frame, bytes) and len(frame) >= 48
+        and 0 < struct.unpack("!I", frame[8:12])[0] <= MAX_LOG_MANIFEST_BYTES
+        and struct.unpack("!I", frame[12:16])[0] <= MAX_LOG_BUNDLE_BYTES,
+        "E_MTLS_SEND_FRAME",
+    )
+    _send_bounded_frame(
+        tls_socket, frame, LOG_BUNDLE_MAGIC,
+        48 + MAX_LOG_MANIFEST_BYTES + MAX_LOG_BUNDLE_BYTES,
+    )
+
+
 def receive_message_frame(tls_socket: ssl.SSLSocket) -> bytes:
     header = receive_exact(tls_socket, 12, "E_MTLS_RECEIVE_MESSAGE")
     require(header[:8] == MESSAGE_MAGIC, "E_MTLS_RECEIVE_MESSAGE")
@@ -520,6 +652,21 @@ def receive_secret_frame(tls_socket: ssl.SSLSocket) -> bytes:
     length = struct.unpack("!I", header[9:13])[0]
     require(16 <= length <= MAX_SECRET_BYTES, "E_MTLS_RECEIVE_SECRET")
     return header + receive_exact(tls_socket, length, "E_MTLS_RECEIVE_SECRET")
+
+
+def receive_log_bundle_frame(tls_socket: ssl.SSLSocket) -> bytes:
+    header = receive_exact(tls_socket, 48, "E_MTLS_RECEIVE_LOG_HEADER")
+    require(header[:8] == LOG_BUNDLE_MAGIC, "E_MTLS_RECEIVE_LOG_HEADER")
+    manifest_length, data_length = struct.unpack("!II", header[8:16])
+    require(
+        0 < manifest_length <= MAX_LOG_MANIFEST_BYTES and data_length <= MAX_LOG_BUNDLE_BYTES,
+        "E_MTLS_RECEIVE_LOG_HEADER",
+    )
+    body = receive_exact(
+        tls_socket, manifest_length + data_length, "E_MTLS_RECEIVE_LOG_BODY",
+        MAX_LOG_MANIFEST_BYTES + MAX_LOG_BUNDLE_BYTES,
+    )
+    return header + body
 
 
 def status() -> dict:

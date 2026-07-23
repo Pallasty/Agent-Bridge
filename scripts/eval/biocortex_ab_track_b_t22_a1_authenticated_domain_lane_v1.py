@@ -9,6 +9,7 @@ authorization.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -33,8 +34,10 @@ RUNTIME_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_private_runtim
 TRANSPORT_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_mtls_transport_v1.py"
 EXECUTOR_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_domain_executor_core_v1.py"
 BACKEND_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_live_local_backend_v1.py"
+EVIDENCE_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_compiler_v1.py"
 MESSAGE_LIFETIME_SECONDS = 60
 AUTHENTICATED_DOMAIN_LANE_ACTIVATION_READY = False
+LOG_SET_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/owned-process-log-set/v1\0"
 HASHING_CONTRACT = {
     "hash_algorithm": "SHA-256",
     "canonicalization": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT",
@@ -63,6 +66,16 @@ CLEANUP_PAYLOAD_KEYS = {
     "domain_workload_plan_sha256", "domain_id", "command",
     "all_owned_processes_cleaned", "all_owned_ports_released",
     "automatic_retry_allowed", "production_admissible",
+}
+COMMAND_RESULT_KEYS = {
+    "schema", "run_id", "source_commit", "execution_contract_sha256",
+    "domain_workload_plan_sha256", "domain_id", "command", "receipt",
+    "signed_events", "log_bundle_follows", "owned_process_log_set_sha256",
+    "contains_endpoint_or_secret", "automatic_retry_allowed", "production_admissible",
+}
+SIGNED_EVENT_KEYS = {
+    "event_type", "payload_sha256", "signature_sha256",
+    "payload_base64", "signature_base64",
 }
 
 
@@ -102,6 +115,10 @@ def load_executor_module():
 
 def load_backend_module():
     return load_module("t22a1_backend_for_authenticated_lane", BACKEND_SOURCE)
+
+
+def load_evidence_module():
+    return load_module("t22a1_evidence_for_authenticated_lane", EVIDENCE_SOURCE)
 
 
 def canonical(value: object) -> bytes:
@@ -151,6 +168,22 @@ def foreign(function, *arguments, **keywords):  # noqa: ANN001, ANN002, ANN003
         return function(*arguments, **keywords)
     except RuntimeError as error:
         raise SafeFailure(str(error)) from error
+
+
+def evidence_log_set_sha256(domain_id: str, rows: list[dict]) -> str:
+    transport = load_transport_module()
+    require(
+        domain_id in {"domain-1", "domain-2", "domain-3"}
+        and isinstance(rows, list)
+        and [row.get("name") for row in rows] == list(transport.EXPECTED_LOG_NAMES)
+        and all(set(row) == {"name", "raw"} and isinstance(row["raw"], bytes) for row in rows),
+        "E_AUTH_LANE_LOG_SET",
+    )
+    manifest = [
+        {"name": row["name"], "size_bytes": len(row["raw"]), "sha256": hashlib.sha256(row["raw"]).hexdigest()}
+        for row in rows
+    ]
+    return hashlib.sha256(LOG_SET_DOMAIN + canonical({"domain_id": domain_id, "logs": manifest})).hexdigest()
 
 
 def stable_code(error: Exception) -> str:
@@ -262,6 +295,60 @@ class SshSigTool:
         return hashlib.sha256(signature).hexdigest()
 
 
+class EvidenceEventEmitter:
+    """Build and sign the exact source-domain evidence events for one lane."""
+
+    def __init__(
+        self, plan: dict, readiness: dict, sshsig: SshSigTool,
+        domain_public_key: bytes, domain_public_key_sha256: str,
+        domain_private_key_path: Path,
+    ) -> None:
+        self.plan, self.sshsig = plan, sshsig
+        self.domain_public_key = domain_public_key
+        self.domain_public_key_sha256 = domain_public_key_sha256
+        self.domain_private_key_path = domain_private_key_path
+        self.attestation_packet_sha256 = readiness.get("bindings", {}).get("domain_attestation_packet_sha256")
+        require(is_sha256(self.attestation_packet_sha256), "E_AUTH_LANE_EVENT_ATTESTATION_BINDING")
+        self.evidence = load_evidence_module()
+        self.event_plan = self.evidence.resolve_event_plan(plan["role"]["fault_target_domain_id"])
+        self.domain_sequence = 0
+        self.previous_event_sha256 = "0" * 64
+
+    def expected_event_types(self, command: str) -> list[str]:
+        return [
+            event_type for domain_id, planned_command, event_type in self.event_plan
+            if domain_id == self.plan["domain_id"] and planned_command == command
+        ]
+
+    def emit(self, receipt: dict) -> list[dict]:
+        rows = []
+        for event_type in self.expected_event_types(receipt["command"]):
+            payload = foreign(
+                self.evidence.build_domain_event_payload, receipt, event_type,
+                self.domain_sequence, self.previous_event_sha256,
+                self.attestation_packet_sha256, self.domain_public_key_sha256,
+            )
+            payload_raw = canonical_line(payload)
+            signature = self.sshsig.sign(
+                payload_raw, self.domain_private_key_path, self.evidence.SIGNATURE_NAMESPACE,
+            )
+            self.sshsig.verify(
+                payload_raw, signature, self.domain_public_key,
+                self.plan["domain_id"], self.evidence.SIGNATURE_NAMESPACE,
+            )
+            foreign(self.evidence.decode_domain_event, payload_raw)
+            rows.append({
+                "event_type": event_type,
+                "payload_sha256": hashlib.sha256(payload_raw).hexdigest(),
+                "signature_sha256": hashlib.sha256(signature).hexdigest(),
+                "payload_base64": base64.b64encode(payload_raw).decode(),
+                "signature_base64": base64.b64encode(signature).decode(),
+            })
+            self.domain_sequence += 1
+            self.previous_event_sha256 = payload["content_sha256"]
+        return rows
+
+
 def secret_policy(domain_id: str, fault_target_domain_id: str, command: str) -> str:
     if command == "START_OWNED_CLUSTER_MEMBERS":
         return "DOMAIN_TO_COORDINATOR" if domain_id == "domain-1" else "COORDINATOR_TO_DOMAIN"
@@ -368,6 +455,43 @@ def validate_cleanup_payload(value: object, plan: dict) -> dict:
         and value["automatic_retry_allowed"] is False and value["production_admissible"] is False,
         "E_AUTH_LANE_CLEANUP_PAYLOAD_BINDING",
     )
+    return value
+
+
+def command_result_payload(plan: dict, receipt: dict, signed_events: list[dict]) -> dict:
+    command = receipt["command"]
+    log_follows = command == "CLEANUP_OWNED_PROCESSES"
+    log_sha256 = receipt.get("observation", {}).get("owned_process_log_set_sha256") if log_follows else None
+    require(not log_follows or is_sha256(log_sha256), "E_AUTH_LANE_LOG_RECEIPT")
+    return {
+        "schema": "agent_bridge.biocortex.track_b.t22_a1.domain_command_result.v1",
+        "run_id": plan["run_id"], "source_commit": plan["source_commit"],
+        "execution_contract_sha256": plan["bindings"]["execution_contract_sha256"],
+        "domain_workload_plan_sha256": plan["content_sha256"], "domain_id": plan["domain_id"],
+        "command": command, "receipt": receipt, "signed_events": signed_events,
+        "log_bundle_follows": log_follows, "owned_process_log_set_sha256": log_sha256,
+        "contains_endpoint_or_secret": False, "automatic_retry_allowed": False,
+        "production_admissible": False,
+    }
+
+
+def validate_command_result_shape(value: object, plan: dict, command: str) -> dict:
+    require(isinstance(value, dict) and set(value) == COMMAND_RESULT_KEYS, "E_AUTH_LANE_COMMAND_RESULT_SHAPE")
+    assert isinstance(value, dict)
+    _bound_payload(value, plan, "E_AUTH_LANE_COMMAND_RESULT_BINDING")
+    require(
+        value["schema"] == "agent_bridge.biocortex.track_b.t22_a1.domain_command_result.v1"
+        and value["command"] == command and isinstance(value["receipt"], dict)
+        and isinstance(value["signed_events"], list)
+        and all(isinstance(row, dict) and set(row) == SIGNED_EVENT_KEYS for row in value["signed_events"])
+        and value["log_bundle_follows"] is (command == "CLEANUP_OWNED_PROCESSES")
+        and value["contains_endpoint_or_secret"] is False
+        and value["automatic_retry_allowed"] is False and value["production_admissible"] is False,
+        "E_AUTH_LANE_COMMAND_RESULT_BINDING",
+    )
+    expected_log = value["receipt"].get("observation", {}).get("owned_process_log_set_sha256") \
+        if command == "CLEANUP_OWNED_PROCESSES" else None
+    require(value["owned_process_log_set_sha256"] == expected_log, "E_AUTH_LANE_LOG_RECEIPT")
     return value
 
 
@@ -616,15 +740,16 @@ class CoordinatorBootstrapStore:
         require(AUTHENTICATED_DOMAIN_LANE_ACTIVATION_READY, "E_AUTH_LANE_ACTIVATION_NOT_READY")
         self.frame: bytearray | None = None
         self.frame_sha256: str | None = None
+        self.secret: bytearray | None = None
 
     def capture(self, frame: bytes, expected_frame_sha256: str) -> None:
         require(self.frame is None, "E_AUTH_LANE_COORDINATOR_BOOTSTRAP_DUPLICATE")
         require(hashlib.sha256(frame).hexdigest() == expected_frame_sha256 and len(frame) >= 45, "E_AUTH_LANE_COORDINATOR_BOOTSTRAP_BINDING")
         transport = load_transport_module()
         secret = foreign(transport.decode_secret_frame, frame, frame[13:45].hex())
-        foreign(transport.zeroize, secret)
         self.frame = bytearray(frame)
         self.frame_sha256 = expected_frame_sha256
+        self.secret = secret
 
     def outbound(self) -> tuple[bytes, str]:
         require(self.frame is not None and is_sha256(self.frame_sha256), "E_AUTH_LANE_COORDINATOR_BOOTSTRAP_MISSING")
@@ -632,17 +757,74 @@ class CoordinatorBootstrapStore:
         assert self.frame_sha256 is not None
         return bytes(self.frame), self.frame_sha256
 
+    def take_secret_for_evidence(self) -> bytearray:
+        require(
+            self.frame is not None and self.secret is not None and is_sha256(self.frame_sha256),
+            "E_AUTH_LANE_COORDINATOR_BOOTSTRAP_MISSING",
+        )
+        transport = load_transport_module()
+        require(
+            hashlib.sha256(self.frame).hexdigest() == self.frame_sha256
+            and hashlib.sha256(transport.encode_secret_frame(self.secret)).hexdigest() == self.frame_sha256,
+            "E_AUTH_LANE_COORDINATOR_BOOTSTRAP_MUTATED",
+        )
+        secret = self.secret
+        self.secret = None
+        self.frame[:] = b"\0" * len(self.frame)
+        self.frame = None
+        self.frame_sha256 = None
+        return secret
+
     def clear(self) -> None:
+        transport = load_transport_module()
+        if self.secret is not None:
+            foreign(transport.zeroize, self.secret)
+            self.secret = None
         if self.frame is not None:
             self.frame[:] = b"\0" * len(self.frame)
             self.frame = None
         self.frame_sha256 = None
 
 
+class EvidenceCollector:
+    """Coordinator-owned, memory-only signed events and bounded log bundles."""
+
+    def __init__(self, fault_target_domain_id: str) -> None:
+        require(AUTHENTICATED_DOMAIN_LANE_ACTIVATION_READY, "E_AUTH_LANE_ACTIVATION_NOT_READY")
+        evidence = load_evidence_module()
+        self.event_plan = evidence.resolve_event_plan(fault_target_domain_id)
+        self.signed_events: list[dict] = []
+        self.log_sets: dict[str, list[dict]] = {}
+
+    def record_events(self, domain_id: str, command: str, rows: list[dict]) -> None:
+        evidence = load_evidence_module()
+        for row in rows:
+            index = len(self.signed_events)
+            require(index < len(self.event_plan), "E_AUTH_LANE_EVENT_COUNT")
+            expected_domain, expected_command, expected_type = self.event_plan[index]
+            payload = foreign(evidence.decode_domain_event, row["payload_raw"])
+            require(
+                (domain_id, command, payload["event_type"])
+                == (expected_domain, expected_command, expected_type),
+                "E_AUTH_LANE_EVENT_GLOBAL_ORDER",
+            )
+            self.signed_events.append(row)
+
+    def record_logs(self, domain_id: str, rows: list[dict], expected_sha256: str) -> None:
+        require(domain_id not in self.log_sets, "E_AUTH_LANE_LOG_REPLAY")
+        require(evidence_log_set_sha256(domain_id, rows) == expected_sha256, "E_AUTH_LANE_LOG_RECEIPT")
+        self.log_sets[domain_id] = rows
+
+    def validate_complete(self) -> None:
+        require(len(self.signed_events) == len(self.event_plan), "E_AUTH_LANE_EVENT_COUNT")
+        require(set(self.log_sets) == {"domain-1", "domain-2", "domain-3"}, "E_AUTH_LANE_LOG_DOMAIN_SET")
+
+
 @dataclass
 class DomainReply:
     response_frame: bytes
     outgoing_secret_frame: bytearray | None
+    log_bundle_frame: bytes | None
 
     def clear_secret(self) -> None:
         if self.outgoing_secret_frame is not None:
@@ -671,6 +853,10 @@ class DomainAgentCore:
         self.session = SessionMachine(
             plan, coordinator_public_key_path, coordinator_sha256,
             domain_public_key_path, domain_sha256, self.sshsig,
+        )
+        self.event_emitter = EvidenceEventEmitter(
+            plan, readiness, self.sshsig, self.domain_public_key,
+            domain_sha256, domain_private_key_path,
         )
         self.plan, self.executor, self.backend, self.exchange = plan, executor, backend, exchange
         self.domain_private_key_path, self.clock = domain_private_key_path, clock
@@ -710,6 +896,7 @@ class DomainAgentCore:
         received_at = self.prepared_at
         command, payload = pending.message["command"], pending.payload
         outgoing: bytearray | None = None
+        log_bundle: bytes | None = None
         try:
             direction = payload["secret_frame_direction"]
             if direction == "COORDINATOR_TO_DOMAIN":
@@ -736,7 +923,22 @@ class DomainAgentCore:
                     outgoing = self.exchange.take_outgoing(observed_secret)
                 elif direction == "COORDINATOR_TO_DOMAIN":
                     require(observed_secret == payload["secret_frame_sha256"], "E_AUTH_LANE_BOOTSTRAP_RECEIPT")
-                response_payload, result, failure_code = receipt, "SUCCEEDED", None
+                signed_events = self.event_emitter.emit(receipt)
+                response_payload = command_result_payload(self.plan, receipt, signed_events)
+                if command == "CLEANUP_OWNED_PROCESSES":
+                    logs = self.backend.evidence_logs()
+                    require(
+                        evidence_log_set_sha256(self.plan["domain_id"], logs)
+                        == receipt["observation"]["owned_process_log_set_sha256"],
+                        "E_AUTH_LANE_LOG_RECEIPT",
+                    )
+                    transport = load_transport_module()
+                    log_bundle = foreign(
+                        transport.encode_log_bundle_frame,
+                        self.plan["domain_id"], self.plan["run_id"], self.plan["source_commit"],
+                        self.plan["bindings"]["execution_contract_sha256"], logs,
+                    )
+                response_payload, result, failure_code = response_payload, "SUCCEEDED", None
             completed_at = self.clock()
             response = self.session.build_response(
                 response_payload, result, failure_code, completed_at, self.domain_private_key_path,
@@ -747,7 +949,7 @@ class DomainAgentCore:
                 if observed_result == result and observed_code == failure_code else (_ for _ in ()).throw(SafeFailure("E_AUTH_LANE_LOCAL_RESPONSE")),
             )
             self.prepared_at = None
-            return DomainReply(response, outgoing)
+            return DomainReply(response, outgoing, log_bundle)
         except Exception as error:
             if outgoing is not None:
                 outgoing[:] = b"\0" * len(outgoing)
@@ -770,7 +972,7 @@ class DomainAgentCore:
                 self.session.pending = None
                 self.prepared_at = None
                 raise SafeFailure(code) from error
-            return DomainReply(response, None)
+            return DomainReply(response, None, None)
 
     def handle(self, request_frame: bytes, incoming_secret_frame: bytes | None, received_at: datetime) -> DomainReply:
         self.prepare(request_frame, received_at)
@@ -786,8 +988,8 @@ class DomainAgentCore:
 class RoundTrip(Protocol):
     def exchange(
         self, request_frame: bytes, incoming_secret_frame: bytes | None,
-        expect_outgoing_secret: bool,
-    ) -> tuple[bytes, bytes | None, datetime]: ...
+        expect_outgoing_secret: bool, expect_log_bundle: bool,
+    ) -> tuple[bytes, bytes | None, bytes | None, datetime]: ...
     def close(self) -> None: ...
 
 
@@ -858,8 +1060,8 @@ class PersistentSocketRoundTrip:
 
     def exchange(
         self, request_frame: bytes, incoming_secret_frame: bytes | None,
-        expect_outgoing_secret: bool,
-    ) -> tuple[bytes, bytes | None, datetime]:
+        expect_outgoing_secret: bool, expect_log_bundle: bool,
+    ) -> tuple[bytes, bytes | None, bytes | None, datetime]:
         tls_socket = self._socket()
         try:
             foreign(self.transport.send_message_frame, tls_socket, request_frame)
@@ -870,8 +1072,23 @@ class PersistentSocketRoundTrip:
                 parse_time(self.domain_plan["limits"]["execution_expires_at"], "E_AUTH_LANE_EXECUTION_EXPIRY"),
                 self.clock,
             )
-            outgoing = foreign(self.transport.receive_secret_frame, tls_socket) if expect_outgoing_secret else None
-            return response, outgoing, self.clock()
+            decoded = foreign(
+                self.transport.decode_message_frame, response, "DOMAIN_TO_COORDINATOR",
+                self.domain_plan["domain_id"], self.domain_plan["run_id"],
+                self.domain_plan["source_commit"],
+                self.domain_plan["bindings"]["execution_contract_sha256"],
+            )
+            successful_result = decoded["message"].get("result") == "SUCCEEDED"
+            result_payload = decoded["payload"]
+            actual_secret = (
+                expect_outgoing_secret and successful_result
+                and result_payload.get("schema") == "agent_bridge.biocortex.track_b.t22_a1.domain_command_result.v1"
+            )
+            actual_log = result_payload.get("log_bundle_follows") is True
+            require(not actual_log or (expect_log_bundle and successful_result), "E_AUTH_LANE_LOG_PROTOCOL")
+            outgoing = foreign(self.transport.receive_secret_frame, tls_socket) if actual_secret else None
+            log_bundle = foreign(self.transport.receive_log_bundle_frame, tls_socket) if actual_log else None
+            return response, outgoing, log_bundle, self.clock()
         except Exception:
             self.close()
             raise
@@ -891,7 +1108,8 @@ class AuthenticatedDomainLane:
         self, coordinator_plan: dict, plan: dict, readiness: dict,
         coordinator_public_key_path: Path, coordinator_private_key_path: Path,
         domain_public_key_path: Path, roundtrip: RoundTrip,
-        bootstrap_store: CoordinatorBootstrapStore, clock: Callable[[], datetime],
+        bootstrap_store: CoordinatorBootstrapStore, evidence_collector: EvidenceCollector,
+        clock: Callable[[], datetime],
     ) -> None:
         require(AUTHENTICATED_DOMAIN_LANE_ACTIVATION_READY, "E_AUTH_LANE_ACTIVATION_NOT_READY")
         transport = load_transport_module()
@@ -910,12 +1128,57 @@ class AuthenticatedDomainLane:
         self.domain_id, self.plan = plan["domain_id"], plan
         self.coordinator_private_key_path = coordinator_private_key_path
         self.roundtrip, self.bootstrap_store = roundtrip, bootstrap_store
+        self.evidence_collector = evidence_collector
         self.clock = clock
         self.executor_module = load_executor_module()
+        self.evidence_module = load_evidence_module()
+        self.readiness = readiness
+        self.event_plan = self.evidence_module.resolve_event_plan(plan["role"]["fault_target_domain_id"])
+        self.event_sequence, self.event_previous = 0, "0" * 64
         self.receipt_state, self.receipt_previous = "CREATED", "0" * 64
         self.receipt_observations: dict[str, dict] = {}
         self.receipt_spend, self.receipt_sequence = 0, 0
         self.remote_cleanup_confirmed = False
+
+    def _signed_events(self, receipt: dict, rows: list[dict]) -> list[dict]:
+        expected_types = [
+            event_type for domain_id, command, event_type in self.event_plan
+            if domain_id == self.domain_id and command == receipt["command"]
+        ]
+        require(len(rows) == len(expected_types), "E_AUTH_LANE_EVENT_COUNT")
+        attestation_sha256 = self.readiness.get("bindings", {}).get("domain_attestation_packet_sha256")
+        require(is_sha256(attestation_sha256), "E_AUTH_LANE_EVENT_ATTESTATION_BINDING")
+        decoded_rows = []
+        sequence, previous = self.event_sequence, self.event_previous
+        for row, event_type in zip(rows, expected_types, strict=True):
+            try:
+                payload_raw = base64.b64decode(row["payload_base64"], validate=True)
+                signature_raw = base64.b64decode(row["signature_base64"], validate=True)
+            except (ValueError, TypeError) as error:
+                raise SafeFailure("E_AUTH_LANE_EVENT_BASE64") from error
+            require(
+                0 < len(payload_raw) <= self.evidence_module.MAX_EVENT_BYTES
+                and 0 < len(signature_raw) <= self.evidence_module.MAX_SIGNATURE_BYTES
+                and hashlib.sha256(payload_raw).hexdigest() == row["payload_sha256"]
+                and hashlib.sha256(signature_raw).hexdigest() == row["signature_sha256"]
+                and row["event_type"] == event_type,
+                "E_AUTH_LANE_EVENT_FRAME",
+            )
+            payload = foreign(self.evidence_module.decode_domain_event, payload_raw)
+            expected = foreign(
+                self.evidence_module.build_domain_event_payload, receipt, event_type,
+                sequence, previous, attestation_sha256, self.session.domain_public_key_sha256,
+            )
+            require(payload == expected, "E_AUTH_LANE_EVENT_RECONSTRUCTION")
+            self.session.sshsig.verify(
+                payload_raw, signature_raw, self.session.domain_public_key,
+                self.domain_id, self.evidence_module.SIGNATURE_NAMESPACE,
+            )
+            decoded_rows.append({"payload_raw": payload_raw, "signature_raw": signature_raw})
+            sequence += 1
+            previous = payload["content_sha256"]
+        self.event_sequence, self.event_previous = sequence, previous
+        return decoded_rows
 
     def _strict_receipt(self, value: dict, command: str) -> dict:
         foreign(
@@ -941,7 +1204,10 @@ class AuthenticatedDomainLane:
             require(result == "SUCCEEDED" and code is None, "E_AUTH_LANE_RESPONSE_RESULT")
             if mode == "EMERGENCY_CLEANUP":
                 return validate_cleanup_payload(value, self.plan)
-            return self._strict_receipt(value, command)
+            wrapper = validate_command_result_shape(value, self.plan, command)
+            receipt = self._strict_receipt(wrapper["receipt"], command)
+            signed_events = self._signed_events(receipt, wrapper["signed_events"])
+            return {"receipt": receipt, "signed_events": signed_events, "wrapper": wrapper}
         return validate
 
     def _exchange(self, command: str, now: datetime, mode: str) -> dict:
@@ -954,8 +1220,9 @@ class AuthenticatedDomainLane:
             inbound, secret_sha256 = self.bootstrap_store.outbound()
         payload = request_payload(self.plan, command, mode, secret_sha256)
         request = self.session.build_request(command, payload, now, self.coordinator_private_key_path)
-        response, outgoing, received_at = self.roundtrip.exchange(
+        response, outgoing, log_bundle, received_at = self.roundtrip.exchange(
             request, inbound, direction == "DOMAIN_TO_COORDINATOR",
+            mode == "NORMAL" and command == "CLEANUP_OWNED_PROCESSES",
         )
         try:
             value = self.session.accept_response(
@@ -966,16 +1233,35 @@ class AuthenticatedDomainLane:
                     value["all_owned_processes_cleaned"] is True
                     and value["all_owned_ports_released"] is True
                 )
+                require(outgoing is None and log_bundle is None, "E_AUTH_LANE_FAILURE_TRAILING_FRAME")
                 raise SafeFailure(value["failure_code"])
+            if mode == "EMERGENCY_CLEANUP":
+                require(outgoing is None and log_bundle is None, "E_AUTH_LANE_CLEANUP_TRAILING_FRAME")
+                return value
+            receipt = value["receipt"]
+            self.evidence_collector.record_events(
+                self.domain_id, command, value["signed_events"],
+            )
             if direction == "DOMAIN_TO_COORDINATOR":
                 require(isinstance(outgoing, bytes), "E_AUTH_LANE_BOOTSTRAP_RESPONSE_MISSING")
-                observed_sha256 = value["observation"]["secret_frame_sha256"]
+                observed_sha256 = receipt["observation"]["secret_frame_sha256"]
                 self.bootstrap_store.capture(outgoing, observed_sha256)
             else:
                 require(outgoing is None, "E_AUTH_LANE_BOOTSTRAP_RESPONSE_UNEXPECTED")
-            if command == "RESTART_OWNED_SERVICE_SET":
-                self.bootstrap_store.clear()
-            return value
+            if command == "CLEANUP_OWNED_PROCESSES":
+                require(isinstance(log_bundle, bytes), "E_AUTH_LANE_LOG_BUNDLE_MISSING")
+                transport = load_transport_module()
+                logs = foreign(
+                    transport.decode_log_bundle_frame, log_bundle, self.domain_id,
+                    self.plan["run_id"], self.plan["source_commit"],
+                    self.plan["bindings"]["execution_contract_sha256"],
+                )
+                self.evidence_collector.record_logs(
+                    self.domain_id, logs, receipt["observation"]["owned_process_log_set_sha256"],
+                )
+            else:
+                require(log_bundle is None, "E_AUTH_LANE_LOG_BUNDLE_UNEXPECTED")
+            return receipt
         finally:
             if mode == "EMERGENCY_CLEANUP" or self.session.state in {"TERMINAL_SUCCEEDED", "TERMINAL_FAILED"}:
                 self.roundtrip.close()
@@ -1040,6 +1326,8 @@ class DomainAgentServer:
                     foreign(self.transport.send_message_frame, tls_socket, reply.response_frame)
                     if reply.outgoing_secret_frame is not None:
                         foreign(self.transport.send_secret_frame, tls_socket, bytes(reply.outgoing_secret_frame))
+                    if reply.log_bundle_frame is not None:
+                        foreign(self.transport.send_log_bundle_frame, tls_socket, reply.log_bundle_frame)
                 finally:
                     reply.clear_secret()
             return self.core.terminal_cleanup or {

@@ -49,6 +49,7 @@ SOURCE_ARTIFACT_PATHS = (
     ("mtls_transport", "scripts/eval/biocortex_ab_track_b_t22_a1_mtls_transport_v1.py"),
     ("evidence_compiler", "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_compiler_v1.py"),
     ("evidence_writer", "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_writer_v1.py"),
+    ("exact_evidence_finalizer", "scripts/eval/biocortex_ab_track_b_t22_a1_exact_evidence_finalizer_v1.py"),
     ("execution_consumer", "scripts/eval/biocortex_ab_track_b_t22_a1_execution_consumer_v1.py"),
 )
 # This may become True only in the final reviewed source commit after exact

@@ -38,6 +38,10 @@ runner_module = load(
     "t22a1_authenticated_lane_runner_kat",
     ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_source_bound_runner_v1.py",
 )
+finalizer_module = load(
+    "t22a1_authenticated_lane_exact_finalizer_kat",
+    ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_exact_evidence_finalizer_v1.py",
+)
 transport_module = module.load_transport_module()
 
 SOURCE_COMMIT = "a" * 40
@@ -124,6 +128,8 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
         "private_runtime": {
             "private_endpoint_manifest_content_sha256": endpoint["content_sha256"],
             "runtime_credential_manifest_content_sha256": sha("credential-manifest"),
+            "credential_verifier_ssh_keygen_executable_path": str(ssh_keygen),
+            "credential_verifier_ssh_keygen_executable_sha256": ssh_keygen_sha256,
         },
         "topology": {"domains": [
             {
@@ -135,8 +141,29 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
         "fault": {"target_domain_id": "domain-3"},
         "authorization": {"maximum_runtime_seconds": 3600, "automatic_retry_allowed": False},
         "budget": {"maximum_spend_usd_cents": 0},
+        "admission_bindings": {
+            "admission_contract_sha256": sha("admission-contract"),
+            "owner_decision_proposal_sha256": sha("owner-proposal"),
+            "exact_three_domain_attestation_packet_set_sha256": sha("attestation-set"),
+            "domain_bindings": [
+                {
+                    "domain_id": domain_id,
+                    "attestation_packet_sha256": sha(f"attestation:{number}"),
+                    "attestation_signature_sha256": sha(f"attestation-signature:{number}"),
+                    "domain_public_key_sha256": domain_public_sha256[domain_id],
+                }
+                for number, domain_id in enumerate(("domain-1", "domain-2", "domain-3"), start=1)
+            ],
+        },
+        "network": {
+            "peer_endpoint_set_sha256": sha("peer-endpoint-set"),
+            "acl_policy_receipt_sha256": sha("acl-policy-receipt"),
+        },
+        "artifact_scope": {"run_evidence_root": str(private_root / "run-evidence")},
         "expires_at": "2026-07-23T00:00:00Z",
     }
+    Path(execution["artifact_scope"]["run_evidence_root"]).mkdir(mode=0o700)
+    Path(execution["artifact_scope"]["run_evidence_root"]).chmod(0o700)
 
     def identity(root: Path, name: str) -> dict:
         return {
@@ -165,6 +192,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
             "source_commit": SOURCE_COMMIT, "run_id": RUN_ID, "domain_id": domain_id,
             "content_sha256": sha(f"readiness:{number}"),
             "bindings": {
+                "domain_attestation_packet_sha256": sha(f"attestation:{number}"),
                 "private_endpoint_manifest_content_sha256": endpoint["content_sha256"],
                 "runtime_credential_manifest_content_sha256": execution["private_runtime"]["runtime_credential_manifest_content_sha256"],
             },
@@ -328,12 +356,19 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
             })
 
         def cleanup_owned_processes(self, _plan: dict) -> dict:
+            logs = self.evidence_logs()
             return self.result("CLEANUP_OWNED_PROCESSES", {
                 "all_owned_processes_stopped": True, "all_owned_ports_released": True,
-                "owned_process_log_set_sha256": sha(f"logs:{self.plan['domain_id']}"),
+                "owned_process_log_set_sha256": module.evidence_log_set_sha256(self.plan["domain_id"], logs),
                 "owned_process_log_count": 4, "cleanup_receipt_sha256": sha(f"cleanup:{self.plan['domain_id']}"),
                 "secret_value_scan_passed": True, "exact_secret_match_count": 0,
             })
+
+        def evidence_logs(self) -> list[dict]:
+            return [
+                {"name": name, "raw": f"T22_A1_SYNTHETIC_ONLY:{self.plan['domain_id']}:{name}\n".encode()}
+                for name in transport_module.EXPECTED_LOG_NAMES
+            ]
 
         def terminal_status(self, plan: dict, previous_receipt_sha256: str) -> dict:
             return self.result("TERMINAL_STATUS", {
@@ -351,14 +386,21 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
             self.core, self.closed = core, False
             self.exchange_count = 0
 
-        def exchange(self, request_frame: bytes, incoming_secret_frame: bytes | None, expect_outgoing_secret: bool):  # noqa: ANN201
+        def exchange(
+            self, request_frame: bytes, incoming_secret_frame: bytes | None,
+            expect_outgoing_secret: bool, expect_log_bundle: bool,
+        ):  # noqa: ANN201
             assert not self.closed
             self.exchange_count += 1
             reply = self.core.handle(request_frame, incoming_secret_frame, clock())
             outgoing = bytes(reply.outgoing_secret_frame) if reply.outgoing_secret_frame is not None else None
+            log_bundle = reply.log_bundle_frame
             reply.clear_secret()
-            assert (outgoing is not None) is expect_outgoing_secret
-            return reply.response_frame, outgoing, clock()
+            if outgoing is not None:
+                assert expect_outgoing_secret
+            if log_bundle is not None:
+                assert expect_log_bundle
+            return reply.response_frame, outgoing, log_bundle, clock()
 
         def close(self) -> None:
             self.closed = True
@@ -366,6 +408,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
     module.AUTHENTICATED_DOMAIN_LANE_ACTIVATION_READY = True
     executor_module.EXECUTOR_ACTIVATION_READY = True
     bootstrap_store = module.CoordinatorBootstrapStore()
+    evidence_collector = module.EvidenceCollector("domain-3")
     cores: dict[str, module.DomainAgentCore] = {}
     lanes: dict[str, module.AuthenticatedDomainLane] = {}
     backends: dict[str, RealFakeBackend] = {}
@@ -383,7 +426,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
             plans[0], plan, packet,
             Path(str(coordinator_key) + ".pub"), coordinator_key,
             Path(str(domain_keys[plan["domain_id"]]) + ".pub"), roundtrip,
-            bootstrap_store, clock,
+            bootstrap_store, evidence_collector, clock,
         )
         cores[plan["domain_id"]], lanes[plan["domain_id"]], backends[plan["domain_id"]] = core, lane, backend
 
@@ -394,20 +437,39 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
         "content_sha256": sha("synthetic-admission"),
     }
     runner_module.RUNNER_ACTIVATION_READY = True
+    finalizer_module.EXACT_EVIDENCE_FINALIZER_ACTIVATION_READY = True
+    finalizer_compiler = finalizer_module.load_compiler_module()
+    finalizer_writer = finalizer_module.load_writer_module()
+    finalizer_compiler.EVIDENCE_ACTIVATION_READY = True
+    finalizer_writer.EVIDENCE_WRITER_ACTIVATION_READY = True
+    exact_finalizer = finalizer_module.ExactEvidenceFinalizer(
+        evidence_collector, bootstrap_store,
+        {domain_id: Path(str(key) + ".pub").read_bytes() for domain_id, key in domain_keys.items()},
+        2, False,
+    )
     runner_result = runner_module.run_source_bound(
         execution, admission, endpoint, readiness_packets,
         lambda plan, _packet: lanes[plan["domain_id"]],
-        lambda _execution, _admission, _plans, _chains, _transcript: {
-            "evidence_manifest_content_sha256": sha("synthetic-evidence-manifest"),
-            "terminal_evidence_content_sha256": sha("synthetic-terminal-evidence"),
-            "all_owned_processes_cleaned": True, "all_owned_ports_released": True,
-            "secret_value_scan_passed": True,
-        },
+        exact_finalizer,
         clock, False,
     )
     runner_module.RUNNER_ACTIVATION_READY = False
-    assert runner_result["status"] == "PASS_T22_A1_TERMINAL_EVIDENCE_READY"
+    finalizer_module.EXACT_EVIDENCE_FINALIZER_ACTIVATION_READY = False
+    finalizer_compiler.EVIDENCE_ACTIVATION_READY = False
+    finalizer_writer.EVIDENCE_WRITER_ACTIVATION_READY = False
+    assert runner_result["status"] == "PASS_T22_A1_TERMINAL_EVIDENCE_READY", runner_result
     assert sum(lane.receipt_sequence for lane in lanes.values()) == 23
+    evidence_collector.validate_complete()
+    assert len(evidence_collector.signed_events) == 21 and len(evidence_collector.log_sets) == 3
+    # The exact finalizer retained the one memory-only value through cleanup,
+    # scanned it against all evidence, and zeroized it before publication.
+    assert bootstrap_store.frame is None and bootstrap_store.frame_sha256 is None and bootstrap_store.secret is None
+    evidence_set = Path(execution["artifact_scope"]["run_evidence_root"]) / "evidence-set"
+    assert evidence_set.is_dir() and len([path for path in evidence_set.rglob("*") if path.is_file()]) == 65
+    expect_failure(
+        lambda: exact_finalizer(execution, admission, plans, {}, []),
+        "E_EXACT_FINALIZER_SINGLE_ATTEMPT",
+    )
     for plan in plans:
         chain = executor_module.validate_receipt_chain(
             cores[plan["domain_id"]].executor.receipts, plan,
@@ -418,10 +480,6 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
         assert lanes[plan["domain_id"]].abort_cleanup() == {
             "all_owned_processes_cleaned": True, "all_owned_ports_released": True,
         }
-    # The final restart is the last legitimate consumer, so the coordinator
-    # zeroizes its retained frame before the remaining evidence-only commands.
-    assert bootstrap_store.frame is None and bootstrap_store.frame_sha256 is None
-
     negative_count = 0
     expect_failure(
         lambda: module.request_payload(plans[0], "PREFLIGHT", "NORMAL", sha("unexpected")),
@@ -473,7 +531,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
             plans[0], plan, packet,
             Path(str(coordinator_key) + ".pub"), coordinator_key,
             Path(str(domain_keys["domain-1"]) + ".pub"), MemoryRoundTrip(core),
-            module.CoordinatorBootstrapStore(), clock,
+            module.CoordinatorBootstrapStore(), module.EvidenceCollector("domain-3"), clock,
         )
         return lane, core, backend
 
@@ -540,11 +598,14 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-authenticated-lane-kat-") as dir
     executor_module.EXECUTOR_ACTIVATION_READY = False
 
 assert module.status()["authenticated_domain_lane_activation_ready"] is False
+assert finalizer_module.status()["exact_evidence_finalizer_activation_ready"] is False
 print("t22_a1_authenticated_domain_lane_check\tpass")
 print("signed_fixed_command_roundtrip_count\t23")
 print("memory_only_bootstrap_publish_count\t1")
 print("memory_only_bootstrap_consume_count\t3")
 print("signed_emergency_cleanup_count\t1")
+print("kat_exact_evidence_finalization_count\t1")
+print("kat_atomic_evidence_file_count\t65")
 print(f"directed_negative_test_count\t{negative_count}")
 print("real_private_inputs_read\t0")
 print("real_certificate_or_key_files_read\t0")

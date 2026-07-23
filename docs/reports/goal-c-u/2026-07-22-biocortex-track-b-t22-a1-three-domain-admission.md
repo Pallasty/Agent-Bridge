@@ -80,7 +80,8 @@ rollback prevention.
   binds the exact artifact/run roots, set countersignature chain, runtime-
   preparation challenge/signature/terminal, private manifests, tool binaries,
   budget, fault target, three signed runtime-readiness packets and exact
-  runner/executor/live-backend/transport/evidence/consumer source-artifact
+  runner/executor/live-backend/authenticated-lane/transport/evidence/compiler/
+  writer/exact-finalizer/consumer source-artifact
   set. A complete
   synthetic chain verifies all eleven credential files only after the final
   owner signature; 50 negative paths cover forgery, readiness/source
@@ -90,8 +91,8 @@ rollback prevention.
   receipt is created and bound by the later private admission receipt.
 - a completion audit that originally proved real collection had to wait for a
   source-bound execution/evidence chain. Those offline components now exist;
-  real activation still waits for authenticated live domain lanes, three
-  signed host-local runtime-readiness packets and credential-placement proof. The
+  real activation still waits for exact launch binding, three signed host-local
+  runtime-readiness packets and credential-placement proof. The
   decision packet fails closed on every remaining input.
 - a single-use execution consumer that independently rechecks the clean source
   commit, owner signature and admission receipt, reserves before runner
@@ -103,8 +104,7 @@ rollback prevention.
   paths with zero real network, listener, workload, fault or credential access.
 - a private domain-runtime-readiness schema, semantic gate and signed-set
   verifier with three synthetic role/domain successes, one complete
-  same-attested-key signed-set success and
-  signed-set success and 54 negative paths. It closes the contract for exact
+  same-attested-key signed-set success and 54 negative paths. It closes the contract for exact
   host-local tools, roots, ports, placed credentials, operator keys,
   coordinator public trust on every domain, coordinator private material only
   on domain-1, and process boundaries, then freshly revalidates
@@ -136,7 +136,8 @@ rollback prevention.
   remains false, so no real process, socket, credential or fault is used.
 - a bounded mTLS framing, context and one-shot socket-adapter core with one real in-memory mutual-TLS
   handshake, one signed-message-frame round trip, one bounded ephemeral secret-
-  frame round trip, and 36 negative paths. It binds exact plan-selected
+  frame round trip, one bounded four-file log-bundle round trip, and 38 negative
+  paths. It binds exact plan-selected
   certificate files, owner-only file modes, hostname and peer-certificate
   identity, including exact rejection of a different same-CA client leaf,
   and adds literal-IP/no-DNS routing, exact source IP, bounded timeout/frame,
@@ -148,7 +149,7 @@ rollback prevention.
   receipt chains, and requires cleanup before evidence finalization. One full
   synthetic schedule and nine directed negative paths pass with activation,
   private inputs, sockets, processes and faults all absent/false. Authenticated
-  live domain lanes remain the next implementation boundary.
+  live domain lanes are now implemented but remain activation-closed.
 - an in-memory evidence compiler that replays 23 command receipts, verifies 21
   source-domain Ed25519 SSHSIG payloads, independently reconstructs and replays
   the 21-event coordinator hash chain, binds and scans four bounded logs per
@@ -159,7 +160,19 @@ rollback prevention.
   evidence files through staging, atomically publishes the closed directory and
   revalidates its exact manifest/file set. Four writer-specific negative paths
   reject replay, wrong signatures, unsafe permissions and injected partial
-  writes. Real activation and live-runner integration remain absent/false.
+  writes. Real activation remains false.
+- an authenticated three-domain lane that verifies exact request/response and
+  event SSHSIG chains, preserves source-IP and peer-certificate binding,
+  transfers the memory-only bootstrap frame only in permitted directions,
+  returns three exact bounded log bundles and performs signed emergency
+  cleanup. Its end-to-end KAT completes all 23 commands and 21 signed events
+  with no real key read, socket, listener, process or fault.
+- a one-shot exact evidence finalizer that revalidates the 23-row runner
+  transcript, transfers the sole coordinator bootstrap value to exact-value
+  leak scanning, guarantees zeroization even on early failure, invokes the
+  compiler and atomic writer, and returns only the five runner-finalization
+  fields. Its integrated KAT publishes and reads back one 65-file temporary
+  evidence set; every real activation remains false.
 
 Stable host identity and endpoint hashes are intentionally absent from the
 public repository. They must be generated into the private artifact root only
@@ -228,9 +241,10 @@ new hashes and still requires a separate owner signature under
 `agent-bridge-t22-a1-owner-v1`. None of these real instances exists or is
 accessed yet.
 
-Before any real collection challenge is generated, the new runner scheduler
-must be completed with live domain lanes/backend and bound, together with the
-executor/transport/evidence sources, into the final execution contract.
+Before any real collection challenge is generated, the now-frozen runner,
+live domain lane/backend and exact finalizer must be bound to the exact
+coordinator/domain launch entry point and included, together with the
+executor/transport/evidence sources, in the final execution contract.
 Otherwise a later source change would invalidate the source-bound host
 attestations. After that source set is frozen and the remaining
 real inputs exist, the implemented builder can generate one source-bound final
