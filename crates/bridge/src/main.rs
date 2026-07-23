@@ -84,9 +84,15 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Cmd {
     /// Run the long-lived JSON-RPC daemon on a Unix socket (default).
-    Daemon,
+    Daemon {
+        #[arg(long, value_enum)]
+        episode_observation: Option<EpisodeObservationMode>,
+    },
     /// Run as an MCP stdio server (for `claude mcp add agent-bridge ...`).
-    Mcp,
+    Mcp {
+        #[arg(long, value_enum)]
+        episode_observation: Option<EpisodeObservationMode>,
+    },
     /// Run the synthetic loopback HTTP/OAuth MCP lab.
     ///
     /// This is a default-off verification surface, not a production server.
@@ -589,6 +595,11 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum EpisodeObservationMode {
+    KeychainMacosV1,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -4418,7 +4429,9 @@ fn main() -> Result<()> {
     // runtime; otherwise WASI p2 attempts a nested block_on and panics.
     #[cfg(feature = "g14-wasi-component-runtime")]
     {
-        let early_cmd = Cli::parse().cmd.unwrap_or(Cmd::Daemon);
+        let early_cmd = Cli::parse().cmd.unwrap_or(Cmd::Daemon {
+            episode_observation: None,
+        });
         match early_cmd {
             Cmd::G14WasiComponent { artifact, sha256 } => {
                 let runtime = ab_bridge::g14_component_runtime::G14ComponentRuntime::new()?;
@@ -4516,7 +4529,9 @@ async fn dim_guard_strict_preflight(store: &Arc<dyn StateStore>) {
 
 async fn real_main() -> Result<()> {
     let cli = Cli::parse();
-    let cmd = cli.cmd.unwrap_or(Cmd::Daemon);
+    let cmd = cli.cmd.unwrap_or(Cmd::Daemon {
+        episode_observation: None,
+    });
 
     // The synthetic auth lab is intentionally isolated from every Agent-Bridge
     // backend. Handle it before loading the credential notebook, optional Seed
@@ -7484,7 +7499,7 @@ async fn real_main() -> Result<()> {
     }
 
     let log_layer = match cmd {
-        Cmd::Mcp => tracing_subscriber::fmt::layer()
+        Cmd::Mcp { .. } => tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
             .boxed(),
         _ => tracing_subscriber::fmt::layer().boxed(),
@@ -7494,10 +7509,18 @@ async fn real_main() -> Result<()> {
         .with(log_layer)
         .init();
 
-    let hub = build_hub().await?;
+    let explicit_episode_observation = matches!(
+        &cmd,
+        Cmd::Daemon {
+            episode_observation: Some(EpisodeObservationMode::KeychainMacosV1)
+        } | Cmd::Mcp {
+            episode_observation: Some(EpisodeObservationMode::KeychainMacosV1)
+        }
+    );
+    let hub = build_hub(explicit_episode_observation).await?;
 
     match cmd {
-        Cmd::Daemon => {
+        Cmd::Daemon { .. } => {
             let socket = default_socket_path();
             tracing::info!(socket = %socket.display(), "starting agent-bridge daemon");
             // Opt-in tiered embedding delegation (default OFF). When
@@ -7867,7 +7890,7 @@ async fn real_main() -> Result<()> {
         Cmd::McpHttpAuthCandidate { .. } => {
             unreachable!("provider auth candidate handled before Hub setup")
         }
-        Cmd::Mcp => {
+        Cmd::Mcp { .. } => {
             let tool_backend_id = json!({
                 "terminal": hub.terminal.as_ref().map(|t| t.id()).unwrap_or("none"),
                 "browser": hub.browser.as_ref().map(|b| b.id()).unwrap_or("none"),
@@ -20641,7 +20664,7 @@ async fn run_rescue_snapshot(
 /// - `AGENT_BRIDGE_OZ_ENVIRONMENT_ID` — default cloud env id for `warp-oz`
 /// - `AGENT_BRIDGE_AUGGIE_BIN`     — path to the `auggie` CLI (default: `auggie`)
 /// - `AGENT_BRIDGE_HEADLESS=1`     — headless Chromium
-async fn build_hub() -> Result<Hub> {
+async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
     #[cfg(target_os = "linux")]
     let notifier: Arc<dyn ab_notifier::Notifier> = {
         use ab_notifier::DbusNotifier;
@@ -20662,7 +20685,8 @@ async fn build_hub() -> Result<Hub> {
         .map(PathBuf::from)
         .unwrap_or_else(default_db_path);
     tracing::info!(path = %db_path.display(), "SQLite store");
-    let store: Arc<dyn StateStore> = Arc::new(SqliteStore::open(&db_path).await?);
+    let store_impl = Arc::new(SqliteStore::open(&db_path).await?);
+    let store: Arc<dyn StateStore> = store_impl.clone();
     let terminal: Arc<dyn TerminalBackend> = auto_backend();
     tracing::info!(terminal_backend = %terminal.id(), "terminal backend selected");
     let browser: Arc<dyn BrowserBackend> = Arc::new(ChromiumCdpBackend::new());
@@ -20732,7 +20756,7 @@ async fn build_hub() -> Result<Hub> {
             .with_store(store.clone()),
     );
 
-    Ok(Hub::builder()
+    let builder = Hub::builder()
         .notifier(notifier)
         .store(store)
         .terminal(terminal)
@@ -20743,8 +20767,22 @@ async fn build_hub() -> Result<Hub> {
         .register_agent(gemini)
         .register_agent(codex)
         .register_agent(acp)
-        .worktree(worktree)
-        .build())
+        .worktree(worktree);
+    #[cfg(all(
+        feature = "episode-observation-c2c-keychain-macos-runtime",
+        target_os = "macos"
+    ))]
+    let builder = if explicit_episode_observation {
+        ab_bridge::episode_observation_c2c_keychain_macos_runtime::attach_explicit_keychain_macos_observer(builder, store_impl)
+    } else {
+        builder
+    };
+    #[cfg(not(all(
+        feature = "episode-observation-c2c-keychain-macos-runtime",
+        target_os = "macos"
+    )))]
+    let _ = explicit_episode_observation;
+    Ok(builder.build())
 }
 
 #[cfg(test)]

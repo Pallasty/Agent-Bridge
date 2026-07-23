@@ -38,6 +38,10 @@ episode-observation-c2-keychain-macos = [
 episode-observation-c2-keychain-macos-live-lab = [
     "episode-observation-c2-keychain-macos",
 ]
+episode-observation-c2c-keychain-macos-runtime = [
+    "episode-observation-slice-b",
+    "episode-observation-c2-keychain-macos",
+]
 
 [dependencies]
 ab-core.workspace = true

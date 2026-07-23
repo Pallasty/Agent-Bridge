@@ -46,6 +46,11 @@ pub(crate) mod episode_observation_curation_batch;
 pub(crate) mod episode_observation_curation_batch_c2_synthetic;
 #[cfg(feature = "episode-observation-c2c-runtime-assembly-synthetic")]
 pub(crate) mod episode_observation_c2c_runtime_assembly_synthetic;
+#[cfg(all(
+    feature = "episode-observation-c2c-keychain-macos-runtime",
+    target_os = "macos"
+))]
+pub mod episode_observation_c2c_keychain_macos_runtime;
 pub mod event_spine;
 pub mod github_api;
 pub mod gitlab_api;

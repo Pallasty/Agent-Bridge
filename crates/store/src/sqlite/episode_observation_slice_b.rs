@@ -81,11 +81,23 @@ enum EpisodeObservationRuntimeGate {
     Disabled,
     #[cfg(any(test, feature = "episode-observation-slice-c2-synthetic"))]
     SyntheticTestOnly,
+    #[cfg(feature = "episode-observation-c2c-keychain-macos-runtime")]
+    KeychainMacosExplicitRuntime,
 }
 
 impl EpisodeObservationRuntimeGate {
     fn permits_io(self) -> bool {
-        #[cfg(any(test, feature = "episode-observation-slice-c2-synthetic"))]
+        #[cfg(all(
+            any(test, feature = "episode-observation-slice-c2-synthetic"),
+            feature = "episode-observation-c2c-keychain-macos-runtime"
+        ))]
+        {
+            return self == Self::SyntheticTestOnly || self == Self::KeychainMacosExplicitRuntime;
+        }
+        #[cfg(all(
+            any(test, feature = "episode-observation-slice-c2-synthetic"),
+            not(feature = "episode-observation-c2c-keychain-macos-runtime")
+        ))]
         {
             return self == Self::SyntheticTestOnly;
         }
@@ -232,6 +244,24 @@ pub(super) fn migrate_or_verify(c: &mut rusqlite::Connection) -> RusqliteResult<
 }
 
 impl SqliteStore {
+    #[cfg(feature = "episode-observation-c2c-keychain-macos-runtime")]
+    pub(crate) async fn append_c2_keychain_macos_runtime_event(
+        &self,
+        event: &EpisodeObservationEvent<'_>,
+        payload_sha256: &str,
+        observed_at: i64,
+    ) -> std::result::Result<(), ()> {
+        self.append_episode_observation_event_inert(
+            EpisodeObservationRuntimeGate::KeychainMacosExplicitRuntime,
+            event,
+            payload_sha256,
+            observed_at,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| ())
+    }
+
     #[cfg(feature = "episode-observation-slice-c2-synthetic")]
     pub(crate) async fn append_c2_synthetic_event(
         &self,
