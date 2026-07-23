@@ -56,7 +56,7 @@ use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
 use ab_store::{default_db_path, SqliteStore, StateStore};
 use ab_terminal::{auto_backend, TerminalBackend};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
@@ -4532,6 +4532,71 @@ fn main() -> Result<()> {
         .block_on(real_main())
 }
 
+/// Prepare the embedding backend for a one-shot Skills route/evaluation.
+///
+/// MCP installs the configured remote delegate and warms it during startup.
+/// The short-lived CLI path bypasses that startup, which used to let its first
+/// route query compare a temporary hash fallback against the real-model store.
+/// Waiting here is intentionally limited to the two semantic Skills commands;
+/// catalog/list/source operations stay lightweight.
+async fn prepare_skills_semantic_route() -> Result<()> {
+    match ab_bridge::remote_embed::install_if_configured() {
+        ab_bridge::remote_embed::InstallOutcome::Installed(url) => {
+            tracing::debug!(%url, "embedding delegation active for skills CLI");
+        }
+        ab_bridge::remote_embed::InstallOutcome::NotConfigured => {}
+        ab_bridge::remote_embed::InstallOutcome::AlreadyInitialized => {
+            tracing::debug!("embedding backend already initialized for skills CLI");
+        }
+    }
+
+    // A delegated backend is immediately usable; local ONNX starts its model
+    // on a background thread and needs a bounded readiness wait below.
+    ab_store::vector::warmup();
+    if ab_bridge::remote_embed::active_remote_url().is_some() {
+        return Ok(());
+    }
+
+    let backend = ab_store::default_backend();
+    let backend_name = backend.name().to_string();
+    let expected_local_name = ab_store::vector::active_model_name();
+    if backend_name != expected_local_name {
+        if backend_name.to_ascii_lowercase().contains("hash") {
+            bail!(
+                "skills semantic routing requires a real embedding backend; active backend is \
+                 {backend_name}. Unset AGENT_BRIDGE_EMBED_BACKEND=hash or configure \
+                 AGENT_BRIDGE_EMBED_REMOTE_URL."
+            );
+        }
+        // A non-ONNX custom backend (for example Seed) owns its own readiness.
+        return Ok(());
+    }
+
+    let wait_ms = std::env::var("AGENT_BRIDGE_ONNX_COLD_ROUTE_WAIT_MS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(30_000)
+        .min(120_000);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
+    while ab_store::vector::local_model_ready().is_none()
+        && std::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+
+    match ab_store::vector::local_model_ready() {
+        Some(true) => Ok(()),
+        Some(false) => bail!(
+            "skills semantic routing cannot use local model {backend_name}: initialization failed; \
+             configure AGENT_BRIDGE_EMBED_REMOTE_URL or repair the local ONNX model cache"
+        ),
+        None => bail!(
+            "skills semantic routing timed out waiting {wait_ms}ms for local model {backend_name}; \
+             retry after it is warm or raise AGENT_BRIDGE_ONNX_COLD_ROUTE_WAIT_MS (max 120000)"
+        ),
+    }
+}
+
 /// Strict startup gate for the embedding dim-guard (Item A, 2026-06-26, #4282).
 ///
 /// A class-1 *config-vs-store* dim mismatch means this process is configured for
@@ -4645,6 +4710,9 @@ async fn real_main() -> Result<()> {
 
     // Skills subcommand: short-lived; no daemon hub needed.
     if let Cmd::Skills { op } = &cmd {
+        if matches!(op, SkillsOp::Route { .. } | SkillsOp::RouteEval { .. }) {
+            prepare_skills_semantic_route().await?;
+        }
         return match op {
             SkillsOp::Index { source, verbose } => {
                 skills::run_index(source, *verbose).await.map(|_| ())

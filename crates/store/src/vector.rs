@@ -304,6 +304,17 @@ pub(crate) mod onnx {
         INIT_STATE.load(Ordering::Acquire) == 2
     }
 
+    /// Whether the local ONNX model finished loading successfully. `None`
+    /// means initialization is still in flight; `Some(false)` is a permanent
+    /// failure and callers must not mistake the hash fallback for semantic
+    /// retrieval.
+    pub fn init_succeeded() -> Option<bool> {
+        if !init_done() {
+            return None;
+        }
+        Some(EMBEDDER.get().and_then(Option::as_ref).is_some())
+    }
+
     /// Embed a single text string; returns `None` when ONNX is unavailable
     /// (model not cached, init still in progress, or permanent failure).
     pub fn embed(text: &str) -> Option<Vec<f32>> {
@@ -385,6 +396,23 @@ pub fn model_init_done() -> bool {
     #[cfg(not(feature = "onnx-embed"))]
     {
         true
+    }
+}
+
+/// Whether the local ONNX model is ready for real semantic retrieval.
+///
+/// `None` means the async initialization has not settled. `Some(false)`
+/// means it settled without a usable model, so embedding calls use the hash
+/// fallback. This is intentionally separate from [`model_init_done`] because
+/// a completed initialization can still have failed.
+pub fn local_model_ready() -> Option<bool> {
+    #[cfg(feature = "onnx-embed")]
+    {
+        onnx::init_succeeded()
+    }
+    #[cfg(not(feature = "onnx-embed"))]
+    {
+        Some(false)
     }
 }
 
