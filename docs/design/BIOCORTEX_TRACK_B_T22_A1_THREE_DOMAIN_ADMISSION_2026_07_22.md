@@ -509,9 +509,9 @@ blocked until these inputs are concrete.
 - domain runtime-readiness schema raw SHA-256:
   `22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451`;
 - admission-contract content SHA-256:
-  `dc4846831a0e0e11c992c6ea9e68ebb2cd5413d93d253cc9f08748a8fa73763a`;
+  `5d5ea3f30d8307805475c2700479db7ab086e18e065939818774d0287840aae2`;
 - blocked owner-proposal content SHA-256:
-  `42f28d09b3e354655ffd582b852d4e4bc3d9d7bf3ced17b6148011023e6ccfca`.
+  `c0d8e43b81b4c9079508fad8784d57903e6f834f6d9fa0bd39254794c852cf43`.
 
 The offline admission gate exercises 82 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating

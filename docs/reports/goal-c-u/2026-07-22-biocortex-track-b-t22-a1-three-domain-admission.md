@@ -222,8 +222,8 @@ Frozen packet identities:
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
 | domain runtime-readiness schema raw bytes | `22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451` |
-| admission-contract content | `dc4846831a0e0e11c992c6ea9e68ebb2cd5413d93d253cc9f08748a8fa73763a` |
-| blocked owner proposal content | `42f28d09b3e354655ffd582b852d4e4bc3d9d7bf3ced17b6148011023e6ccfca` |
+| admission-contract content | `5d5ea3f30d8307805475c2700479db7ab086e18e065939818774d0287840aae2` |
+| blocked owner proposal content | `c0d8e43b81b4c9079508fad8784d57903e6f834f6d9fa0bd39254794c852cf43` |
 
 ## Advancement boundary
 
