@@ -79,7 +79,7 @@
     "terminal_evidence_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-terminal-evidence-schema-v1.json",
     "terminal_evidence_schema_sha256": "f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a",
     "domain_runtime_readiness_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-runtime-readiness-schema-v1.json",
-    "domain_runtime_readiness_schema_sha256": "4c44d3e4617007999af5812d0332fa22f98d1d6302349123bb7c7adb43aa014d",
+    "domain_runtime_readiness_schema_sha256": "22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451",
     "source_bound_cross_host_runner_present": false,
     "three_domain_runtime_readiness_contract_present": true,
     "three_domain_credential_placement_proof_present": false,
@@ -106,5 +106,5 @@
     "external_anti_rollback_proved": false,
     "production_admissible": false
   },
-  "contract_sha256": "be31fbf18bf31850a97088e5107c0aec48c432b25f0d1fa6413de5c075a8ff04"
+  "contract_sha256": "02d34118feab07376aa7c0ca2d809ffb7badf63a6f5cff5cfbd04f1e8ec035dd"
 }

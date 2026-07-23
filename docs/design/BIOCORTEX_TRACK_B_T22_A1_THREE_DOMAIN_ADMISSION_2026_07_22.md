@@ -391,7 +391,10 @@ three ordered, detached-domain-signed packets binds the admitted attestation,
 endpoint and credential manifests, runtime-preparation terminal, exact local
 host identity, ports, six executable paths/hashes/version digests, run-local
 data/log/evidence/reservation roots, exact placed certificate/key identities,
-domain operator key and coordinator-only material. It structurally forbids
+domain operator key, and the coordinator certificate/runtime public-key trust
+material on every domain. Coordinator private TLS/runtime keys remain confined
+to `domain-1`; the public trust copies let every domain reject a different
+client-auth leaf issued by the same ephemeral CA. It structurally forbids
 ambient path or credential discovery, shell text/evaluation, proxy inheritance,
 public listeners, host-global mutation, power actions, key redistribution,
 network collection side effects and production claims. No real packet or
@@ -486,11 +489,11 @@ blocked until these inputs are concrete.
 - terminal-evidence schema raw SHA-256:
   `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a`;
 - domain runtime-readiness schema raw SHA-256:
-  `4c44d3e4617007999af5812d0332fa22f98d1d6302349123bb7c7adb43aa014d`;
+  `22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451`;
 - admission-contract content SHA-256:
-  `be31fbf18bf31850a97088e5107c0aec48c432b25f0d1fa6413de5c075a8ff04`;
+  `02d34118feab07376aa7c0ca2d809ffb7badf63a6f5cff5cfbd04f1e8ec035dd`;
 - blocked owner-proposal content SHA-256:
-  `5cee76bddc2a373776e8a42f9e086e41314b4ba9e8aaf516f3cc1b6d20b7c2cc`.
+  `a65cbb17df515ee8670286ba2dba9f5cb5a0e37426a5584fb9f91f74ca37d773`.
 
 The offline admission gate exercises 82 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
@@ -576,7 +579,7 @@ boundaries. It reads no real execution/admission/credential instance, opens no
 network or listener, starts no workload process and injects no fault.
 
 The domain runtime-readiness KAT validates one synthetic packet for each of the
-three role/domain positions and rejects 44 directed negatives over evidence,
+three role/domain positions, one complete signed set, and rejects 54 directed negatives over evidence,
 host, endpoint, port, tool ordering/path/hash uniqueness, private-root closure,
 certificate/key/SPKI/CA/operator/coordinator placement, time, signature,
 process-policy, side-effect and claim bindings. It reads no real packet, host
@@ -599,9 +602,10 @@ identity reader twice (one success and one deliberate failure), reads zero real
 host identifiers, contacts no host, starts no service, and creates no real
 attestation.
 
-The private workload-plan KAT compiles all three roles and rejects 42 directed
+The private workload-plan KAT compiles all three roles and rejects 45 directed
 mutations over topology, endpoints, paths, tool hashes, credential certificate
-and private-key SPKI bindings, runtime limits, coordinator scope and exact
+and private-key SPKI bindings, runtime limits, coordinator public-trust/private
+scope and exact
 commands. The executor-core KAT then completes three synthetic lifecycles with
 23 hash-chained receipts and rejects 20 state, timing, spend, observation,
 terminal-chain-head and post-dispatch mutations. Both activation gates remain false and neither KAT
@@ -609,10 +613,11 @@ reads a credential, starts a process, opens a listener or injects a fault.
 
 The mTLS transport-core KAT performs one mutual TLS handshake using only
 `ssl.MemoryBIO`, round-trips one bounded signed-message frame and one bounded
-ephemeral OpenBao unseal-secret frame, and rejects 27 route, framing, digest,
+ephemeral OpenBao unseal-secret frame, and rejects 28 route, framing, digest,
 certificate, peer-identity, hostname, file-permission and activation mutations.
 It binds exact plan-selected CA/leaf file hashes and requires explicit
-post-handshake peer-certificate matching. The live socket adapter is still
+post-handshake peer-certificate matching, including rejection of a different
+client certificate issued by the same trusted CA. The live socket adapter is still
 absent, transport activation remains false, and the KAT opens zero sockets or
 listeners and contacts zero hosts.
 

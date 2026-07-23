@@ -97,9 +97,10 @@ rollback prevention.
   paths with zero real network, listener, workload, fault or credential access.
 - a private domain-runtime-readiness schema, semantic gate and signed-set
   verifier with three synthetic role/domain successes, one complete same-key
-  signed-set success and 52 negative paths. It closes the contract for exact
+  signed-set success and 54 negative paths. It closes the contract for exact
   host-local tools, roots, ports, placed credentials, operator keys,
-  coordinator-only material and process boundaries, then freshly revalidates
+  coordinator public trust on every domain, coordinator private material only
+  on domain-1, and process boundaries, then freshly revalidates
   the attestation bundle and purpose-separated domain signatures. The KAT reads
   zero real host, tool, endpoint or credential input.
 - corrected per-domain runtime leaves with both TLS server and client EKUs, as
@@ -107,7 +108,7 @@ rollback prevention.
   connections. The coordinator leaf remains client-only; schema bytes and
   activation authority are unchanged.
 - a pure private workload-plan compiler with three synthetic domain successes
-  and 42 negative paths. It freezes exact etcd argv, mTLS OpenBao HCL, cleared
+  and 45 negative paths. It freezes exact etcd argv, mTLS OpenBao HCL, cleared
   environment, local paths, deterministic workload state and the per-role
   command allowlist, but deliberately does not start a process or claim that
   the cross-host executor/transport/evidence builder exists.
@@ -119,9 +120,10 @@ rollback prevention.
   constant are intentionally absent/false.
 - a bounded mTLS framing and context core with one real in-memory mutual-TLS
   handshake, one signed-message-frame round trip, one bounded ephemeral secret-
-  frame round trip, and 27 negative paths. It binds exact plan-selected
+  frame round trip, and 28 negative paths. It binds exact plan-selected
   certificate files, owner-only file modes, hostname and peer-certificate
-  identity while keeping live socket adaptation and transport activation
+  identity, including exact rejection of a different same-CA client leaf,
+  while keeping live socket adaptation and transport activation
   absent/false; no socket, listener or external host is used.
 - an in-memory evidence compiler that replays 23 command receipts, verifies 21
   source-domain Ed25519 SSHSIG payloads, independently reconstructs and replays
@@ -173,9 +175,9 @@ Frozen packet identities:
 | domain-agent message schema raw bytes | `92d8a9e59e62b56afec200caf0e25517c7bf3322bc24078024d4c52993e9e3ee` |
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
-| domain runtime-readiness schema raw bytes | `4c44d3e4617007999af5812d0332fa22f98d1d6302349123bb7c7adb43aa014d` |
-| admission-contract content | `be31fbf18bf31850a97088e5107c0aec48c432b25f0d1fa6413de5c075a8ff04` |
-| blocked owner proposal content | `5cee76bddc2a373776e8a42f9e086e41314b4ba9e8aaf516f3cc1b6d20b7c2cc` |
+| domain runtime-readiness schema raw bytes | `22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451` |
+| admission-contract content | `02d34118feab07376aa7c0ca2d809ffb7badf63a6f5cff5cfbd04f1e8ec035dd` |
+| blocked owner proposal content | `a65cbb17df515ee8670286ba2dba9f5cb5a0e37426a5584fb9f91f74ca37d773` |
 
 ## Advancement boundary
 

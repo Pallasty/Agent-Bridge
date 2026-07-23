@@ -225,6 +225,7 @@ def build_server_context(plan: dict) -> ssl.SSLContext:
         and credentials.get("domain_private_key_spki_sha256") == credentials["domain_spki_sha256"],
         "E_MTLS_SERVER_KEY_BINDING",
     )
+    expected_coordinator_peer_certificate_der_sha256(plan)
     ca = read_bound_certificate_file(credentials["ca_certificate_path"], credentials["ca_certificate_sha256"], "E_MTLS_SERVER_CA")
     certificate = read_bound_certificate_file(credentials["domain_certificate_path"], credentials["domain_certificate_sha256"], "E_MTLS_SERVER_CERTIFICATE")
     private_key = read_bound_private_key(credentials["domain_private_key_path"], "E_MTLS_SERVER_PRIVATE_KEY")
@@ -238,11 +239,19 @@ def build_server_context(plan: dict) -> ssl.SSLContext:
 def build_client_context(coordinator_plan: dict) -> ssl.SSLContext:
     credentials = coordinator_plan["credentials"]
     coordinator = credentials.get("coordinator_material")
+    coordinator_trust = credentials.get("coordinator_trust_material")
     require(isinstance(coordinator, dict), "E_MTLS_CLIENT_COORDINATOR_MATERIAL")
+    require(isinstance(coordinator_trust, dict), "E_MTLS_CLIENT_COORDINATOR_TRUST")
     require(
         is_sha256(coordinator.get("spki_sha256"))
         and coordinator.get("private_key_spki_sha256") == coordinator["spki_sha256"],
         "E_MTLS_CLIENT_KEY_BINDING",
+    )
+    require(
+        coordinator.get("certificate_path") == coordinator_trust.get("certificate_path")
+        and coordinator.get("certificate_sha256") == coordinator_trust.get("certificate_sha256")
+        and coordinator.get("spki_sha256") == coordinator_trust.get("spki_sha256"),
+        "E_MTLS_CLIENT_COORDINATOR_TRUST_BINDING",
     )
     ca = read_bound_certificate_file(credentials["ca_certificate_path"], credentials["ca_certificate_sha256"], "E_MTLS_CLIENT_CA")
     certificate = read_bound_certificate_file(coordinator["certificate_path"], coordinator["certificate_sha256"], "E_MTLS_CLIENT_CERTIFICATE")
@@ -253,6 +262,33 @@ def build_client_context(coordinator_plan: dict) -> ssl.SSLContext:
     context.load_verify_locations(cafile=str(ca))
     context.load_cert_chain(certfile=str(certificate), keyfile=str(private_key))
     return context
+
+
+def expected_coordinator_peer_certificate_der_sha256(plan: dict) -> str:
+    credentials = plan.get("credentials", {})
+    trust = credentials.get("coordinator_trust_material")
+    require(isinstance(trust, dict), "E_MTLS_SERVER_COORDINATOR_TRUST")
+    require(is_sha256(trust.get("spki_sha256")), "E_MTLS_SERVER_COORDINATOR_TRUST")
+    certificate = read_bound_certificate_file(
+        trust.get("certificate_path"), trust.get("certificate_sha256"),
+        "E_MTLS_SERVER_COORDINATOR_CERTIFICATE",
+    )
+    try:
+        der = ssl.PEM_cert_to_DER_cert(certificate.read_text(encoding="ascii"))
+    except (OSError, UnicodeError, ValueError) as error:
+        raise SafeFailure("E_MTLS_SERVER_COORDINATOR_CERTIFICATE") from error
+    require(isinstance(der, bytes) and der, "E_MTLS_SERVER_COORDINATOR_CERTIFICATE")
+    return hashlib.sha256(der).hexdigest()
+
+
+def verify_coordinator_peer_certificate(
+    plan: dict,
+    tls_object: ssl.SSLObject | ssl.SSLSocket,
+) -> str:
+    return verify_peer_certificate_sha256(
+        tls_object,
+        expected_coordinator_peer_certificate_der_sha256(plan),
+    )
 
 
 def verify_peer_certificate_sha256(

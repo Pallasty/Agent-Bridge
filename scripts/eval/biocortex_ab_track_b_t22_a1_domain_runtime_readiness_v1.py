@@ -24,7 +24,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-runtime-readiness-schema-v1.json"
 ATTESTATION_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_domain_attestation_v1.py"
-EXPECTED_SCHEMA_SHA256 = "4c44d3e4617007999af5812d0332fa22f98d1d6302349123bb7c7adb43aa014d"
+EXPECTED_SCHEMA_SHA256 = "22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451"
 READINESS_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/domain-runtime-readiness/v1\0"
 READINESS_SET_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/domain-runtime-readiness-set/v1\0"
 READINESS_SET_RECEIPT_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/domain-runtime-readiness-set-verification-receipt/v1\0"
@@ -215,33 +215,49 @@ def validate_readiness(
     require(placement["domain_operator_public_key_path"] == str(credentials_root / "domain-operator.pub"), "E_READINESS_OPERATOR_PATH")
     require(placement["domain_operator_private_key_path"] == str(credentials_root / "domain-operator"), "E_READINESS_OPERATOR_PATH")
     require(placement["domain_operator_public_key_sha256"] == operator_sha256, "E_READINESS_OPERATOR_KEY_BINDING")
+    expected_coordinator = credential_manifest["coordinator"]
+    expected_runtime_key = credential_manifest["coordinator_runtime_signing_key"]
+    coordinator_trust = placement["coordinator_trust_material"]
+    require(coordinator_trust == {
+        "certificate_path": str(credentials_root / "coordinator.crt"),
+        "certificate_sha256": expected_coordinator["certificate_sha256"],
+        "spki_sha256": expected_coordinator["spki_sha256"],
+        "runtime_public_key_path": str(credentials_root / "coordinator-runtime.pub"),
+        "runtime_public_key_sha256": expected_runtime_key["public_key_sha256"],
+    }, "E_READINESS_COORDINATOR_TRUST_BINDING")
     coordinator = placement["coordinator_material"]
     if domain_id == "domain-1":
-        expected = credential_manifest["coordinator"]
-        runtime_key = credential_manifest["coordinator_runtime_signing_key"]
         require(coordinator == {
             "client_identity": {
                 "certificate_path": str(credentials_root / "coordinator.crt"),
                 "private_key_path": str(credentials_root / "coordinator.key"),
-                "certificate_sha256": expected["certificate_sha256"], "spki_sha256": expected["spki_sha256"],
-                "private_key_spki_sha256": expected["spki_sha256"], "private_key_file_mode": "0600",
+                "certificate_sha256": expected_coordinator["certificate_sha256"], "spki_sha256": expected_coordinator["spki_sha256"],
+                "private_key_spki_sha256": expected_coordinator["spki_sha256"], "private_key_file_mode": "0600",
                 "certificate_private_key_match_verified": True,
             },
             "runtime_public_key_path": str(credentials_root / "coordinator-runtime.pub"),
             "runtime_private_key_path": str(credentials_root / "coordinator-runtime"),
-            "runtime_public_key_sha256": runtime_key["public_key_sha256"],
+            "runtime_public_key_sha256": expected_runtime_key["public_key_sha256"],
             "runtime_private_key_file_mode": "0600", "runtime_key_pair_verified": True,
         }, "E_READINESS_COORDINATOR_CREDENTIAL_BINDING")
+        require(
+            coordinator["client_identity"]["certificate_path"] == coordinator_trust["certificate_path"]
+            and coordinator["client_identity"]["certificate_sha256"] == coordinator_trust["certificate_sha256"]
+            and coordinator["client_identity"]["spki_sha256"] == coordinator_trust["spki_sha256"]
+            and coordinator["runtime_public_key_path"] == coordinator_trust["runtime_public_key_path"]
+            and coordinator["runtime_public_key_sha256"] == coordinator_trust["runtime_public_key_sha256"],
+            "E_READINESS_COORDINATOR_PUBLIC_PRIVATE_CROSS_BINDING",
+        )
     else:
         require(coordinator is None, "E_READINESS_COORDINATOR_MATERIAL_SCOPE")
     credential_paths = [
         placement["ca_certificate_path"], domain_identity["certificate_path"], domain_identity["private_key_path"],
         placement["domain_operator_public_key_path"], placement["domain_operator_private_key_path"],
+        coordinator_trust["certificate_path"], coordinator_trust["runtime_public_key_path"],
     ]
     if coordinator is not None:
         credential_paths.extend([
-            coordinator["client_identity"]["certificate_path"], coordinator["client_identity"]["private_key_path"],
-            coordinator["runtime_public_key_path"], coordinator["runtime_private_key_path"],
+            coordinator["client_identity"]["private_key_path"], coordinator["runtime_private_key_path"],
         ])
     require(all(path_outside_repository(path) for path in credential_paths) and len(credential_paths) == len(set(credential_paths)), "E_READINESS_CREDENTIAL_PATH_SCOPE")
     require(value["signature_binding"] == {

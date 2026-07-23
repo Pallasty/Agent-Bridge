@@ -160,6 +160,13 @@ def readiness(number: int, operator_public_key_sha256: str | None = None) -> tup
             "runtime_public_key_sha256": CREDENTIAL["coordinator_runtime_signing_key"]["public_key_sha256"],
             "runtime_private_key_file_mode": "0600", "runtime_key_pair_verified": True,
         }
+    coordinator_trust = {
+        "certificate_path": str(credentials_root / "coordinator.crt"),
+        "certificate_sha256": CREDENTIAL["coordinator"]["certificate_sha256"],
+        "spki_sha256": CREDENTIAL["coordinator"]["spki_sha256"],
+        "runtime_public_key_path": str(credentials_root / "coordinator-runtime.pub"),
+        "runtime_public_key_sha256": CREDENTIAL["coordinator_runtime_signing_key"]["public_key_sha256"],
+    }
     value = {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.domain_runtime_readiness.v1",
         "packet_kind": "T22_A1_PRIVATE_DOMAIN_RUNTIME_READINESS",
@@ -218,7 +225,9 @@ def readiness(number: int, operator_public_key_sha256: str | None = None) -> tup
             "domain_operator_public_key_path": str(credentials_root / "domain-operator.pub"),
             "domain_operator_private_key_path": str(credentials_root / "domain-operator"),
             "domain_operator_public_key_sha256": packet["operator_binding"]["public_key_sha256"],
-            "domain_operator_private_key_file_mode": "0600", "coordinator_material": coordinator,
+            "domain_operator_private_key_file_mode": "0600",
+            "coordinator_trust_material": coordinator_trust,
+            "coordinator_material": coordinator,
             "all_paths_local_to_attested_host": True,
             "certificate_chain_eku_san_expiry_verified": True,
             "private_key_redistribution_after_initial_placement_allowed": False,
@@ -325,6 +334,8 @@ mutations = (
     lambda x: x["credential_placement"]["domain_identity"].update(private_key_spki_sha256=sha("wrong-key")),
     lambda x: x["credential_placement"].update(domain_operator_public_key_sha256=sha("wrong-operator")),
     lambda x: x["credential_placement"].update(domain_operator_private_key_path=x["credential_placement"]["domain_operator_public_key_path"]),
+    lambda x: x["credential_placement"]["coordinator_trust_material"].update(certificate_sha256=sha("wrong-coordinator-cert")),
+    lambda x: x["credential_placement"]["coordinator_trust_material"].update(runtime_public_key_sha256=sha("wrong-coordinator-runtime")),
     lambda x: x["credential_placement"].update(coordinator_material=None),
     lambda x: x["credential_placement"].update(private_key_redistribution_after_initial_placement_allowed=True),
     lambda x: x["process_policy"].update(arbitrary_command_or_shell_allowed=True),

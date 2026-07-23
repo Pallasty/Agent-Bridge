@@ -93,6 +93,13 @@ def readiness(number: int) -> dict:
             "runtime_public_key_path": str(credentials / "coordinator-runtime.pub"),
             "runtime_private_key_path": str(credentials / "coordinator-runtime"),
         }
+    coordinator_trust = {
+        "certificate_path": str(credentials / "coordinator.crt"),
+        "certificate_sha256": sha(f"certificate:{credentials}:coordinator"),
+        "spki_sha256": sha(f"spki:{credentials}:coordinator"),
+        "runtime_public_key_path": str(credentials / "coordinator-runtime.pub"),
+        "runtime_public_key_sha256": sha("coordinator-runtime"),
+    }
     return {
         "source_commit": SOURCE_COMMIT,
         "run_id": RUN_ID,
@@ -131,6 +138,7 @@ def readiness(number: int) -> dict:
             "domain_identity": placed_identity(credentials, "domain"),
             "domain_operator_public_key_path": str(credentials / "domain-operator.pub"),
             "domain_operator_private_key_path": str(credentials / "domain-operator"),
+            "coordinator_trust_material": coordinator_trust,
             "coordinator_material": coordinator,
         },
     }
@@ -150,6 +158,7 @@ assert "retry_join" not in PLANS[0]["processes"]["openbao"]["config_text"]
 assert all("retry_join" in plan["processes"]["openbao"]["config_text"] for plan in PLANS[1:])
 assert PLANS[0]["credentials"]["coordinator_material"] is not None
 assert PLANS[1]["credentials"]["coordinator_material"] is None
+assert all(plan["credentials"]["coordinator_trust_material"] is not None for plan in PLANS)
 assert PLANS[2]["role"]["this_domain_is_fault_target"] is True
 assert "STOP_OWNED_SERVICE_SET" in PLANS[2]["command_policy"]["allowed_commands"]
 assert "STOP_OWNED_SERVICE_SET" not in PLANS[0]["command_policy"]["allowed_commands"]
@@ -200,6 +209,8 @@ input_mutations = (
     ("readiness", lambda x: x["credential_placement"].update(all_paths_local_to_attested_host=False)),
     ("readiness", lambda x: x["credential_placement"]["domain_identity"].update(certificate_sha256="0" * 64)),
     ("readiness", lambda x: x["credential_placement"]["domain_identity"].update(private_key_spki_sha256=sha("other-private-key"))),
+    ("readiness", lambda x: x["credential_placement"].update(coordinator_trust_material=None)),
+    ("readiness", lambda x: x["credential_placement"]["coordinator_trust_material"].update(certificate_sha256="0" * 64)),
     ("readiness", lambda x: x["credential_placement"].update(coordinator_material=None)),
 )
 for target, mutation in input_mutations:
@@ -229,6 +240,7 @@ plan_mutations = (
     lambda x: x["command_policy"]["allowed_commands"].append("RUN_SHELL"),
     lambda x: x["workload"].update(bootstrap_secret_persistence_allowed=True),
     lambda x: x["credentials"].update(domain_private_key_path="/tmp/other.key"),
+    lambda x: x["credentials"]["coordinator_trust_material"].update(runtime_public_key_sha256=sha("other-runtime-key")),
     lambda x: x["claims"].update(plan_is_execution_authority=True),
     lambda x: x["claims"].update(production_admissible=True),
 )

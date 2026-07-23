@@ -236,6 +236,21 @@ def _compile(execution: dict, endpoint_manifest: dict, readiness: dict) -> dict:
     ]
     config_path = str(Path(root) / "config" / "openbao.hcl")
     config_text = openbao_config(domain_id, root, endpoint, endpoints["domain-1"], credentials)
+    coordinator_trust = credentials.get("coordinator_trust_material")
+    require(isinstance(coordinator_trust, dict), "E_WORKLOAD_PLAN_COORDINATOR_TRUST")
+    coordinator_trust_paths = {
+        "certificate_path": private_absolute_path(coordinator_trust.get("certificate_path")),
+        "certificate_sha256": coordinator_trust.get("certificate_sha256"),
+        "spki_sha256": coordinator_trust.get("spki_sha256"),
+        "runtime_public_key_path": private_absolute_path(coordinator_trust.get("runtime_public_key_path")),
+        "runtime_public_key_sha256": coordinator_trust.get("runtime_public_key_sha256"),
+    }
+    require(
+        all(is_sha256(coordinator_trust_paths[field]) for field in (
+            "certificate_sha256", "spki_sha256", "runtime_public_key_sha256",
+        )),
+        "E_WORKLOAD_PLAN_COORDINATOR_TRUST_DIGEST",
+    )
     coordinator = credentials.get("coordinator_material")
     if domain_id == "domain-1":
         require(isinstance(coordinator, dict), "E_WORKLOAD_PLAN_COORDINATOR_MATERIAL")
@@ -258,6 +273,13 @@ def _compile(execution: dict, endpoint_manifest: dict, readiness: dict) -> dict:
             and coordinator["client_identity"].get("certificate_private_key_match_verified") is True
             and coordinator["client_identity"].get("private_key_file_mode") == "0600",
             "E_WORKLOAD_PLAN_COORDINATOR_KEY_BINDING",
+        )
+        require(
+            coordinator_paths["certificate_path"] == coordinator_trust_paths["certificate_path"]
+            and coordinator_paths["certificate_sha256"] == coordinator_trust_paths["certificate_sha256"]
+            and coordinator_paths["spki_sha256"] == coordinator_trust_paths["spki_sha256"]
+            and coordinator_paths["runtime_public_key_path"] == coordinator_trust_paths["runtime_public_key_path"],
+            "E_WORKLOAD_PLAN_COORDINATOR_TRUST_CROSS_BINDING",
         )
     else:
         require(coordinator is None, "E_WORKLOAD_PLAN_COORDINATOR_SCOPE")
@@ -326,6 +348,7 @@ def _compile(execution: dict, endpoint_manifest: dict, readiness: dict) -> dict:
             "domain_private_key_spki_sha256": credentials["domain_identity"]["private_key_spki_sha256"],
             "domain_operator_public_key_path": private_absolute_path(credentials["domain_operator_public_key_path"]),
             "domain_operator_private_key_path": private_absolute_path(credentials["domain_operator_private_key_path"]),
+            "coordinator_trust_material": coordinator_trust_paths,
             "coordinator_material": coordinator_paths,
         },
         "processes": {

@@ -77,13 +77,13 @@ def create_leaf(root: Path, ca_key: Path, ca_certificate: Path, name: str, usage
     return key, certificate
 
 
-def plan(ca: Path, domain_certificate: Path, domain_key: Path, coordinator_certificate: Path | None = None, coordinator_key: Path | None = None) -> dict:
+def plan(ca: Path, domain_certificate: Path, domain_key: Path, coordinator_trust_certificate: Path, coordinator_key: Path | None = None) -> dict:
     coordinator = None
-    if coordinator_certificate is not None and coordinator_key is not None:
+    if coordinator_key is not None:
         coordinator = {
-            "certificate_path": str(coordinator_certificate),
+            "certificate_path": str(coordinator_trust_certificate),
             "private_key_path": str(coordinator_key),
-            "certificate_sha256": sha_file(coordinator_certificate),
+            "certificate_sha256": sha_file(coordinator_trust_certificate),
             "spki_sha256": hashlib.sha256(b"synthetic-coordinator-spki").hexdigest(),
             "private_key_spki_sha256": hashlib.sha256(b"synthetic-coordinator-spki").hexdigest(),
         }
@@ -97,6 +97,13 @@ def plan(ca: Path, domain_certificate: Path, domain_key: Path, coordinator_certi
             "domain_spki_sha256": hashlib.sha256(b"synthetic-domain-spki").hexdigest(),
             "domain_private_key_spki_sha256": hashlib.sha256(b"synthetic-domain-spki").hexdigest(),
             "domain_private_key_path": str(domain_key),
+            "coordinator_trust_material": {
+                "certificate_path": str(coordinator_trust_certificate),
+                "certificate_sha256": sha_file(coordinator_trust_certificate),
+                "spki_sha256": hashlib.sha256(b"synthetic-coordinator-spki").hexdigest(),
+                "runtime_public_key_path": str(coordinator_trust_certificate.parent / "coordinator-runtime.pub"),
+                "runtime_public_key_sha256": hashlib.sha256(b"synthetic-runtime-public-key").hexdigest(),
+            },
             "coordinator_material": coordinator,
         },
     }
@@ -250,13 +257,14 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-mtls-kat-") as directory:
     ca_key, ca_certificate = create_ca(root, "synthetic-ca")
     server_key, server_certificate = create_leaf(root, ca_key, ca_certificate, "domain-1", "serverAuth,clientAuth", "100.64.50.1")
     client_key, client_certificate = create_leaf(root, ca_key, ca_certificate, "coordinator", "clientAuth", None)
+    impostor_client_key, impostor_client_certificate = create_leaf(root, ca_key, ca_certificate, "same-ca-impostor", "clientAuth", None)
     wrong_ca_key, wrong_ca_certificate = create_ca(root, "wrong-ca")
     wrong_client_key, wrong_client_certificate = create_leaf(root, wrong_ca_key, wrong_ca_certificate, "wrong-client", "clientAuth", None)
     for path in root.iterdir():
         if path.is_file():
             path.chmod(0o600)
 
-    server_plan = plan(ca_certificate, server_certificate, server_key)
+    server_plan = plan(ca_certificate, server_certificate, server_key, client_certificate)
     client_plan = plan(ca_certificate, server_certificate, server_key, client_certificate, client_key)
     expect_failure(lambda: module.build_server_context(server_plan), "E_MTLS_TRANSPORT_ACTIVATION_NOT_READY")
     negative_count += 1
@@ -265,7 +273,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-mtls-kat-") as directory:
     client_context = module.build_client_context(client_plan)
     client_tls, server_tls, client_out, server_in = memory_handshake(client_context, server_context, "100.64.50.1")
     module.verify_peer_certificate_sha256(client_tls, certificate_der_sha256(server_certificate))
-    module.verify_peer_certificate_sha256(server_tls, certificate_der_sha256(client_certificate))
+    module.verify_coordinator_peer_certificate(server_plan, server_tls)
     expect_failure(
         lambda: module.verify_peer_certificate_sha256(client_tls, hashlib.sha256(b"other-certificate").hexdigest()),
         "E_MTLS_PEER_CERTIFICATE_BINDING",
@@ -283,6 +291,17 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-mtls-kat-") as directory:
             transfer(client_out, server_in)
     assert bytes(received) == frame
     module.decode_message_frame(bytes(received), "COORDINATOR_TO_DOMAIN", "domain-1", RUN_ID, SOURCE_COMMIT, EXECUTION_SHA256)
+
+    impostor_client_plan = plan(ca_certificate, server_certificate, server_key, impostor_client_certificate, impostor_client_key)
+    impostor_client_context = module.build_client_context(impostor_client_plan)
+    _impostor_client_tls, impostor_server_tls, _impostor_client_out, _impostor_server_in = memory_handshake(
+        impostor_client_context, server_context, "100.64.50.1",
+    )
+    expect_failure(
+        lambda: module.verify_coordinator_peer_certificate(server_plan, impostor_server_tls),
+        "E_MTLS_PEER_CERTIFICATE_BINDING",
+    )
+    negative_count += 1
 
     bad_client_plan = plan(ca_certificate, server_certificate, server_key, wrong_client_certificate, wrong_client_key)
     bad_client_context = module.build_client_context(bad_client_plan)

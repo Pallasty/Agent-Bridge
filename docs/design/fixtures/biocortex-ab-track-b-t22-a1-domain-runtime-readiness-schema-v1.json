@@ -160,10 +160,22 @@
         "runtime_key_pair_verified": {"const": true}
       }
     },
+    "coordinator_trust_material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["certificate_path", "certificate_sha256", "spki_sha256", "runtime_public_key_path", "runtime_public_key_sha256"],
+      "properties": {
+        "certificate_path": {"$ref": "#/$defs/absolute_path"},
+        "certificate_sha256": {"$ref": "#/$defs/sha256"},
+        "spki_sha256": {"$ref": "#/$defs/sha256"},
+        "runtime_public_key_path": {"$ref": "#/$defs/absolute_path"},
+        "runtime_public_key_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "credential_placement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "ca_certificate_path", "ca_certificate_sha256", "domain_identity", "domain_operator_public_key_path", "domain_operator_private_key_path", "domain_operator_public_key_sha256", "domain_operator_private_key_file_mode", "coordinator_material", "all_paths_local_to_attested_host", "certificate_chain_eku_san_expiry_verified", "private_key_redistribution_after_initial_placement_allowed"],
+      "required": ["mode", "ca_certificate_path", "ca_certificate_sha256", "domain_identity", "domain_operator_public_key_path", "domain_operator_private_key_path", "domain_operator_public_key_sha256", "domain_operator_private_key_file_mode", "coordinator_trust_material", "coordinator_material", "all_paths_local_to_attested_host", "certificate_chain_eku_san_expiry_verified", "private_key_redistribution_after_initial_placement_allowed"],
       "properties": {
         "mode": {"const": "OWNER_MEDIATED_OUT_OF_BAND_EXACT_HASH_PLACEMENT"},
         "ca_certificate_path": {"$ref": "#/$defs/absolute_path"},
@@ -173,6 +185,7 @@
         "domain_operator_private_key_path": {"$ref": "#/$defs/absolute_path"},
         "domain_operator_public_key_sha256": {"$ref": "#/$defs/sha256"},
         "domain_operator_private_key_file_mode": {"const": "0600"},
+        "coordinator_trust_material": {"$ref": "#/$defs/coordinator_trust_material"},
         "coordinator_material": {"oneOf": [{"$ref": "#/$defs/coordinator_material"}, {"type": "null"}]},
         "all_paths_local_to_attested_host": {"const": true},
         "certificate_chain_eku_san_expiry_verified": {"const": true},

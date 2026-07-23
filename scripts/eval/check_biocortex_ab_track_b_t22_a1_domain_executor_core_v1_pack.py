@@ -83,6 +83,14 @@ def readiness(number: int) -> dict:
         "runtime_public_key_path": str(credentials / "coordinator-runtime.pub"),
         "runtime_private_key_path": str(credentials / "coordinator-runtime"),
     }
+    coordinator_identity = identity(credentials, "coordinator")
+    coordinator_trust = {
+        "certificate_path": coordinator_identity["certificate_path"],
+        "certificate_sha256": coordinator_identity["certificate_sha256"],
+        "spki_sha256": coordinator_identity["spki_sha256"],
+        "runtime_public_key_path": str(credentials / "coordinator-runtime.pub"),
+        "runtime_public_key_sha256": sha("coordinator-runtime"),
+    }
     return {
         "source_commit": SOURCE_COMMIT, "run_id": RUN_ID, "domain_id": domain_id,
         "content_sha256": sha(f"readiness:{number}"),
@@ -112,6 +120,7 @@ def readiness(number: int) -> dict:
             "domain_identity": identity(credentials, "domain"),
             "domain_operator_public_key_path": str(credentials / "domain-operator.pub"),
             "domain_operator_private_key_path": str(credentials / "domain-operator"),
+            "coordinator_trust_material": coordinator_trust,
             "coordinator_material": coordinator,
         },
     }
