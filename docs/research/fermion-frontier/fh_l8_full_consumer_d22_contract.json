@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D22-SYNTHETIC-CONSUMER-V1",
+  "scope": "synthetic_tiny_fixture_protocol_validation_only",
+  "required_shard_count": 53,
+  "synthetic_partition_count": 8,
+  "fault_matrix": ["success", "interruption_resume", "orphan_bytes", "manifest_hash_drift", "fixture_hash_drift", "frontier_gap", "no_replace_publication"],
+  "authorization": {"real_packed_q3_read_authorized": false, "scientific_kernel_authorized": false, "full_53_scientific_execution_authorized": false, "scientific_action_calls": 0},
+  "next_gate": "FULL_53_WORST_CASE_RESOURCE_AND_FILE_ENVELOPE_AUTHORIZATION",
+  "authority_exclusions": ["q4_operand", "q5", "degree6_remainder", "two_step_cumulative", "R100", "physical_reference", "READY"]
+}

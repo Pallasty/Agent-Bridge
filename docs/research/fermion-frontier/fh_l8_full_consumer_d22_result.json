@@ -1,0 +1,9 @@
+{
+  "status": "VERIFIED_D22_SYNTHETIC_53_SHARD_STATE_MACHINE",
+  "fixture_kind": "FH-L8-D22-SYNTHETIC-ONLY-V1",
+  "validated_shards": 53,
+  "validated_rows": 106,
+  "scientific_action_calls": 0,
+  "full_53_scientific_execution_authorized": false,
+  "next_gate": "FULL_53_WORST_CASE_RESOURCE_AND_FILE_ENVELOPE_AUTHORIZATION"
+}
