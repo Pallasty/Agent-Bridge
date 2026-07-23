@@ -20,6 +20,8 @@ mod engram_g1_authenticated_envelope_shadow;
 mod engram_g1_secure_custody_shadow;
 #[cfg(feature = "episode-observation-slice-a")]
 mod episode_observation_slice_a;
+#[cfg(feature = "episode-observation-slice-c2-synthetic")]
+pub mod episode_observation_c2_synthetic;
 pub mod lineage_audit;
 pub mod mmr;
 pub use mmr::mmr_rerank_by_text;

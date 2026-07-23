@@ -42,6 +42,8 @@ pub mod embedding_dim_guard;
 /// is provided by this feature.
 #[cfg(feature = "episode-observation-slice-c1")]
 pub(crate) mod episode_observation_curation_batch;
+#[cfg(feature = "episode-observation-slice-c2-synthetic")]
+pub(crate) mod episode_observation_curation_batch_c2_synthetic;
 pub mod event_spine;
 pub mod github_api;
 pub mod gitlab_api;

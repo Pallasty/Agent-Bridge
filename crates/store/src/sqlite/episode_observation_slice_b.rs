@@ -79,17 +79,17 @@ enum EpisodeObservationStoreError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EpisodeObservationRuntimeGate {
     Disabled,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "episode-observation-slice-c2-synthetic"))]
     SyntheticTestOnly,
 }
 
 impl EpisodeObservationRuntimeGate {
     fn permits_io(self) -> bool {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "episode-observation-slice-c2-synthetic"))]
         {
             return self == Self::SyntheticTestOnly;
         }
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "episode-observation-slice-c2-synthetic")))]
         {
             let _ = self;
             false
@@ -232,6 +232,24 @@ pub(super) fn migrate_or_verify(c: &mut rusqlite::Connection) -> RusqliteResult<
 }
 
 impl SqliteStore {
+    #[cfg(feature = "episode-observation-slice-c2-synthetic")]
+    pub(crate) async fn append_c2_synthetic_event(
+        &self,
+        event: &EpisodeObservationEvent<'_>,
+        payload_sha256: &str,
+        observed_at: i64,
+    ) -> std::result::Result<(), ()> {
+        self.append_episode_observation_event_inert(
+            EpisodeObservationRuntimeGate::SyntheticTestOnly,
+            event,
+            payload_sha256,
+            observed_at,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| ())
+    }
+
     async fn append_episode_observation_event_inert(
         &self,
         gate: EpisodeObservationRuntimeGate,

@@ -29,6 +29,7 @@ temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic = ["temporal-e
 temporal-evidence-s21a-owned-lab-final-refreeze-admission-synthetic = ["temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic"]
 episode-observation-slice-a = ["dep:ring"]
 episode-observation-slice-b = ["episode-observation-slice-a"]
+episode-observation-slice-c2-synthetic = ["episode-observation-slice-b"]
 
 [dependencies]
 ab-core.workspace = true
