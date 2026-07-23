@@ -81,6 +81,10 @@ def execution_packet(root: Path, label: str) -> dict:
                 for number in (1, 2, 3)
             ],
         },
+        "runtime_admission": {
+            "runtime_readiness_set_sha256": sha(f"runtime-readiness-set:{label}"),
+            "source_artifact_set_sha256": sha(f"source-artifact-set:{label}"),
+        },
         "network": {
             "peer_endpoint_set_sha256": sha(f"endpoints:{label}"),
             "acl_policy_receipt_sha256": sha(f"acl:{label}"),
@@ -118,7 +122,13 @@ def admission_receipt(value: dict, owner_signature_sha256: str, admitted_at: dat
         "private_endpoint_manifest_content_sha256": sha("endpoint"),
         "runtime_credential_manifest_content_sha256": sha("credential"),
         "coordinator_runtime_public_key_sha256": sha("coordinator-runtime-key"),
+        "runtime_readiness_set_verification_receipt_sha256": sha("runtime-readiness-verification"),
+        "runtime_readiness_set_sha256": value["runtime_admission"]["runtime_readiness_set_sha256"],
+        "source_artifact_set_sha256": value["runtime_admission"]["source_artifact_set_sha256"],
         "all_three_domain_attestations_reverified_current": True,
+        "all_three_runtime_readiness_packets_reverified_current": True,
+        "all_three_runtime_readiness_signatures_reverified": True,
+        "source_artifacts_rehashed_from_clean_source_commit": True,
         "owner_set_countersignature_reverified": True,
         "owner_runtime_preparation_signature_reverified": True,
         "owner_execution_signature_verified": True,

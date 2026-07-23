@@ -19,6 +19,7 @@
     "budget",
     "network",
     "private_runtime",
+    "runtime_admission",
     "topology",
     "fault",
     "evidence_contract",
@@ -39,6 +40,7 @@
     "budget": {"$ref": "#/$defs/budget"},
     "network": {"$ref": "#/$defs/network"},
     "private_runtime": {"$ref": "#/$defs/private_runtime"},
+    "runtime_admission": {"$ref": "#/$defs/runtime_admission"},
     "topology": {"$ref": "#/$defs/topology"},
     "fault": {"$ref": "#/$defs/fault"},
     "evidence_contract": {"$ref": "#/$defs/evidence_contract"},
@@ -209,6 +211,70 @@
         "agent_listeners_bind_exact_overlay_ip_only": {"const": true},
         "arbitrary_remote_shell_allowed": {"const": false},
         "raw_endpoint_or_credential_manifest_in_repository_or_receipts_allowed": {"const": false}
+      }
+    },
+    "readiness_packet_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "readiness_packet_sha256"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "readiness_packet_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "readiness_signature_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_id", "public_key_sha256", "signature_sha256"],
+      "properties": {
+        "domain_id": {"type": "string", "pattern": "^domain-[123]$"},
+        "public_key_sha256": {"$ref": "#/$defs/sha256"},
+        "signature_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "source_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "sha256"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9_]+$", "maxLength": 128},
+        "path": {"type": "string", "pattern": "^scripts/eval/[a-z0-9_]+\\.py$", "maxLength": 256},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "runtime_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain_runtime_readiness_schema_path", "domain_runtime_readiness_schema_sha256", "runtime_readiness_set_sha256", "earliest_runtime_readiness_expires_at", "packet_bindings", "signature_bindings", "source_artifacts", "source_artifact_set_sha256", "all_three_runtime_readiness_packets_current", "all_three_runtime_readiness_signatures_verified", "source_artifacts_rehashed_from_clean_source_commit", "live_runner_activation_required"],
+      "properties": {
+        "domain_runtime_readiness_schema_path": {"const": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-runtime-readiness-schema-v1.json"},
+        "domain_runtime_readiness_schema_sha256": {"const": "22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451"},
+        "runtime_readiness_set_sha256": {"$ref": "#/$defs/sha256"},
+        "earliest_runtime_readiness_expires_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"},
+        "packet_bindings": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "prefixItems": [
+            {"allOf": [{"$ref": "#/$defs/readiness_packet_binding"}, {"properties": {"domain_id": {"const": "domain-1"}}}]},
+            {"allOf": [{"$ref": "#/$defs/readiness_packet_binding"}, {"properties": {"domain_id": {"const": "domain-2"}}}]},
+            {"allOf": [{"$ref": "#/$defs/readiness_packet_binding"}, {"properties": {"domain_id": {"const": "domain-3"}}}]}
+          ],
+          "items": false
+        },
+        "signature_bindings": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "prefixItems": [
+            {"allOf": [{"$ref": "#/$defs/readiness_signature_binding"}, {"properties": {"domain_id": {"const": "domain-1"}}}]},
+            {"allOf": [{"$ref": "#/$defs/readiness_signature_binding"}, {"properties": {"domain_id": {"const": "domain-2"}}}]},
+            {"allOf": [{"$ref": "#/$defs/readiness_signature_binding"}, {"properties": {"domain_id": {"const": "domain-3"}}}]}
+          ],
+          "items": false
+        },
+        "source_artifacts": {"type": "array", "minItems": 8, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/source_artifact"}},
+        "source_artifact_set_sha256": {"$ref": "#/$defs/sha256"},
+        "all_three_runtime_readiness_packets_current": {"const": true},
+        "all_three_runtime_readiness_signatures_verified": {"const": true},
+        "source_artifacts_rehashed_from_clean_source_commit": {"const": true},
+        "live_runner_activation_required": {"const": true}
       }
     },
     "topology_domain": {

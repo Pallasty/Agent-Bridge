@@ -65,7 +65,7 @@
     "domain_collection_challenge_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-collection-challenge-schema-v1.json",
     "domain_collection_challenge_schema_sha256": "26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d",
     "distributed_execution_contract_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-execution-contract-schema-v1.json",
-    "distributed_execution_contract_schema_sha256": "2ef4bcae59c8eb3ee65611e592e816eaee80d9b977d6c9c4c37c14c3eb4f73fc",
+    "distributed_execution_contract_schema_sha256": "f1738c7b4d4eb7749739a0f73ca599bab2577a40c62681527f78b24a28655426",
     "private_endpoint_manifest_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-private-endpoint-manifest-schema-v1.json",
     "private_endpoint_manifest_schema_sha256": "8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953",
     "runtime_credential_manifest_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-runtime-credential-manifest-schema-v1.json",
@@ -106,5 +106,5 @@
     "external_anti_rollback_proved": false,
     "production_admissible": false
   },
-  "contract_sha256": "02d34118feab07376aa7c0ca2d809ffb7badf63a6f5cff5cfbd04f1e8ec035dd"
+  "contract_sha256": "dc4846831a0e0e11c992c6ea9e68ebb2cd5413d93d253cc9f08748a8fa73763a"
 }

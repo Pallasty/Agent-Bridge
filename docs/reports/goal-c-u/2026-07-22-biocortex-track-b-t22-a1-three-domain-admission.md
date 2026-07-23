@@ -42,7 +42,7 @@ rollback prevention.
   identity/key uniqueness, endpoint/ACL equality, and exact directory closure;
   its 30 synthetic negatives create no real attestation; and
 - closed distributed execution-contract, signed-event, and terminal-evidence
-  schemas with 96 synthetic negative cases and no real contract instance or
+  schemas with 104 synthetic negative cases and no real contract instance or
   evidence item; and
 - exact owner-signed per-domain collection-challenge schema, trust-anchor
   binding/generation/verification gate, and 42 synthetic negative cases. It
@@ -79,14 +79,19 @@ rollback prevention.
 - a final execution-contract builder and owner-signature admission gate that
   binds the exact artifact/run roots, set countersignature chain, runtime-
   preparation challenge/signature/terminal, private manifests, tool binaries,
-  budget and fault target. A complete synthetic chain verifies all eleven
-  credential files only after the final owner signature; 38 negative paths
-  cover forgery, receipt integrity/currentness, replay, wrong signature and
-  post-signature key substitution.
-- a completion audit proving that real collection must wait for the
-  source-bound runner/executor, host-local runtime-readiness packets,
-  credential-placement proof, single-use execution consumer and evidence
-  writer. The decision packet now fails closed on each missing input.
+  budget, fault target, three signed runtime-readiness packets and exact
+  runner/executor/transport/evidence/consumer source-artifact set. A complete
+  synthetic chain verifies all eleven credential files only after the final
+  owner signature; 50 negative paths cover forgery, readiness/source
+  substitution, receipt integrity/currentness, replay, wrong signature and
+  post-signature key substitution. The owner payload binds only stable packet,
+  signature and source-set identities; the time-varying readiness-verification
+  receipt is created and bound by the later private admission receipt.
+- a completion audit that originally proved real collection had to wait for a
+  source-bound execution/evidence chain. Those offline components now exist;
+  real activation still waits for the live local-process backend, three signed
+  host-local runtime-readiness packets and credential-placement proof. The
+  decision packet fails closed on every remaining input.
 - a single-use execution consumer that independently rechecks the clean source
   commit, owner signature and admission receipt, reserves before runner
   dispatch, requires exact validated terminal evidence for PASS, and records
@@ -96,7 +101,8 @@ rollback prevention.
   one synthetic success and 47 negative
   paths with zero real network, listener, workload, fault or credential access.
 - a private domain-runtime-readiness schema, semantic gate and signed-set
-  verifier with three synthetic role/domain successes, one complete same-key
+  verifier with three synthetic role/domain successes, one complete
+  same-attested-key signed-set success and
   signed-set success and 54 negative paths. It closes the contract for exact
   host-local tools, roots, ports, placed credentials, operator keys,
   coordinator public trust on every domain, coordinator private material only
@@ -111,7 +117,7 @@ rollback prevention.
   and 45 negative paths. It freezes exact etcd argv, mTLS OpenBao HCL, cleared
   environment, local paths, deterministic workload state and the per-role
   command allowlist, but deliberately does not start a process or claim that
-  the cross-host executor/transport/evidence builder exists.
+  the later live local-process backend is active.
 - a fixed-command executor core with three synthetic lifecycles, 23 chained
   command receipts and 20 negative paths. It revalidates the exact plan,
   enforces role/state/time/spend boundaries, independently replays each receipt
@@ -176,7 +182,7 @@ Frozen packet identities:
 | domain-attestation schema raw bytes | `1b261a7ac328de62cbcb51eac9189787e3e5144688ec967311c7341f630b8a2b` |
 | domain-collection challenge schema raw bytes | `26d078bb9716cdb443808755ef87c0962f5e4284f94be6f1d168c370a911676d` |
 | attestation-set countersignature schema raw bytes | `615959dbd1fbfe65da7830cd5b2bf4efc2ef9a917c94ae9438f820837d121a1c` |
-| distributed execution-contract schema raw bytes | `2ef4bcae59c8eb3ee65611e592e816eaee80d9b977d6c9c4c37c14c3eb4f73fc` |
+| distributed execution-contract schema raw bytes | `f1738c7b4d4eb7749739a0f73ca599bab2577a40c62681527f78b24a28655426` |
 | private endpoint-manifest schema raw bytes | `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953` |
 | runtime credential-manifest schema raw bytes | `fe9b257edae7f93d20e81280e54b20da771c432b65ae5ac906231799ad4c10e2` |
 | runtime-preparation challenge schema raw bytes | `1baaddc21592427adad308f2325e4cd6a5f9ba7f1a45db2a5d1d03de734967b3` |
@@ -184,8 +190,8 @@ Frozen packet identities:
 | distributed event schema raw bytes | `4aaad4ea4006cfbae80fc784837146f3de48bcf9655fd1fe30a237f0d34f6cf5` |
 | terminal-evidence schema raw bytes | `f3e6b833b04150376d09f3926dc75601acced248ebd9f9e08d70a86cc51e2a1a` |
 | domain runtime-readiness schema raw bytes | `22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451` |
-| admission-contract content | `02d34118feab07376aa7c0ca2d809ffb7badf63a6f5cff5cfbd04f1e8ec035dd` |
-| blocked owner proposal content | `a65cbb17df515ee8670286ba2dba9f5cb5a0e37426a5584fb9f91f74ca37d773` |
+| admission-contract content | `dc4846831a0e0e11c992c6ea9e68ebb2cd5413d93d253cc9f08748a8fa73763a` |
+| blocked owner proposal content | `42f28d09b3e354655ffd582b852d4e4bc3d9d7bf3ced17b6148011023e6ccfca` |
 
 ## Advancement boundary
 

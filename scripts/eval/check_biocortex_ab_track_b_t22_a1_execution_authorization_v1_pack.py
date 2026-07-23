@@ -27,6 +27,7 @@ attestation = countersignature.load_attestation_module()
 runtime = module.load_runtime_module()
 preparation = module.load_preparation_authorization_module()
 material = module.load_material_preparer_module()
+readiness = module.load_readiness_module()
 _preflight, contract, proposal, _collection_schema = collection.load_committed_inputs()
 execution_schema = json.loads(module.SCHEMA_PATH.read_text())
 preparation_schema = json.loads(preparation.SCHEMA_PATH.read_text())
@@ -36,6 +37,7 @@ module.load_countersignature_module = lambda: countersignature
 module.load_runtime_module = lambda: runtime
 module.load_preparation_authorization_module = lambda: preparation
 module.load_material_preparer_module = lambda: material
+module.load_readiness_module = lambda: readiness
 module.load_inputs = lambda: (
     countersignature, collection, attestation, runtime, preparation, material,
     contract, proposal, execution_schema,
@@ -44,6 +46,7 @@ countersignature.load_collection_module = lambda: collection
 countersignature.load_attestation_module = lambda: attestation
 preparation.load_inputs = lambda: (collection, runtime, contract, proposal, preparation_schema)
 material.load_authorization_module = lambda: preparation
+readiness.load_attestation_module = lambda: attestation
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 SOURCE_COMMIT = "a" * 40
@@ -174,6 +177,163 @@ def physical_budget() -> dict:
     }
 
 
+def placed_identity(root: Path, identity: dict, prefix: str) -> dict:
+    return {
+        "certificate_path": str(root / f"{prefix}.crt"),
+        "private_key_path": str(root / f"{prefix}.key"),
+        "certificate_sha256": identity["certificate_sha256"],
+        "spki_sha256": identity["spki_sha256"],
+        "private_key_spki_sha256": identity["spki_sha256"],
+        "private_key_file_mode": "0600", "certificate_private_key_match_verified": True,
+    }
+
+
+def runtime_readiness_packet(
+    number: int,
+    attestation_packet: dict,
+    endpoint: dict,
+    credential: dict,
+    admitted: dict,
+    preparation_terminal: dict,
+    base: Path,
+) -> dict:
+    domain_id = f"domain-{number}"
+    domain_root = base / "domain-runtimes" / domain_id
+    credentials_root = domain_root / "credentials"
+    endpoint_row = endpoint["domains"][number - 1]
+    coordinator_trust = {
+        "certificate_path": str(credentials_root / "coordinator.crt"),
+        "certificate_sha256": credential["coordinator"]["certificate_sha256"],
+        "spki_sha256": credential["coordinator"]["spki_sha256"],
+        "runtime_public_key_path": str(credentials_root / "coordinator-runtime.pub"),
+        "runtime_public_key_sha256": credential["coordinator_runtime_signing_key"]["public_key_sha256"],
+    }
+    coordinator_material = None
+    if number == 1:
+        coordinator_material = {
+            "client_identity": placed_identity(credentials_root, credential["coordinator"], "coordinator"),
+            "runtime_public_key_path": str(credentials_root / "coordinator-runtime.pub"),
+            "runtime_private_key_path": str(credentials_root / "coordinator-runtime"),
+            "runtime_public_key_sha256": credential["coordinator_runtime_signing_key"]["public_key_sha256"],
+            "runtime_private_key_file_mode": "0600", "runtime_key_pair_verified": True,
+        }
+    value = {
+        "schema": "agent_bridge.biocortex.track_b.t22_a1.domain_runtime_readiness.v1",
+        "packet_kind": "T22_A1_PRIVATE_DOMAIN_RUNTIME_READINESS",
+        "hashing_contract": {
+            "hash_algorithm": "SHA-256", "canonicalization": "COMPACT_SORTED_KEYS_UTF8_JSON_NO_FLOAT",
+            "digest_domain": "agent-bridge/biocortex/track-b/t22-a1/domain-runtime-readiness/v1",
+            "hash_scope": "ENTIRE_PACKET_EXCEPT_CONTENT_SHA256", "self_hash_field": "content_sha256",
+            "self_hash_field_excluded": True, "detached_domain_signature_covers_complete_canonical_packet": True,
+            "cross_field_semantic_validation_required": True,
+        },
+        "run_id": RUN_ID, "source_commit": SOURCE_COMMIT, "domain_id": domain_id,
+        "collected_at": module.utc_text(NOW + timedelta(seconds=15)),
+        "expires_at": module.utc_text(NOW + timedelta(minutes=45)),
+        "bindings": {
+            "owner_decision_proposal_sha256": proposal["proposal_sha256"],
+            "admission_contract_sha256": contract["contract_sha256"],
+            "domain_attestation_packet_sha256": attestation_packet["attestation_sha256"],
+            "owner_countersigned_attestation_set_receipt_sha256": admitted["content_sha256"],
+            "private_endpoint_manifest_content_sha256": endpoint["content_sha256"],
+            "runtime_credential_manifest_content_sha256": credential["content_sha256"],
+            "runtime_preparation_terminal_receipt_sha256": preparation_terminal["content_sha256"],
+        },
+        "host_binding": {
+            "hostname": attestation_packet["host_identity"]["hostname"],
+            "operating_system": attestation_packet["host_identity"]["operating_system"],
+            "architecture": attestation_packet["host_identity"]["architecture"],
+            "machine_id_sha256": attestation_packet["host_identity"]["machine_id_sha256"],
+            "hardware_identity_sha256": attestation_packet["host_identity"]["hardware_identity_sha256"],
+            "boot_id_sha256": attestation_packet["host_identity"]["boot_id_sha256"],
+        },
+        "endpoint_binding": {
+            "overlay_ip": endpoint_row["overlay_ip"], "agent_control_port": endpoint_row["agent_control_port"],
+            "etcd_client_port": endpoint_row["etcd_client_port"], "etcd_peer_port": endpoint_row["etcd_peer_port"],
+            "openbao_api_port": endpoint_row["openbao_api_port"], "openbao_cluster_port": endpoint_row["openbao_cluster_port"],
+            "port_set_sha256": attestation_packet["workload_readiness"]["port_set_sha256"],
+            "bind_exact_overlay_ip_only": True, "public_listener_allowed": False,
+        },
+        "toolchain": {
+            "pinned_tool_receipt_path": str(base / "tools" / domain_id / "pinned-tool-receipt.json"),
+            "pinned_tool_receipt_sha256": attestation_packet["workload_readiness"]["pinned_tool_receipt_sha256"],
+            "executables": [{
+                "name": name, "path": str(base / "tools" / domain_id / name),
+                "sha256": digest(f"tool:{domain_id}:{name}"), "bytes": 1000 + index,
+                "executable_by_owner": True, "version_output_sha256": digest(f"version:{domain_id}:{name}"),
+            } for index, name in enumerate(readiness.EXECUTABLE_NAMES)],
+            "all_paths_absolute": True, "all_hashes_recomputed_locally": True,
+            "ambient_path_lookup_allowed": False,
+        },
+        "local_paths": {
+            "domain_private_root": str(domain_root),
+            "private_data_root_sha256": attestation_packet["workload_readiness"]["private_data_root_sha256"],
+            "etcd_data_dir": str(domain_root / "etcd"), "openbao_data_dir": str(domain_root / "openbao"),
+            "owned_logs_dir": str(domain_root / "logs"), "domain_evidence_dir": str(domain_root / "evidence"),
+            "execution_reservation_dir": str(domain_root / "execution-reservations"),
+            "all_paths_outside_repository": True, "directory_mode": "0700",
+        },
+        "credential_placement": {
+            "mode": "OWNER_MEDIATED_OUT_OF_BAND_EXACT_HASH_PLACEMENT",
+            "ca_certificate_path": str(credentials_root / "ca.crt"),
+            "ca_certificate_sha256": credential["ca"]["certificate_sha256"],
+            "domain_identity": placed_identity(credentials_root, credential["domains"][number - 1], "domain"),
+            "domain_operator_public_key_path": str(credentials_root / "domain-operator.pub"),
+            "domain_operator_private_key_path": str(credentials_root / "domain-operator"),
+            "domain_operator_public_key_sha256": attestation_packet["operator_binding"]["public_key_sha256"],
+            "domain_operator_private_key_file_mode": "0600",
+            "coordinator_trust_material": coordinator_trust,
+            "coordinator_material": coordinator_material,
+            "all_paths_local_to_attested_host": True,
+            "certificate_chain_eku_san_expiry_verified": True,
+            "private_key_redistribution_after_initial_placement_allowed": False,
+        },
+        "process_policy": {
+            "fixed_protocol_command_enum_only": True, "arbitrary_command_or_shell_allowed": False,
+            "shell_evaluation_allowed": False, "ambient_credentials_allowed": False,
+            "proxy_environment_inherited": False, "host_global_network_mutation_allowed": False,
+            "host_reboot_or_power_action_allowed": False, "owned_process_and_run_root_scope_required": True,
+        },
+        "signature_binding": {
+            "signer_role": "T22_A1_DOMAIN_OPERATOR",
+            "signer_public_key_sha256": attestation_packet["operator_binding"]["public_key_sha256"],
+            "signature_scheme": "OPENSSH_SSHSIG_ED25519", "signature_namespace": readiness.SIGNATURE_NAMESPACE,
+            "detached_signature_required": True, "signature_embedded": False,
+        },
+        "collection_effects": {
+            "network_accessed": False, "external_hosts_contacted": 0, "listeners_started": 0,
+            "services_started": 0, "faults_injected": 0, "spend_usd_cents": 0,
+        },
+        "claims": {
+            "readiness_is_execution_authority": False, "credential_placement_proved_for_this_host": True,
+            "three_domain_execution_proved": False, "production_admissible": False,
+        },
+    }
+    value["content_sha256"] = readiness.digest(value)
+    return value
+
+
+def make_readiness_bundle(
+    path: Path,
+    attestation_bundle: Path,
+    domain_keys: list[Path],
+    endpoint: dict,
+    credential: dict,
+    admitted: dict,
+    preparation_terminal: dict,
+    base: Path,
+) -> None:
+    path.mkdir(mode=0o700)
+    path.chmod(0o700)
+    for number, key in enumerate(domain_keys, 1):
+        packet = json.loads((attestation_bundle / f"domain-{number}.json").read_text())
+        value = runtime_readiness_packet(number, packet, endpoint, credential, admitted, preparation_terminal, base)
+        packet_path = path / f"domain-{number}.json"
+        write_private(packet_path, value)
+        signature = sign(packet_path, key, readiness.SIGNATURE_NAMESPACE)
+        assert signature == path / f"domain-{number}.json.sig"
+
+
 with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") as directory:
     base = Path(directory).resolve()
     owner_key = base / "owner"
@@ -233,6 +393,11 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
         credential, credential_schema, SOURCE_COMMIT, RUN_ID,
         endpoint["content_sha256"], NOW + timedelta(minutes=50),
     )
+    readiness_bundle = artifact_root / "runtime-readiness"
+    make_readiness_bundle(
+        readiness_bundle, bundle, domain_keys, endpoint, credential,
+        admitted, preparation_terminal, base,
+    )
 
     admitted_checked, _bundle_verification, packets, set_signature_sha256 = module.validate_set_evidence(
         admitted_path, set_challenge_path, set_signature_path, bundle,
@@ -242,6 +407,11 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
         preparation_challenge_path, preparation_signature_path, preparation_terminal_path,
         endpoint_path, credential_path, SOURCE_COMMIT, NOW + timedelta(seconds=15),
         admitted["attestation_set_sha256"], admitted["content_sha256"],
+    )
+    readiness_checked = module.validate_runtime_readiness_evidence(
+        readiness_bundle, bundle, SOURCE_COMMIT, RUN_ID, contract, proposal,
+        admitted["content_sha256"], endpoint, credential,
+        preparation_terminal["content_sha256"], NOW + timedelta(seconds=15),
     )
     altered_admitted = copy.deepcopy(admitted)
     altered_admitted["countersignature_bundle_verification_receipt_sha256"] = digest("forged-original-verification")
@@ -282,6 +452,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
         physical_budget(), admitted_checked, packets,
         set_signature_sha256, prep_checked, prep_terminal_checked,
         endpoint_checked, credential_checked, prep_signature_sha256,
+        readiness_checked,
     )
     execution_path = artifact_root / "authorizations" / "final-execution-contract.json"
     write_private(execution_path, execution)
@@ -291,7 +462,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
         NOW + timedelta(seconds=17), admitted_path, set_challenge_path,
         set_signature_path, bundle, preparation_challenge_path,
         preparation_signature_path, preparation_terminal_path, endpoint_path,
-        credential_path,
+        credential_path, readiness_bundle,
     )
     assert receipt["status"] == "AUTHORIZED_T22_A1_EXACT_OWNER_SIGNED_NONPRODUCTION_EXECUTION_ADMISSION"
     assert receipt["execution_contract_sha256"] == execution["content_sha256"]
@@ -299,6 +470,16 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
     assert receipt["credential_files_read_only_after_owner_execution_signature"] is True
     assert receipt["certificate_count"] == receipt["private_key_count"] == 5
     assert receipt["all_credential_files_verified"] is True
+    assert receipt["runtime_readiness_set_verification_receipt_sha256"] == module.validate_runtime_readiness_evidence(
+        readiness_bundle, bundle, SOURCE_COMMIT, RUN_ID, contract, proposal,
+        admitted["content_sha256"], endpoint, credential,
+        preparation_terminal["content_sha256"], NOW + timedelta(seconds=17),
+    )["content_sha256"]
+    assert receipt["source_artifact_set_sha256"] == execution["runtime_admission"]["source_artifact_set_sha256"]
+    assert receipt["runtime_readiness_set_sha256"] == execution["runtime_admission"]["runtime_readiness_set_sha256"]
+    assert receipt["all_three_runtime_readiness_packets_reverified_current"] is True
+    assert receipt["all_three_runtime_readiness_signatures_reverified"] is True
+    assert receipt["source_artifacts_rehashed_from_clean_source_commit"] is True
     assert receipt["one_execution_per_admission_receipt"] is True
     assert receipt["network_accessed"] is False and receipt["external_hosts_contacted"] == 0
     assert receipt["listeners_started"] == receipt["services_started"] == receipt["faults_injected"] == 0
@@ -328,6 +509,11 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
         lambda x: x.update(execution_contract_sha256=digest("wrong-execution")),
         lambda x: x.update(owner_execution_signature_sha256="0" * 64),
         lambda x: x.update(owner_set_countersignature_reverified=False),
+        lambda x: x.update(all_three_runtime_readiness_packets_reverified_current=False),
+        lambda x: x.update(all_three_runtime_readiness_signatures_reverified=False),
+        lambda x: x.update(source_artifacts_rehashed_from_clean_source_commit=False),
+        lambda x: x.update(source_artifact_set_sha256=digest("wrong-source-set")),
+        lambda x: x.update(runtime_readiness_set_sha256=digest("wrong-readiness-set")),
         lambda x: x.update(certificate_count=4),
         lambda x: x.update(automatic_retry_allowed=True),
         lambda x: x.update(raw_endpoint_or_credential_values_in_receipt=True),
@@ -387,13 +573,23 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
         lambda x: x["private_runtime"].update(private_endpoint_manifest_schema_sha256=digest("wrong-schema")),
         lambda x: x["private_runtime"].update(runtime_credential_manifest_schema_sha256=digest("wrong-schema")),
         lambda x: x["private_runtime"].update(domain_agent_message_schema_sha256=digest("wrong-schema")),
+        lambda x: x["runtime_admission"].update(domain_runtime_readiness_schema_sha256=digest("wrong-schema")),
+        lambda x: x["runtime_admission"].update(runtime_readiness_set_sha256=digest("wrong-readiness-set")),
+        lambda x: x["runtime_admission"]["packet_bindings"].reverse(),
+        lambda x: x["runtime_admission"]["source_artifacts"][0].update(sha256=digest("wrong-source")),
+        lambda x: x["runtime_admission"].update(source_artifact_set_sha256=digest("wrong-source-set")),
+        lambda x: x["runtime_admission"].update(earliest_runtime_readiness_expires_at=module.utc_text(NOW + timedelta(seconds=16))),
+        lambda x: x["runtime_admission"].update(all_three_runtime_readiness_signatures_verified=False),
         lambda x: x["evidence_contract"].update(distributed_event_schema_sha256=digest("wrong-schema")),
         lambda x: x["evidence_contract"].update(terminal_evidence_schema_sha256=digest("wrong-schema")),
         lambda x: x["claims"].update(production_admissible=True),
         lambda x: x.update(unexpected="field"),
     )
-    for mutation in contract_mutations:
-        rejected_contract(mutation)
+    for index, mutation in enumerate(contract_mutations):
+        try:
+            rejected_contract(mutation)
+        except AssertionError as error:
+            raise AssertionError(f"unsafe execution contract mutation admitted at index {index}") from error
 
     # Replay is rejected before any private input or credential file is read.
     original_read_bytes = Path.read_bytes
@@ -401,7 +597,8 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
         path.resolve() for path in [
             admitted_path, set_challenge_path, *bundle.iterdir(),
             preparation_challenge_path, preparation_terminal_path,
-            endpoint_path, credential_path, *(artifact_root / "credentials").iterdir(),
+            endpoint_path, credential_path, *readiness_bundle.iterdir(),
+            *(artifact_root / "credentials").iterdir(),
         ]
     }
 
@@ -418,7 +615,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
                 NOW + timedelta(seconds=18), admitted_path, set_challenge_path,
                 set_signature_path, bundle, preparation_challenge_path,
                 preparation_signature_path, preparation_terminal_path,
-                endpoint_path, credential_path,
+                endpoint_path, credential_path, readiness_bundle,
             )
         except module.SafeFailure as error:
             assert str(error) == "E_EXECUTION_ADMISSION_OUTPUT_EXISTS"
@@ -436,7 +633,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
                 NOW + timedelta(seconds=18), admitted_path, set_challenge_path,
                 set_signature_path, bundle, preparation_challenge_path,
                 preparation_signature_path, preparation_terminal_path,
-                endpoint_path, credential_path,
+                endpoint_path, credential_path, readiness_bundle,
             )
         except module.SafeFailure as error:
             assert str(error) == "E_EXECUTION_OUTPUT_EXISTS"
@@ -469,7 +666,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
                 NOW + timedelta(seconds=18), admitted_path, set_challenge_path,
                 set_signature_path, bundle, preparation_challenge_path,
                 preparation_signature_path, preparation_terminal_path,
-                endpoint_path, credential_path,
+                endpoint_path, credential_path, readiness_bundle,
             )
         except module.SafeFailure as error:
             assert str(error) == "E_EXECUTION_OWNER_SIGNATURE_INVALID"
@@ -500,7 +697,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
             NOW + timedelta(seconds=18), admitted_path, set_challenge_path,
             set_signature_path, bundle, preparation_challenge_path,
             preparation_signature_path, preparation_terminal_path,
-            endpoint_path, credential_path,
+            endpoint_path, credential_path, readiness_bundle,
         )
     except module.SafeFailure as error:
         assert str(error) in {"E_CERTIFICATE_KEY_MISMATCH", "E_PRIVATE_KEY_SPKI"}
@@ -523,7 +720,7 @@ with tempfile.TemporaryDirectory(prefix="t22-a1-execution-authorization-kat-") a
             NOW + timedelta(seconds=18), admitted_path, set_challenge_path,
             set_signature_path, bundle, preparation_challenge_path,
             preparation_signature_path, preparation_terminal_path, endpoint_path,
-            credential_path,
+            credential_path, readiness_bundle,
         )
     except module.SafeFailure as error:
         assert str(error) == "E_EXECUTION_ACTIVATION_NOT_READY"

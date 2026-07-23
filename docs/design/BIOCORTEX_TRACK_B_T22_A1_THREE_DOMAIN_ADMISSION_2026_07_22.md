@@ -357,7 +357,12 @@ file, then atomically reserves the contract for one admission. Only afterward
 does it rebuild the contract from the private evidence and verify the CA,
 certificate chains, certificate/private-key matches, EKUs, expiry, overlay-IP
 SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
-a private one-execution admission receipt; failure is terminal and cannot
+a private one-execution admission receipt; it also freshly revalidates the
+three signed host-readiness packets and re-hashes the exact source-bound
+runner, executor, transport, evidence and consumer artifacts named by the
+owner-signed contract. The owner payload binds the stable readiness-set and
+source-artifact-set digests; the time-varying readiness verification-receipt
+digest is emitted only by admission. Failure is terminal and cannot
 retry. The admission step itself opens no socket, starts no listener or
 service, injects no fault and spends nothing. The source-bound runner core and
 its single-use consumer are now implemented: the runner compiles the exact
@@ -437,8 +442,9 @@ or satisfy the stronger S20 monotonic-CAS requirement.
 
 ## Exact owner inputs still required
 
-1. Freeze and test the source-bound cross-host runner, domain executor,
-   single-use admission consumer and real evidence builder.
+1. Freeze and test the live local-process backend that will drive the already
+   source-bound runner, domain executor, single-use consumer and evidence
+   builder.
 2. Choose a third owner physical host, or choose a cloud provider plus exact
    region/zone/instance type and numeric spend limit.
 3. Choose a dedicated T22-A1 owner public key or explicitly approve reuse of
@@ -478,7 +484,7 @@ blocked until these inputs are concrete.
 - attestation-set countersignature schema raw SHA-256:
   `615959dbd1fbfe65da7830cd5b2bf4efc2ef9a917c94ae9438f820837d121a1c`;
 - distributed execution-contract schema raw SHA-256:
-  `2ef4bcae59c8eb3ee65611e592e816eaee80d9b977d6c9c4c37c14c3eb4f73fc`;
+  `f1738c7b4d4eb7749739a0f73ca599bab2577a40c62681527f78b24a28655426`;
 - private endpoint-manifest schema raw SHA-256:
   `8741f130384d246077c281a8200a174f92c63fda565c9384ab7d6edc0f723953`;
 - runtime credential-manifest schema raw SHA-256:
@@ -494,9 +500,9 @@ blocked until these inputs are concrete.
 - domain runtime-readiness schema raw SHA-256:
   `22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451`;
 - admission-contract content SHA-256:
-  `02d34118feab07376aa7c0ca2d809ffb7badf63a6f5cff5cfbd04f1e8ec035dd`;
+  `dc4846831a0e0e11c992c6ea9e68ebb2cd5413d93d253cc9f08748a8fa73763a`;
 - blocked owner-proposal content SHA-256:
-  `a65cbb17df515ee8670286ba2dba9f5cb5a0e37426a5584fb9f91f74ca37d773`.
+  `42f28d09b3e354655ffd582b852d4e4bc3d9d7bf3ced17b6148011023e6ccfca`.
 
 The offline admission gate exercises 82 directed negative cases after recomputing
 candidate self-digests, so semantic escalation cannot pass merely by updating
@@ -511,9 +517,10 @@ clock spread, signature mismatch, and exact bundle contents. Its KAT generates
 only ephemeral synthetic keys and removes them; it reads zero real host
 identifiers and produces zero real attestations.
 
-The execution/event/terminal schema KAT adds 96 directed negatives. It rejects
+The execution/event/terminal schema KAT adds 104 directed negatives. It rejects
 multi-use or overlong authority, incomplete/domain-colliding topology, public
-or credential-bearing network forms, coordinator-targeted faults, broken
+or credential-bearing network forms, incomplete readiness/source bindings,
+coordinator-targeted faults, broken
 source signatures and event links, incomplete recovery/cleanup, leaked-secret
 states, overspend, and inflated claims. All instances are synthetic; it starts
 zero services, contacts zero hosts, reads zero real identifiers or credentials,
@@ -565,8 +572,9 @@ spend action.
 The final execution-authorization KAT drives one complete synthetic chain from
 three independently signed domain packets through set countersignature,
 runtime-material preparation, final owner execution signature and
-post-signature verification of eleven credential files. Its 38 directed negatives
-cover semantic contract escalation, evidence/tool cross-binding forgery, wrong
+post-signature verification of eleven credential files. Its 50 directed negatives
+cover semantic contract escalation, readiness/source-set substitution,
+evidence/tool cross-binding forgery, wrong
 owner signature, execution-admission receipt tampering/currentness, both
 output-present and reservation-backed replay, and a post-signature private-key
 substitution. It reads zero real private evidence or

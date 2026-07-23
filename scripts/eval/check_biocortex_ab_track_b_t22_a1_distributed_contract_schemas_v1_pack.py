@@ -98,6 +98,40 @@ execution = {
         "all_domain_distinctness_checks_passed": True,
         "owner_countersignature_over_exact_packet_set_verified": True,
     },
+    "runtime_admission": {
+        "domain_runtime_readiness_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-runtime-readiness-schema-v1.json",
+        "domain_runtime_readiness_schema_sha256": "22f34b20906e03f309e688f585d0deac03bcdf16c3eed9ba2ce76f650145b451",
+        "runtime_readiness_set_sha256": digest("runtime-readiness-set"),
+        "earliest_runtime_readiness_expires_at": "2026-07-22T22:00:00Z",
+        "packet_bindings": [
+            {
+                "domain_id": f"domain-{number}",
+                "readiness_packet_sha256": digest(f"runtime-readiness:{number}"),
+            }
+            for number in (1, 2, 3)
+        ],
+        "signature_bindings": [
+            {
+                "domain_id": f"domain-{number}",
+                "public_key_sha256": digest(f"runtime-readiness-key:{number}"),
+                "signature_sha256": digest(f"runtime-readiness-signature:{number}"),
+            }
+            for number in (1, 2, 3)
+        ],
+        "source_artifacts": [
+            {
+                "name": f"synthetic_source_{number}",
+                "path": f"scripts/eval/synthetic_source_{number}.py",
+                "sha256": digest(f"source-artifact:{number}"),
+            }
+            for number in range(1, 9)
+        ],
+        "source_artifact_set_sha256": digest("source-artifact-set"),
+        "all_three_runtime_readiness_packets_current": True,
+        "all_three_runtime_readiness_signatures_verified": True,
+        "source_artifacts_rehashed_from_clean_source_commit": True,
+        "live_runner_activation_required": True,
+    },
     "budget": {
         "mode": "THREE_OWNER_PHYSICAL_HOSTS_ZERO_SPEND",
         "provider": None,
@@ -204,6 +238,14 @@ execution_mutations = (
     lambda x: x["admission_bindings"].pop("owner_attestation_set_countersignature_signature_sha256"),
     lambda x: x["admission_bindings"].pop("owner_countersigned_attestation_set_receipt_sha256"),
     lambda x: x["admission_bindings"].pop("admission_bundle_reverification_receipt_sha256"),
+    lambda x: x.pop("runtime_admission"),
+    lambda x: x["runtime_admission"]["packet_bindings"].pop(),
+    lambda x: x["runtime_admission"]["signature_bindings"][1].update(domain_id="domain-1"),
+    lambda x: x["runtime_admission"]["source_artifacts"].pop(),
+    lambda x: x["runtime_admission"].update(all_three_runtime_readiness_packets_current=False),
+    lambda x: x["runtime_admission"].update(all_three_runtime_readiness_signatures_verified=False),
+    lambda x: x["runtime_admission"].update(source_artifacts_rehashed_from_clean_source_commit=False),
+    lambda x: x["runtime_admission"].update(live_runner_activation_required=False),
     lambda x: x["budget"].update(maximum_spend_usd_cents=1),
     lambda x: x["network"].update(raw_endpoints_embedded=True),
     lambda x: x["network"].update(overlay_credentials_embedded=True),

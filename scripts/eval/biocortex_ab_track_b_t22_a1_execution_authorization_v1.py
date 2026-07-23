@@ -28,14 +28,27 @@ COUNTERSIGNATURE_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_attes
 RUNTIME_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_private_runtime_contracts_v1.py"
 PREPARATION_AUTHORIZATION_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_runtime_preparation_authorization_v1.py"
 MATERIAL_PREPARER_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_runtime_material_preparer_v1.py"
+READINESS_SOURCE = ROOT / "scripts/eval/biocortex_ab_track_b_t22_a1_domain_runtime_readiness_v1.py"
 SCHEMA_PATH = ROOT / "docs/design/fixtures/biocortex-ab-track-b-t22-a1-distributed-execution-contract-schema-v1.json"
-EXPECTED_SCHEMA_SHA256 = "2ef4bcae59c8eb3ee65611e592e816eaee80d9b977d6c9c4c37c14c3eb4f73fc"
+EXPECTED_SCHEMA_SHA256 = "f1738c7b4d4eb7749739a0f73ca599bab2577a40c62681527f78b24a28655426"
 EXECUTION_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/distributed-execution-contract/v1\0"
 ADMISSION_RECEIPT_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/execution-admission-receipt/v1\0"
 TERMINAL_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/execution-admission-terminal/v1\0"
 SIGNATURE_NAMESPACE = "agent-bridge-t22-a1-owner-v1"
 MAX_JSON_BYTES = 256 * 1024
 MAX_SIGNATURE_BYTES = 64 * 1024
+SOURCE_ARTIFACT_SET_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/source-artifact-set/v1\0"
+READINESS_SET_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/domain-runtime-readiness-set/v1\0"
+SOURCE_ARTIFACT_PATHS = (
+    ("source_bound_runner", "scripts/eval/biocortex_ab_track_b_t22_a1_source_bound_runner_v1.py"),
+    ("domain_workload_plan", "scripts/eval/biocortex_ab_track_b_t22_a1_domain_workload_plan_v1.py"),
+    ("domain_agent_session", "scripts/eval/biocortex_ab_track_b_t22_a1_domain_agent_session_v1.py"),
+    ("domain_executor_core", "scripts/eval/biocortex_ab_track_b_t22_a1_domain_executor_core_v1.py"),
+    ("mtls_transport", "scripts/eval/biocortex_ab_track_b_t22_a1_mtls_transport_v1.py"),
+    ("evidence_compiler", "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_compiler_v1.py"),
+    ("evidence_writer", "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_writer_v1.py"),
+    ("execution_consumer", "scripts/eval/biocortex_ab_track_b_t22_a1_execution_consumer_v1.py"),
+)
 # This may become True only in the same reviewed source commit that contains
 # the cross-host runner, three host-readiness validators, credential-placement
 # proof, and terminal evidence builder. Synthetic KATs opt in explicitly.
@@ -83,6 +96,10 @@ def load_material_preparer_module():
     return load_module("t22a1_material_for_execution_authorization", MATERIAL_PREPARER_SOURCE)
 
 
+def load_readiness_module():
+    return load_module("t22a1_readiness_for_execution_authorization", READINESS_SOURCE)
+
+
 def canonical(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
@@ -110,6 +127,19 @@ def contract_digest(value: dict) -> str:
     unsigned = dict(value)
     unsigned.pop("content_sha256", None)
     return digest(EXECUTION_DOMAIN, unsigned)
+
+
+def collect_source_artifacts() -> tuple[list[dict], str]:
+    rows: list[dict] = []
+    for name, relative_path in SOURCE_ARTIFACT_PATHS:
+        path = ROOT / relative_path
+        require(path.is_file() and not path.is_symlink(), "E_EXECUTION_SOURCE_ARTIFACT_FILE")
+        rows.append({
+            "name": name, "path": relative_path,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        })
+    require(len({row["name"] for row in rows}) == len(rows) and len({row["path"] for row in rows}) == len(rows), "E_EXECUTION_SOURCE_ARTIFACT_SET")
+    return rows, digest(SOURCE_ARTIFACT_SET_DOMAIN, rows)
 
 
 def load_inputs() -> tuple[object, object, object, object, object, object, dict, dict, dict]:
@@ -196,6 +226,31 @@ def validate_execution_contract(
     require(private["private_endpoint_manifest_schema_sha256"] == preflight.EXPECTED_ENDPOINT_MANIFEST_SCHEMA_SHA256, "E_EXECUTION_ENDPOINT_SCHEMA")
     require(private["runtime_credential_manifest_schema_sha256"] == preflight.EXPECTED_CREDENTIAL_MANIFEST_SCHEMA_SHA256, "E_EXECUTION_CREDENTIAL_SCHEMA")
     require(private["domain_agent_message_schema_sha256"] == preflight.EXPECTED_AGENT_MESSAGE_SCHEMA_SHA256, "E_EXECUTION_AGENT_SCHEMA")
+    runtime_admission = value["runtime_admission"]
+    require(runtime_admission["domain_runtime_readiness_schema_sha256"] == preflight.EXPECTED_DOMAIN_RUNTIME_READINESS_SCHEMA_SHA256, "E_EXECUTION_READINESS_SCHEMA")
+    require(
+        [row["domain_id"] for row in runtime_admission["packet_bindings"]] == ["domain-1", "domain-2", "domain-3"]
+        and [row["domain_id"] for row in runtime_admission["signature_bindings"]] == ["domain-1", "domain-2", "domain-3"],
+        "E_EXECUTION_READINESS_ORDER",
+    )
+    readiness_payload = {
+        "source_commit": value["source_commit"], "run_id": value["run_id"],
+        "attestation_set_sha256": admission["exact_three_domain_attestation_packet_set_sha256"],
+        "owner_countersigned_attestation_set_receipt_sha256": admission["owner_countersigned_attestation_set_receipt_sha256"],
+        "private_endpoint_manifest_content_sha256": private["private_endpoint_manifest_content_sha256"],
+        "runtime_credential_manifest_content_sha256": private["runtime_credential_manifest_content_sha256"],
+        "runtime_preparation_terminal_receipt_sha256": private["runtime_preparation_terminal_receipt_sha256"],
+        "packets": runtime_admission["packet_bindings"],
+        "signatures": runtime_admission["signature_bindings"],
+    }
+    require(runtime_admission["runtime_readiness_set_sha256"] == digest(READINESS_SET_DOMAIN, readiness_payload), "E_EXECUTION_READINESS_SET_BINDING")
+    expected_sources, expected_source_set_sha256 = collect_source_artifacts()
+    require(
+        runtime_admission["source_artifacts"] == expected_sources
+        and runtime_admission["source_artifact_set_sha256"] == expected_source_set_sha256,
+        "E_EXECUTION_SOURCE_ARTIFACT_BINDING",
+    )
+    require(expires <= parse_time(runtime_admission["earliest_runtime_readiness_expires_at"], "E_EXECUTION_READINESS_EXPIRY"), "E_EXECUTION_READINESS_EXPIRY")
     evidence = value["evidence_contract"]
     require(evidence["distributed_event_schema_sha256"] == preflight.EXPECTED_EVENT_SCHEMA_SHA256, "E_EXECUTION_EVENT_SCHEMA")
     require(evidence["terminal_evidence_schema_sha256"] == preflight.EXPECTED_TERMINAL_SCHEMA_SHA256, "E_EXECUTION_TERMINAL_SCHEMA")
@@ -343,6 +398,40 @@ def validate_budget_against_packets(budget: dict, packets: list[dict]) -> None:
     require(budget["region"] == host["region"] and budget["zone"] == host["zone"], "E_EXECUTION_CLOUD_LOCATION_BINDING")
 
 
+def validate_runtime_readiness_evidence(
+    readiness_bundle: Path,
+    attestation_bundle: Path,
+    source_commit: str,
+    run_id: str,
+    contract: dict,
+    proposal: dict,
+    admitted_set_receipt_sha256: str,
+    endpoint: dict,
+    credential: dict,
+    preparation_terminal_sha256: str,
+    now: datetime,
+) -> dict:
+    readiness = load_readiness_module()
+    try:
+        receipt = readiness.verify_bundle(
+            readiness_bundle, attestation_bundle, source_commit, run_id,
+            contract, proposal, admitted_set_receipt_sha256, endpoint,
+            credential, preparation_terminal_sha256, now,
+        )
+    except RuntimeError as error:
+        raise SafeFailure(str(error)) from error
+    require(
+        receipt["status"] == "THREE_DOMAIN_RUNTIME_READINESS_SET_VERIFIED_NON_EXECUTING"
+        and receipt["source_commit"] == source_commit and receipt["run_id"] == run_id
+        and receipt["owner_countersigned_attestation_set_receipt_sha256"] == admitted_set_receipt_sha256
+        and receipt["private_endpoint_manifest_content_sha256"] == endpoint["content_sha256"]
+        and receipt["runtime_credential_manifest_content_sha256"] == credential["content_sha256"]
+        and receipt["runtime_preparation_terminal_receipt_sha256"] == preparation_terminal_sha256,
+        "E_EXECUTION_READINESS_BINDING",
+    )
+    return receipt
+
+
 def build_execution_contract(
     anchor: dict,
     contract: dict,
@@ -362,6 +451,7 @@ def build_execution_contract(
     endpoint: dict,
     credential: dict,
     preparation_signature_sha256: str,
+    readiness_receipt: dict,
 ) -> dict:
     countersignature = load_countersignature_module()
     collection = countersignature.load_collection_module()
@@ -372,13 +462,15 @@ def build_execution_contract(
     run_id = preparation_challenge["target"]["run_id"]
     planned_expiry = parse_time(preparation_challenge["target"]["planned_execution_expires_at"], "E_EXECUTION_PLANNED_EXPIRY")
     attestation_expiry = parse_time(admitted_receipt["earliest_attestation_expires_at"], "E_EXECUTION_ATTESTATION_EXPIRY")
-    expires = min(issued_at + timedelta(seconds=maximum_runtime_seconds), planned_expiry, attestation_expiry)
+    readiness_expiry = parse_time(readiness_receipt["earliest_readiness_expires_at"], "E_EXECUTION_READINESS_EXPIRY")
+    expires = min(issued_at + timedelta(seconds=maximum_runtime_seconds), planned_expiry, attestation_expiry, readiness_expiry)
     require(issued_at < expires, "E_EXECUTION_EXPIRY_WINDOW")
     packet_by_id = {packet["domain_id"]: packet for packet in packets}
     require([domain["hostname"] for domain in endpoint["domains"]] == [packet_by_id[f"domain-{number}"]["host_identity"]["hostname"] for number in (1, 2, 3)], "E_EXECUTION_ENDPOINT_HOST_BINDING")
     packet_hash = {row["domain_id"]: row["attestation_sha256"] for row in admitted_receipt["packet_bindings"]}
     signatures = {row["domain_id"]: row for row in admitted_receipt["signature_bindings"]}
     preflight = collection.load_preflight_module()
+    source_artifacts, source_artifact_set_sha256 = collect_source_artifacts()
     root = artifact_root.resolve(strict=False)
     value = {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.distributed_execution_contract.v1",
@@ -462,6 +554,20 @@ def build_execution_contract(
             "credentials_read_only_after_owner_signature": True, "domain_message_signatures_required": True,
             "agent_listeners_bind_exact_overlay_ip_only": True, "arbitrary_remote_shell_allowed": False,
             "raw_endpoint_or_credential_manifest_in_repository_or_receipts_allowed": False,
+        },
+        "runtime_admission": {
+            "domain_runtime_readiness_schema_path": "docs/design/fixtures/biocortex-ab-track-b-t22-a1-domain-runtime-readiness-schema-v1.json",
+            "domain_runtime_readiness_schema_sha256": preflight.EXPECTED_DOMAIN_RUNTIME_READINESS_SCHEMA_SHA256,
+            "runtime_readiness_set_sha256": readiness_receipt["runtime_readiness_set_sha256"],
+            "earliest_runtime_readiness_expires_at": readiness_receipt["earliest_readiness_expires_at"],
+            "packet_bindings": readiness_receipt["packet_bindings"],
+            "signature_bindings": readiness_receipt["signature_bindings"],
+            "source_artifacts": source_artifacts,
+            "source_artifact_set_sha256": source_artifact_set_sha256,
+            "all_three_runtime_readiness_packets_current": True,
+            "all_three_runtime_readiness_signatures_verified": True,
+            "source_artifacts_rehashed_from_clean_source_commit": True,
+            "live_runner_activation_required": True,
         },
         "topology": {
             "domains": [
@@ -617,7 +723,13 @@ def validate_admission_receipt(value: object, execution: dict, now: datetime) ->
         "private_endpoint_manifest_content_sha256",
         "runtime_credential_manifest_content_sha256",
         "coordinator_runtime_public_key_sha256",
+        "runtime_readiness_set_verification_receipt_sha256",
+        "runtime_readiness_set_sha256",
+        "source_artifact_set_sha256",
         "all_three_domain_attestations_reverified_current",
+        "all_three_runtime_readiness_packets_reverified_current",
+        "all_three_runtime_readiness_signatures_reverified",
+        "source_artifacts_rehashed_from_clean_source_commit",
         "owner_set_countersignature_reverified",
         "owner_runtime_preparation_signature_reverified",
         "owner_execution_signature_verified",
@@ -640,14 +752,24 @@ def validate_admission_receipt(value: object, execution: dict, now: datetime) ->
         "owner_execution_signature_sha256", "owner_countersigned_attestation_set_receipt_sha256",
         "runtime_preparation_terminal_receipt_sha256", "private_endpoint_manifest_content_sha256",
         "runtime_credential_manifest_content_sha256", "coordinator_runtime_public_key_sha256",
+        "runtime_readiness_set_verification_receipt_sha256", "source_artifact_set_sha256",
+        "runtime_readiness_set_sha256",
     ):
         require(attestation.is_sha256(value[field]), "E_EXECUTION_ADMISSION_RECEIPT_DIGEST")
     require(all(value[field] is True for field in (
         "all_three_domain_attestations_reverified_current", "owner_set_countersignature_reverified",
+        "all_three_runtime_readiness_packets_reverified_current",
+        "all_three_runtime_readiness_signatures_reverified",
+        "source_artifacts_rehashed_from_clean_source_commit",
         "owner_runtime_preparation_signature_reverified", "owner_execution_signature_verified",
         "credential_files_read_only_after_owner_execution_signature", "all_credential_files_verified",
         "one_execution_per_admission_receipt", "execution_authorized",
     )), "E_EXECUTION_ADMISSION_RECEIPT_VERIFICATION")
+    require(
+        value["runtime_readiness_set_sha256"] == execution["runtime_admission"]["runtime_readiness_set_sha256"]
+        and value["source_artifact_set_sha256"] == execution["runtime_admission"]["source_artifact_set_sha256"],
+        "E_EXECUTION_ADMISSION_RECEIPT_RUNTIME_BINDING",
+    )
     require(value["certificate_count"] == value["private_key_count"] == 5, "E_EXECUTION_ADMISSION_RECEIPT_COUNTS")
     require(value["automatic_retry_allowed"] is False and value["raw_endpoint_or_credential_values_in_receipt"] is False, "E_EXECUTION_ADMISSION_RECEIPT_BOUNDARY")
     require(value["network_accessed"] is False and value["external_hosts_contacted"] == value["listeners_started"] == 0, "E_EXECUTION_ADMISSION_RECEIPT_NETWORK")
@@ -681,6 +803,7 @@ def admit(
     preparation_terminal_path: Path,
     endpoint_manifest_path: Path,
     credential_manifest_path: Path,
+    readiness_bundle: Path,
 ) -> dict:
     require(EXECUTION_ACTIVATION_READY, "E_EXECUTION_ACTIVATION_NOT_READY")
     countersignature, collection, _attestation, runtime, _preparation, material, contract, proposal, schema = load_inputs()
@@ -707,6 +830,11 @@ def admit(
             endpoint_manifest_path, credential_manifest_path, source_commit, now,
             admitted["attestation_set_sha256"], admitted["content_sha256"],
         )
+        readiness_receipt = validate_runtime_readiness_evidence(
+            readiness_bundle, bundle, source_commit, challenge["target"]["run_id"],
+            contract, proposal, admitted["content_sha256"], endpoint, credential,
+            preparation_terminal["content_sha256"], now,
+        )
         expected = build_execution_contract(
             anchor, contract, proposal, schema, source_commit,
             parse_time(execution["issued_at"], "E_EXECUTION_ISSUED_AT"),
@@ -714,6 +842,7 @@ def admit(
             execution["fault"]["target_domain_id"], execution["budget"], admitted,
             packets, set_signature_sha256, challenge,
             preparation_terminal, endpoint, credential, preparation_signature_sha256,
+            readiness_receipt,
         )
         require(execution == expected, "E_EXECUTION_REBUILT_CONTRACT_MISMATCH")
         credential_files_read = True
@@ -729,7 +858,13 @@ def admit(
             "private_endpoint_manifest_content_sha256": endpoint["content_sha256"],
             "runtime_credential_manifest_content_sha256": credential["content_sha256"],
             "coordinator_runtime_public_key_sha256": execution["private_runtime"]["coordinator_runtime_public_key_sha256"],
+            "runtime_readiness_set_verification_receipt_sha256": readiness_receipt["content_sha256"],
+            "runtime_readiness_set_sha256": readiness_receipt["runtime_readiness_set_sha256"],
+            "source_artifact_set_sha256": execution["runtime_admission"]["source_artifact_set_sha256"],
             "all_three_domain_attestations_reverified_current": True,
+            "all_three_runtime_readiness_packets_reverified_current": True,
+            "all_three_runtime_readiness_signatures_reverified": True,
+            "source_artifacts_rehashed_from_clean_source_commit": True,
             "owner_set_countersignature_reverified": True,
             "owner_runtime_preparation_signature_reverified": True,
             "owner_execution_signature_verified": True,
@@ -857,6 +992,7 @@ def add_private_evidence_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--runtime-preparation-terminal", type=Path, required=True)
     parser.add_argument("--private-endpoint-manifest", type=Path, required=True)
     parser.add_argument("--runtime-credential-manifest", type=Path, required=True)
+    parser.add_argument("--runtime-readiness-bundle", type=Path, required=True)
 
 
 def main() -> None:
@@ -912,6 +1048,13 @@ def main() -> None:
             arguments.runtime_credential_manifest.resolve(strict=True),
             source_commit, now, admitted["attestation_set_sha256"], admitted["content_sha256"],
         )
+        readiness_receipt = validate_runtime_readiness_evidence(
+            arguments.runtime_readiness_bundle.resolve(strict=True),
+            arguments.attestation_bundle.resolve(strict=True), source_commit,
+            challenge["target"]["run_id"], contract, proposal,
+            admitted["content_sha256"], endpoint, credential,
+            terminal["content_sha256"], now,
+        )
         artifact_root = arguments.artifact_root.resolve(strict=True)
         require(
             artifact_root == Path(challenge["target"]["private_artifact_root"]).resolve(strict=True),
@@ -923,6 +1066,7 @@ def main() -> None:
             arguments.fault_target_domain, budget_from_arguments(arguments), admitted,
             packets, set_signature_sha256, challenge, terminal,
             endpoint, credential, preparation_signature_sha256,
+            readiness_receipt,
         )
         expected_output = artifact_root / "authorizations" / "final-execution-contract.json"
         require(arguments.out.is_absolute() and arguments.out.resolve(strict=False) == expected_output, "E_EXECUTION_CONTRACT_OUTPUT_PATH")
@@ -949,6 +1093,7 @@ def main() -> None:
         arguments.runtime_preparation_terminal.resolve(strict=True),
         arguments.private_endpoint_manifest.resolve(strict=True),
         arguments.runtime_credential_manifest.resolve(strict=True),
+        arguments.runtime_readiness_bundle.resolve(strict=True),
     )
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
 
