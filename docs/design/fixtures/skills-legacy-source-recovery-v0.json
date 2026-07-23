@@ -1,0 +1,23 @@
+{
+  "schema_version": "skills-legacy-source-recovery-v0",
+  "sources": [
+    {
+      "source": "ab-house-rules",
+      "status": "unresolved",
+      "evidence_required": "A stable local checkout path plus an exact content and revision receipt, or a reviewed upstream origin and commit.",
+      "policy": "Keep provenance unknown. Do not admit, refresh, reindex, or auto-enable from this declaration."
+    },
+    {
+      "source": "skills",
+      "status": "unresolved",
+      "evidence_required": "A per-record source mapping with reviewed upstream origin and commit evidence; aggregate naming alone is insufficient.",
+      "policy": "Keep provenance unknown. Do not infer a common origin, overwrite records, or change routing from this declaration."
+    },
+    {
+      "source": "taste-skill",
+      "status": "unresolved",
+      "evidence_required": "A stable local checkout path plus an exact content and revision receipt, or a reviewed upstream origin and commit.",
+      "policy": "Keep provenance unknown. Do not admit, refresh, reindex, or auto-enable from this declaration."
+    }
+  ]
+}

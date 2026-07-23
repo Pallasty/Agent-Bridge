@@ -34,6 +34,7 @@ use ab_store::{
     MemoryEdge, MemoryListSort, MemoryRecord, MemorySearchHit, SqliteStore, StateStore,
 };
 use anyhow::{anyhow, bail, Context, Result};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -46,6 +47,16 @@ const ROUTE_STRONG_SEMANTIC_COSINE: f32 = 0.50;
 /// preference over broad document-related semantic matches. This only affects
 /// the final candidate order; it never installs or executes a skill.
 const ROUTE_FILE_FORMATS: &[&str] = &["pdf", "docx", "xlsx", "pptx"];
+
+/// Checked-in, observation-only quality cases. The evaluator never feeds these
+/// labels back into retrieval or ranking.
+const ROUTE_QUALITY_CORPUS: &str =
+    include_str!("../../../docs/design/fixtures/skills-route-quality-query-cases-v0.json");
+
+/// The legacy aggregate was indexed before Git provenance existed. These
+/// declarations make that absence visible without inventing an upstream.
+const LEGACY_SOURCE_RECOVERY_MANIFEST: &str =
+    include_str!("../../../docs/design/fixtures/skills-legacy-source-recovery-v0.json");
 
 /// Curated seed corpus (Phase A). All known to publish Claude Code skills
 /// in the canonical `<skill-name>/SKILL.md` layout (or a close variant).
@@ -748,6 +759,124 @@ pub async fn run_route(query: &str, limit: usize, body_chars: usize, json: bool)
     Ok(())
 }
 
+/// Evaluate the current router against a small checked-in bilingual corpus.
+/// This is an offline observation surface: it never changes retrieval order,
+/// source provenance, memory, or Skill execution authority.
+pub async fn run_route_eval(limit: usize, json: bool) -> Result<()> {
+    let corpus = parse_route_quality_corpus()?;
+    let limit = limit.clamp(1, 20);
+    let store = open_store().await?;
+    let mut cases = Vec::with_capacity(corpus.cases.len());
+    let mut required = 0usize;
+    let mut required_matched = 0usize;
+    let mut expected_gaps = 0usize;
+    let mut resolved_gaps = 0usize;
+
+    for case in corpus.cases {
+        let hits = route_skill_entries_strict(&store, &case.query, limit).await?;
+        let returned_keys: Vec<String> =
+            hits.iter().map(|hit| hit.hit.record.key.clone()).collect();
+        let matched_keys: Vec<String> = case
+            .expected_keys
+            .iter()
+            .filter(|key| returned_keys.iter().any(|returned| returned == *key))
+            .cloned()
+            .collect();
+        let outcome = match case.expectation.as_str() {
+            "must_match" => {
+                required += 1;
+                if !matched_keys.is_empty() {
+                    required_matched += 1;
+                }
+                route_quality_outcome(&case.expectation, !matched_keys.is_empty())?
+            }
+            "known_gap" => {
+                expected_gaps += 1;
+                if !matched_keys.is_empty() {
+                    resolved_gaps += 1;
+                }
+                route_quality_outcome(&case.expectation, !matched_keys.is_empty())?
+            }
+            other => bail!("unsupported route quality expectation {other:?}"),
+        };
+        cases.push(serde_json::json!({
+            "id": case.id,
+            "language": case.language,
+            "query": case.query,
+            "expectation": case.expectation,
+            "expected_keys": case.expected_keys,
+            "returned_keys": returned_keys,
+            "matched_keys": matched_keys,
+            "outcome": outcome,
+        }));
+    }
+
+    let payload = serde_json::json!({
+        "schema_version": corpus.schema_version,
+        "mode": "offline_observation_only",
+        "limit": limit,
+        "summary": {
+            "required_cases": required,
+            "required_matched": required_matched,
+            "required_recall_at_k": if required == 0 { 0.0 } else { required_matched as f64 / required as f64 },
+            "known_gap_cases": expected_gaps,
+            "known_gap_cases_now_matched": resolved_gaps,
+            "policy_change": "none",
+        },
+        "cases": cases,
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        let summary = &payload["summary"];
+        println!(
+            "[route-eval] required recall@{limit}: {}/{}; known gaps: {} ({} now matched); policy change: none",
+            summary["required_matched"], summary["required_cases"], summary["known_gap_cases"], summary["known_gap_cases_now_matched"],
+        );
+        for case in payload["cases"].as_array().into_iter().flatten() {
+            println!(
+                "- {} [{}]: {}",
+                case["id"], case["language"], case["outcome"]
+            );
+        }
+    }
+    Ok(())
+}
+
+fn route_quality_outcome(expectation: &str, matched: bool) -> Result<&'static str> {
+    match (expectation, matched) {
+        ("must_match", true) => Ok("matched"),
+        ("must_match", false) => Ok("missed"),
+        ("known_gap", true) => Ok("now_matched"),
+        ("known_gap", false) => Ok("still_missing"),
+        (other, _) => bail!("unsupported route quality expectation {other:?}"),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteQualityCorpus {
+    schema_version: String,
+    cases: Vec<RouteQualityCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteQualityCase {
+    id: String,
+    language: String,
+    query: String,
+    expectation: String,
+    expected_keys: Vec<String>,
+}
+
+fn parse_route_quality_corpus() -> Result<RouteQualityCorpus> {
+    let corpus: RouteQualityCorpus = serde_json::from_str(ROUTE_QUALITY_CORPUS)
+        .context("parse embedded Skills route quality corpus")?;
+    if corpus.schema_version != "skills-route-quality-v0" || corpus.cases.is_empty() {
+        bail!("invalid Skills route quality corpus")
+    }
+    Ok(corpus)
+}
+
 /// Build the JSON payload used by both `agent-bridge skills route` and MCP.
 pub async fn route_payload_for_store(
     store: &dyn StateStore,
@@ -771,6 +900,22 @@ async fn route_skill_entries(
 ) -> Result<Vec<RoutedSkillHit>> {
     let hits = route_skill_hits(store, query, limit).await?;
     let feedback = route_feedback_for_hits(store, &hits).await;
+    Ok(route_prioritize_explicit_format_routed(
+        query,
+        route_apply_feedback(hits, &feedback),
+    ))
+}
+
+/// Equivalent retrieval path for the offline evaluator. Unlike the runtime
+/// router, it propagates backend failures so an unhealthy index cannot be
+/// misreported as a routing-quality regression.
+async fn route_skill_entries_strict(
+    store: &dyn StateStore,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<RoutedSkillHit>> {
+    let hits = route_skill_hits_strict(store, query, limit).await?;
+    let feedback = route_feedback_for_hits_strict(store, &hits).await?;
     Ok(route_prioritize_explicit_format_routed(
         query,
         route_apply_feedback(hits, &feedback),
@@ -810,6 +955,44 @@ pub async fn route_skill_hits(
             .memory_search(format, &tag_filter, route_candidate_limit(limit) as u32)
             .await
             .unwrap_or_default();
+        fts_hits.extend(format_hits);
+    }
+    let candidates = route_merge_hits(semantic_hits, fts_hits, route_candidate_limit(limit));
+    Ok(route_prioritize_explicit_format(query, candidates)
+        .into_iter()
+        .take(limit)
+        .collect())
+}
+
+async fn route_skill_hits_strict(
+    store: &dyn StateStore,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<MemorySearchHit>> {
+    let overfetch = route_retrieval_limit(limit);
+    let formats = requested_file_formats(query);
+    let semantic_hits = store
+        .memory_search_semantic(query, overfetch, 0.25_f32)
+        .await
+        .context("route evaluation semantic search failed")?;
+    let tag_filter = vec!["skill".to_string()];
+    let mut fts_hits = store
+        .memory_search(query, &tag_filter, overfetch)
+        .await
+        .context("route evaluation FTS search failed")?;
+    if fts_hits.is_empty() {
+        if let Some(relaxed) = relaxed_fts_query(query) {
+            fts_hits = store
+                .memory_search(&relaxed, &tag_filter, overfetch)
+                .await
+                .context("route evaluation relaxed FTS search failed")?;
+        }
+    }
+    for format in &formats {
+        let format_hits = store
+            .memory_search(format, &tag_filter, route_candidate_limit(limit) as u32)
+            .await
+            .context("route evaluation format FTS search failed")?;
         fts_hits.extend(format_hits);
     }
     let candidates = route_merge_hits(semantic_hits, fts_hits, route_candidate_limit(limit));
@@ -959,6 +1142,25 @@ async fn route_feedback_for_hits(
         }
     }
     out
+}
+
+async fn route_feedback_for_hits_strict(
+    store: &dyn StateStore,
+    hits: &[MemorySearchHit],
+) -> Result<BTreeMap<String, SkillRouteFeedback>> {
+    let mut out = BTreeMap::new();
+    for hit in hits {
+        let key = &hit.record.key;
+        let edges = store
+            .memory_neighbors(key)
+            .await
+            .with_context(|| format!("route evaluation feedback lookup failed for {key}"))?;
+        let stats = route_feedback_stats_from_edges(key, &edges);
+        if stats.count > 0 {
+            out.insert(key.clone(), stats);
+        }
+    }
+    Ok(out)
 }
 
 fn route_feedback_stats_from_edges(skill_key: &str, edges: &[MemoryEdge]) -> SkillRouteFeedback {
@@ -1445,33 +1647,86 @@ pub async fn run_list(limit: usize) -> Result<()> {
 
 /// Persist a source-level review record. This consumes operator-reviewed
 /// evidence and never changes routing or execution authority.
-pub async fn run_admit(source: &str, spdx: &str, verdict: &str, evidence_url: Option<&str>, note: Option<&str>) -> Result<()> {
+pub async fn run_admit(
+    source: &str,
+    spdx: &str,
+    verdict: &str,
+    evidence_url: Option<&str>,
+    note: Option<&str>,
+) -> Result<()> {
     let verdict = SourceAdmissionVerdict::parse(verdict)?;
     let spdx = spdx.trim();
-    if spdx.is_empty() || !spdx.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
+    if spdx.is_empty()
+        || !spdx
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
+    {
         bail!("SPDX identifier must contain only ASCII letters, digits, '.', '-', or '+'");
     }
     let store = open_store().await?;
-    let rows = store.list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX).await.context("list_memories failed")?;
+    let rows = store
+        .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
+        .await
+        .context("list_memories failed")?;
     let inventory = skill_source_inventory(&rows, &BTreeMap::new());
-    let summary = inventory.iter().find(|item| item.source == source)
+    let summary = inventory
+        .iter()
+        .find(|item| item.source == source)
         .ok_or_else(|| anyhow!("no indexed Skills found for source {:?}", source))?;
     if summary.git_origins.len() != 1 || summary.git_commits.len() != 1 {
-        bail!("source {:?} needs exactly one origin and commit before admission", source);
+        bail!(
+            "source {:?} needs exactly one origin and commit before admission",
+            source
+        );
     }
     let now = unix_now();
     let mut tags = vec![
-        "skill_source_admission".to_string(), format!("src:{}", source),
-        format!("admission:{}", verdict.as_str()), format!("spdx:{}", spdx),
+        "skill_source_admission".to_string(),
+        format!("src:{}", source),
+        format!("admission:{}", verdict.as_str()),
+        format!("spdx:{}", spdx),
         format!("git_origin:{}", summary.git_origins.iter().next().unwrap()),
         format!("git_commit:{}", summary.git_commits.iter().next().unwrap()),
     ];
-    if let Some(branch) = summary.git_branches.iter().next() { tags.push(format!("git_branch:{}", branch)); }
-    if let Some(url) = evidence_url.filter(|url| !url.trim().is_empty()) { tags.push(format!("evidence_url:{}", tag_safe_value(url.trim()))); }
-    let content = format!("Source admission for {source}.\n\nVerdict: {}\nSPDX: {spdx}\nEvidence: {}\nNote: {}", verdict.as_str(), evidence_url.unwrap_or("not provided"), note.unwrap_or("not provided").trim());
-    let record = MemoryRecord { key: format!("skill_source_admission:{source}"), kind: "skill_source_admission".to_string(), content, tags, related_keys: Vec::new(), scope: Some("global".to_string()), created_at: now, updated_at: now, last_accessed_at: now, access_count: 0, importance: 0.7, status: "active".to_string(), trigger_pattern: None, superseded_by: None };
-    store.memory_save(&record).await.context("save source admission")?;
-    println!("[skills] admitted source={} verdict={} spdx={} commit={}", source, verdict.as_str(), spdx, summary.git_commits.iter().next().unwrap());
+    if let Some(branch) = summary.git_branches.iter().next() {
+        tags.push(format!("git_branch:{}", branch));
+    }
+    if let Some(url) = evidence_url.filter(|url| !url.trim().is_empty()) {
+        tags.push(format!("evidence_url:{}", tag_safe_value(url.trim())));
+    }
+    let content = format!(
+        "Source admission for {source}.\n\nVerdict: {}\nSPDX: {spdx}\nEvidence: {}\nNote: {}",
+        verdict.as_str(),
+        evidence_url.unwrap_or("not provided"),
+        note.unwrap_or("not provided").trim()
+    );
+    let record = MemoryRecord {
+        key: format!("skill_source_admission:{source}"),
+        kind: "skill_source_admission".to_string(),
+        content,
+        tags,
+        related_keys: Vec::new(),
+        scope: Some("global".to_string()),
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: now,
+        access_count: 0,
+        importance: 0.7,
+        status: "active".to_string(),
+        trigger_pattern: None,
+        superseded_by: None,
+    };
+    store
+        .memory_save(&record)
+        .await
+        .context("save source admission")?;
+    println!(
+        "[skills] admitted source={} verdict={} spdx={} commit={}",
+        source,
+        verdict.as_str(),
+        spdx,
+        summary.git_commits.iter().next().unwrap()
+    );
     Ok(())
 }
 
@@ -1482,9 +1737,17 @@ pub async fn run_sources(json: bool, limit: usize) -> Result<()> {
         .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
         .await
         .context("list_memories failed")?;
-    let admission_rows = store.list_memories(Some("skill_source_admission"), MemoryListSort::Recent, u32::MAX).await.context("list source admissions failed")?;
+    let admission_rows = store
+        .list_memories(
+            Some("skill_source_admission"),
+            MemoryListSort::Recent,
+            u32::MAX,
+        )
+        .await
+        .context("list source admissions failed")?;
     let admissions = source_admission_inventory(&admission_rows);
-    let sources = skill_source_inventory(&rows, &admissions);
+    let mut sources = skill_source_inventory(&rows, &admissions);
+    attach_legacy_source_recovery(&mut sources)?;
     let returned = if limit == 0 {
         sources.len()
     } else {
@@ -1543,6 +1806,13 @@ pub async fn run_sources(json: bool, limit: usize) -> Result<()> {
                 println!("  action: re-review this source before relying on its admission");
             }
         }
+        if let Some(recovery) = &s.recovery {
+            println!(
+                "  recovery: status={} provenance_change=none",
+                recovery.status
+            );
+            println!("  recovery policy: {}", recovery.policy);
+        }
         if !s.risks.is_empty() {
             println!("  risks: {}", display_counts(&s.risks));
         }
@@ -1577,7 +1847,14 @@ pub async fn run_audit(
         .filter(|r| filters.matches(r))
         .cloned()
         .collect();
-    let admission_rows = store.list_memories(Some("skill_source_admission"), MemoryListSort::Recent, u32::MAX).await.context("list source admissions failed")?;
+    let admission_rows = store
+        .list_memories(
+            Some("skill_source_admission"),
+            MemoryListSort::Recent,
+            u32::MAX,
+        )
+        .await
+        .context("list source admissions failed")?;
     let admissions = source_admission_inventory(&admission_rows);
     let sources = skill_source_inventory(&rows, &admissions);
     let source_index: BTreeMap<&str, &SkillSourceSummary> = sources
@@ -1814,11 +2091,15 @@ fn skill_audit_item_json(
         obj.insert(
             "source_admission".to_string(),
             source
-                .and_then(|source| source.admission.as_ref().map(|admission| {
-                    admission.to_json_with_freshness(
-                        source.admission_freshness.unwrap_or(AdmissionFreshness::Unknown),
-                    )
-                }))
+                .and_then(|source| {
+                    source.admission.as_ref().map(|admission| {
+                        admission.to_json_with_freshness(
+                            source
+                                .admission_freshness
+                                .unwrap_or(AdmissionFreshness::Unknown),
+                        )
+                    })
+                })
                 .unwrap_or(serde_json::Value::Null),
         );
     }
@@ -1826,7 +2107,11 @@ fn skill_audit_item_json(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SourceAdmissionVerdict { Approved, Quarantined, ReviewRequired }
+enum SourceAdmissionVerdict {
+    Approved,
+    Quarantined,
+    ReviewRequired,
+}
 
 impl SourceAdmissionVerdict {
     fn parse(value: &str) -> Result<Self> {
@@ -1838,7 +2123,11 @@ impl SourceAdmissionVerdict {
         }
     }
     fn as_str(self) -> &'static str {
-        match self { Self::Approved => "approved", Self::Quarantined => "quarantined", Self::ReviewRequired => "review-required" }
+        match self {
+            Self::Approved => "approved",
+            Self::Quarantined => "quarantined",
+            Self::ReviewRequired => "review-required",
+        }
     }
 }
 
@@ -1861,8 +2150,12 @@ impl AdmissionFreshness {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SkillSourceAdmission {
-    verdict: SourceAdmissionVerdict, spdx: String, evidence_url: Option<String>,
-    reviewed_at: i64, git_origin: Option<String>, git_commit: Option<String>,
+    verdict: SourceAdmissionVerdict,
+    spdx: String,
+    evidence_url: Option<String>,
+    reviewed_at: i64,
+    git_origin: Option<String>,
+    git_commit: Option<String>,
 }
 
 impl SkillSourceAdmission {
@@ -1874,10 +2167,32 @@ impl SkillSourceAdmission {
 fn source_admission_inventory(rows: &[MemoryRecord]) -> BTreeMap<String, SkillSourceAdmission> {
     let mut admissions = BTreeMap::new();
     for record in rows {
-        let (Some(source), Some(verdict), Some(spdx)) = (tag_value(&record.tags, "src:"), tag_value(&record.tags, "admission:"), tag_value(&record.tags, "spdx:")) else { continue; };
-        let Ok(verdict) = SourceAdmissionVerdict::parse(&verdict) else { continue; };
-        let candidate = SkillSourceAdmission { verdict, spdx, evidence_url: tag_value(&record.tags, "evidence_url:"), reviewed_at: record.updated_at, git_origin: tag_value(&record.tags, "git_origin:"), git_commit: tag_value(&record.tags, "git_commit:") };
-        if admissions.get(&source).is_none_or(|existing: &SkillSourceAdmission| candidate.reviewed_at >= existing.reviewed_at) { admissions.insert(source, candidate); }
+        let (Some(source), Some(verdict), Some(spdx)) = (
+            tag_value(&record.tags, "src:"),
+            tag_value(&record.tags, "admission:"),
+            tag_value(&record.tags, "spdx:"),
+        ) else {
+            continue;
+        };
+        let Ok(verdict) = SourceAdmissionVerdict::parse(&verdict) else {
+            continue;
+        };
+        let candidate = SkillSourceAdmission {
+            verdict,
+            spdx,
+            evidence_url: tag_value(&record.tags, "evidence_url:"),
+            reviewed_at: record.updated_at,
+            git_origin: tag_value(&record.tags, "git_origin:"),
+            git_commit: tag_value(&record.tags, "git_commit:"),
+        };
+        if admissions
+            .get(&source)
+            .is_none_or(|existing: &SkillSourceAdmission| {
+                candidate.reviewed_at >= existing.reviewed_at
+            })
+        {
+            admissions.insert(source, candidate);
+        }
     }
     admissions
 }
@@ -1897,6 +2212,7 @@ struct SkillSourceSummary {
     risks: BTreeMap<String, usize>,
     admission: Option<SkillSourceAdmission>,
     admission_freshness: Option<AdmissionFreshness>,
+    recovery: Option<LegacySourceRecovery>,
 }
 
 impl SkillSourceSummary {
@@ -1920,11 +2236,15 @@ impl SkillSourceSummary {
                     self.admission_freshness.unwrap_or(AdmissionFreshness::Unknown),
                 )
             }),
+            "recovery": self.recovery.as_ref().map(LegacySourceRecovery::to_json),
         })
     }
 }
 
-fn skill_source_inventory(rows: &[MemoryRecord], admissions: &BTreeMap<String, SkillSourceAdmission>) -> Vec<SkillSourceSummary> {
+fn skill_source_inventory(
+    rows: &[MemoryRecord],
+    admissions: &BTreeMap<String, SkillSourceAdmission>,
+) -> Vec<SkillSourceSummary> {
     let mut by_source: BTreeMap<String, SkillSourceSummary> = BTreeMap::new();
     for r in rows {
         let Some(source) = tag_value(&r.tags, "src:") else {
@@ -1993,6 +2313,58 @@ fn source_admission_freshness(
     } else {
         AdmissionFreshness::Stale
     }
+}
+
+fn attach_legacy_source_recovery(sources: &mut [SkillSourceSummary]) -> Result<()> {
+    let recovery = legacy_source_recovery_inventory()?;
+    for summary in sources {
+        summary.recovery = recovery.get(&summary.source).cloned();
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct LegacySourceRecovery {
+    source: String,
+    status: String,
+    evidence_required: String,
+    policy: String,
+}
+
+impl LegacySourceRecovery {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "status": self.status,
+            "evidence_required": self.evidence_required,
+            "policy": self.policy,
+            "provenance_change": "none",
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacySourceRecoveryManifest {
+    schema_version: String,
+    sources: Vec<LegacySourceRecovery>,
+}
+
+fn legacy_source_recovery_inventory() -> Result<BTreeMap<String, LegacySourceRecovery>> {
+    let manifest: LegacySourceRecoveryManifest =
+        serde_json::from_str(LEGACY_SOURCE_RECOVERY_MANIFEST)
+            .context("parse embedded legacy Skills source recovery manifest")?;
+    if manifest.schema_version != "skills-legacy-source-recovery-v0" {
+        bail!("invalid legacy Skills source recovery manifest")
+    }
+    let mut out = BTreeMap::new();
+    for entry in manifest.sources {
+        if entry.source.trim().is_empty() || entry.status != "unresolved" {
+            bail!("invalid legacy Skills source recovery entry")
+        }
+        if out.insert(entry.source.clone(), entry).is_some() {
+            bail!("duplicate legacy Skills source recovery entry")
+        }
+    }
+    Ok(out)
 }
 
 fn bump(map: &mut BTreeMap<String, usize>, key: String) {
@@ -4157,16 +4529,24 @@ mod tests {
         let mut admission = mk_skill("example/skills", 20);
         admission.kind = "skill_source_admission".to_string();
         admission.tags.extend([
-            "admission:approved".to_string(), "spdx:MIT".to_string(),
+            "admission:approved".to_string(),
+            "spdx:MIT".to_string(),
             "evidence_url:https://github.com/example/skills/blob/main/LICENSE".to_string(),
-            "git_origin:https://github.com/example/skills.git".to_string(), "git_commit:abc123".to_string(),
+            "git_origin:https://github.com/example/skills.git".to_string(),
+            "git_commit:abc123".to_string(),
         ]);
         let admissions = source_admission_inventory(&[admission]);
         let inventory = skill_source_inventory(&[skill.clone()], &admissions);
         let source = &inventory[0];
         assert_eq!(source.admission.as_ref().unwrap().spdx, "MIT");
-        assert_eq!(source.admission.as_ref().unwrap().verdict, SourceAdmissionVerdict::Approved);
-        assert_eq!(source.admission_freshness, Some(AdmissionFreshness::Current));
+        assert_eq!(
+            source.admission.as_ref().unwrap().verdict,
+            SourceAdmissionVerdict::Approved
+        );
+        assert_eq!(
+            source.admission_freshness,
+            Some(AdmissionFreshness::Current)
+        );
         assert!(tag_value(&skill.tags, "license:").is_none());
         let item = skill_audit_item_json(&skill, Some(source));
         assert_eq!(item["source_admission"]["spdx"], "MIT");
@@ -4188,21 +4568,110 @@ mod tests {
             source: "example/skills".to_string(),
             ..SkillSourceSummary::default()
         };
-        source.git_origins.insert("https://github.com/example/skills.git".to_string());
+        source
+            .git_origins
+            .insert("https://github.com/example/skills.git".to_string());
         source.git_commits.insert("abc123".to_string());
-        assert_eq!(source_admission_freshness(&source, &admission), AdmissionFreshness::Current);
+        assert_eq!(
+            source_admission_freshness(&source, &admission),
+            AdmissionFreshness::Current
+        );
 
         source.git_commits.insert("def456".to_string());
-        assert_eq!(source_admission_freshness(&source, &admission), AdmissionFreshness::Stale);
+        assert_eq!(
+            source_admission_freshness(&source, &admission),
+            AdmissionFreshness::Stale
+        );
 
         source.git_commits.clear();
-        assert_eq!(source_admission_freshness(&source, &admission), AdmissionFreshness::Unknown);
+        assert_eq!(
+            source_admission_freshness(&source, &admission),
+            AdmissionFreshness::Unknown
+        );
     }
 
     #[test]
     fn source_admission_verdict_is_closed_set() {
-        assert_eq!(SourceAdmissionVerdict::parse("quarantined").unwrap(), SourceAdmissionVerdict::Quarantined);
+        assert_eq!(
+            SourceAdmissionVerdict::parse("quarantined").unwrap(),
+            SourceAdmissionVerdict::Quarantined
+        );
         assert!(SourceAdmissionVerdict::parse("trusted").is_err());
+    }
+
+    #[test]
+    fn legacy_source_recovery_manifest_keeps_legacy_sources_unresolved() {
+        let recovery = legacy_source_recovery_inventory().unwrap();
+        assert_eq!(recovery.len(), 3);
+        for source in ["skills", "taste-skill", "ab-house-rules"] {
+            let entry = recovery.get(source).unwrap();
+            assert_eq!(entry.status, "unresolved");
+            assert!(entry.policy.contains("Keep provenance unknown"));
+        }
+    }
+
+    #[test]
+    fn legacy_source_recovery_attaches_to_matching_source_only() {
+        let mut sources = vec![
+            SkillSourceSummary {
+                source: "skills".to_string(),
+                ..SkillSourceSummary::default()
+            },
+            SkillSourceSummary {
+                source: "verified/source".to_string(),
+                ..SkillSourceSummary::default()
+            },
+        ];
+        attach_legacy_source_recovery(&mut sources).unwrap();
+        assert_eq!(sources[0].recovery.as_ref().unwrap().status, "unresolved");
+        assert!(sources[1].recovery.is_none());
+        assert_eq!(
+            sources[0].to_json()["recovery"]["provenance_change"],
+            "none"
+        );
+    }
+
+    #[test]
+    fn route_quality_outcomes_distinguish_gaps_from_recovery() {
+        assert_eq!(
+            route_quality_outcome("must_match", true).unwrap(),
+            "matched"
+        );
+        assert_eq!(
+            route_quality_outcome("must_match", false).unwrap(),
+            "missed"
+        );
+        assert_eq!(
+            route_quality_outcome("known_gap", true).unwrap(),
+            "now_matched"
+        );
+        assert_eq!(
+            route_quality_outcome("known_gap", false).unwrap(),
+            "still_missing"
+        );
+        assert!(route_quality_outcome("unexpected", false).is_err());
+    }
+
+    #[test]
+    fn route_quality_corpus_has_bilingual_required_and_gap_cases() {
+        let corpus = parse_route_quality_corpus().unwrap();
+        assert_eq!(corpus.schema_version, "skills-route-quality-v0");
+        assert!(corpus
+            .cases
+            .iter()
+            .any(|case| case.language == "en" && case.expectation == "must_match"));
+        assert!(corpus
+            .cases
+            .iter()
+            .any(|case| case.language == "zh" && case.expectation == "must_match"));
+        assert!(corpus
+            .cases
+            .iter()
+            .any(|case| case.expectation == "known_gap"));
+        assert!(corpus
+            .cases
+            .iter()
+            .all(|case| !case.expected_keys.is_empty()));
     }
 
     #[test]

@@ -4161,6 +4161,16 @@ enum SkillsOp {
         #[arg(long)]
         json: bool,
     },
+    /// Evaluate the current router against the checked-in bilingual quality corpus.
+    /// This is observation-only and never changes routing policy.
+    RouteEval {
+        /// Maximum routed Skills retained per query.
+        #[arg(long, default_value_t = 3)]
+        limit: usize,
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+    },
     /// Record whether a routed skill was used/helpful, and link that feedback into memory.
     Feedback {
         /// Skill memory key, usually copied from `skills route` / `skills_route`.
@@ -4654,6 +4664,7 @@ async fn real_main() -> Result<()> {
                 body_chars,
                 json,
             } => skills::run_route(query, *limit, *body_chars, *json).await,
+            SkillsOp::RouteEval { limit, json } => skills::run_route_eval(*limit, *json).await,
             SkillsOp::Feedback {
                 skill_key,
                 query,
@@ -4674,13 +4685,22 @@ async fn real_main() -> Result<()> {
             }
             SkillsOp::List { limit } => skills::run_list(*limit).await,
             SkillsOp::Sources { json, limit } => skills::run_sources(*json, *limit).await,
-            SkillsOp::Admit { source, spdx, verdict, evidence_url, note } => skills::run_admit(
+            SkillsOp::Admit {
                 source,
                 spdx,
                 verdict,
-                evidence_url.as_deref(),
-                note.as_deref(),
-            ).await,
+                evidence_url,
+                note,
+            } => {
+                skills::run_admit(
+                    source,
+                    spdx,
+                    verdict,
+                    evidence_url.as_deref(),
+                    note.as_deref(),
+                )
+                .await
+            }
             SkillsOp::Audit {
                 json,
                 src,

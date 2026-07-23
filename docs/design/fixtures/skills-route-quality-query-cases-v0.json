@@ -1,0 +1,47 @@
+{
+  "schema_version": "skills-route-quality-v0",
+  "cases": [
+    {
+      "id": "pdf-en",
+      "language": "en",
+      "query": "read, edit, and verify a PDF form",
+      "expectation": "must_match",
+      "expected_keys": ["skill:anthropics/skills/pdf"]
+    },
+    {
+      "id": "pdf-zh",
+      "language": "zh",
+      "query": "读取、编辑并核对 PDF 表单",
+      "expectation": "must_match",
+      "expected_keys": ["skill:anthropics/skills/pdf"]
+    },
+    {
+      "id": "slides-en",
+      "language": "en",
+      "query": "create a presentation from a project brief",
+      "expectation": "must_match",
+      "expected_keys": ["skill:daymade/claude-code-skills/slides-creator"]
+    },
+    {
+      "id": "rust-review-en",
+      "language": "en",
+      "query": "review a Rust service for security risks",
+      "expectation": "must_match",
+      "expected_keys": ["skill:Jeffallan/claude-skills/rust-engineer"]
+    },
+    {
+      "id": "slides-zh-known-gap",
+      "language": "zh",
+      "query": "根据项目简报制作演示文稿",
+      "expectation": "known_gap",
+      "expected_keys": ["skill:daymade/claude-code-skills/slides-creator"]
+    },
+    {
+      "id": "rust-review-zh-known-gap",
+      "language": "zh",
+      "query": "审查 Rust 服务的安全风险",
+      "expectation": "known_gap",
+      "expected_keys": ["skill:Jeffallan/claude-skills/rust-engineer"]
+    }
+  ]
+}
