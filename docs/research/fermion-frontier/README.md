@@ -99,10 +99,50 @@ above the frozen 67,108,864-byte cap; it therefore returns
 fresh-scope external-only replay pass with the identical manifest SHA-256
 `869008057db5eb93129aca801dce2dab458ec2cfc6f7fa2894bf04538cb4d79b`, 5,472,872,990 ns elapsed,
 98,095,104-byte cgroup peak, 33,546,240-byte RSS, zero swap and zero event deltas. This split replay
-is reproducibility evidence, not a committed terminal execution/resource receipt. The active next
-gate is
+is reproducibility evidence, not a committed terminal execution/resource receipt. At D16-F close,
+its next gate was
 `FRESH_EXCLUSIVE_PACKED_Q3_CONSUMER_IMPLEMENTATION_AND_BOUNDED_4096_PREFLIGHT_AUTHORIZATION`;
-neither bounded-preflight nor full-run execution is authorized.
+neither bounded-preflight nor full-run execution was authorized by D16-F.
+
+D17 then admitted packed C3 as the only q3 vector with complete custody and rejected q0--q4
+dual-vector materialization because q0--q2 were unavailable and the legacy q4 target remained
+quarantined. Its narrow status is `NO_GO_D17_Q0_TO_Q4_DUAL_VECTOR_CUSTODY_INCOMPLETE`; it opened
+only a fresh-exclusive packed-q3 bounded-preflight design. See
+`FH_L8_VECTOR_CUSTODY_D17_ZH.md`.
+
+The legacy D18 lane observed one 4,096-source fresh-scratch spill/merge with 868,786 spill records,
+424,682 partial targets and a matching naive aggregation. D18-C retains those counts and digest
+only as a non-authoritative reproducibility guard: the legacy D18 observation does not restore
+D12/D13 or D16-W numerical authority and cannot authorize a complete q4 action. See
+`FH_L8_CLEAN_PREFLIGHT_D18_ZH.md`.
+
+D18-C V2 now provides the clean implementation -> authorization -> result chronology that the
+active bounded action requires:
+`8cf944e42fd9a981cd78f584885a5c525dd2abd9` ->
+`9e4266600439143d7fdaaf76331dc9780cecd55c` ->
+`10d56da28318d622e791f5f5d39932d7a4a39e11`. The abandoned V1 attempt
+`732643eb -> 34006de5` failed in contract verification on the legacy D18 decimal before launcher,
+scratch or scientific action and has no result. V2 validates all 213,099 packed-q3 records, acts on
+exactly the first 4,096, performs 4,096 spill plus 4,096 naive-replay kernel calls, snapshots four
+frozen kernel artifacts and publishes a 424,682-record / 13,589,824-byte bounded partial target
+with SHA-256 `8b43b76f1e7a45f12e220905bcba41dc7cfef9fce66f0257cb3c9dff9623fa5f`.
+Its global sorted semantic digest
+`da049d945738630c66b8118ec58627a09910887e7263f91e4b08417ef7bafb34` is bound to the external
+target and the second-pass replay.
+
+Static D18-C checking certifies only committed schema and Git provenance. Supplying the retained
+264-file external scratch additionally verifies terminal and launcher receipts, captured outputs,
+all spill partitions, target semantics and custody, yielding
+`VERIFIED_D18C_RESULT_AND_EXTERNAL_TERMINAL_EVIDENCE`. The run used
+`MemoryMax=536,870,912`, `MemoryHigh=402,653,184`, zero swap, a 224,747,520-byte cgroup/systemd
+peak, 193,392,640-byte process RSS and a 57,941,070,334 ns pre-publication runner interval, with no
+pressure or OOM event delta. This is still only a partial q3 -> q4 preflight: its output is
+forbidden as a q4, contraction, q5 or downstream numerical operand. See
+`FH_L8_FRESH_CONSUMER_D18C_ZH.md`.
+
+The active next gate is
+`CLEAN_BOUNDED_PREFLIGHT_REVIEW_AND_FULL_53_SHARD_AUTHORIZATION_DECISION`. It is a review and
+authorization decision, not permission to start the full 53-shard action.
 
 Status date: 2026-07-22
 
