@@ -3,7 +3,8 @@
 The core compiles all three exact workload plans, dispatches the only allowed
 23-command inter-domain schedule, replays every receipt chain, requires cleanup
 on success and on abort, and hands a closed transcript to an injected evidence
-finalizer. Live lanes and activation remain disabled until the final audit.
+finalizer. The live local-process backend is present; authenticated live lanes
+and activation remain disabled until the final audit.
 """
 from __future__ import annotations
 
@@ -249,7 +250,7 @@ def run_source_bound(
 def status() -> dict:
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.source_bound_runner_status.v0",
-        "status": "OFFLINE_SOURCE_BOUND_GLOBAL_SCHEDULER_READY_LIVE_LANES_AND_ACTIVATION_ABSENT",
+        "status": "OFFLINE_SOURCE_BOUND_GLOBAL_SCHEDULER_AND_LOCAL_BACKEND_READY_LIVE_LANES_ACTIVATION_CLOSED",
         "runner_activation_ready": RUNNER_ACTIVATION_READY,
         "global_command_count": 23, "automatic_retry_allowed": False,
         "real_private_inputs_read": 0, "network_accessed": False,

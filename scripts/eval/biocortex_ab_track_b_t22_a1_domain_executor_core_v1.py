@@ -2,7 +2,9 @@
 
 The core revalidates an exact private workload plan, enforces its lifecycle,
 normalizes bounded observations/effects, and emits hash-bound private receipts.
-No live backend is present yet; non-synthetic backends remain hard-disabled.
+A reviewed live local-process backend exists as a separate source artifact;
+non-synthetic execution remains hard-disabled until the lane integration and
+final activation audit are complete.
 """
 from __future__ import annotations
 
@@ -484,7 +486,7 @@ class FixedCommandExecutor:
 def status() -> dict:
     return {
         "schema": "agent_bridge.biocortex.track_b.t22_a1.domain_executor_core_status.v0",
-        "status": "OFFLINE_FIXED_COMMAND_EXECUTOR_CORE_READY_LIVE_BACKEND_AND_ACTIVATION_ABSENT",
+        "status": "OFFLINE_FIXED_COMMAND_EXECUTOR_CORE_AND_LIVE_BACKEND_PRESENT_ACTIVATION_CLOSED",
         "executor_activation_ready": EXECUTOR_ACTIVATION_READY,
         "real_private_plans_read": 0,
         "credential_files_read": 0,

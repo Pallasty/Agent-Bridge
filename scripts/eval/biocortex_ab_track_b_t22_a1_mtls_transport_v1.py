@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 MESSAGE_FRAME_DOMAIN = b"agent-bridge/biocortex/track-b/t22-a1/mtls-message-frame/v1\0"
 MESSAGE_MAGIC = b"T22A1M1\0"
 SECRET_MAGIC = b"T22A1S1\0"
-SECRET_KIND_OPENBAO_UNSEAL_SHARE = 1
+SECRET_KIND_OPENBAO_BOOTSTRAP_BUNDLE = 1
 MAX_MESSAGE_FRAME_BYTES = 512 * 1024
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_SIGNATURE_BYTES = 64 * 1024
@@ -164,13 +164,13 @@ def decode_message_frame(
 def encode_secret_frame(secret: bytearray) -> bytes:
     require(isinstance(secret, bytearray) and 16 <= len(secret) <= MAX_SECRET_BYTES, "E_MTLS_SECRET_VALUE")
     raw = bytes(secret)
-    return SECRET_MAGIC + bytes([SECRET_KIND_OPENBAO_UNSEAL_SHARE]) + struct.pack("!I", len(raw)) + hashlib.sha256(raw).digest() + raw
+    return SECRET_MAGIC + bytes([SECRET_KIND_OPENBAO_BOOTSTRAP_BUNDLE]) + struct.pack("!I", len(raw)) + hashlib.sha256(raw).digest() + raw
 
 
 def decode_secret_frame(frame: bytes, expected_sha256: str) -> bytearray:
     header_size = 8 + 1 + 4 + 32
     require(len(frame) >= header_size and frame[:8] == SECRET_MAGIC, "E_MTLS_SECRET_MAGIC")
-    require(frame[8] == SECRET_KIND_OPENBAO_UNSEAL_SHARE, "E_MTLS_SECRET_KIND")
+    require(frame[8] == SECRET_KIND_OPENBAO_BOOTSTRAP_BUNDLE, "E_MTLS_SECRET_KIND")
     length = struct.unpack("!I", frame[9:13])[0]
     require(16 <= length <= MAX_SECRET_BYTES and len(frame) == header_size + length, "E_MTLS_SECRET_LENGTH")
     claimed = frame[13:45]
@@ -496,7 +496,7 @@ def send_message_frame(tls_socket: ssl.SSLSocket, frame: bytes) -> None:
 def send_secret_frame(tls_socket: ssl.SSLSocket, frame: bytes) -> None:
     require(
         isinstance(frame, bytes) and len(frame) >= 45
-        and frame[8] == SECRET_KIND_OPENBAO_UNSEAL_SHARE
+        and frame[8] == SECRET_KIND_OPENBAO_BOOTSTRAP_BUNDLE
         and struct.unpack("!I", frame[9:13])[0] == len(frame) - 45,
         "E_MTLS_SEND_FRAME",
     )
@@ -513,7 +513,7 @@ def receive_message_frame(tls_socket: ssl.SSLSocket) -> bytes:
 
 def receive_secret_frame(tls_socket: ssl.SSLSocket) -> bytes:
     header = receive_exact(tls_socket, 45, "E_MTLS_RECEIVE_SECRET")
-    require(header[:8] == SECRET_MAGIC and header[8] == SECRET_KIND_OPENBAO_UNSEAL_SHARE, "E_MTLS_RECEIVE_SECRET")
+    require(header[:8] == SECRET_MAGIC and header[8] == SECRET_KIND_OPENBAO_BOOTSTRAP_BUNDLE, "E_MTLS_RECEIVE_SECRET")
     length = struct.unpack("!I", header[9:13])[0]
     require(16 <= length <= MAX_SECRET_BYTES, "E_MTLS_RECEIVE_SECRET")
     return header + receive_exact(tls_socket, length, "E_MTLS_RECEIVE_SECRET")

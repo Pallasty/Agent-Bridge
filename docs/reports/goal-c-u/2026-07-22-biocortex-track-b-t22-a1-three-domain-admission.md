@@ -80,7 +80,8 @@ rollback prevention.
   binds the exact artifact/run roots, set countersignature chain, runtime-
   preparation challenge/signature/terminal, private manifests, tool binaries,
   budget, fault target, three signed runtime-readiness packets and exact
-  runner/executor/transport/evidence/consumer source-artifact set. A complete
+  runner/executor/live-backend/transport/evidence/consumer source-artifact
+  set. A complete
   synthetic chain verifies all eleven credential files only after the final
   owner signature; 50 negative paths cover forgery, readiness/source
   substitution, receipt integrity/currentness, replay, wrong signature and
@@ -89,8 +90,8 @@ rollback prevention.
   receipt is created and bound by the later private admission receipt.
 - a completion audit that originally proved real collection had to wait for a
   source-bound execution/evidence chain. Those offline components now exist;
-  real activation still waits for the live local-process backend, three signed
-  host-local runtime-readiness packets and credential-placement proof. The
+  real activation still waits for authenticated live domain lanes, three
+  signed host-local runtime-readiness packets and credential-placement proof. The
   decision packet fails closed on every remaining input.
 - a single-use execution consumer that independently rechecks the clean source
   commit, owner signature and admission receipt, reserves before runner
@@ -122,8 +123,17 @@ rollback prevention.
   command receipts and 20 negative paths. It revalidates the exact plan,
   enforces role/state/time/spend boundaries, independently replays each receipt
   chain, binds each domain terminal to its preceding receipt-chain head, and
-  makes every post-dispatch failure terminal. Its live backend and activation
-  constant are intentionally absent/false.
+  makes every post-dispatch failure terminal. Its activation constant remains
+  false.
+- a live local-process backend with a concrete bounded child-process runtime
+  and literal-IP, source-bound mTLS etcd/OpenBao JSON control path. It accepts
+  no arbitrary argv or shell, inherits no parent environment, caps service
+  logs and HTTP responses, pins the local service leaf, tracks/stops only its
+  own two child objects, and exposes bootstrap material only through an
+  injected memory-only exchange whose bundle is bound to run/source/execution.
+  Three fake-backed non-synthetic lifecycles cover the exact 23-command
+  schedule and 28 negatives; committed activation
+  remains false, so no real process, socket, credential or fault is used.
 - a bounded mTLS framing, context and one-shot socket-adapter core with one real in-memory mutual-TLS
   handshake, one signed-message-frame round trip, one bounded ephemeral secret-
   frame round trip, and 36 negative paths. It binds exact plan-selected
@@ -137,8 +147,8 @@ rollback prevention.
   dispatches only the 23-command cross-domain schedule, replays all terminal
   receipt chains, and requires cleanup before evidence finalization. One full
   synthetic schedule and nine directed negative paths pass with activation,
-  private inputs, sockets, processes and faults all absent/false. Live domain
-  lanes/backend remain the next implementation boundary.
+  private inputs, sockets, processes and faults all absent/false. Authenticated
+  live domain lanes remain the next implementation boundary.
 - an in-memory evidence compiler that replays 23 command receipts, verifies 21
   source-domain Ed25519 SSHSIG payloads, independently reconstructs and replays
   the 21-event coordinator hash chain, binds and scans four bounded logs per

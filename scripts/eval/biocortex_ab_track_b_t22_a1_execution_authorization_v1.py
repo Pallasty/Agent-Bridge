@@ -44,6 +44,7 @@ SOURCE_ARTIFACT_PATHS = (
     ("domain_workload_plan", "scripts/eval/biocortex_ab_track_b_t22_a1_domain_workload_plan_v1.py"),
     ("domain_agent_session", "scripts/eval/biocortex_ab_track_b_t22_a1_domain_agent_session_v1.py"),
     ("domain_executor_core", "scripts/eval/biocortex_ab_track_b_t22_a1_domain_executor_core_v1.py"),
+    ("live_local_backend", "scripts/eval/biocortex_ab_track_b_t22_a1_live_local_backend_v1.py"),
     ("mtls_transport", "scripts/eval/biocortex_ab_track_b_t22_a1_mtls_transport_v1.py"),
     ("evidence_compiler", "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_compiler_v1.py"),
     ("evidence_writer", "scripts/eval/biocortex_ab_track_b_t22_a1_evidence_writer_v1.py"),

@@ -438,7 +438,7 @@ expect_failure(
 )
 
 status = module.status()
-assert status["status"] == "OFFLINE_FIXED_COMMAND_EXECUTOR_CORE_READY_LIVE_BACKEND_AND_ACTIVATION_ABSENT"
+assert status["status"] == "OFFLINE_FIXED_COMMAND_EXECUTOR_CORE_AND_LIVE_BACKEND_PRESENT_ACTIVATION_CLOSED"
 assert status["executor_activation_ready"] is False
 assert status["real_private_plans_read"] == status["credential_files_read"] == 0
 assert status["network_accessed"] is False

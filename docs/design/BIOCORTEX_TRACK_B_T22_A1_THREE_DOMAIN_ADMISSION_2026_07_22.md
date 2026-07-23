@@ -359,7 +359,8 @@ certificate chains, certificate/private-key matches, EKUs, expiry, overlay-IP
 SANs, coordinator runtime Ed25519 pair, file set and permissions. Success emits
 a private one-execution admission receipt; it also freshly revalidates the
 three signed host-readiness packets and re-hashes the exact source-bound
-runner, executor, transport, evidence and consumer artifacts named by the
+runner, executor, live local-process backend, transport, evidence and consumer
+artifacts named by the
 owner-signed contract. The owner payload binds the stable readiness-set and
 source-artifact-set digests; the time-varying readiness verification-receipt
 digest is emitted only by admission. Failure is terminal and cannot
@@ -389,8 +390,9 @@ private key and certificate have been placed on each remote domain at an exact
 private path. These are execution blockers, not documentation niceties.
 
 The admission contract now records the readiness contract as present; the
-runner scheduler is implemented while live lanes/backend and real placement
-proof remain absent. The blocked proposal requires the exact readiness packet and
+runner scheduler and live local-process backend are implemented while the
+authenticated live lanes and real placement proof remain absent. The blocked
+proposal requires the exact readiness packet and
 signature sets, credential-placement mode, and runner/executor source hash set.
 See the [execution-readiness audit](../reports/goal-c-u/2026-07-22-biocortex-track-b-t22-a1-execution-readiness-audit.md).
 
@@ -442,9 +444,9 @@ or satisfy the stronger S20 monotonic-CAS requirement.
 
 ## Exact owner inputs still required
 
-1. Freeze and test the live local-process backend that will drive the already
-   source-bound runner, domain executor, single-use consumer and evidence
-   builder.
+1. Freeze and test the authenticated domain-lane integration that connects the
+   source-bound runner, fixed executor, live local-process backend, bounded mTLS
+   transport, single-use consumer and evidence builder.
 2. Choose a third owner physical host, or choose a cloud provider plus exact
    region/zone/instance type and numeric spend limit.
 3. Choose a dedicated T22-A1 owner public key or explicitly approve reuse of
@@ -624,7 +626,7 @@ reads a credential, starts a process, opens a listener or injects a fault.
 
 The mTLS transport-core KAT performs one mutual TLS handshake using only
 `ssl.MemoryBIO`, round-trips one bounded signed-message frame and one bounded
-ephemeral OpenBao unseal-secret frame, and rejects 36 route, framing, digest,
+ephemeral OpenBao bootstrap-bundle frame, and rejects 36 route, framing, digest,
 certificate, peer-identity, hostname, file-permission and activation mutations.
 It binds exact plan-selected CA/leaf file hashes and requires explicit
 post-handshake peer-certificate matching, including rejection of a different
@@ -640,8 +642,32 @@ three synthetic lanes and rejects nine admission, endpoint, readiness ordering,
 lane identity, mid-fault failure, evidence-finalization, activation, expiry and
 coordinator-fault mutations. The core compiles all domain plans, replays each
 terminal receipt chain and passes a closed transcript to evidence finalization;
-live lanes/backend and runner activation remain absent/false, with zero private
-input, network, listener, process or fault use.
+the live local-process backend is present while authenticated live lanes and
+runner activation remain absent/false, with zero private input, network,
+listener, process or fault use.
+
+The live local-process backend KAT drives all three non-synthetic backend
+objects through the exact 23-command schedule using injected process, cluster
+and bootstrap-exchange fakes, then rejects 28 activation, plan, process,
+bootstrap, lifecycle, cluster, CAS, transit, rejoin, cleanup and parser
+failures. The concrete path permits only the two plan-bound argv vectors,
+inherits no parent environment, invokes no shell, bounds service logs and HTTP
+responses, binds the bootstrap bundle to run/source/execution, uses literal-IP
+source-bound mTLS, pins the local service leaf,
+tracks/stops only its own child objects, and treats TLS or identity failure as
+terminal. Its committed activation remains false; the KAT reads no private
+plan or credential and starts no process, listener, socket or fault.
+
+The wire operations follow the current primary contracts: etcd's official
+[gRPC-gateway guide](https://etcd.io/docs/v3.6/dev-guide/api_grpc_gateway/)
+defines `/v3/kv/txn`, base64 key/value fields and camel-case RequestOp names,
+while its [API guide](https://etcd.io/docs/v3.6/learning/api/) defines atomic
+transaction comparison and linearizable-by-default ranges. OpenBao's official
+[`/sys/init`](https://openbao.org/api-docs/system/init/),
+[`/sys/unseal`](https://openbao.org/api-docs/system/unseal/),
+[integrated-Raft](https://openbao.org/api-docs/system/storage/raft/) and
+[Transit](https://openbao.org/api-docs/secret/transit/) API contracts define
+the POST methods, voter evidence and sign/verify exchange used by the backend.
 
 The evidence-compiler KAT replays all 23 fixed-command receipts, verifies 21
 source-domain Ed25519 SSHSIG payloads under the purpose-separated event
