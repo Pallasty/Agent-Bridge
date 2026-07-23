@@ -1,5 +1,86 @@
 # Research progress ledger
 
+## 2026-07-22 — FH-L8 D18-C fresh-exclusive packed-q3 bounded preflight V2
+
+- Deprecated the first D18-C attempt after a verified zero-action failure. Its implementation and
+  contract commits were `732643eb856da31e68541df603ed88481a9063cd` ->
+  `34006de5f3548432c7f6e24e1fd3527fab49cb53`; the pre-launch contract checker rejected legacy
+  D18's `elapsed_seconds:66.543` under the generic integer-only JSON reader. No launcher, scratch,
+  source row, kernel action or result commit followed, so V1 is an audit record rather than
+  scientific evidence.
+- Restarted from baseline `26c49b6e7bcddc22a1fc88f3743befa1b6de4446` and froze the V2
+  implementation -> authorization -> result chain as
+  `8cf944e42fd9a981cd78f584885a5c525dd2abd9` ->
+  `9e4266600439143d7fdaaf76331dc9780cecd55c` ->
+  `10d56da28318d622e791f5f5d39932d7a4a39e11`. The three commits add only the four
+  implementation/test files, then the contract, then the result. The narrow V2 legacy reader first
+  checks exact D18 SHA-256 and treats its finite decimal only as an opaque string; main D18-C
+  contract/result JSON remains integer-only.
+- Fully admitted all 213,099 packed-q3 records (6,819,168 bytes; SHA-256
+  `db2ce0a338a378aef6e4a043e02388c4268addc951d0ae590c2ae1d65f840231`) and the complete rank
+  permutation before action, then rehashed the source afterward. Exactly the first 4,096 unique
+  sorted rows were acted on; 4,096 spill evaluations plus 4,096 validation-replay evaluations
+  produced 8,192 frozen `_reduced_column` calls. The remaining 209,003 source rows were not acted
+  on.
+- Compiled/parsed the scientific context from one pre-action byte snapshot of the D5 checker, D5
+  contract, D4 checker and commutator backend. All four working bytes and custody metadata were
+  rehashed after action while execution HEAD/status remained frozen, and no transitive worktree
+  module or contract load occurred during action.
+- Materialized 868,786 spill records / 27,801,152 bytes in 256 partitions, with 868,786 reduced
+  columns, 22 projected-zero outputs and zero dropped zero coefficients. The bounded partial target
+  contains 424,682 records / 13,589,824 bytes with SHA-256
+  `8b43b76f1e7a45f12e220905bcba41dc7cfef9fce66f0257cb3c9dff9623fa5f`.
+- A bounded 256-way external merge binds the target to globally sorted semantic SHA-256
+  `da049d945738630c66b8118ec58627a09910887e7263f91e4b08417ef7bafb34`, exactly matching the
+  second-pass naive aggregation. Legacy D18's matching counts/digest remain a non-authoritative
+  diagnostic guard and do not restore its execution authority.
+- The official scope enforced `MemoryMax=536,870,912`, `MemoryHigh=402,653,184` and zero swap.
+  Runner cgroup/systemd peak was 224,747,520 bytes, process max RSS was 193,392,640 bytes, the
+  pre-publication elapsed interval was 57,941,070,334 ns, and all pressure/OOM deltas were zero.
+  The launcher recorded exit 0, zero stderr, then stopped the unit to `inactive/dead`.
+- Static result checking returns
+  `D18C_COMMITTED_RESULT_SCHEMA_AND_GIT_PROVENANCE_ONLY` and explicitly does not certify external
+  scratch, executed authority or scientific outcome. Rechecking the retained exact 264-file scratch
+  verifies terminal/launcher receipts, captured outputs, all spill/target bytes and semantic
+  digests, returning `VERIFIED_D18C_RESULT_AND_EXTERNAL_TERMINAL_EVIDENCE`.
+- The launcher command digest binds the official execution worktree's absolute runner, contract and
+  capture paths. External checking from another worktree therefore fails closed with
+  `launcher command digest drift`; a normal clone can recover only static provenance unless the
+  original custody path and untracked scratch are retained or a future evidence-transfer contract
+  is separately frozen.
+- Authority is limited to `bounded_4096_preflight_executed=true` and
+  `partial_q3_to_q4_action_executed=true`. The partial target is forbidden as q4, contraction, q5
+  or downstream numerical input. Full q4, all 53 shards, D12/D13 and D16-W numeric authority,
+  remainder/error/reference/hardware/advantage/READY claims remain false.
+- Active next gate:
+  `CLEAN_BOUNDED_PREFLIGHT_REVIEW_AND_FULL_53_SHARD_AUTHORIZATION_DECISION`. No full-shard action
+  is authorized by this result.
+
+## 2026-07-22 — FH-L8 D18 legacy bounded observation
+
+- The legacy D18 lane used a fresh scratch root for one 4,096-source spill/sort/merge and reported
+  868,786 spill/reduced records, 22 projected-zero outputs and 424,682 partial targets. Its target
+  is 13,589,824 bytes with SHA-256
+  `8b43b76f1e7a45f12e220905bcba41dc7cfef9fce66f0257cb3c9dff9623fa5f`, matching its same-kernel
+  naive aggregation.
+- It observed a 218,451,968-byte peak and 66.543-second elapsed time under a 1 GiB / 768 MiB
+  high-water / zero-swap scope, but did not execute all 53 shards, q5 or any error/READY route.
+- D18-C does not admit the legacy execution as authority. It pins the exact D18 result
+  (`51643e67fbb33148b231a4bf1251923c621fd11b`, SHA-256
+  `7fa505485fc718db39d9918ec459094f3766f014fd2ddee7d108f01fae4842c4`) only as a
+  preregistered, fail-closed reproducibility comparator.
+
+## 2026-07-22 — FH-L8 D17 vector custody gate
+
+- Reconfirmed the 213,099-record packed C3 as the only admissible q3 vector and kept the legacy q4
+  target quarantined. No admissible q0, q1 or q2 packed payload was available.
+- Returned `NO_GO_D17_Q0_TO_Q4_DUAL_VECTOR_CUSTODY_INCOMPLETE`: complete q0--q4 vector custody and
+  dual-vector contraction could not be materialized. This is a custody no-go, not a numerical
+  q3 -> q4 feasibility result.
+- Authorized no bounded or full action. The only successor was a separately frozen
+  fresh-exclusive packed-q3 consumer with full source validation, manifest-only merge and an
+  independently authorized 4,096-source preflight.
+
 ## 2026-07-22 — FH-L8 D16-F packed-consumer custody forensic
 
 - Froze the globally unique
