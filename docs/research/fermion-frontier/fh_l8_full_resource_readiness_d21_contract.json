@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D21-READINESS-V1",
+  "analysis_class": "FULL_53_RESOURCE_READINESS_REVIEW_NO_SCIENTIFIC_ACTION",
+  "chronology": {
+    "baseline": "d3565d30f33091c677abe62269f1ae6525c4d03e",
+    "checker_freeze": "273dd1216be28772acb8a83cc9836aceb0a87086",
+    "checker_path": "docs/research/fermion-frontier/fh_l8_full_resource_readiness_d21_checker.py",
+    "test_path": "docs/research/fermion-frontier/test_fh_l8_full_resource_readiness_d21.py",
+    "contract_path": "docs/research/fermion-frontier/fh_l8_full_resource_readiness_d21_contract.json",
+    "result_path": "docs/research/fermion-frontier/fh_l8_full_resource_readiness_d21_result.json",
+    "result_absent_at_contract_freeze": true
+  },
+  "source_pins": [
+    {
+      "path": "fh_l8_full_consumer_d20.py",
+      "sha256": "27f744bd454613487931733a0675be1c7a72a3bcfb676c18a3a8dd7e23663d23",
+      "bytes": 2902
+    },
+    {
+      "path": "fh_l8_full_consumer_d20_contract.json",
+      "sha256": "d87caa10714947d5e13e8ec72b269271ab1606e59af738fe2709e7b6a71ba016",
+      "bytes": 1278
+    },
+    {
+      "path": "fh_l8_full_consumer_d20_result.json",
+      "sha256": "419b755bf371927b2c1f20970a70b809e14245344bc1b6cbb9a45f856d933ac8",
+      "bytes": 578
+    }
+  ],
+  "d20_static_findings": {
+    "declarative_protocol_plan_present": true,
+    "action_entrypoint_implemented": false,
+    "scientific_kernel_invocation_implemented": false,
+    "exact_53_shard_iteration_implemented": false,
+    "per_shard_spill_publication_implemented": false,
+    "resume_frontier_validation_implemented": false,
+    "manifest_only_full_merge_implemented": false,
+    "atomic_full_target_publication_implemented": false,
+    "terminal_resource_receipt_implemented": false,
+    "tiny_fixture_recovery_tests_present": false,
+    "run_unconditionally_rejects_after_plan_validation": true
+  },
+  "d18c_bounded_observation": {
+    "source_records": 213099,
+    "bounded_rows": 4096,
+    "spill_bytes": 27801152,
+    "target_bytes": 13589824,
+    "elapsed_monotonic_ns": 57941070334,
+    "memory_peak_bytes": 224747520,
+    "process_peak_rss_bytes": 193392640,
+    "zero_swap": true,
+    "memory_event_failures": 0,
+    "same_kernel_replay_only": true,
+    "external_evidence_location_bound": true
+  },
+  "planning_projection": {
+    "role": "NON_AUTHORITATIVE_SAMPLE_LINEAR_PLANNING_ONLY",
+    "scale_numerator": 213099,
+    "scale_denominator": 4096,
+    "linear_spill_bytes_ceiling": 1446386155,
+    "linear_target_bytes_ceiling": 707025856,
+    "linear_elapsed_ns_ceiling": 3014449254665,
+    "margin_numerator": 5,
+    "margin_denominator": 4,
+    "margin_spill_bytes_ceiling": 1807982694,
+    "margin_target_bytes_ceiling": 883782320,
+    "margin_elapsed_ns_ceiling": 3768061568332,
+    "combined_margin_spill_and_target_bytes": 2691765014,
+    "authoritative_worst_case_disk_bound": false,
+    "authoritative_full_runtime_bound": false,
+    "authoritative_full_memory_bound": false
+  },
+  "authorization_rule": {
+    "executable_consumer_required": true,
+    "tiny_fixture_success_and_resume_fault_matrix_required": true,
+    "worst_case_disk_file_runtime_bounds_required": true,
+    "bounded_sample_linear_projection_sufficient": false,
+    "full_53_shard_execution_authorized": false,
+    "scientific_action_calls": 0,
+    "no_go_status": "NO_GO_D21_FULL_53_RESOURCE_AUTHORIZATION_EXECUTABLE_IMPLEMENTATION_ABSENT",
+    "next_gate": "FULL_53_SHARD_EXECUTABLE_CONSUMER_AND_TINY_FIXTURE_RECOVERY_VALIDATION"
+  },
+  "authority_ceiling": {
+    "d20_protocol_plan_admitted": true,
+    "d20_executable_consumer_admitted": false,
+    "full_53_resource_envelope_admitted": false,
+    "full_53_shard_execution_authorized": false,
+    "full_53_shard_executed": false,
+    "full_q4_target_materialized": false,
+    "bounded_output_admissible_as_q4_operand": false,
+    "q5_executed": false,
+    "degree6_remainder_bounded": false,
+    "two_step_cumulative_error_bounded": false,
+    "full_R100_error_bounded": false,
+    "physical_reference_qualified": false,
+    "hardware_result_available": false,
+    "quantum_advantage_claimed": false,
+    "ready_gate_eligible": false
+  },
+  "limitations": [
+    "D20 is a declarative protocol plan whose run entrypoint unconditionally rejects; it is not an executable full consumer.",
+    "The D18-C bounded sample supports planning only and is not a worst-case disk, file-count, runtime, or memory proof.",
+    "No tiny-fixture success, interruption, resume, orphan, hash-drift, merge, or publication fault matrix exists for D20.",
+    "No q3 row is authorized or acted on by D21; scientific_action_calls remains zero.",
+    "The D18-C external evidence remains bound to its original custody worktree and untracked scratch.",
+    "No full q4, q5, remainder, cumulative, R100, physical-reference, hardware, advantage, or READY authority is granted."
+  ]
+}

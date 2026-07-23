@@ -1,5 +1,35 @@
 # Research progress ledger
 
+## 2026-07-23 — FH-L8 D21 full-53 resource-authorization readiness
+
+- Audited the merged D20 source rather than accepting its status label as executable evidence.
+  AST inspection proves that `run()` validates the plan and then unconditionally raises; the file
+  contains no loop, scientific-kernel reference, action-file write or manifest merge.
+- Admitted D20 only as a declarative protocol plan. Exact 53-shard iteration, per-shard spill and
+  receipt publication, resume-frontier validation, full merge, atomic target publication, terminal
+  resources and tiny-fixture recovery tests are all absent.
+- Scaled D18-C's bounded observation by exact integer ceiling for planning only: 1,446,386,155
+  spill bytes, 707,025,856 target bytes and 3,014,449,254,665 ns. A 25% margin gives
+  2,691,765,014 combined spill/target bytes and 3,768,061,568,332 ns, but none is an authoritative
+  worst-case disk, runtime or memory bound.
+- Froze an acyclic checker -> contract -> result chain after a pre-contract checker refreeze:
+  `273dd1216be28772acb8a83cc9836aceb0a87086` ->
+  `994c8d3f43aa0f1bc68b984610b65d00978f8dab` ->
+  `0b3e8a1072c9f0e442a2e7353c61726e7a236f3c`.
+- Returned `NO_GO_D21_FULL_53_RESOURCE_AUTHORIZATION_EXECUTABLE_IMPLEMENTATION_ABSENT` with zero
+  scientific calls. Full q4, all 53 shards, q5 and every downstream authority remain false.
+- Next gate:
+  `FULL_53_SHARD_EXECUTABLE_CONSUMER_AND_TINY_FIXTURE_RECOVERY_VALIDATION`.
+
+## 2026-07-23 — FH-L8 D19/D20 full-run decision and protocol plan
+
+- D19 rechecked the bounded D18-C conclusion and correctly kept full-53 authorization false,
+  returning `NO_GO_D19_FULL_53_SHARD_REQUIRES_NEW_IMPLEMENTATION_AND_AUTHORIZATION`.
+- D20 pinned the 213,099-row source and a declarative 53-shard / 256-partition protocol while
+  authorizing zero rows and zero kernel calls. Its action entrypoint deliberately rejects.
+- D21 supersedes any interpretation of D20 as an executable consumer; D20 remains useful only as
+  a protocol-plan input.
+
 ## 2026-07-22 — FH-L8 D18-C fresh-exclusive packed-q3 bounded preflight V2
 
 - Deprecated the first D18-C attempt after a verified zero-action failure. Its implementation and

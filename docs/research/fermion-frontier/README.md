@@ -140,11 +140,25 @@ pressure or OOM event delta. This is still only a partial q3 -> q4 preflight: it
 forbidden as a q4, contraction, q5 or downstream numerical operand. See
 `FH_L8_FRESH_CONSUMER_D18C_ZH.md`.
 
-The active next gate is
-`CLEAN_BOUNDED_PREFLIGHT_REVIEW_AND_FULL_53_SHARD_AUTHORIZATION_DECISION`. It is a review and
-authorization decision, not permission to start the full 53-shard action.
+The merged D19 review retained the externally verified bounded observation but returned
+`NO_GO_D19_FULL_53_SHARD_REQUIRES_NEW_IMPLEMENTATION_AND_AUTHORIZATION`. D20 then froze a
+declarative 53-shard protocol plan with zero authorized rows and an action entrypoint that
+unconditionally rejects. D21's AST-level readiness review therefore admits D20 only as a plan,
+not an executable consumer: no shard loop, scientific-kernel call, spill publication, resume,
+merge, terminal receipt or tiny-fixture recovery matrix exists.
 
-Status date: 2026-07-22
+D21 records the D18-C linear scale-up only as non-authoritative planning: 1,446,386,155 spill bytes,
+707,025,856 target bytes and 3,014,449,254,665 ns, or 2,691,765,014 combined spill/target bytes
+after a 25% margin. These are not worst-case resource bounds and cannot authorize action. Its status
+is `NO_GO_D21_FULL_53_RESOURCE_AUTHORIZATION_EXECUTABLE_IMPLEMENTATION_ABSENT`; see
+`FH_L8_FULL_RESOURCE_READINESS_D21_ZH.md`.
+
+The active next gate is
+`FULL_53_SHARD_EXECUTABLE_CONSUMER_AND_TINY_FIXTURE_RECOVERY_VALIDATION`. It must implement and
+fault-test the real execution/recovery/publication paths on synthetic data before any production
+resource contract or full-53 authorization can be frozen.
+
+Status date: 2026-07-23
 
 Scope: physical fermions, not the historical Fermion Memory service.
 
