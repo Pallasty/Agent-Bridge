@@ -2,7 +2,7 @@
 
 Date: 2026-07-23
 
-Status: **PREREGISTERED / NO SOURCE OR LIVE-RUN AUTHORITY**
+Status: **R27 SOURCE IMPLEMENTED / R26 LIVE RUN NOT EXECUTED**
 
 Parent acceptance: R25 C2C-B startup wiring.
 
@@ -57,8 +57,8 @@ first, then the key account, and verifies absence for both exact accounts.
 
 ## 3. Exact proposed R27 source surface
 
-R26 does not authorize the following source, but reserves this narrow R27
-surface for review:
+The formerly preregistered narrow R27 surface was implemented in
+`1b97b1ca`. It remains default-off and has not performed a live run:
 
 | Path | Purpose |
 | --- | --- |
@@ -116,7 +116,7 @@ deploy/release/merge any artifact.
 
 ## 6. Negative authority
 
-This preregistration authorizes design only. It grants no R27 edits, Keychain
+The R27 source commit authorizes no execution by itself. It grants no Keychain
 read/write/delete, normal-process launch, MCP fixture execution, database
 creation, merge to master, release, deployment, or follow-on training work.
 

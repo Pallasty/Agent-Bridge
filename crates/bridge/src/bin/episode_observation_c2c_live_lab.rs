@@ -10,8 +10,11 @@ use serde_json::{json, Value};
 use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 const LIVE_ACK: &str = "r26-c2c-live-authorized";
+const MCP_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Parser, Debug)]
 #[command(about = "default-off R26 disposable C2C Keychain/MCP fixture")]
@@ -74,21 +77,121 @@ fn successful_saved_count(stdout: &str) -> Result<usize, String> {
         .ok_or_else(|| "fixture saved no core memories".to_owned())
 }
 
-fn run(args: &Args) -> Result<usize, String> {
-    let agent_bridge = args.agent_bridge.as_ref().expect("checked before run");
-    let temp_dir = tempfile::Builder::new()
-        .prefix("ab-r26-c2c.")
-        .tempdir_in("/tmp")
-        .map_err(|_| "could not create disposable R26 directory")?;
-    let db_path = temp_dir.path().join("state.db");
-    let mut custody =
-        C2cLiveLabCustody::prepare().map_err(|_| "Keychain custody preparation failed")?;
+#[derive(Debug, PartialEq, Eq)]
+struct DbEvent {
+    episode_id: String,
+    event_type: String,
+    source_kind: String,
+    episode_position: Option<i64>,
+    item_count: Option<i64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Receipt {
+    item_count: usize,
+}
+
+fn validate_receipt(events: &[DbEvent], expected_item_count: usize) -> Result<Receipt, String> {
+    let Some(first) = events.first() else {
+        return Err("episode receipt is empty".to_owned());
+    };
+    if events
+        .iter()
+        .any(|event| event.episode_id != first.episode_id || event.source_kind != "curation_batch")
+    {
+        return Err("episode receipt is not one CurationBatch episode".to_owned());
+    }
+    if first.event_type != "episode.open"
+        || first.episode_position.is_some()
+        || first.item_count.is_some()
+    {
+        return Err("episode receipt has no valid open".to_owned());
+    }
+    let Some(close) = events.last() else {
+        return Err("episode receipt has no close".to_owned());
+    };
+    if close.event_type != "episode.close"
+        || close.episode_position.is_some()
+        || close.item_count != Some(expected_item_count as i64)
+    {
+        return Err("episode receipt has no matching close".to_owned());
+    }
+    let items = &events[1..events.len().saturating_sub(1)];
+    if items.len() != expected_item_count
+        || items.iter().enumerate().any(|(position, event)| {
+            event.event_type != "episode.item"
+                || event.episode_position != Some(position as i64)
+                || event.item_count.is_some()
+        })
+    {
+        return Err("episode receipt item positions are not contiguous".to_owned());
+    }
+    Ok(Receipt {
+        item_count: expected_item_count,
+    })
+}
+
+fn read_receipt(db_path: &std::path::Path, expected_item_count: usize) -> Result<Receipt, String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| "could not create receipt runtime")?;
+    let events = runtime.block_on(async {
+        let connection = tokio_rusqlite::Connection::open(db_path)
+            .await
+            .map_err(|_| "could not open disposable receipt database")?;
+        connection
+            .call(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT episode_id, event_type, source_kind, episode_position, item_count \
+                     FROM episode_observation_events ORDER BY episode_id ASC, rowid ASC",
+                )?;
+                let events = statement
+                    .query_map([], |row| {
+                        Ok(DbEvent {
+                            episode_id: row.get(0)?,
+                            event_type: row.get(1)?,
+                            source_kind: row.get(2)?,
+                            episode_position: row.get(3)?,
+                            item_count: row.get(4)?,
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>();
+                events
+            })
+            .await
+            .map_err(|_| "could not query disposable receipt database")
+    })?;
+    validate_receipt(&events, expected_item_count)
+}
+
+fn wait_for_child(child: &mut std::process::Child) -> Result<(), String> {
+    let deadline = Instant::now() + MCP_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(_)) => return Err("MCP fixture process failed".to_owned()),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("MCP fixture process timed out".to_owned());
+            }
+            Err(_) => return Err("could not wait for MCP fixture".to_owned()),
+        }
+    }
+}
+
+fn run_fixture(
+    agent_bridge: &std::path::Path,
+    db_path: &std::path::Path,
+) -> Result<Receipt, String> {
     let mut child = Command::new(agent_bridge)
         .arg("mcp")
         .arg("--episode-observation")
         .arg("keychain-macos-v1")
         .env_clear()
-        .env("AGENT_BRIDGE_DB", &db_path)
+        .env("AGENT_BRIDGE_DB", db_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -101,23 +204,44 @@ fn run(args: &Args) -> Result<usize, String> {
         .ok_or_else(|| "missing MCP stdin".to_owned())?
         .write_all(payload.as_bytes())
         .map_err(|_| "could not write MCP fixture")?;
-    let mut stdout = String::new();
-    BufReader::new(
-        child
-            .stdout
-            .take()
-            .ok_or_else(|| "missing MCP stdout".to_owned())?,
-    )
-    .read_to_string(&mut stdout)
-    .map_err(|_| "could not read MCP fixture")?;
-    let status = child.wait().map_err(|_| "could not wait for MCP fixture")?;
-    let saved_count = if status.success() {
-        successful_saved_count(&stdout)?
-    } else {
-        return Err("MCP fixture process failed".to_owned());
-    };
-    custody.cleanup().map_err(|_| "Keychain cleanup failed")?;
-    Ok(saved_count)
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| "missing MCP stdout".to_owned())?;
+    let stdout_handle = thread::spawn(move || {
+        let mut stdout = String::new();
+        BufReader::new(stdout_pipe)
+            .read_to_string(&mut stdout)
+            .map(|_| stdout)
+            .map_err(|_| "could not read MCP fixture".to_owned())
+    });
+    wait_for_child(&mut child)?;
+    let stdout = stdout_handle
+        .join()
+        .map_err(|_| "MCP stdout reader panicked".to_owned())??;
+    let saved_count = successful_saved_count(&stdout)?;
+    read_receipt(db_path, saved_count)
+}
+
+fn run(args: &Args) -> Result<Receipt, String> {
+    let agent_bridge = args.agent_bridge.as_ref().expect("checked before run");
+    let temp_dir = tempfile::Builder::new()
+        .prefix("ab-r26-c2c.")
+        .tempdir_in("/tmp")
+        .map_err(|_| "could not create disposable R26 directory")?;
+    let db_path = temp_dir.path().join("state.db");
+    let mut custody =
+        C2cLiveLabCustody::prepare().map_err(|_| "Keychain custody preparation failed")?;
+    let fixture_result = run_fixture(agent_bridge, &db_path);
+    let cleanup_result = custody.cleanup();
+    match (fixture_result, cleanup_result) {
+        (Ok(receipt), Ok(())) => Ok(receipt),
+        (_, Err(_)) => Err(format!(
+            "Keychain cleanup unconfirmed; recover only {} and active-epoch",
+            custody.key_account()
+        )),
+        (Err(error), Ok(())) => Err(error),
+    }
 }
 
 fn main() {
@@ -127,9 +251,12 @@ fn main() {
         std::process::exit(64);
     }
     match run(&args) {
-        Ok(saved_count) => println!("R26 fixture completed with {saved_count} core memory saves"),
-        Err(_) => {
-            eprintln!("R26 fixture incomplete; cleanup is required before any retry");
+        Ok(receipt) => println!(
+            "R26 fixture receipt: one finalized CurationBatch with {} items",
+            receipt.item_count
+        ),
+        Err(error) => {
+            eprintln!("R26 fixture incomplete: {error}");
             std::process::exit(1);
         }
     }
@@ -161,5 +288,61 @@ mod tests {
         })
         .to_string();
         assert!(successful_saved_count(&stdout).is_err());
+    }
+
+    #[test]
+    fn receipt_requires_one_finalized_contiguous_curation_batch() {
+        let events = vec![
+            DbEvent {
+                episode_id: "ep".into(),
+                event_type: "episode.open".into(),
+                source_kind: "curation_batch".into(),
+                episode_position: None,
+                item_count: None,
+            },
+            DbEvent {
+                episode_id: "ep".into(),
+                event_type: "episode.item".into(),
+                source_kind: "curation_batch".into(),
+                episode_position: Some(0),
+                item_count: None,
+            },
+            DbEvent {
+                episode_id: "ep".into(),
+                event_type: "episode.close".into(),
+                source_kind: "curation_batch".into(),
+                episode_position: None,
+                item_count: Some(1),
+            },
+        ];
+        assert_eq!(validate_receipt(&events, 1), Ok(Receipt { item_count: 1 }));
+    }
+
+    #[test]
+    fn receipt_rejects_noncontiguous_or_multiple_episodes() {
+        let events = vec![
+            DbEvent {
+                episode_id: "ep".into(),
+                event_type: "episode.open".into(),
+                source_kind: "curation_batch".into(),
+                episode_position: None,
+                item_count: None,
+            },
+            DbEvent {
+                episode_id: "other".into(),
+                event_type: "episode.item".into(),
+                source_kind: "curation_batch".into(),
+                episode_position: Some(1),
+                item_count: None,
+            },
+            DbEvent {
+                episode_id: "ep".into(),
+                event_type: "episode.close".into(),
+                source_kind: "curation_batch".into(),
+                episode_position: None,
+                item_count: Some(1),
+            },
+        ];
+        assert!(validate_receipt(&events, 1).is_err());
     }
 }
