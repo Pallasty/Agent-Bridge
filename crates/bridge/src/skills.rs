@@ -39,7 +39,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 const ROUTE_STRONG_SEMANTIC_COSINE: f32 = 0.50;
 
@@ -362,6 +362,7 @@ pub async fn run_refresh(
                         Ok(d) => pruned_total += d,
                         Err(e) => {
                             eprintln!("[skills] {}: prune failed: {}", src, e);
+                            failed.push(format!("{} (prune)", src));
                         }
                     }
                 }
@@ -384,9 +385,10 @@ pub async fn run_refresh(
     );
     if !failed.is_empty() {
         eprintln!("[skills] failed repos:");
-        for s in failed {
+        for s in &failed {
             eprintln!("  - {}", s);
         }
+        bail!("skills refresh failed for {} source operation(s)", failed.len());
     }
     Ok(())
 }
@@ -533,8 +535,9 @@ async fn prune_stale_for_src(
         return Ok(0);
     }
     let mut deleted = 0usize;
+    let mut delete_failures = Vec::new();
     for r in &stale {
-        match store.memory_delete(&r.key).await {
+        match memory_delete_with_retry(store, &r.key).await {
             Ok(true) => {
                 deleted += 1;
                 if verbose {
@@ -542,11 +545,42 @@ async fn prune_stale_for_src(
                 }
             }
             Ok(false) => {} // race: already gone
-            Err(e) => eprintln!("[skills]   ! delete {} failed: {}", r.key, e),
+            Err(e) => {
+                eprintln!("[skills]   ! delete {} failed: {}", r.key, e);
+                delete_failures.push(r.key.clone());
+            }
         }
+    }
+    if !delete_failures.is_empty() {
+        bail!(
+            "failed to prune {} stale skill record(s): {}",
+            delete_failures.len(),
+            delete_failures.join(", ")
+        );
     }
     eprintln!("[skills] {}: pruned {} stale record(s)", src, deleted);
     Ok(deleted)
+}
+
+/// SQLite writers can briefly overlap immediately after indexing. Retry only
+/// transient lock errors; all other delete failures remain visible to callers.
+async fn memory_delete_with_retry(store: &SqliteStore, key: &str) -> Result<bool> {
+    const ATTEMPTS: usize = 3;
+    for attempt in 0..ATTEMPTS {
+        match store.memory_delete(key).await {
+            Ok(deleted) => return Ok(deleted),
+            Err(error) if attempt + 1 < ATTEMPTS && is_sqlite_lock_error(&error) => {
+                tokio::time::sleep(Duration::from_millis(150 * (attempt as u64 + 1))).await;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    unreachable!("a retry loop must return on its final attempt")
+}
+
+fn is_sqlite_lock_error(error: &impl std::fmt::Display) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("database is locked") || message.contains("database is busy")
 }
 
 /// Decide whether `r` is a stale entry for `src`: same `src:` tag and
@@ -4955,6 +4989,13 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("successful"));
+    }
+
+    #[test]
+    fn sqlite_lock_errors_are_retryable_but_other_errors_are_not() {
+        assert!(is_sqlite_lock_error(&anyhow!("database is locked")));
+        assert!(is_sqlite_lock_error(&anyhow!("SQLITE_BUSY: database is busy")));
+        assert!(!is_sqlite_lock_error(&anyhow!("constraint failed")));
     }
 
     #[test]
