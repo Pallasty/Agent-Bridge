@@ -1,0 +1,1953 @@
+{
+  "calls_memory_search": false,
+  "cases": [
+    {
+      "arms": {
+        "content": {
+          "f1": 0.25,
+          "hits": 2,
+          "order": 0.0,
+          "precision": 0.25,
+          "recall": 0.25,
+          "retrieved": [
+            "memory.m3",
+            "world.w8",
+            "release.r8",
+            "memory.m8",
+            "world.w7",
+            "release.r7",
+            "memory.m7",
+            "world.w6"
+          ],
+          "returned": 8,
+          "selected": "content",
+          "task_score": 0.1875
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 0.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r8",
+            "release.r7",
+            "release.r6",
+            "release.r5",
+            "release.r4",
+            "release.r3",
+            "release.r2",
+            "release.r1"
+          ],
+          "returned": 8,
+          "selected": "recency",
+          "task_score": 0.75
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r1",
+            "release.r2",
+            "release.r3",
+            "release.r4",
+            "release.r5",
+            "release.r6",
+            "release.r7",
+            "release.r8"
+          ],
+          "returned": 8,
+          "selected": "scaffold",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r1",
+            "release.r2",
+            "release.r3",
+            "release.r4",
+            "release.r5",
+            "release.r6",
+            "release.r7",
+            "release.r8"
+          ],
+          "returned": 8,
+          "selected": "scaffold",
+          "task_score": 1.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 0.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r8",
+            "release.r7",
+            "release.r6",
+            "release.r5",
+            "release.r4",
+            "release.r3",
+            "release.r2",
+            "release.r1"
+          ],
+          "returned": 8,
+          "selected": "scoped_content",
+          "task_score": 0.75
+        }
+      },
+      "id": "Q01",
+      "intent": "exhaustive",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 8,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 8,
+        "selected": "scaffold",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r2"
+          ],
+          "returned": 2,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "world.w8",
+            "release.r8"
+          ],
+          "returned": 2,
+          "selected": "recency",
+          "task_score": 0.0
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r2"
+          ],
+          "returned": 2,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "scaffold",
+          "task_score": 0.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r2"
+          ],
+          "returned": 2,
+          "selected": "scoped_content",
+          "task_score": 1.0
+        }
+      },
+      "id": "Q02",
+      "intent": "conditional",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 2,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 2,
+        "selected": "content",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "release.r6",
+            "release.r1",
+            "world.w8",
+            "release.r8"
+          ],
+          "returned": 4,
+          "selected": "content",
+          "task_score": 0.0
+        },
+        "graph": {
+          "f1": 1.0,
+          "hits": 4,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r5",
+            "release.r2",
+            "release.r3"
+          ],
+          "returned": 4,
+          "selected": "graph",
+          "task_score": 1.0
+        },
+        "recency": {
+          "f1": 0.25,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 0.25,
+          "recall": 0.25,
+          "retrieved": [
+            "release.r8",
+            "release.r7",
+            "release.r6",
+            "release.r5"
+          ],
+          "returned": 4,
+          "selected": "recency",
+          "task_score": 0.25
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 4,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r5",
+            "release.r2",
+            "release.r3"
+          ],
+          "returned": 4,
+          "selected": "graph",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.75,
+          "hits": 3,
+          "order": 1.0,
+          "precision": 0.75,
+          "recall": 0.75,
+          "retrieved": [
+            "release.r1",
+            "release.r2",
+            "release.r3",
+            "release.r4"
+          ],
+          "returned": 4,
+          "selected": "scaffold",
+          "task_score": 0.75
+        },
+        "scoped_content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "release.r6",
+            "release.r1",
+            "release.r8",
+            "release.r7"
+          ],
+          "returned": 4,
+          "selected": "scoped_content",
+          "task_score": 0.0
+        }
+      },
+      "id": "Q03",
+      "intent": "causal",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 4,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 4,
+        "selected": "graph",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "world.w8"
+          ],
+          "returned": 1,
+          "selected": "content",
+          "task_score": 0.0
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r8"
+          ],
+          "returned": 1,
+          "selected": "recency",
+          "task_score": 1.0
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r8"
+          ],
+          "returned": 1,
+          "selected": "recency",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "release.r1"
+          ],
+          "returned": 1,
+          "selected": "scaffold",
+          "task_score": 0.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r8"
+          ],
+          "returned": 1,
+          "selected": "scoped_content",
+          "task_score": 1.0
+        }
+      },
+      "id": "Q04",
+      "intent": "continuity",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 1,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 1,
+        "selected": "recency",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.375,
+          "hits": 3,
+          "order": 0.666667,
+          "precision": 0.375,
+          "recall": 0.375,
+          "retrieved": [
+            "memory.m3",
+            "world.w8",
+            "release.r8",
+            "memory.m8",
+            "world.w7",
+            "release.r7",
+            "memory.m7",
+            "world.w6"
+          ],
+          "returned": 8,
+          "selected": "content",
+          "task_score": 0.447917
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 0.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m8",
+            "memory.m7",
+            "memory.m6",
+            "memory.m5",
+            "memory.m4",
+            "memory.m3",
+            "memory.m2",
+            "memory.m1"
+          ],
+          "returned": 8,
+          "selected": "recency",
+          "task_score": 0.75
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m1",
+            "memory.m2",
+            "memory.m3",
+            "memory.m4",
+            "memory.m5",
+            "memory.m6",
+            "memory.m7",
+            "memory.m8"
+          ],
+          "returned": 8,
+          "selected": "scaffold",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m1",
+            "memory.m2",
+            "memory.m3",
+            "memory.m4",
+            "memory.m5",
+            "memory.m6",
+            "memory.m7",
+            "memory.m8"
+          ],
+          "returned": 8,
+          "selected": "scaffold",
+          "task_score": 1.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 0.178571,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m3",
+            "memory.m8",
+            "memory.m7",
+            "memory.m6",
+            "memory.m5",
+            "memory.m4",
+            "memory.m2",
+            "memory.m1"
+          ],
+          "returned": 8,
+          "selected": "scoped_content",
+          "task_score": 0.794643
+        }
+      },
+      "id": "Q05",
+      "intent": "exhaustive",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 8,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 8,
+        "selected": "scaffold",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m6",
+            "memory.m5"
+          ],
+          "returned": 2,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "world.w8",
+            "release.r8"
+          ],
+          "returned": 2,
+          "selected": "recency",
+          "task_score": 0.0
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m6",
+            "memory.m5"
+          ],
+          "returned": 2,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "scaffold",
+          "task_score": 0.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m6",
+            "memory.m5"
+          ],
+          "returned": 2,
+          "selected": "scoped_content",
+          "task_score": 1.0
+        }
+      },
+      "id": "Q06",
+      "intent": "conditional",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 2,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 2,
+        "selected": "content",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "memory.m7",
+            "world.w8",
+            "release.r8",
+            "memory.m8"
+          ],
+          "returned": 4,
+          "selected": "content",
+          "task_score": 0.0
+        },
+        "graph": {
+          "f1": 1.0,
+          "hits": 4,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m5",
+            "memory.m6",
+            "memory.m2",
+            "memory.m4"
+          ],
+          "returned": 4,
+          "selected": "graph",
+          "task_score": 1.0
+        },
+        "recency": {
+          "f1": 0.5,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 0.5,
+          "recall": 0.5,
+          "retrieved": [
+            "memory.m8",
+            "memory.m7",
+            "memory.m6",
+            "memory.m5"
+          ],
+          "returned": 4,
+          "selected": "recency",
+          "task_score": 0.5
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 4,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m5",
+            "memory.m6",
+            "memory.m2",
+            "memory.m4"
+          ],
+          "returned": 4,
+          "selected": "graph",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.5,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 0.5,
+          "recall": 0.5,
+          "retrieved": [
+            "memory.m1",
+            "memory.m2",
+            "memory.m3",
+            "memory.m4"
+          ],
+          "returned": 4,
+          "selected": "scaffold",
+          "task_score": 0.5
+        },
+        "scoped_content": {
+          "f1": 0.5,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 0.5,
+          "recall": 0.5,
+          "retrieved": [
+            "memory.m7",
+            "memory.m8",
+            "memory.m6",
+            "memory.m5"
+          ],
+          "returned": 4,
+          "selected": "scoped_content",
+          "task_score": 0.5
+        }
+      },
+      "id": "Q07",
+      "intent": "causal",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 4,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 4,
+        "selected": "graph",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "world.w8"
+          ],
+          "returned": 1,
+          "selected": "content",
+          "task_score": 0.0
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m8"
+          ],
+          "returned": 1,
+          "selected": "recency",
+          "task_score": 1.0
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m8"
+          ],
+          "returned": 1,
+          "selected": "recency",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "memory.m1"
+          ],
+          "returned": 1,
+          "selected": "scaffold",
+          "task_score": 0.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m8"
+          ],
+          "returned": 1,
+          "selected": "scoped_content",
+          "task_score": 1.0
+        }
+      },
+      "id": "Q08",
+      "intent": "continuity",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 1,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 1,
+        "selected": "recency",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.375,
+          "hits": 3,
+          "order": 0.0,
+          "precision": 0.375,
+          "recall": 0.375,
+          "retrieved": [
+            "memory.m3",
+            "world.w8",
+            "release.r8",
+            "memory.m8",
+            "world.w7",
+            "release.r7",
+            "memory.m7",
+            "world.w6"
+          ],
+          "returned": 8,
+          "selected": "content",
+          "task_score": 0.28125
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 0.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w8",
+            "world.w7",
+            "world.w6",
+            "world.w5",
+            "world.w4",
+            "world.w3",
+            "world.w2",
+            "world.w1"
+          ],
+          "returned": 8,
+          "selected": "recency",
+          "task_score": 0.75
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w1",
+            "world.w2",
+            "world.w3",
+            "world.w4",
+            "world.w5",
+            "world.w6",
+            "world.w7",
+            "world.w8"
+          ],
+          "returned": 8,
+          "selected": "scaffold",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w1",
+            "world.w2",
+            "world.w3",
+            "world.w4",
+            "world.w5",
+            "world.w6",
+            "world.w7",
+            "world.w8"
+          ],
+          "returned": 8,
+          "selected": "scaffold",
+          "task_score": 1.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 0.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w8",
+            "world.w7",
+            "world.w6",
+            "world.w5",
+            "world.w4",
+            "world.w3",
+            "world.w2",
+            "world.w1"
+          ],
+          "returned": 8,
+          "selected": "scoped_content",
+          "task_score": 0.75
+        }
+      },
+      "id": "Q09",
+      "intent": "exhaustive",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 8,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 8,
+        "selected": "scaffold",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w3",
+            "world.w7"
+          ],
+          "returned": 2,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "world.w8",
+            "release.r8"
+          ],
+          "returned": 2,
+          "selected": "recency",
+          "task_score": 0.0
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w3",
+            "world.w7"
+          ],
+          "returned": 2,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "scaffold",
+          "task_score": 0.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w3",
+            "world.w7"
+          ],
+          "returned": 2,
+          "selected": "scoped_content",
+          "task_score": 1.0
+        }
+      },
+      "id": "Q10",
+      "intent": "conditional",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 2,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 2,
+        "selected": "content",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.2,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 0.2,
+          "recall": 0.2,
+          "retrieved": [
+            "world.w7",
+            "release.r8",
+            "world.w3",
+            "world.w8",
+            "memory.m8"
+          ],
+          "returned": 5,
+          "selected": "content",
+          "task_score": 0.2
+        },
+        "graph": {
+          "f1": 1.0,
+          "hits": 5,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w3",
+            "world.w5",
+            "world.w6",
+            "world.w2",
+            "world.w4"
+          ],
+          "returned": 5,
+          "selected": "graph",
+          "task_score": 1.0
+        },
+        "recency": {
+          "f1": 0.6,
+          "hits": 3,
+          "order": 1.0,
+          "precision": 0.6,
+          "recall": 0.6,
+          "retrieved": [
+            "world.w8",
+            "world.w7",
+            "world.w6",
+            "world.w5",
+            "world.w4"
+          ],
+          "returned": 5,
+          "selected": "recency",
+          "task_score": 0.6
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 5,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w3",
+            "world.w5",
+            "world.w6",
+            "world.w2",
+            "world.w4"
+          ],
+          "returned": 5,
+          "selected": "graph",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.8,
+          "hits": 4,
+          "order": 1.0,
+          "precision": 0.8,
+          "recall": 0.8,
+          "retrieved": [
+            "world.w1",
+            "world.w2",
+            "world.w3",
+            "world.w4",
+            "world.w5"
+          ],
+          "returned": 5,
+          "selected": "scaffold",
+          "task_score": 0.8
+        },
+        "scoped_content": {
+          "f1": 0.6,
+          "hits": 3,
+          "order": 1.0,
+          "precision": 0.6,
+          "recall": 0.6,
+          "retrieved": [
+            "world.w7",
+            "world.w3",
+            "world.w8",
+            "world.w6",
+            "world.w5"
+          ],
+          "returned": 5,
+          "selected": "scoped_content",
+          "task_score": 0.6
+        }
+      },
+      "id": "Q11",
+      "intent": "causal",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 5,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 5,
+        "selected": "graph",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w8"
+          ],
+          "returned": 1,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w8"
+          ],
+          "returned": 1,
+          "selected": "recency",
+          "task_score": 1.0
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w8"
+          ],
+          "returned": 1,
+          "selected": "recency",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "world.w1"
+          ],
+          "returned": 1,
+          "selected": "scaffold",
+          "task_score": 0.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "world.w8"
+          ],
+          "returned": 1,
+          "selected": "scoped_content",
+          "task_score": 1.0
+        }
+      },
+      "id": "Q12",
+      "intent": "continuity",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 1,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 1,
+        "selected": "recency",
+        "task_score": 1.0
+      },
+      "split": "calibration"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.375,
+          "hits": 3,
+          "order": 0.0,
+          "precision": 0.375,
+          "recall": 0.375,
+          "retrieved": [
+            "world.w8",
+            "release.r8",
+            "memory.m8",
+            "world.w7",
+            "release.r7",
+            "memory.m7",
+            "world.w6",
+            "release.r6"
+          ],
+          "returned": 8,
+          "selected": "content",
+          "task_score": 0.28125
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 0.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r8",
+            "release.r7",
+            "release.r6",
+            "release.r5",
+            "release.r4",
+            "release.r3",
+            "release.r2",
+            "release.r1"
+          ],
+          "returned": 8,
+          "selected": "recency",
+          "task_score": 0.75
+        },
+        "router": {
+          "f1": 0.375,
+          "hits": 3,
+          "order": 0.0,
+          "precision": 0.375,
+          "recall": 0.375,
+          "retrieved": [
+            "world.w8",
+            "release.r8",
+            "memory.m8",
+            "world.w7",
+            "release.r7",
+            "memory.m7",
+            "world.w6",
+            "release.r6"
+          ],
+          "returned": 8,
+          "selected": "content",
+          "task_score": 0.28125
+        },
+        "scaffold": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r1",
+            "release.r2",
+            "release.r3",
+            "release.r4",
+            "release.r5",
+            "release.r6",
+            "release.r7",
+            "release.r8"
+          ],
+          "returned": 8,
+          "selected": "scaffold",
+          "task_score": 1.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 8,
+          "order": 0.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r8",
+            "release.r7",
+            "release.r6",
+            "release.r5",
+            "release.r4",
+            "release.r3",
+            "release.r2",
+            "release.r1"
+          ],
+          "returned": 8,
+          "selected": "scoped_content",
+          "task_score": 0.75
+        }
+      },
+      "id": "Q13",
+      "intent": "exhaustive",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 8,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 8,
+        "selected": "scaffold",
+        "task_score": 1.0
+      },
+      "split": "paraphrase_challenge"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r2"
+          ],
+          "returned": 2,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "world.w8",
+            "release.r8"
+          ],
+          "returned": 2,
+          "selected": "recency",
+          "task_score": 0.0
+        },
+        "router": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r2"
+          ],
+          "returned": 2,
+          "selected": "content",
+          "task_score": 1.0
+        },
+        "scaffold": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "scaffold",
+          "task_score": 0.0
+        },
+        "scoped_content": {
+          "f1": 1.0,
+          "hits": 2,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r2"
+          ],
+          "returned": 2,
+          "selected": "scoped_content",
+          "task_score": 1.0
+        }
+      },
+      "id": "Q14",
+      "intent": "conditional",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 2,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 2,
+        "selected": "content",
+        "task_score": 1.0
+      },
+      "split": "paraphrase_challenge"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "release.r6",
+            "release.r1",
+            "world.w8",
+            "release.r8"
+          ],
+          "returned": 4,
+          "selected": "content",
+          "task_score": 0.0
+        },
+        "graph": {
+          "f1": 1.0,
+          "hits": 4,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "release.r4",
+            "release.r5",
+            "release.r2",
+            "release.r3"
+          ],
+          "returned": 4,
+          "selected": "graph",
+          "task_score": 1.0
+        },
+        "recency": {
+          "f1": 0.25,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 0.25,
+          "recall": 0.25,
+          "retrieved": [
+            "release.r8",
+            "release.r7",
+            "release.r6",
+            "release.r5"
+          ],
+          "returned": 4,
+          "selected": "recency",
+          "task_score": 0.25
+        },
+        "router": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "release.r6",
+            "release.r1",
+            "world.w8",
+            "release.r8"
+          ],
+          "returned": 4,
+          "selected": "content",
+          "task_score": 0.0
+        },
+        "scaffold": {
+          "f1": 0.75,
+          "hits": 3,
+          "order": 1.0,
+          "precision": 0.75,
+          "recall": 0.75,
+          "retrieved": [
+            "release.r1",
+            "release.r2",
+            "release.r3",
+            "release.r4"
+          ],
+          "returned": 4,
+          "selected": "scaffold",
+          "task_score": 0.75
+        },
+        "scoped_content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "release.r6",
+            "release.r1",
+            "release.r8",
+            "release.r7"
+          ],
+          "returned": 4,
+          "selected": "scoped_content",
+          "task_score": 0.0
+        }
+      },
+      "id": "Q15",
+      "intent": "causal",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 4,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 4,
+        "selected": "graph",
+        "task_score": 1.0
+      },
+      "split": "paraphrase_challenge"
+    },
+    {
+      "arms": {
+        "content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "memory.m1"
+          ],
+          "returned": 1,
+          "selected": "content",
+          "task_score": 0.0
+        },
+        "graph": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [],
+          "returned": 0,
+          "selected": "graph",
+          "task_score": 0.0
+        },
+        "recency": {
+          "f1": 1.0,
+          "hits": 1,
+          "order": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "retrieved": [
+            "memory.m8"
+          ],
+          "returned": 1,
+          "selected": "recency",
+          "task_score": 1.0
+        },
+        "router": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "memory.m1"
+          ],
+          "returned": 1,
+          "selected": "content",
+          "task_score": 0.0
+        },
+        "scaffold": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "memory.m1"
+          ],
+          "returned": 1,
+          "selected": "scaffold",
+          "task_score": 0.0
+        },
+        "scoped_content": {
+          "f1": 0.0,
+          "hits": 0,
+          "order": 1.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "retrieved": [
+            "memory.m1"
+          ],
+          "returned": 1,
+          "selected": "scoped_content",
+          "task_score": 0.0
+        }
+      },
+      "id": "Q16",
+      "intent": "continuity",
+      "oracle_upper_bound": {
+        "f1": 1.0,
+        "hits": 1,
+        "order": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "returned": 1,
+        "selected": "recency",
+        "task_score": 1.0
+      },
+      "split": "paraphrase_challenge"
+    }
+  ],
+  "changes_default_search_order": false,
+  "fixture_id": "public_synthetic_free_recall_strategies_v0",
+  "fixture_sha256": "44ca1f31230794562d08b662193410fcaa5b4ce92183ea314cd6747e5e9921ad",
+  "public_synthetic": true,
+  "read_only": true,
+  "schema": "agent_bridge.free_recall_strategy_report.v0",
+  "summary": {
+    "comparison": {
+      "best_single_arm": "scoped_content",
+      "best_single_task_score": 0.69654,
+      "oracle_router_upper_bound": 1.0,
+      "router_lift": 0.133538,
+      "router_task_score": 0.830078,
+      "router_to_oracle_gap": 0.169922
+    },
+    "content": {
+      "by_intent": {
+        "causal": {
+          "f1": 0.05,
+          "task_score": 0.05
+        },
+        "conditional": {
+          "f1": 1.0,
+          "task_score": 1.0
+        },
+        "continuity": {
+          "f1": 0.25,
+          "task_score": 0.25
+        },
+        "exhaustive": {
+          "f1": 0.34375,
+          "task_score": 0.299479
+        }
+      },
+      "by_split": {
+        "calibration": {
+          "f1": 0.433333,
+          "task_score": 0.426389
+        },
+        "paraphrase_challenge": {
+          "f1": 0.34375,
+          "task_score": 0.320312
+        }
+      },
+      "macro_f1": 0.410938,
+      "macro_task_score": 0.39987,
+      "mean_precision": 0.410938,
+      "mean_recall": 0.410938
+    },
+    "graph": {
+      "by_intent": {
+        "causal": {
+          "f1": 1.0,
+          "task_score": 1.0
+        },
+        "conditional": {
+          "f1": 0.0,
+          "task_score": 0.0
+        },
+        "continuity": {
+          "f1": 0.0,
+          "task_score": 0.0
+        },
+        "exhaustive": {
+          "f1": 0.0,
+          "task_score": 0.0
+        }
+      },
+      "by_split": {
+        "calibration": {
+          "f1": 0.25,
+          "task_score": 0.25
+        },
+        "paraphrase_challenge": {
+          "f1": 0.25,
+          "task_score": 0.25
+        }
+      },
+      "macro_f1": 0.25,
+      "macro_task_score": 0.25,
+      "mean_precision": 0.25,
+      "mean_recall": 0.25
+    },
+    "recency": {
+      "by_intent": {
+        "causal": {
+          "f1": 0.4,
+          "task_score": 0.4
+        },
+        "conditional": {
+          "f1": 0.0,
+          "task_score": 0.0
+        },
+        "continuity": {
+          "f1": 1.0,
+          "task_score": 1.0
+        },
+        "exhaustive": {
+          "f1": 1.0,
+          "task_score": 0.75
+        }
+      },
+      "by_split": {
+        "calibration": {
+          "f1": 0.6125,
+          "task_score": 0.55
+        },
+        "paraphrase_challenge": {
+          "f1": 0.5625,
+          "task_score": 0.5
+        }
+      },
+      "macro_f1": 0.6,
+      "macro_task_score": 0.5375,
+      "mean_precision": 0.6,
+      "mean_recall": 0.6
+    },
+    "router": {
+      "by_intent": {
+        "causal": {
+          "f1": 0.75,
+          "task_score": 0.75
+        },
+        "conditional": {
+          "f1": 1.0,
+          "task_score": 1.0
+        },
+        "continuity": {
+          "f1": 0.75,
+          "task_score": 0.75
+        },
+        "exhaustive": {
+          "f1": 0.84375,
+          "task_score": 0.820312
+        }
+      },
+      "by_split": {
+        "calibration": {
+          "f1": 1.0,
+          "task_score": 1.0
+        },
+        "paraphrase_challenge": {
+          "f1": 0.34375,
+          "task_score": 0.320312
+        }
+      },
+      "macro_f1": 0.835938,
+      "macro_task_score": 0.830078,
+      "mean_precision": 0.835938,
+      "mean_recall": 0.835938,
+      "route_accuracy": 0.8125,
+      "route_accuracy_by_split": {
+        "calibration": 1.0,
+        "paraphrase_challenge": 0.25
+      }
+    },
+    "scaffold": {
+      "by_intent": {
+        "causal": {
+          "f1": 0.7,
+          "task_score": 0.7
+        },
+        "conditional": {
+          "f1": 0.0,
+          "task_score": 0.0
+        },
+        "continuity": {
+          "f1": 0.0,
+          "task_score": 0.0
+        },
+        "exhaustive": {
+          "f1": 1.0,
+          "task_score": 1.0
+        }
+      },
+      "by_split": {
+        "calibration": {
+          "f1": 0.420833,
+          "task_score": 0.420833
+        },
+        "paraphrase_challenge": {
+          "f1": 0.4375,
+          "task_score": 0.4375
+        }
+      },
+      "macro_f1": 0.425,
+      "macro_task_score": 0.425,
+      "mean_precision": 0.425,
+      "mean_recall": 0.425
+    },
+    "scoped_content": {
+      "by_intent": {
+        "causal": {
+          "f1": 0.275,
+          "task_score": 0.275
+        },
+        "conditional": {
+          "f1": 1.0,
+          "task_score": 1.0
+        },
+        "continuity": {
+          "f1": 0.75,
+          "task_score": 0.75
+        },
+        "exhaustive": {
+          "f1": 1.0,
+          "task_score": 0.761161
+        }
+      },
+      "by_split": {
+        "calibration": {
+          "f1": 0.841667,
+          "task_score": 0.782887
+        },
+        "paraphrase_challenge": {
+          "f1": 0.5,
+          "task_score": 0.4375
+        }
+      },
+      "macro_f1": 0.75625,
+      "macro_task_score": 0.69654,
+      "mean_precision": 0.75625,
+      "mean_recall": 0.75625
+    }
+  },
+  "trained_model": false
+}

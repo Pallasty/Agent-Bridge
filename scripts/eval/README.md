@@ -62,6 +62,120 @@ and bootstrap calls cannot be counted as organic telemetry.
 
 ## Sibling probes (not benchmark components)
 
+`free_recall_strategy_benchmark.py` is a zero-dependency, offline
+public-synthetic strategy-shape experiment inspired by Li et al. (2026). It
+compares lexical relevance (with and without an episode prefilter), recency,
+stable episode traversal, causal graph traversal, and a text-only router on one
+controlled corpus. Its paraphrase
+challenge separates a perfect template-calibration score from routing
+generalization. It does not open the AB store, call MCP, train a model, or
+change default retrieval order. See
+`docs/design/FREE_RECALL_MEMORY_STRATEGY_EXPLORATION_2026_07_21.md`.
+
+`free_recall_strategy_r1_replay.py` is the separately preregistered successor.
+It creates a read-only SQLite online backup, binds every `memory_search` call to
+disposable clones, and compares fixed-budget relevance, temporal-adjacency,
+graph-expansion, text-router, and oracle-upper-bound arms on the three existing
+curated fixtures. Fixture drift, query-order-dependent rankings, snapshot-path
+misbinding, cross-scope expansion, or a source write stops the run. Its result
+is aggregate-only and grants no runtime authority. See
+`docs/design/FREE_RECALL_STRATEGY_R1_FROZEN_SNAPSHOT_PREREGISTRATION_2026_07_21.md`.
+
+The first real replay stopped before scoring because Hybrid pages were not
+exactly stable under the forward/reverse order falsifier, even with one fresh
+snapshot clone per observation. The aggregate-only blocked result and the
+requirements for a separate frozen-clock adapter are recorded in
+`docs/design/FREE_RECALL_STRATEGY_R1_FROZEN_SNAPSHOT_RESULT_2026_07_21.md`.
+
+R1.1 subsequently added a store-only frozen-clock adapter and passed exact-page
+equality for all three modes. The unchanged strategy gates then rejected the
+current temporal/graph proxy family; the aggregate result and claim boundary
+are recorded in
+`docs/design/FREE_RECALL_STRATEGY_R1_1_FROZEN_CLOCK_RESULT_2026_07_21.md`.
+
+R2 then tests whether current tag, graph, and timestamp metadata can recover
+episode-like synthesis sets without content or fitted parameters. It fails the
+preregistered recoverability gate; the aggregate result and prospective
+write-side instrumentation boundary are recorded in
+`docs/design/FREE_RECALL_STRATEGY_R2_EPISODE_RECOVERABILITY_RESULT_2026_07_21.md`.
+
+`free_recall_strategy_r3_episode_sidecar.py` tests the successor prospective
+contract using public-synthetic data only. Its order-independent reducer must
+reconstruct complete episode membership and position under shuffled,
+duplicated, close-first, and content-permuted delivery, while every incomplete,
+conflicted, or ambiguous episode returns the fixed-budget baseline without
+partial leakage. R3 passes its structural and fail-closed gates and therefore
+opens only a default-off observation-only integration design review; it does
+not authorize a schema, producer, real-session capture, retrieval consumer,
+runtime execution, or deployment. See
+`docs/design/FREE_RECALL_STRATEGY_R3_PROSPECTIVE_EPISODE_SIDECAR_RESULT_2026_07_21.md`.
+
+`free_recall_strategy_r4_observation_contract.py` is the design-only successor.
+It validates that a proposed default-off integration remains separate from
+`MemoryRecord`, memory content, retrieval indexes and consumers, MCP, real
+capture, and runtime authority. Its directed mutations exercise every authority
+flag, forbidden field class, ordering/abstention invariant, and kill-switch
+claim. A pass opens only an R5 source-plan review, with `item_ref` derivation
+and custody still unresolved; it creates no schema or executable integration.
+See
+`docs/design/FREE_RECALL_STRATEGY_R4_OBSERVATION_ONLY_INTEGRATION_RESULT_2026_07_21.md`.
+
+`free_recall_strategy_r5_source_plan.py` validates the next source-only plan
+without implementing it. It freezes a full-length, domain-separated and
+length-framed HMAC-SHA-256 `item_ref`, an interface-only key-provider boundary,
+whole-episode purge semantics, three separately gated source slices, and the
+single proposed `session_curate:curation_batch` producer seam. Public-synthetic
+known-answer and directed-mutation checks open only an owner-gated R6 Slice A
+(pure types, derivation, synthetic provider, and no-op sink), not dependencies,
+SQLite, build, execution, real capture, retrieval, merge, or deployment. See
+`docs/design/FREE_RECALL_STRATEGY_R5_SOURCE_ONLY_PLAN_RESULT_2026_07_22.md`.
+
+R6 Slice A lands the corresponding default-off source primitives in
+`crates/store/src/episode_observation_slice_a.rs`, reusing the already optional
+`ring` dependency. Its source receipt records local static checks, an identical
+tb14 source hash, and the fact that the feature itself remains unbuilt and its
+Rust tests unexecuted. It also records an unplanned default-feature Cargo check
+triggered by the repository pre-commit hook without treating that check as R6
+evidence. See
+`docs/design/FREE_RECALL_STRATEGY_R6_SLICE_A_SOURCE_RECEIPT_2026_07_22.md`.
+
+The subsequent R6 build gate compiles the feature and runs its five filtered
+tests on local macOS and an isolated aio2 Linux worktree with Rust/Cargo 1.96.0.
+Both pass; the final aio2 run is offline and locked. The result accepts Slice A
+only and keeps SQLite Slice B closed. It also records rustup/toolchain and
+crates.io-cache side effects from the first independent build attempt. See
+`docs/design/FREE_RECALL_STRATEGY_R6_SLICE_A_BUILD_RESULT_2026_07_22.md`.
+
+`free_recall_strategy_r10_session_curate_producer.py` validates the first and
+only Slice C producer seam without changing source. It freezes an explicit
+candidate-outcome ledger, optional `Hub` capability injection instead of
+`StateStore` widening, save-before-item order, saved-success ordinals, and
+fail-open core/fail-closed sidecar behavior. Public-synthetic traces include
+dry-run/no-store/disabled, duplicates, mixed errors, begin/item/close failures,
+and the auxiliary-error underflow counterexample. A pass opens only an
+owner-gated R11 C1 bridge-orchestration source request with a fake capability;
+it does not open a store adapter, trusted key custody, build, execution,
+producer integration, merge, release, or deployment. See
+`docs/design/FREE_RECALL_STRATEGY_R10_SESSION_CURATE_PRODUCER_RESULT_2026_07_22.md`.
+
+`free_recall_strategy_r11_c1_source.py` statically checks the resulting C1
+source without invoking Cargo. It verifies the isolated default-off bridge
+feature, private optional `Hub` capability, absence of production/main/store
+wiring, explicit candidate outcome ledger, save-before-item order, first-error
+latch, positive complete close, and required fake source tests. Directed
+mutations exercise each boundary. A pass records source landing only; feature
+compilation, test execution, database access, C2 integration, merge, release,
+and deployment remain closed. See
+`docs/design/FREE_RECALL_STRATEGY_R11_C1_SOURCE_RECEIPT_2026_07_22.md`.
+
+R12 records the C1 build gate. The exact tip passes the default-off feature
+check plus its four orchestration and one ledger regression tests locally with
+locked offline inputs. Its independent Linux replay remains explicitly pending:
+aio2 could not receive the verified source bundle over currently degraded
+transport, while tb14 has no Rust toolchain. This is not C1 acceptance and does
+not open C2. See
+`docs/design/FREE_RECALL_STRATEGY_R12_C1_BUILD_RESULT_2026_07_22.md`.
+
 `engram_g14_wasi_g2f_build_authorization.py` records the owner-gated G2F
 decision. It does not invoke Cargo. It authorizes only a later G2G offline,
 zero-dependency compile of the existing logical-clock host source, never a run,

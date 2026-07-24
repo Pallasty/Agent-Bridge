@@ -27,6 +27,24 @@ temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic = ["t
 engram-g1-secure-custody-shadow-synthetic = ["dep:libc"]
 temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic = ["temporal-evidence-s20-owned-lab-trusted-controller-orchestration-synthetic"]
 temporal-evidence-s21a-owned-lab-final-refreeze-admission-synthetic = ["temporal-evidence-s20b-owned-lab-rich-packet-validators-synthetic"]
+episode-observation-slice-a = ["dep:ring"]
+episode-observation-slice-b = ["episode-observation-slice-a"]
+episode-observation-slice-c2-synthetic = ["episode-observation-slice-b"]
+episode-observation-c2-keychain-macos = [
+    "episode-observation-slice-b",
+    "dep:security-framework",
+    "dep:zeroize",
+]
+episode-observation-c2-keychain-macos-live-lab = [
+    "episode-observation-c2-keychain-macos",
+]
+episode-observation-c2c-keychain-macos-runtime = [
+    "episode-observation-slice-b",
+    "episode-observation-c2-keychain-macos",
+]
+episode-observation-c2c-keychain-macos-live-lab = [
+    "episode-observation-c2-keychain-macos",
+]
 
 [dependencies]
 ab-core.workspace = true
@@ -44,6 +62,10 @@ walkdir.workspace = true
 # Optional: real sentence-transformer embedding via ONNX (all-MiniLM-L6-v2, 384-dim).
 # Activated by default; disable with --no-default-features for hash-only builds.
 fastembed = { version = "5", optional = true, default-features = false, features = ["hf-hub", "ort-download-binaries"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "3.7.0", optional = true }
+zeroize = { version = "1.8.2", optional = true }
 
 [[bin]]
 name = "backfill-embeddings"

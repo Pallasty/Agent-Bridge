@@ -14,6 +14,23 @@ onnx-embed = ["ab-store/onnx-embed"]
 linux-native-avatar = ["dep:smithay-client-toolkit", "dep:wayland-client"]
 biocortex-retrieval-shadow = []
 biocortex-retrieval-opt-in = ["biocortex-retrieval-shadow"]
+episode-observation-slice-c1 = []
+episode-observation-slice-c2-synthetic = [
+    "episode-observation-slice-c1",
+    "ab-store/episode-observation-slice-c2-synthetic",
+]
+episode-observation-c2c-runtime-assembly-synthetic = [
+    "episode-observation-slice-c2-synthetic",
+]
+episode-observation-c2c-keychain-macos-runtime = [
+    "episode-observation-slice-c1",
+    "ab-store/episode-observation-c2c-keychain-macos-runtime",
+]
+episode-observation-c2c-keychain-macos-live-lab = [
+    "episode-observation-c2c-keychain-macos-runtime",
+    "ab-store/episode-observation-c2c-keychain-macos-live-lab",
+    "dep:tempfile",
+]
 temporal-evidence-s4-synthetic = ["ab-store/temporal-evidence-s4-synthetic"]
 temporal-evidence-s5-candidate-synthetic = [
     "temporal-evidence-s4-synthetic",
@@ -73,6 +90,7 @@ ureq = { version = "2", default-features = false }
 # C2 lockfile primitive (kill(pid, 0) liveness probe).
 libc = "0.2"
 png = "0.17"
+tempfile = { version = "3", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 smithay-client-toolkit = { version = "0.20", optional = true }
@@ -84,3 +102,8 @@ tempfile = "3"
 [[bin]]
 name = "agent-bridge"
 path = "src/main.rs"
+
+[[bin]]
+name = "episode-observation-c2c-live-lab"
+path = "src/bin/episode_observation_c2c_live_lab.rs"
+required-features = ["episode-observation-c2c-keychain-macos-live-lab"]
