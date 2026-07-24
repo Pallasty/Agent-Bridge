@@ -19,6 +19,6 @@ episode receipt is empty
 
 R38 therefore accepts the core curate path: the bounded sidecar no longer
 blocks the response. It does not accept a finalized observation receipt; the
-sidecar timeout currently leaves no receipt satisfying that gate. R38 is closed
-without retry. Future reports must retain this two-level verdict rather than
-promote core success into sidecar success.
+sidecar timeout leaves no receipt satisfying that gate. R38 is closed without
+retry under the accepted two-level contract in R39: incomplete sidecars are
+never projected or promoted into observation success.
