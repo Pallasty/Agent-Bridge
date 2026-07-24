@@ -1,0 +1,13 @@
+{
+  "status": "VERIFIED_D30_OWNER_SCOPED_SINGLE_MICRO_ACTION",
+  "representative_hex": "0x66669999666699996666999966669999",
+  "source_orbit_size": 1,
+  "reduced_column_entries": 29,
+  "projected_zero_outputs": 0,
+  "column_sha256": "eae426a626afa1f1def17bc23dd67af684470aeb5f48b6532992eb27bd59f515",
+  "process_peak_rss_kib": 40384,
+  "packed_q3_reads": 0,
+  "scientific_action_calls": 1,
+  "full_53_scientific_execution_authorized": false,
+  "next_gate": "BOUNDED_MICRO_ACTION_REPLAY_AND_RESOURCE_MODEL"
+}
