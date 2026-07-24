@@ -2,7 +2,7 @@
 
 Date: 2026-07-24
 
-Status: **PREREGISTERED / ONE DISPOSABLE RUN ONLY**
+Status: **ATTEMPT-1 INCOMPLETE / NO RETRY**
 
 Parent: R30 established that the fixture reaches MCP initialization but not a
 `session_curate` response. R31 added a default-off redacted checkpoint channel
@@ -46,3 +46,27 @@ complete. R32 is not retried under this identifier.
 
 No deployment, merge, production configuration, broad Keychain access, or
 additional retry is part of R32.
+
+## Attempt-1 receipt
+
+All fixed preconditions passed, including the R27 static/mutation gate,
+default-disabled check, final R31 feature build, eight driver tests, and the
+isolated ordinary MCP fixture (one core memory saved).
+
+The one authorized disposable run returned only this redacted diagnostic:
+
+```text
+after_initialize_before_curate_response; last_checkpoint=observation_item_enter
+```
+
+Thus candidate extraction, observation begin, and the core memory save all
+completed. The stall lies inside the item-sidecar after entry and before its
+completion checkpoint: either the Keychain-derived item reference or the
+immediately following episode-item store append. The child was reaped before
+diagnostics were read, and custody cleanup/postcheck completed. R32 is
+incomplete and will not be retried.
+
+The next source-only lane should separate the synchronous Keychain derivation
+from the asynchronous append with one additional fixed checkpoint on either
+side of the derivation; it must not broaden Keychain access or collect raw
+diagnostics.
