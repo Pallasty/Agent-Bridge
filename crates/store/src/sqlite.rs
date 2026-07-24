@@ -5000,7 +5000,7 @@ impl StateStore for SqliteStore {
                 let n = tx.execute(
                     "UPDATE memories
                         SET status = 'tombstoned',
-                            updated_at = ?2
+                            updated_at = MAX(?2, updated_at + 1)
                       WHERE key = ?1
                         AND status != 'tombstoned'",
                     params![key, now],
@@ -16841,6 +16841,62 @@ mod tests {
         assert_eq!(resurrected.unwrap().status, "active");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn tombstone_timestamp_strictly_exceeds_deleted_record_for_same_second_sync() {
+        use crate::{ImportConflictPolicy, MemoryRecord};
+
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&temp_dir.path().join("state.db"))
+            .await
+            .expect("open");
+        let timestamp = now_secs();
+        let record = MemoryRecord {
+            key: "same_second_tombstone".to_string(),
+            kind: "fact".to_string(),
+            content: "delete me".to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: timestamp,
+            updated_at: timestamp,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&record).await.expect("save");
+        assert!(store.memory_delete(&record.key).await.expect("delete"));
+
+        let conn = rusqlite::Connection::open(temp_dir.path().join("state.db")).expect("sqlite");
+        let tombstone_updated_at: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM memories WHERE key = ?1",
+                [&record.key],
+                |row| row.get(0),
+            )
+            .expect("read tombstone timestamp");
+        assert!(
+            tombstone_updated_at > timestamp,
+            "tombstone must strictly exceed the deleted record timestamp"
+        );
+
+        let stale = temp_dir.path().join("same-second-active.jsonl");
+        tokio::fs::write(
+            &stale,
+            format!("{}\n", serde_json::to_string(&record).unwrap()),
+        )
+        .await
+        .expect("write stale active record");
+        let report = store
+            .memory_import(&stale, ImportConflictPolicy::NewerWins, None)
+            .await
+            .expect("import stale active record");
+        assert_eq!(report.skipped, 1);
+        assert!(store.memory_get(&record.key).await.expect("get").is_none());
     }
 
     #[tokio::test]
