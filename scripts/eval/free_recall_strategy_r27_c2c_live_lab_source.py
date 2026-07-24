@@ -36,7 +36,7 @@ def checks(store_cargo: str, store_lib: str, store_lab: str, bridge_cargo: str, 
         ("fixture rejects an empty core save", '.filter(|count| *count > 0)' in driver and 'zero_saved_count_is_not_accepted' in driver),
         ("driver bounds the MCP process and captures a finalized SQLite receipt", 'const MCP_TIMEOUT: Duration = Duration::from_secs(30);' in driver and 'let outcome = wait_for_child(&mut child);' in driver and 'FROM episode_observation_events' in driver and 'receipt_requires_one_finalized_contiguous_curation_batch' in driver),
         ("cleanup failure carries only the public recovery account", 'Keychain cleanup unconfirmed; recover only {} and active-epoch' in driver and 'custody.key_account()' in driver),
-        ("timeout reports only a redacted JSON-RPC phase after joining stdout", 'fn classify_mcp_phase(stdout: &str)' in driver and 'let outcome = wait_for_child(&mut child);' in driver and 'classify_mcp_phase(&stdout)' in driver and 'timeout_phase_classifier_never_returns_raw_mcp_content' in driver and 'eprintln!("{stdout}")' not in driver),
+        ("timeout reports only a redacted JSON-RPC phase after joining stdout", 'fn classify_mcp_phase(stdout: &str)' in driver and 'let outcome = wait_for_child(&mut child);' in driver and 'classify_mcp_phase(&stdout)' in driver and 'timeout_phase_classifier_never_returns_raw_mcp_content' in driver and 'timeout_kills_and_reaps_child_before_returning' in driver and 'eprintln!("{stdout}")' not in driver),
     ]
 
 

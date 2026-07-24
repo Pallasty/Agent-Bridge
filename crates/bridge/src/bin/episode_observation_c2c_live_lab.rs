@@ -197,7 +197,11 @@ fn read_receipt(db_path: &std::path::Path, expected_item_count: usize) -> Result
 }
 
 fn wait_for_child(child: &mut std::process::Child) -> ChildOutcome {
-    let deadline = Instant::now() + MCP_TIMEOUT;
+    wait_for_child_with_timeout(child, MCP_TIMEOUT)
+}
+
+fn wait_for_child_with_timeout(child: &mut std::process::Child, timeout: Duration) -> ChildOutcome {
+    let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return ChildOutcome::ExitedSuccess,
@@ -402,5 +406,19 @@ mod tests {
             ),
             "after_curate_response_before_exit"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_kills_and_reaps_child_before_returning() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 2"])
+            .spawn()
+            .expect("sleep child");
+        assert_eq!(
+            wait_for_child_with_timeout(&mut child, Duration::from_millis(10)),
+            ChildOutcome::TimedOut
+        );
+        assert!(child.try_wait().expect("reaped child").is_some());
     }
 }
