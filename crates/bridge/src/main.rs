@@ -20895,14 +20895,20 @@ async fn run_rescue_snapshot(
 /// - `AGENT_BRIDGE_HEADLESS=1`     — headless Chromium
 async fn build_hub() -> Result<Hub> {
     #[cfg(target_os = "linux")]
-    let notifier: Arc<dyn ab_notifier::Notifier> = {
+    let notifier: Option<Arc<dyn ab_notifier::Notifier>> = {
         use ab_notifier::DbusNotifier;
-        Arc::new(DbusNotifier::connect().await?)
+        match DbusNotifier::connect().await {
+            Ok(notifier) => Some(Arc::new(notifier)),
+            Err(error) => {
+                tracing::warn!(%error, "D-Bus notifier unavailable; continuing without desktop notifications");
+                None
+            }
+        }
     };
     #[cfg(target_os = "macos")]
-    let notifier: Arc<dyn ab_notifier::Notifier> = {
+    let notifier: Option<Arc<dyn ab_notifier::Notifier>> = {
         use ab_notifier::MacOsNotifier;
-        Arc::new(MacOsNotifier)
+        Some(Arc::new(MacOsNotifier))
     };
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     compile_error!("agent-bridge requires Linux or macOS");
@@ -20984,8 +20990,12 @@ async fn build_hub() -> Result<Hub> {
             .with_store(store.clone()),
     );
 
-    Ok(Hub::builder()
-        .notifier(notifier)
+    let mut builder = Hub::builder();
+    if let Some(notifier) = notifier {
+        builder = builder.notifier(notifier);
+    }
+
+    Ok(builder
         .store(store)
         .terminal(terminal)
         .browser(browser)

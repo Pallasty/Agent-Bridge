@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "linux")]
+pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
@@ -462,7 +464,12 @@ pub fn body_status_snapshot() -> Value {
         return macos::body_status_snapshot();
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        return linux::body_status_snapshot();
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         json!({
             "schema_version": BODY_STATUS_SCHEMA_V0,
