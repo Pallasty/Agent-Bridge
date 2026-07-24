@@ -51,6 +51,8 @@ pub(crate) mod episode_observation_c2c_runtime_assembly_synthetic;
     target_os = "macos"
 ))]
 pub mod episode_observation_c2c_keychain_macos_runtime;
+#[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
+pub(crate) mod episode_observation_c2c_live_lab_diagnostics;
 pub mod event_spine;
 pub mod github_api;
 pub mod gitlab_api;

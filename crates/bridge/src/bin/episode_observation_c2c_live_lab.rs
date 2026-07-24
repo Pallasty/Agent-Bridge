@@ -15,6 +15,20 @@ use std::time::{Duration, Instant};
 
 const LIVE_ACK: &str = "r26-c2c-live-authorized";
 const MCP_TIMEOUT: Duration = Duration::from_secs(30);
+const PHASE_PATH_ENV: &str = "AGENT_BRIDGE_C2C_LIVE_LAB_PHASE_PATH";
+const LAB_PHASES: &[&str] = &[
+    "curate_entered",
+    "candidates_ready",
+    "observation_begin_enter",
+    "observation_begin_done",
+    "core_save_enter",
+    "core_save_done",
+    "observation_item_enter",
+    "observation_item_done",
+    "observation_finish_enter",
+    "observation_finish_done",
+    "curate_response_ready",
+];
 
 #[derive(Parser, Debug)]
 #[command(about = "default-off R26 disposable C2C Keychain/MCP fixture")]
@@ -122,6 +136,21 @@ fn classify_mcp_phase(stdout: &str) -> &'static str {
     }
 }
 
+fn last_lab_checkpoint(contents: &str) -> Option<&'static str> {
+    contents
+        .lines()
+        .filter_map(|line| LAB_PHASES.iter().copied().find(|phase| *phase == line))
+        .last()
+}
+
+fn timeout_diagnostic(stdout: &str, checkpoint_contents: &str) -> String {
+    let mcp_phase = classify_mcp_phase(stdout);
+    match last_lab_checkpoint(checkpoint_contents) {
+        Some(checkpoint) => format!("{mcp_phase}; last_checkpoint={checkpoint}"),
+        None => mcp_phase.to_owned(),
+    }
+}
+
 fn validate_receipt(events: &[DbEvent], expected_item_count: usize) -> Result<Receipt, String> {
     let Some(first) = events.first() else {
         return Err("episode receipt is empty".to_owned());
@@ -221,12 +250,15 @@ fn run_fixture(
     agent_bridge: &std::path::Path,
     db_path: &std::path::Path,
 ) -> Result<Receipt, String> {
+    let phase_file = tempfile::NamedTempFile::new_in("/tmp")
+        .map_err(|_| "could not create disposable R31 phase file")?;
     let mut child = Command::new(agent_bridge)
         .arg("mcp")
         .arg("--episode-observation")
         .arg("keychain-macos-v1")
         .env_clear()
         .env("AGENT_BRIDGE_DB", db_path)
+        .env(PHASE_PATH_ENV, phase_file.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -254,11 +286,12 @@ fn run_fixture(
     let stdout = stdout_handle
         .join()
         .map_err(|_| "MCP stdout reader panicked".to_owned())??;
+    let checkpoint_contents = std::fs::read_to_string(phase_file.path()).unwrap_or_default();
     match outcome {
         ChildOutcome::TimedOut => {
             return Err(format!(
                 "MCP fixture process timed out ({})",
-                classify_mcp_phase(&stdout)
+                timeout_diagnostic(&stdout, &checkpoint_contents)
             ));
         }
         ChildOutcome::ExitedFailure => return Err("MCP fixture process failed".to_owned()),
@@ -405,6 +438,21 @@ mod tests {
 {"jsonrpc":"2.0","id":2,"result":{"content":[{"text":"sensitive"}]}}"#
             ),
             "after_curate_response_before_exit"
+        );
+    }
+
+    #[test]
+    fn timeout_diagnostic_accepts_only_fixed_lab_checkpoints() {
+        assert_eq!(
+            timeout_diagnostic(
+                r#"{"jsonrpc":"2.0","id":1,"result":{}}"#,
+                "curate_entered\nsecret\nobservation_item_enter\n",
+            ),
+            "after_initialize_before_curate_response; last_checkpoint=observation_item_enter"
+        );
+        assert_eq!(
+            timeout_diagnostic("", "untrusted-content\n"),
+            "before_initialize_response"
         );
     }
 

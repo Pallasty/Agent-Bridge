@@ -116,6 +116,17 @@ use crate::context_budget::{
 };
 #[cfg(feature = "episode-observation-slice-c1")]
 use crate::episode_observation_curation_batch::CurationBatchObservationRun;
+
+#[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
+macro_rules! c2c_live_lab_phase {
+    ($label:literal) => {
+        crate::episode_observation_c2c_live_lab_diagnostics::mark($label)
+    };
+}
+#[cfg(not(feature = "episode-observation-c2c-keychain-macos-live-lab"))]
+macro_rules! c2c_live_lab_phase {
+    ($label:literal) => {};
+}
 use crate::hub::Hub;
 use crate::ide::{
     queue_ide_command_with_dir_policy, read_ide_snapshot, IdeCommandDirPolicy, IdeCommandOptions,
@@ -19286,6 +19297,7 @@ impl McpTool for SessionCurateTool {
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let store_opt = self.hub.store.clone();
+        c2c_live_lab_phase!("curate_entered");
 
         let text = match args.get("conversation_text").and_then(|v| v.as_str()) {
             Some(s) if !s.is_empty() => s.to_string(),
@@ -19322,6 +19334,7 @@ impl McpTool for SessionCurateTool {
             max_items,
             curate_opts.clone(),
         );
+        c2c_live_lab_phase!("candidates_ready");
         for candidate in &mut candidates {
             apply_curated_memory_governance(
                 candidate,
@@ -19397,13 +19410,18 @@ impl McpTool for SessionCurateTool {
         }
 
         #[cfg(feature = "episode-observation-slice-c1")]
+        c2c_live_lab_phase!("observation_begin_enter");
+        #[cfg(feature = "episode-observation-slice-c1")]
         let mut curation_batch_observation = CurationBatchObservationRun::begin(
             self.hub.curation_batch_observer.clone(),
             !candidates.is_empty(),
         )
         .await;
+        #[cfg(feature = "episode-observation-slice-c1")]
+        c2c_live_lab_phase!("observation_begin_done");
 
         for mem in &candidates {
+            c2c_live_lab_phase!("core_save_enter");
             // Skip if key already exists (dedup)
             match store.memory_get(&mem.key).await {
                 Ok(Some(_)) => {
@@ -19414,10 +19432,15 @@ impl McpTool for SessionCurateTool {
                     Ok(()) => {
                         saved.push(json!({ "key": mem.key, "kind": mem.kind }));
                         outcome_ledger.record_saved();
+                        c2c_live_lab_phase!("core_save_done");
+                        #[cfg(feature = "episode-observation-slice-c1")]
+                        c2c_live_lab_phase!("observation_item_enter");
                         #[cfg(feature = "episode-observation-slice-c1")]
                         curation_batch_observation
                             .observe_memory_saved(&mem.key)
                             .await;
+                        #[cfg(feature = "episode-observation-slice-c1")]
+                        c2c_live_lab_phase!("observation_item_done");
                     }
                     Err(e) => outcome_ledger.record_save_error(format!("{}: {e}", mem.key)),
                 },
@@ -19426,7 +19449,11 @@ impl McpTool for SessionCurateTool {
         }
 
         #[cfg(feature = "episode-observation-slice-c1")]
+        c2c_live_lab_phase!("observation_finish_enter");
+        #[cfg(feature = "episode-observation-slice-c1")]
         let _observation_completion = curation_batch_observation.finish().await;
+        #[cfg(feature = "episode-observation-slice-c1")]
+        c2c_live_lab_phase!("observation_finish_done");
 
         let session_handoff_key = candidates
             .iter()
@@ -19462,6 +19489,7 @@ impl McpTool for SessionCurateTool {
 
         let errors = outcome_ledger.into_response_errors();
 
+        c2c_live_lab_phase!("curate_response_ready");
         Ok(ToolResult::json_text(&json!({
             "dry_run": false,
             "scope": target_scope.as_deref().unwrap_or("global"),
