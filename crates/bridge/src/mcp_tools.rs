@@ -405,7 +405,8 @@ impl McpTool for TerminalSendKeysTool {
                 "type": "object",
                 "properties": {
                     "pane": { "type": "string", "description": "Pane id from terminal_list." },
-                    "keys": { "type": "string", "description": "Text to inject into the pane." }
+                    "keys": { "type": "string", "description": "Text to inject into the pane." },
+                    "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." }
                 },
                 "required": ["pane", "keys"]
             }),
@@ -424,15 +425,44 @@ impl McpTool for TerminalSendKeysTool {
             None => return Ok(ToolResult::error("missing 'pane'")),
         };
         let raw = args.get("keys").and_then(|v| v.as_str()).unwrap_or("");
+        let embodiment_intent_id = args
+            .get("embodiment_intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
         // Callers write escape sequences as literal text (e.g. \n, \r, \x1b).
         // Unescape them so the PTY receives the actual control bytes.
         let keys = unescape_keys(raw);
         match term.send_keys(&pane, &keys).await {
-            Ok(()) => Ok(ToolResult::text(format!(
-                "sent {} bytes to {pane}",
-                keys.len()
-            ))),
-            Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
+            Ok(()) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "send_keys",
+                    embodiment_intent_id,
+                    Some(pane.to_string()),
+                    true,
+                    json!({"bytes": keys.len()}),
+                )
+                .await;
+                Ok(ToolResult::text(format!(
+                    "sent {} bytes to {pane}",
+                    keys.len()
+                )))
+            }
+            Err(e) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "send_keys",
+                    embodiment_intent_id,
+                    Some(pane.to_string()),
+                    false,
+                    json!({"error": e.to_string()}),
+                )
+                .await;
+                Ok(ToolResult::error(format!("terminal: {e}")))
+            }
         }
     }
 }
@@ -6672,7 +6702,7 @@ impl McpTool for BrowserNavigateTool {
                 .into(),
             input_schema: json!({
                 "type": "object",
-                "properties": { "url": { "type": "string", "description": "Absolute URL." } },
+                "properties": { "url": { "type": "string", "description": "Absolute URL." }, "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." } },
                 "required": ["url"]
             }),
         }
@@ -6689,10 +6719,89 @@ impl McpTool for BrowserNavigateTool {
             Some(u) => u,
             None => return Ok(ToolResult::error("missing 'url'")),
         };
+        let embodiment_intent_id = args
+            .get("embodiment_intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
         match b.navigate(url).await {
-            Ok(pid) => Ok(ToolResult::text(format!("page: {pid}"))),
-            Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
+            Ok(pid) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "browser",
+                    "navigate",
+                    embodiment_intent_id,
+                    Some(pid.to_string()),
+                    true,
+                    json!({"url_recorded": false}),
+                )
+                .await;
+                Ok(ToolResult::text(format!("page: {pid}")))
+            }
+            Err(e) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "browser",
+                    "navigate",
+                    embodiment_intent_id,
+                    None,
+                    false,
+                    json!({"error": e.to_string(), "url_recorded": false}),
+                )
+                .await;
+                Ok(ToolResult::error(format!("browser: {e}")))
+            }
         }
+    }
+}
+
+async fn record_embodiment_receipt(
+    hub: &Hub,
+    source: &str,
+    action: &str,
+    intent_id: Option<&str>,
+    target: Option<String>,
+    ok: bool,
+    facts: Value,
+) {
+    let Some(intent_id) = intent_id else {
+        return;
+    };
+    let Some(store) = &hub.store else {
+        return;
+    };
+    let verdict = if ok {
+        crate::semantic_event::VerdictStatus::Unknown
+    } else {
+        crate::semantic_event::VerdictStatus::NotVerified
+    };
+    let event = crate::semantic_event::SemanticEvent {
+        ts: dispatch_now_secs(),
+        actor: "mcp".into(),
+        source: source.into(),
+        action: action.into(),
+        target,
+        object: crate::semantic_event::SemanticObject {
+            object_type: format!("{source}_surface"),
+            source_adapter: source.into(),
+            label: None,
+            object_id: None,
+        },
+        affordance: crate::semantic_event::Affordance {
+            action_type: action.into(),
+            risk_level: "medium".into(),
+            requires_gate: true,
+            expected_effect: Some("record intent-linked action receipt".into()),
+        },
+        verdict: crate::semantic_event::Verdict {
+            status: verdict,
+            method: "intent_linked_receipt".into(),
+            evidence: json!({"intent_id": intent_id}),
+        },
+        facts: json!({"embodiment_intent_id": intent_id, "receipt": facts}),
+    };
+    if let Err(error) = store.record_semantic_event(event.to_record()).await {
+        tracing::debug!(%error, "record intent-linked embodiment receipt failed");
     }
 }
 

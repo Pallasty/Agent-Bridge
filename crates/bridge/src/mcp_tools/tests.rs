@@ -12843,6 +12843,26 @@ fn desktop_action_schema_hides_host_unlock_flags() {
         .is_some());
 }
 
+#[test]
+fn pty_and_browser_accept_optional_embodiment_intent_id() {
+    let policy = ToolPolicy::from_values(None, None, None, Some("all"));
+    let schemas = build_registry_with_policy(Hub::builder().build(), policy).list();
+    for name in ["terminal_send_keys", "browser_navigate"] {
+        let tool = schemas
+            .iter()
+            .find(|schema| schema.name == name)
+            .expect(name);
+        assert!(tool.input_schema["properties"]
+            .get("embodiment_intent_id")
+            .is_some());
+        assert!(!tool.input_schema["required"]
+            .as_array()
+            .expect("required array")
+            .iter()
+            .any(|value| value == "embodiment_intent_id"));
+    }
+}
+
 #[tokio::test]
 async fn desktop_action_refuses_host_mutation() {
     // No dry_run, no isolated (display+swaysock) => must refuse before exec.
