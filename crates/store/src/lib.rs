@@ -32,6 +32,11 @@ mod episode_observation_c2_keychain_macos;
 ))]
 mod episode_observation_c2_keychain_macos_live_lab;
 #[cfg(all(
+    feature = "episode-observation-c2c-keychain-macos-live-lab",
+    target_os = "macos"
+))]
+pub mod episode_observation_c2c_keychain_macos_c2c_live_lab;
+#[cfg(all(
     feature = "episode-observation-c2c-keychain-macos-runtime",
     target_os = "macos"
 ))]
