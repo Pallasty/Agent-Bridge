@@ -48,3 +48,7 @@ id_newtype!(FeedbackQueryId, "feedback-query");
 id_newtype!(RollbackGroupId, "rollback");
 id_newtype!(RollbackQueryId, "rollback-query");
 id_newtype!(EvidenceQueryId, "evidence-query");
+id_newtype!(BodyId, "body");
+id_newtype!(IntentId, "intent");
+id_newtype!(ReceiptId, "receipt");
+id_newtype!(LeaseId, "lease");
