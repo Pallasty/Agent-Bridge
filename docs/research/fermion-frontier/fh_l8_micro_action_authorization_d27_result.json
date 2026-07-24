@@ -1,0 +1,9 @@
+{
+  "status": "NO_GO_D27_INDEPENDENT_MICRO_ACTION_APPROVAL_ABSENT",
+  "independent_approval_present": false,
+  "d5_kernel_invoked": false,
+  "real_packed_q3_reads": 0,
+  "scientific_action_calls": 0,
+  "full_53_scientific_execution_authorized": false,
+  "next_gate": "INDEPENDENT_SINGLE_ACTION_APPROVAL_AND_ISOLATED_RESOURCE_RECEIPT"
+}

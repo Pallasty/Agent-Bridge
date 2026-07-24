@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D27-MICRO-ACTION-AUTHORIZATION-V1",
+  "request_scope": {"kernel_calls": 1, "packed_q3_reads": 0, "full_shard_runs": 0},
+  "resource_ceiling": {"memory_max_bytes": 536870912, "swap_max_bytes": 0, "wall_seconds": 180},
+  "independent_approval_required": true,
+  "authorization": {"independent_approval_present": false, "scientific_kernel_authorized": false, "full_53_scientific_execution_authorized": false, "scientific_action_calls": 0},
+  "next_gate": "INDEPENDENT_SINGLE_ACTION_APPROVAL_AND_ISOLATED_RESOURCE_RECEIPT"
+}
