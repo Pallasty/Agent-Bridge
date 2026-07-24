@@ -21,6 +21,7 @@ pub mod biocortex_capability_ledger;
 pub mod biocortex_composed_limit_cycle;
 pub mod biocortex_relevance_eval;
 pub mod biocortex_shadow;
+pub mod body_telemetry;
 pub mod bootstrap_bfs;
 pub mod bootstrap_transitions;
 pub mod brave_api;
