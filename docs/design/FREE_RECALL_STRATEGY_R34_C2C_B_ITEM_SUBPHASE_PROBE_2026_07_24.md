@@ -2,7 +2,7 @@
 
 Date: 2026-07-24
 
-Status: **PREREGISTERED / ONE DISPOSABLE RUN ONLY**
+Status: **ATTEMPT-1 INCOMPLETE / NO RETRY**
 
 Parent: R32 located the timeout inside the item-sidecar. R33 separates the
 two operations in that callback with fixed labels only.
@@ -39,3 +39,21 @@ R27 and R33 static/mutation gates, default-disabled check, R33 feature build,
 driver tests, and the isolated ordinary MCP save must pass. The child is
 killed/reaped before diagnostics are read and custody cleanup/postcheck must
 complete. There is no retry under R34, deployment, merge, or production change.
+
+## Attempt-1 receipt
+
+All fixed preconditions passed, including the isolated ordinary MCP fixture
+(`saved_count=1`). The one authorized disposable run returned:
+
+```text
+after_initialize_before_curate_response; last_checkpoint=item_derivation_enter
+```
+
+The sidecar entered synchronous item-reference derivation but did not complete
+it before the deadline. The SQLite episode-item append was therefore not
+started. The child was reaped before diagnostics were read and custody
+cleanup/postcheck completed. R34 is incomplete and will not be retried.
+
+The next lane is source-only: preserve the default-off Keychain boundary while
+moving or bounding derivation so a stalled Security framework call cannot hold
+the MCP request's response path indefinitely.
