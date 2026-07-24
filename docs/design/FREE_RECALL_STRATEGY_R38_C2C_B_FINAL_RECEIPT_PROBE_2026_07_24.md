@@ -1,6 +1,6 @@
 # R38 — C2C-B Final Receipt Probe
 
-Status: **ATTEMPT-1 INCOMPLETE / NO RETRY**
+Status: **CORE-PATH ACCEPTED / SIDECAR RECEIPT INCOMPLETE**
 
 The live-lab binaries are rebuilt from the current source immediately before
 this probe. Execute once with fresh disposable Keychain custody and temporary
@@ -17,10 +17,8 @@ returned:
 episode receipt is empty
 ```
 
-R38 therefore does not claim a finalized observation receipt. The bounded
-sidecar path no longer blocks the core response, but its fail-closed timeout
-does not currently leave a receipt that satisfies the finalized CurationBatch
-gate. R38 is closed without retry. The next source-only decision is whether to
-emit an explicit incomplete/aborted sidecar terminal event or to make the
-experiment's acceptance contract explicitly distinguish core success from
-sidecar incompleteness.
+R38 therefore accepts the core curate path: the bounded sidecar no longer
+blocks the response. It does not accept a finalized observation receipt; the
+sidecar timeout currently leaves no receipt satisfying that gate. R38 is closed
+without retry. Future reports must retain this two-level verdict rather than
+promote core success into sidecar success.
