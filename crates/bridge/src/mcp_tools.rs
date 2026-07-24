@@ -114,6 +114,19 @@ use crate::context_budget::{
     budget_recommendation, env_context_window, estimate_tokens_from_text, estimated_usage_tokens,
     fatigue_tier, model_supports_1m_beta, resolve_context_window,
 };
+#[cfg(feature = "episode-observation-slice-c1")]
+use crate::episode_observation_curation_batch::CurationBatchObservationRun;
+
+#[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
+macro_rules! c2c_live_lab_phase {
+    ($label:literal) => {
+        crate::episode_observation_c2c_live_lab_diagnostics::mark($label)
+    };
+}
+#[cfg(not(feature = "episode-observation-c2c-keychain-macos-live-lab"))]
+macro_rules! c2c_live_lab_phase {
+    ($label:literal) => {};
+}
 use crate::hub::Hub;
 use crate::ide::{
     queue_ide_command_with_dir_policy, read_ide_snapshot, IdeCommandDirPolicy, IdeCommandOptions,
@@ -19113,6 +19126,45 @@ fn session_lifecycle_hint() -> String {
 //                              session_curate
 // ===========================================================================
 
+#[derive(Default)]
+struct SessionCurateCandidateLedger {
+    saved_count: usize,
+    duplicate_count: usize,
+    candidate_error_count: usize,
+    auxiliary_errors: Vec<String>,
+    candidate_errors: Vec<String>,
+}
+
+impl SessionCurateCandidateLedger {
+    fn record_saved(&mut self) {
+        self.saved_count += 1;
+    }
+
+    fn record_duplicate(&mut self) {
+        self.duplicate_count += 1;
+    }
+
+    fn record_lookup_error(&mut self, message: String) {
+        self.candidate_error_count += 1;
+        self.candidate_errors.push(message);
+    }
+
+    fn record_save_error(&mut self, message: String) {
+        self.candidate_error_count += 1;
+        self.candidate_errors.push(message);
+    }
+
+    fn record_auxiliary_error(&mut self, message: String) {
+        self.auxiliary_errors.push(message);
+    }
+
+    fn into_response_errors(self) -> Vec<String> {
+        let mut errors = self.auxiliary_errors;
+        errors.extend(self.candidate_errors);
+        errors
+    }
+}
+
 /// SSB lifecycle producer (roadmap §2 "hooks → bus events"): emit a
 /// `session_curate` as a typed semantic event on the unified Object/Affordance
 /// contract, completing the session-lifecycle trio on the bus alongside
@@ -19248,6 +19300,7 @@ impl McpTool for SessionCurateTool {
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let store_opt = self.hub.store.clone();
+        c2c_live_lab_phase!("curate_entered");
 
         let text = match args.get("conversation_text").and_then(|v| v.as_str()) {
             Some(s) if !s.is_empty() => s.to_string(),
@@ -19284,6 +19337,7 @@ impl McpTool for SessionCurateTool {
             max_items,
             curate_opts.clone(),
         );
+        c2c_live_lab_phase!("candidates_ready");
         for candidate in &mut candidates {
             apply_curated_memory_governance(
                 candidate,
@@ -19321,7 +19375,7 @@ impl McpTool for SessionCurateTool {
 
         let store = store_opt.unwrap();
         let mut saved: Vec<Value> = Vec::new();
-        let mut errors: Vec<String> = Vec::new();
+        let mut outcome_ledger = SessionCurateCandidateLedger::default();
 
         // Staleness-gate slice ③ (forum #119 post 3072): a curate run retires
         // its OWN session's previous in-flight handoff snapshots by declaring
@@ -19354,23 +19408,55 @@ impl McpTool for SessionCurateTool {
                         }
                     }
                 }
-                Err(e) => errors.push(format!("prior-handoff scan: {e}")),
+                Err(e) => outcome_ledger.record_auxiliary_error(format!("prior-handoff scan: {e}")),
             }
         }
 
+        #[cfg(feature = "episode-observation-slice-c1")]
+        c2c_live_lab_phase!("observation_begin_enter");
+        #[cfg(feature = "episode-observation-slice-c1")]
+        let mut curation_batch_observation = CurationBatchObservationRun::begin(
+            self.hub.curation_batch_observer.clone(),
+            !candidates.is_empty(),
+        )
+        .await;
+        #[cfg(feature = "episode-observation-slice-c1")]
+        c2c_live_lab_phase!("observation_begin_done");
+
         for mem in &candidates {
+            c2c_live_lab_phase!("core_save_enter");
             // Skip if key already exists (dedup)
             match store.memory_get(&mem.key).await {
                 Ok(Some(_)) => {
                     // Already exists — skip
+                    outcome_ledger.record_duplicate();
                 }
                 Ok(None) => match store.memory_save(mem).await {
-                    Ok(()) => saved.push(json!({ "key": mem.key, "kind": mem.kind })),
-                    Err(e) => errors.push(format!("{}: {e}", mem.key)),
+                    Ok(()) => {
+                        saved.push(json!({ "key": mem.key, "kind": mem.kind }));
+                        outcome_ledger.record_saved();
+                        c2c_live_lab_phase!("core_save_done");
+                        #[cfg(feature = "episode-observation-slice-c1")]
+                        c2c_live_lab_phase!("observation_item_enter");
+                        #[cfg(feature = "episode-observation-slice-c1")]
+                        curation_batch_observation
+                            .observe_memory_saved(&mem.key)
+                            .await;
+                        #[cfg(feature = "episode-observation-slice-c1")]
+                        c2c_live_lab_phase!("observation_item_done");
+                    }
+                    Err(e) => outcome_ledger.record_save_error(format!("{}: {e}", mem.key)),
                 },
-                Err(e) => errors.push(format!("{}: {e}", mem.key)),
+                Err(e) => outcome_ledger.record_lookup_error(format!("{}: {e}", mem.key)),
             }
         }
+
+        #[cfg(feature = "episode-observation-slice-c1")]
+        c2c_live_lab_phase!("observation_finish_enter");
+        #[cfg(feature = "episode-observation-slice-c1")]
+        let _observation_completion = curation_batch_observation.finish().await;
+        #[cfg(feature = "episode-observation-slice-c1")]
+        c2c_live_lab_phase!("observation_finish_done");
 
         let session_handoff_key = candidates
             .iter()
@@ -19380,13 +19466,15 @@ impl McpTool for SessionCurateTool {
         // SSB lifecycle producer: a real curate HAS readback (the persisted
         // count), so a run that saved ≥1 memory is Verified; saved nothing with
         // no errors → Unknown; saved nothing but every save errored → NotVerified.
-        let skipped = candidates.len() - saved.len() - errors.len();
+        debug_assert_eq!(outcome_ledger.saved_count, saved.len());
+        let skipped = outcome_ledger.duplicate_count;
+        let candidate_error_count = outcome_ledger.candidate_error_count;
         record_session_curate_event(
             &store,
             false,
             saved.len(),
             skipped,
-            errors.len(),
+            candidate_error_count,
             candidates.len(),
         )
         .await;
@@ -19402,6 +19490,9 @@ impl McpTool for SessionCurateTool {
             retired_prior_handoffs.clear();
         }
 
+        let errors = outcome_ledger.into_response_errors();
+
+        c2c_live_lab_phase!("curate_response_ready");
         Ok(ToolResult::json_text(&json!({
             "dry_run": false,
             "scope": target_scope.as_deref().unwrap_or("global"),
