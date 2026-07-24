@@ -7,7 +7,11 @@
 //! about what the agent's body currently knows.
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::VecDeque;
+
+#[cfg(target_os = "macos")]
+pub mod macos;
 
 pub const BODY_STATUS_SCHEMA_V0: &str = "agent_bridge.body_status.v0";
 
@@ -428,6 +432,60 @@ impl BodyTelemetryCore {
     }
 }
 
+/// Whether the host collector may observe the local machine. The default is
+/// deliberately off so merely updating Agent-Bridge cannot begin a new local
+/// telemetry stream.
+pub fn body_telemetry_enabled() -> bool {
+    matches!(
+        std::env::var("AGENT_BRIDGE_BODY_TELEMETRY")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// Read-only status projection used by the MCP surface. It intentionally
+/// performs no sampling when the feature flag is disabled.
+pub fn body_status_snapshot() -> Value {
+    if !body_telemetry_enabled() {
+        return disabled_body_status();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return macos::body_status_snapshot();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        json!({
+            "schema_version": BODY_STATUS_SCHEMA_V0,
+            "mode": "shadow_only",
+            "enabled": true,
+            "status": "unsupported",
+            "reason": "a host sensor adapter has not been implemented for this platform",
+            "platform": std::env::consts::OS,
+            "read_only": true,
+            "persists_raw_samples": false,
+        })
+    }
+}
+
+fn disabled_body_status() -> Value {
+    json!({
+        "schema_version": BODY_STATUS_SCHEMA_V0,
+        "mode": "shadow_only",
+        "enabled": false,
+        "status": "disabled",
+        "reason": "set AGENT_BRIDGE_BODY_TELEMETRY=1 to enable read-only host sampling",
+        "read_only": true,
+        "persists_raw_samples": false,
+    })
+}
+
 fn finite_ratio(value: f64) -> Option<f64> {
     (value.is_finite() && (0.0..=1.0).contains(&value)).then_some(value)
 }
@@ -636,5 +694,14 @@ mod tests {
         );
         assert_eq!(core.pressure(), PressureLevel::Nominal);
         assert_eq!(core.history().latest().map(|s| s.sequence), Some(1));
+    }
+
+    #[test]
+    fn disabled_projection_has_no_live_sample() {
+        let value = disabled_body_status();
+        assert_eq!(value["schema_version"], BODY_STATUS_SCHEMA_V0);
+        assert_eq!(value["status"], "disabled");
+        assert_eq!(value["enabled"], false);
+        assert!(value.get("sample").is_none());
     }
 }

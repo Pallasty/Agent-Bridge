@@ -23667,6 +23667,54 @@ impl McpTool for CapabilitiesTool {
 }
 
 // ===========================================================================
+//                               body_status
+// ===========================================================================
+
+/// Read-only projection of the local host's grounded resource state.
+///
+/// Sampling is default-off and requires `AGENT_BRIDGE_BODY_TELEMETRY=1`; when
+/// disabled this tool returns the explicit disabled state without probing the
+/// host. v0 intentionally has no actuator path or raw-sample persistence.
+pub struct BodyStatusTool;
+
+impl BodyStatusTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BodyStatusTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BodyStatusTool {
+    fn name(&self) -> &'static str {
+        "body_status"
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return read-only local body telemetry: CPU, memory, storage, process footprint, freshness, and pressure. Sampling is default-off; the tool never changes host state or persists raw samples.".into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &crate::body_telemetry::body_status_snapshot(),
+        ))
+    }
+}
+
+// ===========================================================================
 //                           readiness_audit
 // ===========================================================================
 
@@ -40441,6 +40489,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
     ) || matches!(
         tool_name,
         "capabilities"
+            | "body_status"
             | "mcp_dispatch_audit"
             | "mcp_lifecycle_digest"
             | "readiness_audit"
@@ -43588,6 +43637,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Essential,
         Arc::new(CapabilitiesTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(BodyStatusTool::new()),
     );
     reg_if(
         &mut reg,
