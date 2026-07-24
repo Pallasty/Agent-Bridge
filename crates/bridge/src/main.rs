@@ -4121,6 +4121,9 @@ enum SkillsOp {
     Refresh {
         #[arg(long, short = 'v')]
         verbose: bool,
+        /// Refresh only this exact source id (for example `OpenBMB/MiniCPM`).
+        #[arg(long)]
+        src: Option<String>,
         /// Delete records for skills that disappeared upstream.
         #[arg(long)]
         prune: bool,
@@ -4799,10 +4802,11 @@ async fn real_main() -> Result<()> {
             SkillsOp::Seed { verbose } => skills::run_seed(*verbose).await,
             SkillsOp::Refresh {
                 verbose,
+                src,
                 prune,
                 dry_run,
                 json,
-            } => skills::run_refresh(*verbose, *prune, *dry_run, *json).await,
+            } => skills::run_refresh(*verbose, src.as_deref(), *prune, *dry_run, *json).await,
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::Route {

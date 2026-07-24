@@ -255,7 +255,13 @@ pub async fn run_seed(verbose: bool) -> Result<()> {
 /// refresh's start time — those are skills that disappeared upstream. A
 /// failed re-index for a source skips pruning of that source (don't
 /// destroy data when we don't have a fresh authoritative state).
-pub async fn run_refresh(verbose: bool, prune: bool, dry_run: bool, json: bool) -> Result<()> {
+pub async fn run_refresh(
+    verbose: bool,
+    src_filter: Option<&str>,
+    prune: bool,
+    dry_run: bool,
+    json: bool,
+) -> Result<()> {
     if json && !dry_run {
         bail!("`skills refresh --json` is currently only supported with `--dry-run`");
     }
@@ -274,6 +280,9 @@ pub async fn run_refresh(verbose: bool, prune: bool, dry_run: bool, json: bool) 
         let Some(src) = tag_value(&r.tags, "src:") else {
             continue;
         };
+        if src_filter.is_some_and(|filter| filter != src) {
+            continue;
+        }
         if is_remote_src(&src) {
             let plan = remote_index_plan(&src, &r.tags);
             if let Some(existing) = remote_plans.get(&src) {
@@ -298,7 +307,8 @@ pub async fn run_refresh(verbose: bool, prune: bool, dry_run: bool, json: bool) 
                     &remote_plans,
                     &local_srcs,
                     rows.len(),
-                    prune
+                    prune,
+                    src_filter,
                 ))?
             );
         } else {
@@ -408,11 +418,13 @@ fn refresh_dry_run_payload(
     local_srcs: &BTreeSet<String>,
     record_count: usize,
     prune: bool,
+    src_filter: Option<&str>,
 ) -> serde_json::Value {
     serde_json::json!({
         "dry_run": true,
         "mutates": false,
         "total_records": record_count,
+        "source_filter": src_filter,
         "remote_source_count": remote_plans.len(),
         "local_source_count": local_srcs.len(),
         "prune_requested": prune,
@@ -4909,10 +4921,11 @@ mod tests {
         );
         let local_srcs = BTreeSet::from(["local-skills".to_string()]);
 
-        let payload = refresh_dry_run_payload(&plans, &local_srcs, 16, true);
+        let payload = refresh_dry_run_payload(&plans, &local_srcs, 16, true, None);
         assert_eq!(payload["dry_run"], true);
         assert_eq!(payload["mutates"], false);
         assert_eq!(payload["total_records"], 16);
+        assert!(payload["source_filter"].is_null());
         assert_eq!(payload["remote_source_count"], 1);
         assert_eq!(payload["local_source_count"], 1);
         assert_eq!(payload["actions"]["clone_repos"], false);
