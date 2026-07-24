@@ -23846,6 +23846,99 @@ impl McpTool for BodyReflexAdviceTool {
     }
 }
 
+/// Read-only current projection of explicitly recorded embodiment facts.
+pub struct EmbodimentSnapshotTool {
+    hub: Hub,
+}
+impl EmbodimentSnapshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for EmbodimentSnapshotTool {
+    fn name(&self) -> &'static str {
+        "embodiment_snapshot"
+    }
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema { name: self.name().into(), description: "Return a read-only embodiment fact projection. It never resumes actions or acquires write leases.".into(), input_schema: json!({"type":"object","properties":{}}) }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(store) = &self.hub.store else {
+            return Ok(ToolResult::error("no store configured"));
+        };
+        let events = store.recent_semantic_events(90 * 86_400, 500).await?;
+        Ok(ToolResult::json_text(
+            &crate::embodiment_projection::project_embodiment_events(&events),
+        ))
+    }
+}
+
+/// Explicitly records an embodiment fact; it does not dispatch any action.
+pub struct EmbodimentRecordTool {
+    hub: Hub,
+}
+impl EmbodimentRecordTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for EmbodimentRecordTool {
+    fn name(&self) -> &'static str {
+        "embodiment_record"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema { name: self.name().into(), description: "Append an intent or receipt fact to the embodiment event spine. This never executes, resumes, or authorizes an action.".into(), input_schema: json!({"type":"object","required":["kind","body_id","facts"],"properties":{"kind":{"enum":["intent_opened","action_receipt","intent_needs_confirmation_after_restart"]},"body_id":{"type":"string","minLength":1,"maxLength":128},"facts":{"type":"object"},"verdict":{"enum":["verified","not_verified","unknown"]}}}) }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(store) = &self.hub.store else {
+            return Ok(ToolResult::error("no store configured"));
+        };
+        let Some(kind) = args.get("kind").and_then(Value::as_str) else {
+            return Ok(ToolResult::error("missing 'kind'"));
+        };
+        if !matches!(
+            kind,
+            "intent_opened" | "action_receipt" | "intent_needs_confirmation_after_restart"
+        ) {
+            return Ok(ToolResult::error("unsupported 'kind'"));
+        }
+        let Some(body_id) = args
+            .get("body_id")
+            .and_then(Value::as_str)
+            .filter(|v| !v.trim().is_empty())
+        else {
+            return Ok(ToolResult::error("missing 'body_id'"));
+        };
+        let facts = args.get("facts").cloned().unwrap_or(Value::Null);
+        let verdict = match args
+            .get("verdict")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+        {
+            "verified" => crate::semantic_event::VerdictStatus::Verified,
+            "not_verified" => crate::semantic_event::VerdictStatus::NotVerified,
+            _ => crate::semantic_event::VerdictStatus::Unknown,
+        };
+        let event = crate::embodiment_projection::embodiment_event(
+            dispatch_now_secs(),
+            "mcp",
+            kind,
+            body_id,
+            json!({"body_id":body_id,"facts":facts,"resumes_action":false}),
+            verdict,
+        );
+        store.record_semantic_event(event.to_record()).await?;
+        Ok(ToolResult::json_text(
+            &json!({"recorded":true,"executed":false,"resumes_action":false,"kind":kind,"body_id":body_id}),
+        ))
+    }
+}
+
 /// Capture a bounded before/during/after resource span around a caller-owned
 /// task. Only terminal summaries are persisted as semantic events; raw samples
 /// remain in the process-local telemetry ring.
@@ -23908,7 +24001,11 @@ impl McpTool for BodyTaskSpanTool {
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let store = match &self.hub.store {
             Some(store) => store.clone(),
-            None => return Ok(ToolResult::error("no store configured for Event Spine summary")),
+            None => {
+                return Ok(ToolResult::error(
+                    "no store configured for Event Spine summary",
+                ))
+            }
         };
         let op = match args.get("op").and_then(Value::as_str) {
             Some(op) => op,
@@ -23943,7 +24040,8 @@ impl McpTool for BodyTaskSpanTool {
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .map(str::to_string);
-                match crate::body_telemetry::start_task_resource_span(span_id, task_kind, task_ref) {
+                match crate::body_telemetry::start_task_resource_span(span_id, task_kind, task_ref)
+                {
                     Ok(span) => Ok(ToolResult::json_text(&json!({
                         "event_recorded": false,
                         "span": span,
@@ -24045,10 +24143,12 @@ async fn record_body_task_span_event(
             expected_effect: Some("record a bounded task resource-span receipt".to_string()),
         },
         verdict,
-        facts: serde_json::to_value(span.receipt()).unwrap_or_else(|_| json!({
-            "schema_version": crate::body_telemetry::TASK_RESOURCE_SPAN_SCHEMA_V0,
-            "serialization_error": true,
-        })),
+        facts: serde_json::to_value(span.receipt()).unwrap_or_else(|_| {
+            json!({
+                "schema_version": crate::body_telemetry::TASK_RESOURCE_SPAN_SCHEMA_V0,
+                "serialization_error": true,
+            })
+        }),
     };
     match store.record_semantic_event(event.to_record()).await {
         Ok(()) => true,
@@ -43995,6 +44095,18 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Standard,
         Arc::new(BodyReflexAdviceTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(EmbodimentSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(EmbodimentRecordTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
