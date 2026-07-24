@@ -266,6 +266,9 @@ pub async fn run_refresh(
     if json && !dry_run {
         bail!("`skills refresh --json` is currently only supported with `--dry-run`");
     }
+    if checkout_ref_override.is_some() && src_filter.is_none() {
+        bail!("`skills refresh --ref` requires `--src <source>` to avoid changing every source");
+    }
     let store = open_store().await?;
     let rows = store
         .list_memories(Some("skill"), MemoryListSort::Recent, u32::MAX)
@@ -315,6 +318,7 @@ pub async fn run_refresh(
                     rows.len(),
                     prune,
                     src_filter,
+                    checkout_ref_override,
                 ))?
             );
         } else {
@@ -425,12 +429,14 @@ fn refresh_dry_run_payload(
     record_count: usize,
     prune: bool,
     src_filter: Option<&str>,
+    checkout_ref_override: Option<&str>,
 ) -> serde_json::Value {
     serde_json::json!({
         "dry_run": true,
         "mutates": false,
         "total_records": record_count,
         "source_filter": src_filter,
+        "checkout_ref_override": checkout_ref_override,
         "remote_source_count": remote_plans.len(),
         "local_source_count": local_srcs.len(),
         "prune_requested": prune,
@@ -4927,11 +4933,12 @@ mod tests {
         );
         let local_srcs = BTreeSet::from(["local-skills".to_string()]);
 
-        let payload = refresh_dry_run_payload(&plans, &local_srcs, 16, true, None);
+        let payload = refresh_dry_run_payload(&plans, &local_srcs, 16, true, None, None);
         assert_eq!(payload["dry_run"], true);
         assert_eq!(payload["mutates"], false);
         assert_eq!(payload["total_records"], 16);
         assert!(payload["source_filter"].is_null());
+        assert!(payload["checkout_ref_override"].is_null());
         assert_eq!(payload["remote_source_count"], 1);
         assert_eq!(payload["local_source_count"], 1);
         assert_eq!(payload["actions"]["clone_repos"], false);
