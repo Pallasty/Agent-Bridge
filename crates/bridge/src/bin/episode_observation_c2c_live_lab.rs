@@ -91,6 +91,37 @@ struct Receipt {
     item_count: usize,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ChildOutcome {
+    ExitedSuccess,
+    ExitedFailure,
+    TimedOut,
+    WaitFailure,
+}
+
+fn classify_mcp_phase(stdout: &str) -> &'static str {
+    let mut initialized = false;
+    let mut curate_responded = false;
+    for value in stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+    {
+        if value.get("id").and_then(Value::as_i64) == Some(1) && value.get("result").is_some() {
+            initialized = true;
+        }
+        if value.get("id").and_then(Value::as_i64) == Some(2) && value.get("result").is_some() {
+            curate_responded = true;
+        }
+    }
+    if curate_responded {
+        "after_curate_response_before_exit"
+    } else if initialized {
+        "after_initialize_before_curate_response"
+    } else {
+        "before_initialize_response"
+    }
+}
+
 fn validate_receipt(events: &[DbEvent], expected_item_count: usize) -> Result<Receipt, String> {
     let Some(first) = events.first() else {
         return Err("episode receipt is empty".to_owned());
@@ -165,19 +196,19 @@ fn read_receipt(db_path: &std::path::Path, expected_item_count: usize) -> Result
     validate_receipt(&events, expected_item_count)
 }
 
-fn wait_for_child(child: &mut std::process::Child) -> Result<(), String> {
+fn wait_for_child(child: &mut std::process::Child) -> ChildOutcome {
     let deadline = Instant::now() + MCP_TIMEOUT;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(_)) => return Err("MCP fixture process failed".to_owned()),
+            Ok(Some(status)) if status.success() => return ChildOutcome::ExitedSuccess,
+            Ok(Some(_)) => return ChildOutcome::ExitedFailure,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("MCP fixture process timed out".to_owned());
+                return ChildOutcome::TimedOut;
             }
-            Err(_) => return Err("could not wait for MCP fixture".to_owned()),
+            Err(_) => return ChildOutcome::WaitFailure,
         }
     }
 }
@@ -215,10 +246,21 @@ fn run_fixture(
             .map(|_| stdout)
             .map_err(|_| "could not read MCP fixture".to_owned())
     });
-    wait_for_child(&mut child)?;
+    let outcome = wait_for_child(&mut child);
     let stdout = stdout_handle
         .join()
         .map_err(|_| "MCP stdout reader panicked".to_owned())??;
+    match outcome {
+        ChildOutcome::TimedOut => {
+            return Err(format!(
+                "MCP fixture process timed out ({})",
+                classify_mcp_phase(&stdout)
+            ));
+        }
+        ChildOutcome::ExitedFailure => return Err("MCP fixture process failed".to_owned()),
+        ChildOutcome::WaitFailure => return Err("could not wait for MCP fixture".to_owned()),
+        ChildOutcome::ExitedSuccess => {}
+    }
     let saved_count = successful_saved_count(&stdout)?;
     read_receipt(db_path, saved_count)
 }
@@ -344,5 +386,21 @@ mod tests {
             },
         ];
         assert!(validate_receipt(&events, 1).is_err());
+    }
+
+    #[test]
+    fn timeout_phase_classifier_never_returns_raw_mcp_content() {
+        assert_eq!(classify_mcp_phase(""), "before_initialize_response");
+        assert_eq!(
+            classify_mcp_phase(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#),
+            "after_initialize_before_curate_response"
+        );
+        assert_eq!(
+            classify_mcp_phase(
+                r#"{"jsonrpc":"2.0","id":1,"result":{}}
+{"jsonrpc":"2.0","id":2,"result":{"content":[{"text":"sensitive"}]}}"#
+            ),
+            "after_curate_response_before_exit"
+        );
     }
 }
