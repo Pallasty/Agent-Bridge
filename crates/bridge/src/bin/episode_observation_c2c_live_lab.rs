@@ -293,6 +293,9 @@ fn run_fixture(
     let checkpoint_contents = std::fs::read_to_string(phase_file.path()).unwrap_or_default();
     match outcome {
         ChildOutcome::TimedOut => {
+            if let Ok(saved_count) = successful_saved_count(&stdout) {
+                return read_receipt(db_path, saved_count);
+            }
             return Err(format!(
                 "MCP fixture process timed out ({})",
                 timeout_diagnostic(&stdout, &checkpoint_contents)
@@ -458,6 +461,16 @@ mod tests {
             timeout_diagnostic("", "untrusted-content\n"),
             "before_initialize_response"
         );
+    }
+
+    #[test]
+    fn timed_out_server_with_a_completed_curate_response_is_accepted() {
+        let stdout = json!({
+            "jsonrpc": "2.0", "id": 2,
+            "result": {"content": [{"text": r#"{"saved_count":1}"#}]}
+        })
+        .to_string();
+        assert_eq!(successful_saved_count(&stdout), Ok(1));
     }
 
     #[cfg(unix)]
