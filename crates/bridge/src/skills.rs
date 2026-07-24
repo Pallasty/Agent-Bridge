@@ -57,6 +57,11 @@ const ROUTE_QUALITY_CORPUS: &str =
 const ROUTE_PROVENANCE_CORPUS: &str =
     include_str!("../../../docs/design/fixtures/skills-route-provenance-query-cases-v0.json");
 
+/// Independent paired holdout used only to gate owner review of a possible
+/// provenance preference. It is never consumed by runtime routing.
+const ROUTE_PROVENANCE_HOLDOUT: &str =
+    include_str!("../../../docs/design/fixtures/skills-route-provenance-holdout-v1.json");
+
 /// The legacy aggregate was indexed before Git provenance existed. These
 /// declarations make that absence visible without inventing an upstream.
 const LEGACY_SOURCE_RECOVERY_MANIFEST: &str =
@@ -1099,6 +1104,117 @@ pub async fn run_route_provenance_eval(
     Ok(())
 }
 
+/// Measure the provenance shadow against an independent bilingual holdout.
+/// A passing verdict only permits owner review; it never changes runtime
+/// retrieval, ranking, source admission, installation, or execution.
+pub async fn run_route_provenance_gate(limit: usize, json: bool) -> Result<()> {
+    let corpus = parse_route_provenance_holdout()?;
+    let limit = limit.clamp(1, 50);
+    let store = open_store_read_only().await?;
+    let mut rows = Vec::with_capacity(corpus.cases.len());
+    let mut required = 0usize;
+    let mut baseline_required_hits = 0usize;
+    let mut verified_required_hits = 0usize;
+    let mut insufficient = 0usize;
+    let mut fill_risks = 0usize;
+    let mut baseline_to_verified_regressions = 0usize;
+
+    for case in corpus.cases {
+        let candidates =
+            route_skill_entries_strict(&store, &case.query, route_candidate_limit(limit)).await?;
+        let baseline = candidates.iter().take(limit).collect::<Vec<_>>();
+        let verified = candidates
+            .iter()
+            .filter(|hit| skill_provenance(&hit.hit.record.tags) == SkillProvenance::Verified)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let baseline_hit = baseline
+            .iter()
+            .any(|hit| case.relevant_skill_keys.contains(&hit.hit.record.key));
+        let verified_hit = verified
+            .iter()
+            .any(|hit| case.relevant_skill_keys.contains(&hit.hit.record.key));
+        let fill_risk = case.relevant_skill_keys.is_empty() && !verified.is_empty();
+
+        match case.verified_coverage.as_str() {
+            "required" => {
+                required += 1;
+                if baseline_hit {
+                    baseline_required_hits += 1;
+                }
+                if verified_hit {
+                    verified_required_hits += 1;
+                }
+                if baseline_hit && !verified_hit {
+                    baseline_to_verified_regressions += 1;
+                }
+            }
+            "insufficient_expected" => insufficient += 1,
+            other => bail!(
+                "holdout case {} has unsupported verified_coverage {other:?}",
+                case.id
+            ),
+        }
+        if fill_risk {
+            fill_risks += 1;
+        }
+        rows.push(serde_json::json!({
+            "id": case.id,
+            "pair_id": case.pair_id,
+            "language": case.language,
+            "expected_verified_coverage": case.verified_coverage,
+            "baseline_relevant_hit": baseline_hit,
+            "verified_relevant_hit": verified_hit,
+            "verified_fill_risk": fill_risk,
+            "baseline_keys": baseline.iter().map(|hit| &hit.hit.record.key).collect::<Vec<_>>(),
+            "verified_keys": verified.iter().map(|hit| &hit.hit.record.key).collect::<Vec<_>>(),
+        }));
+    }
+
+    let baseline_recall = baseline_required_hits as f64 / required.max(1) as f64;
+    let verified_recall = verified_required_hits as f64 / required.max(1) as f64;
+    let verdict = if verified_recall >= corpus.min_verified_recall
+        && verified_recall + f64::EPSILON >= baseline_recall
+        && baseline_to_verified_regressions == 0
+        && fill_risks == 0
+    {
+        "READY_FOR_OWNER_REVIEW"
+    } else {
+        "INCONCLUSIVE_NO_POLICY_CHANGE"
+    };
+    let payload = serde_json::json!({
+        "schema_version": corpus.schema_version,
+        "mode": "offline_observation_only",
+        "limit": limit,
+        "summary": {
+            "cases": rows.len(),
+            "required_cases": required,
+            "insufficient_expected_cases": insufficient,
+            "baseline_required_recall_at_k": baseline_recall,
+            "verified_required_recall_at_k": verified_recall,
+            "baseline_to_verified_regression_cases": baseline_to_verified_regressions,
+            "verified_fill_risk_cases": fill_risks,
+        },
+        "gate": {
+            "min_cases": corpus.min_cases,
+            "min_verified_recall": corpus.min_verified_recall,
+            "requires_verified_recall_not_below_baseline": true,
+            "requires_zero_fill_risk": true,
+            "automatic_policy_change": false,
+        },
+        "verdict": verdict,
+        "cases": rows,
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!(
+            "[route-provenance-gate] verdict={verdict} baseline_recall@{limit}={baseline_recall:.3} verified_recall@{limit}={verified_recall:.3} regressions={baseline_to_verified_regressions} fill_risk_cases={fill_risks}"
+        );
+    }
+    Ok(())
+}
+
 fn route_quality_outcome(expectation: &str, matched: bool) -> Result<&'static str> {
     match (expectation, matched) {
         ("must_match", true) => Ok("matched"),
@@ -1139,6 +1255,24 @@ struct RouteProvenanceCase {
     verified_coverage: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct RouteProvenanceHoldout {
+    schema_version: String,
+    min_cases: usize,
+    min_verified_recall: f64,
+    cases: Vec<RouteProvenanceHoldoutCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteProvenanceHoldoutCase {
+    id: String,
+    pair_id: String,
+    language: String,
+    query: String,
+    relevant_skill_keys: BTreeSet<String>,
+    verified_coverage: String,
+}
+
 fn parse_route_quality_corpus() -> Result<RouteQualityCorpus> {
     let corpus: RouteQualityCorpus = serde_json::from_str(ROUTE_QUALITY_CORPUS)
         .context("parse embedded Skills route quality corpus")?;
@@ -1160,6 +1294,35 @@ fn parse_route_provenance_corpus(fixture: Option<&Path>) -> Result<RouteProvenan
         || corpus.cases.is_empty()
     {
         bail!("invalid Skills provenance evaluation fixture")
+    }
+    Ok(corpus)
+}
+
+fn parse_route_provenance_holdout() -> Result<RouteProvenanceHoldout> {
+    let corpus: RouteProvenanceHoldout = serde_json::from_str(ROUTE_PROVENANCE_HOLDOUT)
+        .context("parse Skills provenance holdout")?;
+    if corpus.schema_version != "skills-route-provenance-holdout-v1"
+        || corpus.min_cases < 20
+        || corpus.cases.len() < corpus.min_cases
+        || !(0.0..=1.0).contains(&corpus.min_verified_recall)
+    {
+        bail!("invalid Skills provenance holdout")
+    }
+    let mut pairs = BTreeMap::<&str, Vec<&RouteProvenanceHoldoutCase>>::new();
+    for case in &corpus.cases {
+        pairs.entry(&case.pair_id).or_default().push(case);
+    }
+    if pairs.values().any(|pair| {
+        pair.len() != 2
+            || pair
+                .iter()
+                .map(|case| case.language.as_str())
+                .collect::<BTreeSet<_>>()
+                != BTreeSet::from(["en", "zh"])
+            || pair[0].relevant_skill_keys != pair[1].relevant_skill_keys
+            || pair[0].verified_coverage != pair[1].verified_coverage
+    }) {
+        bail!("Skills provenance holdout must contain paired English and Chinese cases")
     }
     Ok(corpus)
 }
@@ -4881,6 +5044,22 @@ mod tests {
             corpus.schema,
             "agent_bridge.skills_route.provenance_query_cases.v0"
         );
+        assert!(corpus
+            .cases
+            .iter()
+            .any(|case| case.verified_coverage == "required"));
+        assert!(corpus
+            .cases
+            .iter()
+            .any(|case| case.verified_coverage == "insufficient_expected"));
+    }
+
+    #[test]
+    fn provenance_holdout_has_independent_paired_gate_coverage() {
+        let corpus = parse_route_provenance_holdout().expect("embedded holdout");
+
+        assert_eq!(corpus.schema_version, "skills-route-provenance-holdout-v1");
+        assert!(corpus.cases.len() >= 20);
         assert!(corpus
             .cases
             .iter()

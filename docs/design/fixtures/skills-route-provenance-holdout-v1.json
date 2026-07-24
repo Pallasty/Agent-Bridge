@@ -1,0 +1,28 @@
+{
+  "schema_version": "skills-route-provenance-holdout-v1",
+  "purpose": "Independent, post-retrieval-only bilingual holdout for owner review of a possible verified-source preference. It never changes runtime routing.",
+  "min_cases": 20,
+  "min_verified_recall": 0.8,
+  "cases": [
+    {"id":"pdf-en","pair_id":"pdf","language":"en","query":"review and fill a PDF form","relevant_skill_keys":["skill:anthropics/skills/pdf"],"verified_coverage":"required"},
+    {"id":"pdf-zh","pair_id":"pdf","language":"zh","query":"审阅并填写 PDF 表单","relevant_skill_keys":["skill:anthropics/skills/pdf"],"verified_coverage":"required"},
+    {"id":"docx-en","pair_id":"docx","language":"en","query":"create a formatted DOCX project report","relevant_skill_keys":["skill:anthropics/skills/docx"],"verified_coverage":"required"},
+    {"id":"docx-zh","pair_id":"docx","language":"zh","query":"创建排版规范的 DOCX 项目报告","relevant_skill_keys":["skill:anthropics/skills/docx"],"verified_coverage":"required"},
+    {"id":"xlsx-en","pair_id":"xlsx","language":"en","query":"analyze an XLSX budget and update formulas","relevant_skill_keys":["skill:anthropics/skills/xlsx"],"verified_coverage":"required"},
+    {"id":"xlsx-zh","pair_id":"xlsx","language":"zh","query":"分析 XLSX 预算表并更新公式","relevant_skill_keys":["skill:anthropics/skills/xlsx"],"verified_coverage":"required"},
+    {"id":"pptx-en","pair_id":"pptx","language":"en","query":"prepare a PPTX presentation deck from notes","relevant_skill_keys":["skill:anthropics/skills/pptx"],"verified_coverage":"required"},
+    {"id":"pptx-zh","pair_id":"pptx","language":"zh","query":"根据笔记制作 PPTX 演示文稿","relevant_skill_keys":["skill:anthropics/skills/pptx"],"verified_coverage":"required"},
+    {"id":"poster-en","pair_id":"poster","language":"en","query":"design a static poster as a PNG","relevant_skill_keys":["skill:anthropics/skills/canvas-design"],"verified_coverage":"required"},
+    {"id":"poster-zh","pair_id":"poster","language":"zh","query":"设计一张 PNG 静态海报","relevant_skill_keys":["skill:anthropics/skills/canvas-design"],"verified_coverage":"required"},
+    {"id":"mlx-en","pair_id":"mlx","language":"en","query":"run a local MLX model on Apple Silicon","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"mlx-zh","pair_id":"mlx","language":"zh","query":"在 Apple Silicon 上运行本地 MLX 模型","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"helm-en","pair_id":"helm","language":"en","query":"audit a Helm chart for deployment risks","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"helm-zh","pair_id":"helm","language":"zh","query":"审计 Helm chart 的部署风险","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"cad-en","pair_id":"cad","language":"en","query":"calculate a mechanical CAD tolerance stack-up","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"cad-zh","pair_id":"cad","language":"zh","query":"计算机械 CAD 的公差叠加","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"legal-en","pair_id":"legal","language":"en","query":"review a California employment contract for legal compliance","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"legal-zh","pair_id":"legal","language":"zh","query":"审查加州雇佣合同的法律合规性","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"hardware-en","pair_id":"hardware","language":"en","query":"repair a mechanical keyboard switch with soldering","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"},
+    {"id":"hardware-zh","pair_id":"hardware","language":"zh","query":"用焊接方式维修机械键盘轴体","relevant_skill_keys":[],"verified_coverage":"insufficient_expected"}
+  ]
+}

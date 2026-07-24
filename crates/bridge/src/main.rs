@@ -4206,6 +4206,15 @@ enum SkillsOp {
         #[arg(long)]
         json: bool,
     },
+    /// Evaluate the independent provenance holdout gate without changing routing.
+    RouteProvenanceGate {
+        /// Maximum candidates evaluated per query.
+        #[arg(long, default_value_t = 3)]
+        limit: usize,
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+    },
     /// Show strict per-lane evidence behind a route decision.
     /// This is observation-only and never changes routing policy.
     RouteDiagnose {
@@ -4778,6 +4787,7 @@ async fn real_main() -> Result<()> {
                 | SkillsOp::RouteAudit { .. }
                 | SkillsOp::RouteEval { .. }
                 | SkillsOp::RouteProvenanceEval { .. }
+                | SkillsOp::RouteProvenanceGate { .. }
                 | SkillsOp::RouteDiagnose { .. }
         ) {
             prepare_skills_semantic_route().await?;
@@ -4810,6 +4820,9 @@ async fn real_main() -> Result<()> {
                 limit,
                 json,
             } => skills::run_route_provenance_eval(fixture.as_deref(), *limit, *json).await,
+            SkillsOp::RouteProvenanceGate { limit, json } => {
+                skills::run_route_provenance_gate(*limit, *json).await
+            }
             SkillsOp::RouteDiagnose { query, limit, json } => {
                 skills::run_route_diagnose(query, *limit, *json).await
             }
