@@ -2,7 +2,7 @@
 
 Date: 2026-07-24
 
-Status: **PREREGISTERED / ONE DISPOSABLE RUN ONLY**
+Status: **ATTEMPT-1 INCOMPLETE / NO RETRY**
 
 Parent: R26 Attempt-1 (`INCOMPLETE`, no retry).
 
@@ -86,3 +86,16 @@ public key-account identifier for exact recovery, then stops.
 R28 permits exactly one live invocation. Whether it passes or fails, do not
 retry it. A further run requires a separately numbered preregistration with a
 new root-cause analysis and new explicit authorization.
+
+## 6. Attempt-1 result
+
+All no-Keychain preflight gates passed, including the isolated MCP fixture
+which saved one core memory. The single live invocation then exceeded the
+driver's 30-second process deadline and returned `INCOMPLETE`; it is not an
+acceptance and is not retried under R28.
+
+The driver did not report `Keychain cleanup unconfirmed`, so its exact cleanup
+and absence postcheck path completed. Raw child stdout/stderr were intentionally
+not emitted or retained, which preserves custody confidentiality but leaves the
+timeout's internal cause unclassified. Any follow-up must be a separately
+numbered source/diagnostic lane before another live authorization is considered.
