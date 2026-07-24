@@ -165,15 +165,7 @@ fn normalize_sql(sql: &str) -> String {
         .join(" ")
 }
 
-fn verify_v44(c: &rusqlite::Connection) -> RusqliteResult<()> {
-    let version: String = c.query_row(
-        "SELECT value FROM main.schema_meta WHERE key='version'",
-        [],
-        |row| row.get(0),
-    )?;
-    if version != SCHEMA_VERSION {
-        return Err(rusqlite::Error::InvalidQuery);
-    }
+fn verify_v44_schema(c: &rusqlite::Connection) -> RusqliteResult<()> {
     let table_sql: String = c.query_row(
         "SELECT sql FROM main.sqlite_master WHERE type='table' AND name=?1",
         params![TABLE],
@@ -209,6 +201,18 @@ fn verify_v44(c: &rusqlite::Connection) -> RusqliteResult<()> {
     Ok(())
 }
 
+fn verify_v44(c: &rusqlite::Connection) -> RusqliteResult<()> {
+    let version: String = c.query_row(
+        "SELECT value FROM main.schema_meta WHERE key='version'",
+        [],
+        |row| row.get(0),
+    )?;
+    if version != SCHEMA_VERSION {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    verify_v44_schema(c)
+}
+
 pub(super) fn migrate_or_verify(c: &mut rusqlite::Connection) -> RusqliteResult<()> {
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let version: String = tx.query_row(
@@ -224,17 +228,26 @@ pub(super) fn migrate_or_verify(c: &mut rusqlite::Connection) -> RusqliteResult<
                 |row| row.get(0),
             )?;
             if collisions != 0 {
-                return Err(rusqlite::Error::InvalidQuery);
+                // A concurrent opener may have committed the additive objects
+                // before its version bump becomes visible to this migration
+                // pass. Accept only an exact, complete v44 schema; spoofed or
+                // partial objects still fail closed through verification.
+                tx.execute(
+                    "UPDATE main.schema_meta SET value=?1 WHERE key='version' AND value='43'",
+                    params![SCHEMA_VERSION],
+                )?;
+                verify_v44(&tx)?;
+            } else {
+                tx.execute_batch(SCHEMA_V44_EPISODE_OBSERVATION)?;
+                let changed = tx.execute(
+                    "UPDATE main.schema_meta SET value=?1 WHERE key='version' AND value='43'",
+                    params![SCHEMA_VERSION],
+                )?;
+                if changed != 1 {
+                    return Err(rusqlite::Error::InvalidQuery);
+                }
+                verify_v44(&tx)?;
             }
-            tx.execute_batch(SCHEMA_V44_EPISODE_OBSERVATION)?;
-            let changed = tx.execute(
-                "UPDATE main.schema_meta SET value=?1 WHERE key='version' AND value='43'",
-                params![SCHEMA_VERSION],
-            )?;
-            if changed != 1 {
-                return Err(rusqlite::Error::InvalidQuery);
-            }
-            verify_v44(&tx)?;
         }
         SCHEMA_VERSION => verify_v44(&tx)?,
         _ => return Err(rusqlite::Error::InvalidQuery),

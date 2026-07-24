@@ -20124,7 +20124,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "43"); // v43 = temporal evidence substrate; latest after all migrations
+        assert_eq!(version, latest_schema_version_for_test()); // v43 substrate; v44 adds Slice B
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -22541,7 +22541,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(v, "43", "schema after all migrations");
+        assert_eq!(v, latest_schema_version_for_test(), "schema after all migrations");
         assert_eq!(n, 1, "last_cofire_at present exactly once");
 
         seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
@@ -22592,7 +22592,7 @@ mod tests {
             })
             .await
             .expect("probe after upgrade");
-        assert_eq!(v, "43", "re-open ran through all migrations");
+        assert_eq!(v, latest_schema_version_for_test(), "re-open ran through all migrations");
         assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -22632,7 +22632,7 @@ mod tests {
             })
             .await
             .expect("probe v39 schema");
-        assert_eq!(v, "43", "schema after all migrations");
+        assert_eq!(v, latest_schema_version_for_test(), "schema after all migrations");
         assert_eq!(table_n, 1, "retrieval_surfacing table exists");
         assert_eq!(key_idx_n, 1, "key/surfaced_at index exists");
         assert_eq!(at_idx_n, 1, "surfaced_at index exists");
@@ -22670,7 +22670,7 @@ mod tests {
             })
             .await
             .expect("probe v40 schema");
-        assert_eq!(v, "43", "schema after v40+v41+v42+v43");
+        assert_eq!(v, latest_schema_version_for_test(), "schema after v40+v41+v42+v43");
         assert_eq!(col_n, 1, "consumed_at column exists exactly once");
         assert_eq!(idx_n, 1, "pending partial index exists");
 
@@ -22827,7 +22827,7 @@ mod tests {
             })
             .await
             .expect("inspect v42 migration");
-        assert_eq!(version, "43");
+        assert_eq!(version, latest_schema_version_for_test());
         assert_eq!(column_n, 1, "traffic_class exists exactly once");
         assert_eq!(index_n, 1, "traffic class index exists exactly once");
         assert_eq!(traffic_class, "unknown", "historical rows fail closed");
@@ -26216,6 +26216,14 @@ mod tests {
         ))
     }
 
+    fn latest_schema_version_for_test() -> &'static str {
+        if cfg!(feature = "episode-observation-slice-b") {
+            "44"
+        } else {
+            "43"
+        }
+    }
+
     #[tokio::test]
     async fn schema_meta_version_returns_current_after_open() {
         // Fresh open runs all migrations; the value should match the
@@ -26231,7 +26239,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("43"),
+            Some(latest_schema_version_for_test()),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -26856,7 +26864,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, "43", "schema must be at the latest version");
+        assert_eq!(probe.0, latest_schema_version_for_test(), "schema must be at the latest version");
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),
@@ -26889,7 +26897,7 @@ mod tests {
             .expect("probe after reopen");
         assert_eq!(
             again,
-            ("43".to_string(), 2),
+            (latest_schema_version_for_test().to_string(), 2),
             "re-open stays at the latest version with both columns, no duplicate ALTER"
         );
 

@@ -551,7 +551,7 @@ async fn truth_evidence_s2_v42_migration_is_zero_backfill_idempotent_and_concurr
         })
         .await
         .expect("inspect migrated identity");
-    assert_eq!(version, "43");
+    assert_eq!(version, expected_schema_meta_version_for_test());
     assert_eq!(legacy_rows, 1, "migration must retain the legacy row");
     assert_eq!(identity_rows, 3);
     assert_eq!(truth_table_counts(&right).await, [0, 0, 0, 0, 0]);
@@ -871,7 +871,10 @@ async fn truth_evidence_s2_s1_fixture_replay_has_exact_payload_and_keeps_late_ro
         "a69fe303e42cf43a644195fa3e7a845e36303034d6014219455485335fbe812d"
     );
     assert_eq!(snapshot.canonical_order, "binary_utf8_v0");
-    assert_eq!(snapshot.producer_identity.schema_meta_version, "43");
+    assert_eq!(
+        snapshot.producer_identity.schema_meta_version,
+        expected_schema_meta_version_for_test()
+    );
     assert_eq!(
         snapshot.producer_identity.schema_digest,
         EXPECTED_SCHEMA_SHA256

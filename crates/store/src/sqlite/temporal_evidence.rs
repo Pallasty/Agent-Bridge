@@ -746,7 +746,15 @@ fn verify_v43_connection_at_versions(
 }
 
 fn verify_v43_connection(c: &rusqlite::Connection) -> RusqliteResult<()> {
-    verify_v43_connection_at_versions(c, &[TEMPORAL_EVIDENCE_SCHEMA_VERSION])
+    let mut accepted_versions = vec![TEMPORAL_EVIDENCE_SCHEMA_VERSION];
+    #[cfg(feature = "episode-observation-slice-b")]
+    accepted_versions.push("44");
+    verify_v43_connection_at_versions(c, &accepted_versions)
+}
+
+fn accepted_schema_meta_version(version: &str) -> bool {
+    version == TEMPORAL_EVIDENCE_SCHEMA_VERSION
+        || (cfg!(feature = "episode-observation-slice-b") && version == "44")
 }
 
 /// Verify the v43 truth-evidence identity, optionally permitting one reviewed
@@ -860,6 +868,15 @@ fn verify_v43(c: &rusqlite::Connection) -> RusqliteResult<()> {
 /// leaving a valid v43 ledger beside an older `schema_meta.version` is an
 /// identity collision that production correctly rejects.
 #[cfg(test)]
+pub(super) fn expected_schema_meta_version_for_test() -> &'static str {
+    if cfg!(feature = "episode-observation-slice-b") {
+        "44"
+    } else {
+        "43"
+    }
+}
+
+#[cfg(test)]
 pub(super) fn remove_v43_for_legacy_migration_test(
     c: &mut rusqlite::Connection,
 ) -> RusqliteResult<()> {
@@ -890,7 +907,9 @@ pub(super) fn remove_v43_for_legacy_migration_test(
          DROP TABLE main.truth_evidence_revisions;
          DROP TABLE main.truth_authority_policy_revisions;
          DROP TABLE main.truth_lineages;
-         DELETE FROM main.schema_meta WHERE key GLOB 'truth_evidence.*';",
+         DELETE FROM main.schema_meta WHERE key GLOB 'truth_evidence.*';
+         DROP INDEX IF EXISTS main.idx_episode_observation_events_episode_id;
+         DROP TABLE IF EXISTS main.episode_observation_events;",
     )?;
     tx.commit()?;
     Ok(())
@@ -2620,7 +2639,7 @@ fn validate_acyclic_adjacency(adjacency: &HashMap<String, Vec<String>>) -> Rusql
 }
 
 fn validate_snapshot_model(snapshot: &TemporalEvidenceSnapshot) -> RusqliteResult<()> {
-    if snapshot.producer_identity.schema_meta_version != TEMPORAL_EVIDENCE_SCHEMA_VERSION
+    if !accepted_schema_meta_version(&snapshot.producer_identity.schema_meta_version)
         || snapshot.producer_identity.schema_digest != EXPECTED_SCHEMA_SHA256
         || snapshot.producer_identity.migration_digest != migration_sha256()
         || snapshot.producer_identity.ledger_format_version
