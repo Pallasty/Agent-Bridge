@@ -23805,6 +23805,47 @@ impl McpTool for BodyStatusTool {
     }
 }
 
+/// Read-only, non-executing guidance derived from the body's hysteretic
+/// pressure projection. This tool never changes a task, process, or host.
+pub struct BodyReflexAdviceTool;
+
+impl BodyReflexAdviceTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BodyReflexAdviceTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BodyReflexAdviceTool {
+    fn name(&self) -> &'static str {
+        "body_reflex_advice"
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Return advisory-only next-step guidance from grounded body pressure. It never pauses tasks, changes settings, spawns/stops processes, sends notifications, or persists samples.".into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &crate::body_telemetry::body_reflex_advice_snapshot(),
+        ))
+    }
+}
+
 /// Capture a bounded before/during/after resource span around a caller-owned
 /// task. Only terminal summaries are persisted as semantic events; raw samples
 /// remain in the process-local telemetry ring.
@@ -43948,6 +43989,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Essential,
         Arc::new(BodyStatusTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BodyReflexAdviceTool::new()),
     );
     reg_if(
         &mut reg,

@@ -19,6 +19,7 @@ pub mod macos;
 
 pub const BODY_STATUS_SCHEMA_V0: &str = "agent_bridge.body_status.v0";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.v0";
+pub const SHADOW_REFLEX_ADVICE_SCHEMA_V0: &str = "agent_bridge.shadow_reflex_advice.v0";
 
 /// Whether a metric is safe to treat as current.
 ///
@@ -484,6 +485,68 @@ pub fn body_status_snapshot() -> Value {
     }
 }
 
+/// Produce a non-executing recommendation from the current pressure projection.
+/// The reducer behind `body_status_snapshot` already applies hysteresis; this
+/// function deliberately adds no background loop, persistence, or actuator.
+pub fn body_reflex_advice_snapshot() -> Value {
+    let status = body_status_snapshot();
+    shadow_reflex_advice_from_status(&status)
+}
+
+fn shadow_reflex_advice_from_status(status: &Value) -> Value {
+    let enabled = status
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let pressure = status
+        .get("pressure")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let (recommendation, reason) = match (enabled, pressure) {
+        (false, _) => (
+            "observe_only",
+            "telemetry is disabled, so no resource-based recommendation is available",
+        ),
+        (_, "nominal") => (
+            "continue_with_normal_scope",
+            "pressure is nominal after the collector's hysteresis reduction",
+        ),
+        (_, "elevated") => (
+            "prefer_lightweight_next_step",
+            "pressure is elevated; defer optional heavyweight work when practical",
+        ),
+        (_, "high") => (
+            "defer_new_heavy_work",
+            "pressure is high; avoid starting new heavyweight work until pressure recovers",
+        ),
+        (_, "critical") => (
+            "request_operator_review_before_heavy_work",
+            "pressure is critical; this is advisory only and never pauses or changes host work",
+        ),
+        _ => (
+            "observe_only",
+            "pressure is unknown or unsupported, so the reflex fails closed",
+        ),
+    };
+
+    json!({
+        "schema_version": SHADOW_REFLEX_ADVICE_SCHEMA_V0,
+        "mode": "advisory_only",
+        "read_only": true,
+        "executes_actions": false,
+        "persists_raw_samples": false,
+        "pressure": pressure,
+        "recommendation": recommendation,
+        "reason": reason,
+        "safety": {
+            "does_not_pause_tasks": true,
+            "does_not_change_system_settings": true,
+            "does_not_spawn_or_stop_processes": true,
+            "operator_confirmation_required_for_execution": true,
+        }
+    })
+}
+
 fn disabled_body_status() -> Value {
     json!({
         "schema_version": BODY_STATUS_SCHEMA_V0,
@@ -947,6 +1010,28 @@ mod tests {
         assert_eq!(value["status"], "disabled");
         assert_eq!(value["enabled"], false);
         assert!(value.get("sample").is_none());
+    }
+
+    #[test]
+    fn shadow_reflex_is_advisory_and_fails_closed_without_pressure() {
+        let disabled = shadow_reflex_advice_from_status(&disabled_body_status());
+        assert_eq!(disabled["mode"], "advisory_only");
+        assert_eq!(disabled["recommendation"], "observe_only");
+        assert_eq!(disabled["executes_actions"], false);
+
+        let critical = shadow_reflex_advice_from_status(&json!({
+            "enabled": true,
+            "pressure": "critical",
+        }));
+        assert_eq!(
+            critical["recommendation"],
+            "request_operator_review_before_heavy_work"
+        );
+        assert_eq!(critical["safety"]["does_not_pause_tasks"], true);
+        assert_eq!(
+            critical["safety"]["operator_confirmation_required_for_execution"],
+            true
+        );
     }
 
     #[test]
