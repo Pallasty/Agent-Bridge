@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D28-EXTERNAL-INTAKE-V1",
+  "bundle_files": ["approval.json", "approval.ed25519.sig", "approval-public-key.pem", "resource-receipt.json", "resource-receipt.ed25519.sig", "resource-public-key.pem"],
+  "signature_algorithm": "Ed25519_detached_over_exact_UTF8_file_bytes",
+  "signer_separation": "approval/resource signer must be independent of agent-bridge-internal-research",
+  "authorization": {"external_signed_bundle_present": false, "scientific_kernel_authorized": false, "full_53_scientific_execution_authorized": false, "scientific_action_calls": 0},
+  "next_gate": "INDEPENDENT_ED25519_SIGNED_APPROVAL_AND_RESOURCE_RECEIPT"
+}
