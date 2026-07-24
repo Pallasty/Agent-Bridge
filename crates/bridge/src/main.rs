@@ -4124,6 +4124,9 @@ enum SkillsOp {
         /// Refresh only this exact source id (for example `OpenBMB/MiniCPM`).
         #[arg(long)]
         src: Option<String>,
+        /// Override the Git checkout ref for the selected source.
+        #[arg(long)]
+        r#ref: Option<String>,
         /// Delete records for skills that disappeared upstream.
         #[arg(long)]
         prune: bool,
@@ -4803,10 +4806,19 @@ async fn real_main() -> Result<()> {
             SkillsOp::Refresh {
                 verbose,
                 src,
+                r#ref,
                 prune,
                 dry_run,
                 json,
-            } => skills::run_refresh(*verbose, src.as_deref(), *prune, *dry_run, *json).await,
+            } => skills::run_refresh(
+                *verbose,
+                src.as_deref(),
+                r#ref.as_deref(),
+                *prune,
+                *dry_run,
+                *json,
+            )
+            .await,
             SkillsOp::Discover { limit, all } => skills::run_discover(*limit, *all).await,
             SkillsOp::Search { query, limit } => skills::run_search(query, *limit).await,
             SkillsOp::Route {

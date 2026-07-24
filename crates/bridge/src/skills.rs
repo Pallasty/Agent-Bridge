@@ -258,6 +258,7 @@ pub async fn run_seed(verbose: bool) -> Result<()> {
 pub async fn run_refresh(
     verbose: bool,
     src_filter: Option<&str>,
+    checkout_ref_override: Option<&str>,
     prune: bool,
     dry_run: bool,
     json: bool,
@@ -284,7 +285,12 @@ pub async fn run_refresh(
             continue;
         }
         if is_remote_src(&src) {
-            let plan = remote_index_plan(&src, &r.tags);
+            let mut plan = remote_index_plan(&src, &r.tags);
+            if src_filter == Some(src.as_str()) {
+                if let Some(checkout_ref) = checkout_ref_override {
+                    plan.checkout_ref = Some(checkout_ref.to_string());
+                }
+            }
             if let Some(existing) = remote_plans.get(&src) {
                 if existing != &plan && verbose {
                     eprintln!(
