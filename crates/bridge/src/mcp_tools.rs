@@ -5828,6 +5828,7 @@ impl McpTool for DesktopActionTool {
                     "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_action.py." },
                     "script_path": { "type": "string", "description": "Explicit desktop_action.py path (tests / alternate checkouts)." },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the action process is killed." }
+                    ,"embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." }
                 },
                 "required": ["action"]
             }),
@@ -5863,6 +5864,12 @@ impl McpTool for DesktopActionTool {
             .unwrap_or(false);
         let display = args.get("display").and_then(|v| v.as_str());
         let swaysock = args.get("swaysock").and_then(|v| v.as_str());
+        let embodiment_intent_id = args
+            .get("embodiment_intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
 
         // SAFETY (isolated-only MVP): this surface never touches the host desktop.
         // Allowed iff dry_run, or isolated = a non-host display WITH its swaysock.
@@ -5897,7 +5904,7 @@ impl McpTool for DesktopActionTool {
                 "refused",
                 false,
                 "host_mutation_not_exposed",
-                json!({ "mode": "refused", "host_target": true }),
+                json!({ "mode": "refused", "host_target": true, "embodiment_intent_id": embodiment_intent_id }),
             )
             .await;
             return Ok(desktop_action_error(json!({
@@ -6052,7 +6059,7 @@ impl McpTool for DesktopActionTool {
                     mode,
                     ok,
                     &event_err,
-                    json!({ "mode": mode, "dry_run": dry_run, "exit_code": output.status.code().unwrap_or(-1) }),
+                    json!({ "mode": mode, "dry_run": dry_run, "exit_code": output.status.code().unwrap_or(-1), "embodiment_intent_id": embodiment_intent_id }),
                 )
                 .await;
                 let mut result = ToolResult::json_text(&payload);
