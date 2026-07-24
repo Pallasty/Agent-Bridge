@@ -2,7 +2,7 @@
 
 Date: 2026-07-24
 
-Status: **PREREGISTERED / ONE DISPOSABLE RUN ONLY**
+Status: **ATTEMPT-1 INCOMPLETE / NO RETRY**
 
 Parent: R28 (`INCOMPLETE`: timeout with no phase visibility) and R29 (accepted
 source-only redacted timeout classifier).
@@ -61,3 +61,24 @@ expose only the generated public account as already specified by R28.
 
 R30 permits one run only. Its result determines the next root-cause lane; it
 must not be retried under this identifier.
+
+## Attempt-1 receipt
+
+The fixed preconditions passed: the R27 static/mutation gate, store fake
+custody tests, driver unit tests, default-feature-disabled check, default-off
+live-lab build, and isolated non-observation MCP preflight.
+
+The one authorized disposable run returned:
+
+```text
+R26 fixture incomplete: MCP fixture process timed out
+(after_initialize_before_curate_response)
+```
+
+This identifies the timeout boundary without exposing raw MCP output or any
+Keychain identifier: initialization completed; the `session_curate` request
+did not produce its response before the 30-second deadline. The driver killed
+and reaped the child before returning, and custody cleanup/postcheck completed.
+Per the one-run rule, R30 is incomplete and will not be retried. The next lane
+is root-cause instrumentation of the curate path, remaining default-off and
+without widening Keychain scope.
