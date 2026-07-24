@@ -12838,6 +12838,9 @@ fn desktop_action_schema_hides_host_unlock_flags() {
         .get("confirm_host")
         .is_some());
     assert!(tool.input_schema["properties"].get("use_grant").is_some());
+    assert!(tool.input_schema["properties"]
+        .get("embodiment_intent_id")
+        .is_some());
 }
 
 #[tokio::test]
@@ -12888,6 +12891,7 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
                 "y": 410,
                 "display": "wayland-2",
                 "swaysock": "/run/user/1000/sway-ipc.test.sock",
+                "embodiment_intent_id": "intent-isolated-smoke",
                 "script_path": script.to_string_lossy(),
                 "timeout_ms": 5000
             }),
@@ -12912,6 +12916,7 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
     assert!(!argv.contains(&"--confirm"));
     assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
     assert!(!argv.contains(&"--dry-run"));
+    assert!(!argv.contains(&"intent-isolated-smoke"));
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
