@@ -88,9 +88,21 @@ impl CustodyState {
 fn random_epoch(rng: &SystemRandom) -> Result<String, C2cLiveLabError> {
     let mut suffix = [0_u8; 8];
     rng.fill(&mut suffix).map_err(|_| C2cLiveLabError::Create)?;
-    let epoch = suffix.iter().map(|byte| format!("{byte:02x}")).collect();
+    let mut suffix = suffix
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let epoch = format!("c2c-live-{suffix}");
     suffix.zeroize();
     Ok(epoch)
+}
+
+fn valid_epoch(epoch: &str) -> bool {
+    epoch.len() == "c2c-live-".len() + 16
+        && epoch.starts_with("c2c-live-")
+        && epoch["c2c-live-".len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn prepare_with(
@@ -98,7 +110,10 @@ fn prepare_with(
     epoch: &str,
     key: &[u8],
 ) -> Result<CustodyState, C2cLiveLabError> {
-    let key_account = format!("key:c2c-live-{epoch}");
+    if !valid_epoch(epoch) || key.len() != 32 {
+        return Err(C2cLiveLabError::Preflight);
+    }
+    let key_account = format!("key:{epoch}");
     if io.account_exists_without_data(ACTIVE_EPOCH_ACCOUNT)?
         || io.account_exists_without_data(&key_account)?
     {
@@ -220,7 +235,8 @@ mod tests {
     #[test]
     fn fake_custody_is_create_only_and_cleans_pointer_before_key() {
         let io = FakeKeychain::default();
-        let mut state = prepare_with(&io, "0123456789abcdef", &[7; 32]).expect("prepare");
+        let epoch = "c2c-live-0123456789abcdef";
+        let mut state = prepare_with(&io, epoch, &[7; 32]).expect("prepare");
         assert_eq!(state.key_account, "key:c2c-live-0123456789abcdef");
         cleanup_with(&io, &mut state).expect("cleanup");
         assert!(state.cleaned);
@@ -230,7 +246,7 @@ mod tests {
                 "exists:active-epoch",
                 "exists:key:c2c-live-0123456789abcdef",
                 "create:key:c2c-live-0123456789abcdef:32",
-                "create:active-epoch:16",
+                "create:active-epoch:25",
                 "delete:active-epoch",
                 "delete:key:c2c-live-0123456789abcdef",
                 "exists:active-epoch",
@@ -245,6 +261,20 @@ mod tests {
         io.accounts
             .borrow_mut()
             .insert(ACTIVE_EPOCH_ACCOUNT.to_owned());
+        assert!(matches!(
+            prepare_with(&io, "c2c-live-0123456789abcdef", &[7; 32]),
+            Err(C2cLiveLabError::Preflight)
+        ));
+        assert!(io
+            .calls
+            .borrow()
+            .iter()
+            .all(|call| !call.starts_with("create:")));
+    }
+
+    #[test]
+    fn raw_suffix_cannot_diverge_from_the_prefixed_active_epoch() {
+        let io = FakeKeychain::default();
         assert!(matches!(
             prepare_with(&io, "0123456789abcdef", &[7; 32]),
             Err(C2cLiveLabError::Preflight)
@@ -263,7 +293,7 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            prepare_with(&io, "0123456789abcdef", &[7; 32]),
+            prepare_with(&io, "c2c-live-0123456789abcdef", &[7; 32]),
             Err(C2cLiveLabError::Create)
         ));
         assert!(io.accounts.borrow().is_empty());

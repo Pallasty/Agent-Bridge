@@ -2,7 +2,7 @@
 
 Date: 2026-07-23
 
-Status: **R27 SOURCE IMPLEMENTED / R26 LIVE RUN NOT EXECUTED**
+Status: **R27 SOURCE IMPLEMENTED / R26 ATTEMPT-1 INCOMPLETE / NO RETRY**
 
 Parent acceptance: R25 C2C-B startup wiring.
 
@@ -58,7 +58,8 @@ first, then the key account, and verifies absence for both exact accounts.
 ## 3. Exact proposed R27 source surface
 
 The formerly preregistered narrow R27 surface was implemented in
-`1b97b1ca`. It remains default-off and has not performed a live run:
+`1b97b1ca`. It remains default-off; its one attempted live run is recorded
+below as incomplete:
 
 | Path | Purpose |
 | --- | --- |
@@ -72,6 +73,15 @@ The formerly preregistered narrow R27 surface was implemented in
 The production R25 runtime modules, C2B reader, Hub seam, SQLite schema,
 MCP registry, retrieval, sync/export, deployment, and default feature set
 remain unchanged.
+
+### Attempt-1 receipt
+
+One bounded attempt reached an empty SQLite episode receipt and is therefore
+`INCOMPLETE`, not acceptance. The generated accounts were handled only by the
+guard's exact cleanup/postcheck path; no account identifier or secret is
+recorded here. Root cause was a source mismatch between the active epoch
+pointer and the prefixed key-account name. The source correction is reviewable,
+but this attempt is not retried under R26.
 
 ## 4. Fixture and acceptance requirements
 
