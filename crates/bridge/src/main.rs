@@ -4463,7 +4463,20 @@ fn which_in_path(bin: &str) -> bool {
     std::env::split_paths(&path).any(|p| p.join(bin).is_file())
 }
 
+#[cfg(unix)]
+fn restore_sigpipe_default() {
+    // Rust ignores SIGPIPE by default, which converts a closed downstream pipe
+    // into an EPIPE from println! and an avoidable CLI panic. Restore standard
+    // Unix pipeline semantics before the runtime or any worker threads start.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
 fn main() -> Result<()> {
+    #[cfg(unix)]
+    restore_sigpipe_default();
+
     // A sandbox launcher must run before this process creates the Tokio runtime,
     // loads bridge credentials, or starts worker threads. Successful launchers
     // `exec` the target and never return; malformed/unsupported requests fail
