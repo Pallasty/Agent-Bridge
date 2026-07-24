@@ -23714,6 +23714,219 @@ impl McpTool for BodyStatusTool {
     }
 }
 
+/// Capture a bounded before/during/after resource span around a caller-owned
+/// task. Only terminal summaries are persisted as semantic events; raw samples
+/// remain in the process-local telemetry ring.
+pub struct BodyTaskSpanTool {
+    hub: Hub,
+}
+
+impl BodyTaskSpanTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BodyTaskSpanTool {
+    fn name(&self) -> &'static str {
+        "body_task_span"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Capture a grounded local resource span around a task: start, checkpoint, finish, or abandon. Requires enabled body telemetry. Only a terminal summary reaches Event Spine; prompts, arguments, transcripts, and raw samples are never stored.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["op"],
+                "properties": {
+                    "op": {
+                        "type": "string",
+                        "enum": ["start", "checkpoint", "finish", "abandon"],
+                        "description": "start creates a before snapshot; checkpoint samples in-flight; finish captures after and records an Event Spine summary; abandon records no after snapshot."
+                    },
+                    "span_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "description": "Opaque span id. Omit only on start to generate one."
+                    },
+                    "task_kind": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 96,
+                        "description": "Short task category, required for start."
+                    },
+                    "task_ref": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "description": "Optional opaque identifier such as an agent session id. Do not supply prompt or transcript content."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "description": "Required only for abandon; explains why no after observation exists."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured for Event Spine summary")),
+        };
+        let op = match args.get("op").and_then(Value::as_str) {
+            Some(op) => op,
+            None => return Ok(ToolResult::error("missing 'op'")),
+        };
+        let supplied_span_id = args
+            .get("span_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let span_id = match (op, supplied_span_id) {
+            ("start", Some(value)) => value.to_string(),
+            ("start", None) => format!("body-span-{}", uuid::Uuid::new_v4()),
+            (_, Some(value)) => value.to_string(),
+            _ => return Ok(ToolResult::error("missing 'span_id'")),
+        };
+
+        match op {
+            "start" => {
+                let task_kind = match args
+                    .get("task_kind")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    Some(value) => value.to_string(),
+                    None => return Ok(ToolResult::error("missing 'task_kind' for start")),
+                };
+                let task_ref = args
+                    .get("task_ref")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
+                match crate::body_telemetry::start_task_resource_span(span_id, task_kind, task_ref) {
+                    Ok(span) => Ok(ToolResult::json_text(&json!({
+                        "event_recorded": false,
+                        "span": span,
+                    }))),
+                    Err(error) => Ok(ToolResult::error(error)),
+                }
+            }
+            "checkpoint" => match crate::body_telemetry::checkpoint_task_resource_span(&span_id) {
+                Ok(span) => Ok(ToolResult::json_text(&json!({
+                    "event_recorded": false,
+                    "span": span,
+                }))),
+                Err(error) => Ok(ToolResult::error(error)),
+            },
+            "finish" => match crate::body_telemetry::finish_task_resource_span(&span_id) {
+                Ok(span) => {
+                    let event_recorded = record_body_task_span_event(&store, &span).await;
+                    Ok(ToolResult::json_text(&json!({
+                        "event_recorded": event_recorded,
+                        "span": span,
+                    })))
+                }
+                Err(error) => Ok(ToolResult::error(error)),
+            },
+            "abandon" => {
+                let reason = match args
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    Some(value) => value.to_string(),
+                    None => return Ok(ToolResult::error("missing 'reason' for abandon")),
+                };
+                match crate::body_telemetry::abandon_task_resource_span(&span_id, reason) {
+                    Ok(span) => {
+                        let event_recorded = record_body_task_span_event(&store, &span).await;
+                        Ok(ToolResult::json_text(&json!({
+                            "event_recorded": event_recorded,
+                            "span": span,
+                        })))
+                    }
+                    Err(error) => Ok(ToolResult::error(error)),
+                }
+            }
+            _ => Ok(ToolResult::error(format!("unsupported op '{op}'"))),
+        }
+    }
+}
+
+async fn record_body_task_span_event(
+    store: &Arc<dyn StateStore>,
+    span: &crate::body_telemetry::TaskResourceSpan,
+) -> bool {
+    let complete = span.has_complete_capture();
+    let verdict = if complete {
+        crate::semantic_event::Verdict {
+            status: crate::semantic_event::VerdictStatus::Verified,
+            method: "before_after_body_observation".to_string(),
+            evidence: json!({
+                "before_present": true,
+                "after_present": true,
+                "checkpoint_count": span.checkpoints.len(),
+                "sampling_gaps": span.sampling_gaps,
+            }),
+        }
+    } else {
+        crate::semantic_event::Verdict {
+            status: crate::semantic_event::VerdictStatus::Unknown,
+            method: "terminal_after_observation_unavailable".to_string(),
+            evidence: json!({
+                "before_present": true,
+                "after_present": false,
+                "abandonment_reason": span.abandonment_reason,
+                "sampling_gaps": span.sampling_gaps,
+            }),
+        }
+    };
+    let event = crate::semantic_event::SemanticEvent {
+        ts: dispatch_now_secs(),
+        actor: "mcp".to_string(),
+        source: "body_telemetry".to_string(),
+        action: if complete {
+            "task_span_closed".to_string()
+        } else {
+            "task_span_abandoned".to_string()
+        },
+        target: Some(span.span_id.clone()),
+        object: crate::semantic_event::SemanticObject {
+            object_type: "task_resource_span".to_string(),
+            source_adapter: "body_telemetry".to_string(),
+            label: Some(span.task_kind.clone()),
+            object_id: Some(span.span_id.clone()),
+        },
+        affordance: crate::semantic_event::Affordance {
+            action_type: "observe".to_string(),
+            risk_level: "low".to_string(),
+            requires_gate: false,
+            expected_effect: Some("record a bounded task resource-span receipt".to_string()),
+        },
+        verdict,
+        facts: serde_json::to_value(span.receipt()).unwrap_or_else(|_| json!({
+            "schema_version": crate::body_telemetry::TASK_RESOURCE_SPAN_SCHEMA_V0,
+            "serialization_error": true,
+        })),
+    };
+    match store.record_semantic_event(event.to_record()).await {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::debug!(error = %error, span_id = %span.span_id, "record_semantic_event (body_task_span) failed");
+            false
+        }
+    }
+}
+
 // ===========================================================================
 //                           readiness_audit
 // ===========================================================================
@@ -40490,6 +40703,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "body_status"
+            | "body_task_span"
             | "mcp_dispatch_audit"
             | "mcp_lifecycle_digest"
             | "readiness_audit"
@@ -43643,6 +43857,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Essential,
         Arc::new(BodyStatusTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(BodyTaskSpanTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

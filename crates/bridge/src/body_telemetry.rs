@@ -8,12 +8,15 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "macos")]
 pub mod macos;
 
 pub const BODY_STATUS_SCHEMA_V0: &str = "agent_bridge.body_status.v0";
+pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.v0";
 
 /// Whether a metric is safe to treat as current.
 ///
@@ -486,6 +489,240 @@ fn disabled_body_status() -> Value {
     })
 }
 
+/// Terminal state of one task-resource observation span. A span is only
+/// `closed` when it has both its before and after observations; otherwise it
+/// is `abandoned` rather than fabricating an after-state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskResourceSpanState {
+    Active,
+    Closed,
+    Abandoned,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskResourceSpan {
+    pub schema_version: String,
+    pub span_id: String,
+    pub task_kind: String,
+    /// Opaque caller-provided reference, such as an agent session ID. Never a
+    /// prompt, tool arguments, or transcript.
+    pub task_ref: Option<String>,
+    pub state: TaskResourceSpanState,
+    pub started_at_unix_ms: i64,
+    pub ended_at_unix_ms: Option<i64>,
+    pub before: Value,
+    pub checkpoints: Vec<Value>,
+    pub after: Option<Value>,
+    pub sampling_gaps: u32,
+    pub abandonment_reason: Option<String>,
+}
+
+/// Bounded, derived receipt suitable for persistent event history. Raw body
+/// snapshots remain process-local and are deliberately excluded here.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TaskResourceSpanReceipt {
+    pub schema_version: String,
+    pub span_id: String,
+    pub task_kind: String,
+    pub state: TaskResourceSpanState,
+    pub started_at_unix_ms: i64,
+    pub ended_at_unix_ms: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub checkpoint_count: usize,
+    pub sampling_gaps: u32,
+    pub before_pressure: Option<String>,
+    pub after_pressure: Option<String>,
+    pub memory_available_delta_bytes: Option<i64>,
+    pub storage_available_delta_bytes: Option<i64>,
+    pub process_resident_delta_bytes: Option<i64>,
+    pub abandonment_reason: Option<String>,
+}
+
+impl TaskResourceSpan {
+    fn active(span_id: String, task_kind: String, task_ref: Option<String>, before: Value) -> Self {
+        Self {
+            schema_version: TASK_RESOURCE_SPAN_SCHEMA_V0.to_string(),
+            span_id,
+            task_kind,
+            task_ref,
+            state: TaskResourceSpanState::Active,
+            started_at_unix_ms: unix_now_ms(),
+            ended_at_unix_ms: None,
+            before,
+            checkpoints: Vec::new(),
+            after: None,
+            sampling_gaps: 0,
+            abandonment_reason: None,
+        }
+    }
+
+    fn finish(mut self, after: Option<Value>, reason: Option<String>) -> Self {
+        self.ended_at_unix_ms = Some(unix_now_ms());
+        self.after = after;
+        self.abandonment_reason = reason;
+        self.state = if self.after.is_some() {
+            TaskResourceSpanState::Closed
+        } else {
+            TaskResourceSpanState::Abandoned
+        };
+        self
+    }
+
+    pub fn has_complete_capture(&self) -> bool {
+        self.state == TaskResourceSpanState::Closed && self.after.is_some()
+    }
+
+    /// Produce the only form of a span that may enter durable event history.
+    /// It contains lifecycle coverage and derived deltas, never raw samples.
+    pub fn receipt(&self) -> TaskResourceSpanReceipt {
+        let after = self.after.as_ref();
+        TaskResourceSpanReceipt {
+            schema_version: self.schema_version.clone(),
+            span_id: self.span_id.clone(),
+            task_kind: self.task_kind.clone(),
+            state: self.state,
+            started_at_unix_ms: self.started_at_unix_ms,
+            ended_at_unix_ms: self.ended_at_unix_ms,
+            duration_ms: self
+                .ended_at_unix_ms
+                .map(|ended| ended.saturating_sub(self.started_at_unix_ms)),
+            checkpoint_count: self.checkpoints.len(),
+            sampling_gaps: self.sampling_gaps,
+            before_pressure: pressure_label(&self.before),
+            after_pressure: after.and_then(pressure_label),
+            memory_available_delta_bytes: after.and_then(|after| {
+                snapshot_delta(&self.before, after, "/sample/memory/available_bytes/value")
+            }),
+            storage_available_delta_bytes: after.and_then(|after| {
+                snapshot_delta(&self.before, after, "/sample/storage/available_bytes/value")
+            }),
+            process_resident_delta_bytes: after.and_then(|after| {
+                snapshot_delta(&self.before, after, "/sample/process/resident_bytes/value")
+            }),
+            abandonment_reason: self.abandonment_reason.clone(),
+        }
+    }
+}
+
+fn pressure_label(snapshot: &Value) -> Option<String> {
+    snapshot
+        .pointer("/pressure")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+fn snapshot_delta(before: &Value, after: &Value, pointer: &str) -> Option<i64> {
+    let before = before.pointer(pointer)?.as_u64()?;
+    let after = after.pointer(pointer)?.as_u64()?;
+    let delta = i128::from(after) - i128::from(before);
+    i64::try_from(delta).ok()
+}
+
+#[derive(Debug, Default)]
+struct TaskResourceSpanTracker {
+    active: BTreeMap<String, TaskResourceSpan>,
+}
+
+const TASK_SPAN_CHECKPOINT_CAP: usize = 8;
+static TASK_SPANS: OnceLock<Mutex<TaskResourceSpanTracker>> = OnceLock::new();
+
+/// Start a task span from one grounded before-observation. Starting is refused
+/// when telemetry is disabled or unavailable; callers cannot create a span
+/// whose start state is merely inferred.
+pub fn start_task_resource_span(
+    span_id: String,
+    task_kind: String,
+    task_ref: Option<String>,
+) -> std::result::Result<TaskResourceSpan, String> {
+    let before = live_body_snapshot().ok_or_else(|| {
+        "body telemetry is not live; set AGENT_BRIDGE_BODY_TELEMETRY=1 on a supported host"
+            .to_string()
+    })?;
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    if tracker.active.contains_key(&span_id) {
+        return Err(format!("task span '{span_id}' is already active"));
+    }
+    let span = TaskResourceSpan::active(span_id.clone(), task_kind, task_ref, before);
+    tracker.active.insert(span_id, span.clone());
+    Ok(span)
+}
+
+/// Capture an in-flight checkpoint. A failed capture becomes an explicit gap;
+/// it never duplicates the last good sample or alters the active span state.
+pub fn checkpoint_task_resource_span(
+    span_id: &str,
+) -> std::result::Result<TaskResourceSpan, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    let span = tracker
+        .active
+        .get_mut(span_id)
+        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    match live_body_snapshot() {
+        Some(snapshot) => {
+            if span.checkpoints.len() == TASK_SPAN_CHECKPOINT_CAP {
+                span.checkpoints.remove(0);
+            }
+            span.checkpoints.push(snapshot);
+        }
+        None => span.sampling_gaps = span.sampling_gaps.saturating_add(1),
+    }
+    Ok(span.clone())
+}
+
+/// End a task span. If the final observation cannot be captured, the returned
+/// span is abandoned and `after` remains absent.
+pub fn finish_task_resource_span(span_id: &str) -> std::result::Result<TaskResourceSpan, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    let span = tracker
+        .active
+        .remove(span_id)
+        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    let after = live_body_snapshot();
+    let reason = after
+        .is_none()
+        .then(|| "after_observation_unavailable".to_string());
+    Ok(span.finish(after, reason))
+}
+
+/// Explicitly abandon a task span, e.g. when a child is lost during a daemon
+/// restart. This preserves the before state but guarantees no fabricated after.
+pub fn abandon_task_resource_span(
+    span_id: &str,
+    reason: String,
+) -> std::result::Result<TaskResourceSpan, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    let span = tracker
+        .active
+        .remove(span_id)
+        .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    Ok(span.finish(None, Some(reason)))
+}
+
+fn live_body_snapshot() -> Option<Value> {
+    let snapshot = body_status_snapshot();
+    (snapshot.get("status").and_then(Value::as_str) == Some("ok")).then_some(snapshot)
+}
+
+fn unix_now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().try_into().unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
+
 fn finite_ratio(value: f64) -> Option<f64> {
     (value.is_finite() && (0.0..=1.0).contains(&value)).then_some(value)
 }
@@ -703,5 +940,41 @@ mod tests {
         assert_eq!(value["status"], "disabled");
         assert_eq!(value["enabled"], false);
         assert!(value.get("sample").is_none());
+    }
+
+    #[test]
+    fn persistent_receipt_excludes_raw_snapshots() {
+        let before = json!({
+            "pressure": "nominal",
+            "sample": {
+                "memory": { "available_bytes": { "value": 80 } },
+                "storage": { "available_bytes": { "value": 70 } },
+                "process": { "resident_bytes": { "value": 10 } },
+            },
+        });
+        let after = json!({
+            "pressure": "elevated",
+            "sample": {
+                "memory": { "available_bytes": { "value": 60 } },
+                "storage": { "available_bytes": { "value": 65 } },
+                "process": { "resident_bytes": { "value": 15 } },
+            },
+        });
+        let span = TaskResourceSpan::active(
+            "span-1".to_string(),
+            "test".to_string(),
+            Some("opaque-ref".to_string()),
+            before,
+        )
+        .finish(Some(after), None);
+
+        let value = serde_json::to_value(span.receipt()).expect("receipt serializes");
+        assert!(value.get("before").is_none());
+        assert!(value.get("checkpoints").is_none());
+        assert!(value.get("after").is_none());
+        assert!(value.get("task_ref").is_none());
+        assert_eq!(value["memory_available_delta_bytes"], -20);
+        assert_eq!(value["storage_available_delta_bytes"], -5);
+        assert_eq!(value["process_resident_delta_bytes"], 5);
     }
 }
