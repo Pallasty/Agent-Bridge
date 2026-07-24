@@ -9246,10 +9246,8 @@ mod tests {
         let fixture = avatar_cortex_binding_fixture_from_plan(plan);
         let adapter = avatar_cortex_visual_adapter_from_fixture(fixture);
         let view = avatar_cortex_renderer_view_from_visual_adapter_payload(adapter);
-        let root =
-            std::env::temp_dir().join(format!("agent-bridge-xiao-review-record-{}", now_secs()));
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("review_records.jsonl");
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("review_records.jsonl");
         let notes = vec!["v2 fixes the floating entry/exit frames".to_string()];
         let opts = AvatarCortexReviewRecordOptions {
             label: None,
@@ -9356,13 +9354,8 @@ mod tests {
         let gate = avatar_cortex_renderer_review_gate_from_renderer_view_payload(view);
         let packet = avatar_cortex_renderer_review_packet_from_review_gate_payload(gate);
         let report = avatar_cortex_renderer_review_report_from_packet_payload(packet);
-        let root = std::env::temp_dir().join(format!(
-            "agent-bridge-review-decision-{}-{}",
-            std::process::id(),
-            now_secs()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let ledger_path = root.join("decisions.jsonl");
+        let root = tempfile::tempdir().unwrap();
+        let ledger_path = root.path().join("decisions.jsonl");
 
         let preview = avatar_cortex_review_decision_record_from_report(
             &AvatarCortexRendererReviewDecisionOptions {
@@ -10269,9 +10262,7 @@ mod tests {
 
     #[test]
     fn xiao_shu_action_queue_lists_pending_without_emitting() {
-        let root =
-            std::env::temp_dir().join(format!("agent-bridge-xiao-shu-action-queue-{}", now_secs()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = tempfile::tempdir().unwrap();
 
         let request_payload = json!({
             "surface": "xiao_shu_action_request",
@@ -10290,7 +10281,7 @@ mod tests {
                 "direct_llm_emit_allowed": false
             }
         });
-        let queue_path = root.join("requests.jsonl");
+        let queue_path = root.path().join("requests.jsonl");
         let older = xiao_shu_action_enqueue_record_from_request(
             request_payload.clone(),
             "agent-bridge",
@@ -10362,7 +10353,6 @@ mod tests {
             "xiao_shu_action_request"
         );
 
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -10396,11 +10386,7 @@ mod tests {
 
     #[test]
     fn xiao_shu_action_queue_uses_latest_append_only_state() {
-        let root = std::env::temp_dir().join(format!(
-            "agent-bridge-xiao-shu-action-current-{}",
-            now_secs()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = tempfile::tempdir().unwrap();
 
         let request_payload = json!({
             "surface": "xiao_shu_action_request",
@@ -10419,7 +10405,7 @@ mod tests {
                 "direct_llm_emit_allowed": false
             }
         });
-        let queue_path = root.join("requests.jsonl");
+        let queue_path = root.path().join("requests.jsonl");
         let pending = xiao_shu_action_enqueue_record_from_request(
             request_payload,
             "agent-bridge",
@@ -10471,7 +10457,6 @@ mod tests {
         assert_eq!(current["records"][0]["state"], "emitted");
         assert_eq!(current["records"][0]["request_id"], pending["request_id"]);
 
-        let _ = std::fs::remove_dir_all(root);
     }
 
     fn sample_voice_preview(voice_allowed: bool) -> Value {
