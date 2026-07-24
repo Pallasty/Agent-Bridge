@@ -1,0 +1,54 @@
+{
+  "schema": "agent_bridge.skills_route.provenance_query_cases.v0",
+  "purpose": "Offline-only labels for evaluating a possible conditional verified-source preference. Labels are never read by live retrieval, ranking, installation, or execution.",
+  "policy_boundary": {
+    "labels_affect_runtime": false,
+    "labels_are_training_data": false,
+    "automatic_policy_change": false,
+    "required_verdict_without_measured_gate": "INCONCLUSIVE_NO_POLICY_CHANGE"
+  },
+  "cases": [
+    {
+      "id": "pdf-form-review",
+      "query": "review and fill a PDF form",
+      "relevant_skill_keys": ["skill:anthropics/skills/pdf"],
+      "verified_coverage": "required"
+    },
+    {
+      "id": "docx-report",
+      "query": "create a formatted DOCX project report",
+      "relevant_skill_keys": ["skill:anthropics/skills/docx"],
+      "verified_coverage": "required"
+    },
+    {
+      "id": "spreadsheet-analysis",
+      "query": "analyze an XLSX budget and update formulas",
+      "relevant_skill_keys": ["skill:anthropics/skills/xlsx"],
+      "verified_coverage": "required"
+    },
+    {
+      "id": "presentation-deck",
+      "query": "prepare a PPTX presentation deck from notes",
+      "relevant_skill_keys": ["skill:anthropics/skills/pptx"],
+      "verified_coverage": "required"
+    },
+    {
+      "id": "poster-art",
+      "query": "design a static poster as a PNG",
+      "relevant_skill_keys": ["skill:anthropics/skills/canvas-design"],
+      "verified_coverage": "required"
+    },
+    {
+      "id": "local-mlx-inference",
+      "query": "run a local MLX model on Apple Silicon",
+      "relevant_skill_keys": [],
+      "verified_coverage": "insufficient_expected"
+    },
+    {
+      "id": "helm-chart-audit",
+      "query": "audit a Helm chart for deployment risks",
+      "relevant_skill_keys": [],
+      "verified_coverage": "insufficient_expected"
+    }
+  ]
+}

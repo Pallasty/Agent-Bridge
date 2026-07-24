@@ -53,6 +53,10 @@ const ROUTE_FILE_FORMATS: &[&str] = &["pdf", "docx", "xlsx", "pptx"];
 const ROUTE_QUALITY_CORPUS: &str =
     include_str!("../../../docs/design/fixtures/skills-route-quality-query-cases-v0.json");
 
+/// Checked-in post-retrieval labels for an observation-only provenance shadow.
+const ROUTE_PROVENANCE_CORPUS: &str =
+    include_str!("../../../docs/design/fixtures/skills-route-provenance-query-cases-v0.json");
+
 /// The legacy aggregate was indexed before Git provenance existed. These
 /// declarations make that absence visible without inventing an upstream.
 const LEGACY_SOURCE_RECOVERY_MANIFEST: &str =
@@ -759,6 +763,32 @@ pub async fn run_route(query: &str, limit: usize, body_chars: usize, json: bool)
     Ok(())
 }
 
+/// Compare normal candidates with the subset that has reproducible upstream
+/// provenance. This is evidence only: normal ordering and policy stay intact.
+pub async fn run_route_audit(query: &str, limit: usize, json: bool) -> Result<()> {
+    let query = query.trim();
+    if query.is_empty() {
+        bail!("query is required");
+    }
+    let limit = limit.clamp(1, 50);
+    let store = open_store_read_only().await?;
+    let candidates =
+        route_skill_entries_strict(&store, query, route_candidate_limit(limit)).await?;
+    let payload = route_provenance_shadow_payload(query, &candidates, limit);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!(
+            "[route-audit] candidate_pool={} baseline_verified={} verified_available={} verdict={}",
+            payload["candidate_pool"],
+            payload["baseline"]["provenance_counts"]["verified"],
+            payload["verified_only"]["count"],
+            payload["verdict"],
+        );
+    }
+    Ok(())
+}
+
 /// Show the strict retrieval lanes behind a route decision without changing
 /// ranking, provenance, admission, memory, or execution authority.
 pub async fn run_route_diagnose(query: &str, limit: usize, json: bool) -> Result<()> {
@@ -973,6 +1003,102 @@ pub async fn run_route_eval(limit: usize, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// Run a checked-in provenance corpus after retrieval. The labels are not
+/// consulted by the runtime router and cannot alter recommendation order.
+pub async fn run_route_provenance_eval(
+    fixture: Option<&Path>,
+    limit: usize,
+    json: bool,
+) -> Result<()> {
+    let corpus = parse_route_provenance_corpus(fixture)?;
+
+    let limit = limit.clamp(1, 50);
+    let store = open_store_read_only().await?;
+    let mut rows = Vec::with_capacity(corpus.cases.len());
+    let mut required = 0usize;
+    let mut required_verified_hits = 0usize;
+    let mut insufficient = 0usize;
+    let mut fill_risks = 0usize;
+
+    for case in corpus.cases {
+        let candidates =
+            route_skill_entries_strict(&store, &case.query, route_candidate_limit(limit)).await?;
+        let baseline = candidates.iter().take(limit).collect::<Vec<_>>();
+        let verified = candidates
+            .iter()
+            .filter(|hit| skill_provenance(&hit.hit.record.tags) == SkillProvenance::Verified)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let baseline_hit = baseline
+            .iter()
+            .any(|hit| case.relevant_skill_keys.contains(&hit.hit.record.key));
+        let verified_hit = verified
+            .iter()
+            .any(|hit| case.relevant_skill_keys.contains(&hit.hit.record.key));
+        let fill_risk = case.relevant_skill_keys.is_empty() && !verified.is_empty();
+
+        match case.verified_coverage.as_str() {
+            "required" => {
+                required += 1;
+                if verified_hit {
+                    required_verified_hits += 1;
+                }
+            }
+            "insufficient_expected" => insufficient += 1,
+            other => bail!(
+                "case {} has unsupported verified_coverage {other:?}",
+                case.id
+            ),
+        }
+        if fill_risk {
+            fill_risks += 1;
+        }
+        rows.push(serde_json::json!({
+            "id": case.id,
+            "query": case.query,
+            "expected_verified_coverage": case.verified_coverage,
+            "baseline_relevant_hit": baseline_hit,
+            "verified_relevant_hit": verified_hit,
+            "verified_fill_risk": fill_risk,
+            "baseline_keys": baseline.iter().map(|hit| &hit.hit.record.key).collect::<Vec<_>>(),
+            "verified_keys": verified.iter().map(|hit| &hit.hit.record.key).collect::<Vec<_>>(),
+        }));
+    }
+
+    let required_recall = required_verified_hits as f64 / required.max(1) as f64;
+    let verdict = if required_recall >= 0.8 && fill_risks == 0 {
+        "READY_FOR_OWNER_REVIEW"
+    } else {
+        "INCONCLUSIVE_NO_POLICY_CHANGE"
+    };
+    let payload = serde_json::json!({
+        "schema_version": "skills-route-provenance-shadow-eval-v0",
+        "mode": "offline_observation_only",
+        "fixture": fixture.map(|path| path.display().to_string()).unwrap_or_else(|| "embedded".to_string()),
+        "limit": limit,
+        "summary": {
+            "cases": rows.len(),
+            "required_cases": required,
+            "required_verified_recall_at_k": required_recall,
+            "insufficient_expected_cases": insufficient,
+            "verified_fill_risk_cases": fill_risks,
+        },
+        "verdict": verdict,
+        "cases": rows,
+        "boundary": {
+            "read_only": true,
+            "changes_route_policy": false,
+            "labels_used_after_retrieval": true,
+        },
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!("[route-provenance-eval] verdict={verdict} required_verified_recall@{limit}={required_recall:.3} fill_risk_cases={fill_risks}");
+    }
+    Ok(())
+}
+
 fn route_quality_outcome(expectation: &str, matched: bool) -> Result<&'static str> {
     match (expectation, matched) {
         ("must_match", true) => Ok("matched"),
@@ -999,6 +1125,20 @@ struct RouteQualityCase {
     expected_keys: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct RouteProvenanceCorpus {
+    schema: String,
+    cases: Vec<RouteProvenanceCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteProvenanceCase {
+    id: String,
+    query: String,
+    relevant_skill_keys: BTreeSet<String>,
+    verified_coverage: String,
+}
+
 fn parse_route_quality_corpus() -> Result<RouteQualityCorpus> {
     let corpus: RouteQualityCorpus = serde_json::from_str(ROUTE_QUALITY_CORPUS)
         .context("parse embedded Skills route quality corpus")?;
@@ -1006,6 +1146,78 @@ fn parse_route_quality_corpus() -> Result<RouteQualityCorpus> {
         bail!("invalid Skills route quality corpus")
     }
     Ok(corpus)
+}
+
+fn parse_route_provenance_corpus(fixture: Option<&Path>) -> Result<RouteProvenanceCorpus> {
+    let raw = match fixture {
+        Some(path) => std::fs::read_to_string(path)
+            .with_context(|| format!("read fixture {}", path.display()))?,
+        None => ROUTE_PROVENANCE_CORPUS.to_string(),
+    };
+    let corpus: RouteProvenanceCorpus =
+        serde_json::from_str(&raw).context("parse Skills provenance evaluation corpus")?;
+    if corpus.schema != "agent_bridge.skills_route.provenance_query_cases.v0"
+        || corpus.cases.is_empty()
+    {
+        bail!("invalid Skills provenance evaluation fixture")
+    }
+    Ok(corpus)
+}
+
+fn route_provenance_shadow_payload(
+    query: &str,
+    candidates: &[RoutedSkillHit],
+    limit: usize,
+) -> serde_json::Value {
+    let baseline = candidates.iter().take(limit).collect::<Vec<_>>();
+    let verified = candidates
+        .iter()
+        .filter(|hit| skill_provenance(&hit.hit.record.tags) == SkillProvenance::Verified)
+        .take(limit)
+        .collect::<Vec<_>>();
+    let count_by_provenance = |hits: &[&RoutedSkillHit]| {
+        let mut counts = BTreeMap::<String, usize>::new();
+        for hit in hits {
+            bump(
+                &mut counts,
+                skill_provenance(&hit.hit.record.tags).as_str().to_string(),
+            );
+        }
+        counts
+    };
+    let baseline_counts = count_by_provenance(&baseline);
+    let candidate_refs = candidates.iter().collect::<Vec<_>>();
+    let candidate_counts = count_by_provenance(&candidate_refs);
+    let baseline_items = baseline
+        .iter()
+        .enumerate()
+        .map(|(index, hit)| route_item_json(index + 1, hit, 0))
+        .collect::<Vec<_>>();
+    let verified_items = verified
+        .iter()
+        .enumerate()
+        .map(|(index, hit)| route_item_json(index + 1, hit, 0))
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "query": query,
+        "candidate_pool": candidates.len(),
+        "baseline": {
+            "count": baseline_items.len(),
+            "provenance_counts": baseline_counts,
+            "skills": baseline_items,
+        },
+        "verified_only": {
+            "count": verified_items.len(),
+            "coverage_of_requested_limit": verified_items.len() as f64 / limit as f64,
+            "coverage_of_candidate_pool": candidate_counts.get("verified").copied().unwrap_or(0) as f64 / candidates.len().max(1) as f64,
+            "skills": verified_items,
+        },
+        "candidate_pool_provenance": candidate_counts,
+        "verdict": "INCONCLUSIVE_NO_POLICY_CHANGE",
+        "reason": "Provenance is a reproducibility signal, not a relevance label. Review this report across an explicit query corpus before changing recommendation order.",
+        "actions": {"network": false, "write_memory": false, "reindex": false, "install": false, "execute_skill": false, "changes_route_policy": false},
+    })
 }
 
 /// Build the JSON payload used by both `agent-bridge skills route` and MCP.
@@ -4630,6 +4842,53 @@ mod tests {
         assert_eq!(skill_provenance(&partial), SkillProvenance::Partial);
         assert_eq!(skill_provenance(&[]), SkillProvenance::Unknown);
         assert!(SkillProvenance::parse("bad").is_err());
+    }
+
+    #[test]
+    fn provenance_shadow_audit_filters_without_reordering_baseline() {
+        let unknown = RoutedSkillHit {
+            hit: test_skill_hit("skill:legacy/pdf", 10.0, None),
+            score: 10.0,
+            feedback: SkillRouteFeedback::default(),
+        };
+        let mut verified_hit = test_skill_hit("skill:upstream/pdf", 9.0, None);
+        verified_hit.record.tags.extend([
+            "git_origin:https://github.com/example/skills.git".to_string(),
+            "git_commit:deadbeef".to_string(),
+        ]);
+        let verified = RoutedSkillHit {
+            hit: verified_hit,
+            score: 9.0,
+            feedback: SkillRouteFeedback::default(),
+        };
+
+        let payload = route_provenance_shadow_payload("review a PDF", &[unknown, verified], 2);
+
+        assert_eq!(payload["baseline"]["skills"][0]["key"], "skill:legacy/pdf");
+        assert_eq!(
+            payload["verified_only"]["skills"][0]["key"],
+            "skill:upstream/pdf"
+        );
+        assert_eq!(payload["verdict"], "INCONCLUSIVE_NO_POLICY_CHANGE");
+        assert_eq!(payload["actions"]["changes_route_policy"], false);
+    }
+
+    #[test]
+    fn embedded_provenance_corpus_is_well_formed() {
+        let corpus = parse_route_provenance_corpus(None).expect("embedded corpus");
+
+        assert_eq!(
+            corpus.schema,
+            "agent_bridge.skills_route.provenance_query_cases.v0"
+        );
+        assert!(corpus
+            .cases
+            .iter()
+            .any(|case| case.verified_coverage == "required"));
+        assert!(corpus
+            .cases
+            .iter()
+            .any(|case| case.verified_coverage == "insufficient_expected"));
     }
 
     #[test]

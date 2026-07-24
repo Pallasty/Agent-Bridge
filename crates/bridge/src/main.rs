@@ -4161,10 +4161,34 @@ enum SkillsOp {
         #[arg(long)]
         json: bool,
     },
+    /// Compare current route candidates with reproducibly sourced candidates.
+    /// This is read-only evidence and never changes routing policy.
+    RouteAudit {
+        /// Task description in natural language.
+        query: String,
+        /// Maximum candidates retained in each comparison.
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+    },
     /// Evaluate the current router against the checked-in bilingual quality corpus.
     /// This is observation-only and never changes routing policy.
     RouteEval {
         /// Maximum routed Skills retained per query.
+        #[arg(long, default_value_t = 3)]
+        limit: usize,
+        /// Emit machine-readable JSON for automation.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Evaluate a fixed provenance corpus without changing runtime routing.
+    RouteProvenanceEval {
+        /// Optional JSON fixture overriding the embedded provenance corpus.
+        #[arg(long)]
+        fixture: Option<PathBuf>,
+        /// Maximum candidates evaluated per query.
         #[arg(long, default_value_t = 3)]
         limit: usize,
         /// Emit machine-readable JSON for automation.
@@ -4735,7 +4759,11 @@ async fn real_main() -> Result<()> {
     if let Cmd::Skills { op } = &cmd {
         if matches!(
             op,
-            SkillsOp::Route { .. } | SkillsOp::RouteEval { .. } | SkillsOp::RouteDiagnose { .. }
+            SkillsOp::Route { .. }
+                | SkillsOp::RouteAudit { .. }
+                | SkillsOp::RouteEval { .. }
+                | SkillsOp::RouteProvenanceEval { .. }
+                | SkillsOp::RouteDiagnose { .. }
         ) {
             prepare_skills_semantic_route().await?;
         }
@@ -4758,7 +4786,15 @@ async fn real_main() -> Result<()> {
                 body_chars,
                 json,
             } => skills::run_route(query, *limit, *body_chars, *json).await,
+            SkillsOp::RouteAudit { query, limit, json } => {
+                skills::run_route_audit(query, *limit, *json).await
+            }
             SkillsOp::RouteEval { limit, json } => skills::run_route_eval(*limit, *json).await,
+            SkillsOp::RouteProvenanceEval {
+                fixture,
+                limit,
+                json,
+            } => skills::run_route_provenance_eval(fixture.as_deref(), *limit, *json).await,
             SkillsOp::RouteDiagnose { query, limit, json } => {
                 skills::run_route_diagnose(query, *limit, *json).await
             }
