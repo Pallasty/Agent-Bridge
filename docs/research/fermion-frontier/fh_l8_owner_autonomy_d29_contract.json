@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INDEPENDENT-REFERENCE-D29-OWNER-AUTONOMY-V1",
+  "authorization_mode": "OWNER_SCOPED_AUTONOMY_FOR_REVERSIBLE_RESEARCH",
+  "supersedes_hard_external_signer_gates": ["D27", "D28", "D29-signed-bundle"],
+  "minimum_controls": {"source_hash_binding": true, "action_count_cap": true, "resource_ceiling": true, "isolated_scratch": true, "receipt": true},
+  "allowed_next_action": {"kernel_calls": 1, "packed_q3_reads": 0, "full_shard_runs": 0},
+  "full_53_scientific_execution_authorized": false,
+  "next_gate": "OWNER_SCOPED_SINGLE_MICRO_ACTION_PREFLIGHT"
+}
