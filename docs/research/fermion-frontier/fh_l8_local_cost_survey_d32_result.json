@@ -1,0 +1,1 @@
+{"status":"VERIFIED_D32_BOUNDED_LOCAL_COST_SURVEY","selected_representatives":8,"entries_min":218,"entries_max":220,"rows_sha256":"3a7389578853d57378a1d5cfecb7dbd20f590888cf632142c5ec617f0906e8a7","process_peak_rss_kib":40636,"packed_q3_reads":0,"scientific_action_calls":9,"full_53_scientific_execution_authorized":false,"next_gate":"BOUNDED_LOCAL_SURVEY_REPLAY_AND_COST_ENVELOPE"}
