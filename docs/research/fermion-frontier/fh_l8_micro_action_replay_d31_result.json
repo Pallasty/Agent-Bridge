@@ -1,0 +1,15 @@
+{
+  "status": "VERIFIED_D31_SINGLE_MICRO_ACTION_REPLAY",
+  "d30_column_sha256": "eae426a626afa1f1def17bc23dd67af684470aeb5f48b6532992eb27bd59f515",
+  "d31_column_sha256": "eae426a626afa1f1def17bc23dd67af684470aeb5f48b6532992eb27bd59f515",
+  "output_digest_match": true,
+  "d30_reduced_column_entries": 29,
+  "d31_reduced_column_entries": 29,
+  "d30_process_peak_rss_kib": 40384,
+  "d31_process_peak_rss_kib": 40392,
+  "peak_rss_delta_kib": 8,
+  "packed_q3_reads": 0,
+  "scientific_action_calls": 1,
+  "full_53_scientific_execution_authorized": false,
+  "next_gate": "BOUNDED_MULTI_REPRESENTATIVE_LOCAL_COST_SURVEY"
+}
