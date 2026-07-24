@@ -23383,7 +23383,7 @@ impl McpTool for MemorySyncStatusTool {
     }
 }
 
-async fn mobile_capabilities_json(policy: ToolPolicy) -> Value {
+async fn mobile_capabilities_json(policy: ToolPolicy, probe_devices: bool) -> Value {
     // Reality view (host detection applied): without adb/macOS the mobile
     // families are not registered, and this list truthfully comes back empty.
     let exposed: Vec<String> = build_registry_current_view(policy)
@@ -23393,17 +23393,24 @@ async fn mobile_capabilities_json(policy: ToolPolicy) -> Value {
         .filter(|n| n.starts_with("mobile_"))
         .collect();
     let adb_on_path = which_binary("adb");
-    let devices = if adb_on_path {
+    let devices = if !probe_devices {
+        json!({
+            "probed": false,
+            "status": "not_probed",
+            "reason": "compact capabilities defers ADB enumeration; call mobile_list_devices or capabilities with compact=false"
+        })
+    } else if adb_on_path {
         match mobile_online_devices(3_000).await {
             Ok(list) => json!({
+                "probed": true,
                 "ok": true,
                 "online_count": list.len(),
                 "serials": list.iter().map(|d| &d.serial).collect::<Vec<_>>(),
             }),
-            Err(e) => json!({ "ok": false, "error": e }),
+            Err(e) => json!({ "probed": true, "ok": false, "error": e }),
         }
     } else {
-        json!({ "ok": false, "error": "adb not on PATH" })
+        json!({ "probed": true, "ok": false, "error": "adb not on PATH" })
     };
     json!({
         "backend": "adb",
@@ -23477,7 +23484,7 @@ impl McpTool for CapabilitiesTool {
                 "properties": {
                     "compact": {
                         "type": "boolean",
-                        "description": "Use compact diagnostics. Omitted = true for Codex compact toolsets, false otherwise."
+                        "description": "Use compact diagnostics. Omitted = true for Codex compact toolsets, false otherwise. Compact mode defers live Android device enumeration."
                     },
                     "include_instinct_sessions": {
                         "type": "boolean",
@@ -23582,7 +23589,7 @@ impl McpTool for CapabilitiesTool {
         let policy = ToolPolicy::from_env();
 
         let sec = &self.hub.security;
-        let mobile = mobile_capabilities_json(policy).await;
+        let mobile = mobile_capabilities_json(policy, !compact).await;
         // Reality view: count what this host actually exposes for the policy,
         // not the nominal fully-available surface.
         let exposed_tool_count = build_registry_current_view(policy).list().len();

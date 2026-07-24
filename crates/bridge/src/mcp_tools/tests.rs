@@ -1054,6 +1054,15 @@ fn compact_instinct_observer_status_omits_per_session_details() {
     assert!(detailed.get("per_session_omitted").is_none());
 }
 
+#[tokio::test]
+async fn compact_mobile_capabilities_defer_adb_device_probe() {
+    let mobile = mobile_capabilities_json(ToolPolicy::from_env(), false).await;
+
+    assert_eq!(mobile["devices"]["probed"], json!(false));
+    assert_eq!(mobile["devices"]["status"], json!("not_probed"));
+    assert!(mobile["default_serial"].is_null());
+}
+
 #[test]
 fn steer_stale_helpers_classify_missing_mux() {
     assert!(steer_error_indicates_missing_mux(
