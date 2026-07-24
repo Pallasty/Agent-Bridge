@@ -14,6 +14,24 @@ use std::sync::{
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const READINESS_MEMORY_KEY: &str = "c2c-keychain-readiness-v1";
 
+#[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
+fn mark_live_lab_phase(label: &'static str) {
+    if !matches!(
+        label,
+        "item_derivation_enter" | "item_derivation_done" | "item_append_enter" | "item_append_done"
+    ) {
+        return;
+    }
+    let Some(path) = std::env::var_os("AGENT_BRIDGE_C2C_LIVE_LAB_PHASE_PATH") else {
+        return;
+    };
+    let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(path) else {
+        return;
+    };
+    use std::io::Write;
+    let _ = writeln!(file, "{label}");
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CurationBatchObservationError {
     Begin,
@@ -105,10 +123,19 @@ impl ExplicitKeychainMacosAttempt {
         memory_key: &str,
         ordinal: u32,
     ) -> Result<(), CurationBatchObservationError> {
-        let item_ref = self.deriver.derive(memory_key).map_err(|_| {
-            self.compromised = true;
-            CurationBatchObservationError::Item
-        })?;
+        #[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
+        mark_live_lab_phase("item_derivation_enter");
+        let item_ref = match self.deriver.derive(memory_key) {
+            Ok(item_ref) => {
+                #[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
+                mark_live_lab_phase("item_derivation_done");
+                item_ref
+            }
+            Err(_) => {
+                self.compromised = true;
+                return Err(CurationBatchObservationError::Item);
+            }
+        };
         let event_id = format!("{}-{}", self.run_id, self.next_event);
         self.next_event += 1;
         let event = EpisodeObservationEvent {
@@ -121,17 +148,27 @@ impl ExplicitKeychainMacosAttempt {
                 episode_position: ordinal,
             },
         };
-        self.store
+        #[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
+        mark_live_lab_phase("item_append_enter");
+        match self
+            .store
             .append_c2_keychain_macos_runtime_event(
                 &event,
                 &digest(&[&event_id, &self.episode_id, &self.run_id, &item_ref]),
                 crate::now_secs(),
             )
             .await
-            .map_err(|_| {
+        {
+            Ok(()) => {
+                #[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
+                mark_live_lab_phase("item_append_done");
+                Ok(())
+            }
+            Err(_) => {
                 self.compromised = true;
-                CurationBatchObservationError::Item
-            })
+                Err(CurationBatchObservationError::Item)
+            }
+        }
     }
     pub async fn finish(self, count: u32) -> Result<(), CurationBatchObservationError> {
         if self.compromised {
