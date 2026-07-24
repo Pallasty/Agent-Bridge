@@ -10,9 +10,11 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
+use std::time::Duration;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const READINESS_MEMORY_KEY: &str = "c2c-keychain-readiness-v1";
+const ITEM_DERIVATION_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
 fn mark_live_lab_phase(label: &'static str) {
@@ -125,13 +127,16 @@ impl ExplicitKeychainMacosAttempt {
     ) -> Result<(), CurationBatchObservationError> {
         #[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
         mark_live_lab_phase("item_derivation_enter");
-        let item_ref = match self.deriver.derive(memory_key) {
-            Ok(item_ref) => {
+        let deriver = self.deriver.clone();
+        let memory_key = memory_key.to_owned();
+        let derivation = tokio::task::spawn_blocking(move || deriver.derive(&memory_key));
+        let item_ref = match tokio::time::timeout(ITEM_DERIVATION_TIMEOUT, derivation).await {
+            Ok(Ok(Ok(item_ref))) => {
                 #[cfg(feature = "episode-observation-c2c-keychain-macos-live-lab")]
                 mark_live_lab_phase("item_derivation_done");
                 item_ref
             }
-            Err(_) => {
+            _ => {
                 self.compromised = true;
                 return Err(CurationBatchObservationError::Item);
             }
@@ -208,6 +213,15 @@ mod tests {
             Ok("epr_v1_test_x".into())
         }
     }
+    struct Blocking(std::sync::atomic::AtomicUsize);
+    impl ItemRefDeriver for Blocking {
+        fn derive(&self, _: &str) -> Result<String, ()> {
+            if self.0.fetch_add(1, Ordering::Relaxed) > 0 {
+                std::thread::sleep(ITEM_DERIVATION_TIMEOUT + Duration::from_millis(100));
+            }
+            Ok("epr_v1_test_x".into())
+        }
+    }
 
     #[tokio::test]
     async fn readiness_failure_prevents_any_open_attempt() {
@@ -235,5 +249,26 @@ mod tests {
         let mut attempt = handle.begin().await.expect("open");
         attempt.observe_saved("memory-a", 0).await.expect("item");
         attempt.finish(1).await.expect("close");
+    }
+
+    #[tokio::test]
+    async fn blocked_derivation_fails_closed_without_blocking_core_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(
+            SqliteStore::open(&dir.path().join("state.db"))
+                .await
+                .expect("store"),
+        );
+        let handle = ExplicitKeychainMacosHandle::from_deriver(
+            store,
+            Arc::new(Blocking(std::sync::atomic::AtomicUsize::new(0))),
+        )
+        .expect("readiness uses the fast test derivation");
+        let mut attempt = handle.begin().await.expect("open");
+        assert_eq!(
+            attempt.observe_saved("memory-a", 0).await,
+            Err(CurationBatchObservationError::Item)
+        );
+        assert!(attempt.compromised);
     }
 }
