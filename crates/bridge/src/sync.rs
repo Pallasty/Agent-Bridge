@@ -24,6 +24,7 @@ use ab_store::{
     default_db_path, node_id_from_name, ImportConflictPolicy, MemoryExportFilter, MemoryRecord,
     SqliteStore, StateStore,
 };
+use crate::locks::{self, AcquireOutcome};
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -33,6 +34,18 @@ const DEFAULT_REPO_NAME: &str = "agent-bridge-memory";
 const MEMORY_FILE: &str = "memory.jsonl";
 const MEMORY_EDGES_FILE: &str = "memory_edges.jsonl";
 const FORUM_FILE: &str = "forum.jsonl";
+const SYNC_LOCK_RESOURCE: &str = "memory-sync";
+const SYNC_LOCK_TTL_SECS: u64 = 600;
+
+struct SyncLockGuard {
+    path: PathBuf,
+}
+
+impl Drop for SyncLockGuard {
+    fn drop(&mut self) {
+        let _ = locks::release(&self.path);
+    }
+}
 
 /// Resolve the cross-device memory repo path.
 ///
@@ -93,6 +106,36 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
         );
         return Ok(false);
     }
+
+    let lock = locks::acquire(
+        SYNC_LOCK_RESOURCE,
+        std::process::id(),
+        "agent-bridge sync",
+        SYNC_LOCK_TTL_SECS,
+    )
+    .context("acquire memory-sync lock")?;
+    let _lock_guard = match lock {
+        AcquireOutcome::Acquired { lock_path, .. } => SyncLockGuard { path: lock_path },
+        AcquireOutcome::ForceBroke {
+            lock_path,
+            old_lock_backup,
+            ..
+        } => {
+            eprintln!(
+                "[sync] reclaimed stale memory-sync lock; previous lock backed up at {}",
+                old_lock_backup.display()
+            );
+            SyncLockGuard { path: lock_path }
+        }
+        AcquireOutcome::Attached { lock, .. } => {
+            eprintln!(
+                "[sync] another sync is already running (pid {}, acquired at {}); skipping this round",
+                lock.owner_pid, lock.acquired_at
+            );
+            return Ok(false);
+        }
+    };
+
     if verbose {
         eprintln!("[sync] repo: {}", repo.display());
     }
