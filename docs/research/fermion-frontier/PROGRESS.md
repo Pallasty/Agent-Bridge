@@ -1,5 +1,19 @@
 # Research progress ledger
 
+Status date: 2026-07-25
+
+## 2026-07-25 — FH-L8 D45--D49 fixed64 resource稳定性与归档闭环
+
+- D45 固定64 受控复放保留 CPU-0、512 MiB AS、零 swap 条件下 67 动作、64 representative 的 replay
+  约束证据，并保持 `packed_q3_reads=0`、`full_53_scientific_execution_authorized=false`。
+- D46 重复复放形成同条件区间，结合 D42–D46 的结构摘要与动作计数一致性，进入 D47 资源区间汇总。
+- D47 形成 D45/D46 区间汇总；D48 执行第三次同约束样本复放（样本 3：0.87s / 38,336 KiB）；
+  D49 决议 `VERIFIED_D49_CONTROLLED_RESOURCE_STABILITY_DECISION` 且 `resource_stability_decision=stabilized`，
+  停止扩规模复放。
+- D47 固定证据包（manifest/result）静态核验通过（D47 status 和 next-gate 正确），随后由 D48
+  consumer check 与 archive 两步推进为 `FH_L8_REPRO_PACKET_D47_ARCHIVE_CLOSED`，未进行任何科学动作，
+  未解锁 full-53 外推。
+
 ## 2026-07-23 — FH-L8 D23 non-authoritative resource guardrail
 
 - Concurrent D23 converts the D21 5/4-margin planning values into a
@@ -320,8 +334,6 @@
   checkerboard-Néel `k0` D3 expectation, while rotated-integrand cancellation remains unassessed.
 - Froze `FH-L8-INDEPENDENT-REFERENCE-D1` as the next unit. No physical reference, full-R100 bound,
   or READY authority was produced.
-
-Status date: 2026-07-14
 
 ## State labels
 
