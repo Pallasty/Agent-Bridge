@@ -79,6 +79,7 @@ FORBIDDEN_DERIVED_OR_ACTUAL_KEYS = {
     "actual_accepted_shots",
     "actual_attempted_shots",
 }
+HIGH_CONFIDENCE_METHOD = "chernoff_lower_tail_half_gap"
 
 
 def canonical_sha256(value: Any) -> str:
@@ -171,6 +172,38 @@ def bounded_hoeffding_required_shots(
     if not math.isfinite(raw):
         raise ValueError("derived effective-shot requirement must be finite")
     return raw, math.ceil(raw)
+
+
+def _high_confidence_attempt_cap(
+    accepted_shots: int, acceptance_probability: float, beta: float
+) -> int:
+    """Return a conservative high-confidence attempt cap.
+
+    We use the lower-tail Chernoff bound
+    P[X < (1-δ) n p] <= exp(-δ^2 n p / 2)
+    with X ~ Bin(n,p). Solving this for n (using a conservative quadratic
+    relaxation) gives a guaranteed bound under independent Bernoulli acceptance.
+    """
+
+    n_eff = _positive_int(accepted_shots, "accepted_shots")
+    p = _probability(acceptance_probability, "acceptance_probability")
+    beta = _probability(beta, "campaign_attempt_failure_rate")
+    if p >= 1.0:
+        return n_eff
+
+    # Let t = n*p, and require t - n_eff >= sqrt(2 * t * log(1/beta))
+    # with n = t / p. The conservative closed form for t is:
+    # t = A + L + sqrt(L*(A + L)),  A = n_eff, L = log(1/beta).
+    # (derived from enforcing (t-A)^2 >= 2 t L, which implies the Chernoff bound).
+    log_factor = math.log(1.0 / beta)
+    if not math.isfinite(log_factor) or log_factor <= 0:
+        raise ValueError("campaign_attempt_failure_rate must imply positive log-factor")
+    required_expected = (
+        n_eff
+        + log_factor
+        + math.sqrt(log_factor * (n_eff + log_factor))
+    )
+    return _ceil_divided_by_probability(required_expected, p)
 
 
 def bounded_hoeffding_half_width(
@@ -687,7 +720,13 @@ def assess_campaign(
                 "planned_joint_effective_shots": joint,
                 "planned_accepted_shots": planned_accepted,
                 "expected_attempted_shots": expected_attempted,
-                "high_confidence_attempt_cap": None,
+                "high_confidence_attempt_cap": (
+                    _high_confidence_attempt_cap(
+                        planned_accepted, acceptance, contract["campaign_attempt_failure_rate"]
+                    )
+                    if planned_accepted is not None and acceptance is not None
+                    else None
+                ),
             }
         )
     all_execution_assumptions = accepted_complete and attempted_complete
@@ -729,15 +768,29 @@ def assess_campaign(
             "expected_attempted_shots": (
                 total_expected_attempted if attempted_complete else None
             ),
-            "high_confidence_attempt_cap": None,
+            "high_confidence_attempt_cap": (
+                sum(
+                    cell["high_confidence_attempt_cap"]
+                    for cell in output_cells
+                    if cell["high_confidence_attempt_cap"] is not None
+                )
+                if all_execution_assumptions
+                else None
+            ),
         },
         "attempt_budget": {
             "campaign_failure_rate": contract["campaign_attempt_failure_rate"],
             "semantics": contract["attempt_budget_semantics"],
-            "high_confidence_method": None,
-            "warning": (
-                "ceil(accepted / acceptance_probability) is an expected-only planning "
-                "quantity, not a high-confidence stopping bound"
+            "high_confidence_method": HIGH_CONFIDENCE_METHOD,
+            "high_confidence_warning": (
+                "ceiled_attempts is an expected-only planning quantity. high_confidence"
+                "_attempt_cap uses a conservative Chernoff lower-tail bound for"
+                " failure rate"
+            )
+            if all_execution_assumptions
+            else (
+                "high-confidence attempt caps require acceptance_probability and"
+                " effective_shot_fraction on every cell"
             ),
         },
         "convergence_certification": "NOT_ASSESSED_BY_PREFLIGHT",
@@ -771,7 +824,14 @@ def main() -> None:
                 "- Planned joint effective shots: "
                 f"`{result['totals']['planned_joint_effective_shots']}`"
             )
-            print("- High-confidence attempt cap: `not computed`")
+            if result["totals"]["high_confidence_attempt_cap"] is None:
+                print("- High-confidence attempt cap: `not computed`")
+            else:
+                print(
+                    "- High-confidence attempt cap: "
+                    f"`{result['totals']['high_confidence_attempt_cap']}` "
+                    f"(method: `{result['attempt_budget']['high_confidence_method']}`)"
+                )
     if result["status"] == "INVALID_SCHEMA":
         sys.exit(1)
 

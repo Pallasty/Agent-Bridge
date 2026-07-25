@@ -160,8 +160,23 @@ class MeasurementCampaignValidatorTests(unittest.TestCase):
         self.assertEqual(result["cells"][0]["expected_attempted_shots"], 34_406_144)
         self.assertEqual(result["totals"]["planned_accepted_shots"], 206_436_864)
         self.assertEqual(result["totals"]["expected_attempted_shots"], 825_747_456)
-        self.assertIsNone(result["totals"]["high_confidence_attempt_cap"])
-        self.assertEqual(result["attempt_budget"]["high_confidence_method"], None)
+        cell_high_confidence_cap = VALIDATOR._high_confidence_attempt_cap(
+            result["cells"][0]["planned_accepted_shots"],
+            0.25,
+            0.01,
+        )
+        self.assertEqual(result["cells"][0]["high_confidence_attempt_cap"], cell_high_confidence_cap)
+        self.assertEqual(
+            result["totals"]["high_confidence_attempt_cap"], cell_high_confidence_cap * 24
+        )
+        self.assertEqual(
+            result["attempt_budget"]["high_confidence_method"], VALIDATOR.HIGH_CONFIDENCE_METHOD
+        )
+        self.assertEqual(
+            result["attempt_budget"]["high_confidence_warning"],
+            "ceiled_attempts is an expected-only planning quantity. high_confidence"
+            "_attempt_cap uses a conservative Chernoff lower-tail bound for failure rate",
+        )
         self.assertNotIn("READY", result["status"])
         self.assertEqual(result["convergence_certification"], "NOT_ASSESSED_BY_PREFLIGHT")
 
