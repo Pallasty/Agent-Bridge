@@ -7,6 +7,7 @@ use crate::semantic_event::{Affordance, SemanticEvent, SemanticObject, Verdict, 
 
 pub const EMBODIMENT_EVENT_SOURCE: &str = "embodiment";
 pub const EMBODIMENT_PROJECTION_SCHEMA_V0: &str = "agent_bridge.embodiment_projection.v0";
+pub const EMBODIMENT_SNAPSHOT_SCHEMA_V0: &str = "agent_bridge.embodiment_snapshot.v0";
 
 /// Constructs a fact-only embodiment event. Callers supply a bounded payload
 /// and must persist it through the existing semantic-event spine themselves.
@@ -90,6 +91,43 @@ pub fn project_embodiment_events(events: &[SemanticEventRecord]) -> Value {
     json!({"schema":EMBODIMENT_PROJECTION_SCHEMA_V0,"read_only":true,"resumes_actions":false,"events":rows,"rejected_rows":rejected})
 }
 
+/// Add the current local body observation to the fact projection without
+/// inferring intents or turning a restart into an execution opportunity.
+pub fn project_embodiment_snapshot(events: &[SemanticEventRecord], body_status: &Value) -> Value {
+    let mut projection = project_embodiment_events(events);
+    let status = body_status
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let observed_at_unix_ms = body_status
+        .pointer("/sample/observed_at_unix_ms")
+        .and_then(Value::as_i64);
+    let body_id = "body-mac";
+    let online = status == "ok";
+
+    projection["schema"] = Value::String(EMBODIMENT_SNAPSHOT_SCHEMA_V0.to_string());
+    projection["body"] = json!({
+        "body_id": body_id,
+        "kind": "mac",
+        "label": "current mac",
+        "authority_scope": "local",
+        "online": online,
+        "read_only": true,
+    });
+    projection["observations"] = json!([{
+        "schema": "agent_bridge.observation.v0",
+        "body_id": body_id,
+        "source": "body_status",
+        "observed_at_unix_ms": observed_at_unix_ms,
+        "freshness": if online { "on_demand" } else { "unavailable" },
+        "confidence": if online { 1.0 } else { 0.0 },
+        "payload": body_status,
+    }]);
+    projection["open_intents"] = json!([]);
+    projection["open_intents_complete"] = Value::Bool(false);
+    projection
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +161,23 @@ mod tests {
         let event = restart_confirmation_event(1, "test", "body-mac", "intent-1");
         assert_eq!(event.verdict.status, VerdictStatus::Unknown);
         assert_eq!(event.facts["resumes_action"], false);
+    }
+
+    #[test]
+    fn snapshot_adds_grounded_body_without_inventing_open_intents() {
+        let snapshot = project_embodiment_snapshot(
+            &[],
+            &json!({
+                "status": "ok",
+                "sample": { "observed_at_unix_ms": 1234 }
+            }),
+        );
+        assert_eq!(snapshot["schema"], EMBODIMENT_SNAPSHOT_SCHEMA_V0);
+        assert_eq!(snapshot["body"]["body_id"], "body-mac");
+        assert_eq!(snapshot["body"]["online"], true);
+        assert_eq!(snapshot["observations"][0]["source"], "body_status");
+        assert_eq!(snapshot["open_intents"].as_array().unwrap().len(), 0);
+        assert_eq!(snapshot["open_intents_complete"], false);
+        assert_eq!(snapshot["resumes_actions"], false);
     }
 }

@@ -24128,7 +24128,10 @@ impl McpTool for EmbodimentSnapshotTool {
         };
         let events = store.recent_semantic_events(90 * 86_400, 500).await?;
         Ok(ToolResult::json_text(
-            &crate::embodiment_projection::project_embodiment_events(&events),
+            &crate::embodiment_projection::project_embodiment_snapshot(
+                &events,
+                &crate::body_telemetry::body_status_snapshot(),
+            ),
         ))
     }
 }
