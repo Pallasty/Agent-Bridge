@@ -1,0 +1,1 @@
+{"status":"VERIFIED_D45_CONTROLLED_FIXED64_REPLAY","cpu_affinity":"0","swap_bytes":0,"wall_seconds":1.10,"ru_maxrss_kib":40664,"structural_rows_sha256":"38aaeffb8f178e918e4f326888493166c21afc7fb1379e91ab965c345b4adc12","scientific_action_calls":67,"packed_q3_reads":0,"full_53_scientific_execution_authorized":false,"next_gate":"D46_CONTROLLED_REPLAY_REPEAT"}
