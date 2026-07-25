@@ -20,15 +20,19 @@
 //! repo `<user>/agent-bridge-memory`, clones to the configured path, and
 //! runs an initial sync.
 
+use crate::locks::{self, AcquireOutcome};
 use ab_store::{
     default_db_path, node_id_from_name, ImportConflictPolicy, MemoryExportFilter, MemoryRecord,
     SqliteStore, StateStore,
 };
-use crate::locks::{self, AcquireOutcome};
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
+use std::collections::HashSet;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_REPO_NAME: &str = "agent-bridge-memory";
 const MEMORY_FILE: &str = "memory.jsonl";
@@ -443,6 +447,175 @@ pub fn run_status() -> Result<()> {
         }
     );
     Ok(())
+}
+
+/// Print a read-only preflight for memory-sync repository maintenance.
+///
+/// This intentionally stops short of history rewriting. Rewriting a shared
+/// repository needs an explicit maintenance window because every clone must
+/// be coordinated and re-seeded afterwards.
+pub fn run_audit(full: bool) -> Result<()> {
+    let repo = default_memory_repo_path();
+    println!("repo path:  {}", repo.display());
+    if !repo.join(".git").exists() {
+        println!("status:     not initialised — run `agent-bridge sync init`");
+        return Ok(());
+    }
+
+    let remote = git_capture(&repo, &["remote", "get-url", "origin"])
+        .unwrap_or_else(|_| "(no origin)".into());
+    let dirty = git_capture(&repo, &["status", "--porcelain"])
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(true);
+    let branch =
+        git_capture(&repo, &["branch", "--show-current"]).unwrap_or_else(|_| "(detached)".into());
+    let upstream = git_capture(
+        &repo,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .unwrap_or_else(|_| "(none)".into());
+    let fsck = full.then(|| git_capture(&repo, &["fsck", "--no-dangling", "--no-progress"]));
+    let objects =
+        git_capture(&repo, &["count-objects", "-vH"]).unwrap_or_else(|_| "(unavailable)".into());
+    let history = audit_history_footprint(&repo)?;
+
+    println!("remote:     {}", remote.trim());
+    println!("branch:     {}", branch.trim());
+    println!("upstream:   {}", upstream.trim());
+    println!("dirty:      {}", if dirty { "yes" } else { "clean" });
+    match fsck {
+        Some(Ok(_)) => println!("fsck (full): ok"),
+        Some(Err(_)) => println!("fsck (full): failed"),
+        None => println!("fsck (full): not run (use `sync audit --full` during maintenance)"),
+    }
+    println!(
+        "reachable memory history: {} blobs / {}",
+        history.blob_count,
+        format_bytes(history.total_bytes)
+    );
+    if let Some((path, bytes)) = history.largest {
+        println!(
+            "largest reachable memory blob: {path} / {}",
+            format_bytes(bytes)
+        );
+    }
+    println!("git objects:");
+    for line in objects.lines() {
+        println!("  {line}");
+    }
+    println!("history rewrite: not performed");
+    println!("rewrite preconditions: clean working tree; full fsck ok (`sync audit --full`); backup clone or bundle; all nodes paused; explicit force-push approval; re-seed each clone after rewrite");
+    Ok(())
+}
+
+#[derive(Default)]
+struct HistoryFootprint {
+    blob_count: usize,
+    total_bytes: u64,
+    largest: Option<(String, u64)>,
+}
+
+fn audit_history_footprint(repo: &Path) -> Result<HistoryFootprint> {
+    let objects = git_capture(repo, &["rev-list", "--objects", "--all"])?;
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+    for line in objects.lines() {
+        let Some((object, path)) = line.split_once(' ') else {
+            continue;
+        };
+        if !is_sync_data_file(path) || !seen.insert(object) {
+            continue;
+        }
+        candidates.push((object.to_string(), path.to_string()));
+    }
+
+    // Feed a file instead of a live pipe: a large candidate set can otherwise
+    // deadlock when `cat-file` fills stdout while this process is still writing.
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let input_path = std::env::temp_dir().join(format!(
+        "agent-bridge-sync-audit-{}-{nonce}.txt",
+        std::process::id()
+    ));
+    let mut input = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&input_path)
+        .with_context(|| format!("create {}", input_path.display()))?;
+    for (object, _) in &candidates {
+        writeln!(input, "{object}").context("write git cat-file batch input")?;
+    }
+    input.flush().context("flush git cat-file batch input")?;
+    drop(input);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "cat-file",
+            "--batch-check=%(objecttype) %(objectsize) %(objectname)",
+        ])
+        .stdin(Stdio::from(
+            std::fs::File::open(&input_path)
+                .with_context(|| format!("open {}", input_path.display()))?,
+        ))
+        .output();
+    let _ = std::fs::remove_file(&input_path);
+    let output = output.context("run git cat-file batch check")?;
+    if !output.status.success() {
+        bail!("git cat-file batch check failed (exit {})", output.status);
+    }
+
+    let mut report = HistoryFootprint::default();
+    for ((object, path), line) in candidates
+        .iter()
+        .zip(String::from_utf8_lossy(&output.stdout).lines())
+    {
+        let mut fields = line.split_whitespace();
+        let object_type = fields.next().unwrap_or_default();
+        let bytes = fields
+            .next()
+            .unwrap_or_default()
+            .parse::<u64>()
+            .with_context(|| format!("parse blob size for {object}"))?;
+        if object_type != "blob" {
+            continue;
+        }
+        report.blob_count += 1;
+        report.total_bytes += bytes;
+        if report
+            .largest
+            .as_ref()
+            .is_none_or(|(_, largest)| bytes > *largest)
+        {
+            report.largest = Some((path.clone(), bytes));
+        }
+    }
+    Ok(report)
+}
+
+fn is_sync_data_file(path: &str) -> bool {
+    matches!(
+        path.rsplit('/').next(),
+        Some(MEMORY_FILE | MEMORY_EDGES_FILE | FORUM_FILE)
+    )
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let value = bytes as f64;
+    if value >= GIB {
+        format!("{:.1} GiB", value / GIB)
+    } else if value >= MIB {
+        format!("{:.1} MiB", value / MIB)
+    } else if value >= KIB {
+        format!("{:.1} KiB", value / KIB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 /// JSON snapshot of cross-device memory-sync repo state (no network I/O).
@@ -1284,5 +1457,17 @@ mod tests {
         // A live concurrent sync just created it — must NOT be reaped.
         assert_eq!(classify_index_lock(17, 0, 120), None);
         assert_eq!(classify_index_lock(17, 119, 120), None);
+    }
+
+    #[test]
+    fn audit_tracks_only_sync_data_files() {
+        assert!(is_sync_data_file("memory.jsonl"));
+        assert!(is_sync_data_file("nested/memory_edges.jsonl"));
+        assert!(is_sync_data_file("forum.jsonl"));
+        assert!(!is_sync_data_file("memory.jsonl.bak"));
+        assert!(!is_sync_data_file("notes.jsonl"));
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1024), "1.0 KiB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MiB");
     }
 }

@@ -4024,6 +4024,14 @@ enum SyncOp {
     },
     /// Print resolved repo path, remote, and last sync; no network calls.
     Status,
+    /// Read-only Git health and history-footprint report for the sync repo.
+    ///
+    /// Does not contact remotes, run sync, garbage-collect, or rewrite history.
+    Audit {
+        /// Run a full object-content fsck. This can be slow on a large history.
+        #[arg(long)]
+        full: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -4770,6 +4778,7 @@ async fn real_main() -> Result<()> {
                 sync::run_init(repo.clone(), (*provider).into()).await
             }
             Some(SyncOp::Status) => sync::run_status(),
+            Some(SyncOp::Audit { full }) => sync::run_audit(*full),
         };
     }
 
