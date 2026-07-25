@@ -1109,7 +1109,11 @@ and a new positive-qualification v2.
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
   and the native-fermion primary-source evidence ledger,
+  an external-evidence intake runner/validator pair (`fh_l8_external_evidence_intake_runner.py` 与
+  `fh_l8_external_evidence_intake.py`),
   an L=2 dual-observable deterministic screening pilot, and unit tests
+  `test_fh_l8_external_evidence_intake.py` /
+  `test_fh_l8_external_evidence_intake_runner.py` /
   `test_fermi_hubbard_resource_model.py` /
   `test_term_order_validator.py` /
   `test_term_order_cross_route.py` /
