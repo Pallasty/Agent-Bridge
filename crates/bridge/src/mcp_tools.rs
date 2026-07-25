@@ -62,6 +62,7 @@ use ab_store::{
     AMBIENT_SURFACING_MODE,
 };
 use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
+use ab_world_core::{BodyId, LeaseId};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Map, Value};
@@ -24127,12 +24128,141 @@ impl McpTool for EmbodimentSnapshotTool {
             return Ok(ToolResult::error("no store configured"));
         };
         let events = store.recent_semantic_events(90 * 86_400, 500).await?;
-        Ok(ToolResult::json_text(
-            &crate::embodiment_projection::project_embodiment_snapshot(
-                &events,
-                &crate::body_telemetry::body_status_snapshot(),
-            ),
-        ))
+        let mut snapshot = crate::embodiment_projection::project_embodiment_snapshot(
+            &events,
+            &crate::body_telemetry::body_status_snapshot(),
+        );
+        let leases = self.hub.embodiment_leases.lock().await;
+        let body_id = BodyId::from_raw(LOCAL_BODY_ID);
+        snapshot["write_lease"] = leases.current(&body_id).map_or(Value::Null, |lease| {
+            json!({
+                "body_id": lease.body_id,
+                "lease_id": lease.lease_id,
+                "holder": lease.holder,
+                "acquired_at_unix_ms": lease.acquired_at_unix_ms,
+            })
+        });
+        snapshot["write_lease_complete"] = Value::Bool(true);
+        Ok(ToolResult::json_text(&snapshot))
+    }
+}
+
+const LOCAL_BODY_ID: &str = "body-mac";
+
+fn embodiment_lease_holder(ctx: &ToolContext) -> String {
+    ctx.session_id
+        .as_ref()
+        .map(ToString::to_string)
+        .or_else(|| std::env::var("MCP_SESSION_ID").ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "mcp-process".into())
+}
+
+/// Explicit process-local write ownership for the current body. Acquiring a
+/// lease never executes an action; restart clears the registry and therefore
+/// leaves recovery confirmation-gated.
+pub struct EmbodimentLeaseTool {
+    hub: Hub,
+}
+
+impl EmbodimentLeaseTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for EmbodimentLeaseTool {
+    fn name(&self) -> &'static str {
+        "embodiment_lease"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Manage explicit local body write ownership; acquire/release never executes an action and restart clears leases.".into(),
+            input_schema: json!({
+                "type":"object",
+                "required":["op"],
+                "properties":{
+                    "op":{"type":"string","enum":["status","acquire","release"]},
+                    "body_id":{"type":"string","default":LOCAL_BODY_ID},
+                    "lease_id":{"type":"string"}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let op = args.get("op").and_then(Value::as_str).unwrap_or("");
+        let body_id = BodyId::from_raw(
+            args.get("body_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(LOCAL_BODY_ID),
+        );
+        let holder = embodiment_lease_holder(ctx);
+        let mut leases = self.hub.embodiment_leases.lock().await;
+
+        match op {
+            "status" => Ok(ToolResult::json_text(&json!({
+                "schema": "agent_bridge.embodiment_lease.v0",
+                "read_only": true,
+                "body_id": body_id,
+                "lease": leases.current(&body_id).map(|lease| json!({
+                    "lease_id": lease.lease_id,
+                    "holder": lease.holder,
+                    "acquired_at_unix_ms": lease.acquired_at_unix_ms,
+                })),
+                "resumes_actions": false,
+            }))),
+            "acquire" => match leases.acquire(
+                body_id.clone(),
+                holder.clone(),
+                u64::try_from(dispatch_now_secs())
+                    .unwrap_or_default()
+                    .saturating_mul(1000),
+            ) {
+                Ok(lease) => Ok(ToolResult::json_text(&json!({
+                    "schema": "agent_bridge.embodiment_lease.v0",
+                    "op": "acquire",
+                    "acquired": true,
+                    "body_id": lease.body_id,
+                    "lease_id": lease.lease_id,
+                    "holder": lease.holder,
+                    "resumes_actions": false,
+                }))),
+                Err(existing) => Ok(ToolResult::json_text(&json!({
+                    "schema": "agent_bridge.embodiment_lease.v0",
+                    "op": "acquire",
+                    "acquired": false,
+                    "reason": "body_already_leased",
+                    "body_id": existing.body_id,
+                    "lease_id": existing.lease_id,
+                    "holder": existing.holder,
+                    "resumes_actions": false,
+                }))),
+            },
+            "release" => {
+                let Some(raw_lease_id) = args.get("lease_id").and_then(Value::as_str) else {
+                    return Ok(ToolResult::error("missing 'lease_id'"));
+                };
+                let lease_id = LeaseId::from_raw(raw_lease_id);
+                let owned = leases
+                    .current(&body_id)
+                    .map(|lease| lease.lease_id == lease_id && lease.holder == holder)
+                    .unwrap_or(false);
+                Ok(ToolResult::json_text(&json!({
+                    "schema": "agent_bridge.embodiment_lease.v0",
+                    "op": "release",
+                    "released": owned && leases.release(&lease_id),
+                    "body_id": body_id,
+                    "lease_id": lease_id,
+                    "resumes_actions": false,
+                })))
+            }
+            _ => Ok(ToolResult::error("op must be status, acquire, or release")),
+        }
     }
 }
 
@@ -44361,6 +44491,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Standard,
         Arc::new(EmbodimentSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(EmbodimentLeaseTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

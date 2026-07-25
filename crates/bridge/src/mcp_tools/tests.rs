@@ -12865,6 +12865,52 @@ fn pty_and_browser_accept_optional_embodiment_intent_id() {
 }
 
 #[tokio::test]
+async fn embodiment_lease_serializes_holders_and_releases_only_by_owner() {
+    let hub = Hub::builder().build();
+    let tool = EmbodimentLeaseTool::new(hub);
+    let owner = context_with_session("session-owner");
+    let other = context_with_session("session-other");
+
+    let acquired: Value = serde_json::from_str(&result_text(
+        &tool.execute(json!({"op":"acquire"}), &owner).await.unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(acquired["acquired"], true);
+    let lease_id = acquired["lease_id"].as_str().unwrap().to_string();
+
+    let blocked: Value = serde_json::from_str(&result_text(
+        &tool.execute(json!({"op":"acquire"}), &other).await.unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(blocked["acquired"], false);
+    assert_eq!(blocked["reason"], "body_already_leased");
+
+    let wrong_release: Value = serde_json::from_str(&result_text(
+        &tool
+            .execute(json!({"op":"release","lease_id":lease_id}), &other)
+            .await
+            .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(wrong_release["released"], false);
+
+    let released: Value = serde_json::from_str(&result_text(
+        &tool
+            .execute(json!({"op":"release","lease_id":lease_id}), &owner)
+            .await
+            .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(released["released"], true);
+
+    let status: Value = serde_json::from_str(&result_text(
+        &tool.execute(json!({"op":"status"}), &owner).await.unwrap(),
+    ))
+    .unwrap();
+    assert!(status["lease"].is_null());
+}
+
+#[tokio::test]
 async fn desktop_action_refuses_host_mutation() {
     // No dry_run, no isolated (display+swaysock) => must refuse before exec.
     let tool = DesktopActionTool::new(Hub::builder().build());

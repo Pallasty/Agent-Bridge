@@ -6,6 +6,7 @@ use ab_core::NotifyEvent;
 use ab_notifier::Notifier;
 use ab_store::{MemoryRecord, StateStore};
 use ab_terminal::TerminalBackend;
+use ab_world_core::WriteLeaseRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
@@ -31,6 +32,9 @@ pub struct Hub {
     /// Lets `agent_spawn` fan out to any installed CLI without requiring
     /// per-call env-var rewrites.
     pub agents: HashMap<String, Arc<dyn AgentRuntime>>,
+    /// Process-local body write ownership. It is deliberately not persisted
+    /// or acquired by background work; a restart therefore clears the lease.
+    pub embodiment_leases: Arc<tokio::sync::Mutex<WriteLeaseRegistry>>,
     pub worktree: Option<Arc<GitWorktreeManager>>,
     /// D2.3: per-turn semantic search cache — populated by session_bootstrap,
     /// consumed by memory_search(mode=semantic) to skip the DB round-trip.
@@ -132,6 +136,7 @@ impl HubBuilder {
             browser: self.browser,
             agent: self.agent,
             agents: self.agents,
+            embodiment_leases: Arc::new(tokio::sync::Mutex::new(WriteLeaseRegistry::default())),
             worktree: self.worktree,
             memory_embed_cache: Arc::new(tokio::sync::Mutex::new(None)),
             security: SecurityPolicy::from_env(),
