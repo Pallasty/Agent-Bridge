@@ -407,16 +407,21 @@ impl McpTool for TerminalSendKeysTool {
                 "properties": {
                     "pane": { "type": "string", "description": "Pane id from terminal_list." },
                     "keys": { "type": "string", "description": "Text to inject into the pane." },
-                    "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." }
+                    "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." },
+                    "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required current body write lease from embodiment_lease(acquire)." }
                 },
-                "required": ["pane", "keys"]
+                "required": ["pane", "keys", "embodiment_lease_id"]
             }),
         }
     }
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
         }
+        let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
+            Ok(lease_id) => lease_id,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
             None => return Ok(ToolResult::error("no terminal backend configured")),
@@ -443,7 +448,7 @@ impl McpTool for TerminalSendKeysTool {
                     embodiment_intent_id,
                     Some(pane.to_string()),
                     true,
-                    json!({"bytes": keys.len()}),
+                    json!({"bytes": keys.len(), "embodiment_lease_id": lease_id}),
                 )
                 .await;
                 Ok(ToolResult::text(format!(
@@ -459,7 +464,7 @@ impl McpTool for TerminalSendKeysTool {
                     embodiment_intent_id,
                     Some(pane.to_string()),
                     false,
-                    json!({"error": e.to_string()}),
+                    json!({"error": e.to_string(), "embodiment_lease_id": lease_id}),
                 )
                 .await;
                 Ok(ToolResult::error(format!("terminal: {e}")))
@@ -504,15 +509,19 @@ impl McpTool for TerminalSplitTool {
                         "description": "Extra environment variables for the new shell (PtyBackend only). \
                                         TERM is preserved by the backend.",
                         "additionalProperties": { "type": "string" }
-                    }
+                    },
+                    "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required current body write lease from embodiment_lease(acquire)." }
                 },
-                "required": ["pane"]
+                "required": ["pane", "embodiment_lease_id"]
             }),
         }
     }
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
+        }
+        if let Err(error) = require_body_write_lease(&self.hub, &args, ctx).await {
+            return Ok(ToolResult::error(error));
         }
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
@@ -662,15 +671,19 @@ impl McpTool for TerminalResizeTool {
                     "rows": { "type": "integer", "minimum": 1, "maximum": 500,
                               "description": "New row count (vertical lines)." },
                     "cols": { "type": "integer", "minimum": 1, "maximum": 1000,
-                              "description": "New column count (horizontal width)." }
+                              "description": "New column count (horizontal width)." },
+                    "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required current body write lease from embodiment_lease(acquire)." }
                 },
-                "required": ["pane", "rows", "cols"]
+                "required": ["pane", "rows", "cols", "embodiment_lease_id"]
             }),
         }
     }
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
+        }
+        if let Err(error) = require_body_write_lease(&self.hub, &args, ctx).await {
+            return Ok(ToolResult::error(error));
         }
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
@@ -6703,15 +6716,19 @@ impl McpTool for BrowserNavigateTool {
                 .into(),
             input_schema: json!({
                 "type": "object",
-                "properties": { "url": { "type": "string", "description": "Absolute URL." }, "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." } },
-                "required": ["url"]
+                "properties": { "url": { "type": "string", "description": "Absolute URL." }, "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." }, "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required current body write lease from embodiment_lease(acquire)." } },
+                "required": ["url", "embodiment_lease_id"]
             }),
         }
     }
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         if let Err(e) = self.hub.security.check(Cap::Browser) {
             return Ok(ToolResult::error(e));
         }
+        let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
+            Ok(lease_id) => lease_id,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let b = match &self.hub.browser {
             Some(b) => b.clone(),
             None => return Ok(ToolResult::error("no browser backend configured")),
@@ -6734,7 +6751,7 @@ impl McpTool for BrowserNavigateTool {
                     embodiment_intent_id,
                     Some(pid.to_string()),
                     true,
-                    json!({"url_recorded": false}),
+                    json!({"url_recorded": false, "embodiment_lease_id": lease_id}),
                 )
                 .await;
                 Ok(ToolResult::text(format!("page: {pid}")))
@@ -6747,7 +6764,7 @@ impl McpTool for BrowserNavigateTool {
                     embodiment_intent_id,
                     None,
                     false,
-                    json!({"error": e.to_string(), "url_recorded": false}),
+                    json!({"error": e.to_string(), "url_recorded": false, "embodiment_lease_id": lease_id}),
                 )
                 .await;
                 Ok(ToolResult::error(format!("browser: {e}")))
@@ -24156,6 +24173,37 @@ fn embodiment_lease_holder(ctx: &ToolContext) -> String {
         .or_else(|| std::env::var("MCP_SESSION_ID").ok())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "mcp-process".into())
+}
+
+async fn require_body_write_lease(
+    hub: &Hub,
+    args: &Value,
+    ctx: &ToolContext,
+) -> std::result::Result<LeaseId, String> {
+    let Some(raw_lease_id) = args
+        .get("embodiment_lease_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err("missing 'embodiment_lease_id'; acquire embodiment_lease first".into());
+    };
+    let requested = LeaseId::from_raw(raw_lease_id);
+    let body_id = BodyId::from_raw(LOCAL_BODY_ID);
+    let holder = embodiment_lease_holder(ctx);
+    let leases = hub.embodiment_leases.lock().await;
+    match leases.current(&body_id) {
+        Some(current) if current.lease_id == requested && current.holder == holder => {
+            Ok(current.lease_id.clone())
+        }
+        Some(current) if current.lease_id == requested => {
+            Err("body write lease belongs to another session; action was not executed".into())
+        }
+        Some(_) => Err(
+            "embodiment lease is stale or does not match the current body lease; action was not executed".into(),
+        ),
+        None => Err("no active body write lease; action was not executed".into()),
+    }
 }
 
 /// Explicit process-local write ownership for the current body. Acquiring a

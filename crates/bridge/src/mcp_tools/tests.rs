@@ -12845,23 +12845,40 @@ fn desktop_action_schema_hides_host_unlock_flags() {
 }
 
 #[test]
-fn pty_and_browser_accept_optional_embodiment_intent_id() {
+fn body_write_tools_require_explicit_embodiment_lease() {
     let policy = ToolPolicy::from_values(None, None, None, Some("all"));
     let schemas = build_registry_with_policy(Hub::builder().build(), policy).list();
-    for name in ["terminal_send_keys", "browser_navigate"] {
+    for name in [
+        "terminal_send_keys",
+        "terminal_split",
+        "terminal_resize",
+        "browser_navigate",
+    ] {
         let tool = schemas
             .iter()
             .find(|schema| schema.name == name)
             .expect(name);
         assert!(tool.input_schema["properties"]
-            .get("embodiment_intent_id")
+            .get("embodiment_lease_id")
             .is_some());
-        assert!(!tool.input_schema["required"]
+        assert!(tool.input_schema["required"]
             .as_array()
             .expect("required array")
             .iter()
-            .any(|value| value == "embodiment_intent_id"));
+            .any(|value| value == "embodiment_lease_id"));
     }
+    let intent_tool = schemas
+        .iter()
+        .find(|schema| schema.name == "terminal_send_keys")
+        .expect("terminal_send_keys");
+    assert!(intent_tool.input_schema["properties"]
+        .get("embodiment_intent_id")
+        .is_some());
+    assert!(!intent_tool.input_schema["required"]
+        .as_array()
+        .expect("required array")
+        .iter()
+        .any(|value| value == "embodiment_intent_id"));
 }
 
 #[tokio::test]
@@ -12908,6 +12925,29 @@ async fn embodiment_lease_serializes_holders_and_releases_only_by_owner() {
     ))
     .unwrap();
     assert!(status["lease"].is_null());
+}
+
+#[tokio::test]
+async fn body_write_lease_gate_rejects_missing_and_foreign_lease() {
+    let hub = Hub::builder().build();
+    let owner = context_with_session("session-owner");
+    let other = context_with_session("session-other");
+    let acquire = EmbodimentLeaseTool::new(hub.clone())
+        .execute(json!({"op":"acquire"}), &owner)
+        .await
+        .unwrap();
+    let acquired: Value = serde_json::from_str(&result_text(&acquire)).unwrap();
+    let lease_id = acquired["lease_id"].as_str().unwrap();
+
+    let missing = require_body_write_lease(&hub, &json!({}), &owner).await;
+    assert!(missing.unwrap_err().contains("missing"));
+    let foreign =
+        require_body_write_lease(&hub, &json!({"embodiment_lease_id": lease_id}), &other).await;
+    assert!(foreign.unwrap_err().contains("another session"));
+    let valid = require_body_write_lease(&hub, &json!({"embodiment_lease_id": lease_id}), &owner)
+        .await
+        .unwrap();
+    assert_eq!(valid.as_str(), lease_id);
 }
 
 #[tokio::test]
