@@ -692,6 +692,7 @@ fn snapshot_delta(before: &Value, after: &Value, pointer: &str) -> Option<i64> {
 #[derive(Debug, Default)]
 struct TaskResourceSpanTracker {
     active: BTreeMap<String, TaskResourceSpan>,
+    session_spans: BTreeMap<String, String>,
 }
 
 const TASK_SPAN_CHECKPOINT_CAP: usize = 8;
@@ -764,6 +765,37 @@ pub fn finish_task_resource_span(span_id: &str) -> std::result::Result<TaskResou
     Ok(span.finish(after, reason))
 }
 
+/// Associate an interactive agent session with an already-started body span.
+/// The session id is opaque and contains no prompt or transcript data.
+pub fn bind_task_resource_span_to_session(
+    session_id: String,
+    span_id: String,
+) -> std::result::Result<(), String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let mut tracker = tracker
+        .lock()
+        .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+    if !tracker.active.contains_key(&span_id) {
+        return Err(format!("unknown active task span '{span_id}'"));
+    }
+    tracker.session_spans.insert(session_id, span_id);
+    Ok(())
+}
+
+/// Finish the body span bound to an interactive session, if one exists.
+pub fn finish_task_resource_span_for_session(
+    session_id: &str,
+) -> std::result::Result<Option<TaskResourceSpan>, String> {
+    let tracker = TASK_SPANS.get_or_init(|| Mutex::new(TaskResourceSpanTracker::default()));
+    let span_id = {
+        let mut tracker = tracker
+            .lock()
+            .map_err(|_| "body task-span tracker mutex poisoned".to_string())?;
+        tracker.session_spans.remove(session_id)
+    };
+    span_id.map(|id| finish_task_resource_span(&id)).transpose()
+}
+
 /// Explicitly abandon a task span, e.g. when a child is lost during a daemon
 /// restart. This preserves the before state but guarantees no fabricated after.
 pub fn abandon_task_resource_span(
@@ -778,6 +810,7 @@ pub fn abandon_task_resource_span(
         .active
         .remove(span_id)
         .ok_or_else(|| format!("unknown active task span '{span_id}'"))?;
+    tracker.session_spans.retain(|_, id| id != span_id);
     Ok(span.finish(None, Some(reason)))
 }
 

@@ -25,7 +25,7 @@ use crate::warp_scheme::{
     scheme_new_tab as warp_scheme_new_tab, scheme_new_window as warp_scheme_new_window,
     scheme_open_settings_page as warp_scheme_open_settings_page,
 };
-use ab_agent::{oz::fetch_run_status, GitWorktreeManager, SpawnConfig};
+use ab_agent::{oz::fetch_run_status, AgentRuntime, GitWorktreeManager, SpawnConfig};
 use ab_core::{NotifyEvent, NotifySeverity, NotifySource, PageId, PaneId, Result, SessionId};
 use ab_mcp::{
     ContentBlock, McpTool, ToolAnnotations, ToolContext, ToolRegistry, ToolResult, ToolSchema,
@@ -9910,6 +9910,100 @@ impl AgentSpawnTool {
         Self { hub }
     }
 }
+
+/// Wrap agent launch with a bounded local body observation. One-shot sessions
+/// close here; interactive sessions remain active until `agent_session_wait`
+/// observes their terminal row.
+async fn spawn_agent_with_body_span(
+    hub: &Hub,
+    agent: Arc<dyn AgentRuntime>,
+    cfg: SpawnConfig,
+) -> std::result::Result<(ab_agent::AgentSession, Option<Value>), String> {
+    let interactive = cfg.interactive;
+    let runtime_id = agent.id().to_string();
+    let span_id = if crate::body_telemetry::body_telemetry_enabled() {
+        let span_id = format!("agent-spawn-{}", uuid::Uuid::new_v4());
+        match crate::body_telemetry::start_task_resource_span(
+            span_id.clone(),
+            "agent_spawn".to_string(),
+            Some(runtime_id),
+        ) {
+            Ok(_) => Some(span_id),
+            Err(error) => {
+                tracing::debug!(error = %error, "agent spawn body span unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    match agent.spawn(cfg).await {
+        Ok(session) => {
+            let mut body_span = None;
+            if let Some(span_id) = span_id {
+                if interactive {
+                    if let Err(error) = crate::body_telemetry::bind_task_resource_span_to_session(
+                        session.id.as_str().to_string(),
+                        span_id.clone(),
+                    ) {
+                        tracing::debug!(error = %error, "agent session body span binding failed");
+                        let _ = crate::body_telemetry::abandon_task_resource_span(
+                            &span_id,
+                            "interactive_session_span_binding_failed".to_string(),
+                        );
+                    } else {
+                        body_span = Some(json!({
+                            "span_id": span_id,
+                            "state": "active",
+                            "completion": "agent_session_wait",
+                        }));
+                    }
+                } else if let Ok(span) = crate::body_telemetry::finish_task_resource_span(&span_id)
+                {
+                    if let Some(store) = &hub.store {
+                        let _ = record_body_task_span_event(store, &span).await;
+                    }
+                    body_span = Some(json!({
+                        "span_id": span.span_id,
+                        "state": span.state,
+                        "receipt": span.receipt(),
+                    }));
+                }
+            }
+            Ok((session, body_span))
+        }
+        Err(error) => {
+            if let Some(span_id) = span_id {
+                let _ = crate::body_telemetry::abandon_task_resource_span(
+                    &span_id,
+                    "agent_spawn_failed".to_string(),
+                );
+            }
+            Err(error.to_string())
+        }
+    }
+}
+
+async fn finish_agent_body_span_for_session(hub: &Hub, session_id: &str) -> Option<Value> {
+    let span = match crate::body_telemetry::finish_task_resource_span_for_session(session_id) {
+        Ok(Some(span)) => span,
+        Ok(None) => return None,
+        Err(error) => {
+            tracing::debug!(error = %error, session_id, "agent session body span finish failed");
+            return None;
+        }
+    };
+    if let Some(store) = &hub.store {
+        let _ = record_body_task_span_event(store, &span).await;
+    }
+    Some(json!({
+        "span_id": span.span_id,
+        "state": span.state,
+        "receipt": span.receipt(),
+    }))
+}
+
 #[async_trait]
 impl McpTool for AgentSpawnTool {
     fn name(&self) -> &'static str {
@@ -10038,10 +10132,14 @@ impl McpTool for AgentSpawnTool {
                 Ok(a) => a,
                 Err(e) => return Ok(ToolResult::error(e)),
             };
-            return match agent.spawn(cfg).await {
-                Ok(s) => Ok(ToolResult::json_text(
-                    &serde_json::to_value(s).unwrap_or(Value::Null),
-                )),
+            return match spawn_agent_with_body_span(&self.hub, agent, cfg).await {
+                Ok((s, body_span)) => {
+                    let mut value = serde_json::to_value(s).unwrap_or(Value::Null);
+                    if let (Some(body_span), Some(object)) = (body_span, value.as_object_mut()) {
+                        object.insert("body_task_span".to_string(), body_span);
+                    }
+                    Ok(ToolResult::json_text(&value))
+                }
                 Err(e) => Ok(ToolResult::error(format!("agent: {e}"))),
             };
         }
@@ -10050,8 +10148,8 @@ impl McpTool for AgentSpawnTool {
         if chain.is_empty() {
             return Ok(ToolResult::error("no default agent runtime configured"));
         }
-        match spawn_with_failover(&chain, cfg).await {
-            Ok((s, idx, failed)) => {
+        match spawn_with_failover_with_body_span(&self.hub, &chain, cfg).await {
+            Ok((s, idx, failed, body_span)) => {
                 let mut v = serde_json::to_value(&s).unwrap_or(Value::Null);
                 // Surface that a backup was used so the caller isn't silently
                 // handed a different runtime than the primary.
@@ -10062,6 +10160,9 @@ impl McpTool for AgentSpawnTool {
                             json!({ "attempted": failed, "used": s.runtime_id }),
                         );
                     }
+                }
+                if let (Some(body_span), Some(object)) = (body_span, v.as_object_mut()) {
+                    object.insert("body_task_span".to_string(), body_span);
                 }
                 Ok(ToolResult::json_text(&v))
             }
@@ -10164,9 +10265,8 @@ fn resolve_spawn_chain(hub: &Hub) -> Vec<Arc<dyn ab_agent::AgentRuntime>> {
     chain
 }
 
-/// Try to spawn `cfg` against each runtime in `chain` in order, returning the
-/// first success with its index and the ids that failed before it. Errors only
-/// when every backend fails (aggregated reason). `chain` is expected non-empty.
+/// Compatibility helper used by the existing failover unit tests. Production
+/// spawning uses the body-aware wrapper below.
 async fn spawn_with_failover(
     chain: &[Arc<dyn ab_agent::AgentRuntime>],
     cfg: SpawnConfig,
@@ -10185,6 +10285,41 @@ async fn spawn_with_failover(
                     );
                 }
                 return Ok((session, idx, failed));
+            }
+            Err(e) => {
+                tracing::warn!(backend = %rt.id(), error = %e, "agent_spawn: backend spawn failed; trying next");
+                last_err = format!("{}: {e}", rt.id());
+                failed.push(rt.id().to_string());
+            }
+        }
+    }
+    Err(format!(
+        "all {} backend(s) failed; last: {last_err}",
+        chain.len()
+    ))
+}
+
+/// Try to spawn `cfg` against each runtime in `chain` in order, returning the
+/// first success with its index, failed backend ids, and body-span receipt.
+async fn spawn_with_failover_with_body_span(
+    hub: &Hub,
+    chain: &[Arc<dyn AgentRuntime>],
+    cfg: SpawnConfig,
+) -> std::result::Result<(ab_agent::AgentSession, usize, Vec<String>, Option<Value>), String> {
+    let mut failed: Vec<String> = Vec::new();
+    let mut last_err = String::from("no agent backend available");
+    for (idx, rt) in chain.iter().enumerate() {
+        match spawn_agent_with_body_span(hub, rt.clone(), cfg.clone()).await {
+            Ok(session) => {
+                if idx > 0 {
+                    tracing::warn!(
+                        backend = %rt.id(),
+                        attempt = idx,
+                        failed = ?failed,
+                        "agent_spawn: primary backend(s) failed; using fallback"
+                    );
+                }
+                return Ok((session.0, idx, failed, session.1));
             }
             Err(e) => {
                 tracing::warn!(backend = %rt.id(), error = %e, "agent_spawn: backend spawn failed; trying next");
@@ -11331,11 +11466,16 @@ impl McpTool for AgentSessionWaitTool {
         let sandbox_attestation = final_row
             .as_ref()
             .and_then(sandbox_attestation_from_session);
-        Ok(ToolResult::json_text(&json!({
+        let body_span = finish_agent_body_span_for_session(&self.hub, id.as_str()).await;
+        let mut response = json!({
             "timed_out": false,
             "sandbox_attestation": sandbox_attestation,
             "session": final_row,
-        })))
+        });
+        if let (Some(body_span), Some(object)) = (body_span, response.as_object_mut()) {
+            object.insert("body_task_span".to_string(), body_span);
+        }
+        Ok(ToolResult::json_text(&response))
     }
 }
 
