@@ -22,5 +22,11 @@ class TestD48(unittest.TestCase):
         self.assertTrue(result["archive_ready"])
 
 
+class TestD48Path(unittest.TestCase):
+    def test_archive_next_gate_defined(self):
+        result = d48.consumer_check()
+        self.assertEqual(result["next_gate"], "ARCHIVE_REPRO_PACKET_D47_RESULT")
+
+
 if __name__ == "__main__":
     unittest.main()
