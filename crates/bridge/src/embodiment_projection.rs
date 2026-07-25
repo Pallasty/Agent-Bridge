@@ -2,6 +2,7 @@
 
 use ab_store::SemanticEventRecord;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 use crate::semantic_event::{Affordance, SemanticEvent, SemanticObject, Verdict, VerdictStatus};
 
@@ -91,6 +92,71 @@ pub fn project_embodiment_events(events: &[SemanticEventRecord]) -> Value {
     json!({"schema":EMBODIMENT_PROJECTION_SCHEMA_V0,"read_only":true,"resumes_actions":false,"events":rows,"rejected_rows":rejected})
 }
 
+fn fact<'a>(facts: &'a Value, key: &str) -> Option<&'a Value> {
+    facts
+        .get(key)
+        .or_else(|| facts.get("facts").and_then(|nested| nested.get(key)))
+}
+
+/// Reconstruct only durable intent candidates from the append-only event log.
+/// Unknown, failed, or restart-interrupted outcomes remain confirmation-gated.
+fn project_open_intents(events: &[SemanticEventRecord]) -> Vec<Value> {
+    let mut ordered = events
+        .iter()
+        .filter(|event| event.source == EMBODIMENT_EVENT_SOURCE)
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|event| event.ts);
+
+    let mut states = BTreeMap::<String, Value>::new();
+    for event in ordered {
+        let Ok(facts) = serde_json::from_str::<Value>(&event.facts) else {
+            continue;
+        };
+        let Some(intent_id) = fact(&facts, "intent_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        let body_id = fact(&facts, "body_id")
+            .and_then(Value::as_str)
+            .or_else(|| event.target.as_deref())
+            .unwrap_or("unknown-body");
+        let action_kind = fact(&facts, "action_kind")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+
+        let state = match event.action.as_str() {
+            "intent_opened" => "open",
+            "intent_needs_confirmation_after_restart" => "needs_confirmation",
+            "action_receipt" if event.verdict_status == "verified" => "completed",
+            "action_receipt" => "needs_confirmation",
+            _ => continue,
+        };
+        states.insert(
+            intent_id.to_string(),
+            json!({
+                "intent_id": intent_id,
+                "body_id": body_id,
+                "action_kind": action_kind,
+                "state": state,
+                "last_event_ts": event.ts,
+                "resumes_action": false,
+            }),
+        );
+    }
+
+    states
+        .into_values()
+        .filter(|intent| {
+            matches!(
+                intent.get("state").and_then(Value::as_str),
+                Some("open" | "needs_confirmation")
+            )
+        })
+        .collect()
+}
+
 /// Add the current local body observation to the fact projection without
 /// inferring intents or turning a restart into an execution opportunity.
 pub fn project_embodiment_snapshot(events: &[SemanticEventRecord], body_status: &Value) -> Value {
@@ -123,8 +189,14 @@ pub fn project_embodiment_snapshot(events: &[SemanticEventRecord], body_status: 
         "confidence": if online { 1.0 } else { 0.0 },
         "payload": body_status,
     }]);
-    projection["open_intents"] = json!([]);
+    let open_intents = project_open_intents(events);
+    projection["open_intents"] = Value::Array(open_intents.clone());
     projection["open_intents_complete"] = Value::Bool(false);
+    projection["recovery"] = json!({
+        "mode": "confirmation_required",
+        "resumes_actions": false,
+        "candidate_count": open_intents.len(),
+    });
     projection
 }
 
@@ -179,5 +251,44 @@ mod tests {
         assert_eq!(snapshot["open_intents"].as_array().unwrap().len(), 0);
         assert_eq!(snapshot["open_intents_complete"], false);
         assert_eq!(snapshot["resumes_actions"], false);
+    }
+
+    #[test]
+    fn snapshot_replays_intents_and_keeps_restart_recovery_gated() {
+        let events = vec![
+            event_with(
+                1,
+                "intent_opened",
+                "unknown",
+                r#"{"body_id":"body-mac","intent_id":"i-1","action_kind":"terminal_write"}"#,
+            ),
+            event_with(
+                2,
+                "intent_needs_confirmation_after_restart",
+                "unknown",
+                r#"{"body_id":"body-mac","intent_id":"i-1","resumes_action":false}"#,
+            ),
+        ];
+        let snapshot = project_embodiment_snapshot(&events, &json!({"status":"unknown"}));
+        assert_eq!(snapshot["open_intents"][0]["intent_id"], "i-1");
+        assert_eq!(snapshot["open_intents"][0]["state"], "needs_confirmation");
+        assert_eq!(snapshot["open_intents"][0]["resumes_action"], false);
+        assert_eq!(snapshot["recovery"]["mode"], "confirmation_required");
+        assert_eq!(snapshot["recovery"]["resumes_actions"], false);
+    }
+
+    fn event_with(ts: i64, action: &str, verdict: &str, facts: &str) -> SemanticEventRecord {
+        SemanticEventRecord {
+            ts,
+            actor: "test".into(),
+            source: EMBODIMENT_EVENT_SOURCE.into(),
+            action: action.into(),
+            target: Some("body-mac".into()),
+            verdict_status: verdict.into(),
+            verdict_method: "test".into(),
+            evidence: None,
+            facts: facts.into(),
+            descriptor: None,
+        }
     }
 }
