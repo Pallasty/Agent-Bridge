@@ -7378,6 +7378,7 @@ fn tool_policy_codex_lean_excludes_native_overlap_tools() {
     assert_eq!(p.profile().label(), "essential");
     assert!(p.includes(Tier::Essential, "memory_search"));
     assert!(p.includes(Tier::Essential, "body_status"));
+    assert!(p.includes(Tier::Essential, "body_reflex_advice"));
     assert!(p.includes(Tier::Essential, "body_task_span"));
     assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
     assert!(p.includes(Tier::Essential, "readiness_audit"));

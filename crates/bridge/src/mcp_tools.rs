@@ -41051,6 +41051,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "body_status"
+            | "body_reflex_advice"
             | "body_task_span"
             | "mcp_dispatch_audit"
             | "mcp_lifecycle_digest"
@@ -44209,7 +44210,7 @@ pub(crate) fn build_registry_with_policy_surface(
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Essential,
         Arc::new(BodyReflexAdviceTool::new()),
     );
     reg_if(
