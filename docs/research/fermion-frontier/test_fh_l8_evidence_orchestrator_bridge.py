@@ -33,6 +33,15 @@ class EvidenceOrchestratorBridgeTests(unittest.TestCase):
                 "cross_route_status": "UNRESOLVED",
             },
         )
+        self.assertIn("next_actions", result)
+        self.assertGreaterEqual(len(result["next_actions"]), 10)
+        self.assertEqual(result["next_actions"][0]["priority"], "1")
+        self.assertTrue(
+            any(
+                action["area"] == "intake" and action["route"] == "native_fermions"
+                for action in result["next_actions"]
+            )
+        )
 
 
 if __name__ == "__main__":

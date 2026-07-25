@@ -62,17 +62,116 @@ def evaluate_bridge(
         _load_json(HERE / "native_transition_contract.json"),
         _load_json(HERE / "surface_place_route_contract.json"),
     )
-
+    next_actions = _next_actions(intake_result, cross_route_snapshot, evidence_result)
     return {
         "intake": intake_result,
         "cross_route_snapshot": cross_route_snapshot,
         "evidence": evidence_result,
+        "next_actions": next_actions,
         "summary": {
             "intake_status": intake_result["status"],
             "evidence_status": evidence_result["status"],
             "cross_route_status": cross_route_snapshot["status"],
         },
     }
+
+
+def _next_actions(
+    intake_result: dict,
+    cross_route_snapshot: dict,
+    evidence_result: dict,
+) -> list[dict[str, str]]:
+    actions: list[dict[str, str]] = []
+
+    for route, detail in intake_result.get("routes", {}).items():
+        status = detail.get("status")
+        if status == "INCOMPLETE":
+            actions.append(
+                {
+                    "priority": "1",
+                    "area": "intake",
+                    "route": route,
+                    "status": status,
+                    "next_action": (
+                        f"submit intake registration for {route} and place admissible raw export JSON under the intake root"
+                    ),
+                }
+            )
+        elif status == "REJECTED":
+            first_error = detail.get("errors", ["registration rejected"])[0]
+            actions.append(
+                {
+                    "priority": "1",
+                    "area": "intake",
+                    "route": route,
+                    "status": status,
+                    "next_action": f"fix {route} registration/export rejection: {first_error}",
+                }
+            )
+
+    if intake_result.get("status") != "READY_FOR_CROSS_ROUTE_COMPARISON":
+        if not any(action["area"] == "intake" for action in actions):
+            actions.append(
+                {
+                    "priority": "1",
+                    "area": "intake",
+                    "route": "*",
+                    "status": intake_result.get("status", "UNKNOWN"),
+                    "next_action": "complete intake admission for all five routes before comparison",
+                }
+            )
+
+    if cross_route_snapshot.get("status") != "MATCHED":
+        if cross_route_snapshot.get("status") == "MISMATCH":
+            actions.append(
+                {
+                    "priority": "2",
+                    "area": "term-order",
+                    "route": "all",
+                    "status": cross_route_snapshot.get("status", "UNKNOWN"),
+                    "next_action": (
+                        "repair admissible route exports so individual-term sequences are identical across all five routes"
+                    ),
+                }
+            )
+        else:
+            actions.append(
+                {
+                    "priority": "2",
+                    "area": "term-order",
+                    "route": "all",
+                    "status": cross_route_snapshot.get("status", "UNKNOWN"),
+                    "next_action": (
+                        "admit all five real route exports, then run cross-route comparison"
+                    ),
+                }
+            )
+
+    for component, status in evidence_result.get("component_statuses", {}).items():
+        if status == "UNRESOLVED":
+            actions.append(
+                {
+                    "priority": "3",
+                    "area": "evidence",
+                    "route": component,
+                    "status": status,
+                    "next_action": f"resolve component '{component}' evidence in its contract-defined sources",
+                }
+            )
+
+    if evidence_result.get("status") != "READY_FOR_BENCHMARK":
+        if not actions:
+            actions.append(
+                {
+                    "priority": "4",
+                    "area": "evidence",
+                    "route": "aggregate",
+                    "status": evidence_result.get("status", "UNKNOWN"),
+                    "next_action": "re-check component gates after cross-route and intake are complete",
+                }
+            )
+
+    return sorted(actions, key=lambda action: (int(action["priority"]), action["area"], action["route"]))
 
 
 def main() -> None:
