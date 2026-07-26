@@ -194,6 +194,12 @@ plan: 42 synthetic and 28 fixed64 processes under CPU0, 512-MiB/384-MiB-high, ze
 network-closed isolation. The authorization remains unused: no scratch, sample, object measurement,
 scientific call or packed-q3 read exists. Full-53 and extrapolation authority remain closed.
 
+D54R preserves that historical state while correcting D54's authorization-field lookup in a newly
+pinned execution path. The exact 70-process plan has now completed: 50 retained measurements,
+791 scientific kernel calls, zero packed-q3 reads and no swap/OOM/cgroup-cap failure. The committed
+result binds the external manifest and ordered receipt set. These finite-host observations do not
+prove allocator, worst-case runtime or full-53 bounds; D55 is the admissibility review.
+
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
 3,110,572,064-byte scratch design, 359,759,114 bytes above D23. It also fixes integer work counts,

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "authorization_id": "FH-L8-D54R-OBJECT-COST-MEASUREMENT-AUTH-V1",
+  "supersedes_execution_path_of": "FH-L8-D54-OBJECT-COST-MEASUREMENT-AUTH-V1",
+  "amendment_reason": "The original runner read packed-q3 and full53 authority fields from the authorization root although the frozen authorization stores them under authority.",
+  "parent_protocol_id": "FH-L8-OBJECT-COST-MEASUREMENT-D53-V1",
+  "authorization_parent_commit": "d164f642",
+  "runner_path": "fh_l8_object_cost_measurement_d54r_runner.py",
+  "runner_sha256": "433ba340c8eee483b7b04d6dc49575f4baa7427d339a7842c4c01bd0ea83574a",
+  "worker_path": "fh_l8_object_cost_measurement_d54_worker.py",
+  "worker_sha256": "a83e8b7e59ff2d822d0f0ccff30de11de6f32743a09f488c8d7a9a2ff863e873",
+  "launcher_path": "fh_l8_object_cost_measurement_d54_launcher.py",
+  "launcher_sha256": "166f7812dba8c574f85d088343831eb886f982696df88706cd04c24b6b1235c7",
+  "aggregator_path": "fh_l8_object_cost_measurement_d54_aggregate.py",
+  "aggregator_sha256": "4f80b0e2cb07f5e949aa549bbc0d790435248466761711d707499ccd483c28d0",
+  "d53_contract_sha256": "8d2d9532035a4edf968036a4260896effd803a85f54d5e2f795b997d50b9d5cb",
+  "d53_result_sha256": "cc6d947e8a336b1deb6ce290a0d72a1fe56e0d74f1610e516cf35619378ae3ba",
+  "measurement_execution_authorized": true,
+  "sample_plan": {
+    "total_fresh_processes": 70,
+    "synthetic_processes": 42,
+    "fixed64_processes": 28,
+    "warmup_processes": 20,
+    "measured_processes": 50,
+    "maximum_scientific_kernel_calls_per_process": 67,
+    "maximum_scientific_kernel_calls_total": 819,
+    "maximum_object_measurements_total": 70
+  },
+  "isolation": {
+    "scratch_root": "/Data/CascadeProjects/.ab-experiments/fh-l8-d54r-object-cost-v1",
+    "scratch_must_be_absent_before_initial_launch": true,
+    "exact_manifest_bound_resume_allowed": true,
+    "fresh_process_per_sample": true,
+    "cpu_affinity": "cpu0",
+    "memory_max_bytes": 536870912,
+    "memory_high_bytes": 402653184,
+    "swap_max_bytes": 0,
+    "network_allowed": false,
+    "writes_outside_scratch_allowed": false
+  },
+  "authority": {
+    "packed_q3_reads_authorized": 0,
+    "full53_execution_authorized": false,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false,
+    "full53_extrapolation_forbidden": true,
+    "external_resource_reservation_admitted": false
+  },
+  "execution_state": {
+    "scratch_created": false,
+    "samples_started": 0,
+    "samples_completed": 0,
+    "object_measurements_executed": 0,
+    "scientific_kernel_calls_executed": 0,
+    "packed_q3_reads": 0
+  },
+  "next_gate": "D54R_FRESH_SAMPLE_REPLAY_AND_INDEPENDENT_AGGREGATION"
+}

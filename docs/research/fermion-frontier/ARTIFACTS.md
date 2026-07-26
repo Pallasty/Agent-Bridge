@@ -346,6 +346,25 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D54 creates no scratch and consumes no sample. Measurement authority is limited to the future
   fixed plan; numeric peak/runtime and full-53 claims remain false.
 
+## FH-L8 D54R bounded execution and aggregation
+
+- `fh_l8_object_cost_measurement_d54r_authorization.json`: source-pinned correction of D54's
+  authorization-field lookup; exact plan and isolation authority remain bounded.
+- `fh_l8_object_cost_measurement_d54r_runner.py`,
+  `fh_l8_object_cost_measurement_d54_worker.py` and
+  `fh_l8_object_cost_measurement_d54_launcher.py`: corrected sample runner, cgroup receipt worker
+  and resumable one-service-per-sample launcher.
+- `fh_l8_object_cost_measurement_d54_aggregate.py`: independently validates all 70 receipts and
+  emits measured-group structural, cgroup-memory and wall-time summaries.
+- `fh_l8_object_cost_measurement_d54r_result.json` and
+  `fh_l8_object_cost_measurement_d54r_result_checker.py`: bind the external manifest and ordered
+  receipt set, then fail closed unless complete reaggregation exactly reproduces the result.
+- `test_fh_l8_object_cost_measurement_d54r_result_checker.py`: ordered-set and fail-closed result
+  regressions.
+- `FH_L8_OBJECT_COST_MEASUREMENT_D54R_ZH.md`: defect chronology, execution evidence and nonclaims.
+- D54R completes the bounded measurement plan but does not prove numeric resource bounds or
+  authorize full-53 execution. Its next gate is D55 admissibility review.
+
 ## Claude source session
 
 - Session:
