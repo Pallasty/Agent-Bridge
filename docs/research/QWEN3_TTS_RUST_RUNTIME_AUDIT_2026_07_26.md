@@ -87,10 +87,39 @@ at approximately 8 MB rather than holding the task for several hours. No model
 load, Metal inference, WAV output, STT verification, playback, or human
 audibility claim was made.
 
+### Download-path probes
+
+The official Hugging Face revision was resolved and pinned to:
+
+`85e237c12c027371202489a0ec509ded67b5e4b5`
+
+Its two LFS objects are:
+
+- `model.safetensors`: 1.8 GB, SHA-256 prefix `bc3c7e785e`
+- `speech_tokenizer/model.safetensors`: 682 MB, SHA-256 prefix `836b7b357f`
+
+Three resumable paths were tested without completing either object:
+
+1. `git-lfs` downloaded both objects at roughly 18-20 MB per minute.
+2. `huggingface_hub 1.24.0` with Rust `hf_xet` and high-performance mode
+   initially reached 67 MB, then held multiple established connections without
+   further file growth.
+3. The Qwen-official ModelScope mirror transferred the main model at roughly
+   0.2 MB/s and the speech tokenizer at roughly 0.7-0.8 MB/s.
+
+All processes were stopped rather than occupying the foreground for hours.
+Partial data remains only under the disposable pilot root. The exact global
+Hugging Face model-cache path was checked after each attempt and remains absent.
+
+No fresh aio2 or tb14 Agent-Bridge presence was available at the time of the
+probe, so no remote download was dispatched based on stale node records.
+
 ## Required next gate
 
-1. Fetch the official model into a disposable, explicit local directory using
-   a resumable downloader with recorded revision and file checksums.
+1. Fetch the official model on a node or network path with adequate object-store
+   bandwidth, then transfer the two files to the Mac. Preserve the pinned
+   revision and verify the complete SHA-256 values against the Hugging Face LFS
+   OIDs before use.
 2. Run the patched arm64 CLI with `--device metal --dtype f16`.
 3. Generate a short fixed Chinese utterance with a fixed seed.
 4. Record wall time, peak memory, output SHA-256, sample rate, channels, and
@@ -99,4 +128,3 @@ audibility claim was made.
 6. Play the named artifact and obtain human audibility confirmation.
 7. Only then design a default-off `qwen3-rust` Agent-Bridge backend. Keep
    generated models and audio outside Git.
-
