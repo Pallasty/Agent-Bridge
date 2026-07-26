@@ -390,6 +390,18 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D55 performs no measurement or scientific action. It admits D54R only as observational evidence;
   numeric resource bounds, external reservation and full53 execution remain closed.
 
+## FH-L8 D56 ordered resource-bound closure plan
+
+- `fh_l8_resource_closure_plan_d56_contract.json`: source pins, six D57--D62 packages, dependency
+  graph, acceptance evidence and global stop conditions.
+- `fh_l8_resource_closure_plan_d56.py` and
+  `fh_l8_resource_closure_plan_d56_result.json`: verify exact D55 requirement coverage, topological
+  ordering, the D58/D59/D60 join and closed authority.
+- `test_fh_l8_resource_closure_plan_d56.py`: requirement, dependency, join and authority
+  fail-closed regressions.
+- `FH_L8_RESOURCE_CLOSURE_PLAN_D56_ZH.md`: Chinese execution sequence and boundary summary.
+- D56 is plan-only. Its next gate is D57 production adapter implementation contract.
+
 ## Claude source session
 
 - Session:

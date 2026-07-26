@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-PRODUCTION-ADAPTER-RESOURCE-CLOSURE-PLAN-D56-V1",
+  "analysis_class": "SOURCE_PINNED_ORDERED_CLOSURE_PLAN_NO_IMPLEMENTATION_OR_EXECUTION",
+  "source_pins": {
+    "fh_l8_measurement_admissibility_d55_contract.json": "b262c04852ea00038645dfd28239948dffc4fb64ed1b72e875a35fdb189c0b43",
+    "fh_l8_measurement_admissibility_d55_result.json": "a7ffb82130e67c10d8294c7cef1d7e390af59b20052832f844300248fb7c9875",
+    "fh_l8_measurement_admissibility_d55.py": "fd02c126f257bad0144e0e7eff8505e0e71ebb6b1926bbb7f9824615c1e3c040",
+    "fh_l8_full53_streaming_lifetime_d51_contract.json": "8def9ebd3372e6cc1fbc810a75abf663c127643e6454f07a0aafdc94f6c9d83b",
+    "fh_l8_full53_adapter_static_cost_d52_contract.json": "08eabdf4826576bc1dbb410d384a5dd370daca43170416999da2b010ff3bafa4",
+    "fh_l8_tiny_recovery_d22_runner.py": "c7ee2770d4ce601e053bda1937566900791a30027449e3882a7757b93b098661",
+    "fh_l8_symmetry_orbit_quotient_d5_checker.py": "681bc63fedce8b71cfb536c66d321467bc8f01cb5947bee59b4291e2ac51a022"
+  },
+  "work_packages": [
+    {
+      "gate": "D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT",
+      "depends_on": [],
+      "closes_requirement": "implement_and_source_pin_the_production_streaming_adapter",
+      "deliverables": [
+        "source_pinned_adapter_module",
+        "record_decode_kernel_spill_merge_publish_interfaces",
+        "per_source_column_release_invariant",
+        "synthetic_and_fixed64_non_full53_tests"
+      ],
+      "acceptance": [
+        "adapter_is_importable_but_full53_entrypoint_is_fail_closed",
+        "D5_reduced_column_binding_is_source_pinned",
+        "no_packed_q3_read_or_scientific_execution_during_contract_verification"
+      ]
+    },
+    {
+      "gate": "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND",
+      "depends_on": [
+        "D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT"
+      ],
+      "closes_requirement": "supply_independent_object_size_or_allocator_bounds_for_live_allocation_classes",
+      "deliverables": [
+        "phase_by_phase_live_object_inventory",
+        "independent_per_class_size_upper_arguments",
+        "alias_and_allocator_overhead_accounting",
+        "integer_peak_live_allocation_expression"
+      ],
+      "acceptance": [
+        "all_D51_and_D52_allocation_terms_are_covered_exactly_once",
+        "finite_D54_observations_are_not_promoted_to_bounds",
+        "unknown_allocator_terms_fail_closed"
+      ]
+    },
+    {
+      "gate": "D59_PRODUCTION_IO_PAGE_CACHE_BOUND",
+      "depends_on": [
+        "D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT"
+      ],
+      "closes_requirement": "measure_or_statically_bound_filesystem_page_cache_under_the_production_io_path",
+      "deliverables": [
+        "production_spill_merge_io_trace_contract",
+        "dirty_and_clean_page_lifetime_model",
+        "writeback_and_fsync_policy",
+        "page_cache_bound_or_explicit_unbounded_disposition"
+      ],
+      "acceptance": [
+        "io_path_matches_the_D57_adapter",
+        "two_simultaneous_spill_generations_are_accounted",
+        "host_specific_measurements_remain_observational_without_static_support"
+      ]
+    },
+    {
+      "gate": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE",
+      "depends_on": [
+        "D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT"
+      ],
+      "closes_requirement": "precommit_and_justify_a_timing_margin_or_supply_a_static_runtime_bound",
+      "deliverables": [
+        "operation_class_to_D51_count_mapping",
+        "timing_population_and_environment_definition",
+        "precommitted_margin_or_static_cost_rule",
+        "out_of_distribution_and_timeout_policy"
+      ],
+      "acceptance": [
+        "rule_is_frozen_before_any_supporting_measurement",
+        "D54R_cross_replay_spread_is_not_itself_the_margin",
+        "missing_operation_class_cost_fails_closed"
+      ]
+    },
+    {
+      "gate": "D61_INTEGRATED_RESOURCE_ENVELOPE_RECONCILIATION",
+      "depends_on": [
+        "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND",
+        "D59_PRODUCTION_IO_PAGE_CACHE_BOUND",
+        "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"
+      ],
+      "closes_requirement": "reconcile_total_peak_memory_with_D51_phase_lifetimes_and_D23_scratch_shortfall",
+      "deliverables": [
+        "phase_peak_memory_and_runtime_envelope",
+        "D23_scratch_shortfall_reconciliation",
+        "filesystem_file_count_and_byte_envelope",
+        "fail_closed_GO_or_NO_GO_resource_disposition"
+      ],
+      "acceptance": [
+        "all_integer_arithmetic_is_recomputed_by_an_independent_checker",
+        "359759114_byte_D23_shortfall_is_closed_or_explicitly_blocking",
+        "no_external_capacity_is_assumed"
+      ]
+    },
+    {
+      "gate": "D62_EXTERNAL_RESERVATION_AND_FULL53_AUTHORIZATION_DECISION",
+      "depends_on": [
+        "D61_INTEGRATED_RESOURCE_ENVELOPE_RECONCILIATION"
+      ],
+      "closes_requirement": "obtain_external_resource_reservation_before_any_full53_execution_authorization",
+      "deliverables": [
+        "source_bound_resource_envelope",
+        "authentic_external_reservation_receipt_or_missing_receipt_disposition",
+        "terminal_full53_GO_or_NO_GO_decision"
+      ],
+      "acceptance": [
+        "reservation_identity_capacity_expiry_and_custody_are_verified",
+        "missing_or_insufficient_reservation_returns_NO_GO",
+        "authorization_never_precedes_all_D57_through_D61_acceptance"
+      ]
+    }
+  ],
+  "parallelism": {
+    "after_D57_may_run_in_parallel": [
+      "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND",
+      "D59_PRODUCTION_IO_PAGE_CACHE_BOUND",
+      "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"
+    ],
+    "D61_requires_all_parallel_gates": true,
+    "D62_requires_D61": true
+  },
+  "global_stop_conditions": [
+    "source_pin_drift",
+    "production_adapter_interface_drift",
+    "unmapped_live_allocation_or_operation_class",
+    "page_cache_term_unbounded",
+    "timing_rule_not_precommitted",
+    "D23_scratch_shortfall_unresolved",
+    "external_reservation_missing_or_insufficient"
+  ],
+  "authority": {
+    "production_adapter_implemented": false,
+    "scientific_kernel_calls_executed": 0,
+    "object_measurements_executed": 0,
+    "packed_q3_reads": 0,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false,
+    "external_resource_reservation_admitted": false,
+    "full53_execution_authorized": false
+  },
+  "status": "PLANNED_D56_ORDERED_PRODUCTION_ADAPTER_AND_RESOURCE_BOUND_CLOSURE",
+  "next_gate": "D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT"
+}
