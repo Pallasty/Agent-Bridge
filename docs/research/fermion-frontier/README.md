@@ -189,18 +189,18 @@ fixed64 prefixes, fourteen metrics, repeated fresh-process samples, CPU0 and 512
 isolation. It executes no measurement itself. `tracemalloc`, RSS/cgroup peaks and timing samples
 remain observations until independent allocator and precommitted timing-margin bounds are supplied.
 
-D54-R consumed that authorization through a committed launcher and independent aggregator. All
-70 fresh-process receipts passed CPU0, 512-MiB/384-MiB-high, zero-swap, bubblewrap-network-namespace
-and structural-digest checks. The largest measured fixed64 prefix observed 49,844,224 cgroup bytes
-and 3.351 seconds, while all 791 scientific calls retained the frozen output structure. These are
-bounded local empirical observations only: no allocator/timing upper bound, full-53 extrapolation,
-resource reservation or packed-q3 authority follows.
-
 D54R preserves that historical state while correcting D54's authorization-field lookup in a newly
 pinned execution path. The exact 70-process plan has now completed: 50 retained measurements,
 791 scientific kernel calls, zero packed-q3 reads and no swap/OOM/cgroup-cap failure. The committed
 result binds the external manifest and ordered receipt set. These finite-host observations do not
 prove allocator, worst-case runtime or full-53 bounds; D55 is the admissibility review.
+
+D54R2 independently replicated the same plan after the concurrent D54R result appeared. Its
+bubblewrap network namespace exposed loopback only, and all 70 fresh-process receipts again passed
+CPU0, 512-MiB/384-MiB-high, zero-swap and structural-digest checks. The fixed64 size-64 maxima were
+49,844,224 cgroup bytes and 3.351 seconds, versus D54R's 46,612,480 bytes and 3.265 seconds. This
+host-level spread reinforces the existing boundary: both sets are empirical observations, not
+allocator/timing upper bounds, full-53 extrapolations or resource authority.
 
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative

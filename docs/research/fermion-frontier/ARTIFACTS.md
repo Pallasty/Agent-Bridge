@@ -365,6 +365,19 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D54R completes the bounded measurement plan but does not prove numeric resource bounds or
   authorize full-53 execution. Its next gate is D55 admissibility review.
 
+## FH-L8 D54R2 independent isolation replication
+
+- `fh_l8_object_cost_measurement_d54r2_launcher.py` and
+  `fh_l8_object_cost_measurement_d54r2_aggregator.py`: committed sequential launcher and
+  independent complete-set aggregator using a loopback-only bubblewrap network namespace.
+- `fh_l8_object_cost_measurement_d54r2_authorization.json`: fresh-root remediation authority that
+  records two pre-run fail-closed isolation attempts and admits only the same 70-sample D53 plan.
+- `fh_l8_object_cost_measurement_d54r2_result.json`,
+  `fh_l8_object_cost_measurement_d54r2_result_checker.py` and focused tests: second empirical
+  receipt-set summary and fail-closed boundary checks.
+- D54R2 is an independent host-isolation replication, not a replacement for D54R. Its slightly
+  higher observed peak/time must not be converted into a full-53 or worst-case bound.
+
 ## Claude source session
 
 - Session:

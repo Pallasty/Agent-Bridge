@@ -34,10 +34,11 @@ runner 包含 alias-aware owned-graph 统计、`tracemalloc`、RSS、wall/CPU �
 
 下一门为 `D54_FRESH_SAMPLE_REPLAY_AND_INDEPENDENT_AGGREGATION`。
 
-## D54-R 执行闭环（2026-07-26）
+## D54-R2 独立隔离复现（2026-07-26）
 
-D54-R 已从提交后的源码执行完 70/70 个 fresh-process 样本，并由独立聚合器重新哈希全部
-receipt。最初两次隔离启动均 fail-closed：第一次发现 user-systemd 无法真正落实
+D54-R2 在并行 D54R 结果出现后，仍从另一组提交后的源码独立执行完 70/70 个
+fresh-process 样本，并由独立聚合器重新哈希全部 receipt。最初两次隔离启动均
+fail-closed：第一次发现 user-systemd 无法真正落实
 `PrivateNetwork`，第二次在 runner 启动前发现嵌套 namespace 被拒；两次均无科学调用，
 也没有结果被采信。最终执行改由 bubblewrap 独立网络 namespace 强制只暴露 loopback。
 
