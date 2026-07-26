@@ -25,6 +25,7 @@ class D54ExecutionTests(unittest.TestCase):
             "sample": sample, "runner_return_code": 0, "runner_stderr_bytes": 0,
             "cgroup_swap_current_bytes": 0,
             "cgroup_memory_events_delta": {"oom": 0, "oom_kill": 0},
+            "network_interfaces": ["lo"],
             "runner_stdout": json.dumps({**sample, "packed_q3_reads": 0}),
             "runner_stderr": "",
         }
@@ -33,6 +34,7 @@ class D54ExecutionTests(unittest.TestCase):
             {"cgroup_swap_current_bytes": 1},
             {"cgroup_memory_events_delta": {"oom": 1, "oom_kill": 0}},
             {"runner_return_code": 1},
+            {"network_interfaces": ["eth0", "lo"]},
         ):
             value = {**base, **mutation}
             with self.assertRaises(launcher.LaunchError):

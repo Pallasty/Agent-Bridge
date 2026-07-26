@@ -16,10 +16,10 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 RUNNER = HERE / "fh_l8_object_cost_measurement_d54_runner.py"
-AUTH = HERE / "fh_l8_object_cost_measurement_d54_authorization.json"
+AUTH = HERE / "fh_l8_object_cost_measurement_d54r_remediation_authorization.json"
 D53 = HERE / "fh_l8_object_cost_measurement_d53_contract.json"
 ALLOWED_PARENT = Path("/Data/CascadeProjects/.ab-experiments")
-ROOT = ALLOWED_PARENT / "fh-l8-d54-object-cost-v1"
+ROOT = ALLOWED_PARENT / "fh-l8-d54-object-cost-v2"
 MAX_CAPTURE = 1_048_576
 TIMEOUT_SECONDS = 180
 
@@ -136,6 +136,11 @@ def worker(args: argparse.Namespace) -> int:
         },
         "cgroup_swap_current_bytes": swap,
         "cgroup_path": str(root.relative_to("/sys/fs/cgroup")),
+        "network_interfaces": sorted(
+            row.split(":", 1)[0].strip()
+            for row in Path("/proc/net/dev").read_text(encoding="ascii").splitlines()
+            if ":" in row
+        ),
     }
     print(canonical(envelope).decode("ascii"), end="")
     return 0
@@ -169,6 +174,8 @@ def validate_envelope(raw: bytes, sample: dict[str, Any]) -> dict[str, Any]:
         raise LaunchError("worker sample/runner status mismatch")
     if envelope.get("runner_stderr_bytes") != 0 or envelope.get("cgroup_swap_current_bytes") != 0:
         raise LaunchError("stderr or swap fails closed")
+    if envelope.get("network_interfaces") != ["lo"]:
+        raise LaunchError("network namespace isolation unavailable")
     events = envelope.get("cgroup_memory_events_delta", {})
     if events.get("oom") != 0 or events.get("oom_kill") != 0:
         raise LaunchError("OOM event fails closed")
@@ -222,6 +229,8 @@ def launch() -> dict[str, Any]:
             "--property=MemoryHigh=402653184", "--property=MemorySwapMax=0",
             "--property=OOMPolicy=stop", "--property=TasksMax=16",
             f"--property=RuntimeMaxSec={TIMEOUT_SECONDS + 10}s",
+            "/usr/bin/bwrap", "--unshare-net", "--ro-bind", "/", "/",
+            "--dev", "/dev", "--proc", "/proc", "--chdir", str(HERE),
             "/usr/bin/env", "-i", f"HOME={Path.home()}", "PATH=/usr/bin:/bin",
             "LANG=C.UTF-8", "LC_ALL=C.UTF-8", "PYTHONDONTWRITEBYTECODE=1",
             sys.executable, "-I", "-B", str(Path(__file__).resolve()), "--worker",
