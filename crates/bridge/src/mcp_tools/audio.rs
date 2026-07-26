@@ -61,7 +61,7 @@ impl McpTool for PresentVoiceTool {
                 "type": "object",
                 "properties": {
                     "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "say", "qwen3"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; say = macOS native TTS; qwen3 = explicit external Qwen3-TTS CustomVoice. Speech on macOS verifies only the synthesized file via STT."},
-                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, or say."},
+                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, say, or qwen3."},
                     "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Kokoro names use af_*/bf_*; macOS say accepts installed system voice names such as Samantha or Tingting."},
                     "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0, "description": "Speech speed."},
                     "freq": {"type": "number", "minimum": 50, "maximum": 18000, "default": 440, "description": "backend=tone: tone frequency (Hz) whose presence on the bus is verified."},

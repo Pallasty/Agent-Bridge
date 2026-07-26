@@ -23,7 +23,9 @@ Do not add weights, virtual environments, or generated WAV files to Git.
 The adapter uses MPS with `float16` when available and intentionally does not
 request FlashAttention: Qwen documents it as a CUDA optimization, not a macOS/MPS
 requirement. A missing or unusable MPS runtime is an explicit synthesis failure;
-there is no hidden CPU or `say` fallback.
+there is no hidden CPU or `say` fallback. CPU execution remains available only as
+an explicit diagnostic override via `AB_QWEN3_TTS_DEVICE=cpu`; it is outside the
+accepted macOS pilot path.
 
 ## Explicit MCP shape
 

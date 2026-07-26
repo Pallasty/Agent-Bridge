@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import audio_embody as ae  # noqa: E402
+import qwen3_tts_synth as q3  # noqa: E402
 
 
 # --- classify_audio_embody truth table (rms, goertzel_f, goertzel_floor, frames) -
@@ -552,6 +553,28 @@ def test_qwen3_requires_an_explicit_isolated_runtime(monkeypatch):
     wav, info = ae.synth_qwen3("你好", "Serena", 1.0)
     assert wav is None
     assert "AB_QWEN3_TTS_PYTHON" in info["detail"]
+
+
+def test_qwen3_device_selection_never_silently_falls_back_to_cpu(monkeypatch):
+    fake_torch = SimpleNamespace(
+        backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: False)),
+        float16="float16",
+        float32="float32",
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    try:
+        q3._device_and_dtype("mps")
+        assert False, "unavailable MPS must fail closed"
+    except RuntimeError as exc:
+        assert "MPS was requested but is unavailable" in str(exc)
+
+    assert q3._device_and_dtype("cpu") == ("cpu", "float32")
+    try:
+        q3._device_and_dtype("auto")
+        assert False, "auto must not reintroduce a hidden CPU fallback"
+    except RuntimeError as exc:
+        assert "device must be mps or cpu" in str(exc)
 
 
 def test_synth_file_qwen3_records_backend_and_expression_provenance():
