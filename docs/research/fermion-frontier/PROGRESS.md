@@ -2,6 +2,19 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D50 source-bound kernel and structural fan-out
+
+- Reconciled D22, D26 and D49: the bounded micro path already binds D5
+  `_reduced_column`, while the D22 production adapter remains unimplemented.
+- Statically recomputed the exact 53-shard shape as 213,099 sources and a
+  225-candidate/source structural upper: 47,947,275 candidate actions and
+  1,534,312,800 fixed-width spill bytes before merge.
+- D50 executes zero kernel calls and reads zero packed-q3 records. The structural bound is not a
+  simultaneous-residency memory bound, runtime bound, target-size bound or resource reservation;
+  full-53 authority remains false.
+- Next gate:
+  `FULL_53_STREAMING_MEMORY_LIFETIME_AND_RUNTIME_UPPER_BOUND_DESIGN`.
+
 ## 2026-07-26 — FH-L8 five-route external-evidence handoff package
 
 - Materialized one sender/receiver handoff directory for all five contract-required routes, with a

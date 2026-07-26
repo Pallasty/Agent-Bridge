@@ -167,8 +167,16 @@ See `FH_L8_FULL_CONSUMER_D22_ZH.md` and `FH_L8_TINY_RECOVERY_D22_ZH.md`.
 Both D22 lanes report zero production checkpoint reads, q3 rows and scientific-kernel calls.
 Concurrent D23 then records a 2,750,812,950-byte / 13,622-file non-authoritative capacity
 guardrail and returns `NO_GO_D23_FULL_53_RESOURCE_ENVELOPE_INCOMPLETE`. Its resource-side next gate
-is `FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`; D22-R's scientific-kernel
-binding and worst-case fan-out proof also remain open. No full-53 action is authorized.
+was `FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`; at D23, D22-R's
+scientific-kernel binding and worst-case fan-out proof also remained open. No full-53 action was
+authorized.
+
+D50 reconciles the later micro-action evidence with that older boundary. The source-bound
+`_reduced_column` kernel is now statically identified, and the fixed 213,099-source / 53-shard
+shape has a 225-candidate/source structural upper: 47,947,275 candidate actions and
+1,534,312,800 fixed-width spill bytes. The D22 production adapter is still absent, and D50 proves
+neither simultaneous-residency memory nor worst-case runtime. Its next gate is
+`FULL_53_STREAMING_MEMORY_LIFETIME_AND_RUNTIME_UPPER_BOUND_DESIGN`; full-53 remains unauthorized.
 
 Status date: 2026-07-23
 

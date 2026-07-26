@@ -1,0 +1,22 @@
+{
+  "status": "VERIFIED_D50_SOURCE_BOUND_KERNEL_AND_STRUCTURAL_FANOUT_CONTRACT",
+  "kernel_symbol": "_reduced_column",
+  "kernel_sector_action_binding_verified": true,
+  "production_adapter_implemented": false,
+  "source_records": 213099,
+  "source_shards": 53,
+  "candidate_actions_per_source": 225,
+  "full_shard_candidate_actions": 921600,
+  "last_shard_candidate_actions": 24075,
+  "total_candidate_actions": 47947275,
+  "full_shard_spill_bytes": 29491200,
+  "last_shard_spill_bytes": 770400,
+  "total_spill_bytes": 1534312800,
+  "scientific_kernel_calls": 0,
+  "packed_q3_reads": 0,
+  "full53_execution_authorized": false,
+  "streaming_peak_memory_proven": false,
+  "worst_case_runtime_proven": false,
+  "external_resource_reservation_admitted": false,
+  "next_gate": "FULL_53_STREAMING_MEMORY_LIFETIME_AND_RUNTIME_UPPER_BOUND_DESIGN"
+}

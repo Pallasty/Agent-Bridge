@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-FULL53-KERNEL-FANOUT-D50-V1",
+  "analysis_class": "STATIC_SOURCE_BOUND_KERNEL_ADAPTER_AND_STRUCTURAL_FANOUT_PROOF_NO_EXECUTION",
+  "source_pins": {
+    "fh_l8_tiny_recovery_d22_runner.py": "c7ee2770d4ce601e053bda1937566900791a30027449e3882a7757b93b098661",
+    "fh_l8_tiny_recovery_d22_contract.json": "541ee8eb423ba4153372dcd7f2935ab276625f8adbdba16354333b9c864c9952",
+    "fh_l8_tiny_recovery_d22_result.json": "57299d3df0c6c5e6af841f3618decff627f6fc577d8040bdd409a8da951199b1",
+    "fh_l8_kernel_fixture_boundary_d26_result.json": "60922f0ccb36f9f3d9e17fd453a03b0aa31467421b8caa6fde486ffeeedf34a7",
+    "fh_l8_controlled_resource_stability_d49_result.json": "ac385431ac48e2c9bd00fb53585622363822eca63f6b5d78974a1b77a9109b20",
+    "fh_l8_symmetry_orbit_quotient_d5_checker.py": "681bc63fedce8b71cfb536c66d321467bc8f01cb5947bee59b4291e2ac51a022",
+    "fh_l8_symmetry_orbit_quotient_d5_contract.json": "1ebd1d38c0c40ca9617f86e09c86d528196260dd6b6b6692c34dacfe7a28d392",
+    "fh_l8_symmetry_orbit_quotient_d5_result.json": "a04a4d0be6265dcaf9d39c7937fc133d19c7a2050e1434c7cb24be88b795baed",
+    "fh_l8_fresh_consumer_d18c_runner.py": "1ebe2a4148becd75f46eb19f161de9dd42f42c63f383ea191f3774d8a775dbf9"
+  },
+  "kernel_binding": {
+    "module": "fh_l8_symmetry_orbit_quotient_d5_checker.py",
+    "symbol": "_reduced_column",
+    "parameters": [
+      "d4",
+      "backend",
+      "bonds",
+      "representative",
+      "symmetries"
+    ],
+    "required_call": "_sector_action",
+    "production_adapter_implemented": false
+  },
+  "full53_shape": {
+    "source_records": 213099,
+    "source_shards": 53,
+    "full_shards": 52,
+    "full_shard_records": 4096,
+    "last_shard_records": 107,
+    "partition_count": 256,
+    "spill_record_bytes": 32,
+    "candidate_actions_per_source": 225
+  },
+  "expected_structural_bounds": {
+    "full_shard_candidate_actions": 921600,
+    "last_shard_candidate_actions": 24075,
+    "total_candidate_actions": 47947275,
+    "full_shard_spill_bytes": 29491200,
+    "last_shard_spill_bytes": 770400,
+    "total_spill_bytes": 1534312800
+  },
+  "proof_boundary": {
+    "scientific_kernel_calls": 0,
+    "packed_q3_reads": 0,
+    "full53_execution_authorized": false,
+    "streaming_peak_memory_proven": false,
+    "worst_case_runtime_proven": false,
+    "external_resource_reservation_admitted": false
+  },
+  "next_gate": "FULL_53_STREAMING_MEMORY_LIFETIME_AND_RUNTIME_UPPER_BOUND_DESIGN"
+}

@@ -282,6 +282,19 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - Resource-side next gate:
   `FULL_53_EXPLICIT_MEMORY_RUNTIME_AND_EXTERNAL_RESOURCE_RESERVATION`.
 
+## FH-L8 D50 source-bound kernel and structural fan-out
+
+- `FH_L8_FULL53_KERNEL_FANOUT_D50_ZH.md`: conclusion, arithmetic and authority boundary.
+- `fh_l8_full53_kernel_fanout_d50_contract.json`: pins D22/D26/D49/D5/D18-C sources, the
+  `_reduced_column` interface, exact 53-shard shape and zero-execution proof boundary.
+- `fh_l8_full53_kernel_fanout_d50.py`: source-pin, AST-binding and integer-arithmetic checker.
+- `fh_l8_full53_kernel_fanout_d50_result.json`: records 47,947,275 candidate actions and
+  1,534,312,800 fixed-width spill bytes as structural upper bounds only.
+- `test_fh_l8_full53_kernel_fanout_d50.py`: committed-result, source-drift, arithmetic-drift,
+  kernel-binding and closed-authority regressions.
+- D50 reads no packed q3 and executes no scientific action. Production adapter, streaming peak
+  memory, worst-case runtime, resource receipt and full-53 authority remain open/false.
+
 ## Claude source session
 
 - Session:
