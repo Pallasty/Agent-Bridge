@@ -2,6 +2,19 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D53 object-cost measurement protocol
+
+- Mapped the unresolved D51/D52 memory and timing terms into ten measurement
+  targets across synthetic-object calibration and source-bound fixed64 tiers.
+- Froze six synthetic sizes, four fixed64 prefixes, fourteen mandatory metrics,
+  two warmups and five retained measurement runs per size under CPU0,
+  512-MiB/zero-swap isolation.
+- Baseline subtraction is limited to `tracemalloc`; process/cgroup peaks remain
+  absolute. Samples alone cannot become allocator or worst-case timing bounds.
+- D53 implements no runner and executes zero measurements, packed-q3 reads or
+  scientific kernel calls. Next gate:
+  `D54_FIXED64_INSTRUMENTED_OBJECT_COST_MEASUREMENT_AUTHORIZATION`.
+
 ## 2026-07-26 — FH-L8 D52 static adapter IR and operation bounds
 
 - Bound a four-stage, non-executable adapter IR to the existing D5

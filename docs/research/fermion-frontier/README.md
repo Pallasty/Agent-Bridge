@@ -184,6 +184,11 @@ non-executable four-stage adapter IR to `_reduced_column` and closes operation-c
 while leaving seven Python allocation/time cost classes unresolved. Neither gate creates an
 executable production adapter or authorizes full-53.
 
+D53 freezes the follow-on measurement protocol: synthetic object calibration plus source-bound
+fixed64 prefixes, fourteen metrics, repeated fresh-process samples, CPU0 and 512-MiB/zero-swap
+isolation. It executes no measurement itself. `tracemalloc`, RSS/cgroup peaks and timing samples
+remain observations until independent allocator and precommitted timing-margin bounds are supplied.
+
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
 3,110,572,064-byte scratch design, 359,759,114 bytes above D23. It also fixes integer work counts,

@@ -321,6 +321,16 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D52 creates no executable adapter, reads no packed q3 and grants no numeric resource or full-53
   authority.
 
+## FH-L8 D53 object/allocation cost measurement protocol
+
+- `FH_L8_OBJECT_COST_MEASUREMENT_D53_ZH.md`: fixture tiers, metrics, isolation and nonclaims.
+- `fh_l8_object_cost_measurement_d53_contract.json`: source-pinned target mapping, sample design,
+  fail-closed conditions, aggregation rules and closed execution authority.
+- `fh_l8_object_cost_measurement_d53.py`: source-pin, coverage and protocol checker.
+- `fh_l8_object_cost_measurement_d53_result.json`: records the verified design-only disposition.
+- `test_fh_l8_object_cost_measurement_d53.py`: authority, metric and aggregation regressions.
+- D53 implements no runner and performs no object measurement, packed-q3 read or scientific action.
+
 ## Claude source session
 
 - Session:

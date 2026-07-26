@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-OBJECT-COST-MEASUREMENT-D53-V1",
+  "analysis_class": "MEASUREMENT_PROTOCOL_DESIGN_NO_OBJECT_OR_KERNEL_MEASUREMENT",
+  "source_pins": {
+    "fh_l8_full53_adapter_static_cost_d52_contract.json": "08eabdf4826576bc1dbb410d384a5dd370daca43170416999da2b010ff3bafa4",
+    "fh_l8_full53_adapter_static_cost_d52_result.json": "977fb3d3551d6152359a9ace8ca984b0bdcf973bcb8f0e9277adb3e364209153",
+    "fh_l8_full53_adapter_static_cost_d52.py": "28a7b54536862040550fc971f801789d5dbdde042d9b61c6fe531ae16073455d",
+    "fh_l8_full53_streaming_lifetime_d51_contract.json": "8def9ebd3372e6cc1fbc810a75abf663c127643e6454f07a0aafdc94f6c9d83b",
+    "fh_l8_full53_streaming_lifetime_d51_result.json": "aa222f7682be2dc0f5a2848583b555e37100137ec4ddfaef64234c7b86ef77b1",
+    "fh_l8_kernel_fixture_boundary_d26_result.json": "60922f0ccb36f9f3d9e17fd453a03b0aa31467421b8caa6fde486ffeeedf34a7",
+    "fh_l8_controlled_resource_stability_d49_result.json": "ac385431ac48e2c9bd00fb53585622363822eca63f6b5d78974a1b77a9109b20"
+  },
+  "measurement_targets": [
+    "python_runtime_base_peak",
+    "sector_action_dictionary_peak",
+    "canonical_info_transient_peak",
+    "basis_images_transient_peak",
+    "fraction_object_peak",
+    "reduced_column_dictionary_peak",
+    "partition_writer_state_peak",
+    "sort_key_heap_object_peak",
+    "filesystem_page_cache_accounting",
+    "per_operation_host_time_ns"
+  ],
+  "upstream_term_mapping": {
+    "python_runtime_base_peak": "python_runtime_base_peak",
+    "kernel_column_python_object_peak": "reduced_column_dictionary_peak",
+    "partition_writer_state_peak": "partition_writer_state_peak",
+    "sort_key_heap_object_peak": "sort_key_heap_object_peak",
+    "filesystem_page_cache_accounting": "filesystem_page_cache_accounting",
+    "per_operation_host_time_ns": "per_operation_host_time_ns",
+    "sector_action_dictionary_peak_bytes": "sector_action_dictionary_peak",
+    "canonical_info_transient_peak_bytes": "canonical_info_transient_peak",
+    "basis_images_transient_peak_bytes": "basis_images_transient_peak",
+    "fraction_object_peak_bytes": "fraction_object_peak",
+    "reduced_column_dictionary_peak_bytes": "reduced_column_dictionary_peak",
+    "partition_writer_state_peak_bytes": "partition_writer_state_peak"
+  },
+  "fixture_tiers": [
+    {
+      "tier": "synthetic_object_calibration",
+      "sizes": [0, 1, 8, 32, 64, 225],
+      "targets": [
+        "sector_action_dictionary_peak",
+        "fraction_object_peak",
+        "partition_writer_state_peak",
+        "sort_key_heap_object_peak"
+      ],
+      "scientific_kernel_calls_per_sample": 0,
+      "packed_q3_reads_per_sample": 0,
+      "admissible_for_full53_extrapolation": false
+    },
+    {
+      "tier": "source_bound_fixed64_micro",
+      "sample_prefix_sizes": [1, 8, 32, 64],
+      "source": "D47_fixed64_repro_packet_selected_representatives",
+      "required_structural_digest": "38aaeffb8f178e918e4f326888493166c21afc7fb1379e91ab965c345b4adc12",
+      "targets": [
+        "canonical_info_transient_peak",
+        "basis_images_transient_peak",
+        "reduced_column_dictionary_peak",
+        "per_operation_host_time_ns"
+      ],
+      "maximum_scientific_kernel_calls_per_run": 67,
+      "full53_extrapolation_forbidden": true,
+      "execution_authorized_by_d53": false
+    }
+  ],
+  "isolation": {
+    "fresh_process_per_measured_sample": true,
+    "cpu_affinity": "cpu0",
+    "memory_max_bytes": 536870912,
+    "memory_high_bytes": 402653184,
+    "swap_max_bytes": 0,
+    "warmup_runs_per_size": 2,
+    "measured_runs_per_size": 5,
+    "garbage_collection_before_baseline": true,
+    "network_allowed": false,
+    "external_writes_allowed": false
+  },
+  "required_metrics": [
+    "python_implementation",
+    "python_version",
+    "allocator_environment",
+    "tracemalloc_current_bytes",
+    "tracemalloc_peak_bytes",
+    "process_ru_maxrss_kib",
+    "cgroup_memory_current_bytes",
+    "cgroup_memory_peak_bytes",
+    "cgroup_memory_events_delta",
+    "cgroup_swap_current_bytes",
+    "wall_elapsed_ns",
+    "process_cpu_ns",
+    "operation_count",
+    "structural_output_sha256"
+  ],
+  "measurement_sequence": [
+    "validate_source_pins_and_frozen_sample_identity",
+    "enter_fresh_zero_swap_cgroup_and_bind_cpu0",
+    "collect_runtime_baseline_after_gc",
+    "start_tracemalloc_before_target_construction",
+    "execute_exactly_one_declared_target_sample",
+    "capture_target_peak_and_operation_count",
+    "release_target_references_and_collect_gc",
+    "capture_post_release_current_memory",
+    "emit_terminal_metrics_and_source_digest",
+    "exit_without_promoting_any_full53_bound"
+  ],
+  "fail_closed_conditions": [
+    "source_or_structural_digest_drift",
+    "missing_required_metric",
+    "unexpected_network_or_external_write",
+    "nonzero_swap_current",
+    "nonzero_oom_or_oom_kill_delta",
+    "scientific_kernel_calls_above_declared_sample_cap",
+    "structural_output_mismatch_across_repetitions",
+    "attempted_full53_extrapolation"
+  ],
+  "aggregation": {
+    "retain_all_raw_samples": true,
+    "report_min_median_max": true,
+    "subtract_runtime_baseline_only_for_tracemalloc_metrics": true,
+    "ru_maxrss_and_cgroup_peak_are_not_baseline_subtracted": true,
+    "upper_bound_requires_independent_object_size_or_allocator_bound": true,
+    "timing_upper_bound_requires_precommitted_margin_rule": true
+  },
+  "authority": {
+    "measurement_runner_implemented": false,
+    "object_measurements_executed": 0,
+    "packed_q3_reads": 0,
+    "scientific_kernel_calls_executed": 0,
+    "full53_executed": false,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false,
+    "external_resource_reservation_admitted": false,
+    "full53_execution_authorized": false
+  },
+  "next_gate": "D54_FIXED64_INSTRUMENTED_OBJECT_COST_MEASUREMENT_AUTHORIZATION"
+}

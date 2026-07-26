@@ -1,0 +1,23 @@
+{
+  "status": "VERIFIED_D53_OBJECT_COST_MEASUREMENT_PROTOCOL_DESIGN_NO_EXECUTION",
+  "measurement_target_count": 10,
+  "fixture_tier_count": 2,
+  "synthetic_size_count": 6,
+  "source_bound_prefix_count": 4,
+  "required_metric_count": 14,
+  "warmup_runs_per_size": 2,
+  "measured_runs_per_size": 5,
+  "memory_max_bytes": 536870912,
+  "swap_max_bytes": 0,
+  "fixed64_structural_digest": "38aaeffb8f178e918e4f326888493166c21afc7fb1379e91ab965c345b4adc12",
+  "maximum_scientific_kernel_calls_per_run": 67,
+  "measurement_runner_implemented": false,
+  "object_measurements_executed": 0,
+  "packed_q3_reads": 0,
+  "scientific_kernel_calls_executed": 0,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "external_resource_reservation_admitted": false,
+  "full53_execution_authorized": false,
+  "next_gate": "D54_FIXED64_INSTRUMENTED_OBJECT_COST_MEASUREMENT_AUTHORIZATION"
+}
