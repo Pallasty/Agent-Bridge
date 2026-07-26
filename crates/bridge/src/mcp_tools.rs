@@ -10049,6 +10049,118 @@ fn agent_spawn_workload_class(node: Option<&str>, interactive: bool) -> &'static
     }
 }
 
+fn body_span_id(body_span: Option<&Value>) -> Option<&str> {
+    body_span?
+        .get("span_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn compact_body_scheduling_advice(advice: &Value) -> Value {
+    json!({
+        "schema_version": advice.get("schema_version").cloned().unwrap_or(Value::Null),
+        "mode": advice.get("mode").cloned().unwrap_or(Value::Null),
+        "read_only": advice.get("read_only").cloned().unwrap_or(Value::Null),
+        "blocked": advice.get("blocked").cloned().unwrap_or(Value::Null),
+        "execution_changed": advice
+            .get("execution_changed")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "changes_routing": advice
+            .get("changes_routing")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "changes_parallelism": advice
+            .get("changes_parallelism")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "pressure": advice.get("pressure").cloned().unwrap_or(Value::Null),
+        "workload_class": advice
+            .get("workload_class")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "requested_parallelism": advice
+            .get("requested_parallelism")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "suggested_max_parallelism": advice
+            .get("suggested_max_parallelism")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "recommendation": advice
+            .get("recommendation")
+            .cloned()
+            .unwrap_or(Value::Null),
+    })
+}
+
+async fn record_body_scheduling_advice_event(
+    hub: &Hub,
+    session: &ab_agent::AgentSession,
+    advice: &Value,
+    body_span: Option<&Value>,
+) -> bool {
+    let Some(store) = &hub.store else {
+        return false;
+    };
+    let span_id = body_span_id(body_span).map(str::to_string);
+    let target = span_id.clone().unwrap_or_else(|| session.id.to_string());
+    let compact_advice = compact_body_scheduling_advice(advice);
+    let event = crate::semantic_event::SemanticEvent {
+        ts: dispatch_now_secs(),
+        actor: "mcp".to_string(),
+        source: "body_telemetry".to_string(),
+        action: "scheduling_advice_observed".to_string(),
+        target: Some(target.clone()),
+        object: crate::semantic_event::SemanticObject {
+            object_type: "body_scheduling_advice".to_string(),
+            source_adapter: "body_telemetry".to_string(),
+            label: compact_advice
+                .get("workload_class")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            object_id: Some(target),
+        },
+        affordance: crate::semantic_event::Affordance {
+            action_type: "observe".to_string(),
+            risk_level: "low".to_string(),
+            requires_gate: false,
+            expected_effect: Some(
+                "record a compact shadow scheduling recommendation for later evaluation"
+                    .to_string(),
+            ),
+        },
+        verdict: crate::semantic_event::Verdict {
+            status: crate::semantic_event::VerdictStatus::Unknown,
+            method: "shadow_advice_has_no_causal_outcome_claim".to_string(),
+            evidence: json!({
+                "advice_computed": true,
+                "causal_quality_evaluable": false,
+                "execution_changed": false,
+            }),
+        },
+        facts: json!({
+            "schema_version": crate::body_telemetry::BODY_SCHEDULING_ADVICE_SCHEMA_V0,
+            "session_id": session.id.to_string(),
+            "runtime_id": session.runtime_id,
+            "span_id": span_id,
+            "advice": compact_advice,
+        }),
+    };
+    match store.record_semantic_event(event.to_record()).await {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::debug!(
+                error = %error,
+                session_id = %session.id,
+                "record_semantic_event (body_scheduling_advice) failed"
+            );
+            false
+        }
+    }
+}
+
 /// Wrap agent launch with a bounded local body observation. One-shot sessions
 /// close here; interactive sessions remain active until `agent_session_wait`
 /// observes their terminal row.
@@ -10276,12 +10388,23 @@ impl McpTool for AgentSpawnTool {
             };
             return match spawn_agent_with_body_span(&self.hub, agent, cfg).await {
                 Ok((s, body_span)) => {
+                    let event_recorded = record_body_scheduling_advice_event(
+                        &self.hub,
+                        &s,
+                        &body_scheduling_advice,
+                        body_span.as_ref(),
+                    )
+                    .await;
                     let mut value = serde_json::to_value(s).unwrap_or(Value::Null);
                     if let (Some(body_span), Some(object)) = (body_span, value.as_object_mut()) {
                         object.insert("body_task_span".to_string(), body_span);
                     }
                     if let Some(object) = value.as_object_mut() {
                         object.insert("body_scheduling_advice".to_string(), body_scheduling_advice);
+                        object.insert(
+                            "body_scheduling_event_recorded".to_string(),
+                            json!(event_recorded),
+                        );
                     }
                     Ok(ToolResult::json_text(&value))
                 }
@@ -10295,6 +10418,13 @@ impl McpTool for AgentSpawnTool {
         }
         match spawn_with_failover_with_body_span(&self.hub, &chain, cfg).await {
             Ok((s, idx, failed, body_span)) => {
+                let event_recorded = record_body_scheduling_advice_event(
+                    &self.hub,
+                    &s,
+                    &body_scheduling_advice,
+                    body_span.as_ref(),
+                )
+                .await;
                 let mut v = serde_json::to_value(&s).unwrap_or(Value::Null);
                 // Surface that a backup was used so the caller isn't silently
                 // handed a different runtime than the primary.
@@ -10311,6 +10441,10 @@ impl McpTool for AgentSpawnTool {
                 }
                 if let Some(object) = v.as_object_mut() {
                     object.insert("body_scheduling_advice".to_string(), body_scheduling_advice);
+                    object.insert(
+                        "body_scheduling_event_recorded".to_string(),
+                        json!(event_recorded),
+                    );
                 }
                 Ok(ToolResult::json_text(&v))
             }
@@ -24723,6 +24857,336 @@ async fn record_body_task_span_event(
             tracing::debug!(error = %error, span_id = %span.span_id, "record_semantic_event (body_task_span) failed");
             false
         }
+    }
+}
+
+fn increment_label(counts: &mut BTreeMap<String, u64>, label: Option<&str>) {
+    let label = label
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    *counts.entry(label.to_string()).or_default() += 1;
+}
+
+fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
+    (denominator > 0).then(|| numerator as f64 / denominator as f64)
+}
+
+fn body_scheduling_report_from_events(
+    events: &[ab_store::SemanticEventRecord],
+    window_secs: i64,
+    source_limit: usize,
+    include_rows: bool,
+) -> Value {
+    let mut advice_by_span = BTreeMap::<String, Value>::new();
+    let mut advice_without_span_rows = Vec::<Value>::new();
+    let mut spans = BTreeMap::<String, Value>::new();
+
+    for event in events {
+        if event.source != "body_telemetry" {
+            continue;
+        }
+        let Ok(facts) = serde_json::from_str::<Value>(&event.facts) else {
+            continue;
+        };
+        match event.action.as_str() {
+            "scheduling_advice_observed" => {
+                if let Some(span_id) = facts
+                    .get("span_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    advice_by_span.entry(span_id.to_string()).or_insert(facts);
+                } else {
+                    advice_without_span_rows.push(facts);
+                }
+            }
+            "task_span_closed" | "task_span_abandoned" => {
+                if let Some(span_id) = facts
+                    .get("span_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    spans.entry(span_id.to_string()).or_insert(facts);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut pressure_counts = BTreeMap::<String, u64>::new();
+    let mut workload_counts = BTreeMap::<String, u64>::new();
+    let mut recommendation_counts = BTreeMap::<String, u64>::new();
+    let mut span_state_counts = BTreeMap::<String, u64>::new();
+    let mut paired_count = 0_u64;
+    let mut aligned_pressure_count = 0_u64;
+    let mut closed_pair_count = 0_u64;
+    let mut safety_violation_count = 0_u64;
+    let mut rows = Vec::new();
+
+    for (span_id, facts) in &advice_by_span {
+        let advice = facts.get("advice").unwrap_or(&Value::Null);
+        increment_label(
+            &mut pressure_counts,
+            advice.get("pressure").and_then(Value::as_str),
+        );
+        increment_label(
+            &mut workload_counts,
+            advice.get("workload_class").and_then(Value::as_str),
+        );
+        increment_label(
+            &mut recommendation_counts,
+            advice.get("recommendation").and_then(Value::as_str),
+        );
+        let safety_violation = advice.get("blocked").and_then(Value::as_bool) == Some(true)
+            || advice.get("execution_changed").and_then(Value::as_bool) == Some(true)
+            || advice.get("changes_routing").and_then(Value::as_bool) == Some(true)
+            || advice.get("changes_parallelism").and_then(Value::as_bool) == Some(true);
+        if safety_violation {
+            safety_violation_count += 1;
+        }
+
+        let span = spans.get(span_id);
+        let pressure_aligned = span.is_some_and(|span| {
+            advice.get("pressure").and_then(Value::as_str)
+                == span.get("before_pressure").and_then(Value::as_str)
+        });
+        if let Some(span) = span {
+            paired_count += 1;
+            increment_label(
+                &mut span_state_counts,
+                span.get("state").and_then(Value::as_str),
+            );
+            if pressure_aligned {
+                aligned_pressure_count += 1;
+            }
+            if span.get("state").and_then(Value::as_str) == Some("closed") {
+                closed_pair_count += 1;
+            }
+        }
+
+        if include_rows && rows.len() < 100 {
+            rows.push(json!({
+                "span_id": span_id,
+                "runtime_id": facts.get("runtime_id").cloned().unwrap_or(Value::Null),
+                "pressure": advice.get("pressure").cloned().unwrap_or(Value::Null),
+                "workload_class": advice.get("workload_class").cloned().unwrap_or(Value::Null),
+                "recommendation": advice.get("recommendation").cloned().unwrap_or(Value::Null),
+                "suggested_max_parallelism": advice
+                    .get("suggested_max_parallelism")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "span_state": span
+                    .and_then(|span| span.get("state"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "before_pressure": span
+                    .and_then(|span| span.get("before_pressure"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "after_pressure": span
+                    .and_then(|span| span.get("after_pressure"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "pressure_aligned": pressure_aligned,
+                "safety_violation": safety_violation,
+            }));
+        }
+    }
+
+    for facts in &advice_without_span_rows {
+        let advice = facts.get("advice").unwrap_or(&Value::Null);
+        increment_label(
+            &mut pressure_counts,
+            advice.get("pressure").and_then(Value::as_str),
+        );
+        increment_label(
+            &mut workload_counts,
+            advice.get("workload_class").and_then(Value::as_str),
+        );
+        increment_label(
+            &mut recommendation_counts,
+            advice.get("recommendation").and_then(Value::as_str),
+        );
+        let safety_violation = advice.get("blocked").and_then(Value::as_bool) == Some(true)
+            || advice.get("execution_changed").and_then(Value::as_bool) == Some(true)
+            || advice.get("changes_routing").and_then(Value::as_bool) == Some(true)
+            || advice.get("changes_parallelism").and_then(Value::as_bool) == Some(true);
+        if safety_violation {
+            safety_violation_count += 1;
+        }
+        if include_rows && rows.len() < 100 {
+            rows.push(json!({
+                "span_id": Value::Null,
+                "runtime_id": facts.get("runtime_id").cloned().unwrap_or(Value::Null),
+                "pressure": advice.get("pressure").cloned().unwrap_or(Value::Null),
+                "workload_class": advice.get("workload_class").cloned().unwrap_or(Value::Null),
+                "recommendation": advice.get("recommendation").cloned().unwrap_or(Value::Null),
+                "suggested_max_parallelism": advice
+                    .get("suggested_max_parallelism")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "span_state": Value::Null,
+                "before_pressure": Value::Null,
+                "after_pressure": Value::Null,
+                "pressure_aligned": false,
+                "safety_violation": safety_violation,
+            }));
+        }
+    }
+
+    let advice_without_span = advice_without_span_rows.len() as u64;
+    let advice_count = advice_by_span.len() as u64 + advice_without_span;
+    let span_count = spans.len() as u64;
+    let source_truncated_possible = events.len() >= source_limit;
+    let status = if safety_violation_count > 0 {
+        "safety_invariant_violation"
+    } else if paired_count < 5 {
+        "insufficient_paired_observations"
+    } else {
+        "observational_consistency_only"
+    };
+
+    let mut report = json!({
+        "schema_version": crate::body_telemetry::BODY_SCHEDULING_REPORT_SCHEMA_V0,
+        "mode": "read_only_report",
+        "window_secs": window_secs,
+        "source_event_limit": source_limit,
+        "source_event_count": events.len(),
+        "source_truncated_possible": source_truncated_possible,
+        "persists_raw_samples": false,
+        "counts": {
+            "advice": advice_count,
+            "spans": span_count,
+            "paired": paired_count,
+            "advice_without_span": advice_without_span,
+            "unpaired_advice": advice_count.saturating_sub(paired_count),
+            "unpaired_spans": span_count.saturating_sub(paired_count),
+            "closed_pairs": closed_pair_count,
+            "pressure_aligned_pairs": aligned_pressure_count,
+            "safety_violations": safety_violation_count,
+        },
+        "rates": {
+            "paired_coverage": ratio(paired_count, advice_count),
+            "closed_pair_coverage": ratio(closed_pair_count, paired_count),
+            "pressure_alignment": ratio(aligned_pressure_count, paired_count),
+        },
+        "distributions": {
+            "pressure": pressure_counts,
+            "workload_class": workload_counts,
+            "recommendation": recommendation_counts,
+            "span_state": span_state_counts,
+        },
+        "evaluation": {
+            "status": status,
+            "causal_quality_evaluable": false,
+            "recommendation_effectiveness_claimed": false,
+            "policy_change_allowed": false,
+            "reason": "shadow observations establish capture and consistency only; they do not prove that a recommendation changed or improved resource pressure",
+        },
+        "safety": {
+            "report_executes_actions": false,
+            "report_changes_routing": false,
+            "report_changes_parallelism": false,
+            "report_updates_policy": false,
+            "observed_violation_count": safety_violation_count,
+        },
+        "rows_included": include_rows,
+        "row_count": if include_rows { rows.len() } else { 0 },
+        "rows_truncated": include_rows && advice_count as usize > rows.len(),
+    });
+    if include_rows {
+        report["rows"] = Value::Array(rows);
+    }
+    report
+}
+
+pub struct BodySchedulingReportTool {
+    hub: Hub,
+}
+
+impl BodySchedulingReportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BodySchedulingReportTool {
+    fn name(&self) -> &'static str {
+        "body_scheduling_report"
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Aggregate compact body-scheduling advice and task-span receipts. Read-only and non-causal: reports capture, consistency, and safety invariants without changing routing, concurrency, admission, or policy.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 604800
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 500
+                    },
+                    "include_rows": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include up to 100 compact joined rows; never includes raw samples, prompts, transcripts, or environment values."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(store) = &self.hub.store else {
+            return Ok(ToolResult::error("no store configured"));
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(Value::as_i64)
+            .unwrap_or(7 * 86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(500)
+            .clamp(1, 500) as usize;
+        let include_rows = args
+            .get("include_rows")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let events = match store
+            .recent_semantic_events(window_secs, limit as u32)
+            .await
+        {
+            Ok(events) => events,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "recent_semantic_events: {error}"
+                )))
+            }
+        };
+        Ok(ToolResult::json_text(&body_scheduling_report_from_events(
+            &events,
+            window_secs,
+            limit,
+            include_rows,
+        )))
     }
 }
 
@@ -41504,6 +41968,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "body_status"
             | "body_reflex_advice"
             | "body_task_span"
+            | "body_scheduling_report"
             | "mcp_dispatch_audit"
             | "mcp_lifecycle_digest"
             | "readiness_audit"
@@ -44687,6 +45152,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Essential,
         Arc::new(BodyTaskSpanTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(BodySchedulingReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

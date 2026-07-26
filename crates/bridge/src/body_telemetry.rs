@@ -21,6 +21,7 @@ pub const BODY_STATUS_SCHEMA_V0: &str = "agent_bridge.body_status.v0";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.v0";
 pub const SHADOW_REFLEX_ADVICE_SCHEMA_V0: &str = "agent_bridge.shadow_reflex_advice.v0";
 pub const BODY_SCHEDULING_ADVICE_SCHEMA_V0: &str = "agent_bridge.body_scheduling_advice.v0";
+pub const BODY_SCHEDULING_REPORT_SCHEMA_V0: &str = "agent_bridge.body_scheduling_report.v0";
 
 /// Whether a metric is safe to treat as current.
 ///

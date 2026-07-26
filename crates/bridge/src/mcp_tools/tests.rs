@@ -7380,6 +7380,7 @@ fn tool_policy_codex_lean_excludes_native_overlap_tools() {
     assert!(p.includes(Tier::Essential, "body_status"));
     assert!(p.includes(Tier::Essential, "body_reflex_advice"));
     assert!(p.includes(Tier::Essential, "body_task_span"));
+    assert!(p.includes(Tier::Essential, "body_scheduling_report"));
     assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
     assert!(p.includes(Tier::Essential, "readiness_audit"));
     assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
@@ -14856,6 +14857,134 @@ async fn agent_spawn_execute_uses_fallback_chain_when_backend_omitted() {
         payload["body_scheduling_advice"]["execution_changed"],
         false
     );
+    assert_eq!(payload["body_scheduling_event_recorded"], false);
+}
+
+fn body_event(action: &str, target: &str, facts: Value) -> ab_store::SemanticEventRecord {
+    ab_store::SemanticEventRecord {
+        ts: 100,
+        actor: "mcp".to_string(),
+        source: "body_telemetry".to_string(),
+        action: action.to_string(),
+        target: Some(target.to_string()),
+        verdict_status: "unknown".to_string(),
+        verdict_method: "test".to_string(),
+        evidence: None,
+        facts: facts.to_string(),
+        descriptor: None,
+    }
+}
+
+#[test]
+fn body_scheduling_report_pairs_compact_events_without_causal_claims() {
+    let advice = body_event(
+        "scheduling_advice_observed",
+        "span-1",
+        json!({
+            "schema_version": crate::body_telemetry::BODY_SCHEDULING_ADVICE_SCHEMA_V0,
+            "session_id": "opaque-session",
+            "runtime_id": "kilo",
+            "span_id": "span-1",
+            "advice": {
+                "pressure": "elevated",
+                "workload_class": "heavy",
+                "recommendation": "prefer_single_heavy_task",
+                "suggested_max_parallelism": 1,
+                "blocked": false,
+                "execution_changed": false,
+                "changes_routing": false,
+                "changes_parallelism": false
+            }
+        }),
+    );
+    let span = body_event(
+        "task_span_closed",
+        "span-1",
+        json!({
+            "schema_version": crate::body_telemetry::TASK_RESOURCE_SPAN_SCHEMA_V0,
+            "span_id": "span-1",
+            "task_kind": "agent_spawn",
+            "state": "closed",
+            "before_pressure": "elevated",
+            "after_pressure": "nominal"
+        }),
+    );
+
+    let report = body_scheduling_report_from_events(&[advice, span], 600, 500, true);
+    assert_eq!(
+        report["schema_version"],
+        crate::body_telemetry::BODY_SCHEDULING_REPORT_SCHEMA_V0
+    );
+    assert_eq!(report["counts"]["paired"], 1);
+    assert_eq!(report["counts"]["closed_pairs"], 1);
+    assert_eq!(report["counts"]["pressure_aligned_pairs"], 1);
+    assert_eq!(report["counts"]["safety_violations"], 0);
+    assert_eq!(report["rates"]["paired_coverage"], 1.0);
+    assert_eq!(
+        report["evaluation"]["status"],
+        "insufficient_paired_observations"
+    );
+    assert_eq!(report["evaluation"]["causal_quality_evaluable"], false);
+    assert_eq!(report["evaluation"]["policy_change_allowed"], false);
+    assert_eq!(report["rows"][0]["runtime_id"], "kilo");
+    assert!(report["rows"][0].get("session_id").is_none());
+    assert!(report["rows"][0].get("sample").is_none());
+}
+
+#[test]
+fn body_scheduling_report_surfaces_safety_invariant_violations() {
+    let advice = body_event(
+        "scheduling_advice_observed",
+        "opaque-session",
+        json!({
+            "span_id": null,
+            "advice": {
+                "pressure": "critical",
+                "workload_class": "heavy",
+                "recommendation": "request_operator_review_before_heavy_work",
+                "blocked": true,
+                "execution_changed": false,
+                "changes_routing": false,
+                "changes_parallelism": false
+            }
+        }),
+    );
+    let report = body_scheduling_report_from_events(&[advice], 600, 1, false);
+    assert_eq!(report["counts"]["safety_violations"], 1);
+    assert_eq!(report["counts"]["advice_without_span"], 1);
+    assert_eq!(report["distributions"]["pressure"]["critical"], 1);
+    assert_eq!(report["evaluation"]["status"], "safety_invariant_violation");
+    assert_eq!(
+        report["safety"]["observed_violation_count"],
+        report["counts"]["safety_violations"]
+    );
+    assert_eq!(report["source_truncated_possible"], true);
+    assert!(report.get("rows").is_none());
+}
+
+#[test]
+fn compact_body_scheduling_advice_is_an_explicit_persistence_allowlist() {
+    let compact = compact_body_scheduling_advice(&json!({
+        "schema_version": crate::body_telemetry::BODY_SCHEDULING_ADVICE_SCHEMA_V0,
+        "mode": "shadow_only",
+        "read_only": true,
+        "blocked": false,
+        "execution_changed": false,
+        "changes_routing": false,
+        "changes_parallelism": false,
+        "pressure": "nominal",
+        "workload_class": "heavy",
+        "requested_parallelism": 1,
+        "suggested_max_parallelism": 1,
+        "recommendation": "start_as_requested",
+        "reason": "must remain response-only",
+        "sample": {"secret_future_raw_field": true},
+        "prompt": "must never persist"
+    }));
+    assert_eq!(compact["recommendation"], "start_as_requested");
+    assert!(compact.get("reason").is_none());
+    assert!(compact.get("sample").is_none());
+    assert!(compact.get("prompt").is_none());
 }
 
 #[test]
