@@ -10195,6 +10195,20 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         schemas.iter().any(|s| s.name == "present_voice"),
         "present_voice must register under the all profile"
     );
+    let voice_schema = schemas
+        .iter()
+        .find(|s| s.name == "present_voice")
+        .expect("present_voice schema");
+    assert_eq!(
+        voice_schema.input_schema["properties"]["backend"]["enum"],
+        json!(["tone", "kokoro", "piper", "say"]),
+        "macOS native say must be an explicit backend, not a hidden kokoro alias"
+    );
+    assert_eq!(
+        voice_schema.input_schema["properties"]["capture_channel"]["enum"],
+        json!(["sink_monitor", "mic", "synth_file"]),
+        "synth_file must be an explicit honest verification boundary"
+    );
     for t in [
         "world_query",
         "world_patch",
