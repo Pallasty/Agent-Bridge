@@ -203,6 +203,12 @@ by 3,231,744 bytes (6.93%) and 85,298,967 ns (2.61%); this observed spread is ex
 margin rule. D56 must design the production adapter and remaining resource-bound closure path;
 full53 authority stays closed.
 
+D56 turns the six remaining requirements into an ordered D57--D62 closure plan. D57 freezes the
+production adapter; D58 allocation bounds, D59 production I/O/page-cache and D60 timing-rule work
+may proceed in parallel; D61 integrates the resource envelope and D23 scratch reconciliation.
+D62 alone can assess an authentic external reservation and terminal authorization. D56 itself is
+plan-only and leaves every execution and numeric-bound authority closed.
+
 D54R2 independently replicated the same plan after the concurrent D54R result appeared. Its
 bubblewrap network namespace exposed loopback only, and all 70 fresh-process receipts again passed
 CPU0, 512-MiB/384-MiB-high, zero-swap and structural-digest checks. The fixed64 size-64 maxima were
