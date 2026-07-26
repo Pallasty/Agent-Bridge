@@ -1,6 +1,19 @@
 # Research progress ledger
 
-Status date: 2026-07-25
+Status date: 2026-07-26
+
+## 2026-07-26 — FH-L8 five-route external-evidence handoff package
+
+- Materialized one sender/receiver handoff directory for all five contract-required routes, with a
+  route-specific request brief and deliberately incomplete registration template for each route.
+- Added a source-pinned checker binding the intake contract, acquisition plan, intake implementation
+  and bootstrap implementation. It verifies the exact route/file sets, workload, source pointers,
+  blank custody placeholders, receiver commands and explicit nonclaims.
+- The focused checker suite passes four positive/fail-closed cases. The package status is
+  `VERIFIED_FH_L8_EXTERNAL_EVIDENCE_HANDOFF_PACKAGE`, with zero real exports, zero admitted routes,
+  and cross-route/full-53/READY authority all false.
+- The next evidence gate remains external receipt of at least one authentic route export; this
+  package is a request and acceptance interface, not a substitute export.
 
 ## 2026-07-25 — FH-L8 D45--D49 fixed64 resource稳定性与归档闭环
 
@@ -2535,3 +2548,13 @@ repository search returned no candidate, and the native-fermion
 machine-readable article still states that study data are included in the main
 text. These observations are source-scoped rather than global absence proofs.
 All five routes remain `UNRESOLVED_EXTERNAL_EXPORT_REQUIRED`.
+
+## FH-L8 named public sources have a fail-closed currentness monitor
+
+The read-only monitor checks the two tracked arXiv versions, exact-identifier
+GitHub repository count and the native-fermion data-availability statement.
+Its first live run on 2026-07-26 returned `UNCHANGED`: dynamic-JW remains v1,
+the adjacent MMD/FSN paper remains v3, the exact-ID repository count remains
+zero and the native statement is unchanged. Network or parse failures produce
+the distinct status `CHECK_FAILED`; neither it nor `UNCHANGED` grants evidence
+admission or proves global source absence.

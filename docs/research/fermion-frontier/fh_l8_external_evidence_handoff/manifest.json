@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "package_id": "FH-L8-EXTERNAL-EVIDENCE-HANDOFF-V1",
+  "intake_contract_id": "FH-L8-EXTERNAL-EVIDENCE-INTAKE-V1",
+  "acquisition_plan_id": "FH-L8-EXTERNAL-SOURCE-ACQUISITION-PLAN-V1",
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "linear_size": 8,
+  "trotter_steps": 100,
+  "source_pins": {
+    "fh_l8_external_evidence_intake_contract.json": "31bc21b4d121ab5c9048cdef036723e9443e6232afed72ea0b1af1ec058866b2",
+    "fh_l8_external_source_acquisition_plan.json": "d6008bbbdfa03867386db153faeced69b06854e0c19f97ba956d76370974b4ae",
+    "fh_l8_external_evidence_intake.py": "d522e5d73605a1555d1983259b279ad572081979bdb2e2b1b8ef44dfe824b496",
+    "fh_l8_external_evidence_intake_bootstrap.py": "b567ca9e9014a9f0d98bbe2fb6d1618475a9edb1a95d4a365c0590947869a12b"
+  },
+  "routes": [
+    "native_fermions",
+    "dynamic_jw_local_grid_source_leading",
+    "dynamic_jw_local_grid_figure_candidate_fit",
+    "fsn_standard_figure_candidate_fit",
+    "fsn_ladder_figure_candidate_fit"
+  ],
+  "receiver_commands": {
+    "package_check": [
+      "python3",
+      "docs/research/fermion-frontier/fh_l8_external_evidence_handoff_checker.py"
+    ],
+    "bootstrap": [
+      "python3",
+      "docs/research/fermion-frontier/fh_l8_external_evidence_intake_bootstrap.py",
+      "--intake-root",
+      "/ABSOLUTE/INTAKE/ROOT",
+      "--select-unique-candidates",
+      "--emit-registry",
+      "/ABSOLUTE/INTAKE/ROOT/draft-registry.json"
+    ],
+    "intake": [
+      "python3",
+      "docs/research/fermion-frontier/fh_l8_external_evidence_intake_runner.py",
+      "--registry",
+      "/ABSOLUTE/INTAKE/ROOT/completed-registry.json",
+      "--intake-root",
+      "/ABSOLUTE/INTAKE/ROOT"
+    ]
+  },
+  "nonclaims": [
+    "No real route export is included.",
+    "No route is admitted by this handoff package.",
+    "No cross-route comparison or performance result is established.",
+    "No physical reference, full-53 execution authority, or READY status is established."
+  ]
+}

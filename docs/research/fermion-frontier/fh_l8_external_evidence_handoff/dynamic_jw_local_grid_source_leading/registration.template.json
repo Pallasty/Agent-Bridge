@@ -1,0 +1,13 @@
+{
+  "artifact_path": "exports/dynamic_jw_local_grid_source_leading.json",
+  "sha256": "",
+  "source_url": "",
+  "release_or_commit": "",
+  "evidence_class": "PRIMARY_EXTERNAL_RAW_EXPORT",
+  "provenance_attestation": "",
+  "compiler_identity": "",
+  "compiler_version": "",
+  "compiler_configuration_sha256": "",
+  "environment_lock_sha256": "",
+  "route": "dynamic_jw_local_grid_source_leading"
+}

@@ -1070,6 +1070,13 @@ and a new positive-qualification v2.
 
 ## FH-L8 external-evidence intake handoff
 
+The machine-checkable sender/receiver package is
+`fh_l8_external_evidence_handoff/`. It contains one request brief and one
+deliberately incomplete registration template for each of the five required
+routes. `fh_l8_external_evidence_handoff_checker.py` binds the package to the
+current intake contract, acquisition plan and receiver implementations; it
+does not admit a route.
+
 The bootstrap helper scans a custody directory without modifying its exports. An
 operator can select fixed files with `--select-route-file ROUTE:PATH`, or opt in
 to `--select-unique-candidates`, which selects only routes having exactly one
@@ -1084,6 +1091,11 @@ The public-source search was refreshed on 2026-07-26 in
 archives, exact-identifier repository search and the native-fermion
 machine-readable article still yielded no admissible five-route raw export.
 Manuscript TeX, embedded tables and PDF figures remain non-admissible.
+
+Run `python3 fh_l8_public_source_monitor.py` from this directory to recheck the
+named sources. Exit code `0` means the tracked signals are `UNCHANGED`, `2`
+means `REVIEW_REQUIRED`, and `3` means `CHECK_FAILED`. A transient source or DNS
+failure therefore cannot masquerade as a no-change result.
 
 ## Final deliverables
 
@@ -1126,11 +1138,15 @@ Manuscript TeX, embedded tables and PDF figures remain non-admissible.
   and the dynamic-JW primary-source evidence ledger,
   plus the FSN primary-source evidence ledger,
   and the native-fermion primary-source evidence ledger,
+  a source-pinned five-route sender/receiver handoff package and checker
+  (`fh_l8_external_evidence_handoff/`,
+  `fh_l8_external_evidence_handoff_checker.py`),
   an external-evidence intake bootstrap/runner/validator chain
   (`fh_l8_external_evidence_intake_bootstrap.py`,
   `fh_l8_external_evidence_intake_runner.py` 与
   `fh_l8_external_evidence_intake.py`),
   an L=2 dual-observable deterministic screening pilot, and unit tests
+  `test_fh_l8_external_evidence_handoff_checker.py` /
   `test_fh_l8_external_evidence_intake_bootstrap.py` /
   `test_fh_l8_external_evidence_intake.py` /
   `test_fh_l8_external_evidence_intake_runner.py` /
