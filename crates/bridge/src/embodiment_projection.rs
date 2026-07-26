@@ -9,6 +9,7 @@ use crate::semantic_event::{Affordance, SemanticEvent, SemanticObject, Verdict, 
 pub const EMBODIMENT_EVENT_SOURCE: &str = "embodiment";
 pub const EMBODIMENT_PROJECTION_SCHEMA_V0: &str = "agent_bridge.embodiment_projection.v0";
 pub const EMBODIMENT_SNAPSHOT_SCHEMA_V0: &str = "agent_bridge.embodiment_snapshot.v0";
+pub const EMBODIMENT_ACTION_LINEAGE_SCHEMA_V0: &str = "agent_bridge.embodiment_action_lineage.v0";
 
 /// Constructs a fact-only embodiment event. Callers supply a bounded payload
 /// and must persist it through the existing semantic-event spine themselves.
@@ -98,6 +99,177 @@ fn fact<'a>(facts: &'a Value, key: &str) -> Option<&'a Value> {
         .or_else(|| facts.get("facts").and_then(|nested| nested.get(key)))
 }
 
+fn action_receipt_intent_id<'a>(event: &SemanticEventRecord, facts: &'a Value) -> Option<&'a str> {
+    if event.source == EMBODIMENT_EVENT_SOURCE && event.action == "action_receipt" {
+        fact(facts, "intent_id").and_then(Value::as_str)
+    } else {
+        facts.get("embodiment_intent_id").and_then(Value::as_str)
+    }
+    .map(str::trim)
+    .filter(|id| !id.is_empty())
+}
+
+fn action_receipt_body_id<'a>(event: &SemanticEventRecord, facts: &'a Value) -> Option<&'a str> {
+    if event.source == EMBODIMENT_EVENT_SOURCE && event.action == "action_receipt" {
+        fact(facts, "body_id").and_then(Value::as_str)
+    } else {
+        facts
+            .pointer("/receipt/body_shadow/body_id")
+            .and_then(Value::as_str)
+    }
+    .map(str::trim)
+    .filter(|id| !id.is_empty())
+}
+
+/// Audits only explicit intent identifiers and whitelisted event metadata.
+/// Receipt payloads and evidence stay out of the projection.
+fn project_action_lineage(events: &[SemanticEventRecord], source_event_limit: usize) -> Value {
+    let mut intents = BTreeMap::<String, (i64, String)>::new();
+    for event in events
+        .iter()
+        .filter(|event| event.source == EMBODIMENT_EVENT_SOURCE && event.action == "intent_opened")
+    {
+        let Ok(facts) = serde_json::from_str::<Value>(&event.facts) else {
+            continue;
+        };
+        let Some(intent_id) = fact(&facts, "intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        let Some(body_id) = fact(&facts, "body_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        match intents.get_mut(intent_id) {
+            Some((ts, stored_body_id)) if event.ts < *ts => {
+                *ts = event.ts;
+                *stored_body_id = body_id.to_string();
+            }
+            None => {
+                intents.insert(intent_id.to_string(), (event.ts, body_id.to_string()));
+            }
+            _ => {}
+        }
+    }
+
+    let mut rows = Vec::new();
+    let mut matched = 0_u64;
+    let mut unmatched_in_window = 0_u64;
+    let mut out_of_order = 0_u64;
+    let mut verified = 0_u64;
+    let mut not_verified = 0_u64;
+    let mut unknown = 0_u64;
+    let mut explicit_body_matches = 0_u64;
+    let mut explicit_body_mismatches = 0_u64;
+    let mut body_not_recorded = 0_u64;
+
+    for event in events {
+        let Ok(facts) = serde_json::from_str::<Value>(&event.facts) else {
+            continue;
+        };
+        let Some(intent_id) = action_receipt_intent_id(event, &facts) else {
+            continue;
+        };
+        let lineage_status = match intents.get(intent_id) {
+            Some((intent_ts, _)) if *intent_ts <= event.ts => {
+                matched += 1;
+                "matched_prior_intent"
+            }
+            Some(_) => {
+                out_of_order += 1;
+                "receipt_precedes_intent"
+            }
+            None => {
+                unmatched_in_window += 1;
+                "no_prior_intent_in_window"
+            }
+        };
+        match event.verdict_status.as_str() {
+            "verified" => verified += 1,
+            "not_verified" => not_verified += 1,
+            _ => unknown += 1,
+        }
+        let receipt_body_id = action_receipt_body_id(event, &facts);
+        let body_binding_status = match (intents.get(intent_id), receipt_body_id) {
+            (Some((_, intent_body_id)), Some(receipt_body_id))
+                if intent_body_id == receipt_body_id =>
+            {
+                explicit_body_matches += 1;
+                "explicit_match"
+            }
+            (Some(_), Some(_)) => {
+                explicit_body_mismatches += 1;
+                "explicit_mismatch"
+            }
+            _ => {
+                body_not_recorded += 1;
+                "not_recorded"
+            }
+        };
+        if rows.len() < 100 {
+            rows.push(json!({
+                "ts": event.ts,
+                "source": event.source,
+                "action": event.action,
+                "target": event.target,
+                "intent_id": intent_id,
+                "lineage_status": lineage_status,
+                "verdict": event.verdict_status,
+                "body_binding_status": body_binding_status,
+            }));
+        }
+    }
+    rows.sort_by_key(|row| row["ts"].as_i64().unwrap_or_default());
+    let receipt_count = matched + unmatched_in_window + out_of_order;
+    let source_truncated_possible = events.len() >= source_event_limit;
+
+    json!({
+        "schema": EMBODIMENT_ACTION_LINEAGE_SCHEMA_V0,
+        "mode": "read_only_audit",
+        "source_event_count": events.len(),
+        "source_event_limit": source_event_limit,
+        "source_truncated_possible": source_truncated_possible,
+        "global_completeness_claimed": false,
+        "all_actions_traceable_claimed": false,
+        "verified_real_world_outcome_claimed": false,
+        "counts": {
+            "intents": intents.len(),
+            "intent_linked_receipts": receipt_count,
+            "matched_prior_intent": matched,
+            "unmatched_in_window": unmatched_in_window,
+            "receipt_precedes_intent": out_of_order,
+            "verdict": {
+                "verified": verified,
+                "not_verified": not_verified,
+                "unknown": unknown,
+            },
+            "body_binding": {
+                "explicit_match": explicit_body_matches,
+                "explicit_mismatch": explicit_body_mismatches,
+                "not_recorded": body_not_recorded,
+            },
+        },
+        "traceability_within_window": if receipt_count > 0 {
+            Some(matched as f64 / receipt_count as f64)
+        } else {
+            None
+        },
+        "rows": rows,
+        "rows_truncated": receipt_count as usize > 100,
+        "executes_actions": false,
+        "resumes_actions": false,
+        "changes_authority": false,
+        "policy_change_allowed": false,
+        "reason": "lineage is bounded to explicit identifiers in the selected event window; missing identifiers, bodies, evidence, and events are never inferred",
+    })
+}
+
 /// Reconstruct only durable intent candidates from the append-only event log.
 /// Unknown, failed, or restart-interrupted outcomes remain confirmation-gated.
 fn project_open_intents(events: &[SemanticEventRecord]) -> Vec<Value> {
@@ -159,7 +331,11 @@ fn project_open_intents(events: &[SemanticEventRecord]) -> Vec<Value> {
 
 /// Add the current local body observation to the fact projection without
 /// inferring intents or turning a restart into an execution opportunity.
-pub fn project_embodiment_snapshot(events: &[SemanticEventRecord], body_status: &Value) -> Value {
+pub fn project_embodiment_snapshot(
+    events: &[SemanticEventRecord],
+    body_status: &Value,
+    source_event_limit: usize,
+) -> Value {
     let mut projection = project_embodiment_events(events);
     let status = body_status
         .get("status")
@@ -197,6 +373,7 @@ pub fn project_embodiment_snapshot(events: &[SemanticEventRecord], body_status: 
         "resumes_actions": false,
         "candidate_count": open_intents.len(),
     });
+    projection["action_lineage"] = project_action_lineage(events, source_event_limit);
     projection
 }
 
@@ -243,6 +420,7 @@ mod tests {
                 "status": "ok",
                 "sample": { "observed_at_unix_ms": 1234 }
             }),
+            500,
         );
         assert_eq!(snapshot["schema"], EMBODIMENT_SNAPSHOT_SCHEMA_V0);
         assert_eq!(snapshot["body"]["body_id"], "body-mac");
@@ -269,7 +447,7 @@ mod tests {
                 r#"{"body_id":"body-mac","intent_id":"i-1","resumes_action":false}"#,
             ),
         ];
-        let snapshot = project_embodiment_snapshot(&events, &json!({"status":"unknown"}));
+        let snapshot = project_embodiment_snapshot(&events, &json!({"status":"unknown"}), 500);
         assert_eq!(snapshot["open_intents"][0]["intent_id"], "i-1");
         assert_eq!(snapshot["open_intents"][0]["state"], "needs_confirmation");
         assert_eq!(snapshot["open_intents"][0]["resumes_action"], false);
@@ -290,5 +468,86 @@ mod tests {
             facts: facts.into(),
             descriptor: None,
         }
+    }
+
+    #[test]
+    fn action_lineage_joins_native_receipts_without_exposing_payloads() {
+        let events = vec![
+            event_with(
+                10,
+                "intent_opened",
+                "unknown",
+                r#"{"body_id":"body-mac","intent_id":"i-1","action_kind":"terminal_write"}"#,
+            ),
+            SemanticEventRecord {
+                ts: 20,
+                actor: "mcp".into(),
+                source: "terminal".into(),
+                action: "send_keys".into(),
+                target: Some("pane-1".into()),
+                verdict_status: "verified".into(),
+                verdict_method: "test".into(),
+                evidence: Some(r#"{"secret":"must-not-project"}"#.into()),
+                facts: r#"{"embodiment_intent_id":"i-1","receipt":{"keys":"secret","body_shadow":{"body_id":"body-mac"}}}"#.into(),
+                descriptor: None,
+            },
+        ];
+        let audit = project_action_lineage(&events, 500);
+        assert_eq!(audit["counts"]["matched_prior_intent"], 1);
+        assert_eq!(audit["counts"]["unmatched_in_window"], 0);
+        assert_eq!(audit["counts"]["verdict"]["verified"], 1);
+        assert_eq!(audit["counts"]["body_binding"]["explicit_match"], 1);
+        assert_eq!(audit["traceability_within_window"], 1.0);
+        assert_eq!(audit["global_completeness_claimed"], false);
+        assert_eq!(audit["verified_real_world_outcome_claimed"], false);
+        assert!(audit["rows"][0].get("receipt").is_none());
+        assert!(audit["rows"][0].get("evidence").is_none());
+        assert!(!audit.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn action_lineage_fails_closed_for_unmatched_order_and_truncation() {
+        let events = vec![
+            SemanticEventRecord {
+                ts: 5,
+                actor: "mcp".into(),
+                source: "browser".into(),
+                action: "navigate".into(),
+                target: None,
+                verdict_status: "unknown".into(),
+                verdict_method: "test".into(),
+                evidence: None,
+                facts: r#"{"embodiment_intent_id":"future-intent","receipt":{}}"#.into(),
+                descriptor: None,
+            },
+            event_with(
+                10,
+                "intent_opened",
+                "unknown",
+                r#"{"body_id":"body-mac","intent_id":"future-intent"}"#,
+            ),
+            SemanticEventRecord {
+                ts: 15,
+                actor: "mcp".into(),
+                source: "terminal".into(),
+                action: "send_keys".into(),
+                target: None,
+                verdict_status: "not_verified".into(),
+                verdict_method: "test".into(),
+                evidence: None,
+                facts: r#"{"embodiment_intent_id":"missing-intent","receipt":{}}"#.into(),
+                descriptor: None,
+            },
+        ];
+        let audit = project_action_lineage(&events, events.len());
+        assert_eq!(audit["counts"]["receipt_precedes_intent"], 1);
+        assert_eq!(audit["counts"]["unmatched_in_window"], 1);
+        assert_eq!(audit["counts"]["verdict"]["unknown"], 1);
+        assert_eq!(audit["counts"]["verdict"]["not_verified"], 1);
+        assert_eq!(audit["counts"]["body_binding"]["not_recorded"], 2);
+        assert_eq!(audit["traceability_within_window"], 0.0);
+        assert_eq!(audit["source_truncated_possible"], true);
+        assert_eq!(audit["all_actions_traceable_claimed"], false);
+        assert_eq!(audit["policy_change_allowed"], false);
     }
 }

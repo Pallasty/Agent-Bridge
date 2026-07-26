@@ -24425,6 +24425,7 @@ impl McpTool for EmbodimentSnapshotTool {
         let mut snapshot = crate::embodiment_projection::project_embodiment_snapshot(
             &events,
             &crate::body_telemetry::body_status_snapshot(),
+            500,
         );
         let leases = self.hub.embodiment_leases.lock().await;
         let body_id = BodyId::from_raw(LOCAL_BODY_ID);
