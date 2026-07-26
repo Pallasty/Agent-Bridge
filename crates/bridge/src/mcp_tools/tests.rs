@@ -10339,8 +10339,8 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         .expect("present_voice schema");
     assert_eq!(
         voice_schema.input_schema["properties"]["backend"]["enum"],
-        json!(["tone", "kokoro", "piper", "sherpa", "say"]),
-        "all speech backends, including Sherpa and macOS say, must be explicit"
+        json!(["tone", "kokoro", "piper", "sherpa", "say", "qwen3"]),
+        "all speech backends, including Sherpa, macOS say, and explicit Qwen3 must be visible"
     );
     assert_eq!(
         voice_schema.input_schema["properties"]["capture_channel"]["enum"],

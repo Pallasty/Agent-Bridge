@@ -547,6 +547,35 @@ def test_synth_file_selects_zh_stt_for_cjk():
         _restore(saved)
 
 
+def test_qwen3_requires_an_explicit_isolated_runtime(monkeypatch):
+    monkeypatch.delenv("AB_QWEN3_TTS_PYTHON", raising=False)
+    wav, info = ae.synth_qwen3("你好", "Serena", 1.0)
+    assert wav is None
+    assert "AB_QWEN3_TTS_PYTHON" in info["detail"]
+
+
+def test_synth_file_qwen3_records_backend_and_expression_provenance():
+    saved = _patch(
+        synth_qwen3=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {
+            "ok": True, "backend": "qwen3", "voice": "Serena", "sample_rate": 24000,
+            "wpm": 175, "model": "Qwen/test", "device": "mps", "dtype": "float16",
+            "instruct_applied": True,
+        }),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000, "frames": 48000},
+        transcribe_synth_file=lambda w, model=None, language="en": ("本地语音", None),
+    )
+    try:
+        out = ae.run_speech_synth_file("本地语音", "Serena", 1.0, synth_backend="qwen3",
+                                       qwen_instruct="温暖、平静")
+        assert out["synth_backend"] == "qwen3"
+        assert out["qwen_model"] == "Qwen/test"
+        assert out["qwen_device"] == "mps"
+        assert out["qwen_instruct_applied"] is True
+        assert out["status"] == "emitted", out
+    finally:
+        _restore(saved)
+
+
 def test_whisper_timeout_is_bounded_and_degrades():
     original_exists = ae.os.path.exists
     original_run = ae.subprocess.run
