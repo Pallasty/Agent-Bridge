@@ -44,7 +44,7 @@ impl McpTool for PresentVoiceTool {
         ToolSchema {
             name: self.name().into(),
             description: "Output-expression lane, AUDIO embodiment. backend=tone (default) emits a known \
-                 tone; kokoro/piper use offline model TTS; say uses macOS native speech synthesis. \
+                 tone; kokoro/piper use offline model TTS; say uses macOS native speech synthesis; qwen3 is an explicit, default-off external Qwen3-TTS CustomVoice adapter. \
                  Linux tone/model speech is played to an output sink and read back off the system bus (PipeWire \
                  sink .monitor loopback) to prove it reached the bus: tone uses a spectral-peak falsifier \
                  (Goertzel vs local floor); speech uses an energy-envelope cross-correlation falsifier (the \
@@ -54,13 +54,13 @@ impl McpTool for PresentVoiceTool {
                  Returns status (emitted|silent|mismatch|no_capture|error) plus an HONEST verified_to boundary. \
                  Writes a verified-outcome sidecar that flows into present_outcomes. capture_channel is \
                  sink_monitor, mic, or synth_file. Linux bus verification requires PipeWire + ffmpeg/paplay; \
-                 kokoro/piper need ab-tts-synth and their model assets; say needs macOS /usr/bin/say and Whisper \
+                 kokoro/piper need ab-tts-synth and their model assets; qwen3 needs an explicit isolated Python runtime and official model assets; say needs macOS /usr/bin/say and Whisper \
                  for synth_file verification. Opt-in (Niche)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "say"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; say = macOS native TTS. say should use capture_channel=synth_file and verifies only the synthesized file via STT."},
+                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "say", "qwen3"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; say = macOS native TTS; qwen3 = explicit external Qwen3-TTS CustomVoice. Speech on macOS verifies only the synthesized file via STT."},
                     "text": {"type": "string", "description": "Speech text; required for kokoro, piper, or say."},
                     "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Kokoro names use af_*/bf_*; macOS say accepts installed system voice names such as Samantha or Tingting."},
                     "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0, "description": "Speech speed."},
@@ -71,6 +71,9 @@ impl McpTool for PresentVoiceTool {
                     "capture_channel": {"type": "string", "enum": ["sink_monitor", "mic", "synth_file"], "default": "sink_monitor", "description": "Readback channel: sink_monitor = PipeWire bus loopback; mic = acoustic input; synth_file = STT over the synthesized file (macOS, does not verify playback)."},
                     "intent": {"type": "string", "description": "What this emission is the outcome of (recorded in the outcome sidecar; does not affect playback)."},
                     "synth_bin": {"type": "string", "description": "backend=kokoro/piper: explicit ab-tts-synth path (else env AB_TTS_SYNTH_BIN)."},
+                    "qwen_instruct": {"type": "string", "description": "backend=qwen3: natural-language expression instruction, for example a calm, warm Mandarin delivery."},
+                    "qwen_python": {"type": "string", "description": "backend=qwen3: explicit isolated Python 3.12 executable containing qwen-tts (else AB_QWEN3_TTS_PYTHON)."},
+                    "qwen_model": {"type": "string", "description": "backend=qwen3: Qwen model id or local model directory; defaults to Qwen3-TTS 0.6B CustomVoice."},
                     "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro/piper: ALSO transcribe the bus capture (whisper.cpp). synth_file already uses STT as its primary falsifier."},
                     "stt_bin": {"type": "string", "description": "verify_intelligibility: whisper.cpp CLI path (else env AB_TTS_STT_BIN)."},
                     "stt_model": {"type": "string", "description": "verify_intelligibility: whisper ggml model path (else env AB_TTS_STT_MODEL)."},
@@ -171,6 +174,9 @@ impl McpTool for PresentVoiceTool {
                 .arg("--capture-channel")
                 .arg(&capture_channel);
             push_optional_str_arg(&mut cmd, &args, "synth_bin", "--synth-bin");
+            push_optional_str_arg(&mut cmd, &args, "qwen_instruct", "--qwen-instruct");
+            push_optional_str_arg(&mut cmd, &args, "qwen_python", "--qwen-python");
+            push_optional_str_arg(&mut cmd, &args, "qwen_model", "--qwen-model");
             if verify_intelligibility {
                 cmd.arg("--check-intelligibility");
                 push_optional_str_arg(&mut cmd, &args, "stt_bin", "--stt-bin");

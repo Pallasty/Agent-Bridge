@@ -10294,8 +10294,8 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         .expect("present_voice schema");
     assert_eq!(
         voice_schema.input_schema["properties"]["backend"]["enum"],
-        json!(["tone", "kokoro", "piper", "say"]),
-        "macOS native say must be an explicit backend, not a hidden kokoro alias"
+        json!(["tone", "kokoro", "piper", "say", "qwen3"]),
+        "macOS native say and explicit Qwen3 must not be hidden backend aliases"
     );
     assert_eq!(
         voice_schema.input_schema["properties"]["capture_channel"]["enum"],
