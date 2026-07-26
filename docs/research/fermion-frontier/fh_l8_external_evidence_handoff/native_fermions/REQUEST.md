@@ -15,4 +15,3 @@ immutable release or commit, compiler identity/version, configuration and
 environment-lock SHA-256 values, raw artifact SHA-256, HTTPS source URL, and a
 custody attestation. Gate diagrams, article data, handwritten exports and
 figure/prose reconstructions are insufficient.
-

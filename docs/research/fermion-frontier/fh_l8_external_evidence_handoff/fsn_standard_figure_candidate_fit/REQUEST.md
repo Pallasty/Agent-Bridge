@@ -13,4 +13,3 @@ immutable release or commit, compiler identity/version, configuration and
 environment-lock SHA-256 values, raw artifact SHA-256, HTTPS source URL, and a
 custody attestation. A generic library function, handwritten export or
 figure/prose reconstruction is insufficient.
-

@@ -43,4 +43,3 @@ python3 docs/research/fermion-frontier/fh_l8_external_evidence_intake_runner.py 
 An incomplete or rejected route is not evidence. The package itself supplies no
 real export, compiler result, performance result, cross-route comparison,
 physical reference, full-53 authority, or `READY_FOR_BENCHMARK` status.
-

@@ -15,4 +15,3 @@ configuration and environment-lock SHA-256 values, raw artifact SHA-256, HTTPS
 source URL, and a custody attestation. A generic implementation, handwritten
 export, graph reconstruction or reuse of the standard-FSN artifact is
 insufficient.
-
