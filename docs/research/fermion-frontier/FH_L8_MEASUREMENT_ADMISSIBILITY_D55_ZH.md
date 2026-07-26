@@ -22,6 +22,15 @@ D54R 与 D54R2 的两套完整 70 样本回执可采为同环境回归基线、f
 - timing protocol 没有预承诺且经论证的裕量规则。
 - D51 的 359,759,114-byte scratch 缺口和外部资源预留仍未关闭。
 
+两次复放的 fixed64 size=64 结构摘要完全一致，但主机最大观测并不相同：
+
+- cgroup peak 相差 3,231,744 bytes，D54R2 相对 D54R 高 69,332 ppm（约 6.93%）；
+- wall time 相差 85,298,967 ns，D54R2 相对 D54R 高 26,122 ppm（约 2.61%）；
+- 两次网络隔离机制也不相同。
+
+因此该 spread 只支持“结果结构可复现、成本观测有环境波动”，不能反向充当
+precommitted margin rule。
+
 ## 下一门
 
 D56 先设计 production streaming adapter 与资源界闭合方案：固定可执行 adapter，

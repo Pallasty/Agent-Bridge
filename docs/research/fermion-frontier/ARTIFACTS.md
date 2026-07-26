@@ -381,7 +381,7 @@ All copied JSON files are research-only outputs. They contain no credentials.
 ## FH-L8 D55 measurement admissibility decision
 
 - `fh_l8_measurement_admissibility_d55_contract.json`: source-pinned, target-by-target
-  admissibility levels, admitted/forbidden uses and six closure requirements.
+  admissibility levels, admitted/forbidden uses, cross-replay spread and six closure requirements.
 - `fh_l8_measurement_admissibility_d55.py` and
   `fh_l8_measurement_admissibility_d55_result.json`: verify upstream coverage, both D54R replay
   boundaries and the resource-incomplete NO-GO result.

@@ -8,7 +8,10 @@
     "fh_l8_full53_adapter_static_cost_d52_contract.json": "08eabdf4826576bc1dbb410d384a5dd370daca43170416999da2b010ff3bafa4",
     "fh_l8_full53_adapter_static_cost_d52_result.json": "977fb3d3551d6152359a9ace8ca984b0bdcf973bcb8f0e9277adb3e364209153",
     "fh_l8_object_cost_measurement_d53_contract.json": "8d2d9532035a4edf968036a4260896effd803a85f54d5e2f795b997d50b9d5cb",
+    "fh_l8_object_cost_measurement_d54r_authorization.json": "a0b08eb7093261240c46b0cba459f72f7310963089e226e4e409e19884ffdab1",
     "fh_l8_object_cost_measurement_d54r_result.json": "03ba409a9476b76c19af5c2b21ad77f3008c2ad92d7e8a6d7c99c10d5ba4ae7f",
+    "fh_l8_object_cost_measurement_d54r_result_checker.py": "9d3cb06849754cdc64070257d51754da5324bc4665cdc175251724a756bdb313",
+    "fh_l8_object_cost_measurement_d54r2_authorization.json": "53d72808345930d1d9043f26176fa888588c0de5281f77c0ded5336b5d85b1f1",
     "fh_l8_object_cost_measurement_d54r2_result.json": "3da17c6ef982acbb014cb156b0497e68c62d1385aa18f95b14783edd8140ca9e",
     "fh_l8_object_cost_measurement_d54r2_result_checker.py": "498ba1889b419ffa76855b7391d4f6e469a740f057ddc6c5ea01ef3934c2d5ea"
   },
@@ -71,6 +74,18 @@
     "worst_case_host_time_claim",
     "external_resource_reservation"
   ],
+  "cross_replication_assessment": {
+    "fixed64_structural_digest_exact_across_replays": true,
+    "sample_plan_shape_exact_across_replays": true,
+    "scientific_kernel_call_count_exact_across_replays": true,
+    "network_isolation_mechanism_identical": false,
+    "cgroup_peak_max_difference_bytes": 3231744,
+    "cgroup_peak_max_increase_ppm_relative_to_d54r": 69332,
+    "wall_elapsed_max_difference_ns": 85298967,
+    "wall_elapsed_max_increase_ppm_relative_to_d54r": 26122,
+    "observed_spread_is_not_a_margin_rule": true,
+    "observed_maximum_is_not_an_upper_bound": true
+  },
   "closure_requirements": [
     "implement_and_source_pin_the_production_streaming_adapter",
     "supply_independent_object_size_or_allocator_bounds_for_live_allocation_classes",
