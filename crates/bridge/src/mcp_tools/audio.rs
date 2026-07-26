@@ -232,6 +232,25 @@ impl McpTool for PresentVoiceTool {
             .get("verify_status")
             .and_then(|v| v.as_str())
             .unwrap_or("error");
+        // The platform adapter is authoritative for the method/backend/channel it
+        // actually used. On macOS a requested offline speech backend intentionally
+        // routes to native `say` + STT over the synthesized file; labelling that as
+        // PipeWire bus readback would overstate the verified boundary.
+        let verify_method = res
+            .get("verify_method")
+            .and_then(|v| v.as_str())
+            .unwrap_or("audio_bus_readback")
+            .to_string();
+        let effective_backend = res
+            .get("synth_backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&backend)
+            .to_string();
+        let effective_capture_channel = res
+            .get("capture_channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&capture_channel)
+            .to_string();
 
         // Provenance: the present_replay chain_head over the lane's artifacts NOW
         // (same idiom present()/present_dashboard use). build_outcome_memory now
@@ -259,19 +278,20 @@ impl McpTool for PresentVoiceTool {
         };
         // Faithful log regardless of outcome (the gate decides eligibility on the
         // read side). verify_status=rendered_ok ONLY when the played audio was
-        // confirmed on the bus (tone: spectral peak; speech: envelope correlation).
+        // confirmed at the adapter-declared boundary. On Linux that is normally the
+        // bus; on macOS synth_file_stt proves only the synthesized file.
         // Mode-specific metrics are present for the active backend, null otherwise.
         let outcome_record = json!({
             "artifact_id": id,
             "intent": intent,
             "action_tool": "present_voice",
             "kind": "voice",
-            "backend": backend,
+            "backend": effective_backend,
             "verify_status": verify_status,
             "embody_status": crate::present::EmbodyStatus::NotApplicable.as_str(),
-            "verify_method": "audio_bus_readback",
+            "verify_method": verify_method,
             "audio_status": status,
-            "capture_channel": capture_channel,
+            "capture_channel": effective_capture_channel,
             "verified_to": res.get("verified_to"),
             "not_verified": res.get("not_verified"),
             // speech-mode fields
@@ -301,7 +321,7 @@ impl McpTool for PresentVoiceTool {
         if let Some(obj) = result.as_object_mut() {
             obj.insert("id".to_string(), json!(id));
             obj.insert("action_tool".to_string(), json!("present_voice"));
-            obj.insert("verify_method".to_string(), json!("audio_bus_readback"));
+            obj.insert("verify_method".to_string(), json!(verify_method));
             obj.insert("chain_head".to_string(), json!(chain_head));
             obj.insert(
                 "outcome_sidecar".to_string(),

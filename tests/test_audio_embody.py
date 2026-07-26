@@ -508,6 +508,7 @@ def test_synth_file_selects_zh_stt_for_cjk():
         out = ae.run_speech_synth_file("本地语音", "Tingting", 1.0)
         assert seen["language"] == "zh"
         assert out["stt_language"] == "zh"
+        assert out["verify_method"] == "synth_file_stt"
         assert out["status"] == "emitted", out
     finally:
         _restore(saved)

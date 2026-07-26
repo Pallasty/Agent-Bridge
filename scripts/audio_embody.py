@@ -863,6 +863,7 @@ def run_speech_synth_file(text, voice, speed):
     out = {
         "mode": "speech", "text": text, "voice": voice, "speed": speed,
         "synth_backend": "say", "capture_channel": "synth_file",
+        "verify_method": "synth_file_stt",
         # claim nothing until the channel confirms it; not_verified already names the
         # channel so EARLY-RETURN failures stay honest (see honest_attestation):
         "verified_to": None,
