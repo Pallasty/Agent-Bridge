@@ -16,10 +16,10 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 RUNNER = HERE / "fh_l8_object_cost_measurement_d54_runner.py"
-AUTH = HERE / "fh_l8_object_cost_measurement_d54r_remediation_authorization.json"
+AUTH = HERE / "fh_l8_object_cost_measurement_d54r_v3_authorization.json"
 D53 = HERE / "fh_l8_object_cost_measurement_d53_contract.json"
 ALLOWED_PARENT = Path("/Data/CascadeProjects/.ab-experiments")
-ROOT = ALLOWED_PARENT / "fh-l8-d54-object-cost-v2"
+ROOT = ALLOWED_PARENT / "fh-l8-d54-object-cost-v3"
 MAX_CAPTURE = 1_048_576
 TIMEOUT_SECONDS = 180
 
@@ -223,8 +223,7 @@ def launch() -> dict[str, Any]:
         unit = f"ab-fh-l8-d54-{index:02d}-{os.getpid()}"
         command = [
             "/usr/bin/systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe",
-            f"--unit={unit}", "--service-type=exec",
-            "--property=PrivateNetwork=yes", "--property=AllowedCPUs=0",
+            f"--unit={unit}", "--service-type=exec", "--property=AllowedCPUs=0",
             "--property=MemoryAccounting=yes", "--property=MemoryMax=536870912",
             "--property=MemoryHigh=402653184", "--property=MemorySwapMax=0",
             "--property=OOMPolicy=stop", "--property=TasksMax=16",
