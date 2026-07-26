@@ -183,16 +183,28 @@ def main() -> None:
         type=Path,
         default=HERE / "evidence_manifest_source_snapshot.json",
     )
+    parser.add_argument(
+        "--next-actions-only",
+        action="store_true",
+        help="emit only next_actions (one action per line)",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     result = evaluate_bridge(args.registry, args.intake_root, args.evidence_manifest)
-    if args.output is not None:
+    if args.output is not None and not args.next_actions_only:
         args.output.write_text(
             json.dumps(result, indent=2, sort_keys=True),
             encoding="utf-8",
         )
-    print(json.dumps(result, indent=2, sort_keys=True))
+    if args.next_actions_only:
+        for action in result["next_actions"]:
+            print(
+                f'[{action["priority"]}] {action["area"]:>10} {action["route"]}: {action["next_action"]} '
+                f'({action["status"]})'
+            )
+    else:
+        print(json.dumps(result, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
