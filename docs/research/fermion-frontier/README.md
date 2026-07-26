@@ -189,6 +189,11 @@ fixed64 prefixes, fourteen metrics, repeated fresh-process samples, CPU0 and 512
 isolation. It executes no measurement itself. `tracemalloc`, RSS/cgroup peaks and timing samples
 remain observations until independent allocator and precommitted timing-margin bounds are supplied.
 
+D54 now freezes a one-process/one-sample runner and separately authorizes the exact 70-sample D53
+plan: 42 synthetic and 28 fixed64 processes under CPU0, 512-MiB/384-MiB-high, zero-swap and
+network-closed isolation. The authorization remains unused: no scratch, sample, object measurement,
+scientific call or packed-q3 read exists. Full-53 and extrapolation authority remain closed.
+
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
 3,110,572,064-byte scratch design, 359,759,114 bytes above D23. It also fixes integer work counts,

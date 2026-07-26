@@ -331,6 +331,21 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `test_fh_l8_object_cost_measurement_d53.py`: authority, metric and aggregation regressions.
 - D53 implements no runner and performs no object measurement, packed-q3 read or scientific action.
 
+## FH-L8 D54 instrumented runner and bounded authorization
+
+- `fh_l8_object_cost_measurement_d54_runner.py`: one-process/one-sample, authorization-gated
+  synthetic/fixed64 runner; frozen before authority.
+- `test_fh_l8_object_cost_measurement_d54_runner.py`: exact 70-sample plan, source-pin/authority and
+  alias-aware sizing tests without scientific execution.
+- `fh_l8_object_cost_measurement_d54_authorization.json`: exact runner/D53 pins, sample/call caps,
+  isolation, receipt requirements and zero packed-q3/full-53 boundary.
+- `fh_l8_object_cost_measurement_d54_authorization_checker.py`,
+  `fh_l8_object_cost_measurement_d54_authorization_result.json` and focused tests: verify the
+  authorization is exact, bounded and unused.
+- `FH_L8_OBJECT_COST_MEASUREMENT_D54_ZH.md`: chronology, scope and nonclaims.
+- D54 creates no scratch and consumes no sample. Measurement authority is limited to the future
+  fixed plan; numeric peak/runtime and full-53 claims remain false.
+
 ## Claude source session
 
 - Session:
