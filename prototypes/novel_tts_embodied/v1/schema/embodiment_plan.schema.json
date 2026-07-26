@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://example.org/ab/novel_tts_embodied/embodiment_plan.schema.json",
+  "title": "NovelTtsEmbodimentPlan",
+  "type": "object",
+  "required": ["task_id", "order", "segment_id", "tool", "priority", "retry_policy", "tool_args", "segment_status"],
+  "properties": {
+    "task_id": { "type": "string" },
+    "order": { "type": "integer", "minimum": 1 },
+    "segment_id": { "type": "string", "minLength": 1 },
+    "tool": { "const": "present_voice" },
+    "priority": { "type": "string", "enum": ["low", "normal", "high", "critical"] },
+    "retry_policy": {
+      "type": "object",
+      "required": ["retry_limit", "cooldown_ms", "backoff_ms"],
+      "properties": {
+        "retry_limit": { "type": "integer", "minimum": 0 },
+        "cooldown_ms": { "type": "integer", "minimum": 0 },
+        "backoff_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "tool_args": {
+      "type": "object",
+      "required": ["backend", "text", "voice", "speed", "pause_ms", "gain_db", "pitch_shift", "output_file", "segment_hash", "estimated_duration_sec"],
+      "properties": {
+        "backend": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "voice": { "type": "string", "minLength": 1 },
+        "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0 },
+        "pause_ms": { "type": "number", "minimum": 0, "maximum": 3000 },
+        "gain_db": { "type": "number", "minimum": -6, "maximum": 6 },
+        "pitch_shift": { "type": "number", "minimum": -6, "maximum": 6 },
+        "output_file": { "type": "string", "minLength": 1 },
+        "segment_hash": { "type": "string", "minLength": 1 },
+        "estimated_duration_sec": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "segment_status": { "type": "string", "enum": ["ready", "needs_review", "failed"] }
+  },
+  "additionalProperties": false
+}
