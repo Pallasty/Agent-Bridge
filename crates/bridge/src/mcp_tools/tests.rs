@@ -14996,6 +14996,19 @@ fn body_scheduling_report_pairs_compact_events_without_causal_claims() {
     );
     assert_eq!(report["evaluation"]["causal_quality_evaluable"], false);
     assert_eq!(report["evaluation"]["policy_change_allowed"], false);
+    assert_eq!(report["calibration"]["minimum_paired_observations"], 5);
+    assert_eq!(report["calibration"]["minimum_pair_gate_met"], false);
+    assert_eq!(
+        report["calibration"]["readiness_status"],
+        "insufficient_paired_observations"
+    );
+    assert_eq!(report["calibration"]["causal_quality_evaluable"], false);
+    assert_eq!(report["calibration"]["policy_change_allowed"], false);
+    assert!(report["calibration"]["coverage"]["pressure"]["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "critical"));
     assert_eq!(report["rows"][0]["runtime_id"], "kilo");
     assert!(report["rows"][0].get("session_id").is_none());
     assert!(report["rows"][0].get("sample").is_none());
@@ -15030,6 +15043,76 @@ fn body_scheduling_report_surfaces_safety_invariant_violations() {
     );
     assert_eq!(report["source_truncated_possible"], true);
     assert!(report.get("rows").is_none());
+    assert_eq!(
+        report["calibration"]["readiness_status"],
+        "blocked_by_safety_invariant_violation"
+    );
+}
+
+#[test]
+fn body_scheduling_report_marks_baseline_pair_gate_without_claiming_quality() {
+    let mut events = Vec::new();
+    for (index, (pressure, workload, recommendation)) in [
+        ("nominal", "heavy", "start_as_requested"),
+        ("elevated", "sustained", "prefer_single_heavy_task"),
+        ("high", "remote_heavy", "prefer_remote_execution"),
+        (
+            "critical",
+            "heavy",
+            "request_operator_review_before_heavy_work",
+        ),
+        ("nominal", "sustained", "start_as_requested"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let span_id = format!("span-{index}");
+        events.push(body_event(
+            "scheduling_advice_observed",
+            &span_id,
+            json!({
+                "span_id": span_id,
+                "runtime_id": "kilo",
+                "advice": {
+                    "pressure": pressure,
+                    "workload_class": workload,
+                    "recommendation": recommendation,
+                    "blocked": false,
+                    "execution_changed": false,
+                    "changes_routing": false,
+                    "changes_parallelism": false
+                }
+            }),
+        ));
+        events.push(body_event(
+            "task_span_closed",
+            &format!("span-{index}"),
+            json!({
+                "span_id": format!("span-{index}"),
+                "state": "closed",
+                "before_pressure": pressure,
+                "after_pressure": pressure
+            }),
+        ));
+    }
+
+    let report = body_scheduling_report_from_events(&events, 600, 500, false);
+    assert_eq!(report["counts"]["paired"], 5);
+    assert_eq!(report["calibration"]["minimum_pair_gate_met"], true);
+    assert_eq!(
+        report["calibration"]["readiness_status"],
+        "baseline_pair_and_coverage_gates_met"
+    );
+    assert_eq!(
+        report["calibration"]["coverage"]["pressure"]["complete"],
+        true
+    );
+    assert_eq!(
+        report["calibration"]["coverage"]["workload_class"]["complete"],
+        true
+    );
+    assert_eq!(report["calibration"]["causal_quality_evaluable"], false);
+    assert_eq!(report["calibration"]["policy_change_allowed"], false);
 }
 
 #[test]

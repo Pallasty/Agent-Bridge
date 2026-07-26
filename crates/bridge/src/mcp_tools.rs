@@ -24885,6 +24885,25 @@ fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
     (denominator > 0).then(|| numerator as f64 / denominator as f64)
 }
 
+const BODY_SCHEDULING_MIN_PAIRED_OBSERVATIONS: u64 = 5;
+const BODY_SCHEDULING_TARGET_PRESSURES: &[&str] = &["nominal", "elevated", "high", "critical"];
+const BODY_SCHEDULING_TARGET_WORKLOADS: &[&str] = &["heavy", "sustained", "remote_heavy"];
+
+fn calibration_coverage(observed: &BTreeMap<String, u64>, target: &[&str]) -> Value {
+    let observed_labels = observed.keys().cloned().collect::<Vec<_>>();
+    let missing = target
+        .iter()
+        .filter(|label| !observed.contains_key(**label))
+        .map(|label| (*label).to_string())
+        .collect::<Vec<_>>();
+    json!({
+        "observed": observed_labels,
+        "target": target,
+        "missing": missing,
+        "complete": missing.is_empty(),
+    })
+}
+
 fn body_scheduling_report_from_events(
     events: &[ab_store::SemanticEventRecord],
     window_secs: i64,
@@ -25056,10 +25075,24 @@ fn body_scheduling_report_from_events(
     let source_truncated_possible = events.len() >= source_limit;
     let status = if safety_violation_count > 0 {
         "safety_invariant_violation"
-    } else if paired_count < 5 {
+    } else if paired_count < BODY_SCHEDULING_MIN_PAIRED_OBSERVATIONS {
         "insufficient_paired_observations"
     } else {
         "observational_consistency_only"
+    };
+    let pressure_coverage =
+        calibration_coverage(&pressure_counts, BODY_SCHEDULING_TARGET_PRESSURES);
+    let workload_coverage =
+        calibration_coverage(&workload_counts, BODY_SCHEDULING_TARGET_WORKLOADS);
+    let minimum_pair_gate_met = paired_count >= BODY_SCHEDULING_MIN_PAIRED_OBSERVATIONS;
+    let readiness_status = if safety_violation_count > 0 {
+        "blocked_by_safety_invariant_violation"
+    } else if !minimum_pair_gate_met {
+        "insufficient_paired_observations"
+    } else if pressure_coverage["complete"] == true && workload_coverage["complete"] == true {
+        "baseline_pair_and_coverage_gates_met"
+    } else {
+        "baseline_pair_gate_met_with_coverage_gaps"
     };
 
     let mut report = json!({
@@ -25098,6 +25131,25 @@ fn body_scheduling_report_from_events(
             "recommendation_effectiveness_claimed": false,
             "policy_change_allowed": false,
             "reason": "shadow observations establish capture and consistency only; they do not prove that a recommendation changed or improved resource pressure",
+        },
+        "calibration": {
+            "mode": "observation_readiness_only",
+            "minimum_paired_observations": BODY_SCHEDULING_MIN_PAIRED_OBSERVATIONS,
+            "paired_observations": paired_count,
+            "minimum_pair_gate_met": minimum_pair_gate_met,
+            "readiness_status": readiness_status,
+            "coverage": {
+                "pressure": pressure_coverage,
+                "workload_class": workload_coverage,
+                "recommendation": {
+                    "observed": recommendation_counts.keys().cloned().collect::<Vec<_>>(),
+                    "distinct_count": recommendation_counts.len(),
+                    "target": "no fixed recommendation target; labels are pressure-derived",
+                },
+            },
+            "causal_quality_evaluable": false,
+            "policy_change_allowed": false,
+            "reason": "category coverage identifies observation gaps only; it does not establish recommendation efficacy or authorize policy changes",
         },
         "safety": {
             "report_executes_actions": false,
