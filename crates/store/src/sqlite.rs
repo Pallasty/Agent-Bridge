@@ -2852,6 +2852,13 @@ fn plan_import_actions(
                     } else {
                         match inc.compare(existing_vv) {
                             VvOrd::Greater => ImportAction::Update,
+                            // Older lifecycle operations (archive/tombstone)
+                            // changed `updated_at` before they began advancing
+                            // the version vector. Preserve a strict timestamp
+                            // tie-break for an equal vector so those records
+                            // can converge, while a genuinely dominated vector
+                            // remains protected from stale wall-clock data.
+                            VvOrd::Equal if r.updated_at > *existing_uat => ImportAction::Update,
                             VvOrd::Equal | VvOrd::Lesser => ImportAction::Skip,
                             VvOrd::ConcurrentLesser | VvOrd::ConcurrentGreater => {
                                 ImportAction::ConflictCopy
@@ -13110,6 +13117,26 @@ mod tests {
         let actions = plan_import_actions(
             &parsed,
             &[incoming_vv],
+            &existing,
+            ImportConflictPolicy::VersionVectorMerge,
+        );
+        assert_eq!(actions, vec![ImportAction::Update]);
+    }
+
+    #[test]
+    fn vv_merge_equal_vector_newer_lifecycle_state_updates() {
+        // Archive/tombstone writers from before lifecycle operations advanced
+        // version vectors leave an equal vector but a strictly newer timestamp.
+        // The incoming status must still converge rather than ping-ponging.
+        let shared_vv = vstamp("aio2", 5);
+        let mut tombstone = mk_record("k", 200);
+        tombstone.status = "tombstoned".into();
+        let parsed = vec![tombstone];
+        let mut existing: ExistingMetaT = std::collections::HashMap::new();
+        existing.insert("k".to_string(), (100, shared_vv.clone()));
+        let actions = plan_import_actions(
+            &parsed,
+            &[shared_vv],
             &existing,
             ImportConflictPolicy::VersionVectorMerge,
         );

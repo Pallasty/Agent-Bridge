@@ -225,13 +225,11 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
     let filter = MemoryExportFilter {
         edges_out_path: Some(memory_edges_file.clone()),
         stable_sync_metadata: true,
-        // Stop carrying aged tombstones in the sync transport: align with the
-        // ζ-10 `purge-tombstones --older-than-days 7` window so a tombstone
-        // that has been purged locally is not resurrected from this export on
-        // the next peer's (or our own next cycle's) import. memory_import
-        // Inserts any absent-key row, incl. tombstones, so without this the
-        // export grows unbounded with dead rows and purge never converges.
-        exclude_tombstoned_older_than_secs: Some(7 * 86_400),
+        // A tombstone may be the only evidence that a peer needs to retire an
+        // older active or archived row. Do not filter it by local wall-clock
+        // age until sync has per-peer acknowledgement/compaction metadata;
+        // otherwise an offline peer can miss the deletion permanently and
+        // full-snapshot exports keep oscillating.
         ..MemoryExportFilter::default()
     };
     let result = store
