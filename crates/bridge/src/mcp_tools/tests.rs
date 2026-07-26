@@ -10176,6 +10176,8 @@ fn present_is_niche_opt_in_and_registers_under_all() {
     // Audio embodiment present_voice is the same Niche opt-in shape.
     assert!(all.includes(Tier::Niche, "present_voice"));
     assert!(!std_p.includes(Tier::Niche, "present_voice"));
+    assert!(all.includes(Tier::Niche, "present_voice_confirm_audibility"));
+    assert!(!std_p.includes(Tier::Niche, "present_voice_confirm_audibility"));
     // Live semantic world tools are Step C Niche opt-ins; absent from
     // standard/default profile surfaces until explicitly requested.
     for t in [
@@ -10265,6 +10267,12 @@ fn present_is_niche_opt_in_and_registers_under_all() {
     assert!(
         schemas.iter().any(|s| s.name == "present_voice"),
         "present_voice must register under the all profile"
+    );
+    assert!(
+        schemas
+            .iter()
+            .any(|s| s.name == "present_voice_confirm_audibility"),
+        "present_voice_confirm_audibility must register under the all profile"
     );
     let voice_schema = schemas
         .iter()
@@ -10383,6 +10391,133 @@ fn present_is_niche_opt_in_and_registers_under_all() {
             .any(|s| s.name == "lswr_outcome_admissions_ingest"),
         "lswr_outcome_admissions_ingest must stay out of codex-essential"
     );
+}
+
+#[test]
+fn voice_audibility_confirmation_is_single_outcome_human_evidence() {
+    let source = json!({
+        "artifact_id": "voice_say_123",
+        "kind": "voice",
+        "verify_status": "rendered_ok",
+        "verify_method": "synth_file_stt",
+        "verified_to": "synthesized audio file"
+    });
+    let row = build_voice_audibility_confirmation(
+        &source,
+        "abc123",
+        "voice_say_123.audibility.456",
+        "confirmed_audible",
+        "owner",
+        "headphones",
+        "heard the whole utterance",
+        456,
+        Some("node:project:main"),
+    )
+    .expect("confirmation");
+    assert_eq!(row["source_artifact_id"], "voice_say_123");
+    assert_eq!(row["source_outcome_sha256"], "abc123");
+    assert_eq!(row["scope"], "single_voice_outcome");
+    assert_eq!(row["decision"], "approved");
+    assert_eq!(row["audibility"], "confirmed_audible");
+    assert_eq!(row["verify_method"], "human_decision");
+    assert_eq!(
+        row["verified_to"],
+        "human_reported_audible_at_playback_endpoint"
+    );
+    assert_eq!(row["source_machine_verify_method"], "synth_file_stt");
+    assert_eq!(
+        row["confirmation_provenance"],
+        "caller_asserted_human_statement"
+    );
+    assert_eq!(source["verified_to"], "synthesized audio file");
+
+    let negative = build_voice_audibility_confirmation(
+        &source,
+        "abc123",
+        "voice_say_123.audibility.457",
+        "confirmed_not_audible",
+        "owner",
+        "headphones",
+        "",
+        457,
+        None,
+    )
+    .expect("negative confirmation");
+    assert_eq!(negative["decision"], "rejected");
+    assert_eq!(
+        negative["verified_to"],
+        "human_reported_not_audible_at_playback_endpoint"
+    );
+
+    let uncertain = build_voice_audibility_confirmation(
+        &source,
+        "abc123",
+        "voice_say_123.audibility.458",
+        "uncertain",
+        "owner",
+        "headphones",
+        "",
+        458,
+        None,
+    )
+    .expect("uncertain confirmation");
+    assert_eq!(uncertain["decision"], "pending");
+    assert!(uncertain["verified_to"].is_null());
+
+    assert!(build_voice_audibility_confirmation(
+        &json!({"artifact_id": "not_voice", "kind": "image"}),
+        "abc123",
+        "confirm",
+        "confirmed_audible",
+        "owner",
+        "headphones",
+        "",
+        1,
+        None,
+    )
+    .is_err());
+}
+
+#[test]
+fn voice_audibility_projection_links_latest_confirmation_without_mutating_source() {
+    let source = json!({
+        "artifact_id": "voice_say_123",
+        "kind": "voice",
+        "verify_status": "rendered_ok"
+    });
+    let older = json!({
+        "artifact_id": "voice_say_123.audibility.10",
+        "kind": "voice_audibility_confirmation",
+        "source_artifact_id": "voice_say_123",
+        "audibility": "uncertain",
+        "ts": 10
+    });
+    let latest = json!({
+        "artifact_id": "voice_say_123.audibility.20",
+        "kind": "voice_audibility_confirmation",
+        "source_artifact_id": "voice_say_123",
+        "audibility": "confirmed_audible",
+        "ts": 20
+    });
+    let other = json!({
+        "artifact_id": "voice_say_456.audibility.15",
+        "kind": "voice_audibility_confirmation",
+        "source_artifact_id": "voice_say_456",
+        "audibility": "confirmed_not_audible",
+        "ts": 15
+    });
+
+    let projection =
+        latest_voice_audibility_by_source(&[source.clone(), latest.clone(), older, other]);
+    assert_eq!(
+        projection["voice_say_123"]["artifact_id"],
+        latest["artifact_id"]
+    );
+    assert_eq!(
+        projection["voice_say_456"]["audibility"],
+        "confirmed_not_audible"
+    );
+    assert_eq!(source["verify_status"], "rendered_ok");
 }
 
 #[test]

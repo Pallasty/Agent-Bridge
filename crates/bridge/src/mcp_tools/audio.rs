@@ -365,6 +365,290 @@ pub(super) fn present_voice_script_path(args: &Value, cwd: Option<&PathBuf>) -> 
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/audio_embody.py")
 }
 
+/// Persist a human audibility decision for exactly one existing voice outcome.
+///
+/// This is a separate evidence row: it never rewrites the machine-produced
+/// synth/bus receipt and never generalises one person's decision to future runs.
+pub struct PresentVoiceConfirmAudibilityTool {
+    _hub: Hub,
+}
+
+impl PresentVoiceConfirmAudibilityTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+pub(super) fn build_voice_audibility_confirmation(
+    source: &Value,
+    source_digest: &str,
+    confirmation_id: &str,
+    audibility: &str,
+    confirmed_by: &str,
+    playback_path: &str,
+    note: &str,
+    ts: u64,
+    session_id: Option<&str>,
+) -> std::result::Result<Value, String> {
+    if source.get("kind").and_then(Value::as_str) != Some("voice") {
+        return Err("source outcome kind must be voice".to_string());
+    }
+    let source_artifact_id = source
+        .get("artifact_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "source voice outcome has no artifact_id".to_string())?;
+    let (decision, verified_to, not_verified) = match audibility {
+        "confirmed_audible" => (
+            "approved",
+            Some("human_reported_audible_at_playback_endpoint"),
+            "objective loudness, audio quality, comfort, and future voice runs",
+        ),
+        "confirmed_not_audible" => (
+            "rejected",
+            Some("human_reported_not_audible_at_playback_endpoint"),
+            "failure cause, objective signal path, and future voice runs",
+        ),
+        "uncertain" => (
+            "pending",
+            None,
+            "audibility, objective signal path, audio quality, and future voice runs",
+        ),
+        _ => {
+            return Err(
+                "audibility must be confirmed_audible|confirmed_not_audible|uncertain".to_string(),
+            )
+        }
+    };
+    Ok(json!({
+        "artifact_id": confirmation_id,
+        "intent": format!("human audibility confirmation for {source_artifact_id}"),
+        "action_tool": "present_voice_confirm_audibility",
+        "kind": "voice_audibility_confirmation",
+        "verify_status": "rendered_ok",
+        "embody_status": crate::present::EmbodyStatus::NotApplicable.as_str(),
+        "decision": decision,
+        "audibility": audibility,
+        "verify_method": "human_decision",
+        "verified_to": verified_to,
+        "not_verified": not_verified,
+        "scope": "single_voice_outcome",
+        "source_artifact_id": source_artifact_id,
+        "source_outcome_sha256": source_digest,
+        "source_machine_verify_method": source.get("verify_method").cloned().unwrap_or(Value::Null),
+        "source_machine_verified_to": source.get("verified_to").cloned().unwrap_or(Value::Null),
+        "source_machine_verify_status": source.get("verify_status").cloned().unwrap_or(Value::Null),
+        "confirmation_provenance": "caller_asserted_human_statement",
+        "confirmed_by": confirmed_by,
+        "playback_path": playback_path,
+        "note": note,
+        "session_id": session_id,
+        "ts": ts,
+    }))
+}
+
+pub(super) fn latest_voice_audibility_by_source(records: &[Value]) -> Value {
+    let mut latest = std::collections::BTreeMap::<String, Value>::new();
+    for record in records {
+        if record.get("kind").and_then(Value::as_str) != Some("voice_audibility_confirmation") {
+            continue;
+        }
+        let Some(source_id) = record
+            .get("source_artifact_id")
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+        else {
+            continue;
+        };
+        let candidate_ts = record.get("ts").and_then(Value::as_u64).unwrap_or_default();
+        let replace = latest
+            .get(source_id)
+            .and_then(|current| current.get("ts"))
+            .and_then(Value::as_u64)
+            .map(|current_ts| candidate_ts >= current_ts)
+            .unwrap_or(true);
+        if replace {
+            latest.insert(source_id.to_string(), record.clone());
+        }
+    }
+    Value::Object(latest.into_iter().collect())
+}
+
+#[async_trait]
+impl McpTool for PresentVoiceConfirmAudibilityTool {
+    fn name(&self) -> &'static str {
+        "present_voice_confirm_audibility"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Persist a HUMAN audibility decision for exactly one existing voice \
+                 outcome. Writes a separate append-only outcome sidecar linked by \
+                 source_artifact_id and SHA-256; never rewrites machine evidence and never \
+                 generalises to future runs. This confirms only the named person's report at \
+                 the named playback endpoint, not objective loudness or audio quality. Niche."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "source_artifact_id": {
+                        "type": "string",
+                        "description": "Exact artifact_id of an existing kind=voice outcome."
+                    },
+                    "audibility": {
+                        "type": "string",
+                        "enum": ["confirmed_audible", "confirmed_not_audible", "uncertain"]
+                    },
+                    "confirmed_by": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80,
+                        "description": "Human identity/role making this report, e.g. owner."
+                    },
+                    "playback_path": {
+                        "type": "string",
+                        "enum": ["headphones", "speakers", "other"],
+                        "description": "Endpoint through which the human evaluated this run."
+                    },
+                    "note": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "description": "Optional bounded human observation."
+                    },
+                    "acknowledge_single_outcome_scope": {
+                        "type": "boolean",
+                        "description": "Must be true: this decision applies only to source_artifact_id."
+                    }
+                },
+                "required": [
+                    "source_artifact_id",
+                    "audibility",
+                    "confirmed_by",
+                    "playback_path",
+                    "acknowledge_single_outcome_scope"
+                ],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let source_artifact_id = args
+            .get("source_artifact_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if source_artifact_id.is_empty()
+            || source_artifact_id.len() > 160
+            || !source_artifact_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        {
+            return Ok(ToolResult::error(
+                "source_artifact_id must be 1..160 safe ASCII id characters",
+            ));
+        }
+        if args
+            .get("acknowledge_single_outcome_scope")
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
+            return Ok(ToolResult::error(
+                "acknowledge_single_outcome_scope=true is required",
+            ));
+        }
+        let audibility = args.get("audibility").and_then(Value::as_str).unwrap_or("");
+        let confirmed_by = args
+            .get("confirmed_by")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if confirmed_by.is_empty() || confirmed_by.len() > 80 {
+            return Ok(ToolResult::error("confirmed_by must be 1..80 characters"));
+        }
+        let playback_path = args
+            .get("playback_path")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if !matches!(playback_path, "headphones" | "speakers" | "other") {
+            return Ok(ToolResult::error(
+                "playback_path must be headphones|speakers|other",
+            ));
+        }
+        let note = args.get("note").and_then(Value::as_str).unwrap_or("");
+        if note.len() > 500 {
+            return Ok(ToolResult::error("note must be at most 500 characters"));
+        }
+
+        let dir = crate::present::presentations_dir();
+        let source_path = dir.join(format!(
+            "{source_artifact_id}.{}",
+            crate::present::OUTCOME_SIDECAR_SUFFIX
+        ));
+        let source_raw = match std::fs::read_to_string(&source_path) {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "source voice outcome not found/readable: {e}"
+                )))
+            }
+        };
+        let source: Value = match serde_json::from_str(&source_raw) {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "source voice outcome is malformed JSON: {e}"
+                )))
+            }
+        };
+        if source.get("artifact_id").and_then(Value::as_str) != Some(source_artifact_id) {
+            return Ok(ToolResult::error(
+                "source outcome artifact_id does not match requested id",
+            ));
+        }
+        let digest = Sha256::digest(source_raw.as_bytes());
+        let source_digest = digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let ts = crate::present::now_unix();
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let confirmation_id = format!("{source_artifact_id}.audibility.{millis}");
+        let session_id = ctx.session_id.as_ref().map(|s| s.to_string());
+        let confirmation = match build_voice_audibility_confirmation(
+            &source,
+            &source_digest,
+            &confirmation_id,
+            audibility,
+            confirmed_by,
+            playback_path,
+            note,
+            ts,
+            session_id.as_deref(),
+        ) {
+            Ok(v) => v,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        if let Err(e) = crate::present::write_outcome_sidecar(&dir, &confirmation_id, &confirmation)
+        {
+            return Ok(ToolResult::error(format!(
+                "write audibility confirmation failed: {e}"
+            )));
+        }
+        Ok(ToolResult::json_text(&json!({
+            "schema": "present_voice_audibility_confirmation/v0",
+            "status": "recorded",
+            "source_artifact_id": source_artifact_id,
+            "source_outcome_unchanged": true,
+            "confirmation": confirmation,
+            "confirmation_sidecar": format!("{confirmation_id}.{}", crate::present::OUTCOME_SIDECAR_SUFFIX),
+        })))
+    }
+}
+
 pub struct PresentDashboardTool {
     hub: Hub,
 }
@@ -930,10 +1214,20 @@ impl McpTool for PresentOutcomesTool {
         let records = crate::present::read_outcome_records(&dir, limit, cutoff);
         let mut projection = crate::present::present_outcomes_projection(&records, verified_only);
         if let Some(obj) = projection.as_object_mut() {
+            let confirmations = latest_voice_audibility_by_source(&records);
+            let confirmation_count = confirmations
+                .as_object()
+                .map(|rows| rows.len())
+                .unwrap_or_default();
             obj.insert("schema".into(), json!("present_outcomes/v0"));
             obj.insert("dir".into(), json!(dir.display().to_string()));
             obj.insert("window_secs".into(), json!(window_secs));
             obj.insert("generated_at".into(), json!(now.max(0)));
+            obj.insert(
+                "voice_audibility_confirmation_count".into(),
+                json!(confirmation_count),
+            );
+            obj.insert("voice_audibility_by_source".into(), confirmations);
         }
         Ok(ToolResult::json_text(&projection))
     }
