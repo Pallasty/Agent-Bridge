@@ -7,6 +7,8 @@ import array
 import math
 import os
 import sys
+import tempfile
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import audio_embody as ae  # noqa: E402
@@ -533,6 +535,39 @@ def test_whisper_timeout_is_bounded_and_degrades():
             ae.os.environ.pop("AB_TTS_WHISPER_TIMEOUT_SECS", None)
         else:
             ae.os.environ["AB_TTS_WHISPER_TIMEOUT_SECS"] = original_env
+
+
+def test_zh_whisper_requests_simplified_chinese_without_leaking_reference_text():
+    with tempfile.TemporaryDirectory() as td:
+        wav = os.path.join(td, "voice.wav")
+        open(wav, "wb").close()
+        whisper = os.path.join(td, "whisper")
+        open(whisper, "wb").close()
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            outdir = cmd[cmd.index("--output_dir") + 1]
+            with open(os.path.join(outdir, "voice.txt"), "w", encoding="utf-8") as f:
+                f.write("中文语音闭环测试")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        old_run = ae.subprocess.run
+        old_bin = os.environ.get("AB_TTS_WHISPER_BIN")
+        try:
+            ae.subprocess.run = fake_run
+            os.environ["AB_TTS_WHISPER_BIN"] = whisper
+            transcript, err = ae.transcribe_synth_file(wav, model="tiny", language="zh")
+        finally:
+            ae.subprocess.run = old_run
+            if old_bin is None:
+                os.environ.pop("AB_TTS_WHISPER_BIN", None)
+            else:
+                os.environ["AB_TTS_WHISPER_BIN"] = old_bin
+
+        assert err is None
+        assert transcript == "中文语音闭环测试"
+        assert seen["cmd"][-2:] == ["--initial_prompt", "以下是普通话的简体中文句子。"]
 
 
 # --- #2300 review fixes: duration guard (MED-1) + empty-transcript no_capture (MED-2) -----

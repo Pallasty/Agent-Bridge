@@ -751,9 +751,17 @@ def transcribe_synth_file(wav_path, model=None, language="en"):
         timeout_s = 45.0
     timeout_s = max(5.0, min(timeout_s, 300.0))
     try:
-        p = subprocess.run([whisper_bin, wav_path, "--model", model, "--language", language,
-                            "--output_format", "txt", "--output_dir", outdir,
-                            "--fp16", "False", "--verbose", "False"],
+        cmd = [whisper_bin, wav_path, "--model", model, "--language", language,
+               "--output_format", "txt", "--output_dir", outdir,
+               "--fp16", "False", "--verbose", "False"]
+        # macOS Tingting speaks Mandarin, but Whisper often emits semantically
+        # identical Traditional Chinese. The exact-character recall gate then
+        # misclassifies a healthy synth as garbled. Prompt the decoder toward
+        # Simplified Chinese so the transcript and requested text share the same
+        # writing system; this does not supply the requested sentence itself.
+        if language == "zh":
+            cmd.extend(["--initial_prompt", "以下是普通话的简体中文句子。"])
+        p = subprocess.run(cmd,
                            capture_output=True, text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:
         return None, f"whisper timed out after {timeout_s:g}s"
