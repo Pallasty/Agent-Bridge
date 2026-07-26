@@ -22,6 +22,12 @@ D56 不实现 adapter、不执行测量或科学 kernel，也不授予 full-53 �
 D57 完成后 D58、D59、D60 可并行；D61 是三路汇合点，D62 是唯一可能讨论 full-53
 授权的终门。
 
+机器可检验的 coverage matrix 进一步固定了责任边界：D51 的 4 个 lifetime phases、
+D52 的 4 个 adapter stages 和 6 个 operation bounds 都有明确后继门。D56 还逐门冻结
+最小权限：D57 contract verification 的科学调用为零；D58 不获对象测量权；D59 不获
+production I/O 执行权；D60 不获 timing 测量权；D61 不得假设外部容量；D62 的决议本身
+不等于执行，且没有真实 reservation receipt 时必须 NO-GO。
+
 ## 当前边界
 
 本门结果是 `VERIFIED_D56_ORDERED_PRODUCTION_ADAPTER_AND_RESOURCE_BOUND_CLOSURE_PLAN`。

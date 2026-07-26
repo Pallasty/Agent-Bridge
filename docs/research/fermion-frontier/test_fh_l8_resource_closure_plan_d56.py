@@ -1,7 +1,15 @@
 import copy
+import importlib.util
 import unittest
+from pathlib import Path
 
-import fh_l8_resource_closure_plan_d56 as d56
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location(
+    "d56", HERE / "fh_l8_resource_closure_plan_d56.py"
+)
+d56 = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(d56)
 
 
 class D56Tests(unittest.TestCase):

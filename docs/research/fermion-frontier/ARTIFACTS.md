@@ -393,7 +393,8 @@ All copied JSON files are research-only outputs. They contain no credentials.
 ## FH-L8 D56 ordered resource-bound closure plan
 
 - `fh_l8_resource_closure_plan_d56_contract.json`: source pins, six D57--D62 packages, dependency
-  graph, acceptance evidence and global stop conditions.
+  graph, D51/D52 coverage matrix, per-gate minimum authority, acceptance evidence and global stop
+  conditions.
 - `fh_l8_resource_closure_plan_d56.py` and
   `fh_l8_resource_closure_plan_d56_result.json`: verify exact D55 requirement coverage, topological
   ordering, the D58/D59/D60 join and closed authority.
