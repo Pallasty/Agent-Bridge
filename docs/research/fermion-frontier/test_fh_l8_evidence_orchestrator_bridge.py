@@ -1,5 +1,8 @@
 import importlib.util
 import json
+import io
+import sys
+import contextlib
 import unittest
 from pathlib import Path
 
@@ -42,6 +45,28 @@ class EvidenceOrchestratorBridgeTests(unittest.TestCase):
                 for action in result["next_actions"]
             )
         )
+
+    def test_cli_next_actions_only_output(self) -> None:
+        original_argv = sys.argv
+        stdout = io.StringIO()
+        try:
+            sys.argv = [
+                "fh_l8_evidence_orchestrator_bridge.py",
+                "--next-actions-only",
+                "--registry",
+                str(HERE / "fh_l8_external_evidence_registry_template.json"),
+                "--intake-root",
+                str(HERE),
+            ]
+            with contextlib.redirect_stdout(stdout):
+                BRIDGE.main()
+        finally:
+            sys.argv = original_argv
+        lines = [line.strip() for line in stdout.getvalue().splitlines() if line.strip()]
+        self.assertTrue(lines, "next-actions-only output should not be empty")
+        self.assertTrue(any(line.startswith("[1]") and "intake" in line for line in lines))
+        self.assertTrue(any("term-order" in line for line in lines))
+        self.assertTrue(any("evidence" in line for line in lines))
 
 
 if __name__ == "__main__":
