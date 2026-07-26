@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-FULL53-STREAMING-LIFETIME-D51-V1",
+  "analysis_class": "STATIC_STREAMING_LIFETIME_AND_RUNTIME_WORK_UNIT_DESIGN_NO_EXECUTION",
+  "source_pins": {
+    "fh_l8_full53_kernel_fanout_d50_contract.json": "d1ac21b7a9a4fce580c8662807d2bf39c213b9dfb81e12c83981ad2556797c05",
+    "fh_l8_full53_kernel_fanout_d50_result.json": "9cb2f52659ae0da288143579098e63e23307a551ed8e857bb34b93c0c5b7844c",
+    "fh_l8_tiny_recovery_d22_runner.py": "c7ee2770d4ce601e053bda1937566900791a30027449e3882a7757b93b098661",
+    "fh_l8_tiny_recovery_d22_contract.json": "541ee8eb423ba4153372dcd7f2935ab276625f8adbdba16354333b9c864c9952",
+    "fh_l8_full_resource_envelope_d23_contract.json": "ce6baf3161db6094fd3d80079527b0a8bf8f91f48c3b384ceb09366406ab8535",
+    "fh_l8_full_resource_envelope_d23_result.json": "8116d6f4ef76c7f9253629e99c80579add77742a016bd6494211dd63e8ee5dec",
+    "fh_l8_packed_consumer_forensic_d16_contract.json": "e42029f7090da444a9f464d53221da6009db0d6eff2fe3f1631306a7b6053768"
+  },
+  "streaming_design": {
+    "partition_order": "000_to_255",
+    "maximum_merge_fan_in": 32,
+    "merge_levels_for_53_runs": 2,
+    "input_buffer_bytes_per_run": 1048576,
+    "output_buffer_bytes": 1048576,
+    "source_read_buffer_bytes": 1048576,
+    "manifest_bytes": 524288,
+    "result_bytes": 262144,
+    "receipt_bytes": 131072,
+    "known_buffer_subtotal_bytes": 35520512,
+    "target_publication": "stream_to_fresh_stage_then_atomic_no_replace_publish",
+    "old_runs_deleted_before_terminal_receipt": false
+  },
+  "disk_lifetime_design": {
+    "source_checkpoint_bytes": 6819168,
+    "structural_spill_bytes": 1534312800,
+    "simultaneous_spill_generations": 2,
+    "manifest_count": 53,
+    "receipt_count": 54,
+    "design_required_scratch_bytes": 3110572064,
+    "d23_registered_scratch_bytes": 2750812950,
+    "d23_shortfall_bytes": 359759114
+  },
+  "runtime_work_units": {
+    "scientific_kernel_calls": 213099,
+    "candidate_visits": 47947275,
+    "merge_record_reads_upper": 95894550,
+    "merge_record_writes_upper": 95894550,
+    "merge_heap_comparisons_design_upper": 958945500,
+    "host_seconds_bound_proven": false
+  },
+  "lifetime_phases": [
+    {
+      "phase": "source_admission",
+      "live_components": [
+        "python_runtime_base_peak",
+        "source_read_buffer"
+      ]
+    },
+    {
+      "phase": "kernel_and_spill",
+      "live_components": [
+        "python_runtime_base_peak",
+        "kernel_column_python_object_peak",
+        "source_read_buffer",
+        "output_buffer",
+        "partition_writer_state_peak"
+      ]
+    },
+    {
+      "phase": "partition_external_merge",
+      "live_components": [
+        "python_runtime_base_peak",
+        "up_to_32_input_buffers",
+        "output_buffer",
+        "sort_key_heap_object_peak",
+        "manifest"
+      ]
+    },
+    {
+      "phase": "target_publication",
+      "live_components": [
+        "python_runtime_base_peak",
+        "source_read_buffer",
+        "output_buffer",
+        "manifest",
+        "result",
+        "receipt"
+      ]
+    }
+  ],
+  "unresolved_numeric_terms": [
+    "python_runtime_base_peak",
+    "kernel_column_python_object_peak",
+    "partition_writer_state_peak",
+    "sort_key_heap_object_peak",
+    "filesystem_page_cache_accounting",
+    "per_operation_host_time_ns"
+  ],
+  "authority": {
+    "production_adapter_implemented": false,
+    "packed_q3_reads": 0,
+    "scientific_kernel_calls_executed": 0,
+    "full53_executed": false,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false,
+    "external_resource_reservation_admitted": false,
+    "full53_execution_authorized": false
+  },
+  "next_gate": "D52_PRODUCTION_ADAPTER_STATIC_ALLOCATION_AND_OPERATION_COST_BOUND"
+}

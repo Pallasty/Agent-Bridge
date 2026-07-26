@@ -2,6 +2,19 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D51 streaming lifetime and runtime-work design
+
+- Split D50's full-53 structural bound into source admission, kernel/spill, partition merge and
+  target-publication lifetime phases under the pinned 32-way external-merge design.
+- Conservative receipt-first storage requires 3,110,572,064 bytes, 359,759,114 bytes above D23's
+  registered scratch guardrail.
+- Closed integer work counts for 213,099 planned kernel calls, 47,947,275 candidate visits,
+  95,894,550 merge record reads/writes and a design upper of 958,945,500 heap comparisons.
+- The 35,520,512-byte known-buffer subtotal excludes Python runtime, kernel-column, writer/heap
+  objects and page-cache accounting; neither numeric peak memory nor host seconds is proven.
+- D51 executes zero scientific calls and reads zero packed q3. Next gate:
+  `D52_PRODUCTION_ADAPTER_STATIC_ALLOCATION_AND_OPERATION_COST_BOUND`.
+
 ## 2026-07-26 — FH-L8 D50 source-bound kernel and structural fan-out
 
 - Reconciled D22, D26 and D49: the bounded micro path already binds D5
