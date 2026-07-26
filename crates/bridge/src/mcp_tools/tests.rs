@@ -13417,6 +13417,66 @@ async fn embodiment_receipt_persists_compact_body_shadow_summary() {
 }
 
 #[tokio::test]
+async fn embodiment_receipt_without_intent_persists_only_coverage_fields() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    record_embodiment_receipt(
+        &hub,
+        "terminal",
+        "send_keys",
+        None,
+        Some("pane-must-not-persist".into()),
+        false,
+        json!({
+            "secret": "must-not-persist",
+            "error": "must-not-persist",
+            "embodiment_lease_id": "lease-must-not-persist",
+            "body_shadow": {"raw": "must-not-persist"}
+        }),
+    )
+    .await;
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 10)
+        .await
+        .expect("recent events");
+    let event = events
+        .iter()
+        .find(|event| event.source == "terminal" && event.action == "send_keys")
+        .expect("terminal coverage receipt");
+    let facts: Value = serde_json::from_str(&event.facts).expect("coverage facts");
+    assert_eq!(event.target, None);
+    assert_eq!(event.verdict_status, "not_verified");
+    assert_eq!(event.verdict_method, "action_coverage_receipt");
+    assert_eq!(facts["embodiment_intent_id"], Value::Null);
+    assert_eq!(
+        facts["receipt"]["schema"],
+        "agent_bridge.embodiment_action_coverage.v0"
+    );
+    assert_eq!(facts["receipt"]["coverage_only"], true);
+    assert_eq!(facts["receipt"]["intent_linked"], false);
+    assert_eq!(facts["receipt"]["body_id"], LOCAL_BODY_ID);
+    assert_eq!(facts["receipt"]["execution_succeeded"], false);
+    let serialized = serde_json::to_string(&facts).expect("serialize facts");
+    for forbidden in [
+        "must-not-persist",
+        "embodiment_lease_id",
+        "body_shadow",
+        "error",
+        "secret",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "coverage receipt leaked forbidden field: {forbidden}"
+        );
+    }
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
 async fn desktop_action_refuses_host_mutation() {
     // No dry_run, no isolated (display+swaysock) => must refuse before exec.
     let tool = DesktopActionTool::new(Hub::builder().build());

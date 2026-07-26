@@ -137,6 +137,14 @@ fn is_whitelisted_action_receipt(event: &SemanticEventRecord) -> bool {
     )
 }
 
+fn is_enrolled_action_receipt(event: &SemanticEventRecord, facts: &Value) -> bool {
+    if !is_whitelisted_action_receipt(event) {
+        return false;
+    }
+    (event.source == EMBODIMENT_EVENT_SOURCE && event.action == "action_receipt")
+        || facts.get("embodiment_intent_id").is_some()
+}
+
 /// Audits only explicit intent identifiers and whitelisted event metadata.
 /// Receipt payloads and evidence stay out of the projection.
 fn project_action_lineage(events: &[SemanticEventRecord], source_event_limit: usize) -> Value {
@@ -184,15 +192,37 @@ fn project_action_lineage(events: &[SemanticEventRecord], source_event_limit: us
     let mut explicit_body_matches = 0_u64;
     let mut explicit_body_mismatches = 0_u64;
     let mut body_not_recorded = 0_u64;
+    let mut coverage_receipts = 0_u64;
+    let mut missing_intent_link = 0_u64;
 
     for event in events {
-        if !is_whitelisted_action_receipt(event) {
-            continue;
-        }
         let Ok(facts) = serde_json::from_str::<Value>(&event.facts) else {
             continue;
         };
+        if !is_enrolled_action_receipt(event, &facts) {
+            continue;
+        }
+        coverage_receipts += 1;
+        match event.verdict_status.as_str() {
+            "verified" => verified += 1,
+            "not_verified" => not_verified += 1,
+            _ => unknown += 1,
+        }
         let Some(intent_id) = action_receipt_intent_id(event, &facts) else {
+            missing_intent_link += 1;
+            body_not_recorded += 1;
+            if rows.len() < 100 {
+                rows.push(json!({
+                    "ts": event.ts,
+                    "source": event.source,
+                    "action": event.action,
+                    "target": Value::Null,
+                    "intent_id": Value::Null,
+                    "lineage_status": "missing_intent_link",
+                    "verdict": event.verdict_status,
+                    "body_binding_status": "not_recorded",
+                }));
+            }
             continue;
         };
         let lineage_status = match intents.get(intent_id) {
@@ -209,11 +239,6 @@ fn project_action_lineage(events: &[SemanticEventRecord], source_event_limit: us
                 "no_prior_intent_in_window"
             }
         };
-        match event.verdict_status.as_str() {
-            "verified" => verified += 1,
-            "not_verified" => not_verified += 1,
-            _ => unknown += 1,
-        }
         let receipt_body_id = action_receipt_body_id(event, &facts);
         let body_binding_status = match (intents.get(intent_id), receipt_body_id) {
             (Some((_, intent_body_id)), Some(receipt_body_id))
@@ -259,7 +284,9 @@ fn project_action_lineage(events: &[SemanticEventRecord], source_event_limit: us
         "verified_real_world_outcome_claimed": false,
         "counts": {
             "intents": intents.len(),
+            "coverage_receipts": coverage_receipts,
             "intent_linked_receipts": receipt_count,
+            "missing_intent_link": missing_intent_link,
             "matched_prior_intent": matched,
             "unmatched_in_window": unmatched_in_window,
             "receipt_precedes_intent": out_of_order,
@@ -279,13 +306,18 @@ fn project_action_lineage(events: &[SemanticEventRecord], source_event_limit: us
         } else {
             None
         },
+        "intent_link_coverage": if coverage_receipts > 0 {
+            Some(receipt_count as f64 / coverage_receipts as f64)
+        } else {
+            None
+        },
         "rows": rows,
-        "rows_truncated": receipt_count as usize > 100,
+        "rows_truncated": coverage_receipts as usize > 100,
         "executes_actions": false,
         "resumes_actions": false,
         "changes_authority": false,
         "policy_change_allowed": false,
-        "reason": "lineage is bounded to explicit identifiers in the selected event window; missing identifiers, bodies, evidence, and events are never inferred",
+        "reason": "lineage is bounded to explicitly enrolled receipts in the selected event window; missing identifiers are counted, while missing bodies, evidence, and events are never inferred",
     })
 }
 
@@ -512,16 +544,48 @@ mod tests {
             },
         ];
         let audit = project_action_lineage(&events, 500);
+        assert_eq!(audit["counts"]["coverage_receipts"], 1);
+        assert_eq!(audit["counts"]["intent_linked_receipts"], 1);
+        assert_eq!(audit["counts"]["missing_intent_link"], 0);
         assert_eq!(audit["counts"]["matched_prior_intent"], 1);
         assert_eq!(audit["counts"]["unmatched_in_window"], 0);
         assert_eq!(audit["counts"]["verdict"]["verified"], 1);
         assert_eq!(audit["counts"]["body_binding"]["explicit_match"], 1);
         assert_eq!(audit["traceability_within_window"], 1.0);
+        assert_eq!(audit["intent_link_coverage"], 1.0);
         assert_eq!(audit["global_completeness_claimed"], false);
         assert_eq!(audit["verified_real_world_outcome_claimed"], false);
         assert!(audit["rows"][0].get("receipt").is_none());
         assert!(audit["rows"][0].get("evidence").is_none());
         assert!(!audit.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn action_lineage_counts_privacy_minimal_receipt_without_intent() {
+        let events = vec![SemanticEventRecord {
+            ts: 20,
+            actor: "mcp".into(),
+            source: "terminal".into(),
+            action: "send_keys".into(),
+            target: None,
+            verdict_status: "not_verified".into(),
+            verdict_method: "action_coverage_receipt".into(),
+            evidence: Some(r#"{"intent_linked":false}"#.into()),
+            facts: r#"{"embodiment_intent_id":null,"receipt":{"schema":"agent_bridge.embodiment_action_coverage.v0","coverage_only":true,"intent_linked":false,"body_id":"body-mac","execution_succeeded":false}}"#.into(),
+            descriptor: None,
+        }];
+        let audit = project_action_lineage(&events, 500);
+        assert_eq!(audit["counts"]["coverage_receipts"], 1);
+        assert_eq!(audit["counts"]["intent_linked_receipts"], 0);
+        assert_eq!(audit["counts"]["missing_intent_link"], 1);
+        assert_eq!(audit["counts"]["verdict"]["not_verified"], 1);
+        assert_eq!(audit["intent_link_coverage"], 0.0);
+        assert_eq!(audit["traceability_within_window"], Value::Null);
+        assert_eq!(audit["rows"][0]["intent_id"], Value::Null);
+        assert_eq!(audit["rows"][0]["lineage_status"], "missing_intent_link");
+        assert_eq!(audit["rows"][0]["target"], Value::Null);
+        assert!(!audit.to_string().contains("execution_succeeded"));
+        assert!(!audit.to_string().contains("body-mac"));
     }
 
     #[test]

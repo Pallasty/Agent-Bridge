@@ -6892,9 +6892,6 @@ async fn record_embodiment_receipt(
     ok: bool,
     facts: Value,
 ) {
-    let Some(intent_id) = intent_id else {
-        return;
-    };
     let Some(store) = &hub.store else {
         return;
     };
@@ -6902,6 +6899,31 @@ async fn record_embodiment_receipt(
         crate::semantic_event::VerdictStatus::Unknown
     } else {
         crate::semantic_event::VerdictStatus::NotVerified
+    };
+    let (target, method, evidence, facts, expected_effect) = match intent_id {
+        Some(intent_id) => (
+            target,
+            "intent_linked_receipt",
+            json!({"intent_id": intent_id}),
+            json!({"embodiment_intent_id": intent_id, "receipt": facts}),
+            "record intent-linked action receipt",
+        ),
+        None => (
+            None,
+            "action_coverage_receipt",
+            json!({"intent_linked": false}),
+            json!({
+                "embodiment_intent_id": null,
+                "receipt": {
+                    "schema": "agent_bridge.embodiment_action_coverage.v0",
+                    "coverage_only": true,
+                    "intent_linked": false,
+                    "body_id": LOCAL_BODY_ID,
+                    "execution_succeeded": ok,
+                }
+            }),
+            "record privacy-minimal action coverage receipt",
+        ),
     };
     let event = crate::semantic_event::SemanticEvent {
         ts: dispatch_now_secs(),
@@ -6919,17 +6941,17 @@ async fn record_embodiment_receipt(
             action_type: action.into(),
             risk_level: "medium".into(),
             requires_gate: true,
-            expected_effect: Some("record intent-linked action receipt".into()),
+            expected_effect: Some(expected_effect.into()),
         },
         verdict: crate::semantic_event::Verdict {
             status: verdict,
-            method: "intent_linked_receipt".into(),
-            evidence: json!({"intent_id": intent_id}),
+            method: method.into(),
+            evidence,
         },
-        facts: json!({"embodiment_intent_id": intent_id, "receipt": facts}),
+        facts,
     };
     if let Err(error) = store.record_semantic_event(event.to_record()).await {
-        tracing::debug!(%error, "record intent-linked embodiment receipt failed");
+        tracing::debug!(%error, "record embodiment action receipt failed");
     }
 }
 
