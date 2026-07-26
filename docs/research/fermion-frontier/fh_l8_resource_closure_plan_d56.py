@@ -41,6 +41,8 @@ def validate(contract: Mapping[str, Any]) -> dict[str, Any]:
 
     d55_contract = load(HERE / "fh_l8_measurement_admissibility_d55_contract.json")
     d55_result = load(HERE / "fh_l8_measurement_admissibility_d55_result.json")
+    d51_contract = load(HERE / "fh_l8_full53_streaming_lifetime_d51_contract.json")
+    d52_contract = load(HERE / "fh_l8_full53_adapter_static_cost_d52_contract.json")
     if d55_result["next_gate"] != "D56_PRODUCTION_STREAMING_ADAPTER_AND_RESOURCE_BOUND_CLOSURE_PLAN":
         raise D56Error("D55 handoff drift")
     packages = contract.get("work_packages")
@@ -83,6 +85,57 @@ def validate(contract: Mapping[str, Any]) -> dict[str, Any]:
     if packages[5]["depends_on"] != [expected_gates[4]]:
         raise D56Error("D62 dependency incomplete")
 
+    coverage = contract.get("coverage_matrix")
+    if not isinstance(coverage, Mapping):
+        raise D56Error("coverage matrix missing")
+    d51_phases = [row["phase"] for row in d51_contract["lifetime_phases"]]
+    d52_stages = [row["stage"] for row in d52_contract["adapter_ir"]]
+    if list(coverage.get("D51_lifetime_phases", {})) != d51_phases:
+        raise D56Error("D51 phase coverage drift")
+    if list(coverage.get("D52_adapter_stages", {})) != d52_stages:
+        raise D56Error("D52 stage coverage drift")
+    for section in ("D51_lifetime_phases", "D52_adapter_stages"):
+        for owners in coverage[section].values():
+            if (
+                not isinstance(owners, list)
+                or not owners
+                or len(owners) != len(set(owners))
+                or any(owner not in expected_gates for owner in owners)
+            ):
+                raise D56Error(f"invalid coverage owners: {section}")
+    operation_owners = coverage.get("D52_operation_bounds")
+    required_operations = (
+        "source_records",
+        "candidate_actions_per_source",
+        "total_canonical_info_calls_upper",
+        "total_basis_images_upper",
+        "total_fraction_constructions_upper",
+        "total_reduced_column_updates_upper",
+    )
+    if (
+        not isinstance(operation_owners, Mapping)
+        or tuple(operation_owners) != required_operations
+        or any(value != expected_gates[3] for value in operation_owners.values())
+        or any(key not in d52_contract["operation_bounds"] for key in operation_owners)
+    ):
+        raise D56Error("D52 operation-bound coverage drift")
+
+    future_rules = contract.get("future_gate_authority_rules")
+    if not isinstance(future_rules, Mapping) or list(future_rules) != expected_gates:
+        raise D56Error("future gate authority-rule coverage drift")
+    if (
+        future_rules[expected_gates[0]].get("contract_verification_scientific_calls") != 0
+        or future_rules[expected_gates[1]].get("object_measurements_authorized_by_D56") != 0
+        or future_rules[expected_gates[2]].get("production_io_execution_authorized_by_D56") is not False
+        or future_rules[expected_gates[3]].get("timing_measurements_authorized_by_D56") != 0
+        or future_rules[expected_gates[4]].get("external_capacity_may_be_assumed") is not False
+        or future_rules[expected_gates[5]].get("D56_itself_confers_full53_authority") is not False
+    ):
+        raise D56Error("future authority unexpectedly open")
+    for gate, rule in future_rules.items():
+        if gate != expected_gates[5] and rule.get("full53_execution_authorized") is not False:
+            raise D56Error(f"future full53 authority open: {gate}")
+
     stops = contract.get("global_stop_conditions")
     if not isinstance(stops, list) or len(stops) != len(set(stops)) or not stops:
         raise D56Error("stop-condition set invalid")
@@ -112,6 +165,10 @@ def validate(contract: Mapping[str, Any]) -> dict[str, Any]:
         "acceptance_check_count": sum(len(package["acceptance"]) for package in packages),
         "parallel_gate_count_after_d57": len(parallel["after_D57_may_run_in_parallel"]),
         "global_stop_condition_count": len(stops),
+        "D51_phase_coverage_count": len(d51_phases),
+        "D52_stage_coverage_count": len(d52_stages),
+        "D52_operation_bound_coverage_count": len(required_operations),
+        "future_gate_authority_rule_count": len(future_rules),
         **{key: authority[key] for key in false_fields},
         **{key: authority[key] for key in zero_fields},
         "next_gate": contract["next_gate"],

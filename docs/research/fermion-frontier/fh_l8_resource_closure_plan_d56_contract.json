@@ -129,6 +129,60 @@
     "D61_requires_all_parallel_gates": true,
     "D62_requires_D61": true
   },
+  "coverage_matrix": {
+    "D51_lifetime_phases": {
+      "source_admission": ["D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT", "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND", "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE", "D61_INTEGRATED_RESOURCE_ENVELOPE_RECONCILIATION"],
+      "kernel_and_spill": ["D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT", "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND", "D59_PRODUCTION_IO_PAGE_CACHE_BOUND", "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE", "D61_INTEGRATED_RESOURCE_ENVELOPE_RECONCILIATION"],
+      "partition_external_merge": ["D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT", "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND", "D59_PRODUCTION_IO_PAGE_CACHE_BOUND", "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE", "D61_INTEGRATED_RESOURCE_ENVELOPE_RECONCILIATION"],
+      "target_publication": ["D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT", "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND", "D59_PRODUCTION_IO_PAGE_CACHE_BOUND", "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE", "D61_INTEGRATED_RESOURCE_ENVELOPE_RECONCILIATION"]
+    },
+    "D52_adapter_stages": {
+      "decode_one_source_record": ["D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT", "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND", "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"],
+      "invoke_bound_reduced_column": ["D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT", "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND", "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"],
+      "encode_partition_records": ["D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT", "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND", "D59_PRODUCTION_IO_PAGE_CACHE_BOUND", "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"],
+      "release_column_before_next_source": ["D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT", "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND"]
+    },
+    "D52_operation_bounds": {
+      "source_records": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE",
+      "candidate_actions_per_source": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE",
+      "total_canonical_info_calls_upper": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE",
+      "total_basis_images_upper": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE",
+      "total_fraction_constructions_upper": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE",
+      "total_reduced_column_updates_upper": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"
+    }
+  },
+  "future_gate_authority_rules": {
+    "D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT": {
+      "implementation_may_be_created_only_by_a_future_separate_commit": true,
+      "contract_verification_scientific_calls": 0,
+      "full53_execution_authorized": false
+    },
+    "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND": {
+      "analysis_only": true,
+      "object_measurements_authorized_by_D56": 0,
+      "full53_execution_authorized": false
+    },
+    "D59_PRODUCTION_IO_PAGE_CACHE_BOUND": {
+      "protocol_design_precedes_any_io_measurement": true,
+      "production_io_execution_authorized_by_D56": false,
+      "full53_execution_authorized": false
+    },
+    "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE": {
+      "timing_rule_commit_precedes_any_supporting_measurement": true,
+      "timing_measurements_authorized_by_D56": 0,
+      "full53_execution_authorized": false
+    },
+    "D61_INTEGRATED_RESOURCE_ENVELOPE_RECONCILIATION": {
+      "arithmetic_reconciliation_only": true,
+      "external_capacity_may_be_assumed": false,
+      "full53_execution_authorized": false
+    },
+    "D62_EXTERNAL_RESERVATION_AND_FULL53_AUTHORIZATION_DECISION": {
+      "decision_is_not_execution": true,
+      "missing_authentic_reservation_receipt_means_NO_GO": true,
+      "D56_itself_confers_full53_authority": false
+    }
+  },
   "global_stop_conditions": [
     "source_pin_drift",
     "production_adapter_interface_drift",

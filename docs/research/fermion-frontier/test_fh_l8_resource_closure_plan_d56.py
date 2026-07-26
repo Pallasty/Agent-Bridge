@@ -40,6 +40,29 @@ class D56Tests(unittest.TestCase):
         with self.assertRaises(d56.D56Error):
             d56.validate(mutated)
 
+    def test_phase_stage_and_operation_coverage_fail_closed(self):
+        variants = []
+        phase = copy.deepcopy(self.contract)
+        phase["coverage_matrix"]["D51_lifetime_phases"].pop("target_publication")
+        variants.append(phase)
+        stage = copy.deepcopy(self.contract)
+        stage["coverage_matrix"]["D52_adapter_stages"]["invoke_bound_reduced_column"] = []
+        variants.append(stage)
+        operation = copy.deepcopy(self.contract)
+        operation["coverage_matrix"]["D52_operation_bounds"].pop("source_records")
+        variants.append(operation)
+        for mutated in variants:
+            with self.assertRaises(d56.D56Error):
+                d56.validate(mutated)
+
+    def test_future_gate_authority_fails_closed(self):
+        mutated = copy.deepcopy(self.contract)
+        mutated["future_gate_authority_rules"][
+            "D59_PRODUCTION_IO_PAGE_CACHE_BOUND"
+        ]["production_io_execution_authorized_by_D56"] = True
+        with self.assertRaises(d56.D56Error):
+            d56.validate(mutated)
+
 
 if __name__ == "__main__":
     unittest.main()
