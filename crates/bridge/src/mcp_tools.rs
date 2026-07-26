@@ -439,7 +439,10 @@ impl McpTool for TerminalSendKeysTool {
         // Callers write escape sequences as literal text (e.g. \n, \r, \x1b).
         // Unescape them so the PTY receives the actual control bytes.
         let keys = unescape_keys(raw);
-        match term.send_keys(&pane, &keys).await {
+        let body_shadow = BodyWriteShadowSpan::start("terminal_send_keys", Some(pane.to_string()));
+        let result = term.send_keys(&pane, &keys).await;
+        let body_shadow = body_shadow.finish(&self.hub).await;
+        match result {
             Ok(()) => {
                 record_embodiment_receipt(
                     &self.hub,
@@ -448,7 +451,11 @@ impl McpTool for TerminalSendKeysTool {
                     embodiment_intent_id,
                     Some(pane.to_string()),
                     true,
-                    json!({"bytes": keys.len(), "embodiment_lease_id": lease_id}),
+                    json!({
+                        "bytes": keys.len(),
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
                 )
                 .await;
                 Ok(ToolResult::text(format!(
@@ -464,7 +471,11 @@ impl McpTool for TerminalSendKeysTool {
                     embodiment_intent_id,
                     Some(pane.to_string()),
                     false,
-                    json!({"error": e.to_string(), "embodiment_lease_id": lease_id}),
+                    json!({
+                        "error": e.to_string(),
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
                 )
                 .await;
                 Ok(ToolResult::error(format!("terminal: {e}")))
@@ -554,12 +565,14 @@ impl McpTool for TerminalSplitTool {
             })
             .unwrap_or_default();
         let has_options = cwd.is_some() || !env_map.is_empty();
+        let body_shadow = BodyWriteShadowSpan::start("terminal_split", Some(pane.to_string()));
         let result = if has_options {
             term.split_with_options(&pane, dir, SpawnOptions { cwd, env: env_map })
                 .await
         } else {
             term.split(&pane, dir).await
         };
+        let _body_shadow = body_shadow.finish(&self.hub).await;
         match result {
             Ok(new_pane) => Ok(ToolResult::text(format!("new pane: {new_pane}"))),
             Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
@@ -701,7 +714,10 @@ impl McpTool for TerminalResizeTool {
             Some(c) => c.clamp(1, 1000) as u16,
             None => return Ok(ToolResult::error("missing 'cols'")),
         };
-        match term.resize(&pane, rows, cols).await {
+        let body_shadow = BodyWriteShadowSpan::start("terminal_resize", Some(pane.to_string()));
+        let result = term.resize(&pane, rows, cols).await;
+        let _body_shadow = body_shadow.finish(&self.hub).await;
+        match result {
             Ok(()) => Ok(ToolResult::json_text(&json!({
                 "pane": pane.as_str(),
                 "backend": term.id(),
@@ -6742,7 +6758,10 @@ impl McpTool for BrowserNavigateTool {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|id| !id.is_empty());
-        match b.navigate(url).await {
+        let body_shadow = BodyWriteShadowSpan::start("browser_navigate", None);
+        let result = b.navigate(url).await;
+        let body_shadow = body_shadow.finish(&self.hub).await;
+        match result {
             Ok(pid) => {
                 record_embodiment_receipt(
                     &self.hub,
@@ -6751,7 +6770,11 @@ impl McpTool for BrowserNavigateTool {
                     embodiment_intent_id,
                     Some(pid.to_string()),
                     true,
-                    json!({"url_recorded": false, "embodiment_lease_id": lease_id}),
+                    json!({
+                        "url_recorded": false,
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
                 )
                 .await;
                 Ok(ToolResult::text(format!("page: {pid}")))
@@ -6764,12 +6787,99 @@ impl McpTool for BrowserNavigateTool {
                     embodiment_intent_id,
                     None,
                     false,
-                    json!({"error": e.to_string(), "url_recorded": false, "embodiment_lease_id": lease_id}),
+                    json!({
+                        "error": e.to_string(),
+                        "url_recorded": false,
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
                 )
                 .await;
                 Ok(ToolResult::error(format!("browser: {e}")))
             }
         }
+    }
+}
+
+const BODY_WRITE_SHADOW_SCHEMA_V0: &str = "agent_bridge.body_write_shadow.v0";
+
+struct BodyWriteShadowSpan {
+    preflight: Value,
+    span_id: Option<String>,
+    start_error: Option<String>,
+}
+
+impl BodyWriteShadowSpan {
+    fn start(task_kind: &str, task_ref: Option<String>) -> Self {
+        let span_id = format!("body-write-{}", uuid::Uuid::new_v4());
+        match crate::body_telemetry::start_task_resource_span(
+            span_id.clone(),
+            task_kind.to_string(),
+            task_ref,
+        ) {
+            Ok(span) => Self {
+                preflight: crate::body_telemetry::shadow_reflex_advice_from_status(&span.before),
+                span_id: Some(span_id),
+                start_error: None,
+            },
+            Err(error) => Self {
+                preflight: crate::body_telemetry::body_reflex_advice_snapshot(),
+                span_id: None,
+                start_error: Some(error),
+            },
+        }
+    }
+
+    async fn finish(self, hub: &Hub) -> Value {
+        let task_span = match self.span_id {
+            Some(span_id) => {
+                let checkpoint_captured =
+                    crate::body_telemetry::checkpoint_task_resource_span(&span_id).is_ok();
+                match crate::body_telemetry::finish_task_resource_span(&span_id) {
+                    Ok(span) => {
+                        let event_recorded = match &hub.store {
+                            Some(store) => record_body_task_span_event(store, &span).await,
+                            None => false,
+                        };
+                        json!({
+                            "span_id": span.span_id,
+                            "state": span.state,
+                            "checkpoint_phase": "post_dispatch",
+                            "checkpoint_captured": checkpoint_captured,
+                            "event_recorded": event_recorded,
+                            "receipt": span.receipt(),
+                        })
+                    }
+                    Err(error) => json!({
+                        "span_id": span_id,
+                        "state": "abandoned",
+                        "checkpoint_phase": "post_dispatch",
+                        "checkpoint_captured": checkpoint_captured,
+                        "event_recorded": false,
+                        "error": error,
+                    }),
+                }
+            }
+            None => json!({
+                "state": "not_started",
+                "event_recorded": false,
+                "reason": self.start_error,
+            }),
+        };
+
+        json!({
+            "schema_version": BODY_WRITE_SHADOW_SCHEMA_V0,
+            "mode": "shadow_only",
+            "body_id": LOCAL_BODY_ID,
+            "blocked": false,
+            "changes_execution_authority": false,
+            "preflight": {
+                "pressure": self.preflight.get("pressure").cloned().unwrap_or(Value::String("unknown".into())),
+                "recommendation": self.preflight.get("recommendation").cloned().unwrap_or(Value::String("observe_only".into())),
+                "reason": self.preflight.get("reason").cloned().unwrap_or(Value::String("body advice unavailable".into())),
+            },
+            "task_span": task_span,
+        })
     }
 }
 

@@ -493,7 +493,7 @@ pub fn body_reflex_advice_snapshot() -> Value {
     shadow_reflex_advice_from_status(&status)
 }
 
-fn shadow_reflex_advice_from_status(status: &Value) -> Value {
+pub(crate) fn shadow_reflex_advice_from_status(status: &Value) -> Value {
     let enabled = status
         .get("enabled")
         .and_then(Value::as_bool)

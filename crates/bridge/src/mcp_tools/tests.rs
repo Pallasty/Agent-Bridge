@@ -12951,6 +12951,96 @@ async fn body_write_lease_gate_rejects_missing_and_foreign_lease() {
 }
 
 #[tokio::test]
+async fn body_write_shadow_preflight_never_blocks_or_changes_authority() {
+    let observation = BodyWriteShadowSpan {
+        preflight: json!({
+            "pressure": "critical",
+            "recommendation": "request_operator_review_before_heavy_work",
+            "reason": "synthetic critical pressure for a non-executing test",
+        }),
+        span_id: None,
+        start_error: Some("telemetry unavailable in synthetic test".into()),
+    };
+    let payload = observation.finish(&Hub::builder().build()).await;
+
+    assert_eq!(
+        payload["schema_version"],
+        "agent_bridge.body_write_shadow.v0"
+    );
+    assert_eq!(payload["mode"], "shadow_only");
+    assert_eq!(payload["body_id"], "body-mac");
+    assert_eq!(payload["blocked"], false);
+    assert_eq!(payload["changes_execution_authority"], false);
+    assert_eq!(payload["preflight"]["pressure"], "critical");
+    assert_eq!(payload["task_span"]["state"], "not_started");
+    assert_eq!(payload["task_span"]["event_recorded"], false);
+}
+
+#[tokio::test]
+async fn embodiment_receipt_persists_compact_body_shadow_summary() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    record_embodiment_receipt(
+        &hub,
+        "terminal",
+        "send_keys",
+        Some("intent-shadow-receipt"),
+        Some("pane-shadow".into()),
+        true,
+        json!({
+            "embodiment_lease_id": "lease-shadow",
+            "body_shadow": {
+                "schema_version": "agent_bridge.body_write_shadow.v0",
+                "mode": "shadow_only",
+                "blocked": false,
+                "preflight": {
+                    "pressure": "nominal",
+                    "recommendation": "continue_with_normal_scope"
+                },
+                "task_span": {
+                    "state": "closed",
+                    "receipt": {
+                        "before_pressure": "nominal",
+                        "after_pressure": "nominal"
+                    }
+                }
+            }
+        }),
+    )
+    .await;
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 10)
+        .await
+        .expect("recent events");
+    let event = events
+        .iter()
+        .find(|event| event.source == "terminal" && event.action == "send_keys")
+        .expect("terminal receipt");
+    let facts: Value = serde_json::from_str(&event.facts).expect("receipt facts");
+    assert_eq!(facts["embodiment_intent_id"], "intent-shadow-receipt");
+    assert_eq!(
+        facts["receipt"]["body_shadow"]["schema_version"],
+        "agent_bridge.body_write_shadow.v0"
+    );
+    assert_eq!(
+        facts["receipt"]["body_shadow"]["task_span"]["receipt"]["before_pressure"],
+        "nominal"
+    );
+    let span_receipt = &facts["receipt"]["body_shadow"]["task_span"]["receipt"];
+    for raw_field in ["before", "after", "checkpoints"] {
+        assert!(
+            span_receipt.get(raw_field).is_none(),
+            "raw body field '{raw_field}' must not enter the action receipt"
+        );
+    }
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
 async fn desktop_action_refuses_host_mutation() {
     // No dry_run, no isolated (display+swaysock) => must refuse before exec.
     let tool = DesktopActionTool::new(Hub::builder().build());
