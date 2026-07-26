@@ -1068,6 +1068,17 @@ FB-S2B is not authorized. Reopening requires a new hash-bound owner packet, a
 1-GiB-safe independent gate, materialized adapter and Fermion-mapping evidence,
 and a new positive-qualification v2.
 
+## FH-L8 external-evidence intake handoff
+
+The bootstrap helper scans a custody directory without modifying its exports. An
+operator can select fixed files with `--select-route-file ROUTE:PATH`, or opt in
+to `--select-unique-candidates`, which selects only routes having exactly one
+contract-matching candidate. Explicit selections fail closed on malformed JSON,
+route/workload mismatch, paths outside the intake root, and duplicate routes.
+The emitted registry is deliberately a draft: provenance, compiler and
+environment fields remain blank and must be reviewed before the intake runner
+can admit an export.
+
 ## Final deliverables
 
 - [Chinese executive brief](EXECUTIVE_BRIEF_ZH.md)

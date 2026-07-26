@@ -1,6 +1,8 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -155,6 +157,67 @@ class FHExternalEvidenceIntakeBootstrapTests(unittest.TestCase):
                     root,
                     self.contract,
                 )
+
+    def test_select_unique_candidates_excludes_missing_and_ambiguous_routes(self):
+        candidates = {
+            "native_fermions": [Path("native.json")],
+            "dynamic_jw_local_grid_source_leading": [
+                Path("dynamic-a.json"),
+                Path("dynamic-b.json"),
+            ],
+            "fsn_standard_figure_candidate_fit": [Path("fsn.json")],
+        }
+
+        selected = BOOTSTRAP.select_unique_candidates(
+            candidates,
+            self.contract["required_routes"],
+        )
+
+        self.assertEqual(
+            selected,
+            {
+                "native_fermions": Path("native.json"),
+                "fsn_standard_figure_candidate_fit": Path("fsn.json"),
+            },
+        )
+
+    def test_cli_select_unique_candidates_emits_draft_registry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            native = root / "native.json"
+            registry_path = root / "draft-registry.json"
+            native.write_text(
+                json.dumps(self._route_export("native_fermions")),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(HERE / "fh_l8_external_evidence_intake_bootstrap.py"),
+                    "--intake-root",
+                    str(root),
+                    "--select-unique-candidates",
+                    "--emit-registry",
+                    str(registry_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertIn("native_fermions: SELECTED", completed.stdout)
+            self.assertIn("selected count: 1", completed.stdout)
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            self.assertEqual(set(registry["artifacts"]), {"native_fermions"})
+            self.assertEqual(
+                registry["artifacts"]["native_fermions"]["artifact_path"],
+                "native.json",
+            )
+            self.assertEqual(
+                registry["artifacts"]["native_fermions"]["source_url"],
+                "",
+            )
 
     def test_build_registry_populates_sketch_metadata_and_digests(self):
         with tempfile.TemporaryDirectory() as temporary:

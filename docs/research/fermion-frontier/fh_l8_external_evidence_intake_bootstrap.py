@@ -149,6 +149,18 @@ def parse_select_route_file_specs(
     return selections
 
 
+def select_unique_candidates(
+    candidates: Mapping[str, list[Path]],
+    required_routes: list[str],
+) -> dict[str, Path]:
+    """Select routes only when discovery produced exactly one matching file."""
+    return {
+        route: paths[0]
+        for route in required_routes
+        if len(paths := candidates.get(route, [])) == 1
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--contract", type=Path, default=HERE / "fh_l8_external_evidence_intake_contract.json")
@@ -160,6 +172,11 @@ def main() -> None:
         metavar="ROUTE:PATH",
         help="optional fixed selection for a route",
     )
+    parser.add_argument(
+        "--select-unique-candidates",
+        action="store_true",
+        help="select a route automatically only when exactly one matching candidate was discovered",
+    )
     parser.add_argument("--emit-registry", type=Path)
     parser.add_argument("--no-summary", action="store_true")
     args = parser.parse_args()
@@ -169,6 +186,15 @@ def main() -> None:
     selections = parse_select_route_file_specs(
         args.select_route_file, args.intake_root, contract
     )
+    if args.select_unique_candidates:
+        automatic = select_unique_candidates(candidates, contract["required_routes"])
+        overlap = sorted(set(selections) & set(automatic))
+        if overlap:
+            raise ValueError(
+                "routes cannot be both explicitly and automatically selected: "
+                + ", ".join(overlap)
+            )
+        selections.update(automatic)
 
     registry = build_registry(args.contract, args.intake_root, selections)
     if not args.no_summary:
