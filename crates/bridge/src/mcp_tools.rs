@@ -7534,9 +7534,14 @@ impl McpTool for ForumPostTool {
                     "thread_id":  { "type": "integer", "description": "Existing thread id; omit to create a new thread." },
                     "board":      { "type": "string",  "description": "Board name (required when creating a new thread). E.g. 'general', 'design', 'incidents'." },
                     "title":      { "type": "string",  "description": "Thread title (required when creating)." },
-                    "author":     { "type": "string",  "description": "Author session id (REQUIRED, non-empty)." },
-                    "kind":       { "type": "string",  "default": "msg", "description": "msg | finding | question | decision | reply" },
-                    "body":       { "type": "string",  "description": "Post body (required, non-empty)." },
+                    "author":     { "type": "string",  "minLength": 1, "description": "Author session id (REQUIRED, non-empty)." },
+                    "kind":       {
+                        "type": "string",
+                        "enum": ["msg", "finding", "question", "decision", "reply"],
+                        "default": "msg",
+                        "description": "Post kind. Use finding for an observed fact; decision for a settled choice. note/status are not valid."
+                    },
+                    "body":       { "type": "string",  "minLength": 1, "description": "Post body (required, non-empty)." },
                     "refs":       { "type": "object",  "description": "Opaque JSON — e.g. {memory_keys:[...], files:[...], parent_post_id:N}." },
                     "tags":       { "type": "array",   "items": {"type": "string"}, "description": "Tags applied when creating a new thread." },
                     "peer":       { "type": "string",  "description": "Optional tailnet peer host:port; if set, post via that daemon-http instead of local. (v20)" }
@@ -7558,6 +7563,14 @@ impl McpTool for ForumPostTool {
             None => return Ok(ToolResult::error("missing or empty 'author'")),
         };
         let kind = args.get("kind").and_then(|v| v.as_str()).unwrap_or("msg");
+        if !matches!(
+            kind,
+            "msg" | "finding" | "question" | "decision" | "reply"
+        ) {
+            return Ok(ToolResult::error(format!(
+                "invalid 'kind': {kind:?}; allowed values are msg, finding, question, decision, reply (use finding for an observed fact; note/status are not valid)"
+            )));
+        }
         let body = match args.get("body").and_then(|v| v.as_str()) {
             Some(s) if !s.trim().is_empty() => s,
             _ => return Ok(ToolResult::error("missing or empty 'body'")),
@@ -36633,10 +36646,12 @@ impl McpTool for GitTopologyPreflightTool {
                     },
                     "target": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Required target branch/ref for the intended PR/MR, e.g. origin/master or review-base/foo."
                     },
                     "source": {
                         "type": "string",
+                        "minLength": 1,
                         "default": "HEAD",
                         "description": "Source branch/ref to review. Defaults to HEAD."
                     },
@@ -36661,12 +36676,24 @@ impl McpTool for GitTopologyPreflightTool {
             .get("target")
             .and_then(|v| v.as_str())
             .unwrap_or("")
+            .trim()
             .to_string();
+        if target.is_empty() {
+            return Ok(ToolResult::error(
+                "missing or empty 'target'; provide the intended PR/MR base ref, e.g. origin/master",
+            ));
+        }
         let source = args
             .get("source")
             .and_then(|v| v.as_str())
             .unwrap_or("HEAD")
+            .trim()
             .to_string();
+        if source.is_empty() {
+            return Ok(ToolResult::error(
+                "empty 'source'; omit it to use HEAD or provide a non-empty Git ref",
+            ));
+        }
         let max_files = args
             .get("max_files")
             .and_then(|v| v.as_u64())
@@ -38082,15 +38109,15 @@ impl McpTool for PlanSaveTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "plan_id": { "type": "string", "description": "Stable plan identifier." },
-                    "title": { "type": "string", "description": "Human-readable plan title." },
+                    "plan_id": { "type": "string", "minLength": 1, "description": "Stable plan identifier." },
+                    "title": { "type": "string", "minLength": 1, "description": "Human-readable plan title." },
                     "steps": {
                         "type": "array",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "id": { "type": "string" },
-                                "desc": { "type": "string" },
+                                "id": { "type": "string", "minLength": 1 },
+                                "desc": { "type": "string", "minLength": 1, "description": "Required human-readable step description. The field name is desc, not description or step." },
                                 "status": { "type": "string", "description": "pending | in_progress | done | cancelled (free-form allowed)" },
                                 "deps": { "type": "array", "items": { "type": "string" } }
                             },
@@ -38128,8 +38155,14 @@ impl McpTool for PlanSaveTool {
             Some(v) if v.is_array() => v.clone(),
             _ => return Ok(ToolResult::error("missing 'steps' array")),
         };
-        let steps: Vec<PlanStep> = serde_json::from_value(steps_val)
-            .map_err(|e| ab_core::Error::InvalidArgument(format!("invalid steps: {e}")))?;
+        let steps: Vec<PlanStep> = match serde_json::from_value(steps_val) {
+            Ok(steps) => steps,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "invalid 'steps': {e}; every step requires non-empty string fields 'id' and 'desc' (use 'desc', not 'description' or 'step')"
+                )));
+            }
+        };
         if steps.is_empty() {
             return Ok(ToolResult::error("'steps' must be non-empty"));
         }

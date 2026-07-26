@@ -8510,6 +8510,76 @@ fn registry_exposes_git_topology_preflight_tool() {
 }
 
 #[test]
+fn collaboration_write_schemas_expose_observed_argument_contracts() {
+    let hub = Hub::builder().build();
+
+    let forum = ForumPostTool::new(hub.clone()).schema().input_schema;
+    assert_eq!(
+        forum["properties"]["kind"]["enum"],
+        json!(["msg", "finding", "question", "decision", "reply"])
+    );
+    assert_eq!(forum["properties"]["author"]["minLength"], json!(1));
+    assert_eq!(forum["properties"]["body"]["minLength"], json!(1));
+
+    let plan = PlanSaveTool::new(hub.clone()).schema().input_schema;
+    assert_eq!(
+        plan["properties"]["steps"]["items"]["required"],
+        json!(["id", "desc"])
+    );
+    assert_eq!(
+        plan["properties"]["steps"]["items"]["properties"]["desc"]["minLength"],
+        json!(1)
+    );
+
+    let topology = GitTopologyPreflightTool::new(hub).schema().input_schema;
+    assert_eq!(topology["properties"]["target"]["minLength"], json!(1));
+    assert_eq!(topology["properties"]["source"]["minLength"], json!(1));
+}
+
+#[tokio::test]
+async fn collaboration_write_validation_returns_actionable_errors() {
+    let ctx = ToolContext::default();
+    let hub = Hub::builder().build();
+
+    let forum = ForumPostTool::new(hub.clone())
+        .execute(
+            json!({"author": "codex-test", "body": "update", "kind": "status"}),
+            &ctx,
+        )
+        .await
+        .expect("forum validation result");
+    assert!(forum.is_error);
+    let forum_error = result_text(&forum);
+    assert!(forum_error.contains("allowed values"));
+    assert!(forum_error.contains("note/status are not valid"));
+
+    let topology = GitTopologyPreflightTool::new(hub)
+        .execute(json!({"target": "  "}), &ctx)
+        .await
+        .expect("topology validation result");
+    assert!(topology.is_error);
+    assert!(result_text(&topology).contains("origin/master"));
+
+    let (plan_hub, temp_dir) = mk_test_hub_with_store().await;
+    let plan = PlanSaveTool::new(plan_hub)
+        .execute(
+            json!({
+                "plan_id": "contract-test",
+                "title": "Contract test",
+                "steps": [{"id": "s1", "description": "wrong field name"}]
+            }),
+            &ctx,
+        )
+        .await
+        .expect("plan validation result");
+    assert!(plan.is_error);
+    let plan_error = result_text(&plan);
+    assert!(plan_error.contains("requires non-empty string fields 'id' and 'desc'"));
+    assert!(plan_error.contains("not 'description' or 'step'"));
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[test]
 fn registry_exposes_desktop_snapshot_to_codex_essential() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     assert!(p.includes(Tier::Standard, "desktop_snapshot"));
