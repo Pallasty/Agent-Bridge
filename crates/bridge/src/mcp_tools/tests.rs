@@ -10178,6 +10178,8 @@ fn present_is_niche_opt_in_and_registers_under_all() {
     assert!(!std_p.includes(Tier::Niche, "present_voice"));
     assert!(all.includes(Tier::Niche, "present_voice_confirm_audibility"));
     assert!(!std_p.includes(Tier::Niche, "present_voice_confirm_audibility"));
+    assert!(all.includes(Tier::Niche, "voice_delivery_health"));
+    assert!(!std_p.includes(Tier::Niche, "voice_delivery_health"));
     // Live semantic world tools are Step C Niche opt-ins; absent from
     // standard/default profile surfaces until explicitly requested.
     for t in [
@@ -10273,6 +10275,10 @@ fn present_is_niche_opt_in_and_registers_under_all() {
             .iter()
             .any(|s| s.name == "present_voice_confirm_audibility"),
         "present_voice_confirm_audibility must register under the all profile"
+    );
+    assert!(
+        schemas.iter().any(|s| s.name == "voice_delivery_health"),
+        "voice_delivery_health must register under the all profile"
     );
     let voice_schema = schemas
         .iter()
@@ -10518,6 +10524,114 @@ fn voice_audibility_projection_links_latest_confirmation_without_mutating_source
         "confirmed_not_audible"
     );
     assert_eq!(source["verify_status"], "rendered_ok");
+}
+
+#[test]
+fn voice_delivery_health_is_latest_run_scoped_and_fails_closed() {
+    let healthy_records = vec![
+        json!({
+            "artifact_id": "voice_new",
+            "kind": "voice",
+            "verify_status": "rendered_ok",
+            "ts": 100
+        }),
+        json!({
+            "artifact_id": "voice_new.audibility.101",
+            "kind": "voice_audibility_confirmation",
+            "source_artifact_id": "voice_new",
+            "audibility": "confirmed_audible",
+            "ts": 101
+        }),
+        json!({
+            "artifact_id": "voice_old",
+            "kind": "voice",
+            "verify_status": "rendered_ok",
+            "ts": 50
+        }),
+        json!({
+            "artifact_id": "voice_old.audibility.51",
+            "kind": "voice_audibility_confirmation",
+            "source_artifact_id": "voice_old",
+            "audibility": "confirmed_not_audible",
+            "ts": 51
+        }),
+    ];
+    let healthy = voice_delivery_health_projection(&healthy_records, 110, 60);
+    assert_eq!(healthy["status"], "healthy_confirmed");
+    assert_eq!(healthy["recommended_action"], "none");
+    assert_eq!(healthy["human"]["confirmed_not_audible_fresh_count"], 1);
+    assert_eq!(healthy["machine"]["latest"]["artifact_id"], "voice_new");
+    assert_eq!(healthy["emits_audio"], false);
+
+    let mismatch = voice_delivery_health_projection(
+        &[
+            json!({
+                "artifact_id": "voice_bad",
+                "kind": "voice",
+                "verify_status": "rendered_ok",
+                "ts": 100
+            }),
+            json!({
+                "artifact_id": "voice_bad.audibility.101",
+                "kind": "voice_audibility_confirmation",
+                "source_artifact_id": "voice_bad",
+                "audibility": "confirmed_not_audible",
+                "ts": 101
+            }),
+        ],
+        110,
+        60,
+    );
+    assert_eq!(mismatch["status"], "delivery_mismatch");
+
+    let machine_only = voice_delivery_health_projection(
+        &[json!({
+            "artifact_id": "voice_unconfirmed",
+            "kind": "voice",
+            "verify_status": "rendered_ok",
+            "ts": 100
+        })],
+        110,
+        60,
+    );
+    assert_eq!(machine_only["status"], "machine_only");
+
+    let failed = voice_delivery_health_projection(
+        &[json!({
+            "artifact_id": "voice_failed",
+            "kind": "voice",
+            "verify_status": "no_capture",
+            "ts": 100
+        })],
+        110,
+        60,
+    );
+    assert_eq!(failed["status"], "failed");
+
+    let expired = voice_delivery_health_projection(
+        &[
+            json!({
+                "artifact_id": "voice_expired",
+                "kind": "voice",
+                "verify_status": "rendered_ok",
+                "ts": 100
+            }),
+            json!({
+                "artifact_id": "voice_expired.audibility.101",
+                "kind": "voice_audibility_confirmation",
+                "source_artifact_id": "voice_expired",
+                "audibility": "confirmed_audible",
+                "ts": 101
+            }),
+        ],
+        1_000,
+        60,
+    );
+    assert_eq!(expired["status"], "machine_only");
+    assert_eq!(expired["human"]["expired_confirmation_count"], 1);
+
+    let empty = voice_delivery_health_projection(&[], 100, 60);
+    assert_eq!(empty["status"], "insufficient_evidence");
 }
 
 #[test]

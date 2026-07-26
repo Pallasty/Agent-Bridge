@@ -474,6 +474,239 @@ pub(super) fn latest_voice_audibility_by_source(records: &[Value]) -> Value {
     Value::Object(latest.into_iter().collect())
 }
 
+/// Read-only health projection over machine voice receipts and their explicitly
+/// linked, single-outcome human audibility confirmations. This never treats a
+/// human confirmation as a property of a backend, device, or future run.
+pub(super) fn voice_delivery_health_projection(
+    records: &[Value],
+    now: u64,
+    confirmation_fresh_secs: u64,
+) -> Value {
+    let voices: Vec<&Value> = records
+        .iter()
+        .filter(|record| record.get("kind").and_then(Value::as_str) == Some("voice"))
+        .collect();
+    let voice_outcome_count = voices.len();
+    let confirmations = latest_voice_audibility_by_source(records);
+    let confirmation_rows = confirmations.as_object();
+
+    let mut machine_rendered_ok_count = 0usize;
+    let mut machine_failed_count = 0usize;
+    let mut confirmed_audible_fresh_count = 0usize;
+    let mut confirmed_not_audible_fresh_count = 0usize;
+    let mut uncertain_fresh_count = 0usize;
+    let mut expired_confirmation_count = 0usize;
+    let mut unconfirmed_count = 0usize;
+
+    for voice in &voices {
+        if voice.get("verify_status").and_then(Value::as_str) == Some("rendered_ok") {
+            machine_rendered_ok_count += 1;
+        } else {
+            machine_failed_count += 1;
+        }
+        let source_id = voice.get("artifact_id").and_then(Value::as_str);
+        let confirmation = source_id.and_then(|id| confirmation_rows.and_then(|rows| rows.get(id)));
+        let confirmation_ts = confirmation
+            .and_then(|row| row.get("ts"))
+            .and_then(Value::as_u64);
+        let fresh = confirmation_ts
+            .map(|ts| ts <= now && now.saturating_sub(ts) <= confirmation_fresh_secs)
+            .unwrap_or(false);
+        if !fresh {
+            if confirmation.is_some() {
+                expired_confirmation_count += 1;
+            }
+            unconfirmed_count += 1;
+            continue;
+        }
+        match confirmation
+            .and_then(|row| row.get("audibility"))
+            .and_then(Value::as_str)
+        {
+            Some("confirmed_audible") => confirmed_audible_fresh_count += 1,
+            Some("confirmed_not_audible") => confirmed_not_audible_fresh_count += 1,
+            _ => {
+                uncertain_fresh_count += 1;
+                unconfirmed_count += 1;
+            }
+        }
+    }
+
+    let latest_voice = voices.into_iter().max_by(|a, b| {
+        let a_ts = a.get("ts").and_then(Value::as_u64).unwrap_or_default();
+        let b_ts = b.get("ts").and_then(Value::as_u64).unwrap_or_default();
+        let a_id = a.get("artifact_id").and_then(Value::as_str).unwrap_or("");
+        let b_id = b.get("artifact_id").and_then(Value::as_str).unwrap_or("");
+        a_ts.cmp(&b_ts).then_with(|| a_id.cmp(b_id))
+    });
+    let latest_source_id = latest_voice
+        .and_then(|row| row.get("artifact_id"))
+        .and_then(Value::as_str);
+    let latest_confirmation = latest_source_id
+        .and_then(|id| confirmation_rows.and_then(|rows| rows.get(id)))
+        .cloned();
+    let latest_confirmation_ts = latest_confirmation
+        .as_ref()
+        .and_then(|row| row.get("ts"))
+        .and_then(Value::as_u64);
+    let latest_confirmation_fresh = latest_confirmation_ts
+        .map(|ts| ts <= now && now.saturating_sub(ts) <= confirmation_fresh_secs)
+        .unwrap_or(false);
+    let latest_machine_ok = latest_voice
+        .and_then(|row| row.get("verify_status"))
+        .and_then(Value::as_str)
+        == Some("rendered_ok");
+    let latest_audibility = latest_confirmation
+        .as_ref()
+        .and_then(|row| row.get("audibility"))
+        .and_then(Value::as_str);
+
+    let (status, recommended_action) = if latest_voice.is_none() {
+        (
+            "insufficient_evidence",
+            "emit_one_explicit_test_then_request_single_human_confirmation",
+        )
+    } else if !latest_machine_ok {
+        (
+            "failed",
+            "inspect_machine_synthesis_or_verification_failure",
+        )
+    } else if latest_confirmation_fresh && latest_audibility == Some("confirmed_not_audible") {
+        (
+            "delivery_mismatch",
+            "inspect_named_playback_endpoint_then_emit_a_new_explicit_test",
+        )
+    } else if latest_confirmation_fresh && latest_audibility == Some("confirmed_audible") {
+        ("healthy_confirmed", "none")
+    } else if latest_confirmation_fresh && latest_audibility == Some("uncertain") {
+        (
+            "insufficient_evidence",
+            "request_a_clear_single_human_audibility_confirmation",
+        )
+    } else {
+        (
+            "machine_only",
+            "request_single_human_audibility_confirmation",
+        )
+    };
+
+    json!({
+        "schema": "voice_delivery_health/v1",
+        "read_only": true,
+        "emits_audio": false,
+        "changes_playback_device": false,
+        "confirmation_scope": "each human confirmation applies only to its linked voice artifact",
+        "now": now,
+        "confirmation_fresh_secs": confirmation_fresh_secs,
+        "status": status,
+        "recommended_action": recommended_action,
+        "voice_outcome_count": voice_outcome_count,
+        "machine": {
+            "rendered_ok_count": machine_rendered_ok_count,
+            "failed_count": machine_failed_count,
+            "latest": latest_voice.cloned().unwrap_or(Value::Null),
+        },
+        "human": {
+            "latest_confirmation": latest_confirmation,
+            "latest_confirmation_fresh": latest_confirmation_fresh,
+            "confirmed_audible_fresh_count": confirmed_audible_fresh_count,
+            "confirmed_not_audible_fresh_count": confirmed_not_audible_fresh_count,
+            "uncertain_fresh_count": uncertain_fresh_count,
+            "expired_confirmation_count": expired_confirmation_count,
+            "unconfirmed_count": unconfirmed_count,
+        },
+        "not_verified": "objective loudness, audio quality, physical transducer behavior beyond each named human report, and delivery of future voice runs",
+    })
+}
+
+/// Read-only operator projection for whether the latest explicit voice outcome
+/// has matching, fresh human audibility evidence.
+pub struct VoiceDeliveryHealthTool {
+    _hub: Hub,
+}
+
+impl VoiceDeliveryHealthTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for VoiceDeliveryHealthTool {
+    fn name(&self) -> &'static str {
+        "voice_delivery_health"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only voice delivery health projection. Correlates machine voice receipts with \
+                 their explicitly linked, single-outcome human audibility confirmations. Reports \
+                 healthy_confirmed|machine_only|delivery_mismatch|failed|insufficient_evidence \
+                 plus an operator recommendation. Never emits audio, changes playback devices, \
+                 or generalises a human report to a backend or future run. Niche."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over voice outcomes and confirmations."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 200,
+                        "description": "Maximum sidecar records scanned, newest-first."
+                    },
+                    "confirmation_fresh_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 604800,
+                        "description": "A human confirmation older than this is historical only, not current delivery evidence."
+                    }
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let window_secs = args
+            .get("window_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(200)
+            .clamp(1, 1000) as usize;
+        let confirmation_fresh_secs = args
+            .get("confirmation_fresh_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(604_800)
+            .clamp(60, 31_536_000);
+        let now = dispatch_now_secs().max(0) as u64;
+        let cutoff = now.saturating_sub(window_secs);
+        let records = crate::present::read_outcome_records(
+            &crate::present::presentations_dir(),
+            limit,
+            cutoff,
+        );
+        Ok(ToolResult::json_text(&voice_delivery_health_projection(
+            &records,
+            now,
+            confirmation_fresh_secs,
+        )))
+    }
+}
+
 #[async_trait]
 impl McpTool for PresentVoiceConfirmAudibilityTool {
     fn name(&self) -> &'static str {

@@ -46786,6 +46786,15 @@ pub(crate) fn build_registry_with_policy_surface(
         Tier::Niche,
         Arc::new(PresentVoiceConfirmAudibilityTool::new(hub.clone())),
     );
+    // Read-only aggregate of machine voice receipts and their explicitly linked
+    // human audibility confirmations. Niche: it neither emits audio nor adapts
+    // playback behavior from the result.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(VoiceDeliveryHealthTool::new(hub.clone())),
+    );
     // Host-confirm path B (Linux Computer Use): present an Approve/Reject card for a
     // pending host desktop action, block until a human decides, return the verdict.
     // Standard tier; mints no authority (reuses the desktop_pending token + desktop_confirm).
