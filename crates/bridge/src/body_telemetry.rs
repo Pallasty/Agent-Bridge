@@ -20,6 +20,7 @@ pub mod macos;
 pub const BODY_STATUS_SCHEMA_V0: &str = "agent_bridge.body_status.v0";
 pub const TASK_RESOURCE_SPAN_SCHEMA_V0: &str = "agent_bridge.task_resource_span.v0";
 pub const SHADOW_REFLEX_ADVICE_SCHEMA_V0: &str = "agent_bridge.shadow_reflex_advice.v0";
+pub const BODY_SCHEDULING_ADVICE_SCHEMA_V0: &str = "agent_bridge.body_scheduling_advice.v0";
 
 /// Whether a metric is safe to treat as current.
 ///
@@ -547,6 +548,122 @@ pub(crate) fn shadow_reflex_advice_from_status(status: &Value) -> Value {
     })
 }
 
+/// Produce workload-aware, report-only scheduling guidance. The caller remains
+/// authoritative: this projection never changes concurrency, routing, or task
+/// admission.
+pub fn body_scheduling_advice_snapshot(workload_class: &str, requested_parallelism: u64) -> Value {
+    let status = body_status_snapshot();
+    body_scheduling_advice_from_status(&status, workload_class, requested_parallelism)
+}
+
+pub(crate) fn body_scheduling_advice_from_status(
+    status: &Value,
+    workload_class: &str,
+    requested_parallelism: u64,
+) -> Value {
+    let enabled = status
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let pressure = status
+        .get("pressure")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let workload_class = match workload_class.trim() {
+        "light" => "light",
+        "standard" => "standard",
+        "heavy" => "heavy",
+        "sustained" => "sustained",
+        "remote_heavy" => "remote_heavy",
+        _ => "standard",
+    };
+    let requested_parallelism = requested_parallelism.max(1);
+    let is_heavy = matches!(workload_class, "heavy" | "sustained");
+    let is_remote = workload_class == "remote_heavy";
+
+    let (recommendation, reason, suggested_max_parallelism) = if !enabled {
+        (
+            "observe_only",
+            "telemetry is disabled, so scheduling remains caller-directed",
+            requested_parallelism,
+        )
+    } else {
+        match pressure {
+            "nominal" => (
+                "start_as_requested",
+                "pressure is nominal after hysteresis reduction",
+                requested_parallelism,
+            ),
+            "elevated" if is_remote => (
+                "start_remote_as_requested",
+                "the heavyweight work is remote, so local pressure only warrants observation",
+                requested_parallelism,
+            ),
+            "elevated" if is_heavy => (
+                "prefer_single_heavy_task",
+                "pressure is elevated; avoid optional local heavyweight concurrency",
+                1,
+            ),
+            "elevated" => (
+                "prefer_lightweight_next_step",
+                "pressure is elevated; keep optional local concurrency bounded",
+                requested_parallelism.min(1),
+            ),
+            "high" if is_remote => (
+                "prefer_remote_execution",
+                "pressure is high locally, while the requested heavyweight work is remote",
+                requested_parallelism,
+            ),
+            "high" if is_heavy => (
+                "defer_optional_heavy_work",
+                "pressure is high; defer new optional local heavyweight work until recovery",
+                1,
+            ),
+            "high" => (
+                "avoid_optional_parallelism",
+                "pressure is high; keep the next local step lightweight and serial",
+                1,
+            ),
+            "critical" if is_remote => (
+                "prefer_remote_execution",
+                "pressure is critical locally, while remote execution avoids most local load",
+                requested_parallelism,
+            ),
+            "critical" if is_heavy => (
+                "request_operator_review_before_heavy_work",
+                "pressure is critical; review new local heavyweight work before proceeding",
+                1,
+            ),
+            "critical" => (
+                "continue_lightweight_only",
+                "pressure is critical; prefer only bounded lightweight local work",
+                1,
+            ),
+            _ => (
+                "observe_only",
+                "pressure is unknown or unsupported, so scheduling remains caller-directed",
+                requested_parallelism,
+            ),
+        }
+    };
+
+    json!({
+        "schema_version": BODY_SCHEDULING_ADVICE_SCHEMA_V0,
+        "mode": "shadow_only",
+        "read_only": true,
+        "blocked": false,
+        "execution_changed": false,
+        "changes_routing": false,
+        "changes_parallelism": false,
+        "pressure": pressure,
+        "workload_class": workload_class,
+        "requested_parallelism": requested_parallelism,
+        "suggested_max_parallelism": suggested_max_parallelism,
+        "recommendation": recommendation,
+        "reason": reason,
+    })
+}
+
 fn disabled_body_status() -> Value {
     json!({
         "schema_version": BODY_STATUS_SCHEMA_V0,
@@ -1065,6 +1182,41 @@ mod tests {
             critical["safety"]["operator_confirmation_required_for_execution"],
             true
         );
+    }
+
+    #[test]
+    fn scheduling_advice_is_workload_aware_but_never_changes_execution() {
+        let critical = json!({
+            "enabled": true,
+            "pressure": "critical",
+        });
+        let local = body_scheduling_advice_from_status(&critical, "heavy", 4);
+        assert_eq!(local["schema_version"], BODY_SCHEDULING_ADVICE_SCHEMA_V0);
+        assert_eq!(
+            local["recommendation"],
+            "request_operator_review_before_heavy_work"
+        );
+        assert_eq!(local["suggested_max_parallelism"], 1);
+        assert_eq!(local["blocked"], false);
+        assert_eq!(local["execution_changed"], false);
+        assert_eq!(local["changes_routing"], false);
+        assert_eq!(local["changes_parallelism"], false);
+
+        let remote = body_scheduling_advice_from_status(&critical, "remote_heavy", 4);
+        assert_eq!(remote["recommendation"], "prefer_remote_execution");
+        assert_eq!(remote["suggested_max_parallelism"], 4);
+        assert_eq!(remote["blocked"], false);
+        assert_eq!(remote["execution_changed"], false);
+    }
+
+    #[test]
+    fn scheduling_advice_normalizes_unknown_workloads_and_disabled_telemetry() {
+        let advice = body_scheduling_advice_from_status(&disabled_body_status(), "surprise", 0);
+        assert_eq!(advice["workload_class"], "standard");
+        assert_eq!(advice["requested_parallelism"], 1);
+        assert_eq!(advice["recommendation"], "observe_only");
+        assert_eq!(advice["blocked"], false);
+        assert_eq!(advice["execution_changed"], false);
     }
 
     #[test]

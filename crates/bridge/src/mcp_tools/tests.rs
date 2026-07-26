@@ -14621,6 +14621,17 @@ fn agent_spawn_schema_exposes_interactive_flag() {
 }
 
 #[test]
+fn agent_spawn_workload_class_distinguishes_local_and_remote_load() {
+    assert_eq!(agent_spawn_workload_class(None, false), "heavy");
+    assert_eq!(agent_spawn_workload_class(None, true), "sustained");
+    assert_eq!(agent_spawn_workload_class(Some("local"), true), "sustained");
+    assert_eq!(
+        agent_spawn_workload_class(Some("aio2"), false),
+        "remote_heavy"
+    );
+}
+
+#[test]
 fn agent_spawn_resolves_grok_build_alias_to_acp() {
     let hub = crate::Hub::builder()
         .register_agent(Arc::new(ab_agent::AcpRuntime::with_binary(
@@ -14821,6 +14832,16 @@ async fn agent_spawn_execute_uses_fallback_chain_when_backend_omitted() {
     assert_eq!(payload["cwd"], json!("/tmp"));
     assert_eq!(payload["failover"]["attempted"], json!(["primary"]));
     assert_eq!(payload["failover"]["used"], json!("backup"));
+    assert_eq!(
+        payload["body_scheduling_advice"]["schema_version"],
+        crate::body_telemetry::BODY_SCHEDULING_ADVICE_SCHEMA_V0
+    );
+    assert_eq!(payload["body_scheduling_advice"]["workload_class"], "heavy");
+    assert_eq!(payload["body_scheduling_advice"]["blocked"], false);
+    assert_eq!(
+        payload["body_scheduling_advice"]["execution_changed"],
+        false
+    );
 }
 
 #[test]

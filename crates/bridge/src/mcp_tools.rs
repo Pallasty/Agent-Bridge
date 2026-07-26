@@ -10039,6 +10039,16 @@ impl AgentSpawnTool {
     }
 }
 
+fn agent_spawn_workload_class(node: Option<&str>, interactive: bool) -> &'static str {
+    if node.is_some_and(|node| !node.eq_ignore_ascii_case("local")) {
+        "remote_heavy"
+    } else if interactive {
+        "sustained"
+    } else {
+        "heavy"
+    }
+}
+
 /// Wrap agent launch with a bounded local body observation. One-shot sessions
 /// close here; interactive sessions remain active until `agent_session_wait`
 /// observes their terminal row.
@@ -10242,6 +10252,10 @@ impl McpTool for AgentSpawnTool {
             .get("interactive")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let body_scheduling_advice = crate::body_telemetry::body_scheduling_advice_snapshot(
+            agent_spawn_workload_class(node.as_deref(), interactive),
+            1,
+        );
         let cfg = SpawnConfig {
             cwd,
             env,
@@ -10265,6 +10279,9 @@ impl McpTool for AgentSpawnTool {
                     let mut value = serde_json::to_value(s).unwrap_or(Value::Null);
                     if let (Some(body_span), Some(object)) = (body_span, value.as_object_mut()) {
                         object.insert("body_task_span".to_string(), body_span);
+                    }
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert("body_scheduling_advice".to_string(), body_scheduling_advice);
                     }
                     Ok(ToolResult::json_text(&value))
                 }
@@ -10291,6 +10308,9 @@ impl McpTool for AgentSpawnTool {
                 }
                 if let (Some(body_span), Some(object)) = (body_span, v.as_object_mut()) {
                     object.insert("body_task_span".to_string(), body_span);
+                }
+                if let Some(object) = v.as_object_mut() {
+                    object.insert("body_scheduling_advice".to_string(), body_scheduling_advice);
                 }
                 Ok(ToolResult::json_text(&v))
             }
