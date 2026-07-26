@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
-RESULT = HERE / "fh_l8_object_cost_measurement_d54_result.json"
+RESULT = HERE / "fh_l8_object_cost_measurement_d54r2_result.json"
 FULL64 = "38aaeffb8f178e918e4f326888493166c21afc7fb1379e91ab965c345b4adc12"
 
 
@@ -17,7 +17,7 @@ class ResultError(RuntimeError):
 
 
 def check(value: dict[str, Any]) -> dict[str, Any]:
-    if value.get("status") != "D54_BOUNDED_LOCAL_MEASUREMENT_COMPLETE":
+    if value.get("status") != "D54R2_BOUNDED_LOCAL_MEASUREMENT_COMPLETE":
         raise ResultError("result status drift")
     if (value.get("raw_sample_count"), value.get("warmup_sample_count"),
             value.get("measured_sample_count")) != (70, 20, 50):
@@ -67,7 +67,7 @@ def check(value: dict[str, Any]) -> dict[str, Any]:
     if groups[-1].get("structural_output_sha256") != FULL64:
         raise ResultError("fixed64 structural digest drift")
     return {
-        "status": "VERIFIED_D54_BOUNDED_LOCAL_MEASUREMENT",
+        "status": "VERIFIED_D54R2_BOUNDED_LOCAL_MEASUREMENT",
         "raw_sample_count": 70,
         "maximum_observed_cgroup_peak_bytes": max(
             row["metrics"]["cgroup_memory_peak_bytes"]["max"] for row in groups

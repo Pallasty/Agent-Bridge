@@ -13,7 +13,7 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
-    "fh_l8_d54_launcher", HERE / "fh_l8_object_cost_measurement_d54_launcher.py"
+    "fh_l8_d54_launcher", HERE / "fh_l8_object_cost_measurement_d54r2_launcher.py"
 )
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("cannot load D54 launcher")
@@ -92,7 +92,7 @@ def aggregate(root: Path) -> dict[str, Any]:
             groups.append({"tier": tier, "size": size, "measured_samples": 5,
                            "structural_output_sha256": next(iter(digests)), "metrics": metrics})
     return {
-        "schema_version": 1, "status": "D54_BOUNDED_LOCAL_MEASUREMENT_COMPLETE",
+        "schema_version": 1, "status": "D54R2_BOUNDED_LOCAL_MEASUREMENT_COMPLETE",
         "source_commit": state["source_commit"], "launcher_state_sha256": sha(state_raw),
         "raw_sample_count": len(observed), "measured_sample_count": 50,
         "warmup_sample_count": 20, "groups": groups,

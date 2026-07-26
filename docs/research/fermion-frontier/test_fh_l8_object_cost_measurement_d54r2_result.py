@@ -6,7 +6,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
-    "d54_result_checker", HERE / "fh_l8_object_cost_measurement_d54_result_checker.py"
+    "d54_result_checker", HERE / "fh_l8_object_cost_measurement_d54r2_result_checker.py"
 )
 CHECKER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -19,7 +19,7 @@ class D54ResultTests(unittest.TestCase):
 
     def test_committed_result(self):
         checked = CHECKER.check(self.result)
-        self.assertEqual(checked["status"], "VERIFIED_D54_BOUNDED_LOCAL_MEASUREMENT")
+        self.assertEqual(checked["status"], "VERIFIED_D54R2_BOUNDED_LOCAL_MEASUREMENT")
         self.assertFalse(checked["full53_authority_open"])
 
     def test_counts_digest_and_authority_fail_closed(self):

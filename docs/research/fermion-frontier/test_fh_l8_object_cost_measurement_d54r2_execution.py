@@ -7,8 +7,8 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import fh_l8_object_cost_measurement_d54_aggregator as aggregator
-import fh_l8_object_cost_measurement_d54_launcher as launcher
+import fh_l8_object_cost_measurement_d54r2_aggregator as aggregator
+import fh_l8_object_cost_measurement_d54r2_launcher as launcher
 
 
 class D54ExecutionTests(unittest.TestCase):
