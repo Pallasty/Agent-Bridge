@@ -521,6 +521,7 @@ impl McpTool for TerminalSplitTool {
                                         TERM is preserved by the backend.",
                         "additionalProperties": { "type": "string" }
                     },
+                    "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." },
                     "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required current body write lease from embodiment_lease(acquire)." }
                 },
                 "required": ["pane", "embodiment_lease_id"]
@@ -531,9 +532,10 @@ impl McpTool for TerminalSplitTool {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
         }
-        if let Err(error) = require_body_write_lease(&self.hub, &args, ctx).await {
-            return Ok(ToolResult::error(error));
-        }
+        let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
+            Ok(lease_id) => lease_id,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
             None => return Ok(ToolResult::error("no terminal backend configured")),
@@ -542,6 +544,11 @@ impl McpTool for TerminalSplitTool {
             Some(s) => PaneId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'pane'")),
         };
+        let embodiment_intent_id = args
+            .get("embodiment_intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
         let dir = match args
             .get("dir")
             .and_then(|v| v.as_str())
@@ -572,10 +579,41 @@ impl McpTool for TerminalSplitTool {
         } else {
             term.split(&pane, dir).await
         };
-        let _body_shadow = body_shadow.finish(&self.hub).await;
+        let body_shadow = body_shadow.finish(&self.hub).await;
         match result {
-            Ok(new_pane) => Ok(ToolResult::text(format!("new pane: {new_pane}"))),
-            Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
+            Ok(new_pane) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "split",
+                    embodiment_intent_id,
+                    Some(new_pane.to_string()),
+                    true,
+                    json!({
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
+                )
+                .await;
+                Ok(ToolResult::text(format!("new pane: {new_pane}")))
+            }
+            Err(e) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "split",
+                    embodiment_intent_id,
+                    Some(pane.to_string()),
+                    false,
+                    json!({
+                        "error": e.to_string(),
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
+                )
+                .await;
+                Ok(ToolResult::error(format!("terminal: {e}")))
+            }
         }
     }
 }
@@ -685,6 +723,7 @@ impl McpTool for TerminalResizeTool {
                               "description": "New row count (vertical lines)." },
                     "cols": { "type": "integer", "minimum": 1, "maximum": 1000,
                               "description": "New column count (horizontal width)." },
+                    "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." },
                     "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required current body write lease from embodiment_lease(acquire)." }
                 },
                 "required": ["pane", "rows", "cols", "embodiment_lease_id"]
@@ -695,9 +734,10 @@ impl McpTool for TerminalResizeTool {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
         }
-        if let Err(error) = require_body_write_lease(&self.hub, &args, ctx).await {
-            return Ok(ToolResult::error(error));
-        }
+        let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
+            Ok(lease_id) => lease_id,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
             None => return Ok(ToolResult::error("no terminal backend configured")),
@@ -706,6 +746,11 @@ impl McpTool for TerminalResizeTool {
             Some(s) => PaneId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'pane'")),
         };
+        let embodiment_intent_id = args
+            .get("embodiment_intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
         let rows = match args.get("rows").and_then(|v| v.as_u64()) {
             Some(r) => r.clamp(1, 500) as u16,
             None => return Ok(ToolResult::error("missing 'rows'")),
@@ -716,16 +761,51 @@ impl McpTool for TerminalResizeTool {
         };
         let body_shadow = BodyWriteShadowSpan::start("terminal_resize", Some(pane.to_string()));
         let result = term.resize(&pane, rows, cols).await;
-        let _body_shadow = body_shadow.finish(&self.hub).await;
+        let body_shadow = body_shadow.finish(&self.hub).await;
         match result {
-            Ok(()) => Ok(ToolResult::json_text(&json!({
-                "pane": pane.as_str(),
-                "backend": term.id(),
-                "rows": rows,
-                "cols": cols,
-                "ok": true
-            }))),
-            Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
+            Ok(()) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "resize",
+                    embodiment_intent_id,
+                    Some(pane.to_string()),
+                    true,
+                    json!({
+                        "rows": rows,
+                        "cols": cols,
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
+                )
+                .await;
+                Ok(ToolResult::json_text(&json!({
+                    "pane": pane.as_str(),
+                    "backend": term.id(),
+                    "rows": rows,
+                    "cols": cols,
+                    "ok": true
+                })))
+            }
+            Err(e) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "resize",
+                    embodiment_intent_id,
+                    Some(pane.to_string()),
+                    false,
+                    json!({
+                        "rows": rows,
+                        "cols": cols,
+                        "error": e.to_string(),
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
+                )
+                .await;
+                Ok(ToolResult::error(format!("terminal: {e}")))
+            }
         }
     }
 }

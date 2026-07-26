@@ -128,7 +128,7 @@ fn is_whitelisted_action_receipt(event: &SemanticEventRecord) -> bool {
     matches!(
         (event.source.as_str(), event.action.as_str()),
         (EMBODIMENT_EVENT_SOURCE, "action_receipt")
-            | ("terminal", "send_keys")
+            | ("terminal", "send_keys" | "split" | "resize")
             | ("browser", "navigate")
             | (
                 "desktop",
@@ -584,6 +584,36 @@ mod tests {
         assert_eq!(audit["rows"][0]["intent_id"], Value::Null);
         assert_eq!(audit["rows"][0]["lineage_status"], "missing_intent_link");
         assert_eq!(audit["rows"][0]["target"], Value::Null);
+        assert!(!audit.to_string().contains("execution_succeeded"));
+        assert!(!audit.to_string().contains("body-mac"));
+    }
+
+    #[test]
+    fn action_lineage_enrolls_terminal_topology_coverage_receipts() {
+        let events = ["split", "resize"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, action)| SemanticEventRecord {
+                ts: 20 + index as i64,
+                actor: "mcp".into(),
+                source: "terminal".into(),
+                action: action.into(),
+                target: None,
+                verdict_status: "unknown".into(),
+                verdict_method: "action_coverage_receipt".into(),
+                evidence: Some(r#"{"intent_linked":false}"#.into()),
+                facts: r#"{"embodiment_intent_id":null,"receipt":{"schema":"agent_bridge.embodiment_action_coverage.v0","coverage_only":true,"intent_linked":false,"body_id":"body-mac","execution_succeeded":true}}"#.into(),
+                descriptor: None,
+            })
+            .collect::<Vec<_>>();
+        let audit = project_action_lineage(&events, 500);
+        assert_eq!(audit["counts"]["coverage_receipts"], 2);
+        assert_eq!(audit["counts"]["intent_linked_receipts"], 0);
+        assert_eq!(audit["counts"]["missing_intent_link"], 2);
+        assert_eq!(audit["counts"]["verdict"]["unknown"], 2);
+        assert_eq!(audit["intent_link_coverage"], 0.0);
+        assert_eq!(audit["rows"][0]["action"], "split");
+        assert_eq!(audit["rows"][1]["action"], "resize");
         assert!(!audit.to_string().contains("execution_succeeded"));
         assert!(!audit.to_string().contains("body-mac"));
     }

@@ -13243,18 +13243,156 @@ fn body_write_tools_require_explicit_embodiment_lease() {
             .iter()
             .any(|value| value == "embodiment_lease_id"));
     }
-    let intent_tool = schemas
+    for name in [
+        "terminal_send_keys",
+        "terminal_split",
+        "terminal_resize",
+        "browser_navigate",
+    ] {
+        let intent_tool = schemas
+            .iter()
+            .find(|schema| schema.name == name)
+            .expect(name);
+        assert!(intent_tool.input_schema["properties"]
+            .get("embodiment_intent_id")
+            .is_some());
+        assert!(!intent_tool.input_schema["required"]
+            .as_array()
+            .expect("required array")
+            .iter()
+            .any(|value| value == "embodiment_intent_id"));
+    }
+}
+
+struct TopologyReceiptTerminal;
+
+#[async_trait]
+impl ab_terminal::TerminalBackend for TopologyReceiptTerminal {
+    fn id(&self) -> &str {
+        "topology-receipt-test"
+    }
+
+    fn capabilities(&self) -> ab_terminal::TerminalCapabilities {
+        ab_terminal::TerminalCapabilities {
+            backend_id: self.id().into(),
+            can_read_output: true,
+            can_send_keys: true,
+            can_split: true,
+        }
+    }
+
+    async fn list_panes(&self) -> ab_core::Result<Vec<ab_terminal::Pane>> {
+        Ok(Vec::new())
+    }
+
+    async fn send_keys(&self, _pane: &PaneId, _keys: &str) -> ab_core::Result<()> {
+        Ok(())
+    }
+
+    async fn read_output(&self, _pane: &PaneId, _lines: usize) -> ab_core::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    async fn split(&self, _pane: &PaneId, _dir: SplitDir) -> ab_core::Result<PaneId> {
+        Ok(PaneId::from_raw("child-pane"))
+    }
+
+    async fn resize(&self, _pane: &PaneId, _rows: u16, _cols: u16) -> ab_core::Result<()> {
+        Ok(())
+    }
+
+    async fn subscribe(
+        &self,
+    ) -> ab_core::Result<futures::stream::BoxStream<'static, ab_terminal::TermEvent>> {
+        Ok(Box::pin(futures::stream::empty()))
+    }
+}
+
+#[tokio::test]
+async fn terminal_topology_tools_persist_privacy_minimal_coverage_receipts() {
+    let (store_hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = store_hub.store.clone().expect("store");
+    let hub = Hub::builder()
+        .store(store)
+        .terminal(std::sync::Arc::new(TopologyReceiptTerminal))
+        .build();
+    let ctx = context_with_session("session-topology-coverage");
+    let acquired = EmbodimentLeaseTool::new(hub.clone())
+        .execute(json!({"op":"acquire"}), &ctx)
+        .await
+        .expect("acquire lease");
+    let acquired: Value = serde_json::from_str(&result_text(&acquired)).expect("lease json");
+    let lease_id = acquired["lease_id"].as_str().expect("lease id");
+
+    let split = TerminalSplitTool::new(hub.clone())
+        .execute(
+            json!({
+                "pane": "parent-pane-must-not-persist",
+                "dir": "vertical",
+                "cwd": "/secret/cwd-must-not-persist",
+                "env": {"SECRET_ENV": "must-not-persist"},
+                "embodiment_lease_id": lease_id
+            }),
+            &ctx,
+        )
+        .await
+        .expect("split");
+    assert!(!split.is_error);
+    let resize = TerminalResizeTool::new(hub.clone())
+        .execute(
+            json!({
+                "pane": "child-pane-must-not-persist",
+                "rows": 47,
+                "cols": 131,
+                "embodiment_lease_id": lease_id
+            }),
+            &ctx,
+        )
+        .await
+        .expect("resize");
+    assert!(!resize.is_error);
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("recent events");
+    let receipts = events
         .iter()
-        .find(|schema| schema.name == "terminal_send_keys")
-        .expect("terminal_send_keys");
-    assert!(intent_tool.input_schema["properties"]
-        .get("embodiment_intent_id")
-        .is_some());
-    assert!(!intent_tool.input_schema["required"]
-        .as_array()
-        .expect("required array")
-        .iter()
-        .any(|value| value == "embodiment_intent_id"));
+        .filter(|event| {
+            event.source == "terminal" && matches!(event.action.as_str(), "split" | "resize")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(receipts.len(), 2);
+    for event in receipts {
+        assert_eq!(event.target, None);
+        assert_eq!(event.verdict_method, "action_coverage_receipt");
+        let facts: Value = serde_json::from_str(&event.facts).expect("coverage facts");
+        assert_eq!(facts["embodiment_intent_id"], Value::Null);
+        assert_eq!(
+            facts["receipt"]["schema"],
+            "agent_bridge.embodiment_action_coverage.v0"
+        );
+        let serialized = serde_json::to_string(&facts).expect("serialize facts");
+        for forbidden in [
+            "must-not-persist",
+            "embodiment_lease_id",
+            "body_shadow",
+            "rows",
+            "cols",
+            "cwd",
+            "SECRET_ENV",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "topology coverage receipt leaked forbidden field: {forbidden}"
+            );
+        }
+    }
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
 
 #[tokio::test]
