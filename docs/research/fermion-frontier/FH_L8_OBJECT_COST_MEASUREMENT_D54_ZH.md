@@ -33,3 +33,24 @@ runner 包含 alias-aware owned-graph 统计、`tracemalloc`、RSS、wall/CPU �
 峰值或最坏运行时间证明。
 
 下一门为 `D54_FRESH_SAMPLE_REPLAY_AND_INDEPENDENT_AGGREGATION`。
+
+## D54-R 执行闭环（2026-07-26）
+
+D54-R 已从提交后的源码执行完 70/70 个 fresh-process 样本，并由独立聚合器重新哈希全部
+receipt。最初两次隔离启动均 fail-closed：第一次发现 user-systemd 无法真正落实
+`PrivateNetwork`，第二次在 runner 启动前发现嵌套 namespace 被拒；两次均无科学调用，
+也没有结果被采信。最终执行改由 bubblewrap 独立网络 namespace 强制只暴露 loopback。
+
+最终闭环结果：
+
+- 20 个 warmup、50 个 measured 全部齐备；
+- fixed64 全尺寸结构 digest 精确匹配 `38aaeffb…`，各重复无漂移；
+- 791 次科学 kernel 调用，packed-q3 读取为 0，full-53 未执行；
+- 所有样本 swap、OOM 与 OOM-kill 增量均为 0；
+- fixed64 size=64 的五次 measured cgroup peak 为
+  48,824,320–49,844,224 bytes（中位 49,233,920）；
+- 同组目标 wall time 为 3.155–3.351 秒（中位 3.213 秒）；
+- `tracemalloc` peak 为 3,088,965–3,088,997 bytes。
+
+该结果只证明本机、当前 CPython/实现和固定 64-prefix 工作负载的经验观测，不是
+full-53 峰值内存或最坏运行时间上界，也不授予资源预留、full-53 或外推权限。

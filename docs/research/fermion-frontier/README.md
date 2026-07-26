@@ -189,10 +189,12 @@ fixed64 prefixes, fourteen metrics, repeated fresh-process samples, CPU0 and 512
 isolation. It executes no measurement itself. `tracemalloc`, RSS/cgroup peaks and timing samples
 remain observations until independent allocator and precommitted timing-margin bounds are supplied.
 
-D54 now freezes a one-process/one-sample runner and separately authorizes the exact 70-sample D53
-plan: 42 synthetic and 28 fixed64 processes under CPU0, 512-MiB/384-MiB-high, zero-swap and
-network-closed isolation. The authorization remains unused: no scratch, sample, object measurement,
-scientific call or packed-q3 read exists. Full-53 and extrapolation authority remain closed.
+D54-R consumed that authorization through a committed launcher and independent aggregator. All
+70 fresh-process receipts passed CPU0, 512-MiB/384-MiB-high, zero-swap, bubblewrap-network-namespace
+and structural-digest checks. The largest measured fixed64 prefix observed 49,844,224 cgroup bytes
+and 3.351 seconds, while all 791 scientific calls retained the frozen output structure. These are
+bounded local empirical observations only: no allocator/timing upper bound, full-53 extrapolation,
+resource reservation or packed-q3 authority follows.
 
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
