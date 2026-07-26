@@ -2,6 +2,17 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D54 instrumented runner and bounded authorization
+
+- Froze a one-process/one-sample runner before authorization; exact D53 expansion contains 70
+  samples (42 synthetic, 28 fixed64; 20 warmup, 50 measured).
+- Separately authorized only that exact plan under CPU0, 512-MiB/384-MiB high, zero-swap,
+  network-closed fresh-process isolation and a fresh external scratch root.
+- Fixed64 calls are capped at 67 per process and 819 total; packed-q3 reads and full-53 authority
+  remain zero/false. Per-process terminal receipts and structural-repeat checks are mandatory.
+- Authorization is unused: scratch absent, samples/object measurements/scientific calls all zero.
+  Next gate: `D54_FRESH_SAMPLE_REPLAY_AND_INDEPENDENT_AGGREGATION`.
+
 ## 2026-07-26 — FH-L8 D53 object-cost measurement protocol
 
 - Mapped the unresolved D51/D52 memory and timing terms into ten measurement

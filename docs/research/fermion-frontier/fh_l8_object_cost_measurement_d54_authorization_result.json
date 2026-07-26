@@ -1,0 +1,23 @@
+{
+  "status": "AUTHORIZED_D54_BOUNDED_OBJECT_COST_MEASUREMENT_NOT_EXECUTED",
+  "total_fresh_processes": 70,
+  "synthetic_processes": 42,
+  "fixed64_processes": 28,
+  "warmup_processes": 20,
+  "measured_processes": 50,
+  "maximum_scientific_kernel_calls_per_process": 67,
+  "maximum_scientific_kernel_calls_total": 819,
+  "maximum_object_measurements_total": 70,
+  "measurement_execution_authorized": true,
+  "scratch_created": false,
+  "samples_started": 0,
+  "samples_completed": 0,
+  "object_measurements_executed": 0,
+  "scientific_kernel_calls_executed": 0,
+  "packed_q3_reads": 0,
+  "full53_execution_authorized": false,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "full53_extrapolation_forbidden": true,
+  "next_gate": "D54_FRESH_SAMPLE_REPLAY_AND_INDEPENDENT_AGGREGATION"
+}
