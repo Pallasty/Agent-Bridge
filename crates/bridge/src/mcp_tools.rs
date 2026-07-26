@@ -24904,6 +24904,35 @@ fn calibration_coverage(observed: &BTreeMap<String, u64>, target: &[&str]) -> Va
     })
 }
 
+fn normalized_pressure(value: Option<&str>) -> &'static str {
+    match value.map(str::trim) {
+        Some("nominal") => "nominal",
+        Some("elevated") => "elevated",
+        Some("high") => "high",
+        Some("critical") => "critical",
+        _ => "unknown",
+    }
+}
+
+fn pressure_rank(value: &str) -> Option<u8> {
+    match value {
+        "nominal" => Some(0),
+        "elevated" => Some(1),
+        "high" => Some(2),
+        "critical" => Some(3),
+        _ => None,
+    }
+}
+
+fn pressure_transition_direction(before: &str, after: &str) -> &'static str {
+    match (pressure_rank(before), pressure_rank(after)) {
+        (Some(before), Some(after)) if after < before => "improved",
+        (Some(before), Some(after)) if after > before => "worsened",
+        (Some(_), Some(_)) => "unchanged",
+        _ => "unknown",
+    }
+}
+
 fn body_scheduling_report_from_events(
     events: &[ab_store::SemanticEventRecord],
     window_secs: i64,
@@ -24952,6 +24981,8 @@ fn body_scheduling_report_from_events(
     let mut workload_counts = BTreeMap::<String, u64>::new();
     let mut recommendation_counts = BTreeMap::<String, u64>::new();
     let mut span_state_counts = BTreeMap::<String, u64>::new();
+    let mut transition_counts = BTreeMap::<String, u64>::new();
+    let mut transition_direction_counts = BTreeMap::<String, u64>::new();
     let mut paired_count = 0_u64;
     let mut aligned_pressure_count = 0_u64;
     let mut closed_pair_count = 0_u64;
@@ -24987,6 +25018,19 @@ fn body_scheduling_report_from_events(
         });
         if let Some(span) = span {
             paired_count += 1;
+            let before_pressure =
+                normalized_pressure(span.get("before_pressure").and_then(Value::as_str));
+            let after_pressure =
+                normalized_pressure(span.get("after_pressure").and_then(Value::as_str));
+            let transition = format!("{before_pressure}->{after_pressure}");
+            *transition_counts.entry(transition).or_default() += 1;
+            increment_label(
+                &mut transition_direction_counts,
+                Some(pressure_transition_direction(
+                    before_pressure,
+                    after_pressure,
+                )),
+            );
             increment_label(
                 &mut span_state_counts,
                 span.get("state").and_then(Value::as_str),
@@ -25124,6 +25168,20 @@ fn body_scheduling_report_from_events(
             "workload_class": workload_counts,
             "recommendation": recommendation_counts,
             "span_state": span_state_counts,
+        },
+        "pressure_transitions": {
+            "observed": transition_counts,
+            "direction": {
+                "improved": transition_direction_counts.get("improved").copied().unwrap_or(0),
+                "unchanged": transition_direction_counts.get("unchanged").copied().unwrap_or(0),
+                "worsened": transition_direction_counts.get("worsened").copied().unwrap_or(0),
+                "unknown": transition_direction_counts.get("unknown").copied().unwrap_or(0),
+            },
+            "paired_observations": paired_count,
+            "temporal_observation_only": true,
+            "causal_attribution_allowed": false,
+            "recommendation_effectiveness_claimed": false,
+            "reason": "before/after pressure order is descriptive only and does not attribute a transition to the task or recommendation",
         },
         "evaluation": {
             "status": status,

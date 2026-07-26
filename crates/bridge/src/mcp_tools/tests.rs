@@ -15240,6 +15240,21 @@ fn body_scheduling_report_pairs_compact_events_without_causal_claims() {
     assert_eq!(report["counts"]["safety_violations"], 0);
     assert_eq!(report["rates"]["paired_coverage"], 1.0);
     assert_eq!(
+        report["pressure_transitions"]["observed"]["elevated->nominal"],
+        1
+    );
+    assert_eq!(report["pressure_transitions"]["direction"]["improved"], 1);
+    assert_eq!(report["pressure_transitions"]["direction"]["unchanged"], 0);
+    assert_eq!(report["pressure_transitions"]["direction"]["worsened"], 0);
+    assert_eq!(
+        report["pressure_transitions"]["causal_attribution_allowed"],
+        false
+    );
+    assert_eq!(
+        report["pressure_transitions"]["recommendation_effectiveness_claimed"],
+        false
+    );
+    assert_eq!(
         report["evaluation"]["status"],
         "insufficient_paired_observations"
     );
@@ -15360,8 +15375,31 @@ fn body_scheduling_report_marks_baseline_pair_gate_without_claiming_quality() {
         report["calibration"]["coverage"]["workload_class"]["complete"],
         true
     );
+    assert_eq!(report["pressure_transitions"]["direction"]["unchanged"], 5);
+    assert_eq!(report["pressure_transitions"]["paired_observations"], 5);
     assert_eq!(report["calibration"]["causal_quality_evaluable"], false);
     assert_eq!(report["calibration"]["policy_change_allowed"], false);
+}
+
+#[test]
+fn pressure_transition_direction_fails_closed_for_unknown_labels() {
+    assert_eq!(
+        pressure_transition_direction("nominal", "critical"),
+        "worsened"
+    );
+    assert_eq!(
+        pressure_transition_direction("critical", "elevated"),
+        "improved"
+    );
+    assert_eq!(
+        pressure_transition_direction("elevated", "elevated"),
+        "unchanged"
+    );
+    assert_eq!(normalized_pressure(Some("future_pressure")), "unknown");
+    assert_eq!(
+        pressure_transition_direction("unknown", "nominal"),
+        "unknown"
+    );
 }
 
 #[test]
