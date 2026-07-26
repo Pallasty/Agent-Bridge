@@ -2,6 +2,17 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D54R2 independent isolation replication
+
+- Reconciled the concurrently published D54R completion without overwriting its runner, receipts
+  or result.
+- Independently completed the same 70-process plan inside a bubblewrap network namespace that
+  exposed loopback only; CPU0, 512-MiB/384-MiB-high, zero-swap, OOM and structural gates passed.
+- Reobserved 791 scientific calls and the exact fixed64 structural digests. The size-64 maxima were
+  49,844,224 cgroup bytes and 3,350,640,149 wall nanoseconds, modestly above D54R.
+- The two finite-host samples remain separate evidence sets. D55 must treat their spread as
+  evidence against promoting either observed maximum to a worst-case bound.
+
 ## 2026-07-26 — FH-L8 D54R complete bounded measurement replay
 
 - Identified a field-location defect that made the frozen D54 runner reject its own authorization;

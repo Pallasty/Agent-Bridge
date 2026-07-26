@@ -189,16 +189,18 @@ fixed64 prefixes, fourteen metrics, repeated fresh-process samples, CPU0 and 512
 isolation. It executes no measurement itself. `tracemalloc`, RSS/cgroup peaks and timing samples
 remain observations until independent allocator and precommitted timing-margin bounds are supplied.
 
-D54 now freezes a one-process/one-sample runner and separately authorizes the exact 70-sample D53
-plan: 42 synthetic and 28 fixed64 processes under CPU0, 512-MiB/384-MiB-high, zero-swap and
-network-closed isolation. The authorization remains unused: no scratch, sample, object measurement,
-scientific call or packed-q3 read exists. Full-53 and extrapolation authority remain closed.
-
 D54R preserves that historical state while correcting D54's authorization-field lookup in a newly
 pinned execution path. The exact 70-process plan has now completed: 50 retained measurements,
 791 scientific kernel calls, zero packed-q3 reads and no swap/OOM/cgroup-cap failure. The committed
 result binds the external manifest and ordered receipt set. These finite-host observations do not
 prove allocator, worst-case runtime or full-53 bounds; D55 is the admissibility review.
+
+D54R2 independently replicated the same plan after the concurrent D54R result appeared. Its
+bubblewrap network namespace exposed loopback only, and all 70 fresh-process receipts again passed
+CPU0, 512-MiB/384-MiB-high, zero-swap and structural-digest checks. The fixed64 size-64 maxima were
+49,844,224 cgroup bytes and 3.351 seconds, versus D54R's 46,612,480 bytes and 3.265 seconds. This
+host-level spread reinforces the existing boundary: both sets are empirical observations, not
+allocator/timing upper bounds, full-53 extrapolations or resource authority.
 
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
