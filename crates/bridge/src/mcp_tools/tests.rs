@@ -10180,6 +10180,8 @@ fn present_is_niche_opt_in_and_registers_under_all() {
     assert!(!std_p.includes(Tier::Niche, "present_voice_confirm_audibility"));
     assert!(all.includes(Tier::Niche, "voice_delivery_health"));
     assert!(!std_p.includes(Tier::Niche, "voice_delivery_health"));
+    assert!(all.includes(Tier::Niche, "embodiment_operating_readiness"));
+    assert!(!std_p.includes(Tier::Niche, "embodiment_operating_readiness"));
     // Live semantic world tools are Step C Niche opt-ins; absent from
     // standard/default profile surfaces until explicitly requested.
     for t in [
@@ -10279,6 +10281,12 @@ fn present_is_niche_opt_in_and_registers_under_all() {
     assert!(
         schemas.iter().any(|s| s.name == "voice_delivery_health"),
         "voice_delivery_health must register under the all profile"
+    );
+    assert!(
+        schemas
+            .iter()
+            .any(|s| s.name == "embodiment_operating_readiness"),
+        "embodiment_operating_readiness must register under the all profile"
     );
     let voice_schema = schemas
         .iter()
@@ -10632,6 +10640,40 @@ fn voice_delivery_health_is_latest_run_scoped_and_fails_closed() {
 
     let empty = voice_delivery_health_projection(&[], 100, 60);
     assert_eq!(empty["status"], "insufficient_evidence");
+}
+
+#[test]
+fn embodiment_operating_readiness_keeps_body_and_voice_independent() {
+    let result = embodiment_operating_readiness_projection(
+        json!({
+            "schema_version": "agent_bridge.body_scheduling_advice.v0",
+            "recommendation": "prefer_single_heavy_task",
+            "execution_changed": false,
+            "changes_routing": false,
+            "changes_parallelism": false
+        }),
+        json!({
+            "schema": "voice_delivery_health/v1",
+            "status": "delivery_mismatch",
+            "recommended_action": "inspect_named_playback_endpoint_then_emit_a_new_explicit_test",
+            "emits_audio": false
+        }),
+    );
+    assert_eq!(result["mode"], "observation_only");
+    assert_eq!(result["read_only"], true);
+    assert_eq!(result["automatic_action_allowed"], false);
+    assert_eq!(result["cross_domain_causal_inference"], false);
+    assert_eq!(result["changes_routing"], false);
+    assert_eq!(result["changes_parallelism"], false);
+    assert_eq!(result["emits_audio"], false);
+    assert_eq!(
+        result["operator_checks"][0]["recommendation"],
+        "prefer_single_heavy_task"
+    );
+    assert_eq!(
+        result["operator_checks"][1]["recommendation"],
+        "inspect_named_playback_endpoint_then_emit_a_new_explicit_test"
+    );
 }
 
 #[test]

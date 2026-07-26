@@ -46853,6 +46853,15 @@ pub(crate) fn build_registry_with_policy_surface(
         Tier::Niche,
         Arc::new(VoiceDeliveryHealthTool::new(hub.clone())),
     );
+    // One read-only operator snapshot over independent body scheduling and
+    // voice delivery observations. It deliberately derives no cross-domain
+    // policy and has no actuator path.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(EmbodimentOperatingReadinessTool::new(hub.clone())),
+    );
     // Host-confirm path B (Linux Computer Use): present an Approve/Reject card for a
     // pending host desktop action, block until a human decides, return the verdict.
     // Standard tier; mints no authority (reuses the desktop_pending token + desktop_confirm).

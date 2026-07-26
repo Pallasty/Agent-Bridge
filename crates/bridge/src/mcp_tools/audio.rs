@@ -707,6 +707,162 @@ impl McpTool for VoiceDeliveryHealthTool {
     }
 }
 
+/// Combines independent, read-only body-scheduling and voice-delivery
+/// observations without deriving a cross-domain policy or actuator command.
+pub(super) fn embodiment_operating_readiness_projection(
+    body_scheduling_advice: Value,
+    voice_delivery_health: Value,
+) -> Value {
+    let body_recommendation = body_scheduling_advice
+        .get("recommendation")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let voice_recommendation = voice_delivery_health
+        .get("recommended_action")
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({
+        "schema": "embodiment_operating_readiness/v1",
+        "mode": "observation_only",
+        "read_only": true,
+        "emits_audio": false,
+        "changes_playback_device": false,
+        "changes_routing": false,
+        "changes_parallelism": false,
+        "changes_task_admission": false,
+        "cross_domain_causal_inference": false,
+        "cross_domain_policy_change": false,
+        "automatic_action_allowed": false,
+        "body_scheduling_advice": body_scheduling_advice,
+        "voice_delivery_health": voice_delivery_health,
+        "operator_checks": [
+            {
+                "domain": "body_scheduling",
+                "recommendation": body_recommendation,
+                "authority": "advisory_only"
+            },
+            {
+                "domain": "voice_delivery",
+                "recommendation": voice_recommendation,
+                "authority": "single_outcome_human_evidence_only"
+            }
+        ],
+        "not_verified": "whether body pressure caused any voice result, whether voice delivery affects task quality, and whether either observation should automatically change execution",
+    })
+}
+
+/// One read-only operator surface for two independent embodiment observations.
+pub struct EmbodimentOperatingReadinessTool {
+    _hub: Hub,
+}
+
+impl EmbodimentOperatingReadinessTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for EmbodimentOperatingReadinessTool {
+    fn name(&self) -> &'static str {
+        "embodiment_operating_readiness"
+    }
+
+    fn annotations(&self) -> Option<ToolAnnotations> {
+        Some(ToolAnnotations::read_only())
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description:
+                "Read-only embodiment operating snapshot. Places body scheduling advice and \
+                 voice delivery health beside one another without inferring a causal relationship \
+                 or changing routing, parallelism, task admission, audio, or playback devices. \
+                 Niche."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "workload_class": {
+                        "type": "string",
+                        "enum": ["light", "standard", "heavy", "sustained", "remote_heavy"],
+                        "default": "standard",
+                        "description": "Read-only body scheduling observation context."
+                    },
+                    "requested_parallelism": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024,
+                        "default": 1
+                    },
+                    "voice_window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400
+                    },
+                    "voice_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 200
+                    },
+                    "confirmation_fresh_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 604800
+                    }
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let workload_class = args
+            .get("workload_class")
+            .and_then(Value::as_str)
+            .unwrap_or("standard");
+        let requested_parallelism = args
+            .get("requested_parallelism")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .clamp(1, 1024);
+        let voice_window_secs = args
+            .get("voice_window_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let voice_limit = args
+            .get("voice_limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(200)
+            .clamp(1, 1000) as usize;
+        let confirmation_fresh_secs = args
+            .get("confirmation_fresh_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(604_800)
+            .clamp(60, 31_536_000);
+        let now = dispatch_now_secs().max(0) as u64;
+        let records = crate::present::read_outcome_records(
+            &crate::present::presentations_dir(),
+            voice_limit,
+            now.saturating_sub(voice_window_secs),
+        );
+        Ok(ToolResult::json_text(
+            &embodiment_operating_readiness_projection(
+                crate::body_telemetry::body_scheduling_advice_snapshot(
+                    workload_class,
+                    requested_parallelism,
+                ),
+                voice_delivery_health_projection(&records, now, confirmation_fresh_secs),
+            ),
+        ))
+    }
+}
+
 #[async_trait]
 impl McpTool for PresentVoiceConfirmAudibilityTool {
     fn name(&self) -> &'static str {
