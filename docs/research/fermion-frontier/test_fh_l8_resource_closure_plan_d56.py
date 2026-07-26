@@ -1,7 +1,15 @@
 import copy
+import importlib.util
 import unittest
+from pathlib import Path
 
-import fh_l8_resource_closure_plan_d56 as d56
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location(
+    "d56", HERE / "fh_l8_resource_closure_plan_d56.py"
+)
+d56 = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(d56)
 
 
 class D56Tests(unittest.TestCase):
@@ -37,6 +45,29 @@ class D56Tests(unittest.TestCase):
     def test_open_authority_fails_closed(self):
         mutated = copy.deepcopy(self.contract)
         mutated["authority"]["full53_execution_authorized"] = True
+        with self.assertRaises(d56.D56Error):
+            d56.validate(mutated)
+
+    def test_phase_stage_and_operation_coverage_fail_closed(self):
+        variants = []
+        phase = copy.deepcopy(self.contract)
+        phase["coverage_matrix"]["D51_lifetime_phases"].pop("target_publication")
+        variants.append(phase)
+        stage = copy.deepcopy(self.contract)
+        stage["coverage_matrix"]["D52_adapter_stages"]["invoke_bound_reduced_column"] = []
+        variants.append(stage)
+        operation = copy.deepcopy(self.contract)
+        operation["coverage_matrix"]["D52_operation_bounds"].pop("source_records")
+        variants.append(operation)
+        for mutated in variants:
+            with self.assertRaises(d56.D56Error):
+                d56.validate(mutated)
+
+    def test_future_gate_authority_fails_closed(self):
+        mutated = copy.deepcopy(self.contract)
+        mutated["future_gate_authority_rules"][
+            "D59_PRODUCTION_IO_PAGE_CACHE_BOUND"
+        ]["production_io_execution_authorized_by_D56"] = True
         with self.assertRaises(d56.D56Error):
             d56.validate(mutated)
 

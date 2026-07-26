@@ -1,9 +1,13 @@
 {
+  "D51_phase_coverage_count": 4,
+  "D52_operation_bound_coverage_count": 6,
+  "D52_stage_coverage_count": 4,
   "acceptance_check_count": 18,
   "closure_requirement_count": 6,
   "deliverable_count": 23,
   "external_resource_reservation_admitted": false,
   "full53_execution_authorized": false,
+  "future_gate_authority_rule_count": 6,
   "global_stop_condition_count": 7,
   "next_gate": "D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT",
   "numeric_peak_memory_proven": false,

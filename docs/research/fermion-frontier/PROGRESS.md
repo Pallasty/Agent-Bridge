@@ -11,6 +11,9 @@ Status date: 2026-07-26
 - D61 is the mandatory three-way resource-envelope join and must reconcile the 359,759,114-byte
   D23 scratch shortfall. D62 alone may evaluate an authentic external reservation and terminal
   full53 authorization.
+- Machine-checkable coverage binds all four D51 phases, four D52 adapter stages and six selected
+  operation bounds to their responsible gates; per-gate rules confirm D56 grants no future
+  measurement, production-I/O, external-capacity or full53 authority.
 - D56 implements no adapter and performs zero measurements, scientific calls or packed-q3 reads.
   Numeric resource and full53 authority remain closed.
 - Next gate: `D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT`.

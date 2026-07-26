@@ -207,7 +207,9 @@ D56 turns the six remaining requirements into an ordered D57--D62 closure plan. 
 production adapter; D58 allocation bounds, D59 production I/O/page-cache and D60 timing-rule work
 may proceed in parallel; D61 integrates the resource envelope and D23 scratch reconciliation.
 D62 alone can assess an authentic external reservation and terminal authorization. D56 itself is
-plan-only and leaves every execution and numeric-bound authority closed.
+plan-only and leaves every execution and numeric-bound authority closed. Its checked matrix covers
+all four D51 phases, four D52 adapter stages and six operation bounds; D62's future decision is
+explicitly not an execution.
 
 D54R2 independently replicated the same plan after the concurrent D54R result appeared. Its
 bubblewrap network namespace exposed loopback only, and all 70 fresh-process receipts again passed
