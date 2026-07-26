@@ -9,6 +9,8 @@ Status date: 2026-07-26
   page-cache accounting as not measured.
 - Admitted the evidence only for regression, descriptive fixed64 summaries and hotspot
   prioritization; full53 extrapolation and resource bounds remain forbidden.
+- Pinned both authorizations and result checkers. The size-64 replay maxima differ by 3,231,744
+  cgroup bytes (69,332 ppm) and 85,298,967 ns (26,122 ppm); this spread is not a margin rule.
 - Returned
   `NO_GO_D55_MEASUREMENTS_ADMISSIBLE_ONLY_AS_OBSERVATIONS_RESOURCE_BOUNDS_INCOMPLETE`.
   D55 executes zero measurements, scientific kernels and packed-q3 reads.

@@ -10,6 +10,7 @@
   "fixed64_size64_wall_elapsed_max_ns_observed_across_replays": 3350640149,
   "full53_execution_authorized": false,
   "measurement_target_count": 10,
+  "next_gate": "D56_PRODUCTION_STREAMING_ADAPTER_AND_RESOURCE_BOUND_CLOSURE_PLAN",
   "not_measured_count": 1,
   "not_separately_identified_count": 3,
   "numeric_peak_memory_proven": false,
@@ -19,6 +20,5 @@
   "packed_q3_reads_by_d55": 0,
   "replay_count": 2,
   "scientific_kernel_calls_executed_by_d55": 0,
-  "status": "VERIFIED_D55_MEASUREMENT_ADMISSIBILITY_REVIEW_RESOURCE_BOUNDS_INCOMPLETE",
-  "next_gate": "D56_PRODUCTION_STREAMING_ADAPTER_AND_RESOURCE_BOUND_CLOSURE_PLAN"
+  "status": "VERIFIED_D55_MEASUREMENT_ADMISSIBILITY_REVIEW_RESOURCE_BOUNDS_INCOMPLETE"
 }
