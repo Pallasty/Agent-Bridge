@@ -295,6 +295,20 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D50 reads no packed q3 and executes no scientific action. Production adapter, streaming peak
   memory, worst-case runtime, resource receipt and full-53 authority remain open/false.
 
+## FH-L8 D51 streaming lifetime and runtime-work design
+
+- `FH_L8_FULL53_STREAMING_LIFETIME_D51_ZH.md`: four-phase lifetime, scratch shortfall, unresolved
+  memory terms, work-unit bounds and authority report.
+- `fh_l8_full53_streaming_lifetime_d51_contract.json`: pins D16/D22/D23/D50, the 32-way buffer
+  design, two-generation spill lifetime, exact integer formulas and closed execution authority.
+- `fh_l8_full53_streaming_lifetime_d51.py`: source-pin and arithmetic checker.
+- `fh_l8_full53_streaming_lifetime_d51_result.json`: records the 3,110,572,064-byte design scratch
+  requirement, 359,759,114-byte D23 shortfall and unresolved numeric peak/runtime terms.
+- `test_fh_l8_full53_streaming_lifetime_d51.py`: result equality, source, scratch, buffer,
+  work-unit and authority drift regressions.
+- D51 performs no scientific action and supplies no production adapter, numeric peak, host seconds,
+  resource reservation or full-53 authority.
+
 ## Claude source session
 
 - Session:

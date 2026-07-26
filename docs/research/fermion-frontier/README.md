@@ -178,6 +178,14 @@ shape has a 225-candidate/source structural upper: 47,947,275 candidate actions 
 neither simultaneous-residency memory nor worst-case runtime. Its next gate is
 `FULL_53_STREAMING_MEMORY_LIFETIME_AND_RUNTIME_UPPER_BOUND_DESIGN`; full-53 remains unauthorized.
 
+D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
+and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
+3,110,572,064-byte scratch design, 359,759,114 bytes above D23. It also fixes integer work counts,
+but the 35,520,512-byte known I/O-buffer subtotal excludes Python runtime, kernel-column,
+writer/heap objects and page-cache accounting. Numeric peak memory and host seconds remain
+unproven; D52 must statically bind production-adapter allocations and operation costs before any
+resource authorization.
+
 Status date: 2026-07-23
 
 Scope: physical fermions, not the historical Fermion Memory service.
