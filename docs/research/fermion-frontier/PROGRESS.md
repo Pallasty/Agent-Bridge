@@ -2524,3 +2524,14 @@ candidate-shape validation only: it does not establish provenance, compiler
 custody or scientific admissibility, all of which remain owned by the existing
 intake validator. With no external raw exports present, all five routes remain
 `MISSING` and cross-route comparison remains blocked.
+
+## FH-L8 public export source re-audit remains unresolved
+
+A 2026-07-26 network re-audit downloaded and hash-bound the official source
+archives for dynamic-JW arXiv v1 and the adjacent MMD/FSN Hubbard scenario
+arXiv v3. Their static inventories contain manuscripts and PDF figures, but no
+code/data archive or complete individual-term event sequence. Exact arXiv-ID
+repository search returned no candidate, and the native-fermion
+machine-readable article still states that study data are included in the main
+text. These observations are source-scoped rather than global absence proofs.
+All five routes remain `UNRESOLVED_EXTERNAL_EXPORT_REQUIRED`.

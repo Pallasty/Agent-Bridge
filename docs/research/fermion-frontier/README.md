@@ -1079,6 +1079,12 @@ The emitted registry is deliberately a draft: provenance, compiler and
 environment fields remain blank and must be reviewed before the intake runner
 can admit an export.
 
+The public-source search was refreshed on 2026-07-26 in
+`fh_l8_public_export_source_reaudit_20260726.json`. Official arXiv source
+archives, exact-identifier repository search and the native-fermion
+machine-readable article still yielded no admissible five-route raw export.
+Manuscript TeX, embedded tables and PDF figures remain non-admissible.
+
 ## Final deliverables
 
 - [Chinese executive brief](EXECUTIVE_BRIEF_ZH.md)

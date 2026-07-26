@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "record_id": "FH-L8-PUBLIC-EXPORT-SOURCE-REAUDIT-20260726-V1",
+  "audit_date": "2026-07-26",
+  "workload_fingerprint": "FH_L8_UoverT8_tT1_half_filling",
+  "predecessor_audit": "fh_l8_public_export_source_audit_result.json",
+  "method": [
+    "official_arXiv_API_version_check",
+    "official_arXiv_e-print_source_archive_download_and_static_file_inventory",
+    "GitHub_public_repository_search_by_exact_arXiv_identifier",
+    "Europe_PMC_machine_readable_full_text_data_availability_check",
+    "no_third_party_code_execution",
+    "no_export_reconstruction"
+  ],
+  "reviewed_sources": [
+    {
+      "source_id": "dynamic_jw_arxiv_v1",
+      "url": "https://arxiv.org/abs/2605.12600v1",
+      "retrieved_archive_url": "https://export.arxiv.org/e-print/2605.12600v1",
+      "archive_sha256": "30e7afa399812aad0994fd55f8d5f8d97d03d9493b29a92169e5e4c772f696ba",
+      "archive_size_bytes": 1265067,
+      "version_observation": "arXiv API still reports v1, submitted 2026-05-12",
+      "static_inventory": {
+        "tex_files": 1,
+        "pdf_figure_files": 17,
+        "metadata_files": 1,
+        "other_payload_files": 0
+      },
+      "code_or_data_link_in_tex_identified": false,
+      "full_individual_term_event_sequence_identified": false,
+      "route_scope": [
+        "dynamic_jw_local_grid_source_leading",
+        "dynamic_jw_local_grid_figure_candidate_fit"
+      ],
+      "disposition": "NO_NEW_ADMISSIBLE_PUBLIC_EXPORT"
+    },
+    {
+      "source_id": "mmd_fsn_adjacent_scenario_arxiv_v3",
+      "url": "https://arxiv.org/abs/2505.10513v3",
+      "retrieved_archive_url": "https://export.arxiv.org/e-print/2505.10513v3",
+      "archive_sha256": "37a7c537efdf3f88d3e2e7f4dcaf321aceb4cedd4bc66b559208fbf0d5214c48",
+      "archive_size_bytes": 93741,
+      "version_observation": "arXiv API reports v3, updated 2025-11-10",
+      "relevance": "uses a related L=8, U=8, t=1 two-dimensional Hubbard FSN resource scenario",
+      "static_inventory": {
+        "tex_files": 1,
+        "bibliography_files": 1,
+        "pdf_figure_files": 8,
+        "metadata_files": 1,
+        "other_payload_files": 0
+      },
+      "supplementary_data_form": "tables embedded in the TeX manuscript",
+      "code_or_data_link_in_tex_identified": false,
+      "full_individual_term_event_sequence_identified": false,
+      "route_scope": [
+        "fsn_standard_figure_candidate_fit",
+        "fsn_ladder_figure_candidate_fit"
+      ],
+      "disposition": "CONTEXT_ONLY_NO_ADMISSIBLE_PUBLIC_EXPORT"
+    },
+    {
+      "source_id": "native_fermions_europe_pmc_full_text",
+      "url": "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC10468619/fullTextXML",
+      "version_observation": "machine-readable open article reviewed on audit date",
+      "data_availability_observation": "All study data are included in the main text.",
+      "code_repository_link_identified": false,
+      "full_individual_term_event_sequence_identified": false,
+      "route_scope": [
+        "native_fermions"
+      ],
+      "disposition": "NO_NEW_ADMISSIBLE_PUBLIC_EXPORT"
+    },
+    {
+      "source_id": "github_exact_identifier_search",
+      "url": "https://api.github.com/search/repositories?q=%222505.10513%22+OR+%222605.12600%22",
+      "public_repository_matches": 0,
+      "scope_note": "repository-name-and-metadata search only; zero matches is not a universal absence proof",
+      "route_scope": [
+        "dynamic_jw_local_grid_source_leading",
+        "dynamic_jw_local_grid_figure_candidate_fit",
+        "fsn_standard_figure_candidate_fit",
+        "fsn_ladder_figure_candidate_fit"
+      ],
+      "disposition": "NO_REPOSITORY_CANDIDATE_IDENTIFIED"
+    }
+  ],
+  "route_disposition": {
+    "native_fermions": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+    "dynamic_jw_local_grid_source_leading": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+    "dynamic_jw_local_grid_figure_candidate_fit": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+    "fsn_standard_figure_candidate_fit": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED",
+    "fsn_ladder_figure_candidate_fit": "UNRESOLVED_EXTERNAL_EXPORT_REQUIRED"
+  },
+  "admitted_exports": [],
+  "audit_disposition": "NO_NEW_ADMISSIBLE_PUBLIC_EXPORT_IDENTIFIED",
+  "boundary": "The downloaded manuscript source archives establish only the reviewed public package contents. They do not establish global nonexistence, provenance for reconstructed data, compiler custody, or scientific admission.",
+  "next_state": "MONITOR_VERSIONED_PRIMARY_SOURCES_OR_RECEIVE_AUTHORITATIVE_RAW_EXPORTS"
+}
