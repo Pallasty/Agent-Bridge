@@ -24933,15 +24933,75 @@ fn pressure_transition_direction(before: &str, after: &str) -> &'static str {
     }
 }
 
+fn passive_observation_window_health(
+    paired_timestamps: &[i64],
+    now_secs: i64,
+    window_secs: i64,
+    source_truncated_possible: bool,
+) -> Value {
+    let valid = paired_timestamps
+        .iter()
+        .copied()
+        .filter(|timestamp| *timestamp > 0)
+        .collect::<Vec<_>>();
+    let invalid_timestamp_count = paired_timestamps.len().saturating_sub(valid.len());
+    let first = valid.iter().min().copied();
+    let last = valid.iter().max().copied();
+    let future_timestamp_count = valid
+        .iter()
+        .filter(|timestamp| **timestamp > now_secs)
+        .count();
+    let clock_valid = now_secs > 0 && invalid_timestamp_count == 0 && future_timestamp_count == 0;
+    let newest_age_secs = last
+        .filter(|_| clock_valid)
+        .map(|timestamp| now_secs.saturating_sub(timestamp));
+    let observed_span_secs = first
+        .zip(last)
+        .filter(|_| clock_valid)
+        .map(|(first, last)| last.saturating_sub(first));
+    let newest_within_requested_window = newest_age_secs.map(|age| age <= window_secs.max(0));
+    let status = if paired_timestamps.is_empty() {
+        "no_paired_observations"
+    } else if !clock_valid {
+        "clock_anomaly"
+    } else if source_truncated_possible {
+        "source_truncated"
+    } else if newest_within_requested_window == Some(true) {
+        "within_requested_window"
+    } else {
+        "outside_requested_window"
+    };
+
+    json!({
+        "mode": "passive_observation_only",
+        "status": status,
+        "paired_timestamp_count": paired_timestamps.len(),
+        "first_paired_at_unix_secs": first,
+        "last_paired_at_unix_secs": last,
+        "newest_paired_age_secs": newest_age_secs,
+        "observed_span_secs": observed_span_secs,
+        "newest_within_requested_window": newest_within_requested_window,
+        "source_truncated_possible": source_truncated_possible,
+        "clock_valid": clock_valid,
+        "invalid_timestamp_count": invalid_timestamp_count,
+        "future_timestamp_count": future_timestamp_count,
+        "collects_new_samples": false,
+        "changes_execution": false,
+        "policy_change_allowed": false,
+        "reason": "time health describes existing paired receipts only; it does not trigger sampling, execution, or policy changes",
+    })
+}
+
 fn body_scheduling_report_from_events(
     events: &[ab_store::SemanticEventRecord],
     window_secs: i64,
     source_limit: usize,
     include_rows: bool,
+    now_secs: i64,
 ) -> Value {
-    let mut advice_by_span = BTreeMap::<String, Value>::new();
+    let mut advice_by_span = BTreeMap::<String, (i64, Value)>::new();
     let mut advice_without_span_rows = Vec::<Value>::new();
-    let mut spans = BTreeMap::<String, Value>::new();
+    let mut spans = BTreeMap::<String, (i64, Value)>::new();
 
     for event in events {
         if event.source != "body_telemetry" {
@@ -24958,7 +25018,9 @@ fn body_scheduling_report_from_events(
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                 {
-                    advice_by_span.entry(span_id.to_string()).or_insert(facts);
+                    advice_by_span
+                        .entry(span_id.to_string())
+                        .or_insert((event.ts, facts));
                 } else {
                     advice_without_span_rows.push(facts);
                 }
@@ -24970,7 +25032,9 @@ fn body_scheduling_report_from_events(
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                 {
-                    spans.entry(span_id.to_string()).or_insert(facts);
+                    spans
+                        .entry(span_id.to_string())
+                        .or_insert((event.ts, facts));
                 }
             }
             _ => {}
@@ -24987,9 +25051,10 @@ fn body_scheduling_report_from_events(
     let mut aligned_pressure_count = 0_u64;
     let mut closed_pair_count = 0_u64;
     let mut safety_violation_count = 0_u64;
+    let mut paired_timestamps = Vec::<i64>::new();
     let mut rows = Vec::new();
 
-    for (span_id, facts) in &advice_by_span {
+    for (span_id, (_, facts)) in &advice_by_span {
         let advice = facts.get("advice").unwrap_or(&Value::Null);
         increment_label(
             &mut pressure_counts,
@@ -25014,10 +25079,11 @@ fn body_scheduling_report_from_events(
         let span = spans.get(span_id);
         let pressure_aligned = span.is_some_and(|span| {
             advice.get("pressure").and_then(Value::as_str)
-                == span.get("before_pressure").and_then(Value::as_str)
+                == span.1.get("before_pressure").and_then(Value::as_str)
         });
-        if let Some(span) = span {
+        if let Some((span_timestamp, span)) = span {
             paired_count += 1;
+            paired_timestamps.push(*span_timestamp);
             let before_pressure =
                 normalized_pressure(span.get("before_pressure").and_then(Value::as_str));
             let after_pressure =
@@ -25055,15 +25121,15 @@ fn body_scheduling_report_from_events(
                     .cloned()
                     .unwrap_or(Value::Null),
                 "span_state": span
-                    .and_then(|span| span.get("state"))
+                    .and_then(|(_, span)| span.get("state"))
                     .cloned()
                     .unwrap_or(Value::Null),
                 "before_pressure": span
-                    .and_then(|span| span.get("before_pressure"))
+                    .and_then(|(_, span)| span.get("before_pressure"))
                     .cloned()
                     .unwrap_or(Value::Null),
                 "after_pressure": span
-                    .and_then(|span| span.get("after_pressure"))
+                    .and_then(|(_, span)| span.get("after_pressure"))
                     .cloned()
                     .unwrap_or(Value::Null),
                 "pressure_aligned": pressure_aligned,
@@ -25117,6 +25183,12 @@ fn body_scheduling_report_from_events(
     let advice_count = advice_by_span.len() as u64 + advice_without_span;
     let span_count = spans.len() as u64;
     let source_truncated_possible = events.len() >= source_limit;
+    let observation_window = passive_observation_window_health(
+        &paired_timestamps,
+        now_secs,
+        window_secs,
+        source_truncated_possible,
+    );
     let status = if safety_violation_count > 0 {
         "safety_invariant_violation"
     } else if paired_count < BODY_SCHEDULING_MIN_PAIRED_OBSERVATIONS {
@@ -25183,6 +25255,7 @@ fn body_scheduling_report_from_events(
             "recommendation_effectiveness_claimed": false,
             "reason": "before/after pressure order is descriptive only and does not attribute a transition to the task or recommendation",
         },
+        "observation_window": observation_window,
         "evaluation": {
             "status": status,
             "causal_quality_evaluable": false,
@@ -25309,6 +25382,7 @@ impl McpTool for BodySchedulingReportTool {
             window_secs,
             limit,
             include_rows,
+            dispatch_now_secs(),
         )))
     }
 }

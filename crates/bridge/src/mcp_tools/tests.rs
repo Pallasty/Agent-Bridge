@@ -15271,7 +15271,7 @@ fn body_scheduling_report_pairs_compact_events_without_causal_claims() {
         }),
     );
 
-    let report = body_scheduling_report_from_events(&[advice, span], 600, 500, true);
+    let report = body_scheduling_report_from_events(&[advice, span], 600, 500, true, 200);
     assert_eq!(
         report["schema_version"],
         crate::body_telemetry::BODY_SCHEDULING_REPORT_SCHEMA_V0
@@ -15296,6 +15296,27 @@ fn body_scheduling_report_pairs_compact_events_without_causal_claims() {
         report["pressure_transitions"]["recommendation_effectiveness_claimed"],
         false
     );
+    assert_eq!(
+        report["observation_window"]["status"],
+        "within_requested_window"
+    );
+    assert_eq!(
+        report["observation_window"]["first_paired_at_unix_secs"],
+        100
+    );
+    assert_eq!(
+        report["observation_window"]["last_paired_at_unix_secs"],
+        100
+    );
+    assert_eq!(report["observation_window"]["newest_paired_age_secs"], 100);
+    assert_eq!(report["observation_window"]["observed_span_secs"], 0);
+    assert_eq!(
+        report["observation_window"]["newest_within_requested_window"],
+        true
+    );
+    assert_eq!(report["observation_window"]["collects_new_samples"], false);
+    assert_eq!(report["observation_window"]["changes_execution"], false);
+    assert_eq!(report["observation_window"]["policy_change_allowed"], false);
     assert_eq!(
         report["evaluation"]["status"],
         "insufficient_paired_observations"
@@ -15338,7 +15359,7 @@ fn body_scheduling_report_surfaces_safety_invariant_violations() {
             }
         }),
     );
-    let report = body_scheduling_report_from_events(&[advice], 600, 1, false);
+    let report = body_scheduling_report_from_events(&[advice], 600, 1, false, 200);
     assert_eq!(report["counts"]["safety_violations"], 1);
     assert_eq!(report["counts"]["advice_without_span"], 1);
     assert_eq!(report["distributions"]["pressure"]["critical"], 1);
@@ -15402,7 +15423,7 @@ fn body_scheduling_report_marks_baseline_pair_gate_without_claiming_quality() {
         ));
     }
 
-    let report = body_scheduling_report_from_events(&events, 600, 500, false);
+    let report = body_scheduling_report_from_events(&events, 600, 500, false, 200);
     assert_eq!(report["counts"]["paired"], 5);
     assert_eq!(report["calibration"]["minimum_pair_gate_met"], true);
     assert_eq!(
@@ -15442,6 +15463,32 @@ fn pressure_transition_direction_fails_closed_for_unknown_labels() {
         pressure_transition_direction("unknown", "nominal"),
         "unknown"
     );
+}
+
+#[test]
+fn passive_observation_window_health_fails_closed_at_time_boundaries() {
+    let empty = passive_observation_window_health(&[], 1_000, 600, false);
+    assert_eq!(empty["status"], "no_paired_observations");
+    assert_eq!(empty["clock_valid"], true);
+    assert_eq!(empty["newest_paired_age_secs"], Value::Null);
+
+    let stale = passive_observation_window_health(&[100, 200], 1_000, 600, false);
+    assert_eq!(stale["status"], "outside_requested_window");
+    assert_eq!(stale["newest_paired_age_secs"], 800);
+    assert_eq!(stale["observed_span_secs"], 100);
+    assert_eq!(stale["newest_within_requested_window"], false);
+
+    let truncated = passive_observation_window_health(&[900], 1_000, 600, true);
+    assert_eq!(truncated["status"], "source_truncated");
+    assert_eq!(truncated["source_truncated_possible"], true);
+
+    for timestamps in [&[0][..], &[1_001][..]] {
+        let anomalous = passive_observation_window_health(timestamps, 1_000, 600, false);
+        assert_eq!(anomalous["status"], "clock_anomaly");
+        assert_eq!(anomalous["clock_valid"], false);
+        assert_eq!(anomalous["newest_paired_age_secs"], Value::Null);
+        assert_eq!(anomalous["newest_within_requested_window"], Value::Null);
+    }
 }
 
 #[test]
