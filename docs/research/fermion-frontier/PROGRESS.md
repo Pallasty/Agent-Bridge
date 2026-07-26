@@ -2,6 +2,20 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D54R complete bounded measurement replay
+
+- Identified a field-location defect that made the frozen D54 runner reject its own authorization;
+  preserved D54 history and froze a source-pinned D54R correction instead.
+- Completed the exact 70-process plan under CPU0, 512-MiB/384-MiB-high, zero-swap and
+  network-closed user-service isolation: 20 warmups and 50 retained measurements.
+- The receipt set records 791 scientific kernel calls, zero packed-q3 reads, no OOM/swap/cap
+  failure and stable structural digests within every measured group.
+- The fixed64 size-64 observations span 46,002,176--46,612,480 cgroup peak bytes and
+  2,992,888,732--3,265,341,182 wall nanoseconds. They remain observations, not numeric bounds.
+- A committed result binds the external manifest and ordered 70-receipt set and is independently
+  reaggregated by a fail-closed checker. Next gate:
+  `D55_D54_MEASUREMENT_REVIEW_AND_BOUND_ADMISSIBILITY_DECISION`.
+
 ## 2026-07-26 — FH-L8 D54 instrumented runner and bounded authorization
 
 - Froze a one-process/one-sample runner before authorization; exact D53 expansion contains 70

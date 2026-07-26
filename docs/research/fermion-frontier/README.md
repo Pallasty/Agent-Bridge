@@ -196,6 +196,12 @@ and 3.351 seconds, while all 791 scientific calls retained the frozen output str
 bounded local empirical observations only: no allocator/timing upper bound, full-53 extrapolation,
 resource reservation or packed-q3 authority follows.
 
+D54R preserves that historical state while correcting D54's authorization-field lookup in a newly
+pinned execution path. The exact 70-process plan has now completed: 50 retained measurements,
+791 scientific kernel calls, zero packed-q3 reads and no swap/OOM/cgroup-cap failure. The committed
+result binds the external manifest and ordered receipt set. These finite-host observations do not
+prove allocator, worst-case runtime or full-53 bounds; D55 is the admissibility review.
+
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
 3,110,572,064-byte scratch design, 359,759,114 bytes above D23. It also fixes integer work counts,

@@ -1,0 +1,85 @@
+{
+  "authorization_id": "FH-L8-D54R-OBJECT-COST-MEASUREMENT-AUTH-V1",
+  "authorization_sha256": "a0b08eb7093261240c46b0cba459f72f7310963089e226e4e409e19884ffdab1",
+  "claims": {
+    "full53_execution_authorized": false,
+    "full53_extrapolation_forbidden": true,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false
+  },
+  "fixed64_summaries": [
+    {
+      "cgroup_memory_peak_bytes": {
+        "max": 42242048,
+        "median": 42237952,
+        "min": 41967616
+      },
+      "measured_samples": 5,
+      "size": 1,
+      "structural_output_sha256": "c329518d61a4bfe84eb3f3ca1d66bc8103505927553ab7ec4582bead45a7f585",
+      "tier": "source_bound_fixed64_micro",
+      "wall_elapsed_ns": {
+        "max": 48030422,
+        "median": 47826298,
+        "min": 47686572
+      }
+    },
+    {
+      "cgroup_memory_peak_bytes": {
+        "max": 42766336,
+        "median": 42762240,
+        "min": 42287104
+      },
+      "measured_samples": 5,
+      "size": 8,
+      "structural_output_sha256": "19e54ae0a73a9ae3108f18cc691c6493b30aa639dc3c023af6b6c98445862f79",
+      "tier": "source_bound_fixed64_micro",
+      "wall_elapsed_ns": {
+        "max": 382665661,
+        "median": 378462804,
+        "min": 372553653
+      }
+    },
+    {
+      "cgroup_memory_peak_bytes": {
+        "max": 43847680,
+        "median": 43540480,
+        "min": 43417600
+      },
+      "measured_samples": 5,
+      "size": 32,
+      "structural_output_sha256": "d87e097812108e61c738fa431e005cc4e1f3a1f42d2732cc4bf5ac64c1576376",
+      "tier": "source_bound_fixed64_micro",
+      "wall_elapsed_ns": {
+        "max": 1505424825,
+        "median": 1493583058,
+        "min": 1482562991
+      }
+    },
+    {
+      "cgroup_memory_peak_bytes": {
+        "max": 46612480,
+        "median": 46120960,
+        "min": 46002176
+      },
+      "measured_samples": 5,
+      "size": 64,
+      "structural_output_sha256": "38aaeffb8f178e918e4f326888493166c21afc7fb1379e91ab965c345b4adc12",
+      "tier": "source_bound_fixed64_micro",
+      "wall_elapsed_ns": {
+        "max": 3265341182,
+        "median": 2998987404,
+        "min": 2992888732
+      }
+    }
+  ],
+  "measured_sample_count": 50,
+  "next_gate": "D55_D54_MEASUREMENT_REVIEW_AND_BOUND_ADMISSIBILITY_DECISION",
+  "packed_q3_reads": 0,
+  "sample_receipt_count": 70,
+  "sample_receipt_set_sha256": "c8f1409b3f76910184c3f4a9a717b6c05aa93784a9dbe12ebee5418168e48b11",
+  "schema_version": 1,
+  "scientific_kernel_calls_total": 791,
+  "scratch_manifest_sha256": "e11e70664a6a4eebf34c0f017867db600841a8997d2ce045743bb45f273aca65",
+  "status": "COMPLETED_D54_FIXED64_INSTRUMENTED_OBJECT_COST_MEASUREMENTS"
+}
