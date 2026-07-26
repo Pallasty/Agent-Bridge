@@ -128,3 +128,32 @@ probe, so no remote download was dispatched based on stale node records.
 6. Play the named artifact and obtain human audibility confirmation.
 7. Only then design a default-off `qwen3-rust` Agent-Bridge backend. Keep
    generated models and audio outside Git.
+
+## Offline gate implementation
+
+`scripts/qwen3_tts_rust_gate.py` makes steps 1-4 fail closed:
+
+- embeds the pinned Hugging Face revision and complete LFS SHA-256 identities;
+- verifies exact size before hashing either large file;
+- refuses to execute when either model file is absent or mismatched;
+- invokes only a local model path with fixed `metal`, `f16`, Chinese language,
+  and deterministic seed parameters;
+- refuses to overwrite an existing output;
+- records command timing, bounded process output, WAV shape, bytes, and SHA-256;
+- verifies only to `qwen3_rust_synthesized_wav`, never to STT, speaker output,
+  or human audibility.
+
+Example after both model files have been transferred:
+
+```bash
+python3 scripts/qwen3_tts_rust_gate.py \
+  --binary /private/tmp/ab-qwen3-rust-pilot/bin/qwen-tts \
+  --model-dir /private/tmp/ab-qwen3-rust-pilot/models/Qwen3-TTS-12Hz-0.6B-CustomVoice \
+  --output /private/tmp/ab-qwen3-rust-pilot/out/qwen3-rust-zh.wav
+```
+
+The implementation has six unit tests covering missing files, size mismatch,
+same-size SHA mismatch, fixed Metal command shape, successful non-empty WAV
+attestation, existing-output preservation, and timeout honesty. A negative run
+against the current incomplete disposable model returned
+`model_integrity_failed` with `execution.attempted=false`.
