@@ -121,6 +121,22 @@ fn action_receipt_body_id<'a>(event: &SemanticEventRecord, facts: &'a Value) -> 
     .filter(|id| !id.is_empty())
 }
 
+/// Only these native event pairs are written by embodiment-aware action
+/// surfaces.  A fact key alone must never enroll an unrelated semantic event
+/// in the action-lineage audit.
+fn is_whitelisted_action_receipt(event: &SemanticEventRecord) -> bool {
+    matches!(
+        (event.source.as_str(), event.action.as_str()),
+        (EMBODIMENT_EVENT_SOURCE, "action_receipt")
+            | ("terminal", "send_keys")
+            | ("browser", "navigate")
+            | (
+                "desktop",
+                "type" | "key" | "move" | "moveto" | "click" | "scroll"
+            )
+    )
+}
+
 /// Audits only explicit intent identifiers and whitelisted event metadata.
 /// Receipt payloads and evidence stay out of the projection.
 fn project_action_lineage(events: &[SemanticEventRecord], source_event_limit: usize) -> Value {
@@ -170,6 +186,9 @@ fn project_action_lineage(events: &[SemanticEventRecord], source_event_limit: us
     let mut body_not_recorded = 0_u64;
 
     for event in events {
+        if !is_whitelisted_action_receipt(event) {
+            continue;
+        }
         let Ok(facts) = serde_json::from_str::<Value>(&event.facts) else {
             continue;
         };
@@ -549,5 +568,36 @@ mod tests {
         assert_eq!(audit["source_truncated_possible"], true);
         assert_eq!(audit["all_actions_traceable_claimed"], false);
         assert_eq!(audit["policy_change_allowed"], false);
+    }
+
+    #[test]
+    fn action_lineage_ignores_unwhitelisted_events_even_with_intent_key() {
+        let events = vec![
+            event_with(
+                10,
+                "intent_opened",
+                "unknown",
+                r#"{"body_id":"body-mac","intent_id":"i-1"}"#,
+            ),
+            SemanticEventRecord {
+                ts: 20,
+                actor: "mcp".into(),
+                source: "future_adapter".into(),
+                action: "write".into(),
+                target: Some("opaque-target".into()),
+                verdict_status: "verified".into(),
+                verdict_method: "test".into(),
+                evidence: Some(r#"{"secret":"must-not-project"}"#.into()),
+                facts: r#"{"embodiment_intent_id":"i-1","receipt":{"secret":"must-not-project"}}"#
+                    .into(),
+                descriptor: None,
+            },
+        ];
+        let audit = project_action_lineage(&events, 500);
+        assert_eq!(audit["counts"]["intents"], 1);
+        assert_eq!(audit["counts"]["intent_linked_receipts"], 0);
+        assert_eq!(audit["counts"]["matched_prior_intent"], 0);
+        assert!(audit["rows"].as_array().expect("rows").is_empty());
+        assert!(!audit.to_string().contains("secret"));
     }
 }
