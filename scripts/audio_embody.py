@@ -20,7 +20,7 @@ Pluggable capture channel:
 This is the Python half (analysis + decision) wrapped by the thin Rust MCP tool
 `present_voice`, matching the desktop_verify / vision_grounding_ocr pattern.
 """
-import argparse, array, hashlib, json, math, os, re, subprocess, sys, tempfile, time, unicodedata, wave
+import argparse, array, fcntl, hashlib, json, math, os, re, subprocess, sys, tempfile, time, unicodedata, wave
 
 # Platform routing: macOS has NO PipeWire sink `.monitor` loopback, so present_voice
 # verifies the SYNTHESIZED FILE (via STT) instead of a bus readback — a different,
@@ -704,6 +704,71 @@ def transcribe(wav_path, stt_bin, model):
 # STT gate catches it (verified live on this host). So ALWAYS pass an explicit,
 # full-quality voice. Kokoro-style names (af_*/bf_*) don't exist on macOS -> fall back.
 _MACOS_DEFAULT_VOICE = "Samantha"
+_MACOS_PLAYBACK_LOCK_NAME = "agent-bridge-present-voice.lock"
+
+
+def _new_say_wav_path():
+    """Reserve a per-request WAV name without retaining an open descriptor.
+
+    A single fixed `ab_voice_say.wav` path allowed a later synthesis to replace a
+    file still being consumed by afplay, which manifests as an audible prefix
+    followed by truncation. Each request therefore owns its source file.
+    """
+    fd, path = tempfile.mkstemp(prefix="ab_voice_say_", suffix=".wav")
+    os.close(fd)
+    os.unlink(path)
+    return path
+
+
+def play_say_serialized(wav_path):
+    """Best-effort macOS playback with a bounded, cross-process endpoint lock.
+
+    This serializes only physical playback, not synthesis or STT. A lock timeout
+    is an honest no-play result rather than permitting overlapping afplay calls.
+    The returned timing describes process completion, not speaker audibility.
+    """
+    if not os.path.exists("/usr/bin/afplay"):
+        return {"play_ok": False, "playback_error": "afplay not found"}
+    lock_path = os.path.join(tempfile.gettempdir(), _MACOS_PLAYBACK_LOCK_NAME)
+    try:
+        timeout_s = float(os.environ.get("AB_TTS_PLAYBACK_LOCK_TIMEOUT_SECS", "30"))
+    except ValueError:
+        timeout_s = 30.0
+    timeout_s = max(1.0, min(timeout_s, 120.0))
+    started_wait = time.monotonic()
+    lock_file = open(lock_path, "a+")
+    try:
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() - started_wait >= timeout_s:
+                    return {
+                        "play_ok": False,
+                        "playback_error": f"playback lock timed out after {timeout_s:g}s",
+                        "playback_lock_wait_ms": round((time.monotonic() - started_wait) * 1000),
+                        "playback_serialized": True,
+                    }
+                time.sleep(0.05)
+        lock_wait_ms = round((time.monotonic() - started_wait) * 1000)
+        started_ms = round(time.time() * 1000)
+        started_play = time.monotonic()
+        play = subprocess.run(["/usr/bin/afplay", wav_path], capture_output=True, text=True)
+        elapsed_ms = round((time.monotonic() - started_play) * 1000)
+        return {
+            "play_ok": play.returncode == 0,
+            "playback_lock_wait_ms": lock_wait_ms,
+            "playback_started_at_unix_ms": started_ms,
+            "playback_elapsed_ms": elapsed_ms,
+            "playback_serialized": True,
+            "playback_error": (play.stderr or "")[:200] if play.returncode else None,
+        }
+    finally:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_file.close()
 
 
 def synth_say(text, voice, speed):
@@ -717,12 +782,7 @@ def synth_say(text, voice, speed):
          else _MACOS_DEFAULT_VOICE)
     # speed (0.5-2.0) -> words/min around the ~175 baseline; floored to stay intelligible.
     wpm = int(max(90, min(2.0, max(0.5, speed)) * 175))
-    wav = os.path.join(tempfile.gettempdir(), "ab_voice_say.wav")
-    try:
-        if os.path.exists(wav):
-            os.remove(wav)
-    except OSError:
-        pass
+    wav = _new_say_wav_path()
     p = subprocess.run([say_bin, "-v", v, "-r", str(wpm), "-o", wav,
                         "--data-format=LEI16@16000", text],
                        capture_output=True, text=True)
@@ -930,12 +990,15 @@ def run_speech_synth_file(text, voice, speed):
         out["stt_detail"] = stt_err
         out["detail"] = f"say synth {synth_dur}s rms={rms_val}; STT unavailable -> words unverified ({stt_err})"
 
-    # best-effort audible playback; play_ok is DECOUPLED from verify_status (honesty:
-    # afplay exit 0 on a muted/headless device or a silent file is not audible sound).
-    if os.path.exists("/usr/bin/afplay"):
-        play = subprocess.run(["/usr/bin/afplay", wav], capture_output=True, text=True)
-        out["play_ok"] = (play.returncode == 0)
-        out["play_note"] = "afplay best-effort; play_ok does NOT affect verify_status (exit 0 != audible)"
+    # Best-effort physical playback is serialized across local processes so one
+    # request cannot cut off another. Completion timing proves only afplay's
+    # process lifetime; human confirmation remains the last-mile evidence.
+    playback = play_say_serialized(wav)
+    out.update(playback)
+    out["play_note"] = (
+        "afplay is serialized and timed; play_ok still does NOT prove speaker audibility "
+        "or full-utterance delivery"
+    )
     return out
 
 

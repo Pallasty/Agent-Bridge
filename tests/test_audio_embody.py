@@ -487,6 +487,37 @@ def test_say_backend_never_uses_truncating_default_voice():
     assert ae._MACOS_DEFAULT_VOICE and not ae._MACOS_DEFAULT_VOICE.startswith(("af_", "bf_"))
 
 
+def test_say_wav_paths_are_unique_per_request():
+    first = ae._new_say_wav_path()
+    second = ae._new_say_wav_path()
+    try:
+        assert first != second
+        assert not os.path.exists(first)
+        assert not os.path.exists(second)
+        assert os.path.basename(first).startswith("ab_voice_say_")
+    finally:
+        for path in (first, second):
+            if os.path.exists(path):
+                os.unlink(path)
+
+
+def test_serialized_say_playback_returns_process_timing(monkeypatch, tmp_path):
+    wav = tmp_path / "voice.wav"
+    wav.write_bytes(b"fake")
+    monkeypatch.setattr(ae.os.path, "exists", lambda path: path == "/usr/bin/afplay")
+    monkeypatch.setattr(
+        ae.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stderr=""),
+    )
+    out = ae.play_say_serialized(str(wav))
+    assert out["play_ok"] is True
+    assert out["playback_serialized"] is True
+    assert out["playback_lock_wait_ms"] >= 0
+    assert out["playback_elapsed_ms"] >= 0
+    assert isinstance(out["playback_started_at_unix_ms"], int)
+
+
 def test_cjk_units_participate_in_overlap_and_duration():
     ratio, nref = ae.word_overlap("Agent Bridge 本地语音", "Agent Bridge 本地語音")
     assert nref == 6
