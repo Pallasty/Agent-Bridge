@@ -5,12 +5,20 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import statistics
 from pathlib import Path
 from typing import Any
 
-import fh_l8_object_cost_measurement_d54_launcher as launcher
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location(
+    "fh_l8_d54_launcher", HERE / "fh_l8_object_cost_measurement_d54_launcher.py"
+)
+if SPEC is None or SPEC.loader is None:
+    raise RuntimeError("cannot load D54 launcher")
+launcher = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(launcher)
 
 
 class AggregateError(RuntimeError):
