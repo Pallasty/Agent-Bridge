@@ -84,12 +84,14 @@ class FHExternalEvidenceIntakeBootstrapTests(unittest.TestCase):
     def test_parse_select_route_file_specs_rejects_unsafe_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "native.json").write_text("{}", encoding="utf-8")
+            (root / "native.json").write_text(
+                json.dumps(self._route_export("native_fermions")), encoding="utf-8"
+            )
 
             parsed = BOOTSTRAP.parse_select_route_file_specs(
                 ["native_fermions:native.json"],
                 root,
-                self.contract["required_routes"],
+                self.contract,
             )
             self.assertEqual(parsed["native_fermions"], root / "native.json")
 
@@ -97,7 +99,7 @@ class FHExternalEvidenceIntakeBootstrapTests(unittest.TestCase):
                 BOOTSTRAP.parse_select_route_file_specs(
                     ["unknown_route:native.json"],
                     root,
-                    self.contract["required_routes"],
+                    self.contract,
                 )
             self.assertIn("unknown route", str(context.exception))
 
@@ -105,7 +107,7 @@ class FHExternalEvidenceIntakeBootstrapTests(unittest.TestCase):
                 BOOTSTRAP.parse_select_route_file_specs(
                     [f"native_fermions:../outside.json"],
                     root,
-                    self.contract["required_routes"],
+                    self.contract,
                 )
             self.assertIn("must be under intake root", str(context.exception))
 
@@ -113,9 +115,46 @@ class FHExternalEvidenceIntakeBootstrapTests(unittest.TestCase):
                 BOOTSTRAP.parse_select_route_file_specs(
                     ["native_fermions:not-found.json"],
                     root,
-                    self.contract["required_routes"],
+                    self.contract,
                 )
             self.assertIn("does not exist", str(context.exception))
+
+    def test_parse_select_route_file_specs_rejects_mismatch_and_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            native = root / "native.json"
+            wrong_route = root / "wrong-route.json"
+            malformed = root / "malformed.json"
+            native.write_text(
+                json.dumps(self._route_export("native_fermions")), encoding="utf-8"
+            )
+            wrong_route.write_text(
+                json.dumps(self._route_export("fsn_standard_figure_candidate_fit")),
+                encoding="utf-8",
+            )
+            malformed.write_text("{", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "candidate shape"):
+                BOOTSTRAP.parse_select_route_file_specs(
+                    ["native_fermions:wrong-route.json"],
+                    root,
+                    self.contract,
+                )
+            with self.assertRaisesRegex(ValueError, "not readable JSON"):
+                BOOTSTRAP.parse_select_route_file_specs(
+                    ["native_fermions:malformed.json"],
+                    root,
+                    self.contract,
+                )
+            with self.assertRaisesRegex(ValueError, "selected more than once"):
+                BOOTSTRAP.parse_select_route_file_specs(
+                    [
+                        "native_fermions:native.json",
+                        "native_fermions:native.json",
+                    ],
+                    root,
+                    self.contract,
+                )
 
     def test_build_registry_populates_sketch_metadata_and_digests(self):
         with tempfile.TemporaryDirectory() as temporary:

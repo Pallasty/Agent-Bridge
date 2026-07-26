@@ -35,7 +35,7 @@ def _digest(path: Path) -> str:
     return h.hexdigest()
 
 
-def _looks_like_real(route: str, payload: Any, contract: Mapping[str, Any]) -> bool:
+def _looks_like_candidate(route: str, payload: Any, contract: Mapping[str, Any]) -> bool:
     if not isinstance(payload, Mapping):
         return False
     if payload.get("route") != route:
@@ -58,7 +58,7 @@ def find_candidates(intake_root: Path, contract: Mapping[str, Any]) -> dict[str,
         except (OSError, ValueError, json.JSONDecodeError):
             continue
         route = payload.get("route") if isinstance(payload, Mapping) else None
-        if route in contract["required_routes"] and _looks_like_real(route, payload, contract):
+        if route in contract["required_routes"] and _looks_like_candidate(route, payload, contract):
             by_route[route].append(path)
     return dict(by_route)
 
@@ -120,7 +120,7 @@ def summarize(
 def parse_select_route_file_specs(
     specs: list[str],
     intake_root: Path,
-    required_routes: list[str],
+    contract: Mapping[str, Any],
 ) -> dict[str, Path]:
     selections: dict[str, Path] = {}
     resolved_root = intake_root.resolve()
@@ -128,13 +128,23 @@ def parse_select_route_file_specs(
         route, sep, file_path = spec.partition(":")
         if not sep:
             raise ValueError(f"--select-route-file requires ROUTE:PATH form, got {spec!r}")
-        if route not in required_routes:
+        if route not in contract["required_routes"]:
             raise ValueError(f"unknown route in --select-route-file: {route}")
+        if route in selections:
+            raise ValueError(f"route selected more than once: {route}")
         path = (intake_root / file_path).resolve()
         if not path.is_relative_to(resolved_root):
             raise ValueError(f"selected path must be under intake root: {path}")
         if not path.is_file():
             raise ValueError(f"selected path does not exist: {path}")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            raise ValueError(f"selected path is not readable JSON: {path}: {error}") from error
+        if not _looks_like_candidate(route, payload, contract):
+            raise ValueError(
+                f"selected path does not match route/workload/step candidate shape: {path}"
+            )
         selections[route] = path
     return selections
 
@@ -157,7 +167,7 @@ def main() -> None:
     contract = _load(args.contract)
     candidates = find_candidates(args.intake_root, contract)
     selections = parse_select_route_file_specs(
-        args.select_route_file, args.intake_root, contract["required_routes"]
+        args.select_route_file, args.intake_root, contract
     )
 
     registry = build_registry(args.contract, args.intake_root, selections)

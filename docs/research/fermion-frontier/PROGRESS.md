@@ -2513,3 +2513,14 @@ D4 support canonicalizer: all `1704285` states yield `213099` orbits in
 the frozen 240-second cap. The `14.856` console timing is not retained in the
 result and is non-certifying. Complete depth-3 orbit enumeration is feasible,
 but no quotient Hamiltonian or fourth-layer cost is certified.
+
+## FH-L8 external-evidence bootstrap selection is fail-closed
+
+The intake bootstrap now validates every explicit route/file selection against
+the frozen route, workload, lattice-size, Trotter-step and nonempty-step
+candidate shape before writing a draft registry. It also rejects duplicate
+route selections, malformed JSON and paths outside the intake root. This is
+candidate-shape validation only: it does not establish provenance, compiler
+custody or scientific admissibility, all of which remain owned by the existing
+intake validator. With no external raw exports present, all five routes remain
+`MISSING` and cross-route comparison remains blocked.
