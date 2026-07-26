@@ -309,6 +309,18 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D51 performs no scientific action and supplies no production adapter, numeric peak, host seconds,
   resource reservation or full-53 authority.
 
+## FH-L8 D52 static adapter IR and operation bounds
+
+- `FH_L8_FULL53_ADAPTER_STATIC_COST_D52_ZH.md`: operation bounds, unresolved costs and authority.
+- `fh_l8_full53_adapter_static_cost_d52_contract.json`: source-pinned four-stage static IR, AST
+  contract, integer work bounds and closed execution authority.
+- `fh_l8_full53_adapter_static_cost_d52.py`: source-pin, AST and arithmetic checker.
+- `fh_l8_full53_adapter_static_cost_d52_result.json`: records the four full-53 operation-count
+  ceilings and seven unresolved allocation/time classes.
+- `test_fh_l8_full53_adapter_static_cost_d52.py`: IR lifetime, arithmetic and authority regressions.
+- D52 creates no executable adapter, reads no packed q3 and grants no numeric resource or full-53
+  authority.
+
 ## Claude source session
 
 - Session:

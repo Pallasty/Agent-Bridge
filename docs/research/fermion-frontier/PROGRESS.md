@@ -2,6 +2,19 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D52 static adapter IR and operation bounds
+
+- Bound a four-stage, non-executable adapter IR to the existing D5
+  `_reduced_column` kernel and made per-source column release explicit.
+- AST and integer checks bound full-53 calls to 48,160,374 canonical-info
+  evaluations, 385,282,992 symmetry images, 95,894,550 `Fraction`
+  constructions and 47,947,275 reduced-column updates.
+- Seven allocation/time cost classes remain unmeasured. D52 creates no
+  executable production adapter, reads no packed q3 and executes no scientific
+  kernel call; numeric memory/runtime and full-53 authority remain false.
+- Next gate:
+  `D53_OBJECT_ALLOCATION_AND_OPERATION_COST_MEASUREMENT_PROTOCOL_DESIGN`.
+
 ## 2026-07-26 — FH-L8 D51 streaming lifetime and runtime-work design
 
 - Split D50's full-53 structural bound into source admission, kernel/spill, partition merge and

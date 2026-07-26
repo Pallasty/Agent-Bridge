@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-FULL53-ADAPTER-STATIC-COST-D52-V1",
+  "analysis_class": "STATIC_ADAPTER_IR_ALLOCATION_CLASS_AND_OPERATION_COUNT_NO_EXECUTION",
+  "source_pins": {
+    "fh_l8_full53_streaming_lifetime_d51_contract.json": "8def9ebd3372e6cc1fbc810a75abf663c127643e6454f07a0aafdc94f6c9d83b",
+    "fh_l8_full53_streaming_lifetime_d51_result.json": "aa222f7682be2dc0f5a2848583b555e37100137ec4ddfaef64234c7b86ef77b1",
+    "fh_l8_full53_streaming_lifetime_d51.py": "81372a0b173b38aae6a91f0ee5ee0ee333bb1aa76e7265acaf67752fcd5b8c03",
+    "fh_l8_symmetry_orbit_quotient_d5_checker.py": "681bc63fedce8b71cfb536c66d321467bc8f01cb5947bee59b4291e2ac51a022",
+    "fh_l8_tiny_recovery_d22_runner.py": "c7ee2770d4ce601e053bda1937566900791a30027449e3882a7757b93b098661"
+  },
+  "adapter_ir": [
+    {
+      "stage": "decode_one_source_record",
+      "input": "one_32_byte_packed_q3_record",
+      "output": "one_representative_integer",
+      "allocation_classes": ["source_record_buffer", "python_integer"]
+    },
+    {
+      "stage": "invoke_bound_reduced_column",
+      "input": "one_representative_integer",
+      "output": "one_reduced_column_dictionary",
+      "bound_symbol": "_reduced_column",
+      "allocation_classes": [
+        "sector_action_dictionary",
+        "canonical_info_dictionaries",
+        "basis_image_lists_and_tuples",
+        "fraction_objects",
+        "reduced_column_dictionary"
+      ]
+    },
+    {
+      "stage": "encode_partition_records",
+      "input": "one_reduced_column_dictionary",
+      "output": "bounded_partition_buffers",
+      "allocation_classes": [
+        "partition_writer_state",
+        "fixed_width_serialization_buffer",
+        "hash_state"
+      ]
+    },
+    {
+      "stage": "release_column_before_next_source",
+      "input": "one_reduced_column_dictionary",
+      "output": "no_live_column_reference",
+      "allocation_classes": []
+    }
+  ],
+  "kernel_ast_contract": {
+    "function": "_reduced_column",
+    "positional_parameters": ["d4", "backend", "bonds", "representative", "symmetries"],
+    "sector_action_call_sites": 1,
+    "canonical_info_call_sites": 2,
+    "fraction_call_sites": 2,
+    "for_loops": 1,
+    "dict_literals": 2
+  },
+  "operation_bounds": {
+    "source_records": 213099,
+    "candidate_actions_per_source": 225,
+    "canonical_info_calls_per_source_upper": 226,
+    "basis_images_per_canonical_info": 8,
+    "fraction_constructions_per_candidate_upper": 2,
+    "reduced_column_updates_per_source_upper": 225,
+    "total_canonical_info_calls_upper": 48160374,
+    "total_basis_images_upper": 385282992,
+    "total_fraction_constructions_upper": 95894550,
+    "total_reduced_column_updates_upper": 47947275
+  },
+  "unresolved_allocation_costs": [
+    "sector_action_dictionary_peak_bytes",
+    "canonical_info_transient_peak_bytes",
+    "basis_images_transient_peak_bytes",
+    "fraction_object_peak_bytes",
+    "reduced_column_dictionary_peak_bytes",
+    "partition_writer_state_peak_bytes",
+    "per_operation_host_time_ns"
+  ],
+  "authority": {
+    "executable_production_adapter_created": false,
+    "packed_q3_reads": 0,
+    "scientific_kernel_calls_executed": 0,
+    "full53_executed": false,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false,
+    "external_resource_reservation_admitted": false,
+    "full53_execution_authorized": false
+  },
+  "next_gate": "D53_OBJECT_ALLOCATION_AND_OPERATION_COST_MEASUREMENT_PROTOCOL_DESIGN"
+}
