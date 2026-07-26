@@ -378,6 +378,18 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D54R2 is an independent host-isolation replication, not a replacement for D54R. Its slightly
   higher observed peak/time must not be converted into a full-53 or worst-case bound.
 
+## FH-L8 D55 measurement admissibility decision
+
+- `fh_l8_measurement_admissibility_d55_contract.json`: source-pinned, target-by-target
+  admissibility levels, admitted/forbidden uses and six closure requirements.
+- `fh_l8_measurement_admissibility_d55.py` and
+  `fh_l8_measurement_admissibility_d55_result.json`: verify upstream coverage, both D54R replay
+  boundaries and the resource-incomplete NO-GO result.
+- `test_fh_l8_measurement_admissibility_d55.py`: source, coverage, basis and authority regressions.
+- `FH_L8_MEASUREMENT_ADMISSIBILITY_D55_ZH.md`: Chinese decision rationale and D56 handoff.
+- D55 performs no measurement or scientific action. It admits D54R only as observational evidence;
+  numeric resource bounds, external reservation and full53 execution remain closed.
+
 ## Claude source session
 
 - Session:

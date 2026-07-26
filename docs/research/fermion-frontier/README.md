@@ -195,6 +195,12 @@ pinned execution path. The exact 70-process plan has now completed: 50 retained 
 result binds the external manifest and ordered receipt set. These finite-host observations do not
 prove allocator, worst-case runtime or full-53 bounds; D55 is the admissibility review.
 
+D55 completes that review against both D54R receipt sets. Six targets are observational only,
+three costs are not separately identified and filesystem page-cache accounting is not measured.
+The evidence is accepted for regression and hotspot prioritization but rejected as a full53
+peak-memory, worst-case-time or resource-reservation bound. D56 must design the production adapter
+and remaining resource-bound closure path; full53 authority stays closed.
+
 D54R2 independently replicated the same plan after the concurrent D54R result appeared. Its
 bubblewrap network namespace exposed loopback only, and all 70 fresh-process receipts again passed
 CPU0, 512-MiB/384-MiB-high, zero-swap and structural-digest checks. The fixed64 size-64 maxima were

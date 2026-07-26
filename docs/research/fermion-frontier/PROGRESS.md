@@ -2,6 +2,18 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D55 measurement admissibility decision
+
+- Reviewed every D53 target against D51/D52 unresolved terms and both complete D54R replays.
+- Classified six targets as observational only, three as not separately identified and filesystem
+  page-cache accounting as not measured.
+- Admitted the evidence only for regression, descriptive fixed64 summaries and hotspot
+  prioritization; full53 extrapolation and resource bounds remain forbidden.
+- Returned
+  `NO_GO_D55_MEASUREMENTS_ADMISSIBLE_ONLY_AS_OBSERVATIONS_RESOURCE_BOUNDS_INCOMPLETE`.
+  D55 executes zero measurements, scientific kernels and packed-q3 reads.
+- Next gate: `D56_PRODUCTION_STREAMING_ADAPTER_AND_RESOURCE_BOUND_CLOSURE_PLAN`.
+
 ## 2026-07-26 — FH-L8 D54R2 independent isolation replication
 
 - Reconciled the concurrently published D54R completion without overwriting its runner, receipts
