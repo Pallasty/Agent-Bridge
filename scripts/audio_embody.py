@@ -165,11 +165,31 @@ SYNTH_FILE_DEGRADED_FLOOR = 0.5  # 5+ words: a FULL-LENGTH clip with recall in [
                                  # collapsed -> mismatch. (review #2300 follow-up / #2335 design Q;
                                  # the long-line twin of MED-2 degraded!=fault; pending mac calibration.)
 
-_WORD_RE = re.compile(r"[a-z0-9']+")
+_WORD_RE = re.compile(r"[a-z0-9']+|[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 
 def _norm_words(text):
     return _WORD_RE.findall((text or "").lower())
+
+
+def _contains_cjk(text):
+    return bool(_CJK_RE.search(text or ""))
+
+
+def _expected_speech_duration(text, wpm):
+    """Estimate speech duration without treating a whole CJK clause as one word.
+
+    Preserve the historical English words/wpm calculation exactly. CJK characters
+    are counted separately at a conservative 1.45 characters per Latin word.
+    This estimate is only a truncation falsifier; it never proves intelligibility.
+    """
+    if wpm <= 0:
+        return 0.0
+    latin_words = re.findall(r"[a-z0-9']+", (text or "").lower())
+    cjk_chars = _CJK_RE.findall(text or "")
+    return (len(latin_words) / wpm * 60.0
+            + len(cjk_chars) / (wpm * 1.45) * 60.0)
 
 
 def word_overlap(reference, hypothesis):
@@ -711,7 +731,7 @@ def synth_say(text, voice, speed):
     return wav, {"ok": True, "backend": "say", "voice": v, "sample_rate": 16000, "wpm": wpm}
 
 
-def transcribe_synth_file(wav_path, model=None):
+def transcribe_synth_file(wav_path, model=None, language="en"):
     """OpenAI-whisper (Python CLI, NOT whisper.cpp) transcription of a synth WAV ->
     (text, None) or (None, err). The macOS STT path: AB_TTS_STT_BIN points at a
     whisper.cpp CLI with different flags, so the synth_file channel uses the `whisper`
@@ -725,10 +745,18 @@ def transcribe_synth_file(wav_path, model=None):
         return None, "whisper CLI not found (brew install openai-whisper, or set AB_TTS_WHISPER_BIN)"
     model = model or os.environ.get("AB_TTS_WHISPER_MODEL", "").strip() or "tiny"
     outdir = tempfile.mkdtemp(prefix="ab_whisper_")
-    p = subprocess.run([whisper_bin, wav_path, "--model", model, "--language", "en",
-                        "--output_format", "txt", "--output_dir", outdir,
-                        "--fp16", "False", "--verbose", "False"],
-                       capture_output=True, text=True)
+    try:
+        timeout_s = float(os.environ.get("AB_TTS_WHISPER_TIMEOUT_SECS", "45"))
+    except ValueError:
+        timeout_s = 45.0
+    timeout_s = max(5.0, min(timeout_s, 300.0))
+    try:
+        p = subprocess.run([whisper_bin, wav_path, "--model", model, "--language", language,
+                            "--output_format", "txt", "--output_dir", outdir,
+                            "--fp16", "False", "--verbose", "False"],
+                           capture_output=True, text=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return None, f"whisper timed out after {timeout_s:g}s"
     if p.returncode != 0:
         return None, f"whisper rc={p.returncode}: {(p.stderr or '')[:200]}"
     txt_path = os.path.join(outdir, os.path.splitext(os.path.basename(wav_path))[0] + ".txt")
@@ -857,7 +885,9 @@ def run_speech_synth_file(text, voice, speed):
     # STT gate (THE falsifier for the synth_file channel): transcribe the synth WAV and
     # check the requested words survived synthesis. STT unavailable -> no_capture (never
     # claim emitted without the word gate; degraded capability, not a content fault).
-    transcript, stt_err = transcribe_synth_file(wav)
+    stt_language = "zh" if _contains_cjk(text) else "en"
+    transcript, stt_err = transcribe_synth_file(wav, language=stt_language)
+    out["stt_language"] = stt_language
     # An empty/whitespace transcript from a WORKING whisper (exit 0, no words) is NOT a
     # content fault — whisper declined to transcribe (silence / non-speech / undecodable).
     # Fold it into the honest no_capture path (NOT mismatch, which would falsely assert the
@@ -869,7 +899,7 @@ def run_speech_synth_file(text, voice, speed):
     ratio, nref = word_overlap(text, transcript or "")
     # expected duration from words/wpm feeds the truncation guard (see classify_synth_file_embody).
     wpm = info.get("wpm", 0) or 0
-    expected_dur = (len(_norm_words(text)) / wpm * 60.0) if wpm > 0 else 0.0
+    expected_dur = _expected_speech_duration(text, wpm)
     out["expected_dur_s"] = round(expected_dur, 3)
     status = classify_synth_file_embody(parsed["frames"], rms_val, ratio, nref, stt_available,
                                         synth_dur_s=synth_dur, expected_dur_s=expected_dur)

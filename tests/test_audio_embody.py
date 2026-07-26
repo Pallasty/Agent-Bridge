@@ -485,6 +485,55 @@ def test_say_backend_never_uses_truncating_default_voice():
     assert ae._MACOS_DEFAULT_VOICE and not ae._MACOS_DEFAULT_VOICE.startswith(("af_", "bf_"))
 
 
+def test_cjk_units_participate_in_overlap_and_duration():
+    ratio, nref = ae.word_overlap("Agent Bridge 本地语音", "Agent Bridge 本地語音")
+    assert nref == 6
+    assert ratio == 5 / 6
+    # English behavior is unchanged; CJK is no longer collapsed to zero/one word.
+    assert round(ae._expected_speech_duration("one two", 120), 3) == 1.0
+    assert ae._expected_speech_duration("本地语音", 120) > 1.0
+
+
+def test_synth_file_selects_zh_stt_for_cjk():
+    seen = {}
+    saved = _patch(
+        synth_say=lambda t, v, s: ("/tmp/ab_fake.wav",
+                                   {"ok": True, "backend": "say", "voice": "Tingting",
+                                    "sample_rate": 16000, "wpm": 175}),
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000, "frames": 48000},
+        transcribe_synth_file=lambda w, model=None, language="en":
+            (seen.setdefault("language", language) and "本地语音", None),
+    )
+    try:
+        out = ae.run_speech_synth_file("本地语音", "Tingting", 1.0)
+        assert seen["language"] == "zh"
+        assert out["stt_language"] == "zh"
+        assert out["status"] == "emitted", out
+    finally:
+        _restore(saved)
+
+
+def test_whisper_timeout_is_bounded_and_degrades():
+    original_exists = ae.os.path.exists
+    original_run = ae.subprocess.run
+    original_env = ae.os.environ.get("AB_TTS_WHISPER_TIMEOUT_SECS")
+    try:
+        ae.os.path.exists = lambda p: True
+        ae.subprocess.run = lambda *a, **kw: (_ for _ in ()).throw(
+            ae.subprocess.TimeoutExpired(a[0], kw["timeout"]))
+        ae.os.environ["AB_TTS_WHISPER_TIMEOUT_SECS"] = "12"
+        transcript, err = ae.transcribe_synth_file("/tmp/fake.wav")
+        assert transcript is None
+        assert err == "whisper timed out after 12s"
+    finally:
+        ae.os.path.exists = original_exists
+        ae.subprocess.run = original_run
+        if original_env is None:
+            ae.os.environ.pop("AB_TTS_WHISPER_TIMEOUT_SECS", None)
+        else:
+            ae.os.environ["AB_TTS_WHISPER_TIMEOUT_SECS"] = original_env
+
+
 # --- #2300 review fixes: duration guard (MED-1) + empty-transcript no_capture (MED-2) -----
 
 def _patch(**stubs):
@@ -523,7 +572,7 @@ def test_synth_file_caller_empty_transcript_is_no_capture_not_mismatch():
                                    {"ok": True, "backend": "say", "voice": "Samantha",
                                     "sample_rate": 16000, "wpm": 175}),
         _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000, "frames": 48000},
-        transcribe_synth_file=lambda w, model=None: ("", None),  # working whisper, no words
+        transcribe_synth_file=lambda w, model=None, language="en": ("", None),  # working whisper, no words
     )
     try:
         out = ae.run_speech_synth_file("hello world this is a real test", "Samantha", 1.0)
@@ -543,7 +592,7 @@ def test_synth_file_caller_duration_guard_rejects_truncated_clip():
                                    {"ok": True, "backend": "say", "voice": "Samantha",
                                     "sample_rate": 16000, "wpm": 175}),
         _read_wav_mono_s16=lambda p: {"samples": [1000] * 6400, "sr": 16000, "frames": 6400},  # 0.4s
-        transcribe_synth_file=lambda w, model=None: ("go now here", None),  # all unique words back
+        transcribe_synth_file=lambda w, model=None, language="en": ("go now here", None),  # all unique words back
     )
     try:
         # 10 words (go x8 + now + here) -> expected ~3.43s; synth 0.4s << 0.5*expected -> truncated
@@ -566,7 +615,7 @@ def test_synth_file_caller_full_clip_emitted_with_verified_to():
                                    {"ok": True, "backend": "say", "voice": "Samantha",
                                     "sample_rate": 16000, "wpm": 175}),
         _read_wav_mono_s16=lambda p: {"samples": [1000] * 54880, "sr": 16000, "frames": 54880},  # 3.43s
-        transcribe_synth_file=lambda w, model=None: (text, None),
+        transcribe_synth_file=lambda w, model=None, language="en": (text, None),
     )
     try:
         out = ae.run_speech_synth_file(text, "Samantha", 1.0)
