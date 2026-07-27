@@ -2,6 +2,18 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D57 production streaming adapter contract
+
+- Added an importable adapter contract for source decode, bound-kernel invocation, partition spill,
+  merge and terminal publication, with release of each column before the next source.
+- Synthetic/mock tests construct individual 32-byte records in memory; they perform no packed-q3
+  file read, production I/O, object measurement or scientific call. The full53 entrypoint fails
+  closed.
+- D5 `_reduced_column` is source-pinned as the future binding symbol but is neither imported nor
+  called by D57 verification. Numeric bounds and external reservation remain unproven/unadmitted.
+- D57 unlocks the planned parallel analysis gates D58 allocation classes, D59 production I/O/page
+  cache and D60 precommitted runtime rule; it unlocks no measurement or full53 execution.
+
 ## 2026-07-26 — FH-L8 D56 ordered resource-bound closure plan
 
 - Converted all six D55 closure requirements into source-pinned D57--D62 work packages with
