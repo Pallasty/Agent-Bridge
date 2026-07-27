@@ -44,7 +44,7 @@ impl McpTool for PresentVoiceTool {
         ToolSchema {
             name: self.name().into(),
             description: "Output-expression lane, AUDIO embodiment. backend=tone (default) emits a known \
-                 tone; kokoro/piper use offline model TTS; say uses macOS native speech synthesis. \
+                 tone; kokoro/piper use offline model TTS; sherpa uses an offline Chinese multi-speaker VITS model; say uses macOS native speech synthesis. \
                  Linux tone/model speech is played to an output sink and read back off the system bus (PipeWire \
                  sink .monitor loopback) to prove it reached the bus: tone uses a spectral-peak falsifier \
                  (Goertzel vs local floor); speech uses an energy-envelope cross-correlation falsifier (the \
@@ -54,15 +54,15 @@ impl McpTool for PresentVoiceTool {
                  Returns status (emitted|silent|mismatch|no_capture|error) plus an HONEST verified_to boundary. \
                  Writes a verified-outcome sidecar that flows into present_outcomes. capture_channel is \
                  sink_monitor, mic, or synth_file. Linux bus verification requires PipeWire + ffmpeg/paplay; \
-                 kokoro/piper need ab-tts-synth and their model assets; say needs macOS /usr/bin/say and Whisper \
+                 kokoro/piper need ab-tts-synth and their model assets; sherpa needs ab-sherpa-tts-synth plus explicit model/voice-map environment; say needs macOS /usr/bin/say and Whisper \
                  for synth_file verification. Opt-in (Niche)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "say"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; say = macOS native TTS. say should use capture_channel=synth_file and verifies only the synthesized file via STT."},
-                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, or say."},
-                    "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Kokoro names use af_*/bf_*; macOS say accepts installed system voice names such as Samantha or Tingting."},
+                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "sherpa", "say"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; sherpa = offline Chinese multi-speaker VITS; say = macOS native TTS. say should use capture_channel=synth_file and verifies only the synthesized file via STT."},
+                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, sherpa, or say."},
+                    "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Sherpa requires a name from AB_TTS_SHERPA_VOICE_MAP; speaker IDs are not gender claims."},
                     "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0, "description": "Speech speed."},
                     "freq": {"type": "number", "minimum": 50, "maximum": 18000, "default": 440, "description": "backend=tone: tone frequency (Hz) whose presence on the bus is verified."},
                     "duration_ms": {"type": "integer", "minimum": 100, "maximum": 8000, "default": 1500},
@@ -70,8 +70,8 @@ impl McpTool for PresentVoiceTool {
                     "sink": {"type": "string", "description": "PipeWire output sink to emit to. Defaults to the system default sink; the SAME sink's .monitor is the bus-loopback readback."},
                     "capture_channel": {"type": "string", "enum": ["sink_monitor", "mic", "synth_file"], "default": "sink_monitor", "description": "Readback channel: sink_monitor = PipeWire bus loopback; mic = acoustic input; synth_file = STT over the synthesized file (macOS, does not verify playback)."},
                     "intent": {"type": "string", "description": "What this emission is the outcome of (recorded in the outcome sidecar; does not affect playback)."},
-                    "synth_bin": {"type": "string", "description": "backend=kokoro/piper: explicit ab-tts-synth path (else env AB_TTS_SYNTH_BIN)."},
-                    "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro/piper: ALSO transcribe the bus capture (whisper.cpp). synth_file already uses STT as its primary falsifier."},
+                    "synth_bin": {"type": "string", "description": "backend=kokoro/piper: explicit ab-tts-synth; backend=sherpa: explicit ab-sherpa-tts-synth (else env AB_TTS_SYNTH_BIN)."},
+                    "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro/piper/sherpa: ALSO transcribe the bus capture (whisper.cpp). synth_file already uses STT as its primary falsifier."},
                     "stt_bin": {"type": "string", "description": "verify_intelligibility: whisper.cpp CLI path (else env AB_TTS_STT_BIN)."},
                     "stt_model": {"type": "string", "description": "verify_intelligibility: whisper ggml model path (else env AB_TTS_STT_MODEL)."},
                     "cwd": {"type": "string", "description": "Repo root to resolve scripts/audio_embody.py."},

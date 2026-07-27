@@ -645,27 +645,34 @@ def run(freq, dur_ms, amp, sink_arg, capture_channel, emit):
 
 
 def resolve_synth_bin(arg):
-    """Locate the ab-tts-synth CLI: explicit arg → env → None (caller errors)."""
+    """Locate the selected TTS CLI: explicit arg → env → None (caller errors)."""
     cand = arg or os.environ.get("AB_TTS_SYNTH_BIN", "").strip()
     return cand or None
 
 
 def synth_speech(text, voice, speed, synth_bin, backend="kokoro"):
     """Invoke ab-tts-synth (Rust) to render `text` → WAV with the chosen `backend`
-    (kokoro | piper). Returns (wav_path, info_dict) or (None, error_dict). The synth
-    bin reports its own sample_rate in `info`, so the falsifier stays backend-agnostic."""
+    (kokoro | piper) or ab-sherpa-tts-synth (sherpa). Returns (wav_path, info_dict)
+    or (None, error_dict). The synth bin reports its own sample_rate in `info`, so
+    the falsifier stays backend-agnostic."""
     if not synth_bin or not os.path.exists(synth_bin):
-        return None, {"detail": f"ab-tts-synth not found ({synth_bin!r}); set --synth-bin or AB_TTS_SYNTH_BIN"}
-    wav = os.path.join(tempfile.gettempdir(), "ab_voice_speech.wav")
-    proc = subprocess.run(
-        [synth_bin, "--backend", backend, "--text", text, "--voice", voice,
-         "--speed", str(speed), "--out", wav],
-        capture_output=True, text=True)
+        return None, {"detail": f"TTS synth binary not found ({synth_bin!r}); set --synth-bin or AB_TTS_SYNTH_BIN"}
+    fd, wav = tempfile.mkstemp(prefix="ab_voice_speech_", suffix=".wav")
+    os.close(fd)
+    os.unlink(wav)
+    if backend == "sherpa":
+        cmd = [synth_bin, "--text", text, "--voice", voice, "--speed", str(speed), "--out", wav]
+    else:
+        cmd = [synth_bin, "--backend", backend, "--text", text, "--voice", voice,
+               "--speed", str(speed), "--out", wav]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     try:
         info = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.stdout.strip() else {}
     except Exception:  # noqa
         info = {}
     if proc.returncode != 0 or not info.get("ok") or not os.path.exists(wav):
+        if os.path.exists(wav):
+            os.unlink(wav)
         return None, {"detail": f"synth failed rc={proc.returncode}: {info.get('error') or proc.stderr[:300]}"}
     return wav, info
 
@@ -1132,8 +1139,8 @@ def main():
     ap.add_argument("--voice", default="af_sarah", help="speech mode: TTS voice name")
     ap.add_argument("--speed", type=float, default=1.0, help="speech mode: speech speed (0.5-2.0)")
     ap.add_argument("--synth-bin", default=None, help="speech mode: path to ab-tts-synth (or env AB_TTS_SYNTH_BIN)")
-    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "say"], default="kokoro",
-                    help="speech mode: TTS engine (kokoro 24kHz | piper 22.05kHz | say = macOS native, "
+    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "sherpa", "say"], default="kokoro",
+                    help="speech mode: TTS engine (kokoro 24kHz | piper 22.05kHz | sherpa = Chinese multi-speaker VITS | say = macOS native, "
                          "auto-selected on darwin via the synth_file channel)")
     ap.add_argument("--check-intelligibility", action="store_true",
                     help="speech mode: also transcribe the bus capture (whisper.cpp) and check words came back")
