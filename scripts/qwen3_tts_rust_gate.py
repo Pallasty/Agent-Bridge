@@ -13,17 +13,41 @@ import wave
 from pathlib import Path
 
 
-MODEL_REVISION = "85e237c12c027371202489a0ec509ded67b5e4b5"
-EXPECTED_FILES = {
-    "model.safetensors": {
-        "size": 1_811_626_576,
-        "sha256": "bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb",
+MODEL_PROFILES = {
+    "0.6b-customvoice": {
+        "revision": "85e237c12c027371202489a0ec509ded67b5e4b5",
+        "default_speaker": "Serena",
+        "expected_files": {
+            "model.safetensors": {
+                "size": 1_811_626_576,
+                "sha256": "bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb",
+            },
+            "speech_tokenizer/model.safetensors": {
+                "size": 682_293_092,
+                "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+            },
+        },
     },
-    "speech_tokenizer/model.safetensors": {
-        "size": 682_293_092,
-        "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+    "1.7b-customvoice": {
+        # The large file hash is the content identity; the ModelScope snapshot
+        # is deliberately not treated as an immutable upstream revision string.
+        "revision": "sha256:38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+        "default_speaker": "serena",
+        "expected_files": {
+            "model.safetensors": {
+                "size": 3_833_402_552,
+                "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+            },
+            "speech_tokenizer/model.safetensors": {
+                "size": 682_293_092,
+                "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+            },
+        },
     },
 }
+DEFAULT_PROFILE = "0.6b-customvoice"
+MODEL_REVISION = MODEL_PROFILES[DEFAULT_PROFILE]["revision"]
+EXPECTED_FILES = MODEL_PROFILES[DEFAULT_PROFILE]["expected_files"]
 DEFAULT_TEXT = "你好，这是 Agent Bridge 的纯 Rust 语音试验。"
 
 
@@ -119,23 +143,30 @@ def run_gate(
     output: Path,
     *,
     text: str = DEFAULT_TEXT,
-    speaker: str = "Serena",
+    speaker: str | None = None,
+    model_profile: str = DEFAULT_PROFILE,
     max_tokens: int = 128,
     seed: int = 42,
     timeout_seconds: int = 900,
-    specs=EXPECTED_FILES,
+    specs=None,
     runner=subprocess.run,
 ) -> dict:
+    profile = MODEL_PROFILES.get(model_profile)
+    if profile is None:
+        raise ValueError(f"unknown model profile: {model_profile}")
+    expected_files = profile["expected_files"]
+    selected_speaker = speaker or profile["default_speaker"]
     report = {
         "schema": "agent_bridge.qwen3_tts_rust_gate.v1",
         "ok": False,
         "verified": False,
         "verified_to": None,
-        "model_revision": MODEL_REVISION,
+        "model_profile": model_profile,
+        "model_revision": profile["revision"],
         "model_dir": str(model_dir),
         "binary": str(binary),
         "output": str(output),
-        "model_files": verify_model_files(model_dir, specs),
+        "model_files": verify_model_files(model_dir, specs or expected_files),
         "execution": {"attempted": False},
         "reason": None,
     }
@@ -150,7 +181,7 @@ def run_gate(
         return report
 
     command = build_command(
-        binary, model_dir, output, text, speaker, max_tokens, seed
+        binary, model_dir, output, text, selected_speaker, max_tokens, seed
     )
     started = time.monotonic()
     report["execution"] = {
@@ -217,7 +248,8 @@ def main() -> int:
     parser.add_argument("--model-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--text", default=DEFAULT_TEXT)
-    parser.add_argument("--speaker", default="Serena")
+    parser.add_argument("--model-profile", choices=sorted(MODEL_PROFILES), default=DEFAULT_PROFILE)
+    parser.add_argument("--speaker", default=None)
     parser.add_argument("--max-tokens", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--timeout-seconds", type=int, default=900)
@@ -228,6 +260,7 @@ def main() -> int:
         args.output,
         text=args.text,
         speaker=args.speaker,
+        model_profile=args.model_profile,
         max_tokens=max(1, args.max_tokens),
         seed=args.seed,
         timeout_seconds=max(1, args.timeout_seconds),

@@ -160,3 +160,18 @@ def test_timeout_is_not_reported_as_success(tmp_path):
     )
     assert report["reason"] == "inference_timeout"
     assert not report["verified"]
+
+
+def test_17b_profile_uses_verified_manifest_and_lowercase_speaker(tmp_path):
+    profile = gate.MODEL_PROFILES["1.7b-customvoice"]
+    command = gate.build_command(
+        tmp_path / "qwen-tts",
+        tmp_path / "model",
+        tmp_path / "out.wav",
+        "你好",
+        profile["default_speaker"],
+        128,
+        42,
+    )
+    assert command[-3:] == ["custom-voice", "--speaker", "serena"]
+    assert profile["revision"].startswith("sha256:")

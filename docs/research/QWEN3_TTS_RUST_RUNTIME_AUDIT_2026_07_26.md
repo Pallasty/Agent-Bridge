@@ -1,8 +1,9 @@
 # Qwen3-TTS Rust Runtime Audit
 
-Date: 2026-07-26
+Date: 2026-07-26 (updated 2026-07-27)
 
-Status: source/build gate passed; real-model inference gate incomplete
+Status: 1.7B real-model synthesis gate passed; STT, playback, and human
+audibility gates remain open
 
 ## Decision
 
@@ -77,7 +78,7 @@ A disposable two-file patch changed both model and tokenizer clients to
 This patch must be carried locally or accepted upstream before Agent-Bridge may
 invoke the Rust CLI with a cache-isolation claim.
 
-## Incomplete real-model gate
+## Real-model gate
 
 The official `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` model is Apache-2.0 and is
 the selected smallest CustomVoice validation target.
@@ -114,16 +115,48 @@ Hugging Face model-cache path was checked after each attempt and remains absent.
 No fresh aio2 or tb14 Agent-Bridge presence was available at the time of the
 probe, so no remote download was dispatched based on stale node records.
 
+### 1.7B ModelScope snapshot: accepted for the disposable pilot
+
+The following completed local snapshot was checked without modifying or
+relocating it:
+
+`/Users/pallasting/.cache/modelscope/models/Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master`
+
+The manifest reports `tts_model_size=1b7` and `tts_model_type=custom_voice`.
+The complete file hashes match the corresponding Hugging Face LFS OIDs:
+
+- `model.safetensors`: 3,833,402,552 bytes,
+  `38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137`
+- `speech_tokenizer/model.safetensors`: 682,293,092 bytes,
+  `836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258`
+
+The Rust arm64 CLI loaded the model on Metal and generated the fixed Chinese
+utterance successfully. The first attempt used `Serena` and was rejected by
+the 1.7B CLI's lowercase speaker registry; retrying with `serena` succeeded.
+This is now represented as the explicit `1.7b-customvoice` profile in the
+offline gate, rather than changing the existing 0.6B profile implicitly.
+
+Gate evidence:
+
+- elapsed inference: 5.732 seconds;
+- WAV: 24,000 Hz, mono, 16-bit PCM, 93,525 frames, 3.896875 seconds;
+- output SHA-256:
+  `00a121b6aa419772f4e99ca2be663afbe7a0f3d4c6e0ab21e00e177d60afc63c`;
+- result: `verified=true`, `verified_to=qwen3_rust_synthesized_wav`.
+
+This proves local model integrity, Metal loading, and Rust synthesis only. It
+does not prove intelligibility, speaker quality, physical playback, or human
+audibility.
+
 ## Required next gate
 
-1. Fetch the official model on a node or network path with adequate object-store
-   bandwidth, then transfer the two files to the Mac. Preserve the pinned
-   revision and verify the complete SHA-256 values against the Hugging Face LFS
-   OIDs before use.
-2. Run the patched arm64 CLI with `--device metal --dtype f16`.
-3. Generate a short fixed Chinese utterance with a fixed seed.
-4. Record wall time, peak memory, output SHA-256, sample rate, channels, and
-   duration.
+1. ~~Fetch the official model on a node or network path with adequate
+   object-store bandwidth, then transfer the two files to the Mac.~~ Done via
+   the verified ModelScope snapshot above; the files remain outside Git.
+2. ~~Run the patched arm64 CLI with `--device metal --dtype f16`.~~ Done.
+3. ~~Generate a short fixed Chinese utterance with a fixed seed.~~ Done.
+4. ~~Record wall time, output SHA-256, sample rate, channels, and duration.~~
+   Done. Peak-memory measurement remains optional and unclaimed.
 5. Run file-level STT as an intelligibility check.
 6. Play the named artifact and obtain human audibility confirmation.
 7. Only then design a default-off `qwen3-rust` Agent-Bridge backend. Keep
@@ -140,6 +173,8 @@ probe, so no remote download was dispatched based on stale node records.
   and deterministic seed parameters;
 - refuses to overwrite an existing output;
 - records command timing, bounded process output, WAV shape, bytes, and SHA-256;
+- supports explicit `0.6b-customvoice` and `1.7b-customvoice` manifests, with
+  profile-specific speaker defaults;
 - verifies only to `qwen3_rust_synthesized_wav`, never to STT, speaker output,
   or human audibility.
 
@@ -152,8 +187,9 @@ python3 scripts/qwen3_tts_rust_gate.py \
   --output /private/tmp/ab-qwen3-rust-pilot/out/qwen3-rust-zh.wav
 ```
 
-The implementation has six unit tests covering missing files, size mismatch,
+The implementation has eight unit tests covering missing files, size mismatch,
 same-size SHA mismatch, fixed Metal command shape, successful non-empty WAV
-attestation, existing-output preservation, and timeout honesty. A negative run
+attestation, existing-output preservation, timeout honesty, and the explicit
+1.7B profile. A negative run
 against the current incomplete disposable model returned
 `model_integrity_failed` with `execution.attempted=false`.
