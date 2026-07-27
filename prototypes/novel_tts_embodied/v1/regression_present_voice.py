@@ -481,6 +481,23 @@ def scenario_cli_adapter_rejects_missing_artifact(tmpdir: Path, adapter_path: Pa
     _assert(row.get("output_file_exists") is False, "missing artifact must not be reported as existing")
 
 
+def scenario_cli_adapter_quotes_backend_values(tmpdir: Path, adapter_path: Path) -> None:
+    out = tmpdir / "cli_adapter_shell_quote"
+    sentinel = tmpdir / "must_not_be_created"
+    payload = _run_runner(
+        output_dir=out,
+        input_text=f"$(touch {sentinel})",
+        executor=f"python3 {adapter_path}",
+        mode="json",
+        retry_limit=0,
+        validate_outputs=False,
+        backend_cmd="/bin/true -- {text}",
+    )
+
+    _assert(not sentinel.exists(), "backend template values must be shell-quoted")
+    _assert(payload.get("present_voice_summary", {}).get("ok_count") == 0, "no-output backend should remain non-ok")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run lightweight regression checks for novel_tts_embodied v1 present_voice paths")
     parser.add_argument("--workdir", default=None)
@@ -523,6 +540,10 @@ def main() -> None:
             adapter_path=ROOT / "adapters" / "present_voice_cli.py",
         )
         scenario_cli_adapter_rejects_missing_artifact(
+            tmpdir=base,
+            adapter_path=ROOT / "adapters" / "present_voice_cli.py",
+        )
+        scenario_cli_adapter_quotes_backend_values(
             tmpdir=base,
             adapter_path=ROOT / "adapters" / "present_voice_cli.py",
         )

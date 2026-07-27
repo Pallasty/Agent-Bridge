@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 import sys
@@ -24,17 +25,20 @@ def _write_placeholder_audio(path: Path) -> None:
 
 
 def _run_backend_command(cmd_template: str, payload: dict) -> tuple[int, str]:
+    def shell_arg(value) -> str:
+        return shlex.quote(_to_str(value))
+
     command = cmd_template.format(
-        backend=_to_str(payload.get("backend")),
-        text=_to_str(payload.get("text")).replace('"', '\\"'),
-        voice=_to_str(payload.get("voice")),
-        speed=_to_str(payload.get("speed")),
-        pause_ms=_to_str(payload.get("pause_ms")),
-        gain_db=_to_str(payload.get("gain_db")),
-        pitch_shift=_to_str(payload.get("pitch_shift")),
-        output_file=_to_str(payload.get("output_file")),
-        segment_hash=_to_str(payload.get("segment_hash")),
-        estimated_duration_sec=_to_str(payload.get("estimated_duration_sec")),
+        backend=shell_arg(payload.get("backend")),
+        text=shell_arg(payload.get("text")),
+        voice=shell_arg(payload.get("voice")),
+        speed=shell_arg(payload.get("speed")),
+        pause_ms=shell_arg(payload.get("pause_ms")),
+        gain_db=shell_arg(payload.get("gain_db")),
+        pitch_shift=shell_arg(payload.get("pitch_shift")),
+        output_file=shell_arg(payload.get("output_file")),
+        segment_hash=shell_arg(payload.get("segment_hash")),
+        estimated_duration_sec=shell_arg(payload.get("estimated_duration_sec")),
     )
     proc = subprocess.run(
         command,

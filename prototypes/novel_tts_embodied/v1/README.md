@@ -99,7 +99,7 @@ python3 ab_runner.py \
 这个 adapter 在 `backend=ab-tts` 下会产出一个有效的占位 `wav`，用于验证回执链路和文件归档；你可以改造它接到真实 TTS 后端：
 
 ```bash
-export NOVEL_PRESENT_VOICE_BACKEND_CMD="tts-cli --backend {backend} --voice {voice} --speed {speed} --input \"{text}\" --out {output_file}"
+export NOVEL_PRESENT_VOICE_BACKEND_CMD="tts-cli --backend {backend} --voice {voice} --speed {speed} --input {text} --out {output_file}"
 ```
 
 并保持 ab_runner 输入/输出结构不变即可替换验证阶段实现。
@@ -125,10 +125,10 @@ must only be assigned after listening review:
 export AB_TTS_SHERPA_MODEL_DIR=/Data/Models/sherpa-onnx/vits-icefall-zh-aishell3
 export AB_TTS_SHERPA_VOICE_MAP='male_standard=<sid>,female_standard=<sid>,narrator_calm=<sid>'
 export NOVEL_PRESENT_VOICE_EXECUTOR="python3 $(pwd)/adapters/present_voice_cli.py"
-export NOVEL_PRESENT_VOICE_BACKEND_CMD='/Data/ab-sherpa-target/debug/ab-sherpa-tts-synth --text "{text}" --voice {voice} --speed {speed} --out {output_file}'
+export NOVEL_PRESENT_VOICE_BACKEND_CMD='/Data/ab-sherpa-target/debug/ab-sherpa-tts-synth --text {text} --voice {voice} --speed {speed} --out {output_file}'
 ```
 
-The adapter now requires the command to leave a non-trivial WAV at `output_file`.
+The adapter shell-quotes every template value and requires the command to leave a non-trivial WAV at `output_file`.
 An exit code of zero without a real audio file is a `failed/mismatch` receipt;
 it is never replaced with a placeholder WAV.
 
