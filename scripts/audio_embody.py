@@ -1048,6 +1048,38 @@ def run_emit(text, voice, speed, sink_arg, synth_bin):
     return out
 
 
+def run_render(text, voice, speed, synth_bin, synth_backend, output_file):
+    """Synthesize a durable WAV without emitting it to an audio sink."""
+    out = {"mode": "render", "text": text, "voice": voice, "speed": speed,
+           "synth_backend": synth_backend, "verified_to": None,
+           "not_verified": "output bus and physical transducer (render mode never plays audio)"}
+    wav, info = synth_speech(text, voice, speed, synth_bin, backend=synth_backend)
+    if wav is None:
+        out.update(status="error", verify_status="error", detail=info.get("detail", "synth failed"))
+        return out
+    target = os.path.abspath(output_file)
+    try:
+        target_dir = os.path.dirname(target)
+        os.makedirs(target_dir, exist_ok=True)
+        fd, staged = tempfile.mkstemp(prefix=".ab_voice_render_", suffix=".wav", dir=target_dir)
+        os.close(fd)
+        with open(wav, "rb") as src, open(staged, "wb") as dst:
+            while block := src.read(1024 * 1024):
+                dst.write(block)
+        os.unlink(wav)
+        os.replace(staged, target)
+        with open(target, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        out.update(status="rendered", verify_status="synthesized", audio_file=target,
+                   audio_sha256=digest, audio_bytes=os.path.getsize(target),
+                   detail="rendered click-to-play audio; no playback requested")
+    except Exception as e:  # noqa
+        if os.path.exists(wav):
+            os.unlink(wav)
+        out.update(status="error", verify_status="error", detail=f"persist rendered audio: {e}")
+    return out
+
+
 # --- voice adapter orchestration (LCC-V1: decide -> route -> receipt) ------------
 
 # Fields the chosen tier (emit | speech) produces that we copy verbatim into the
@@ -1110,7 +1142,7 @@ def run_voice(mode, voice, sink_arg, synth_bin, evidence_ids=None,
 
 def main():
     ap = argparse.ArgumentParser(description="present_voice audio-embodiment falsifier")
-    ap.add_argument("--mode", choices=["tone", "speech", "emit", "voice"], default="tone",
+    ap.add_argument("--mode", choices=["tone", "speech", "emit", "render", "voice"], default="tone",
                     help="tone = fixed-freq Goertzel peak (default); speech = TTS envelope-correlation "
                          "falsifier (verified); emit = TTS synth+play, NO bus readback (fast, unverified); "
                          "voice = LCC-V1 companion voice adapter (voice-policy v0 gate -> emit/speech tier)")
@@ -1139,6 +1171,7 @@ def main():
     ap.add_argument("--voice", default="af_sarah", help="speech mode: TTS voice name")
     ap.add_argument("--speed", type=float, default=1.0, help="speech mode: speech speed (0.5-2.0)")
     ap.add_argument("--synth-bin", default=None, help="speech mode: path to ab-tts-synth (or env AB_TTS_SYNTH_BIN)")
+    ap.add_argument("--output-file", default=None, help="render mode: durable WAV output path")
     ap.add_argument("--synth-backend", choices=["kokoro", "piper", "sherpa", "say"], default="kokoro",
                     help="speech mode: TTS engine (kokoro 24kHz | piper 22.05kHz | sherpa = Chinese multi-speaker VITS | say = macOS native, "
                          "auto-selected on darwin via the synth_file channel)")
@@ -1176,6 +1209,19 @@ def main():
         else:
             res = run_emit(a.text, a.voice, max(0.5, min(a.speed, 2.0)), a.sink,
                            resolve_synth_bin(a.synth_bin))
+        if a.json:
+            print(json.dumps(res))
+        else:
+            for k, v in res.items():
+                print(f"{k}: {v}")
+        return
+    if a.mode == "render":
+        if not a.text or not a.text.strip():
+            res = {"mode": "render", "status": "error", "verify_status": "error", "detail": "render mode requires --text"}
+        elif not a.output_file:
+            res = {"mode": "render", "status": "error", "verify_status": "error", "detail": "render mode requires --output-file"}
+        else:
+            res = run_render(a.text, a.voice, max(0.5, min(a.speed, 2.0)), resolve_synth_bin(a.synth_bin), a.synth_backend, a.output_file)
         if a.json:
             print(json.dumps(res))
         else:
