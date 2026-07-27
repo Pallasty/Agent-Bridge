@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-LIVE-ALLOCATION-BOUND-D58-V1",
+  "analysis_class": "SOURCE_PINNED_SYMBOLIC_LIVE_ALLOCATION_INVENTORY_NO_NUMERIC_BOUND",
+  "source_pins": {
+    "fh_l8_full53_streaming_lifetime_d51_contract.json": "8def9ebd3372e6cc1fbc810a75abf663c127643e6454f07a0aafdc94f6c9d83b",
+    "fh_l8_full53_streaming_lifetime_d51_result.json": "aa222f7682be2dc0f5a2848583b555e37100137ec4ddfaef64234c7b86ef77b1",
+    "fh_l8_full53_adapter_static_cost_d52_contract.json": "08eabdf4826576bc1dbb410d384a5dd370daca43170416999da2b010ff3bafa4",
+    "fh_l8_full53_adapter_static_cost_d52_result.json": "977fb3d3551d6152359a9ace8ca984b0bdcf973bcb8f0e9277adb3e364209153",
+    "fh_l8_production_streaming_adapter_d57_contract.json": "c325d515690ee00f538e78750d10ee6e05277af2bbf568c0bc8e3038fe9cded1",
+    "fh_l8_production_streaming_adapter_d57_result.json": "21e65066072ed310af0748585f0289df3ef728a94ba847276b7270fc7e04fd35",
+    "fh_l8_resource_closure_plan_d56_contract.json": "3d3e5b7ef396a87daa4faa411e967b89522e980be3777bcc20bcab08b1b2c583"
+  },
+  "bound_variables": [
+    "R_python_runtime_base",
+    "A_sector_action_dictionary",
+    "A_canonical_info_transient",
+    "A_basis_images_transient",
+    "A_fraction_objects",
+    "A_reduced_column_dictionary",
+    "A_partition_writer_state",
+    "A_sort_key_heap"
+  ],
+  "phase_expressions": {
+    "source_admission": ["R_python_runtime_base", "source_read_buffer_bytes"],
+    "kernel_and_spill": ["R_python_runtime_base", "source_read_buffer_bytes", "output_buffer_bytes", "A_sector_action_dictionary", "A_canonical_info_transient", "A_basis_images_transient", "A_fraction_objects", "A_reduced_column_dictionary", "A_partition_writer_state"],
+    "partition_external_merge": ["R_python_runtime_base", "32*input_buffer_bytes_per_run", "output_buffer_bytes", "A_sort_key_heap", "manifest_bytes"],
+    "target_publication": ["R_python_runtime_base", "source_read_buffer_bytes", "output_buffer_bytes", "manifest_bytes", "result_bytes", "receipt_bytes"]
+  },
+  "proof_obligations": {
+    "R_python_runtime_base": "independent interpreter/runtime configuration upper bound",
+    "A_sector_action_dictionary": "bounded dictionary entry and allocator-overhead proof",
+    "A_canonical_info_transient": "bounded transient dictionary lifetime proof",
+    "A_basis_images_transient": "bounded list/tuple image lifetime proof",
+    "A_fraction_objects": "bounded Fraction object and integer payload proof",
+    "A_reduced_column_dictionary": "bounded 225-entry column representation proof",
+    "A_partition_writer_state": "bounded 256-partition writer state proof",
+    "A_sort_key_heap": "bounded 32-way merge heap representation proof"
+  },
+  "forbidden_substitutions": [
+    "D54R_or_D54R2_observed_peak_as_allocator_bound",
+    "CPython_current_host_getsizeof_as_cross_configuration_bound",
+    "unbounded_page_cache_as_allocation_term",
+    "aggregate_cgroup_peak_as_per_class_bound"
+  ],
+  "authority": {
+    "scientific_kernel_calls_executed": 0,
+    "object_measurements_executed": 0,
+    "packed_q3_reads": 0,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false,
+    "external_resource_reservation_admitted": false,
+    "full53_execution_authorized": false
+  },
+  "status": "PLANNED_D58_SYMBOLIC_ALLOCATION_INVENTORY_NUMERIC_PROOFS_PENDING",
+  "next_gate": "D59_PRODUCTION_IO_PAGE_CACHE_BOUND"
+}

@@ -415,6 +415,14 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `FH_L8_PRODUCTION_STREAMING_ADAPTER_D57_ZH.md`: Chinese scope and handoff note.
 - D57 enables D58/D59/D60 analysis only; it does not authorize full53 execution.
 
+## FH-L8 D58 live-allocation bound inventory
+
+- `fh_l8_live_allocation_bound_d58_contract.json`: source pins, eight symbolic variables, four phase
+  expressions, proof obligations and prohibited substitutions.
+- `fh_l8_live_allocation_bound_d58.py` and result: exact lifetime/allocation coverage checker.
+- `test_fh_l8_live_allocation_bound_d58.py`: variable, merge-lifetime and authority fail-closed tests.
+- `FH_L8_LIVE_ALLOCATION_BOUND_D58_ZH.md`: Chinese scope and nonclaim summary.
+
 ## Claude source session
 
 - Session:

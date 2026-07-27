@@ -2,6 +2,15 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D58 symbolic live-allocation inventory
+
+- Mapped D51's four lifetime phases and D52/D57 allocation classes into eight independent symbolic
+  peak variables and phase expressions.
+- Frozen eight proof obligations and rejected D54 observations, host `getsizeof` values and aggregate
+  cgroup peaks as substitutes for allocator bounds.
+- The inventory is complete but numeric proofs remain pending; D58 executes zero measurements,
+  scientific kernels and packed-q3 reads. Next gate: `D59_PRODUCTION_IO_PAGE_CACHE_BOUND`.
+
 ## 2026-07-26 — FH-L8 D57 production streaming adapter contract
 
 - Added an importable adapter contract for source decode, bound-kernel invocation, partition spill,
