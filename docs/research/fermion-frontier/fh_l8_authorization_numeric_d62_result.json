@@ -1,0 +1,10 @@
+{
+  "status": "VERIFIED_D62_AUTHORIZATION_FAIL_CLOSED",
+  "decision": "NO_GO_D62_CLOSURE_PREDICATES_UNSATISFIED",
+  "predicate_count": 5,
+  "unsatisfied_predicate_count": 5,
+  "unsatisfied_predicates": ["D58_numeric_peak_memory_proven", "D59_page_cache_environment_bound", "D60_runtime_rule_precommitted_and_environment_fixed", "D23_registered_scratch_meets_design_requirement", "D61_integrated_envelope_GO"],
+  "external_resource_reservation_admitted": false,
+  "full53_execution_authorized": false,
+  "full53_execution_performed": false
+}
