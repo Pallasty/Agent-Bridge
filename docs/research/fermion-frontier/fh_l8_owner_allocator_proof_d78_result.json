@@ -1,0 +1,11 @@
+{
+  "status": "VERIFIED_D78_OWNER_ALLOCATOR_TEMPLATE_FAIL_CLOSED",
+  "decision": "NO_GO_D78_ALLOCATOR_NUMERIC_INPUTS_MISSING",
+  "variable_count": 8,
+  "missing_variable_count": 8,
+  "missing_variables": ["R_python_runtime_base", "A_sector_action_dictionary", "A_canonical_info_transient", "A_basis_images_transient", "A_fraction_objects", "A_reduced_column_dictionary", "A_partition_writer_state", "A_sort_key_heap"],
+  "owner_local_template_ready": true,
+  "object_measurements_executed": 0,
+  "numeric_peak_memory_proven": false,
+  "full53_execution_authorized": false
+}
