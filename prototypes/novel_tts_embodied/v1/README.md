@@ -132,6 +132,19 @@ The adapter shell-quotes every template value and requires the command to leave 
 An exit code of zero without a real audio file is a `failed/mismatch` receipt;
 it is never replaced with a placeholder WAV.
 
+### 声音试听与映射
+
+AISHELL3 的 speaker ID 不提供性别元数据。可用下列命令生成不带性别预设的试听包；其 `audition_manifest.json` 会记录每个候选的 ID、WAV 哈希及待审听状态：
+
+```bash
+python3 tools/prepare_sherpa_audition.py \
+  --synthesizer /Data/ab-sherpa-release/release/ab-sherpa-tts-synth \
+  --model-dir /Data/Models/sherpa-onnx/vits-icefall-zh-aishell3 \
+  --output-dir /Data/novel_sherpa_audition
+```
+
+审听后才可将候选 ID 映射到 `narrator_calm`、`male_standard` 或 `female_standard`；不能由编号推断性别。
+
 `task_payload.json` 示例：
 
 ```json
