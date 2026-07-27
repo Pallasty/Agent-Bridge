@@ -2,6 +2,13 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D60 premeasurement runtime-rule disposition
+
+- Bound D51 operation populations to the only two admissible runtime-rule forms and explicitly
+  rejected D54R cross-replay spread, fixed64 observations and posthoc host load as margins.
+- Environment, margin and timeout rules remain uncommitted, so D60 returns a fail-closed NO-GO
+  without timing measurements or scientific execution. Next gate: D61 integration.
+
 ## 2026-07-26 — FH-L8 D59 production I/O/page-cache disposition
 
 - Fixed source, spill, two-generation merge and publication I/O lifetimes against D51/D57.
