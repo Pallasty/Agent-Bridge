@@ -37,7 +37,7 @@ all-backends = ["kokoro", "piper"]
 # Sherpa-ONNX owns the Chinese VITS frontend (lexicon/tokens/rule FSTs) and
 # exposes it through a Rust API. Kept separate from `ort` so this capability
 # is strictly opt-in.
-sherpa = ["dep:sherpa-onnx"]
+sherpa = ["dep:sherpa-onnx", "dep:serde_json"]
 
 # Production synthesis CLI (text → WAV), invoked by scripts/audio_embody.py in
 # speech mode. Gated on `kokoro` so the heavy `ort` link only happens when the

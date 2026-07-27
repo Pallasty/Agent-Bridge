@@ -75,6 +75,7 @@ impl McpTool for PresentVoiceTool {
                     "qwen_python": {"type": "string", "description": "backend=qwen3: explicit isolated Python 3.12 executable containing qwen-tts (else AB_QWEN3_TTS_PYTHON)."},
                     "qwen_model": {"type": "string", "description": "backend=qwen3: Qwen model id or local model directory; defaults to Qwen3-TTS 1.7B CustomVoice."},
                     "qwen_worker": {"type": "string", "description": "backend=qwen3: explicit owner-only Unix socket for the default-off persistent Qwen worker (else AB_QWEN3_TTS_WORKER_SOCKET)."},
+                    "sherpa_worker": {"type": "string", "description": "backend=sherpa: explicit owner-only Unix socket for the default-off persistent Sherpa-ONNX worker."},
                     "qwen_rust_bin": {"type": "string", "description": "backend=qwen3-rust: explicit local qwen-tts executable (else AB_QWEN3_TTS_RUST_BIN). Requires AB_QWEN3_TTS_RUST_ENABLED=1."},
                     "qwen_rust_model_dir": {"type": "string", "description": "backend=qwen3-rust: explicit complete local model directory (else AB_QWEN3_TTS_RUST_MODEL_DIR). No download or model lookup is performed."},
                     "qwen_rust_profile": {"type": "string", "enum": ["0.6b-customvoice", "1.7b-customvoice"], "description": "backend=qwen3-rust: pinned size/SHA-256 integrity profile (else AB_QWEN3_TTS_RUST_PROFILE)."},
@@ -182,6 +183,7 @@ impl McpTool for PresentVoiceTool {
             push_optional_str_arg(&mut cmd, &args, "qwen_python", "--qwen-python");
             push_optional_str_arg(&mut cmd, &args, "qwen_model", "--qwen-model");
             push_optional_str_arg(&mut cmd, &args, "qwen_worker", "--qwen-worker");
+            push_optional_str_arg(&mut cmd, &args, "sherpa_worker", "--sherpa-worker");
             push_optional_str_arg(&mut cmd, &args, "qwen_rust_bin", "--qwen-rust-bin");
             push_optional_str_arg(&mut cmd, &args, "qwen_rust_model_dir", "--qwen-rust-model-dir");
             push_optional_str_arg(&mut cmd, &args, "qwen_rust_profile", "--qwen-rust-profile");

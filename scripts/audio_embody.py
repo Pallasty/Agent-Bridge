@@ -868,6 +868,29 @@ def synth_qwen3(text, voice, speed, instruct=None, qwen_python=None, qwen_model=
     return wav, info
 
 
+def synth_sherpa_worker(text, voice, speed, sherpa_worker):
+    """Render through an explicit AB Worker v1 Sherpa socket, with no fallback."""
+    fd, wav = tempfile.mkstemp(prefix="ab_voice_sherpa_", suffix=".wav")
+    os.close(fd)
+    os.unlink(wav)
+    try:
+        timeout_s = float(os.environ.get("AB_TTS_SHERPA_TIMEOUT_SECS", "60"))
+    except ValueError:
+        timeout_s = 60.0
+    try:
+        info = _qwen_worker_request(
+            sherpa_worker,
+            {"op": "synthesize", "text": text, "output": wav,
+             "speaker": voice, "speed": speed, "instruct": ""},
+            max(10.0, min(timeout_s, 300.0)),
+        )
+    except (OSError, ValueError, RuntimeError, socket.timeout) as exc:
+        return None, {"detail": f"Sherpa worker unavailable: {str(exc)[:300]}"}
+    if not info.get("ok") or not os.path.exists(wav):
+        return None, {"detail": info.get("detail", "Sherpa worker did not write WAV")}
+    return wav, info
+
+
 def synth_qwen3_rust(text, voice, speed, instruct=None, binary=None,
                      model_dir=None, model_profile=None):
     """Run the pure-Rust Qwen3-TTS pilot through its fail-closed integrity gate.
@@ -1062,8 +1085,9 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
     return out
 
 
-def run_speech_synth_file(text, voice, speed, synth_backend="say", qwen_instruct=None,
+def run_speech_synth_file(text, voice, speed, synth_backend="say", synth_bin=None, qwen_instruct=None,
                           qwen_python=None, qwen_model=None, qwen_worker=None,
+                          sherpa_worker=None,
                           qwen_rust_bin=None, qwen_rust_model_dir=None,
                           qwen_rust_profile=None, stt_model=None):
     """macOS speech embodiment: selected synth -> STT-on-the-synth-file falsifier. No bus
@@ -1088,6 +1112,11 @@ def run_speech_synth_file(text, voice, speed, synth_backend="say", qwen_instruct
     }
     if synth_backend == "qwen3":
         wav, info = synth_qwen3(text, voice, speed, qwen_instruct, qwen_python, qwen_model, qwen_worker)
+    elif synth_backend == "sherpa":
+        if sherpa_worker:
+            wav, info = synth_sherpa_worker(text, voice, speed, sherpa_worker)
+        else:
+            wav, info = synth_speech(text, voice, speed, synth_bin, backend="sherpa")
     elif synth_backend == "qwen3-rust":
         wav, info = synth_qwen3_rust(text, voice, speed, qwen_instruct,
                                      qwen_rust_bin, qwen_rust_model_dir,
@@ -1102,7 +1131,11 @@ def run_speech_synth_file(text, voice, speed, synth_backend="say", qwen_instruct
                   "model_profile", "model_revision", "integrity_verified",
                   "binary", "binary_sha256"):
         if field in info:
-            out[f"qwen_{field}"] = info[field]
+            prefix = "qwen" if synth_backend in {"qwen3", "qwen3-rust"} else "sherpa"
+            out[f"{prefix}_{field}"] = info[field]
+    for field in ("protocol", "engine", "capabilities", "speakers"):
+        if field in info:
+            out[f"worker_{field}"] = info[field]
     parsed = _read_wav_mono_s16(wav)
     if parsed is None or not len(parsed["samples"]):
         out.update(status="error", verify_status="error", detail="synthesized WAV unreadable/empty")
@@ -1333,6 +1366,7 @@ def main():
     ap.add_argument("--qwen-python", default=None, help="explicit isolated Python that has qwen-tts installed")
     ap.add_argument("--qwen-model", default=None, help="Qwen3 model id or local directory; defaults to 1.7B CustomVoice")
     ap.add_argument("--qwen-worker", default=None, help="explicit owner-only Unix socket for the persistent Qwen worker")
+    ap.add_argument("--sherpa-worker", default=None, help="explicit owner-only Unix socket for the persistent Sherpa-ONNX worker")
     ap.add_argument("--qwen-rust-bin", default=None, help="qwen3-rust: explicit local qwen-tts executable")
     ap.add_argument("--qwen-rust-model-dir", default=None, help="qwen3-rust: explicit complete local model directory")
     ap.add_argument("--qwen-rust-profile", default=None, help="qwen3-rust: pinned integrity profile, e.g. 1.7b-customvoice")
@@ -1399,9 +1433,11 @@ def main():
             # run_speech_synth_file. SCOPED to the present_voice speech path only — the
             # LCC voice adapter (`--mode voice` -> run_voice) is deliberately unchanged.
             res = run_speech_synth_file(a.text, a.voice, max(0.5, min(a.speed, 2.0)),
-                                        synth_backend=a.synth_backend, qwen_instruct=a.qwen_instruct,
+                                        synth_backend=a.synth_backend, synth_bin=resolve_synth_bin(a.synth_bin),
+                                        qwen_instruct=a.qwen_instruct,
                                         qwen_python=a.qwen_python, qwen_model=a.qwen_model,
                                         qwen_worker=a.qwen_worker,
+                                        sherpa_worker=a.sherpa_worker,
                                         qwen_rust_bin=a.qwen_rust_bin,
                                         qwen_rust_model_dir=a.qwen_rust_model_dir,
                                         qwen_rust_profile=a.qwen_rust_profile,

@@ -593,6 +593,23 @@ def test_qwen3_worker_receipt_preserves_declared_runtime_identity(monkeypatch):
         _restore(saved)
 
 
+def test_sherpa_worker_is_explicit_and_preserves_capabilities():
+    def fake_worker(sock, request, timeout):
+        with open(request["output"], "wb") as f:
+            f.write(b"RIFFfake")
+        return {"ok": True, "protocol": "ab.tts.worker.v1", "backend": "sherpa-vits",
+                "engine": "sherpa-onnx", "dtype": "unknown",
+                "capabilities": ["zh", "multi_speaker", "speed"], "speakers": 174}
+    saved = _patch(_qwen_worker_request=fake_worker)
+    try:
+        wav, info = ae.synth_sherpa_worker("你好", "speaker_66", 1.1, "/tmp/sherpa.sock")
+        assert wav and os.path.exists(wav)
+        assert info["engine"] == "sherpa-onnx"
+        assert "instruct" not in info["capabilities"]
+    finally:
+        _restore(saved)
+
+
 def test_synth_file_qwen3_records_backend_and_expression_provenance():
     saved = _patch(
         synth_qwen3=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.pallasting.agent-bridge.sherpa-tts</string>
+  <key>ProgramArguments</key><array>
+    <string>__BINARY__</string>
+    <string>--socket</string><string>__SOCKET__</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>AB_TTS_SHERPA_MODEL_DIR</key><string>__MODEL__</string>
+    <key>AB_TTS_SHERPA_VOICE_MAP</key><string>__VOICE_MAP__</string>
+    <key>AB_TTS_SHERPA_THREADS</key><string>__THREADS__</string>
+    <key>AB_TTS_SHERPA_DTYPE</key><string>__DTYPE__</string>
+  </dict>
+  <key>WorkingDirectory</key><string>__LIB_DIR__</string>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__LOG__</string>
+  <key>StandardErrorPath</key><string>__LOG__</string>
+</dict></plist>
