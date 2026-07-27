@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-RUNTIME-NUMERIC-PROOF-D60-V1",
+  "analysis_class": "SOURCE_PINNED_RUNTIME_RULE_RECOMPUTATION_FAIL_CLOSED",
+  "source_pins": {
+    "fh_l8_runtime_rule_d60_contract.json": "aedb085f4cf3f05030142f76997bf765e2ff8d817e125235055873400a97b515",
+    "fh_l8_production_io_page_cache_d59_contract.json": "7df9c5c05e12a6230bd5d2e1e33a76b01f79cfb88edeebbf0fc1fa333f71b13a"
+  },
+  "operation_population": {"scientific_kernel_calls": 213099, "candidate_visits": 47947275, "merge_record_reads_upper": 95894550, "merge_record_writes_upper": 95894550, "merge_heap_comparisons_design_upper": 958945500},
+  "environment_definition": {"python_implementation_and_version_fixed": false, "cpu_model_frequency_governor_fixed": false, "filesystem_and_cgroup_policy_fixed": false, "concurrent_load_excluded": false, "adapter_source_pin_verified": true},
+  "rule_selection": {"selected_form": null, "per_operation_upper_bound_seconds": null, "measurement_margin": null, "ood_policy": null, "timeout_policy": null},
+  "required_rule_forms": ["static_per_operation_upper_bound_with_proof", "precommitted_measurement_population_margin_and_timeout_rule"],
+  "missing_input_policy": "NO_GO",
+  "authority": {"timing_measurements_executed": 0, "scientific_kernel_calls_executed": 0, "numeric_runtime_seconds_proven": false, "full53_execution_authorized": false},
+  "decision": "NO_GO_D60_RUNTIME_INPUTS_INCOMPLETE"
+}
