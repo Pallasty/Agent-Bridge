@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-PRODUCTION-STREAMING-ADAPTER-D57-V1",
+  "analysis_class": "SOURCE_PINNED_IMPORTABLE_INTERFACES_SYNTHETIC_MOCK_TESTS_FULL53_FAIL_CLOSED",
+  "implementation_commit": "14456707c4c286e52dc740f79f1eb1ee36774aae",
+  "source_pins": {
+    "fh_l8_resource_closure_plan_d56_contract.json": "3d3e5b7ef396a87daa4faa411e967b89522e980be3777bcc20bcab08b1b2c583",
+    "fh_l8_resource_closure_plan_d56_result.json": "6f6020bbd407f8a3797aa4dfcb0c04a695f631af1bc1eef89fad4049ff3441c0",
+    "fh_l8_resource_closure_plan_d56.py": "f1893f1a45d4eecda57d2f21508b66b03ad99d5297e9e741d49c1fca9631d9ea",
+    "fh_l8_full53_adapter_static_cost_d52_contract.json": "08eabdf4826576bc1dbb410d384a5dd370daca43170416999da2b010ff3bafa4",
+    "fh_l8_symmetry_orbit_quotient_d5_checker.py": "681bc63fedce8b71cfb536c66d321467bc8f01cb5947bee59b4291e2ac51a022",
+    "fh_l8_packed_q3_checkpoint_d11_bundle/result.json": "f372a2eedabfc57d049d6a8c6d0609c1b7bcf25aae760353699916a6f1bc4bf5",
+    "fh_l8_fresh_consumer_d18c_contract.json": "e85fd9cedf00ab2aeeff4cbb34e460a0e8666d6505c3b031eb11be2e8fbe327a",
+    "fh_l8_production_streaming_adapter_d57.py": "4a28a1cc66609425dfdea6640d49f3501698d7ff4426e59bb16feccdf05b607a",
+    "test_fh_l8_production_streaming_adapter_d57.py": "217948761b5b17327ca9d59b10bc5762100bac3080f1d9fb3189d24a21a2a375"
+  },
+  "adapter_interfaces": {
+    "classes": ["AdapterError", "Full53Unauthorized", "SourceRow", "SpillRow", "SourceReceipt", "PartitionSink"],
+    "functions": ["decode_one_source_record", "partition_for_target", "encode_spill_record", "decode_spill_record", "process_one_source", "merge_batches", "publication_order", "run_full53"]
+  },
+  "record_formats": {
+    "source": "u128be_representative+i64be_amplitude+u8_orbit+u8_zero_flags+u16_zero_reserved+u32be_rank",
+    "source_bytes": 32,
+    "spill": "u128be_target+i64be_scaled8_delta+u64be_zero",
+    "spill_bytes": 32,
+    "partition_selector": "SHA256(target_u128_be)[0]",
+    "partition_count": 256,
+    "scaled_denominator": 8
+  },
+  "lifecycle": [
+    "decode_one_source_record",
+    "invoke_caller_supplied_kernel_bound_in_future_to_D5_reduced_column",
+    "encode_and_emit_at_most_225_partition_records",
+    "clear_column_in_finally_before_return_or_failure",
+    "plan_at_most_32_way_merge_batches",
+    "publish_256_partitions_then_manifest_result_terminal_receipt"
+  ],
+  "kernel_binding": {
+    "future_source": "fh_l8_symmetry_orbit_quotient_d5_checker.py",
+    "future_symbol": "_reduced_column",
+    "D57_imports_or_invokes_scientific_kernel": false,
+    "production_invocation_authorized": false
+  },
+  "synthetic_mock_tests": {
+    "test_count": 7,
+    "packed_q3_file_reads": 0,
+    "scientific_kernel_calls": 0,
+    "production_io_operations": 0,
+    "object_measurements": 0
+  },
+  "authority": {
+    "production_adapter_interfaces_implemented": true,
+    "production_adapter_resource_ready": false,
+    "full53_execution_authorized": false,
+    "packed_q3_reads": 0,
+    "scientific_kernel_calls_executed": 0,
+    "object_measurements_executed": 0,
+    "production_io_executed": false,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false,
+    "external_resource_reservation_admitted": false
+  },
+  "next_gates": [
+    "D58_LIVE_ALLOCATION_CLASS_STATIC_BOUND",
+    "D59_PRODUCTION_IO_PAGE_CACHE_BOUND",
+    "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"
+  ]
+}

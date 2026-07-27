@@ -211,6 +211,12 @@ plan-only and leaves every execution and numeric-bound authority closed. Its che
 all four D51 phases, four D52 adapter stages and six operation bounds; D62's future decision is
 explicitly not an execution.
 
+D57 now supplies importable streaming adapter interfaces for the frozen 32-byte packed source and
+spill formats, one-source mock-kernel processing, bounded merge planning and terminal publication
+ordering. Every source column is cleared in `finally`; the full53 entrypoint always fails closed,
+and D5 remains a source-pinned future binding rather than an executed kernel. D58--D60 may now
+proceed in parallel; production I/O and full53 authority remain closed.
+
 D54R2 independently replicated the same plan after the concurrent D54R result appeared. Its
 bubblewrap network namespace exposed loopback only, and all 70 fresh-process receipts again passed
 CPU0, 512-MiB/384-MiB-high, zero-swap and structural-digest checks. The fixed64 size-64 maxima were

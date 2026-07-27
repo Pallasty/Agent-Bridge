@@ -403,6 +403,18 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `FH_L8_RESOURCE_CLOSURE_PLAN_D56_ZH.md`: Chinese execution sequence and boundary summary.
 - D56 is plan-only. Its next gate is D57 production adapter implementation contract.
 
+## FH-L8 D57 production streaming adapter contract
+
+- `fh_l8_production_streaming_adapter_d57.py`: importable 32-byte source/spill, mock-kernel,
+  merge-plan and publication-order interfaces, explicit release and fail-closed full53 entrypoint.
+- `fh_l8_production_streaming_adapter_d57_contract.json`,
+  `fh_l8_production_streaming_adapter_d57_checker.py` and result: source pins, lifecycle and
+  authority verifier.
+- `test_fh_l8_production_streaming_adapter_d57.py` and focused contract tests: in-memory format,
+  release-on-failure, merge fan-in, full53 denial and contract fail-closed regressions.
+- `FH_L8_PRODUCTION_STREAMING_ADAPTER_D57_ZH.md`: Chinese scope and handoff note.
+- D57 enables D58/D59/D60 analysis only; it does not authorize full53 execution.
+
 ## Claude source session
 
 - Session:
