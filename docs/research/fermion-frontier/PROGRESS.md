@@ -2,6 +2,14 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D59 production I/O/page-cache disposition
+
+- Fixed source, spill, two-generation merge and publication I/O lifetimes against D51/D57.
+- Found the required OS/filesystem writeback, cgroup file-page and target-size contracts absent;
+  page-cache therefore remains numerically unbounded and returns a fail-closed NO-GO.
+- D59 performs zero production I/O, scientific calls and packed-q3 reads. Next gate:
+  `D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE`.
+
 ## 2026-07-26 — FH-L8 D58 symbolic live-allocation inventory
 
 - Mapped D51's four lifetime phases and D52/D57 allocation classes into eight independent symbolic
