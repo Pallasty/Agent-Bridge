@@ -1,5 +1,58 @@
 # Research progress ledger
 
+Status date: 2026-07-27
+
+## 2026-07-27 — FH-L8 D79 runtime scope-lock precheck
+
+- Synced local worktree to the latest committed frontier state (same ancestry as
+  `origin/master`), then validated the D67–D79 chain end-to-end.
+- Completed/re-verified fail-closed gates for:
+  - D67 external-capacity receipt request,
+  - D68 page-cache environment request,
+  - D69 runtime environment request,
+  - D70 allocator-proof request,
+  - D71 evidence handoff bundle,
+  - D72 recipient registry template,
+  - D73 owner-local attestation workflow,
+  - D74 owner-local preflight,
+  - D75/ D76 owner-local capacity admission,
+  - D77 integrated envelope refresh,
+  - D78 owner host/allocator proof intake,
+  - D79 runtime scope-lock precheck.
+- The D79 precheck confirms:
+  - scope mode lacks cgroup memory controller capabilities,
+  - service mode applies only service-visible memory limits,
+  - no external request, no request-scope runtime lock commitment,
+  - no full-53 execution authority.
+- Ran 34 D-line verifier tests (including D56–D63 dependencies and D67–D79 checks);
+  all passed.
+- Remaining closed-state blockers remain unchanged:
+  - D58 numeric allocator proof inputs are still missing for all 8 required variables,
+  - D59 page-cache bound still requires production-environment evidence contract before closure,
+  - D60 runtime rule is still `NO_GO_D60_RUNTIME_RULE_ENVIRONMENT_AND_MARGIN_NOT_PRECOMMITTED`,
+  - D61 reconciles with four unresolved closures,
+  - D23 external-resource shortfall remains unresolved.
+- Next gate target remains `D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE`.
+
+## 2026-07-27 — FH-L8 D60 local readiness checkpoint before evidence exchange
+
+- Performed a second local verifier sweep across the current D56–D79 frontier:
+  `fh_l8_allocator_numeric_proof_d58_result.json`, `fh_l8_runtime_rule_d60_result.json`,
+  `fh_l8_runtime_numeric_proof_d60_result.json`, `fh_l8_production_io_page_cache_d59_result.json`,
+  `fh_l8_integrated_resource_envelope_d61_result.json`, `fh_l8_external_authorization_d62_result.json`,
+  and `fh_l8_runtime_scope_lock_d79_result.json` all remain in their expected fail-closed states.
+- Confirmed unsent/request-pending pre-closure artifacts are still structurally intact:
+  `fh_l8_d67_external_capacity_receipt_request_d67.json`,
+  `fh_l8_d58_allocator_proof_request_d70.json`,
+  `fh_l8_d59_page_cache_environment_request_d68.json`,
+  `fh_l8_d60_runtime_environment_request_d69.json`,
+  `fh_l8_evidence_request_handoff_d71.json`,
+  `fh_l8_evidence_recipient_registry_d72.json`.
+- D60 remains blocked by missing premeasurement runtime rule/environment inputs; no new execution
+  authority was introduced.
+- Next immediate objective: keep D69/D71/D72 in local-united ready state, then advance to
+  evidence intake only when first valid `runtime_experiment` premeasurement packets are available.
+
 Status date: 2026-07-26
 
 ## 2026-07-26 — FH-L8 D64 owner-local capacity observation
