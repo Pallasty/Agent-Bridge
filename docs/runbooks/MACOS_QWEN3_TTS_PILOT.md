@@ -76,6 +76,23 @@ embedding-only; they are not a TTS backend. This v1 transport is intentionally
 Unix-socket local-only. Cross-node access requires a separate authenticated,
 authorized transport and is not enabled by setting this environment variable.
 
+## Worker contract validation
+
+Validate a worker without importing a model runtime or playing audio:
+
+```sh
+python3 scripts/validate_tts_worker_contract.py \
+  --socket "$HOME/.cache/agent-bridge/qwen3/worker.sock" \
+  --expected-engine qwen3-pytorch \
+  --require-capability zh
+```
+
+For an ONNX candidate, change only `--expected-engine` after its actual engine
+identity is established (for example `onnxruntime` or `sherpa-onnx`). Add
+`--text` and an absolute `--output` only for an explicit real synthesis smoke.
+A passing health probe alone never promotes a model or proves Chinese
+intelligibility, expression control, or physical playback.
+
 ## Pure-Rust pilot backend
 
 The pure-Rust adapter is a separate backend named `qwen3-rust`. It remains
