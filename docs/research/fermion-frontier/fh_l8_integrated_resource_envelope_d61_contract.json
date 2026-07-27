@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INTEGRATED-RESOURCE-ENVELOPE-D61-V1",
+  "analysis_class": "SOURCE_PINNED_RESOURCE_RECONCILIATION_FAIL_CLOSED_NO_EXECUTION",
+  "source_pins": {
+    "fh_l8_resource_closure_plan_d56_contract.json": "3d3e5b7ef396a87daa4faa411e967b89522e980be3777bcc20bcab08b1b2c583",
+    "fh_l8_full53_streaming_lifetime_d51_contract.json": "8def9ebd3372e6cc1fbc810a75abf663c127643e6454f07a0aafdc94f6c9d83b",
+    "fh_l8_full53_streaming_lifetime_d51_result.json": "aa222f7682be2dc0f5a2848583b555e37100137ec4ddfaef64234c7b86ef77b1",
+    "fh_l8_full_resource_envelope_d23_contract.json": "ce6baf3161db6094fd3d80079527b0a8bf8f91f48c3b384ceb09366406ab8535",
+    "fh_l8_full_resource_envelope_d23_result.json": "8116d6f4ef76c7f9253629e99c80579add77742a016bd6494211dd63e8ee5dec",
+    "fh_l8_live_allocation_bound_d58_contract.json": "51d6708f0779a29026b95c39782d8a86f9e7e2b460fbccb8831f16bf82c5c98c",
+    "fh_l8_live_allocation_bound_d58_result.json": "b4fa9bc984d793d82acfa76b65b9930e1425aea658ef8eadc97fb3feb770effb",
+    "fh_l8_production_io_page_cache_d59_contract.json": "7df9c5c05e12a6230bd5d2e1e33a76b01f79cfb88edeebbf0fc1fa333f71b13a",
+    "fh_l8_production_io_page_cache_d59_result.json": "a3530f2f0670b6a2eb1d7dd0b1ac8e5b4cfbc645faa528aeb533e37459a64122",
+    "fh_l8_runtime_rule_d60_contract.json": "aedb085f4cf3f05030142f76997bf765e2ff8d817e125235055873400a97b515",
+    "fh_l8_runtime_rule_d60_result.json": "27bdf0796d0a06f92f7bad5307920a2aabacc260fae26dcfd5db2e0fe84b5b9f"
+  },
+  "phase_resource_envelope": {
+    "source_admission": {"allocation_expression": ["R_python_runtime_base", "source_read_buffer_bytes"], "page_cache": "unbounded_without_environment_contract", "runtime": "no_per_operation_rule"},
+    "kernel_and_spill": {"allocation_expression": ["R_python_runtime_base", "source_read_buffer_bytes", "output_buffer_bytes", "A_sector_action_dictionary", "A_canonical_info_transient", "A_basis_images_transient", "A_fraction_objects", "A_reduced_column_dictionary", "A_partition_writer_state"], "page_cache": "dirty_or_writeback_unbounded_without_environment_contract", "runtime": "no_per_operation_rule"},
+    "partition_external_merge": {"allocation_expression": ["R_python_runtime_base", "32*input_buffer_bytes_per_run", "output_buffer_bytes", "A_sort_key_heap", "manifest_bytes"], "page_cache": "two_spill_generations_plus_writeback_unbounded_without_environment_contract", "runtime": "no_per_operation_rule"},
+    "target_publication": {"allocation_expression": ["R_python_runtime_base", "source_read_buffer_bytes", "output_buffer_bytes", "manifest_bytes", "result_bytes", "receipt_bytes"], "page_cache": "target_file_pages_unbounded_without_target_and_environment_contract", "runtime": "no_per_operation_rule"}
+  },
+  "scratch_reconciliation": {"design_required_scratch_bytes": 3110572064, "d23_registered_scratch_bytes": 2750812950, "shortfall_bytes": 359759114, "registered_meets_design_requirement": false},
+  "unresolved_closures": ["D58_independent_allocator_and_object_size_bounds", "D59_filesystem_page_cache_environment_and_writeback_bound", "D60_precommitted_runtime_rule_and_fixed_environment", "D23_scratch_capacity_shortfall"],
+  "authority": {"scientific_kernel_calls_executed": 0, "object_measurements_executed": 0, "timing_measurements_executed": 0, "packed_q3_reads": 0, "production_io_executed": false, "numeric_peak_memory_proven": false, "numeric_runtime_seconds_proven": false, "external_resource_reservation_admitted": false, "full53_execution_authorized": false},
+  "decision": "NO_GO_D61_INTEGRATED_RESOURCE_ENVELOPE_INCOMPLETE",
+  "next_gate": "D62_EXTERNAL_RESERVATION_AND_FULL53_AUTHORIZATION_DECISION_ONLY_AFTER_ALL_D61_CLOSURES"
+}
