@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.pallasting.agent-bridge.qwen3-tts</string>
+  <key>ProgramArguments</key><array>
+    <string>__PYTHON__</string><string>__WORKER__</string>
+    <string>--socket</string><string>__SOCKET__</string>
+    <string>--model</string><string>__MODEL__</string>
+    <string>--device</string><string>mps</string>
+  </array>
+  <key>WorkingDirectory</key><string>__LIB_DIR__</string>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__LOG__</string>
+  <key>StandardErrorPath</key><string>__LOG__</string>
+</dict></plist>

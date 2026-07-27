@@ -554,6 +554,26 @@ def test_qwen3_requires_an_explicit_isolated_runtime(monkeypatch):
     assert "AB_QWEN3_TTS_PYTHON" in info["detail"]
 
 
+def test_qwen3_worker_is_explicit_and_never_requires_or_falls_back_to_python(monkeypatch):
+    monkeypatch.delenv("AB_QWEN3_TTS_PYTHON", raising=False)
+    seen = {}
+    def fake_worker(sock, request, timeout):
+        seen.update(sock=sock, request=request, timeout=timeout)
+        with open(request["output"], "wb") as f:
+            f.write(b"RIFFfake")
+        return {"ok": True, "backend": "qwen3", "voice": "Serena", "sample_rate": 24000,
+                "device": "mps", "dtype": "float16", "worker": "unix_socket"}
+    saved = _patch(_qwen_worker_request=fake_worker)
+    try:
+        wav, info = ae.synth_qwen3("你好", "Serena", 1.0, qwen_worker="/tmp/qwen.sock")
+        assert wav and os.path.exists(wav)
+        assert info["worker"] == "unix_socket"
+        assert seen["sock"] == "/tmp/qwen.sock"
+        assert seen["request"]["op"] == "synthesize"
+    finally:
+        _restore(saved)
+
+
 def test_synth_file_qwen3_records_backend_and_expression_provenance():
     saved = _patch(
         synth_qwen3=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {

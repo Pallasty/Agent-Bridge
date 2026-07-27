@@ -74,6 +74,7 @@ impl McpTool for PresentVoiceTool {
                     "qwen_instruct": {"type": "string", "description": "backend=qwen3: natural-language expression instruction, for example a calm, warm Mandarin delivery."},
                     "qwen_python": {"type": "string", "description": "backend=qwen3: explicit isolated Python 3.12 executable containing qwen-tts (else AB_QWEN3_TTS_PYTHON)."},
                     "qwen_model": {"type": "string", "description": "backend=qwen3: Qwen model id or local model directory; defaults to Qwen3-TTS 1.7B CustomVoice."},
+                    "qwen_worker": {"type": "string", "description": "backend=qwen3: explicit owner-only Unix socket for the default-off persistent Qwen worker (else AB_QWEN3_TTS_WORKER_SOCKET)."},
                     "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro/piper/sherpa: ALSO transcribe the bus capture (whisper.cpp). synth_file already uses STT as its primary falsifier."},
                     "stt_bin": {"type": "string", "description": "verify_intelligibility: whisper.cpp CLI path (else env AB_TTS_STT_BIN)."},
                     "stt_model": {"type": "string", "description": "verify_intelligibility: whisper ggml model path (else env AB_TTS_STT_MODEL)."},
@@ -177,6 +178,7 @@ impl McpTool for PresentVoiceTool {
             push_optional_str_arg(&mut cmd, &args, "qwen_instruct", "--qwen-instruct");
             push_optional_str_arg(&mut cmd, &args, "qwen_python", "--qwen-python");
             push_optional_str_arg(&mut cmd, &args, "qwen_model", "--qwen-model");
+            push_optional_str_arg(&mut cmd, &args, "qwen_worker", "--qwen-worker");
             if verify_intelligibility {
                 cmd.arg("--check-intelligibility");
                 push_optional_str_arg(&mut cmd, &args, "stt_bin", "--stt-bin");

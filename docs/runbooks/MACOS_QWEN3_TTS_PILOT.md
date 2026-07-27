@@ -28,6 +28,25 @@ request FlashAttention: Qwen documents it as a CUDA optimization, not a macOS/MP
 requirement. A missing or unusable MPS runtime is an explicit synthesis failure;
 there is no hidden CPU or `say` fallback.
 
+## Optional persistent worker
+
+The one-shot adapter remains the default diagnostic path. To remove repeated
+model-load latency, start the **explicit, local-only** worker in the isolated
+environment (it holds roughly 5–7 GB of unified memory while ready):
+
+```sh
+mkdir -p /Users/pallasting/.cache/agent-bridge/qwen3
+/private/tmp/ab-qwen3tts-pilot/bin/python scripts/qwen3_tts_worker.py \
+  --socket /Users/pallasting/.cache/agent-bridge/qwen3/worker.sock \
+  --model "$AB_QWEN3_TTS_MODEL" --device mps
+```
+
+The socket is owner-only and accepts one request at a time. It has no HTTP
+listener and never plays audio. Opt in per MCP call with `qwen_worker`, or set
+`AB_QWEN3_TTS_WORKER_SOCKET`; when a worker is selected, an unavailable worker
+returns an explicit Qwen failure and does **not** fall back to one-shot Python or
+macOS `say`.
+
 ## Explicit MCP shape
 
 Use the `qwen3` backend only after the isolated environment and model probe pass:
