@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-INTEGRATED-ENVELOPE-NUMERIC-D61-V1",
+  "source_pins": {
+    "fh_l8_integrated_resource_envelope_d61_contract.json": "305ffb4fbdbda66f29f57a8d94f32fbfc7d3d95bce4a03c14c8203f4b3ae9d5c",
+    "fh_l8_allocator_numeric_proof_d58_result.json": "1fc0f3629ef66dc2e635f8d56fbd51c24075fb0ea82543773b85c73845d9f836",
+    "fh_l8_page_cache_numeric_proof_d59_result.json": "c80c1d4a5735205a7d5c53a51df601664bb09f8a49da8e34d42efa96fe57e249",
+    "fh_l8_runtime_numeric_proof_d60_result.json": "2a5a755d340393260b3e6c2c435d3838a773ca6302c67abf4987bfbd0a02141f"
+  },
+  "phases": ["source_admission", "kernel_and_spill", "partition_external_merge", "target_publication"],
+  "scratch": {"design_required_bytes": 3110572064, "registered_bytes": 2750812950},
+  "closure_requirements": ["D58", "D59", "D60", "D23"],
+  "missing_input_policy": "NO_GO",
+  "authority": {"numeric_peak_memory_proven": false, "numeric_runtime_seconds_proven": false, "full53_execution_authorized": false},
+  "decision": "NO_GO_D61_INTEGRATED_ENVELOPE_INPUTS_INCOMPLETE"
+}

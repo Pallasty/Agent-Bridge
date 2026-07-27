@@ -1,0 +1,11 @@
+{
+  "status": "VERIFIED_D61_INTEGRATED_ENVELOPE_FAIL_CLOSED",
+  "decision": "NO_GO_D61_INTEGRATED_ENVELOPE_INPUTS_INCOMPLETE",
+  "phase_count": 4,
+  "unresolved_closure_count": 4,
+  "unresolved_closures": ["D58", "D59", "D60", "D23"],
+  "scratch_shortfall_bytes": 359759114,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "full53_execution_authorized": false
+}
