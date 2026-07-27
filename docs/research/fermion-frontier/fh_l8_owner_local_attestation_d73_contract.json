@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-OWNER-LOCAL-ATTESTATION-D73-V1",
+  "analysis_class": "SOURCE_PINNED_SINGLE_OWNER_LOCAL_ATTESTATION_NO_EXECUTION",
+  "source_pins": {
+    "fh_l8_closure_evidence_collection_plan_d66.json": "eeff0a67ac965c848a8a86ce09178017cf7328e03098cbe5c553a70c61282ce5",
+    "fh_l8_d23_capacity_attestation_d64.json": "89c8e020fb78d70e38b0bf06284070af9a3fdd96bec1531837c2d7a221ac236d",
+    "fh_l8_evidence_request_handoff_d71.json": "92c2536be617d74b5074b80ee4f1cca78c931db89255c06693cd4097e53e4047",
+    "fh_l8_evidence_recipient_registry_d72.json": "591b47cdbc7d10fe0602215a4bb8aa76b8b349218d6248cededb23044dcd058a"
+  },
+  "supersedes_semantics": {
+    "D67_D72_multi_party_or_external_contact_required": true,
+    "replacement": "one_authenticated_project_owner_may_attest_owner_controlled_host_and_resources"
+  },
+  "owner_local_roles": {
+    "capacity": "project_owner",
+    "production_environment": "project_owner",
+    "runtime_rule": "project_owner",
+    "allocator_proof": "project_owner"
+  },
+  "required_independent_checks": [
+    "D23_filesystem_capacity_and_scope_recomputation",
+    "D59_source_pinned_environment_and_page_cache_expression_check",
+    "D60_premeasurement_commit_and_environment_lock_check",
+    "D58_source_pinned_static_object_allocator_proof_check"
+  ],
+  "owner_attestation_template": {
+    "owner_identity": "",
+    "attestation_time_utc": "",
+    "controlled_host_identity": "",
+    "controlled_scope": "",
+    "assertion": "",
+    "owner_confirmation": ""
+  },
+  "state": "OWNER_LOCAL_TEMPLATE_UNATTESTED",
+  "authority": {
+    "owner_attestation_accepted": false,
+    "external_contact_required": false,
+    "scientific_execution": false,
+    "production_io": false,
+    "full53_execution_authorized": false
+  },
+  "decision": "D73_OWNER_LOCAL_WORKFLOW_READY_OWNER_CONFIRMATION_REQUIRED"
+}
