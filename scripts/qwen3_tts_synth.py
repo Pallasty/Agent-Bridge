@@ -12,20 +12,24 @@ import os
 import sys
 
 
-DEFAULT_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+# The 1.7B CustomVoice checkpoint is the expression-control baseline. The
+# smaller 0.6B checkpoint remains caller-selectable but is not the default.
+DEFAULT_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
 DEFAULT_SPEAKER = "Serena"
 
 
 def _device_and_dtype(requested):
     import torch
 
+    if requested == "auto":
+        requested = "mps" if torch.backends.mps.is_available() else "cpu"
     if requested == "mps":
         if not torch.backends.mps.is_available():
             raise RuntimeError("MPS was requested but is unavailable in this PyTorch build")
         return "mps", torch.float16
     if requested == "cpu":
         return "cpu", torch.float32
-    raise RuntimeError("device must be mps or cpu")
+    raise RuntimeError("device must be auto, mps, or cpu")
 
 
 def main():
@@ -35,8 +39,8 @@ def main():
     ap.add_argument("--speaker", default=DEFAULT_SPEAKER)
     ap.add_argument("--instruct", default="")
     ap.add_argument("--model", default=os.environ.get("AB_QWEN3_TTS_MODEL", DEFAULT_MODEL))
-    ap.add_argument("--device", choices=["mps", "cpu"],
-                    default=os.environ.get("AB_QWEN3_TTS_DEVICE", "mps"))
+    ap.add_argument("--device", choices=["auto", "mps", "cpu"],
+                    default=os.environ.get("AB_QWEN3_TTS_DEVICE", "auto"))
     args = ap.parse_args()
     try:
         import soundfile as sf

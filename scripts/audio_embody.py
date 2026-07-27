@@ -20,7 +20,7 @@ Pluggable capture channel:
 This is the Python half (analysis + decision) wrapped by the thin Rust MCP tool
 `present_voice`, matching the desktop_verify / vision_grounding_ocr pattern.
 """
-import argparse, array, fcntl, hashlib, json, math, os, re, subprocess, sys, tempfile, time, unicodedata, wave
+import argparse, array, fcntl, hashlib, json, math, os, re, socket, subprocess, sys, tempfile, time, unicodedata, wave
 
 # Platform routing: macOS has NO PipeWire sink `.monitor` loopback, so present_voice
 # verifies the SYNTHESIZED FILE (via STT) instead of a bus readback — a different,
@@ -645,27 +645,34 @@ def run(freq, dur_ms, amp, sink_arg, capture_channel, emit):
 
 
 def resolve_synth_bin(arg):
-    """Locate the ab-tts-synth CLI: explicit arg → env → None (caller errors)."""
+    """Locate the selected TTS CLI: explicit arg → env → None (caller errors)."""
     cand = arg or os.environ.get("AB_TTS_SYNTH_BIN", "").strip()
     return cand or None
 
 
 def synth_speech(text, voice, speed, synth_bin, backend="kokoro"):
     """Invoke ab-tts-synth (Rust) to render `text` → WAV with the chosen `backend`
-    (kokoro | piper). Returns (wav_path, info_dict) or (None, error_dict). The synth
-    bin reports its own sample_rate in `info`, so the falsifier stays backend-agnostic."""
+    (kokoro | piper) or ab-sherpa-tts-synth (sherpa). Returns (wav_path, info_dict)
+    or (None, error_dict). The synth bin reports its own sample_rate in `info`, so
+    the falsifier stays backend-agnostic."""
     if not synth_bin or not os.path.exists(synth_bin):
-        return None, {"detail": f"ab-tts-synth not found ({synth_bin!r}); set --synth-bin or AB_TTS_SYNTH_BIN"}
-    wav = os.path.join(tempfile.gettempdir(), "ab_voice_speech.wav")
-    proc = subprocess.run(
-        [synth_bin, "--backend", backend, "--text", text, "--voice", voice,
-         "--speed", str(speed), "--out", wav],
-        capture_output=True, text=True)
+        return None, {"detail": f"TTS synth binary not found ({synth_bin!r}); set --synth-bin or AB_TTS_SYNTH_BIN"}
+    fd, wav = tempfile.mkstemp(prefix="ab_voice_speech_", suffix=".wav")
+    os.close(fd)
+    os.unlink(wav)
+    if backend == "sherpa":
+        cmd = [synth_bin, "--text", text, "--voice", voice, "--speed", str(speed), "--out", wav]
+    else:
+        cmd = [synth_bin, "--backend", backend, "--text", text, "--voice", voice,
+               "--speed", str(speed), "--out", wav]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     try:
         info = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.stdout.strip() else {}
     except Exception:  # noqa
         info = {}
     if proc.returncode != 0 or not info.get("ok") or not os.path.exists(wav):
+        if os.path.exists(wav):
+            os.unlink(wav)
         return None, {"detail": f"synth failed rc={proc.returncode}: {info.get('error') or proc.stderr[:300]}"}
     return wav, info
 
@@ -791,42 +798,70 @@ def synth_say(text, voice, speed):
     return wav, {"ok": True, "backend": "say", "voice": v, "sample_rate": 16000, "wpm": wpm}
 
 
-def synth_qwen3(text, voice, speed, instruct=None, qwen_python=None, qwen_model=None):
+def _qwen_worker_request(socket_path, request, timeout_s):
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(timeout_s)
+    try:
+        client.connect(socket_path)
+        client.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+        raw = bytearray()
+        while len(raw) < 65536:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            raw.extend(chunk)
+            if b"\n" in chunk:
+                break
+        if not raw:
+            raise RuntimeError("Qwen3 worker returned no receipt")
+        return json.loads(raw.split(b"\n", 1)[0].decode("utf-8"))
+    finally:
+        client.close()
+
+
+def synth_qwen3(text, voice, speed, instruct=None, qwen_python=None, qwen_model=None,
+                qwen_worker=None):
     """Run Qwen3-TTS only through an explicit isolated Python runtime.
 
     No implicit package lookup or native-``say`` fallback is allowed: an unavailable
     Qwen environment is an honest synthesis error.  The model itself is loaded by
     the child adapter, keeping PyTorch out of the AB MCP process.
     """
-    qwen_python = qwen_python or os.environ.get("AB_QWEN3_TTS_PYTHON", "").strip()
-    if not qwen_python or not os.path.exists(qwen_python):
-        return None, {"detail": "Qwen3-TTS runtime not configured; set AB_QWEN3_TTS_PYTHON to the isolated Python 3.12 executable"}
-    adapter = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qwen3_tts_synth.py")
-    if not os.path.exists(adapter):
-        return None, {"detail": f"Qwen3-TTS adapter not found: {adapter}"}
     fd, wav = tempfile.mkstemp(prefix="ab_voice_qwen3_", suffix=".wav")
     os.close(fd)
     os.unlink(wav)
-    cmd = [qwen_python, adapter, "--text", text, "--output", wav, "--speaker", voice]
-    if instruct:
-        cmd.extend(["--instruct", instruct])
-    if qwen_model:
-        cmd.extend(["--model", qwen_model])
     try:
         timeout_s = float(os.environ.get("AB_QWEN3_TTS_TIMEOUT_SECS", "180"))
     except ValueError:
         timeout_s = 180.0
     timeout_s = max(30.0, min(timeout_s, 600.0))
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        return None, {"detail": f"Qwen3-TTS timed out after {timeout_s:g}s"}
-    try:
-        info = json.loads((proc.stdout or "").strip().splitlines()[-1])
-    except (IndexError, json.JSONDecodeError):
-        info = {"detail": f"Qwen3-TTS produced no JSON receipt: {(proc.stderr or '')[:200]}"}
-    if proc.returncode != 0 or not info.get("ok") or not os.path.exists(wav):
-        return None, {"detail": info.get("detail", f"Qwen3-TTS rc={proc.returncode}")}
+    qwen_worker = qwen_worker or os.environ.get("AB_QWEN3_TTS_WORKER_SOCKET", "").strip()
+    if qwen_worker:
+        try:
+            info = _qwen_worker_request(qwen_worker, {"op": "synthesize", "text": text,
+                "output": wav, "speaker": voice, "instruct": instruct or ""}, timeout_s)
+        except (OSError, ValueError, RuntimeError, socket.timeout) as exc:
+            return None, {"detail": f"Qwen3 worker unavailable: {str(exc)[:300]}"}
+        if not info.get("ok") or not os.path.exists(wav):
+            return None, {"detail": info.get("detail", "Qwen3 worker did not write WAV")}
+    else:
+        qwen_python = qwen_python or os.environ.get("AB_QWEN3_TTS_PYTHON", "").strip()
+        if not qwen_python or not os.path.exists(qwen_python):
+            return None, {"detail": "Qwen3-TTS runtime not configured; set AB_QWEN3_TTS_PYTHON or AB_QWEN3_TTS_WORKER_SOCKET"}
+        adapter = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qwen3_tts_synth.py")
+        if not os.path.exists(adapter):
+            return None, {"detail": f"Qwen3-TTS adapter not found: {adapter}"}
+        cmd = [qwen_python, adapter, "--text", text, "--output", wav, "--speaker", voice]
+        if instruct: cmd.extend(["--instruct", instruct])
+        if qwen_model: cmd.extend(["--model", qwen_model])
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            return None, {"detail": f"Qwen3-TTS timed out after {timeout_s:g}s"}
+        try: info = json.loads((proc.stdout or "").strip().splitlines()[-1])
+        except (IndexError, json.JSONDecodeError): info = {"detail": f"Qwen3-TTS produced no JSON receipt: {(proc.stderr or '')[:200]}"}
+        if proc.returncode != 0 or not info.get("ok") or not os.path.exists(wav):
+            return None, {"detail": info.get("detail", f"Qwen3-TTS rc={proc.returncode}")}
     # A timing estimate is only a truncation falsifier. It is not a claim that Qwen
     # emitted at an exact rate, and stays aligned with the existing macOS gate.
     info["wpm"] = int(max(90, min(2.0, max(0.5, speed)) * 175))
@@ -848,69 +883,39 @@ def synth_qwen3_rust(text, voice, speed, instruct=None, binary=None,
         }
     binary = binary or os.environ.get("AB_QWEN3_TTS_RUST_BIN", "").strip()
     model_dir = model_dir or os.environ.get("AB_QWEN3_TTS_RUST_MODEL_DIR", "").strip()
-    model_profile = (
-        model_profile
-        or os.environ.get("AB_QWEN3_TTS_RUST_PROFILE", "").strip()
-    )
+    model_profile = model_profile or os.environ.get("AB_QWEN3_TTS_RUST_PROFILE", "").strip()
     if not binary:
-        return None, {
-            "detail": "Qwen3 Rust binary not configured; set AB_QWEN3_TTS_RUST_BIN"
-        }
+        return None, {"detail": "Qwen3 Rust binary not configured; set AB_QWEN3_TTS_RUST_BIN"}
     if not model_dir:
-        return None, {
-            "detail": "Qwen3 Rust model directory not configured; set AB_QWEN3_TTS_RUST_MODEL_DIR"
-        }
+        return None, {"detail": "Qwen3 Rust model directory not configured; set AB_QWEN3_TTS_RUST_MODEL_DIR"}
     if not model_profile:
-        return None, {
-            "detail": "Qwen3 Rust model profile not configured; set AB_QWEN3_TTS_RUST_PROFILE"
-        }
-    gate = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "qwen3_tts_rust_gate.py"
-    )
+        return None, {"detail": "Qwen3 Rust model profile not configured; set AB_QWEN3_TTS_RUST_PROFILE"}
+    gate = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qwen3_tts_rust_gate.py")
     if not os.path.exists(gate):
         return None, {"detail": f"Qwen3 Rust integrity gate not found: {gate}"}
 
     fd, wav = tempfile.mkstemp(prefix="ab_voice_qwen3_rust_", suffix=".wav")
     os.close(fd)
     os.unlink(wav)
-    cmd = [
-        sys.executable,
-        gate,
-        "--binary",
-        binary,
-        "--model-dir",
-        model_dir,
-        "--model-profile",
-        model_profile,
-        "--output",
-        wav,
-        "--text",
-        text,
-        "--speaker",
-        voice,
-    ]
+    cmd = [sys.executable, gate, "--binary", binary, "--model-dir", model_dir,
+           "--model-profile", model_profile, "--output", wav, "--text", text,
+           "--speaker", voice]
     if instruct:
         cmd.extend(["--instruct", instruct])
     try:
-        timeout_s = float(
-            os.environ.get("AB_QWEN3_TTS_RUST_TIMEOUT_SECS", "900")
-        )
+        timeout_s = float(os.environ.get("AB_QWEN3_TTS_RUST_TIMEOUT_SECS", "900"))
     except ValueError:
         timeout_s = 900.0
     timeout_s = max(30.0, min(timeout_s, 1200.0))
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_s
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:
         return None, {"detail": f"Qwen3 Rust gate timed out after {timeout_s:g}s"}
     try:
         receipt = json.loads((proc.stdout or "").strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError):
-        receipt = {
-            "reason": "malformed_gate_receipt",
-            "detail": f"Qwen3 Rust gate produced no JSON receipt: {(proc.stderr or '')[:200]}",
-        }
+        receipt = {"reason": "malformed_gate_receipt",
+                   "detail": f"Qwen3 Rust gate produced no JSON receipt: {(proc.stderr or '')[:200]}"}
     if proc.returncode != 0 or not receipt.get("verified") or not os.path.exists(wav):
         if os.path.exists(wav):
             try:
@@ -918,29 +923,18 @@ def synth_qwen3_rust(text, voice, speed, instruct=None, binary=None,
             except OSError:
                 pass
         reason = receipt.get("reason") or f"gate_rc_{proc.returncode}"
-        return None, {
-            "detail": receipt.get("detail", f"Qwen3 Rust gate failed: {reason}"),
-            "reason": reason,
-        }
+        return None, {"detail": receipt.get("detail", f"Qwen3 Rust gate failed: {reason}"),
+                      "reason": reason}
 
     binary_evidence = receipt.get("binary_evidence") or {}
-    info = {
-        "ok": True,
-        "backend": "qwen3-rust",
-        "runtime": "rust",
-        "model": model_dir,
-        "model_profile": receipt.get("model_profile"),
-        "model_revision": receipt.get("model_revision"),
-        "voice": voice,
-        "device": "metal",
-        "dtype": "f16",
-        "instruct_applied": bool(instruct),
-        "integrity_verified": True,
-        "binary": binary,
+    return wav, {
+        "ok": True, "backend": "qwen3-rust", "runtime": "rust", "model": model_dir,
+        "model_profile": receipt.get("model_profile"), "model_revision": receipt.get("model_revision"),
+        "voice": voice, "device": "metal", "dtype": "f16",
+        "instruct_applied": bool(instruct), "integrity_verified": True, "binary": binary,
         "binary_sha256": binary_evidence.get("sha256"),
         "wpm": int(max(90, min(2.0, max(0.5, speed)) * 175)),
     }
-    return wav, info
 
 
 def transcribe_synth_file(wav_path, model=None, language="en"):
@@ -1069,9 +1063,9 @@ def run_speech(text, voice, speed, sink_arg, capture_channel, synth_bin,
 
 
 def run_speech_synth_file(text, voice, speed, synth_backend="say", qwen_instruct=None,
-                          qwen_python=None, qwen_model=None, qwen_rust_bin=None,
-                          qwen_rust_model_dir=None, qwen_rust_profile=None,
-                          stt_model=None):
+                          qwen_python=None, qwen_model=None, qwen_worker=None,
+                          qwen_rust_bin=None, qwen_rust_model_dir=None,
+                          qwen_rust_profile=None, stt_model=None):
     """macOS speech embodiment: selected synth -> STT-on-the-synth-file falsifier. No bus
     `.monitor` loopback exists on macOS, so this channel honestly verifies the
     SYNTHESIZED FILE is intelligible, NOT that it played. The STT word_overlap is THE
@@ -1093,35 +1087,20 @@ def run_speech_synth_file(text, voice, speed, synth_backend="say", qwen_instruct
         "not_verified": honest_attestation(None, channel_verified_to, channel_not_verified)[1],
     }
     if synth_backend == "qwen3":
-        wav, info = synth_qwen3(text, voice, speed, qwen_instruct, qwen_python, qwen_model)
+        wav, info = synth_qwen3(text, voice, speed, qwen_instruct, qwen_python, qwen_model, qwen_worker)
     elif synth_backend == "qwen3-rust":
-        wav, info = synth_qwen3_rust(
-            text,
-            voice,
-            speed,
-            qwen_instruct,
-            qwen_rust_bin,
-            qwen_rust_model_dir,
-            qwen_rust_profile,
-        )
+        wav, info = synth_qwen3_rust(text, voice, speed, qwen_instruct,
+                                     qwen_rust_bin, qwen_rust_model_dir,
+                                     qwen_rust_profile)
     else:
         wav, info = synth_say(text, voice, speed)
     if wav is None:
         out.update(status="error", verify_status="error", detail=info.get("detail", f"{synth_backend} synth failed"))
         return out
     out["voice"] = info.get("voice", voice)
-    for field in (
-        "model",
-        "device",
-        "dtype",
-        "instruct_applied",
-        "runtime",
-        "model_profile",
-        "model_revision",
-        "integrity_verified",
-        "binary",
-        "binary_sha256",
-    ):
+    for field in ("model", "device", "dtype", "instruct_applied", "runtime",
+                  "model_profile", "model_revision", "integrity_verified",
+                  "binary", "binary_sha256"):
         if field in info:
             out[f"qwen_{field}"] = info[field]
     parsed = _read_wav_mono_s16(wav)
@@ -1137,9 +1116,7 @@ def run_speech_synth_file(text, voice, speed, synth_backend="say", qwen_instruct
     # check the requested words survived synthesis. STT unavailable -> no_capture (never
     # claim emitted without the word gate; degraded capability, not a content fault).
     stt_language = "zh" if _contains_cjk(text) else "en"
-    transcript, stt_err = transcribe_synth_file(
-        wav, model=stt_model, language=stt_language
-    )
+    transcript, stt_err = transcribe_synth_file(wav, model=stt_model, language=stt_language)
     out["stt_language"] = stt_language
     # An empty/whitespace transcript from a WORKING whisper (exit 0, no words) is NOT a
     # content fault — whisper declined to transcribe (silence / non-speech / undecodable).
@@ -1225,6 +1202,38 @@ def run_emit(text, voice, speed, sink_arg, synth_bin):
     return out
 
 
+def run_render(text, voice, speed, synth_bin, synth_backend, output_file):
+    """Synthesize a durable WAV without emitting it to an audio sink."""
+    out = {"mode": "render", "text": text, "voice": voice, "speed": speed,
+           "synth_backend": synth_backend, "verified_to": None,
+           "not_verified": "output bus and physical transducer (render mode never plays audio)"}
+    wav, info = synth_speech(text, voice, speed, synth_bin, backend=synth_backend)
+    if wav is None:
+        out.update(status="error", verify_status="error", detail=info.get("detail", "synth failed"))
+        return out
+    target = os.path.abspath(output_file)
+    try:
+        target_dir = os.path.dirname(target)
+        os.makedirs(target_dir, exist_ok=True)
+        fd, staged = tempfile.mkstemp(prefix=".ab_voice_render_", suffix=".wav", dir=target_dir)
+        os.close(fd)
+        with open(wav, "rb") as src, open(staged, "wb") as dst:
+            while block := src.read(1024 * 1024):
+                dst.write(block)
+        os.unlink(wav)
+        os.replace(staged, target)
+        with open(target, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        out.update(status="rendered", verify_status="synthesized", audio_file=target,
+                   audio_sha256=digest, audio_bytes=os.path.getsize(target),
+                   detail="rendered click-to-play audio; no playback requested")
+    except Exception as e:  # noqa
+        if os.path.exists(wav):
+            os.unlink(wav)
+        out.update(status="error", verify_status="error", detail=f"persist rendered audio: {e}")
+    return out
+
+
 # --- voice adapter orchestration (LCC-V1: decide -> route -> receipt) ------------
 
 # Fields the chosen tier (emit | speech) produces that we copy verbatim into the
@@ -1287,7 +1296,7 @@ def run_voice(mode, voice, sink_arg, synth_bin, evidence_ids=None,
 
 def main():
     ap = argparse.ArgumentParser(description="present_voice audio-embodiment falsifier")
-    ap.add_argument("--mode", choices=["tone", "speech", "emit", "voice"], default="tone",
+    ap.add_argument("--mode", choices=["tone", "speech", "emit", "render", "voice"], default="tone",
                     help="tone = fixed-freq Goertzel peak (default); speech = TTS envelope-correlation "
                          "falsifier (verified); emit = TTS synth+play, NO bus readback (fast, unverified); "
                          "voice = LCC-V1 companion voice adapter (voice-policy v0 gate -> emit/speech tier)")
@@ -1316,19 +1325,17 @@ def main():
     ap.add_argument("--voice", default="af_sarah", help="speech mode: TTS voice name")
     ap.add_argument("--speed", type=float, default=1.0, help="speech mode: speech speed (0.5-2.0)")
     ap.add_argument("--synth-bin", default=None, help="speech mode: path to ab-tts-synth (or env AB_TTS_SYNTH_BIN)")
-    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "say", "qwen3", "qwen3-rust"], default="kokoro",
-                    help="speech mode: TTS engine (kokoro 24kHz | piper 22.05kHz | say = macOS native | "
-                         "qwen3 = explicit Python CustomVoice | qwen3-rust = default-off local Rust gate; "
-                         "macOS uses synth_file STT verification)")
+    ap.add_argument("--output-file", default=None, help="render mode: durable WAV output path")
+    ap.add_argument("--synth-backend", choices=["kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust"], default="kokoro",
+                    help="speech mode: TTS engine (kokoro 24kHz | piper 22.05kHz | sherpa = Chinese multi-speaker VITS | say = macOS native | "
+                         "qwen3 = explicit Python CustomVoice | qwen3-rust = default-off local Rust gate; macOS uses synth_file STT verification)")
     ap.add_argument("--qwen-instruct", default=None, help="Qwen3 CustomVoice natural-language style instruction")
     ap.add_argument("--qwen-python", default=None, help="explicit isolated Python that has qwen-tts installed")
-    ap.add_argument("--qwen-model", default=None, help="Qwen3 model id or local directory; defaults to 0.6B CustomVoice")
-    ap.add_argument("--qwen-rust-bin", default=None,
-                    help="qwen3-rust: explicit local qwen-tts executable")
-    ap.add_argument("--qwen-rust-model-dir", default=None,
-                    help="qwen3-rust: explicit complete local model directory")
-    ap.add_argument("--qwen-rust-profile", default=None,
-                    help="qwen3-rust: pinned integrity profile, e.g. 1.7b-customvoice")
+    ap.add_argument("--qwen-model", default=None, help="Qwen3 model id or local directory; defaults to 1.7B CustomVoice")
+    ap.add_argument("--qwen-worker", default=None, help="explicit owner-only Unix socket for the persistent Qwen worker")
+    ap.add_argument("--qwen-rust-bin", default=None, help="qwen3-rust: explicit local qwen-tts executable")
+    ap.add_argument("--qwen-rust-model-dir", default=None, help="qwen3-rust: explicit complete local model directory")
+    ap.add_argument("--qwen-rust-profile", default=None, help="qwen3-rust: pinned integrity profile, e.g. 1.7b-customvoice")
     ap.add_argument("--check-intelligibility", action="store_true",
                     help="speech mode: also transcribe the bus capture (whisper.cpp) and check words came back")
     ap.add_argument("--stt-bin", default=None, help="whisper.cpp CLI path (or env AB_TTS_STT_BIN)")
@@ -1369,6 +1376,19 @@ def main():
             for k, v in res.items():
                 print(f"{k}: {v}")
         return
+    if a.mode == "render":
+        if not a.text or not a.text.strip():
+            res = {"mode": "render", "status": "error", "verify_status": "error", "detail": "render mode requires --text"}
+        elif not a.output_file:
+            res = {"mode": "render", "status": "error", "verify_status": "error", "detail": "render mode requires --output-file"}
+        else:
+            res = run_render(a.text, a.voice, max(0.5, min(a.speed, 2.0)), resolve_synth_bin(a.synth_bin), a.synth_backend, a.output_file)
+        if a.json:
+            print(json.dumps(res))
+        else:
+            for k, v in res.items():
+                print(f"{k}: {v}")
+        return
     if a.mode == "speech":
         if not a.text or not a.text.strip():
             res = {"mode": "speech", "status": "error", "verify_status": "error",
@@ -1381,6 +1401,7 @@ def main():
             res = run_speech_synth_file(a.text, a.voice, max(0.5, min(a.speed, 2.0)),
                                         synth_backend=a.synth_backend, qwen_instruct=a.qwen_instruct,
                                         qwen_python=a.qwen_python, qwen_model=a.qwen_model,
+                                        qwen_worker=a.qwen_worker,
                                         qwen_rust_bin=a.qwen_rust_bin,
                                         qwen_rust_model_dir=a.qwen_rust_model_dir,
                                         qwen_rust_profile=a.qwen_rust_profile,

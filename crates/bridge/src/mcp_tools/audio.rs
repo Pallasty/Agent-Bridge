@@ -44,7 +44,7 @@ impl McpTool for PresentVoiceTool {
         ToolSchema {
             name: self.name().into(),
             description: "Output-expression lane, AUDIO embodiment. backend=tone (default) emits a known \
-                 tone; kokoro/piper use offline model TTS; say uses macOS native speech synthesis; qwen3 is an explicit Python Qwen3-TTS adapter; qwen3-rust is an explicit, default-off local Rust adapter. \
+                 tone; kokoro/piper use offline model TTS; sherpa uses an offline Chinese multi-speaker VITS model; say uses macOS native speech synthesis; qwen3 is an explicit Python Qwen3-TTS adapter; qwen3-rust is an explicit, default-off local Rust adapter. \
                  Linux tone/model speech is played to an output sink and read back off the system bus (PipeWire \
                  sink .monitor loopback) to prove it reached the bus: tone uses a spectral-peak falsifier \
                  (Goertzel vs local floor); speech uses an energy-envelope cross-correlation falsifier (the \
@@ -54,15 +54,15 @@ impl McpTool for PresentVoiceTool {
                  Returns status (emitted|silent|mismatch|no_capture|error) plus an HONEST verified_to boundary. \
                  Writes a verified-outcome sidecar that flows into present_outcomes. capture_channel is \
                  sink_monitor, mic, or synth_file. Linux bus verification requires PipeWire + ffmpeg/paplay; \
-                 kokoro/piper need ab-tts-synth and their model assets; qwen3 needs an explicit isolated Python runtime and official model assets; qwen3-rust additionally requires an enable flag, pinned local binary, complete local model directory, and integrity profile; say needs macOS /usr/bin/say and Whisper \
+                 kokoro/piper need ab-tts-synth and their model assets; sherpa needs ab-sherpa-tts-synth plus explicit model/voice-map environment; qwen3 needs an explicit isolated Python runtime and official model assets; qwen3-rust additionally requires an enable flag, pinned local binary, complete local model directory, and integrity profile; say needs macOS /usr/bin/say and Whisper \
                  for synth_file verification. Opt-in (Niche)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "say", "qwen3", "qwen3-rust"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; say = macOS native TTS; qwen3 = explicit Python Qwen3-TTS; qwen3-rust = default-off local Rust Qwen3-TTS integrity-gated adapter. Speech on macOS verifies only the synthesized file via STT."},
-                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, say, qwen3, or qwen3-rust."},
-                    "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Kokoro names use af_*/bf_*; macOS say accepts installed system voice names such as Samantha or Tingting; qwen3-rust 1.7B uses lowercase names such as serena."},
+                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; sherpa = offline Chinese multi-speaker VITS; say = macOS native TTS; qwen3 = explicit Python Qwen3-TTS; qwen3-rust = default-off local Rust Qwen3-TTS integrity-gated adapter. Speech on macOS verifies only the synthesized file via STT."},
+                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, sherpa, say, qwen3, or qwen3-rust."},
+                    "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Sherpa requires a name from AB_TTS_SHERPA_VOICE_MAP; Qwen CustomVoice accepts an official speaker name; qwen3-rust 1.7B uses lowercase names such as serena; speaker IDs are not gender claims."},
                     "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0, "description": "Speech speed."},
                     "freq": {"type": "number", "minimum": 50, "maximum": 18000, "default": 440, "description": "backend=tone: tone frequency (Hz) whose presence on the bus is verified."},
                     "duration_ms": {"type": "integer", "minimum": 100, "maximum": 8000, "default": 1500},
@@ -70,14 +70,15 @@ impl McpTool for PresentVoiceTool {
                     "sink": {"type": "string", "description": "PipeWire output sink to emit to. Defaults to the system default sink; the SAME sink's .monitor is the bus-loopback readback."},
                     "capture_channel": {"type": "string", "enum": ["sink_monitor", "mic", "synth_file"], "default": "sink_monitor", "description": "Readback channel: sink_monitor = PipeWire bus loopback; mic = acoustic input; synth_file = STT over the synthesized file (macOS, does not verify playback)."},
                     "intent": {"type": "string", "description": "What this emission is the outcome of (recorded in the outcome sidecar; does not affect playback)."},
-                    "synth_bin": {"type": "string", "description": "backend=kokoro/piper: explicit ab-tts-synth path (else env AB_TTS_SYNTH_BIN)."},
+                    "synth_bin": {"type": "string", "description": "backend=kokoro/piper: explicit ab-tts-synth; backend=sherpa: explicit ab-sherpa-tts-synth (else env AB_TTS_SYNTH_BIN)."},
                     "qwen_instruct": {"type": "string", "description": "backend=qwen3/qwen3-rust: natural-language expression instruction, for example a calm, warm Mandarin delivery."},
                     "qwen_python": {"type": "string", "description": "backend=qwen3: explicit isolated Python 3.12 executable containing qwen-tts (else AB_QWEN3_TTS_PYTHON)."},
-                    "qwen_model": {"type": "string", "description": "backend=qwen3: Qwen model id or local model directory; defaults to Qwen3-TTS 0.6B CustomVoice."},
+                    "qwen_model": {"type": "string", "description": "backend=qwen3: Qwen model id or local model directory; defaults to Qwen3-TTS 1.7B CustomVoice."},
+                    "qwen_worker": {"type": "string", "description": "backend=qwen3: explicit owner-only Unix socket for the default-off persistent Qwen worker (else AB_QWEN3_TTS_WORKER_SOCKET)."},
                     "qwen_rust_bin": {"type": "string", "description": "backend=qwen3-rust: explicit local qwen-tts executable (else AB_QWEN3_TTS_RUST_BIN). Requires AB_QWEN3_TTS_RUST_ENABLED=1."},
                     "qwen_rust_model_dir": {"type": "string", "description": "backend=qwen3-rust: explicit complete local model directory (else AB_QWEN3_TTS_RUST_MODEL_DIR). No download or model lookup is performed."},
                     "qwen_rust_profile": {"type": "string", "enum": ["0.6b-customvoice", "1.7b-customvoice"], "description": "backend=qwen3-rust: pinned size/SHA-256 integrity profile (else AB_QWEN3_TTS_RUST_PROFILE)."},
-                    "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro/piper: ALSO transcribe the bus capture (whisper.cpp). synth_file already uses STT as its primary falsifier."},
+                    "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro/piper/sherpa: ALSO transcribe the bus capture (whisper.cpp). synth_file already uses STT as its primary falsifier."},
                     "stt_bin": {"type": "string", "description": "verify_intelligibility: whisper.cpp CLI path (else env AB_TTS_STT_BIN)."},
                     "stt_model": {"type": "string", "description": "Whisper model used by synth_file, or whisper.cpp model path for Linux verify_intelligibility (else env AB_TTS_STT_MODEL / AB_TTS_WHISPER_MODEL as applicable)."},
                     "cwd": {"type": "string", "description": "Repo root to resolve scripts/audio_embody.py."},
@@ -180,13 +181,9 @@ impl McpTool for PresentVoiceTool {
             push_optional_str_arg(&mut cmd, &args, "qwen_instruct", "--qwen-instruct");
             push_optional_str_arg(&mut cmd, &args, "qwen_python", "--qwen-python");
             push_optional_str_arg(&mut cmd, &args, "qwen_model", "--qwen-model");
+            push_optional_str_arg(&mut cmd, &args, "qwen_worker", "--qwen-worker");
             push_optional_str_arg(&mut cmd, &args, "qwen_rust_bin", "--qwen-rust-bin");
-            push_optional_str_arg(
-                &mut cmd,
-                &args,
-                "qwen_rust_model_dir",
-                "--qwen-rust-model-dir",
-            );
+            push_optional_str_arg(&mut cmd, &args, "qwen_rust_model_dir", "--qwen-rust-model-dir");
             push_optional_str_arg(&mut cmd, &args, "qwen_rust_profile", "--qwen-rust-profile");
             push_optional_str_arg(&mut cmd, &args, "stt_model", "--stt-model");
             if verify_intelligibility {
@@ -364,6 +361,380 @@ impl McpTool for PresentVoiceTool {
             );
         }
         Ok(ToolResult::json_text(&result))
+    }
+}
+
+/// Render a concise task summary into a durable, click-to-play audio artifact.
+/// Unlike `present_voice`, this tool never emits audio to a sink: it is the
+/// default-safe completion path for a task-group final summary.
+pub struct VoiceSummaryTool {
+    _hub: Hub,
+}
+
+impl VoiceSummaryTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for VoiceSummaryTool {
+    fn name(&self) -> &'static str {
+        "voice_summary"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Render a task-group final summary as a durable click-to-play WAV. This default-safe tool never plays audio and makes no output-bus or speaker-audibility claim. Use present_voice only for explicit playback.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["summary"],
+                "properties": {
+                    "summary": {"type": "string", "minLength": 1, "description": "Concise, user-safe final task summary to render. Do not include secrets or raw logs."},
+                    "backend": {"type": "string", "enum": ["sherpa", "kokoro", "piper"], "default": "sherpa"},
+                    "voice": {"type": "string", "default": "narrator_calm", "description": "Sherpa voice-map name or backend-specific voice name."},
+                    "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0},
+                    "synth_bin": {"type": "string", "description": "Explicit TTS binary. Sherpa requires ab-sherpa-tts-synth."},
+                    "cwd": {"type": "string", "description": "Repo root used only to resolve scripts/audio_embody.py."},
+                    "script_path": {"type": "string", "description": "Explicit audio_embody.py path for tests or alternate checkouts."}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let summary = args.get("summary").and_then(Value::as_str).unwrap_or("").trim();
+        if summary.is_empty() {
+            return Ok(ToolResult::error("voice_summary requires a non-empty summary"));
+        }
+        if summary.chars().count() > 1200 {
+            return Ok(ToolResult::error("voice_summary summary exceeds 1200 characters; provide a concise final summary"));
+        }
+        let backend = args.get("backend").and_then(Value::as_str).unwrap_or("sherpa");
+        let voice = args.get("voice").and_then(Value::as_str).unwrap_or("narrator_calm");
+        let speed = args.get("speed").and_then(Value::as_f64).unwrap_or(1.0).clamp(0.5, 2.0);
+        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
+        let script = present_voice_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(ToolResult::error(format!("audio_embody.py not found at {}", script.display())));
+        }
+        let output_dir = crate::present::presentations_dir().join("voice-summaries");
+        let output_file = output_dir.join(format!("voice-summary-{}.wav", uuid::Uuid::new_v4()));
+        let mut cmd = killable_command(std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()));
+        cmd.arg(&script).arg("--json").arg("--mode").arg("render")
+            .arg("--text").arg(summary).arg("--voice").arg(voice)
+            .arg("--speed").arg(format!("{speed}")).arg("--synth-backend").arg(backend)
+            .arg("--output-file").arg(&output_file);
+        push_optional_str_arg(&mut cmd, &args, "synth_bin", "--synth-bin");
+        cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        let output = match tokio::time::timeout(Duration::from_millis(120_000), cmd.output()).await {
+            Err(_) => return Ok(ToolResult::error("voice_summary synthesis exceeded 120000 ms")),
+            Ok(Err(e)) => return Ok(ToolResult::error(format!("voice_summary spawn failed: {e}"))),
+            Ok(Ok(output)) => output,
+        };
+        let (stdout, _) = lossy_truncate(&output.stdout);
+        let (stderr, _) = lossy_truncate(&output.stderr);
+        let mut result: Value = match serde_json::from_str(&stdout) {
+            Ok(value) => value,
+            Err(e) => return Ok(ToolResult::error(format!("voice_summary returned invalid JSON: {e}; stderr={stderr}"))),
+        };
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("action_tool".to_string(), json!("voice_summary"));
+            obj.insert("delivery_mode".to_string(), json!("click"));
+            obj.insert("click_path".to_string(), json!(output_file));
+            obj.insert("playback_requested".to_string(), json!(false));
+            obj.insert("mcp_wrapper".to_string(), json!({"tool": "voice_summary", "exit_code": output.status.code().unwrap_or(-1), "stderr_present": !stderr.is_empty()}));
+        }
+        Ok(ToolResult::json_text(&result))
+    }
+}
+
+/// Explicit task-group terminal action. This is intentionally separate from
+/// transcript reads and session maintenance: callers choose the exact summary
+/// that becomes user-facing text and optional click-to-play audio.
+pub struct TaskSummaryFinalizeTool {
+    hub: Hub,
+}
+
+impl TaskSummaryFinalizeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+pub(super) fn task_summary_click_appendix(voice: &Value) -> Option<String> {
+    voice
+        .get("click_path")
+        .and_then(Value::as_str)
+        .filter(|_| voice.get("status").and_then(Value::as_str) == Some("rendered"))
+        .map(|path| format!("[🔊 播放总结]({path})"))
+}
+
+pub(super) fn valid_task_group_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn task_finalizer_receipt_dir() -> PathBuf {
+    crate::present::presentations_dir().join("voice-summaries").join("task-finalizers")
+}
+
+fn task_finalizer_receipt_path(task_group_id: &str) -> PathBuf {
+    task_finalizer_receipt_dir().join(format!("{task_group_id}.json"))
+}
+
+fn voice_summary_policy_path() -> PathBuf {
+    std::env::var_os("AGENT_BRIDGE_VOICE_SUMMARY_POLICY_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::present::presentations_dir().join("voice-summary-policy.json"))
+}
+
+fn load_voice_summary_policy() -> String {
+    let path = voice_summary_policy_path();
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|value| value.get("mode").and_then(Value::as_str).map(ToOwned::to_owned))
+        .filter(|mode| matches!(mode.as_str(), "click" | "auto" | "off"))
+        .unwrap_or_else(|| "click".to_string())
+}
+
+pub struct VoiceSummaryPolicyTool {
+    _hub: Hub,
+}
+
+impl VoiceSummaryPolicyTool {
+    pub fn new(hub: Hub) -> Self { Self { _hub: hub } }
+}
+
+#[async_trait]
+impl McpTool for VoiceSummaryPolicyTool {
+    fn name(&self) -> &'static str { "voice_summary_policy" }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read or persist the task-summary voice policy. Default is click. auto is reserved for explicit speaker playback integration and is never silently treated as click.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string", "enum": ["status", "set"], "default": "status"},
+                    "mode": {"type": "string", "enum": ["click", "auto", "off"], "description": "Required for operation=set."}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let operation = args.get("operation").and_then(Value::as_str).unwrap_or("status");
+        let path = voice_summary_policy_path();
+        if operation == "set" {
+            let mode = args.get("mode").and_then(Value::as_str).unwrap_or("");
+            if !matches!(mode, "click" | "auto" | "off") {
+                return Ok(ToolResult::error("voice_summary_policy mode must be click|auto|off"));
+            }
+            if let Some(parent) = path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    return Ok(ToolResult::error(format!("cannot create policy directory: {e}")));
+                }
+            }
+            let staged = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4()));
+            let payload = json!({"schema": "agent_bridge.voice_summary_policy.v1", "mode": mode, "auto_play_available": false});
+            let write_result = serde_json::to_vec_pretty(&payload)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| std::fs::write(&staged, bytes).map_err(|e| e.to_string()))
+                .and_then(|_| std::fs::rename(&staged, &path).map_err(|e| e.to_string()));
+            if let Err(e) = write_result {
+                let _ = std::fs::remove_file(&staged);
+                return Ok(ToolResult::error(format!("cannot persist voice summary policy: {e}")));
+            }
+            return Ok(ToolResult::json_text(&json!({"operation": "set", "mode": mode, "policy_file": path, "auto_play_available": false})));
+        }
+        if operation != "status" {
+            return Ok(ToolResult::error("voice_summary_policy operation must be status|set"));
+        }
+        let (mode, source) = match std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
+            Some(value) => (value.get("mode").and_then(Value::as_str).filter(|mode| matches!(*mode, "click" | "auto" | "off")).unwrap_or("click").to_string(), "persisted"),
+            None => (load_voice_summary_policy(), "default"),
+        };
+        Ok(ToolResult::json_text(&json!({"operation": "status", "mode": mode, "source": source, "policy_file": path, "auto_play_available": false})))
+    }
+}
+
+#[async_trait]
+impl McpTool for TaskSummaryFinalizeTool {
+    fn name(&self) -> &'static str { "task_summary_finalize" }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Finalize one task-group summary and render its default click-to-play audio artifact. This is the only intended completion trigger; it never plays sound.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["task_group_id", "status", "summary"],
+                "properties": {
+                    "task_group_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Stable ASCII task-group ID ([A-Za-z0-9_-]); exactly one terminal receipt may be recorded for it."},
+                    "status": {"type": "string", "enum": ["completed", "failed", "waiting_for_user"]},
+                    "summary": {"type": "string", "minLength": 1, "description": "Final user-facing task summary."},
+                    "backend": {"type": "string", "enum": ["sherpa", "kokoro", "piper"], "default": "sherpa"},
+                    "voice": {"type": "string", "default": "narrator_calm"},
+                    "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0},
+                    "synth_bin": {"type": "string"},
+                    "cwd": {"type": "string"},
+                    "script_path": {"type": "string"}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let task_group_id = args.get("task_group_id").and_then(Value::as_str).unwrap_or("");
+        if !valid_task_group_id(task_group_id) {
+            return Ok(ToolResult::error("task_summary_finalize task_group_id must be 1..128 ASCII characters from [A-Za-z0-9_-]"));
+        }
+        let status = args.get("status").and_then(Value::as_str).unwrap_or("");
+        if !matches!(status, "completed" | "failed" | "waiting_for_user") {
+            return Ok(ToolResult::error("task_summary_finalize status must be completed|failed|waiting_for_user"));
+        }
+        let summary = args.get("summary").and_then(Value::as_str).unwrap_or("").trim();
+        if summary.is_empty() {
+            return Ok(ToolResult::error("task_summary_finalize requires a non-empty summary"));
+        }
+        let policy = load_voice_summary_policy();
+        if policy == "off" {
+            return Ok(ToolResult::json_text(&json!({
+                "action_tool": "task_summary_finalize", "task_group_id": task_group_id,
+                "finalizer_status": "suppressed", "status": status, "summary": summary,
+                "voice_delivery_mode": "off", "voice_summary": Value::Null,
+                "final_response_appendix_markdown": Value::Null,
+                "hook_contract": "Voice summary policy is off; no audio artifact was requested."
+            })));
+        }
+        let receipt_dir = task_finalizer_receipt_dir();
+        let receipt_path = task_finalizer_receipt_path(task_group_id);
+        let lock_path = receipt_dir.join(format!(".{task_group_id}.lock"));
+        if receipt_path.exists() {
+            let prior = match std::fs::read_to_string(&receipt_path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
+                Some(value) => value,
+                None => return Ok(ToolResult::error("task_summary_finalize found an unreadable prior receipt; refusing to re-render")),
+            };
+            return Ok(ToolResult::json_text(&json!({
+                "action_tool": "task_summary_finalize", "task_group_id": task_group_id,
+                "finalizer_status": "duplicate", "prior_receipt": prior
+            })));
+        }
+        if let Err(e) = std::fs::create_dir_all(&receipt_dir) {
+            return Ok(ToolResult::error(format!("task_summary_finalize cannot create receipt directory: {e}")));
+        }
+        let lock = std::fs::OpenOptions::new().write(true).create_new(true).open(&lock_path);
+        if let Err(e) = lock {
+            return Ok(ToolResult::error(format!("task_summary_finalize duplicate or in-progress task_group_id {task_group_id}: {e}")));
+        }
+        let voice_result = match VoiceSummaryTool::new(self.hub.clone()).execute(args.clone(), ctx).await {
+            Ok(result) => result,
+            Err(e) => {
+                let _ = std::fs::remove_file(&lock_path);
+                return Err(e);
+            }
+        };
+        let mut voice = tool_result_first_json(&voice_result).unwrap_or_else(|| json!({"status": "error", "detail": "voice_summary returned no JSON"}));
+        let mut playback_requested = false;
+        if policy == "auto" && voice.get("status").and_then(Value::as_str) == Some("rendered") {
+            if let Some(audio_file) = voice.get("audio_file").and_then(Value::as_str) {
+                playback_requested = true;
+                let playback = std::process::Command::new("paplay").arg(audio_file).output();
+                let (play_ok, detail) = match playback {
+                    Ok(output) if output.status.success() => (true, "paplay completed; physical audibility remains unverified".to_string()),
+                    Ok(output) => (false, format!("paplay failed with exit code {:?}", output.status.code())),
+                    Err(error) => (false, format!("paplay unavailable: {error}")),
+                };
+                if let Some(object) = voice.as_object_mut() {
+                    object.insert("playback_requested".to_string(), json!(true));
+                    object.insert("play_ok".to_string(), json!(play_ok));
+                    object.insert("playback_verify_status".to_string(), json!("unverified"));
+                    object.insert("playback_detail".to_string(), json!(detail));
+                }
+            }
+        }
+        let click_markdown = task_summary_click_appendix(&voice);
+        let rendered = click_markdown.is_some();
+        let payload = json!({
+            "action_tool": "task_summary_finalize",
+            "task_group_id": task_group_id,
+            "finalizer_status": "recorded",
+            "status": status,
+            "summary": summary,
+            "voice_delivery_mode": policy,
+            "playback_requested": playback_requested,
+            "voice_summary": voice,
+            "final_response_appendix_markdown": click_markdown,
+            "final_response_contract": "Append final_response_appendix_markdown only when non-null. Do not synthesize a link from arbitrary transcript text.",
+            "hook_contract": "A completion hook may verify this action was called once for a terminal task group; it must not infer a summary from arbitrary transcript text."
+        });
+        if !rendered {
+            let _ = std::fs::remove_file(&lock_path);
+            return Ok(ToolResult::json_text(&payload));
+        }
+        let staged = receipt_dir.join(format!(".{task_group_id}.{}.tmp", uuid::Uuid::new_v4()));
+        let write_result = serde_json::to_vec_pretty(&payload)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| std::fs::write(&staged, bytes).map_err(|e| e.to_string()))
+            .and_then(|_| std::fs::rename(&staged, &receipt_path).map_err(|e| e.to_string()));
+        let _ = std::fs::remove_file(&lock_path);
+        if let Err(e) = write_result {
+            let _ = std::fs::remove_file(&staged);
+            return Ok(ToolResult::error(format!("task_summary_finalize could not persist receipt: {e}")));
+        }
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+/// Read-only completion-hook gate for one terminal task group. It deliberately
+/// trusts only a durable finalizer receipt and never infers completion from a
+/// transcript or creates a missing voice artifact.
+pub struct TaskSummaryCompletionCheckTool {
+    _hub: Hub,
+}
+
+impl TaskSummaryCompletionCheckTool {
+    pub fn new(hub: Hub) -> Self { Self { _hub: hub } }
+}
+
+#[async_trait]
+impl McpTool for TaskSummaryCompletionCheckTool {
+    fn name(&self) -> &'static str { "task_summary_completion_check" }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only completion-hook gate: report whether one terminal task group has exactly one valid task_summary_finalize receipt. Never synthesizes audio or infers a summary from transcript text.".into(),
+            input_schema: json!({
+                "type": "object", "required": ["task_group_id"],
+                "properties": {"task_group_id": {"type": "string", "minLength": 1, "maxLength": 128}}
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let task_group_id = args.get("task_group_id").and_then(Value::as_str).unwrap_or("");
+        if !valid_task_group_id(task_group_id) {
+            return Ok(ToolResult::error("task_summary_completion_check task_group_id must be 1..128 ASCII characters from [A-Za-z0-9_-]"));
+        }
+        let receipt_path = task_finalizer_receipt_path(task_group_id);
+        let lock_path = task_finalizer_receipt_dir().join(format!(".{task_group_id}.lock"));
+        if receipt_path.exists() {
+            let receipt = match std::fs::read_to_string(&receipt_path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
+                Some(value) if value.get("action_tool").and_then(Value::as_str) == Some("task_summary_finalize")
+                    && value.get("task_group_id").and_then(Value::as_str) == Some(task_group_id)
+                    && value.get("finalizer_status").and_then(Value::as_str) == Some("recorded") => value,
+                _ => return Ok(ToolResult::json_text(&json!({"task_group_id": task_group_id, "gate": "corrupt", "ready": false, "receipt_path": receipt_path}))),
+            };
+            return Ok(ToolResult::json_text(&json!({"task_group_id": task_group_id, "gate": "ready", "ready": true, "receipt_path": receipt_path, "receipt": receipt})));
+        }
+        let gate = if lock_path.exists() { "in_progress" } else { "missing" };
+        Ok(ToolResult::json_text(&json!({"task_group_id": task_group_id, "gate": gate, "ready": false, "receipt_path": receipt_path})))
     }
 }
 

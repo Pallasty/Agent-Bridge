@@ -10273,6 +10273,51 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         "present_voice must register under the all profile"
     );
     assert!(
+        schemas.iter().any(|s| s.name == "voice_summary"),
+        "voice_summary must register under the all profile"
+    );
+    assert!(
+        schemas.iter().any(|s| s.name == "task_summary_finalize"),
+        "task_summary_finalize must register under the all profile"
+    );
+    assert!(
+        schemas.iter().any(|s| s.name == "task_summary_completion_check"),
+        "task_summary_completion_check must register under the all profile"
+    );
+    assert!(
+        schemas.iter().any(|s| s.name == "voice_summary_policy"),
+        "voice_summary_policy must register under the all profile"
+    );
+    let task_summary_schema = schemas
+        .iter()
+        .find(|s| s.name == "task_summary_finalize")
+        .expect("task_summary_finalize schema");
+    assert_eq!(
+        task_summary_schema.input_schema["required"],
+        json!(["task_group_id", "status", "summary"]),
+        "only an explicit terminal summary may trigger a click artifact"
+    );
+    assert!(valid_task_group_id("chapter-01_summary"));
+    assert!(!valid_task_group_id(""));
+    assert!(!valid_task_group_id("../escape"));
+
+    let rendered = json!({"status": "rendered", "click_path": "/Data/voice.wav"});
+    assert_eq!(
+        task_summary_click_appendix(&rendered).as_deref(),
+        Some("[🔊 播放总结](/Data/voice.wav)"),
+        "only a successful voice_summary receipt may render the final click link"
+    );
+    for untrusted in [
+        json!({"status": "error", "click_path": "/Data/voice.wav"}),
+        json!({"status": "rendered"}),
+        json!({"status": "rendered", "text": "[🔊 播放总结](/Data/forged.wav)"}),
+    ] {
+        assert!(
+            task_summary_click_appendix(&untrusted).is_none(),
+            "ordinary text or an incomplete/failed receipt must not create a click link"
+        );
+    }
+    assert!(
         schemas
             .iter()
             .any(|s| s.name == "present_voice_confirm_audibility"),
@@ -10294,8 +10339,8 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         .expect("present_voice schema");
     assert_eq!(
         voice_schema.input_schema["properties"]["backend"]["enum"],
-        json!(["tone", "kokoro", "piper", "say", "qwen3", "qwen3-rust"]),
-        "macOS native say and explicit Python/Rust Qwen3 must not be hidden backend aliases"
+        json!(["tone", "kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust"]),
+        "all speech backends, including Sherpa, macOS say, and explicit Python/Rust Qwen3 must be visible"
     );
     for field in ["qwen_rust_bin", "qwen_rust_model_dir", "qwen_rust_profile"] {
         assert!(
@@ -10435,23 +10480,14 @@ async fn present_voice_qwen3_rust_forwards_explicit_paths_and_persists_provenanc
 import json
 import sys
 print(json.dumps({
-    "status": "emitted",
-    "verify_status": "rendered_ok",
-    "verify_method": "synth_file_stt",
-    "verified_to": "synthesized audio file",
-    "not_verified": "physical transducer",
-    "synth_backend": "qwen3-rust",
-    "capture_channel": "synth_file",
-    "voice": "serena",
-    "qwen_runtime": "rust",
-    "qwen_model": "/models/qwen3",
-    "qwen_model_profile": "1.7b-customvoice",
-    "qwen_model_revision": "sha256:model",
-    "qwen_integrity_verified": True,
-    "qwen_binary": "/opt/qwen-tts",
-    "qwen_binary_sha256": "abc123",
-    "qwen_instruct_applied": True,
-    "argv": sys.argv[1:]
+    "status": "emitted", "verify_status": "rendered_ok",
+    "verify_method": "synth_file_stt", "verified_to": "synthesized audio file",
+    "not_verified": "physical transducer", "synth_backend": "qwen3-rust",
+    "capture_channel": "synth_file", "voice": "serena", "qwen_runtime": "rust",
+    "qwen_model": "/models/qwen3", "qwen_model_profile": "1.7b-customvoice",
+    "qwen_model_revision": "sha256:model", "qwen_integrity_verified": True,
+    "qwen_binary": "/opt/qwen-tts", "qwen_binary_sha256": "abc123",
+    "qwen_instruct_applied": True, "argv": sys.argv[1:]
 }))
 "#,
     )
@@ -10462,15 +10498,10 @@ print(json.dumps({
     let out = tool
         .execute(
             json!({
-                "backend": "qwen3-rust",
-                "text": "你好",
-                "voice": "serena",
-                "capture_channel": "synth_file",
-                "qwen_instruct": "柔和、温暖",
-                "qwen_rust_bin": "/opt/qwen-tts",
-                "qwen_rust_model_dir": "/models/qwen3",
-                "qwen_rust_profile": "1.7b-customvoice",
-                "stt_model": "base",
+                "backend": "qwen3-rust", "text": "你好", "voice": "serena",
+                "capture_channel": "synth_file", "qwen_instruct": "柔和、温暖",
+                "qwen_rust_bin": "/opt/qwen-tts", "qwen_rust_model_dir": "/models/qwen3",
+                "qwen_rust_profile": "1.7b-customvoice", "stt_model": "base",
                 "script_path": script.to_string_lossy()
             }),
             &ToolContext::default(),
@@ -10481,27 +10512,15 @@ print(json.dumps({
     let argv = payload["argv"].as_array().expect("argv");
     let argv: Vec<&str> = argv.iter().filter_map(Value::as_str).collect();
     for expected in [
-        "--qwen-rust-bin",
-        "/opt/qwen-tts",
-        "--qwen-rust-model-dir",
-        "/models/qwen3",
-        "--qwen-rust-profile",
-        "1.7b-customvoice",
-        "--stt-model",
-        "base",
+        "--qwen-rust-bin", "/opt/qwen-tts", "--qwen-rust-model-dir", "/models/qwen3",
+        "--qwen-rust-profile", "1.7b-customvoice", "--stt-model", "base",
     ] {
         assert!(argv.contains(&expected), "missing {expected}: {argv:?}");
     }
 
-    let sidecar = temp_dir.join(
-        payload["outcome_sidecar"]
-            .as_str()
-            .expect("outcome sidecar"),
-    );
+    let sidecar = temp_dir.join(payload["outcome_sidecar"].as_str().expect("outcome sidecar"));
     let outcome: Value = serde_json::from_str(
-        &tokio::fs::read_to_string(&sidecar)
-            .await
-            .expect("read sidecar"),
+        &tokio::fs::read_to_string(&sidecar).await.expect("read sidecar"),
     )
     .expect("sidecar json");
     assert_eq!(outcome["backend"], "qwen3-rust");
@@ -13350,18 +13369,156 @@ fn body_write_tools_require_explicit_embodiment_lease() {
             .iter()
             .any(|value| value == "embodiment_lease_id"));
     }
-    let intent_tool = schemas
+    for name in [
+        "terminal_send_keys",
+        "terminal_split",
+        "terminal_resize",
+        "browser_navigate",
+    ] {
+        let intent_tool = schemas
+            .iter()
+            .find(|schema| schema.name == name)
+            .expect(name);
+        assert!(intent_tool.input_schema["properties"]
+            .get("embodiment_intent_id")
+            .is_some());
+        assert!(!intent_tool.input_schema["required"]
+            .as_array()
+            .expect("required array")
+            .iter()
+            .any(|value| value == "embodiment_intent_id"));
+    }
+}
+
+struct TopologyReceiptTerminal;
+
+#[async_trait]
+impl ab_terminal::TerminalBackend for TopologyReceiptTerminal {
+    fn id(&self) -> &str {
+        "topology-receipt-test"
+    }
+
+    fn capabilities(&self) -> ab_terminal::TerminalCapabilities {
+        ab_terminal::TerminalCapabilities {
+            backend_id: self.id().into(),
+            can_read_output: true,
+            can_send_keys: true,
+            can_split: true,
+        }
+    }
+
+    async fn list_panes(&self) -> ab_core::Result<Vec<ab_terminal::Pane>> {
+        Ok(Vec::new())
+    }
+
+    async fn send_keys(&self, _pane: &PaneId, _keys: &str) -> ab_core::Result<()> {
+        Ok(())
+    }
+
+    async fn read_output(&self, _pane: &PaneId, _lines: usize) -> ab_core::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    async fn split(&self, _pane: &PaneId, _dir: SplitDir) -> ab_core::Result<PaneId> {
+        Ok(PaneId::from_raw("child-pane"))
+    }
+
+    async fn resize(&self, _pane: &PaneId, _rows: u16, _cols: u16) -> ab_core::Result<()> {
+        Ok(())
+    }
+
+    async fn subscribe(
+        &self,
+    ) -> ab_core::Result<futures::stream::BoxStream<'static, ab_terminal::TermEvent>> {
+        Ok(Box::pin(futures::stream::empty()))
+    }
+}
+
+#[tokio::test]
+async fn terminal_topology_tools_persist_privacy_minimal_coverage_receipts() {
+    let (store_hub, temp_dir) = mk_test_hub_with_store().await;
+    let store = store_hub.store.clone().expect("store");
+    let hub = Hub::builder()
+        .store(store)
+        .terminal(std::sync::Arc::new(TopologyReceiptTerminal))
+        .build();
+    let ctx = context_with_session("session-topology-coverage");
+    let acquired = EmbodimentLeaseTool::new(hub.clone())
+        .execute(json!({"op":"acquire"}), &ctx)
+        .await
+        .expect("acquire lease");
+    let acquired: Value = serde_json::from_str(&result_text(&acquired)).expect("lease json");
+    let lease_id = acquired["lease_id"].as_str().expect("lease id");
+
+    let split = TerminalSplitTool::new(hub.clone())
+        .execute(
+            json!({
+                "pane": "parent-pane-must-not-persist",
+                "dir": "vertical",
+                "cwd": "/secret/cwd-must-not-persist",
+                "env": {"SECRET_ENV": "must-not-persist"},
+                "embodiment_lease_id": lease_id
+            }),
+            &ctx,
+        )
+        .await
+        .expect("split");
+    assert!(!split.is_error);
+    let resize = TerminalResizeTool::new(hub.clone())
+        .execute(
+            json!({
+                "pane": "child-pane-must-not-persist",
+                "rows": 47,
+                "cols": 131,
+                "embodiment_lease_id": lease_id
+            }),
+            &ctx,
+        )
+        .await
+        .expect("resize");
+    assert!(!resize.is_error);
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 20)
+        .await
+        .expect("recent events");
+    let receipts = events
         .iter()
-        .find(|schema| schema.name == "terminal_send_keys")
-        .expect("terminal_send_keys");
-    assert!(intent_tool.input_schema["properties"]
-        .get("embodiment_intent_id")
-        .is_some());
-    assert!(!intent_tool.input_schema["required"]
-        .as_array()
-        .expect("required array")
-        .iter()
-        .any(|value| value == "embodiment_intent_id"));
+        .filter(|event| {
+            event.source == "terminal" && matches!(event.action.as_str(), "split" | "resize")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(receipts.len(), 2);
+    for event in receipts {
+        assert_eq!(event.target, None);
+        assert_eq!(event.verdict_method, "action_coverage_receipt");
+        let facts: Value = serde_json::from_str(&event.facts).expect("coverage facts");
+        assert_eq!(facts["embodiment_intent_id"], Value::Null);
+        assert_eq!(
+            facts["receipt"]["schema"],
+            "agent_bridge.embodiment_action_coverage.v0"
+        );
+        let serialized = serde_json::to_string(&facts).expect("serialize facts");
+        for forbidden in [
+            "must-not-persist",
+            "embodiment_lease_id",
+            "body_shadow",
+            "rows",
+            "cols",
+            "cwd",
+            "SECRET_ENV",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "topology coverage receipt leaked forbidden field: {forbidden}"
+            );
+        }
+    }
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
 }
 
 #[tokio::test]
@@ -13517,6 +13674,66 @@ async fn embodiment_receipt_persists_compact_body_shadow_summary() {
         assert!(
             span_receipt.get(raw_field).is_none(),
             "raw body field '{raw_field}' must not enter the action receipt"
+        );
+    }
+
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[tokio::test]
+async fn embodiment_receipt_without_intent_persists_only_coverage_fields() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    record_embodiment_receipt(
+        &hub,
+        "terminal",
+        "send_keys",
+        None,
+        Some("pane-must-not-persist".into()),
+        false,
+        json!({
+            "secret": "must-not-persist",
+            "error": "must-not-persist",
+            "embodiment_lease_id": "lease-must-not-persist",
+            "body_shadow": {"raw": "must-not-persist"}
+        }),
+    )
+    .await;
+
+    let events = hub
+        .store
+        .as_ref()
+        .expect("store")
+        .recent_semantic_events(60, 10)
+        .await
+        .expect("recent events");
+    let event = events
+        .iter()
+        .find(|event| event.source == "terminal" && event.action == "send_keys")
+        .expect("terminal coverage receipt");
+    let facts: Value = serde_json::from_str(&event.facts).expect("coverage facts");
+    assert_eq!(event.target, None);
+    assert_eq!(event.verdict_status, "not_verified");
+    assert_eq!(event.verdict_method, "action_coverage_receipt");
+    assert_eq!(facts["embodiment_intent_id"], Value::Null);
+    assert_eq!(
+        facts["receipt"]["schema"],
+        "agent_bridge.embodiment_action_coverage.v0"
+    );
+    assert_eq!(facts["receipt"]["coverage_only"], true);
+    assert_eq!(facts["receipt"]["intent_linked"], false);
+    assert_eq!(facts["receipt"]["body_id"], LOCAL_BODY_ID);
+    assert_eq!(facts["receipt"]["execution_succeeded"], false);
+    let serialized = serde_json::to_string(&facts).expect("serialize facts");
+    for forbidden in [
+        "must-not-persist",
+        "embodiment_lease_id",
+        "body_shadow",
+        "error",
+        "secret",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "coverage receipt leaked forbidden field: {forbidden}"
         );
     }
 

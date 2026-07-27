@@ -12,7 +12,6 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import audio_embody as ae  # noqa: E402
-import qwen3_tts_synth as q3  # noqa: E402
 
 
 # --- classify_audio_embody truth table (rms, goertzel_f, goertzel_floor, frames) -
@@ -555,96 +554,43 @@ def test_qwen3_requires_an_explicit_isolated_runtime(monkeypatch):
     assert "AB_QWEN3_TTS_PYTHON" in info["detail"]
 
 
-def test_qwen3_rust_requires_explicit_enablement(monkeypatch):
-    monkeypatch.delenv("AB_QWEN3_TTS_RUST_ENABLED", raising=False)
-    wav, info = ae.synth_qwen3_rust("你好", "serena", 1.0)
-    assert wav is None
-    assert "AB_QWEN3_TTS_RUST_ENABLED=1" in info["detail"]
-
-
-def test_qwen3_rust_requires_explicit_binary_model_and_profile(monkeypatch):
-    monkeypatch.setenv("AB_QWEN3_TTS_RUST_ENABLED", "1")
-    for name in (
-        "AB_QWEN3_TTS_RUST_BIN",
-        "AB_QWEN3_TTS_RUST_MODEL_DIR",
-        "AB_QWEN3_TTS_RUST_PROFILE",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    wav, info = ae.synth_qwen3_rust("你好", "serena", 1.0)
-    assert wav is None
-    assert "AB_QWEN3_TTS_RUST_BIN" in info["detail"]
-
-
-def test_qwen3_rust_invokes_integrity_gate_and_preserves_provenance(
-    monkeypatch, tmp_path
-):
-    binary = tmp_path / "qwen-tts"
-    binary.write_text("#!/bin/sh\n")
-    binary.chmod(0o755)
-    model_dir = tmp_path / "model"
-    model_dir.mkdir()
+def test_qwen3_worker_is_explicit_and_never_requires_or_falls_back_to_python(monkeypatch):
+    monkeypatch.delenv("AB_QWEN3_TTS_PYTHON", raising=False)
     seen = {}
-
-    def fake_run(command, **kwargs):
-        seen["command"] = command
-        seen["timeout"] = kwargs["timeout"]
-        output = command[command.index("--output") + 1]
-        with ae.wave.open(output, "wb") as audio:
-            audio.setnchannels(1)
-            audio.setsampwidth(2)
-            audio.setframerate(24000)
-            audio.writeframes(b"\x00\x01" * 240)
-        receipt = {
-            "verified": True,
-            "model_profile": "1.7b-customvoice",
-            "model_revision": "sha256:model",
-            "binary_evidence": {"sha256": "a" * 64},
-        }
-        return SimpleNamespace(
-            returncode=0, stdout=ae.json.dumps(receipt), stderr=""
-        )
-
-    monkeypatch.setenv("AB_QWEN3_TTS_RUST_ENABLED", "1")
-    monkeypatch.setattr(ae.subprocess, "run", fake_run)
-    wav, info = ae.synth_qwen3_rust(
-        "你好",
-        "serena",
-        1.0,
-        "柔和、温暖",
-        str(binary),
-        str(model_dir),
-        "1.7b-customvoice",
-    )
-    assert os.path.exists(wav)
-    assert info["backend"] == "qwen3-rust"
-    assert info["runtime"] == "rust"
-    assert info["integrity_verified"] is True
-    assert info["binary_sha256"] == "a" * 64
-    assert seen["command"][seen["command"].index("--model-profile") + 1] == "1.7b-customvoice"
-    assert seen["command"][-2:] == ["--instruct", "柔和、温暖"]
-    assert seen["timeout"] == 900
-
-
-def test_qwen3_device_selection_never_silently_falls_back_to_cpu(monkeypatch):
-    fake_torch = SimpleNamespace(
-        backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: False)),
-        float16="float16",
-        float32="float32",
-    )
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
-
+    def fake_worker(sock, request, timeout):
+        seen.update(sock=sock, request=request, timeout=timeout)
+        with open(request["output"], "wb") as f:
+            f.write(b"RIFFfake")
+        return {"ok": True, "backend": "qwen3", "voice": "Serena", "sample_rate": 24000,
+                "device": "mps", "dtype": "float16", "worker": "unix_socket"}
+    saved = _patch(_qwen_worker_request=fake_worker)
     try:
-        q3._device_and_dtype("mps")
-        assert False, "unavailable MPS must fail closed"
-    except RuntimeError as exc:
-        assert "MPS was requested but is unavailable" in str(exc)
+        wav, info = ae.synth_qwen3("你好", "Serena", 1.0, qwen_worker="/tmp/qwen.sock")
+        assert wav and os.path.exists(wav)
+        assert info["worker"] == "unix_socket"
+        assert seen["sock"] == "/tmp/qwen.sock"
+        assert seen["request"]["op"] == "synthesize"
+    finally:
+        _restore(saved)
 
-    assert q3._device_and_dtype("cpu") == ("cpu", "float32")
+
+def test_qwen3_worker_receipt_preserves_declared_runtime_identity(monkeypatch):
+    """The client keeps an adapter's actual engine/precision visible to receipts."""
+    def fake_worker(sock, request, timeout):
+        with open(request["output"], "wb") as f:
+            f.write(b"RIFFfake")
+        return {"ok": True, "protocol": "ab.tts.worker.v1", "backend": "qwen3",
+                "engine": "onnxruntime", "model": "validated/export", "dtype": "int8",
+                "capabilities": ["custom_voice", "zh"], "worker": "unix_socket"}
+    saved = _patch(_qwen_worker_request=fake_worker)
     try:
-        q3._device_and_dtype("auto")
-        assert False, "auto must not reintroduce a hidden CPU fallback"
-    except RuntimeError as exc:
-        assert "device must be mps or cpu" in str(exc)
+        wav, info = ae.synth_qwen3("你好", "Serena", 1.0, qwen_worker="/tmp/future-onnx.sock")
+        assert wav and os.path.exists(wav)
+        assert info["protocol"] == "ab.tts.worker.v1"
+        assert info["engine"] == "onnxruntime"
+        assert info["dtype"] == "int8"
+    finally:
+        _restore(saved)
 
 
 def test_synth_file_qwen3_records_backend_and_expression_provenance():
@@ -669,46 +615,75 @@ def test_synth_file_qwen3_records_backend_and_expression_provenance():
         _restore(saved)
 
 
+def test_qwen3_rust_requires_explicit_enablement(monkeypatch):
+    monkeypatch.delenv("AB_QWEN3_TTS_RUST_ENABLED", raising=False)
+    wav, info = ae.synth_qwen3_rust("你好", "serena", 1.0)
+    assert wav is None
+    assert "AB_QWEN3_TTS_RUST_ENABLED=1" in info["detail"]
+
+
+def test_qwen3_rust_requires_explicit_binary_model_and_profile(monkeypatch):
+    monkeypatch.setenv("AB_QWEN3_TTS_RUST_ENABLED", "1")
+    for name in ("AB_QWEN3_TTS_RUST_BIN", "AB_QWEN3_TTS_RUST_MODEL_DIR", "AB_QWEN3_TTS_RUST_PROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    wav, info = ae.synth_qwen3_rust("你好", "serena", 1.0)
+    assert wav is None
+    assert "AB_QWEN3_TTS_RUST_BIN" in info["detail"]
+
+
+def test_qwen3_rust_invokes_integrity_gate_and_preserves_provenance(monkeypatch, tmp_path):
+    binary = tmp_path / "qwen-tts"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["timeout"] = kwargs["timeout"]
+        output = command[command.index("--output") + 1]
+        with ae.wave.open(output, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(24000)
+            audio.writeframes(b"\x00\x01" * 240)
+        receipt = {"verified": True, "model_profile": "1.7b-customvoice",
+                   "model_revision": "sha256:model", "binary_evidence": {"sha256": "a" * 64}}
+        return SimpleNamespace(returncode=0, stdout=ae.json.dumps(receipt), stderr="")
+
+    monkeypatch.setenv("AB_QWEN3_TTS_RUST_ENABLED", "1")
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    wav, info = ae.synth_qwen3_rust("你好", "serena", 1.0, "柔和、温暖",
+                                    str(binary), str(model_dir), "1.7b-customvoice")
+    assert os.path.exists(wav)
+    assert info["backend"] == "qwen3-rust"
+    assert info["runtime"] == "rust"
+    assert info["integrity_verified"] is True
+    assert info["binary_sha256"] == "a" * 64
+    assert seen["command"][seen["command"].index("--model-profile") + 1] == "1.7b-customvoice"
+    assert seen["command"][-2:] == ["--instruct", "柔和、温暖"]
+    assert seen["timeout"] == 900
+
+
 def test_synth_file_qwen3_rust_records_integrity_and_uses_explicit_stt_model():
     seen = {}
     saved = _patch(
         synth_qwen3_rust=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {
-            "ok": True,
-            "backend": "qwen3-rust",
-            "runtime": "rust",
-            "voice": "serena",
-            "sample_rate": 24000,
-            "wpm": 175,
-            "model": "/models/qwen3",
-            "model_profile": "1.7b-customvoice",
-            "model_revision": "sha256:model",
-            "device": "metal",
-            "dtype": "f16",
-            "instruct_applied": False,
-            "integrity_verified": True,
-            "binary": "/bin/qwen-tts",
-            "binary_sha256": "a" * 64,
+            "ok": True, "backend": "qwen3-rust", "runtime": "rust", "voice": "serena",
+            "sample_rate": 24000, "wpm": 175, "model": "/models/qwen3",
+            "model_profile": "1.7b-customvoice", "model_revision": "sha256:model",
+            "device": "metal", "dtype": "f16", "instruct_applied": False,
+            "integrity_verified": True, "binary": "/bin/qwen-tts", "binary_sha256": "a" * 64,
         }),
-        _read_wav_mono_s16=lambda p: {
-            "samples": [1000] * 48000,
-            "sr": 16000,
-            "frames": 48000,
-        },
+        _read_wav_mono_s16=lambda p: {"samples": [1000] * 48000, "sr": 16000, "frames": 48000},
         transcribe_synth_file=lambda w, model=None, language="en":
             (seen.setdefault("model", model) and "本地语音", None),
-        play_say_serialized=lambda p: {
-            "play_ok": True,
-            "playback_serialized": True,
-        },
+        play_say_serialized=lambda p: {"play_ok": True, "playback_serialized": True},
     )
     try:
-        out = ae.run_speech_synth_file(
-            "本地语音",
-            "serena",
-            1.0,
-            synth_backend="qwen3-rust",
-            stt_model="base",
-        )
+        out = ae.run_speech_synth_file("本地语音", "serena", 1.0,
+                                       synth_backend="qwen3-rust", stt_model="base")
         assert seen["model"] == "base"
         assert out["synth_backend"] == "qwen3-rust"
         assert out["qwen_runtime"] == "rust"

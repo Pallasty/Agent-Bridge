@@ -521,6 +521,7 @@ impl McpTool for TerminalSplitTool {
                                         TERM is preserved by the backend.",
                         "additionalProperties": { "type": "string" }
                     },
+                    "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." },
                     "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required current body write lease from embodiment_lease(acquire)." }
                 },
                 "required": ["pane", "embodiment_lease_id"]
@@ -531,9 +532,10 @@ impl McpTool for TerminalSplitTool {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
         }
-        if let Err(error) = require_body_write_lease(&self.hub, &args, ctx).await {
-            return Ok(ToolResult::error(error));
-        }
+        let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
+            Ok(lease_id) => lease_id,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
             None => return Ok(ToolResult::error("no terminal backend configured")),
@@ -542,6 +544,11 @@ impl McpTool for TerminalSplitTool {
             Some(s) => PaneId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'pane'")),
         };
+        let embodiment_intent_id = args
+            .get("embodiment_intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
         let dir = match args
             .get("dir")
             .and_then(|v| v.as_str())
@@ -572,10 +579,41 @@ impl McpTool for TerminalSplitTool {
         } else {
             term.split(&pane, dir).await
         };
-        let _body_shadow = body_shadow.finish(&self.hub).await;
+        let body_shadow = body_shadow.finish(&self.hub).await;
         match result {
-            Ok(new_pane) => Ok(ToolResult::text(format!("new pane: {new_pane}"))),
-            Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
+            Ok(new_pane) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "split",
+                    embodiment_intent_id,
+                    Some(new_pane.to_string()),
+                    true,
+                    json!({
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
+                )
+                .await;
+                Ok(ToolResult::text(format!("new pane: {new_pane}")))
+            }
+            Err(e) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "split",
+                    embodiment_intent_id,
+                    Some(pane.to_string()),
+                    false,
+                    json!({
+                        "error": e.to_string(),
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
+                )
+                .await;
+                Ok(ToolResult::error(format!("terminal: {e}")))
+            }
         }
     }
 }
@@ -685,6 +723,7 @@ impl McpTool for TerminalResizeTool {
                               "description": "New row count (vertical lines)." },
                     "cols": { "type": "integer", "minimum": 1, "maximum": 1000,
                               "description": "New column count (horizontal width)." },
+                    "embodiment_intent_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional explicit embodiment intent reference. Records receipt linkage only; it grants no execution authority." },
                     "embodiment_lease_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required current body write lease from embodiment_lease(acquire)." }
                 },
                 "required": ["pane", "rows", "cols", "embodiment_lease_id"]
@@ -695,9 +734,10 @@ impl McpTool for TerminalResizeTool {
         if let Err(e) = self.hub.security.check(Cap::TerminalWrite) {
             return Ok(ToolResult::error(e));
         }
-        if let Err(error) = require_body_write_lease(&self.hub, &args, ctx).await {
-            return Ok(ToolResult::error(error));
-        }
+        let lease_id = match require_body_write_lease(&self.hub, &args, ctx).await {
+            Ok(lease_id) => lease_id,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let term = match &self.hub.terminal {
             Some(t) => t.clone(),
             None => return Ok(ToolResult::error("no terminal backend configured")),
@@ -706,6 +746,11 @@ impl McpTool for TerminalResizeTool {
             Some(s) => PaneId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'pane'")),
         };
+        let embodiment_intent_id = args
+            .get("embodiment_intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
         let rows = match args.get("rows").and_then(|v| v.as_u64()) {
             Some(r) => r.clamp(1, 500) as u16,
             None => return Ok(ToolResult::error("missing 'rows'")),
@@ -716,16 +761,51 @@ impl McpTool for TerminalResizeTool {
         };
         let body_shadow = BodyWriteShadowSpan::start("terminal_resize", Some(pane.to_string()));
         let result = term.resize(&pane, rows, cols).await;
-        let _body_shadow = body_shadow.finish(&self.hub).await;
+        let body_shadow = body_shadow.finish(&self.hub).await;
         match result {
-            Ok(()) => Ok(ToolResult::json_text(&json!({
-                "pane": pane.as_str(),
-                "backend": term.id(),
-                "rows": rows,
-                "cols": cols,
-                "ok": true
-            }))),
-            Err(e) => Ok(ToolResult::error(format!("terminal: {e}"))),
+            Ok(()) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "resize",
+                    embodiment_intent_id,
+                    Some(pane.to_string()),
+                    true,
+                    json!({
+                        "rows": rows,
+                        "cols": cols,
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
+                )
+                .await;
+                Ok(ToolResult::json_text(&json!({
+                    "pane": pane.as_str(),
+                    "backend": term.id(),
+                    "rows": rows,
+                    "cols": cols,
+                    "ok": true
+                })))
+            }
+            Err(e) => {
+                record_embodiment_receipt(
+                    &self.hub,
+                    "terminal",
+                    "resize",
+                    embodiment_intent_id,
+                    Some(pane.to_string()),
+                    false,
+                    json!({
+                        "rows": rows,
+                        "cols": cols,
+                        "error": e.to_string(),
+                        "embodiment_lease_id": lease_id,
+                        "body_shadow": body_shadow,
+                    }),
+                )
+                .await;
+                Ok(ToolResult::error(format!("terminal: {e}")))
+            }
         }
     }
 }
@@ -6892,9 +6972,6 @@ async fn record_embodiment_receipt(
     ok: bool,
     facts: Value,
 ) {
-    let Some(intent_id) = intent_id else {
-        return;
-    };
     let Some(store) = &hub.store else {
         return;
     };
@@ -6902,6 +6979,31 @@ async fn record_embodiment_receipt(
         crate::semantic_event::VerdictStatus::Unknown
     } else {
         crate::semantic_event::VerdictStatus::NotVerified
+    };
+    let (target, method, evidence, facts, expected_effect) = match intent_id {
+        Some(intent_id) => (
+            target,
+            "intent_linked_receipt",
+            json!({"intent_id": intent_id}),
+            json!({"embodiment_intent_id": intent_id, "receipt": facts}),
+            "record intent-linked action receipt",
+        ),
+        None => (
+            None,
+            "action_coverage_receipt",
+            json!({"intent_linked": false}),
+            json!({
+                "embodiment_intent_id": null,
+                "receipt": {
+                    "schema": "agent_bridge.embodiment_action_coverage.v0",
+                    "coverage_only": true,
+                    "intent_linked": false,
+                    "body_id": LOCAL_BODY_ID,
+                    "execution_succeeded": ok,
+                }
+            }),
+            "record privacy-minimal action coverage receipt",
+        ),
     };
     let event = crate::semantic_event::SemanticEvent {
         ts: dispatch_now_secs(),
@@ -6919,17 +7021,17 @@ async fn record_embodiment_receipt(
             action_type: action.into(),
             risk_level: "medium".into(),
             requires_gate: true,
-            expected_effect: Some("record intent-linked action receipt".into()),
+            expected_effect: Some(expected_effect.into()),
         },
         verdict: crate::semantic_event::Verdict {
             status: verdict,
-            method: "intent_linked_receipt".into(),
-            evidence: json!({"intent_id": intent_id}),
+            method: method.into(),
+            evidence,
         },
-        facts: json!({"embodiment_intent_id": intent_id, "receipt": facts}),
+        facts,
     };
     if let Err(error) = store.record_semantic_event(event.to_record()).await {
-        tracing::debug!(%error, "record intent-linked embodiment receipt failed");
+        tracing::debug!(%error, "record embodiment action receipt failed");
     }
 }
 
@@ -46909,6 +47011,32 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(PresentVoiceTool::new(hub.clone())),
+    );
+    // Default-safe task-final summary delivery: renders an audio artifact for an
+    // explicit click, without emitting it to any physical output device.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(VoiceSummaryTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TaskSummaryFinalizeTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TaskSummaryCompletionCheckTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(VoiceSummaryPolicyTool::new(hub.clone())),
     );
     // Human audibility confirmation for one existing voice outcome. Separate
     // append-only sidecar; never rewrites the machine receipt or generalises
