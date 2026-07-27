@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-RUNTIME-SCOPE-LOCK-D79-V1",
+  "analysis_class": "SOURCE_PINNED_RUNTIME_SCOPE_LOCK_PRECHECK",
+  "source_pins": {
+    "fh_l8_runtime_rule_d60_contract.json": "aedb085f4cf3f05030142f76997bf765e2ff8d817e125235055873400a97b515",
+    "fh_l8_owner_host_fingerprint_d78.json": "a163c7ff438c398632759f936e1c42ccd6a6726849c9ceb4fbb0fbf400277eee",
+    "fh_l8_owner_local_capacity_admission_d76_result.json": "4d1c82fbc3e24b036aadcbf50fbf8b463fd047ad7bdf50ab4cb08fa0ca205589",
+    "fh_l8_cgroup_envelope_d10_contract.json": "9fadd4e58ad65a0ddd9cb12ee09fd0e96dd0e09b270abb06a8858b20eb038ce3",
+    "fh_l8_production_io_page_cache_d59_contract.json": "7df9c5c05e12a6230bd5d2e1e33a76b01f79cfb88edeebbf0fc1fa333f71b13a"
+  },
+  "probe_definition": {
+    "scope": {
+      "unit_prefix": "ab-fh-l8-d79-runtime-lock-scope",
+      "command": "/usr/bin/true",
+      "requested_memory_max": "1073741824",
+      "requested_memory_high": "805306368",
+      "requested_memory_swap_max": "0"
+    },
+    "service": {
+      "unit_prefix": "ab-fh-l8-d79-runtime-lock-service",
+      "command": "/usr/bin/true",
+      "requested_memory_max": "1073741824",
+      "requested_memory_high": "805306368",
+      "requested_memory_swap_max": "0"
+    }
+  },
+  "authority": {
+    "scope_probe_executed": false,
+    "service_probe_executed": false,
+    "runtime_lock_precommitted": false,
+    "d59_request_issued": false,
+    "external_request_sent": false,
+    "d60_environment_fixed": false,
+    "full53_execution_authorized": false
+  },
+  "decision": "NO_GO_D79_RUNTIME_SCOPE_LOCK_INCOMPLETE",
+  "next_gate": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"
+}
