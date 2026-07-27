@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-AUTHORIZATION-NUMERIC-D62-V1",
+  "source_pins": {
+    "fh_l8_external_authorization_d62_contract.json": "fe6c2769421697af4fc1c0546555f4b014094a9aa3cfb2adf8b6ddaa68663ba6",
+    "fh_l8_integrated_envelope_numeric_d61_result.json": "80e444933cdc9cf6dc38e26a64ca646e14e22146749354ae6d296f70494d7314",
+    "fh_l8_closure_evidence_intake_d63_contract.json": "864c00c8b81ff48a925c7410950cc203e325137045b6c7c8f1251c0f4f24f860"
+  },
+  "required_predicates": ["D58_numeric_peak_memory_proven", "D59_page_cache_environment_bound", "D60_runtime_rule_precommitted_and_environment_fixed", "D23_registered_scratch_meets_design_requirement", "D61_integrated_envelope_GO"],
+  "predicate_values": {"D58_numeric_peak_memory_proven": false, "D59_page_cache_environment_bound": false, "D60_runtime_rule_precommitted_and_environment_fixed": false, "D23_registered_scratch_meets_design_requirement": false, "D61_integrated_envelope_GO": false},
+  "authority": {"external_resource_reservation_attempted": false, "external_resource_reservation_admitted": false, "full53_execution_authorized": false, "full53_execution_performed": false},
+  "decision": "NO_GO_D62_CLOSURE_PREDICATES_UNSATISFIED"
+}
