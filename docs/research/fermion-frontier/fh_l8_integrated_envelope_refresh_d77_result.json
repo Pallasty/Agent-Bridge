@@ -1,0 +1,10 @@
+{
+  "status": "VERIFIED_D77_INTEGRATED_ENVELOPE_REFRESH",
+  "decision": "NO_GO_D77_D58_D59_D60_REMAIN_UNRESOLVED",
+  "required_gate_count": 4,
+  "unresolved_gate_count": 4,
+  "unresolved_gates": ["D23_external_reservation", "D58", "D59", "D60"],
+  "owner_local_capacity_admitted": true,
+  "external_resource_reservation_admitted": false,
+  "full53_execution_authorized": false
+}
