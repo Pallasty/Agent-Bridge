@@ -454,6 +454,14 @@ pub(super) fn valid_task_group_id(id: &str) -> bool {
         && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
+fn task_finalizer_receipt_dir() -> PathBuf {
+    crate::present::presentations_dir().join("voice-summaries").join("task-finalizers")
+}
+
+fn task_finalizer_receipt_path(task_group_id: &str) -> PathBuf {
+    task_finalizer_receipt_dir().join(format!("{task_group_id}.json"))
+}
+
 #[async_trait]
 impl McpTool for TaskSummaryFinalizeTool {
     fn name(&self) -> &'static str { "task_summary_finalize" }
@@ -493,8 +501,8 @@ impl McpTool for TaskSummaryFinalizeTool {
         if summary.is_empty() {
             return Ok(ToolResult::error("task_summary_finalize requires a non-empty summary"));
         }
-        let receipt_dir = crate::present::presentations_dir().join("voice-summaries").join("task-finalizers");
-        let receipt_path = receipt_dir.join(format!("{task_group_id}.json"));
+        let receipt_dir = task_finalizer_receipt_dir();
+        let receipt_path = task_finalizer_receipt_path(task_group_id);
         let lock_path = receipt_dir.join(format!(".{task_group_id}.lock"));
         if receipt_path.exists() {
             let prior = match std::fs::read_to_string(&receipt_path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
@@ -550,6 +558,53 @@ impl McpTool for TaskSummaryFinalizeTool {
             return Ok(ToolResult::error(format!("task_summary_finalize could not persist receipt: {e}")));
         }
         Ok(ToolResult::json_text(&payload))
+    }
+}
+
+/// Read-only completion-hook gate for one terminal task group. It deliberately
+/// trusts only a durable finalizer receipt and never infers completion from a
+/// transcript or creates a missing voice artifact.
+pub struct TaskSummaryCompletionCheckTool {
+    _hub: Hub,
+}
+
+impl TaskSummaryCompletionCheckTool {
+    pub fn new(hub: Hub) -> Self { Self { _hub: hub } }
+}
+
+#[async_trait]
+impl McpTool for TaskSummaryCompletionCheckTool {
+    fn name(&self) -> &'static str { "task_summary_completion_check" }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only completion-hook gate: report whether one terminal task group has exactly one valid task_summary_finalize receipt. Never synthesizes audio or infers a summary from transcript text.".into(),
+            input_schema: json!({
+                "type": "object", "required": ["task_group_id"],
+                "properties": {"task_group_id": {"type": "string", "minLength": 1, "maxLength": 128}}
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let task_group_id = args.get("task_group_id").and_then(Value::as_str).unwrap_or("");
+        if !valid_task_group_id(task_group_id) {
+            return Ok(ToolResult::error("task_summary_completion_check task_group_id must be 1..128 ASCII characters from [A-Za-z0-9_-]"));
+        }
+        let receipt_path = task_finalizer_receipt_path(task_group_id);
+        let lock_path = task_finalizer_receipt_dir().join(format!(".{task_group_id}.lock"));
+        if receipt_path.exists() {
+            let receipt = match std::fs::read_to_string(&receipt_path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
+                Some(value) if value.get("action_tool").and_then(Value::as_str) == Some("task_summary_finalize")
+                    && value.get("task_group_id").and_then(Value::as_str) == Some(task_group_id)
+                    && value.get("finalizer_status").and_then(Value::as_str) == Some("recorded") => value,
+                _ => return Ok(ToolResult::json_text(&json!({"task_group_id": task_group_id, "gate": "corrupt", "ready": false, "receipt_path": receipt_path}))),
+            };
+            return Ok(ToolResult::json_text(&json!({"task_group_id": task_group_id, "gate": "ready", "ready": true, "receipt_path": receipt_path, "receipt": receipt})));
+        }
+        let gate = if lock_path.exists() { "in_progress" } else { "missing" };
+        Ok(ToolResult::json_text(&json!({"task_group_id": task_group_id, "gate": gate, "ready": false, "receipt_path": receipt_path})))
     }
 }
 
