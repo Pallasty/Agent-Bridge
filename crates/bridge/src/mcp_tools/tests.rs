@@ -10284,6 +10284,10 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         schemas.iter().any(|s| s.name == "task_summary_completion_check"),
         "task_summary_completion_check must register under the all profile"
     );
+    assert!(
+        schemas.iter().any(|s| s.name == "voice_summary_policy"),
+        "voice_summary_policy must register under the all profile"
+    );
     let task_summary_schema = schemas
         .iter()
         .find(|s| s.name == "task_summary_finalize")

@@ -462,6 +462,80 @@ fn task_finalizer_receipt_path(task_group_id: &str) -> PathBuf {
     task_finalizer_receipt_dir().join(format!("{task_group_id}.json"))
 }
 
+fn voice_summary_policy_path() -> PathBuf {
+    std::env::var_os("AGENT_BRIDGE_VOICE_SUMMARY_POLICY_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::present::presentations_dir().join("voice-summary-policy.json"))
+}
+
+fn load_voice_summary_policy() -> &'static str {
+    // The current default is deliberately compiled-safe. Persistence is read by
+    // the policy tool and by future finalizer/playback routing in one place.
+    "click"
+}
+
+pub struct VoiceSummaryPolicyTool {
+    _hub: Hub,
+}
+
+impl VoiceSummaryPolicyTool {
+    pub fn new(hub: Hub) -> Self { Self { _hub: hub } }
+}
+
+#[async_trait]
+impl McpTool for VoiceSummaryPolicyTool {
+    fn name(&self) -> &'static str { "voice_summary_policy" }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read or persist the task-summary voice policy. Default is click. auto is reserved for explicit speaker playback integration and is never silently treated as click.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string", "enum": ["status", "set"], "default": "status"},
+                    "mode": {"type": "string", "enum": ["click", "auto", "off"], "description": "Required for operation=set."}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let operation = args.get("operation").and_then(Value::as_str).unwrap_or("status");
+        let path = voice_summary_policy_path();
+        if operation == "set" {
+            let mode = args.get("mode").and_then(Value::as_str).unwrap_or("");
+            if !matches!(mode, "click" | "auto" | "off") {
+                return Ok(ToolResult::error("voice_summary_policy mode must be click|auto|off"));
+            }
+            if let Some(parent) = path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    return Ok(ToolResult::error(format!("cannot create policy directory: {e}")));
+                }
+            }
+            let staged = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4()));
+            let payload = json!({"schema": "agent_bridge.voice_summary_policy.v1", "mode": mode, "auto_play_available": false});
+            let write_result = serde_json::to_vec_pretty(&payload)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| std::fs::write(&staged, bytes).map_err(|e| e.to_string()))
+                .and_then(|_| std::fs::rename(&staged, &path).map_err(|e| e.to_string()));
+            if let Err(e) = write_result {
+                let _ = std::fs::remove_file(&staged);
+                return Ok(ToolResult::error(format!("cannot persist voice summary policy: {e}")));
+            }
+            return Ok(ToolResult::json_text(&json!({"operation": "set", "mode": mode, "policy_file": path, "auto_play_available": false})));
+        }
+        if operation != "status" {
+            return Ok(ToolResult::error("voice_summary_policy operation must be status|set"));
+        }
+        let (mode, source) = match std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
+            Some(value) => (value.get("mode").and_then(Value::as_str).unwrap_or(load_voice_summary_policy()).to_string(), "persisted"),
+            None => (load_voice_summary_policy().to_string(), "default"),
+        };
+        Ok(ToolResult::json_text(&json!({"operation": "status", "mode": mode, "source": source, "policy_file": path, "auto_play_available": false})))
+    }
+}
+
 #[async_trait]
 impl McpTool for TaskSummaryFinalizeTool {
     fn name(&self) -> &'static str { "task_summary_finalize" }
