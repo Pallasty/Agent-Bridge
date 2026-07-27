@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D23-CAPACITY-ATTESTATION-D64-V1",
+  "source_pins": {
+    "fh_l8_full_resource_envelope_d23_result.json": "8116d6f4ef76c7f9253629e99c80579add77742a016bd6494211dd63e8ee5dec",
+    "fh_l8_integrated_resource_envelope_d61_result.json": "4c1fa69a5572e7271096dc77cea339eae5bacbfee631e2399e66065c98cae6f2",
+    "fh_l8_closure_evidence_intake_d63_contract.json": "864c00c8b81ff48a925c7410950cc203e325137045b6c7c8f1251c0f4f24f860"
+  },
+  "reservation": {
+    "path": "/Data/CascadeProjects/.ab-reservations/fh-l8-d23-capacity-reservation-v1.bin",
+    "directory_mode": "0700",
+    "file_mode": "0600",
+    "required_bytes": 3110572064,
+    "required_blocks_512_or_more": 6081196,
+    "owner_uid": 1000,
+    "owner_gid": 1000,
+    "reversible": true
+  },
+  "authority": {
+    "capacity_attestation_admitted": false,
+    "external_resource_reservation_admitted": false,
+    "full53_execution_authorized": false,
+    "scientific_kernel_calls_executed": 0,
+    "packed_q3_reads": 0
+  },
+  "decision": "OBSERVED_D64_OWNER_LOCAL_CAPACITY_RESERVATION_NOT_EXTERNAL_ATTESTATION",
+  "next_gate": "D58_D59_D60_EVIDENCE_CLOSURE_BEFORE_D61_REVERIFY"
+}

@@ -2,6 +2,16 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D64 owner-local capacity observation
+
+- Revalidated the reversible owner-local reservation at
+  `/Data/CascadeProjects/.ab-reservations/fh-l8-d23-capacity-reservation-v1.bin`: exact
+  3,110,572,064 logical bytes, 6,081,320 allocated 512-byte blocks, mode 0600 and uid/gid 1000.
+- Recorded it as an observation only. It is not an external attestation, does not close D23 in D62,
+  and does not alter D58/D59/D60 or full53 authority.
+- D64 allocator proof interface remains empty for all eight variables; next gate is
+  `D58_D59_D60_EVIDENCE_CLOSURE_BEFORE_D61_REVERIFY`.
+
 ## 2026-07-26 — FH-L8 D60 premeasurement runtime-rule disposition
 
 - Bound D51 operation populations to the only two admissible runtime-rule forms and explicitly
