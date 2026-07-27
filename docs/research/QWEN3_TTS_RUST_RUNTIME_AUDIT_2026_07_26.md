@@ -2,8 +2,8 @@
 
 Date: 2026-07-26 (updated 2026-07-27)
 
-Status: 1.7B synthesis and file-level intelligibility gates passed; human
-audibility confirmation remains open
+Status: disposable 1.7B synthesis, intelligibility, playback, and human
+audibility gates passed; production integration remains intentionally closed
 
 ## Decision
 
@@ -162,10 +162,10 @@ degraded detector, not as a rejection of the audio. `large-v3-turbo` exceeded
 the 45-second local STT timeout and remains unavailable for this short gate.
 
 The exact artifact was then sent once to `/usr/bin/afplay`; the process exited
-zero after 4.649 seconds. This proves only that the local player completed its
-process lifetime. It does not prove that the full utterance reached the
-headphones or that a human heard it. Human confirmation is the remaining
-last-mile gate.
+zero after 4.649 seconds. The owner reported hearing this artifact and judged
+the voice "非常棒！柔美！". This closes the disposable human-audibility and
+quality observation for this named artifact, while keeping the scope limited:
+it is not a claim of aggregate delivery reliability or production integration.
 
 ## Required next gate
 
@@ -178,9 +178,9 @@ last-mile gate.
    Done. Peak-memory measurement remains optional and unclaimed.
 5. ~~Run file-level STT as an intelligibility check.~~ Done with cached
    Whisper `base`, overlap `0.846`.
-6. Play the named artifact and obtain human audibility confirmation. Playback
-   process completion is recorded, but human audibility is intentionally not
-   inferred.
+6. ~~Play the named artifact and obtain human audibility confirmation.~~ Done:
+   `afplay` completed and the owner confirmed hearing the artifact as
+   "非常棒！柔美！".
 7. Only then design a default-off `qwen3-rust` Agent-Bridge backend. Keep
    generated models and audio outside Git.
 
