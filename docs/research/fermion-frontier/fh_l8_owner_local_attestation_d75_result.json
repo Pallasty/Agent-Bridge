@@ -1,0 +1,10 @@
+{
+  "status": "VERIFIED_D75_OWNER_LOCAL_ATTESTATION",
+  "owner_attestation_accepted": true,
+  "logical_bytes": 3110572064,
+  "allocated_blocks_512": 6081320,
+  "capacity_attestation_admitted": false,
+  "external_resource_reservation_admitted": false,
+  "full53_execution_authorized": false,
+  "decision": "LOCAL_D75_OWNER_ATTESTATION_ACCEPTED_EXTERNAL_EVIDENCE_STILL_REQUIRED"
+}
