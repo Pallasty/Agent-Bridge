@@ -431,6 +431,13 @@ All copied JSON files are research-only outputs. They contain no credentials.
   environment and authority checks.
 - `FH_L8_PRODUCTION_IO_PAGE_CACHE_D59_ZH.md`: Chinese NO-GO rationale and D60 handoff.
 
+## FH-L8 D64 owner-local capacity observation
+
+- `fh_l8_d23_capacity_attestation_d64.json` and `fh_l8_d23_capacity_attestation_d64.py`: live
+  file-length, allocated-block, mode and owner checks for the reversible local reservation.
+- `test_fh_l8_d23_capacity_attestation_d64.py`: live reservation observation regression.
+- The observation is not an external capacity attestation and cannot open D62.
+
 ## Claude source session
 
 - Session:
