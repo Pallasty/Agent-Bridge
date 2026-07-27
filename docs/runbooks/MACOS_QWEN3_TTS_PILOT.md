@@ -176,3 +176,30 @@ quality baseline: MPS for the Python pilot and Metal for the Rust pilot. ONNX, I
 INT4 exports are separate community-runtime experiments; they must reproduce the
 same Chinese expression corpus and physical-delivery acceptance before becoming an
 available backend. Do not select INT4 merely to reduce memory on this host.
+
+## Same-family GGUF candidate gate
+
+For a resource-constrained node, do not substitute a different acoustic model
+merely because it has a small ONNX graph. The first candidate is a community GGUF
+conversion of the *same* `Qwen3-TTS-12Hz-1.7B-CustomVoice` checkpoint, paired with
+the matching Qwen3-TTS tokenizer/codec. It is an experiment, not a replacement:
+the community runtime and conversion must independently prove speaker selection,
+instruction handling, 24 kHz output, intelligibility, and human acceptance.
+
+Use the isolated probe only after pinning a runtime binary and both model hashes:
+
+```sh
+python3 scripts/qwen3_gguf_candidate_probe.py \
+  --runtime /absolute/path/to/crispasr \
+  --talker /absolute/path/to/qwen3-tts-12hz-1.7b-customvoice-q8_0.gguf \
+  --codec /absolute/path/to/qwen3-tts-tokenizer-12hz.gguf \
+  --voice vivian \
+  --instruct "用温暖、自然、清晰的普通话播报。" \
+  --output /private/tmp/ab-qwen3-gguf-candidate.wav
+```
+
+The probe never downloads a model, starts a worker, alters the Qwen MPS service,
+or plays audio. A successful JSON receipt is only a prerequisite for same-prompt
+comparison against the accepted FP16/MPS artifact, synthesized-file STT, and a
+human hearing the exact GGUF WAV. Until those gates pass, this engine must report
+its own identity (for example `crispasr-gguf`) and remains default-off.
