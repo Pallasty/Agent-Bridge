@@ -1,0 +1,16 @@
+{
+  "admissible_runtime_rule_form_count": 2,
+  "decision": "NO_GO_D60_RUNTIME_RULE_ENVIRONMENT_AND_MARGIN_NOT_PRECOMMITTED",
+  "environment_field_count": 5,
+  "external_resource_reservation_admitted": false,
+  "forbidden_margin_source_count": 3,
+  "full53_execution_authorized": false,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "packed_q3_reads": 0,
+  "required_before_measurement_count": 4,
+  "scientific_kernel_calls_executed": 0,
+  "status": "VERIFIED_D60_PREMEASUREMENT_RUNTIME_RULE_ENVIRONMENT_AND_MARGIN_PENDING",
+  "timing_measurements_executed": 0,
+  "next_gate": "D61_INTEGRATED_RESOURCE_ENVELOPE_RECONCILIATION"
+}
