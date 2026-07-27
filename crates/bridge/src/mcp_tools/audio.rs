@@ -468,10 +468,14 @@ fn voice_summary_policy_path() -> PathBuf {
         .unwrap_or_else(|| crate::present::presentations_dir().join("voice-summary-policy.json"))
 }
 
-fn load_voice_summary_policy() -> &'static str {
-    // The current default is deliberately compiled-safe. Persistence is read by
-    // the policy tool and by future finalizer/playback routing in one place.
-    "click"
+fn load_voice_summary_policy() -> String {
+    let path = voice_summary_policy_path();
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|value| value.get("mode").and_then(Value::as_str).map(ToOwned::to_owned))
+        .filter(|mode| matches!(mode.as_str(), "click" | "auto" | "off"))
+        .unwrap_or_else(|| "click".to_string())
 }
 
 pub struct VoiceSummaryPolicyTool {
@@ -529,8 +533,8 @@ impl McpTool for VoiceSummaryPolicyTool {
             return Ok(ToolResult::error("voice_summary_policy operation must be status|set"));
         }
         let (mode, source) = match std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
-            Some(value) => (value.get("mode").and_then(Value::as_str).unwrap_or(load_voice_summary_policy()).to_string(), "persisted"),
-            None => (load_voice_summary_policy().to_string(), "default"),
+            Some(value) => (value.get("mode").and_then(Value::as_str).filter(|mode| matches!(*mode, "click" | "auto" | "off")).unwrap_or("click").to_string(), "persisted"),
+            None => (load_voice_summary_policy(), "default"),
         };
         Ok(ToolResult::json_text(&json!({"operation": "status", "mode": mode, "source": source, "policy_file": path, "auto_play_available": false})))
     }
@@ -575,6 +579,16 @@ impl McpTool for TaskSummaryFinalizeTool {
         if summary.is_empty() {
             return Ok(ToolResult::error("task_summary_finalize requires a non-empty summary"));
         }
+        let policy = load_voice_summary_policy();
+        if policy == "off" {
+            return Ok(ToolResult::json_text(&json!({
+                "action_tool": "task_summary_finalize", "task_group_id": task_group_id,
+                "finalizer_status": "suppressed", "status": status, "summary": summary,
+                "voice_delivery_mode": "off", "voice_summary": Value::Null,
+                "final_response_appendix_markdown": Value::Null,
+                "hook_contract": "Voice summary policy is off; no audio artifact was requested."
+            })));
+        }
         let receipt_dir = task_finalizer_receipt_dir();
         let receipt_path = task_finalizer_receipt_path(task_group_id);
         let lock_path = receipt_dir.join(format!(".{task_group_id}.lock"));
@@ -602,7 +616,25 @@ impl McpTool for TaskSummaryFinalizeTool {
                 return Err(e);
             }
         };
-        let voice = tool_result_first_json(&voice_result).unwrap_or_else(|| json!({"status": "error", "detail": "voice_summary returned no JSON"}));
+        let mut voice = tool_result_first_json(&voice_result).unwrap_or_else(|| json!({"status": "error", "detail": "voice_summary returned no JSON"}));
+        let mut playback_requested = false;
+        if policy == "auto" && voice.get("status").and_then(Value::as_str) == Some("rendered") {
+            if let Some(audio_file) = voice.get("audio_file").and_then(Value::as_str) {
+                playback_requested = true;
+                let playback = std::process::Command::new("paplay").arg(audio_file).output();
+                let (play_ok, detail) = match playback {
+                    Ok(output) if output.status.success() => (true, "paplay completed; physical audibility remains unverified".to_string()),
+                    Ok(output) => (false, format!("paplay failed with exit code {:?}", output.status.code())),
+                    Err(error) => (false, format!("paplay unavailable: {error}")),
+                };
+                if let Some(object) = voice.as_object_mut() {
+                    object.insert("playback_requested".to_string(), json!(true));
+                    object.insert("play_ok".to_string(), json!(play_ok));
+                    object.insert("playback_verify_status".to_string(), json!("unverified"));
+                    object.insert("playback_detail".to_string(), json!(detail));
+                }
+            }
+        }
         let click_markdown = task_summary_click_appendix(&voice);
         let rendered = click_markdown.is_some();
         let payload = json!({
@@ -611,7 +643,8 @@ impl McpTool for TaskSummaryFinalizeTool {
             "finalizer_status": "recorded",
             "status": status,
             "summary": summary,
-            "voice_delivery_mode": "click",
+            "voice_delivery_mode": policy,
+            "playback_requested": playback_requested,
             "voice_summary": voice,
             "final_response_appendix_markdown": click_markdown,
             "final_response_contract": "Append final_response_appendix_markdown only when non-null. Do not synthesize a link from arbitrary transcript text.",
