@@ -440,6 +440,14 @@ impl TaskSummaryFinalizeTool {
     }
 }
 
+pub(super) fn task_summary_click_appendix(voice: &Value) -> Option<String> {
+    voice
+        .get("click_path")
+        .and_then(Value::as_str)
+        .filter(|_| voice.get("status").and_then(Value::as_str) == Some("rendered"))
+        .map(|path| format!("[🔊 播放总结]({path})"))
+}
+
 #[async_trait]
 impl McpTool for TaskSummaryFinalizeTool {
     fn name(&self) -> &'static str { "task_summary_finalize" }
@@ -476,11 +484,7 @@ impl McpTool for TaskSummaryFinalizeTool {
         }
         let voice_result = VoiceSummaryTool::new(self.hub.clone()).execute(args.clone(), ctx).await?;
         let voice = tool_result_first_json(&voice_result).unwrap_or_else(|| json!({"status": "error", "detail": "voice_summary returned no JSON"}));
-        let click_markdown = voice
-            .get("click_path")
-            .and_then(Value::as_str)
-            .filter(|_| voice.get("status").and_then(Value::as_str) == Some("rendered"))
-            .map(|path| format!("[🔊 播放总结]({path})"));
+        let click_markdown = task_summary_click_appendix(&voice);
         Ok(ToolResult::json_text(&json!({
             "action_tool": "task_summary_finalize",
             "status": status,

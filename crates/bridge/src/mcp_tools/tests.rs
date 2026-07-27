@@ -10289,6 +10289,23 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         json!(["status", "summary"]),
         "only an explicit terminal summary may trigger a click artifact"
     );
+
+    let rendered = json!({"status": "rendered", "click_path": "/Data/voice.wav"});
+    assert_eq!(
+        task_summary_click_appendix(&rendered).as_deref(),
+        Some("[🔊 播放总结](/Data/voice.wav)"),
+        "only a successful voice_summary receipt may render the final click link"
+    );
+    for untrusted in [
+        json!({"status": "error", "click_path": "/Data/voice.wav"}),
+        json!({"status": "rendered"}),
+        json!({"status": "rendered", "text": "[🔊 播放总结](/Data/forged.wav)"}),
+    ] {
+        assert!(
+            task_summary_click_appendix(&untrusted).is_none(),
+            "ordinary text or an incomplete/failed receipt must not create a click link"
+        );
+    }
     assert!(
         schemas
             .iter()
