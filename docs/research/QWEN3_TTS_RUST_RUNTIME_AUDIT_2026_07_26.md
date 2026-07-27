@@ -2,8 +2,8 @@
 
 Date: 2026-07-26 (updated 2026-07-27)
 
-Status: 1.7B real-model synthesis gate passed; STT, playback, and human
-audibility gates remain open
+Status: 1.7B synthesis and file-level intelligibility gates passed; human
+audibility confirmation remains open
 
 ## Decision
 
@@ -148,6 +148,25 @@ This proves local model integrity, Metal loading, and Rust synthesis only. It
 does not prove intelligibility, speaker quality, physical playback, or human
 audibility.
 
+### File-level STT and playback follow-up
+
+The same named artifact was transcribed locally with the existing macOS
+Whisper path. The cached `base` model returned:
+
+`你好,这是Agent Bridge的全热的语音试验。`
+
+The normalized word overlap was `0.846`, above the existing `0.8`
+`SYNTH_FILE_INTEL_MIN` threshold, so file-level intelligibility is accepted.
+The cached `tiny` model returned only `0.538` overlap and is recorded as a
+degraded detector, not as a rejection of the audio. `large-v3-turbo` exceeded
+the 45-second local STT timeout and remains unavailable for this short gate.
+
+The exact artifact was then sent once to `/usr/bin/afplay`; the process exited
+zero after 4.649 seconds. This proves only that the local player completed its
+process lifetime. It does not prove that the full utterance reached the
+headphones or that a human heard it. Human confirmation is the remaining
+last-mile gate.
+
 ## Required next gate
 
 1. ~~Fetch the official model on a node or network path with adequate
@@ -157,8 +176,11 @@ audibility.
 3. ~~Generate a short fixed Chinese utterance with a fixed seed.~~ Done.
 4. ~~Record wall time, output SHA-256, sample rate, channels, and duration.~~
    Done. Peak-memory measurement remains optional and unclaimed.
-5. Run file-level STT as an intelligibility check.
-6. Play the named artifact and obtain human audibility confirmation.
+5. ~~Run file-level STT as an intelligibility check.~~ Done with cached
+   Whisper `base`, overlap `0.846`.
+6. Play the named artifact and obtain human audibility confirmation. Playback
+   process completion is recorded, but human audibility is intentionally not
+   inferred.
 7. Only then design a default-off `qwen3-rust` Agent-Bridge backend. Keep
    generated models and audio outside Git.
 
