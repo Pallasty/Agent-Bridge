@@ -1,0 +1,14 @@
+{
+  "external_resource_reservation_admitted": false,
+  "fixed_io_lifetime_count": 4,
+  "full53_execution_authorized": false,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "packed_q3_reads": 0,
+  "production_io_executed": false,
+  "required_closure_item_count": 5,
+  "scientific_kernel_calls_executed": 0,
+  "status": "VERIFIED_D59_PRODUCTION_IO_LIFETIME_PAGE_CACHE_BOUND_INCOMPLETE",
+  "decision": "NO_GO_D59_PAGE_CACHE_BOUND_MISSING_ENVIRONMENT_CONTRACT",
+  "next_gate": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"
+}

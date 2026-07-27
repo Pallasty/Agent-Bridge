@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-PRODUCTION-IO-PAGE-CACHE-D59-V1",
+  "analysis_class": "SOURCE_PINNED_PRODUCTION_IO_LIFETIME_PAGE_CACHE_BOUND_INCOMPLETE",
+  "source_pins": {
+    "fh_l8_resource_closure_plan_d56_contract.json": "3d3e5b7ef396a87daa4faa411e967b89522e980be3777bcc20bcab08b1b2c583",
+    "fh_l8_full53_streaming_lifetime_d51_contract.json": "8def9ebd3372e6cc1fbc810a75abf663c127643e6454f07a0aafdc94f6c9d83b",
+    "fh_l8_full53_streaming_lifetime_d51_result.json": "aa222f7682be2dc0f5a2848583b555e37100137ec4ddfaef64234c7b86ef77b1",
+    "fh_l8_production_streaming_adapter_d57_contract.json": "c325d515690ee00f538e78750d10ee6e05277af2bbf568c0bc8e3038fe9cded1",
+    "fh_l8_live_allocation_bound_d58_contract.json": "51d6708f0779a29026b95c39782d8a86f9e7e2b460fbccb8831f16bf82c5c98c"
+  },
+  "io_lifetimes": [
+    {"phase":"source_admission","operation":"read_source_checkpoint","bytes":"6819168","page_cache_state":"clean_file_pages_unbounded_without_environment_contract"},
+    {"phase":"kernel_and_spill","operation":"write_partition_spills","bytes":"1534312800","page_cache_state":"dirty_or_writeback_file_pages_unbounded_without_environment_contract"},
+    {"phase":"partition_external_merge","operation":"read_old_generation_and_write_new_generation","bytes":"2*1534312800","page_cache_state":"two_generations_plus_writeback_unbounded_without_environment_contract"},
+    {"phase":"target_publication","operation":"stream_stage_then_atomic_publish","bytes":"target_size_unknown","page_cache_state":"target_file_pages_unbounded_without_target_and_environment_contract"}
+  ],
+  "fixed_policy": {
+    "partition_count": 256,
+    "maximum_merge_fan_in": 32,
+    "simultaneous_spill_generations": 2,
+    "old_runs_deleted_before_terminal_receipt": false,
+    "writeback_and_fsync_policy": "UNSPECIFIED_BLOCKING",
+    "page_cache_environment_contract": "MISSING"
+  },
+  "required_to_close": [
+    "source_pinned_os_and_filesystem_writeback_policy",
+    "cgroup_file_page_accounting_and_limit_contract",
+    "target_size_upper_bound",
+    "fsync_and_dirty_page_lifetime_rule",
+    "independent_checker_recomputing_page_cache_expression"
+  ],
+  "forbidden_claims": [
+    "spill_file_bytes_equal_page_cache_peak",
+    "D54R_cgroup_peak_bounds_production_page_cache",
+    "host_observation_is_cross_host_page_cache_bound",
+    "numeric_peak_memory_proven"
+  ],
+  "authority": {
+    "production_io_executed": false,
+    "scientific_kernel_calls_executed": 0,
+    "packed_q3_reads": 0,
+    "numeric_peak_memory_proven": false,
+    "numeric_runtime_seconds_proven": false,
+    "external_resource_reservation_admitted": false,
+    "full53_execution_authorized": false
+  },
+  "decision": "NO_GO_D59_PAGE_CACHE_BOUND_MISSING_ENVIRONMENT_CONTRACT",
+  "next_gate": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"
+}

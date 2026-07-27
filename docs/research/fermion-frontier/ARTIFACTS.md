@@ -423,6 +423,14 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - `test_fh_l8_live_allocation_bound_d58.py`: variable, merge-lifetime and authority fail-closed tests.
 - `FH_L8_LIVE_ALLOCATION_BOUND_D58_ZH.md`: Chinese scope and nonclaim summary.
 
+## FH-L8 D59 production I/O/page-cache disposition
+
+- `fh_l8_production_io_page_cache_d59_contract.json`: four I/O lifetimes, fixed merge policy,
+  missing-environment disposition and closure requirements.
+- `fh_l8_production_io_page_cache_d59.py`, result and tests: fail-closed phase, two-generation,
+  environment and authority checks.
+- `FH_L8_PRODUCTION_IO_PAGE_CACHE_D59_ZH.md`: Chinese NO-GO rationale and D60 handoff.
+
 ## Claude source session
 
 - Session:
