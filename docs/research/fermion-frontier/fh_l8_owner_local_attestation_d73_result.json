@@ -1,0 +1,8 @@
+{
+  "decision": "D73_OWNER_LOCAL_WORKFLOW_READY_OWNER_CONFIRMATION_REQUIRED",
+  "external_contact_required": false,
+  "independent_check_count": 4,
+  "owner_attestation_accepted": false,
+  "owner_role_count": 1,
+  "status": "VERIFIED_D73_OWNER_LOCAL_ATTESTATION_TEMPLATE"
+}
