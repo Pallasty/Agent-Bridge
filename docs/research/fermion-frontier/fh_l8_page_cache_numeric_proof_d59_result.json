@@ -1,0 +1,11 @@
+{
+  "status": "VERIFIED_D59_PAGE_CACHE_PROOF_FAIL_CLOSED",
+  "decision": "NO_GO_D59_PAGE_CACHE_INPUTS_INCOMPLETE",
+  "phase_count": 4,
+  "missing_phase_count": 4,
+  "missing_phases": ["source_admission", "kernel_and_spill", "partition_external_merge", "target_publication"],
+  "recomputed_peak_bytes": null,
+  "numeric_peak_memory_proven": false,
+  "production_io_executed": false,
+  "full53_execution_authorized": false
+}
