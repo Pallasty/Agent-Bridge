@@ -12,7 +12,9 @@ import os
 import sys
 
 
-DEFAULT_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+# The 1.7B CustomVoice checkpoint is the expression-control baseline. The
+# smaller 0.6B checkpoint remains caller-selectable but is not the default.
+DEFAULT_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
 DEFAULT_SPEAKER = "Serena"
 
 
