@@ -1,0 +1,10 @@
+{
+  "status": "VERIFIED_D58_NUMERIC_PROOF_FAIL_CLOSED",
+  "decision": "NO_GO_D58_NUMERIC_INPUTS_INCOMPLETE",
+  "variable_count": 8,
+  "missing_variable_count": 8,
+  "missing_variables": ["R_python_runtime_base", "A_sector_action_dictionary", "A_canonical_info_transient", "A_basis_images_transient", "A_fraction_objects", "A_reduced_column_dictionary", "A_partition_writer_state", "A_sort_key_heap"],
+  "recomputed_peak_bytes": null,
+  "numeric_peak_memory_proven": false,
+  "full53_execution_authorized": false
+}
