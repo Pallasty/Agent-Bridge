@@ -10273,6 +10273,10 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         "present_voice must register under the all profile"
     );
     assert!(
+        schemas.iter().any(|s| s.name == "voice_summary"),
+        "voice_summary must register under the all profile"
+    );
+    assert!(
         schemas
             .iter()
             .any(|s| s.name == "present_voice_confirm_audibility"),
@@ -10294,8 +10298,8 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         .expect("present_voice schema");
     assert_eq!(
         voice_schema.input_schema["properties"]["backend"]["enum"],
-        json!(["tone", "kokoro", "piper", "say"]),
-        "macOS native say must be an explicit backend, not a hidden kokoro alias"
+        json!(["tone", "kokoro", "piper", "sherpa", "say"]),
+        "all speech backends, including Sherpa and macOS say, must be explicit"
     );
     assert_eq!(
         voice_schema.input_schema["properties"]["capture_channel"]["enum"],

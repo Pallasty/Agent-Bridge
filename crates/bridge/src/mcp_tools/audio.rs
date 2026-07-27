@@ -341,6 +341,92 @@ impl McpTool for PresentVoiceTool {
     }
 }
 
+/// Render a concise task summary into a durable, click-to-play audio artifact.
+/// Unlike `present_voice`, this tool never emits audio to a sink: it is the
+/// default-safe completion path for a task-group final summary.
+pub struct VoiceSummaryTool {
+    _hub: Hub,
+}
+
+impl VoiceSummaryTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for VoiceSummaryTool {
+    fn name(&self) -> &'static str {
+        "voice_summary"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Render a task-group final summary as a durable click-to-play WAV. This default-safe tool never plays audio and makes no output-bus or speaker-audibility claim. Use present_voice only for explicit playback.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["summary"],
+                "properties": {
+                    "summary": {"type": "string", "minLength": 1, "description": "Concise, user-safe final task summary to render. Do not include secrets or raw logs."},
+                    "backend": {"type": "string", "enum": ["sherpa", "kokoro", "piper"], "default": "sherpa"},
+                    "voice": {"type": "string", "default": "narrator_calm", "description": "Sherpa voice-map name or backend-specific voice name."},
+                    "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0},
+                    "synth_bin": {"type": "string", "description": "Explicit TTS binary. Sherpa requires ab-sherpa-tts-synth."},
+                    "cwd": {"type": "string", "description": "Repo root used only to resolve scripts/audio_embody.py."},
+                    "script_path": {"type": "string", "description": "Explicit audio_embody.py path for tests or alternate checkouts."}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let summary = args.get("summary").and_then(Value::as_str).unwrap_or("").trim();
+        if summary.is_empty() {
+            return Ok(ToolResult::error("voice_summary requires a non-empty summary"));
+        }
+        if summary.chars().count() > 1200 {
+            return Ok(ToolResult::error("voice_summary summary exceeds 1200 characters; provide a concise final summary"));
+        }
+        let backend = args.get("backend").and_then(Value::as_str).unwrap_or("sherpa");
+        let voice = args.get("voice").and_then(Value::as_str).unwrap_or("narrator_calm");
+        let speed = args.get("speed").and_then(Value::as_f64).unwrap_or(1.0).clamp(0.5, 2.0);
+        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
+        let script = present_voice_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(ToolResult::error(format!("audio_embody.py not found at {}", script.display())));
+        }
+        let output_dir = crate::present::presentations_dir().join("voice-summaries");
+        let output_file = output_dir.join(format!("voice-summary-{}.wav", uuid::Uuid::new_v4()));
+        let mut cmd = killable_command(std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()));
+        cmd.arg(&script).arg("--json").arg("--mode").arg("render")
+            .arg("--text").arg(summary).arg("--voice").arg(voice)
+            .arg("--speed").arg(format!("{speed}")).arg("--synth-backend").arg(backend)
+            .arg("--output-file").arg(&output_file);
+        push_optional_str_arg(&mut cmd, &args, "synth_bin", "--synth-bin");
+        cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        let output = match tokio::time::timeout(Duration::from_millis(120_000), cmd.output()).await {
+            Err(_) => return Ok(ToolResult::error("voice_summary synthesis exceeded 120000 ms")),
+            Ok(Err(e)) => return Ok(ToolResult::error(format!("voice_summary spawn failed: {e}"))),
+            Ok(Ok(output)) => output,
+        };
+        let (stdout, _) = lossy_truncate(&output.stdout);
+        let (stderr, _) = lossy_truncate(&output.stderr);
+        let mut result: Value = match serde_json::from_str(&stdout) {
+            Ok(value) => value,
+            Err(e) => return Ok(ToolResult::error(format!("voice_summary returned invalid JSON: {e}; stderr={stderr}"))),
+        };
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("action_tool".to_string(), json!("voice_summary"));
+            obj.insert("delivery_mode".to_string(), json!("click"));
+            obj.insert("click_path".to_string(), json!(output_file));
+            obj.insert("playback_requested".to_string(), json!(false));
+            obj.insert("mcp_wrapper".to_string(), json!({"tool": "voice_summary", "exit_code": output.status.code().unwrap_or(-1), "stderr_present": !stderr.is_empty()}));
+        }
+        Ok(ToolResult::json_text(&result))
+    }
+}
+
 pub(super) fn present_voice_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
         return PathBuf::from(path);

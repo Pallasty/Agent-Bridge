@@ -47012,6 +47012,14 @@ pub(crate) fn build_registry_with_policy_surface(
         Tier::Niche,
         Arc::new(PresentVoiceTool::new(hub.clone())),
     );
+    // Default-safe task-final summary delivery: renders an audio artifact for an
+    // explicit click, without emitting it to any physical output device.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(VoiceSummaryTool::new(hub.clone())),
+    );
     // Human audibility confirmation for one existing voice outcome. Separate
     // append-only sidecar; never rewrites the machine receipt or generalises
     // across runs. Niche and explicitly scoped.
