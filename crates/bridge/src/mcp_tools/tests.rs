@@ -10280,6 +10280,15 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         schemas.iter().any(|s| s.name == "task_summary_finalize"),
         "task_summary_finalize must register under the all profile"
     );
+    let task_summary_schema = schemas
+        .iter()
+        .find(|s| s.name == "task_summary_finalize")
+        .expect("task_summary_finalize schema");
+    assert_eq!(
+        task_summary_schema.input_schema["required"],
+        json!(["status", "summary"]),
+        "only an explicit terminal summary may trigger a click artifact"
+    );
     assert!(
         schemas
             .iter()

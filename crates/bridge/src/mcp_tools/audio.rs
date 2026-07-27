@@ -476,12 +476,19 @@ impl McpTool for TaskSummaryFinalizeTool {
         }
         let voice_result = VoiceSummaryTool::new(self.hub.clone()).execute(args.clone(), ctx).await?;
         let voice = tool_result_first_json(&voice_result).unwrap_or_else(|| json!({"status": "error", "detail": "voice_summary returned no JSON"}));
+        let click_markdown = voice
+            .get("click_path")
+            .and_then(Value::as_str)
+            .filter(|_| voice.get("status").and_then(Value::as_str) == Some("rendered"))
+            .map(|path| format!("[🔊 播放总结]({path})"));
         Ok(ToolResult::json_text(&json!({
             "action_tool": "task_summary_finalize",
             "status": status,
             "summary": summary,
             "voice_delivery_mode": "click",
             "voice_summary": voice,
+            "final_response_appendix_markdown": click_markdown,
+            "final_response_contract": "Append final_response_appendix_markdown only when non-null. Do not synthesize a link from arbitrary transcript text.",
             "hook_contract": "A completion hook may verify this action was called once for a terminal task group; it must not infer a summary from arbitrary transcript text."
         })))
     }
