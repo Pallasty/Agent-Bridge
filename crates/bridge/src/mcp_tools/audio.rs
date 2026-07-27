@@ -44,7 +44,7 @@ impl McpTool for PresentVoiceTool {
         ToolSchema {
             name: self.name().into(),
             description: "Output-expression lane, AUDIO embodiment. backend=tone (default) emits a known \
-                 tone; kokoro/piper use offline model TTS; say uses macOS native speech synthesis; qwen3 is an explicit, default-off external Qwen3-TTS CustomVoice adapter. \
+                 tone; kokoro/piper use offline model TTS; say uses macOS native speech synthesis; qwen3 is an explicit Python Qwen3-TTS adapter; qwen3-rust is an explicit, default-off local Rust adapter. \
                  Linux tone/model speech is played to an output sink and read back off the system bus (PipeWire \
                  sink .monitor loopback) to prove it reached the bus: tone uses a spectral-peak falsifier \
                  (Goertzel vs local floor); speech uses an energy-envelope cross-correlation falsifier (the \
@@ -54,15 +54,15 @@ impl McpTool for PresentVoiceTool {
                  Returns status (emitted|silent|mismatch|no_capture|error) plus an HONEST verified_to boundary. \
                  Writes a verified-outcome sidecar that flows into present_outcomes. capture_channel is \
                  sink_monitor, mic, or synth_file. Linux bus verification requires PipeWire + ffmpeg/paplay; \
-                 kokoro/piper need ab-tts-synth and their model assets; qwen3 needs an explicit isolated Python runtime and official model assets; say needs macOS /usr/bin/say and Whisper \
+                 kokoro/piper need ab-tts-synth and their model assets; qwen3 needs an explicit isolated Python runtime and official model assets; qwen3-rust additionally requires an enable flag, pinned local binary, complete local model directory, and integrity profile; say needs macOS /usr/bin/say and Whisper \
                  for synth_file verification. Opt-in (Niche)."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "say", "qwen3"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; say = macOS native TTS; qwen3 = explicit external Qwen3-TTS CustomVoice. Speech on macOS verifies only the synthesized file via STT."},
-                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, say, or qwen3."},
-                    "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Kokoro names use af_*/bf_*; macOS say accepts installed system voice names such as Samantha or Tingting."},
+                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "say", "qwen3", "qwen3-rust"], "default": "tone", "description": "tone = fixed-freq tone (default); kokoro/piper = offline model TTS; say = macOS native TTS; qwen3 = explicit Python Qwen3-TTS; qwen3-rust = default-off local Rust Qwen3-TTS integrity-gated adapter. Speech on macOS verifies only the synthesized file via STT."},
+                    "text": {"type": "string", "description": "Speech text; required for kokoro, piper, say, qwen3, or qwen3-rust."},
+                    "voice": {"type": "string", "default": "af_sarah", "description": "TTS voice. Kokoro names use af_*/bf_*; macOS say accepts installed system voice names such as Samantha or Tingting; qwen3-rust 1.7B uses lowercase names such as serena."},
                     "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0, "description": "Speech speed."},
                     "freq": {"type": "number", "minimum": 50, "maximum": 18000, "default": 440, "description": "backend=tone: tone frequency (Hz) whose presence on the bus is verified."},
                     "duration_ms": {"type": "integer", "minimum": 100, "maximum": 8000, "default": 1500},
@@ -71,12 +71,15 @@ impl McpTool for PresentVoiceTool {
                     "capture_channel": {"type": "string", "enum": ["sink_monitor", "mic", "synth_file"], "default": "sink_monitor", "description": "Readback channel: sink_monitor = PipeWire bus loopback; mic = acoustic input; synth_file = STT over the synthesized file (macOS, does not verify playback)."},
                     "intent": {"type": "string", "description": "What this emission is the outcome of (recorded in the outcome sidecar; does not affect playback)."},
                     "synth_bin": {"type": "string", "description": "backend=kokoro/piper: explicit ab-tts-synth path (else env AB_TTS_SYNTH_BIN)."},
-                    "qwen_instruct": {"type": "string", "description": "backend=qwen3: natural-language expression instruction, for example a calm, warm Mandarin delivery."},
+                    "qwen_instruct": {"type": "string", "description": "backend=qwen3/qwen3-rust: natural-language expression instruction, for example a calm, warm Mandarin delivery."},
                     "qwen_python": {"type": "string", "description": "backend=qwen3: explicit isolated Python 3.12 executable containing qwen-tts (else AB_QWEN3_TTS_PYTHON)."},
                     "qwen_model": {"type": "string", "description": "backend=qwen3: Qwen model id or local model directory; defaults to Qwen3-TTS 0.6B CustomVoice."},
+                    "qwen_rust_bin": {"type": "string", "description": "backend=qwen3-rust: explicit local qwen-tts executable (else AB_QWEN3_TTS_RUST_BIN). Requires AB_QWEN3_TTS_RUST_ENABLED=1."},
+                    "qwen_rust_model_dir": {"type": "string", "description": "backend=qwen3-rust: explicit complete local model directory (else AB_QWEN3_TTS_RUST_MODEL_DIR). No download or model lookup is performed."},
+                    "qwen_rust_profile": {"type": "string", "enum": ["0.6b-customvoice", "1.7b-customvoice"], "description": "backend=qwen3-rust: pinned size/SHA-256 integrity profile (else AB_QWEN3_TTS_RUST_PROFILE)."},
                     "verify_intelligibility": {"type": "boolean", "default": false, "description": "backend=kokoro/piper: ALSO transcribe the bus capture (whisper.cpp). synth_file already uses STT as its primary falsifier."},
                     "stt_bin": {"type": "string", "description": "verify_intelligibility: whisper.cpp CLI path (else env AB_TTS_STT_BIN)."},
-                    "stt_model": {"type": "string", "description": "verify_intelligibility: whisper ggml model path (else env AB_TTS_STT_MODEL)."},
+                    "stt_model": {"type": "string", "description": "Whisper model used by synth_file, or whisper.cpp model path for Linux verify_intelligibility (else env AB_TTS_STT_MODEL / AB_TTS_WHISPER_MODEL as applicable)."},
                     "cwd": {"type": "string", "description": "Repo root to resolve scripts/audio_embody.py."},
                     "script_path": {"type": "string", "description": "Explicit audio_embody.py path (tests/alternate checkouts)."}
                 }
@@ -177,10 +180,18 @@ impl McpTool for PresentVoiceTool {
             push_optional_str_arg(&mut cmd, &args, "qwen_instruct", "--qwen-instruct");
             push_optional_str_arg(&mut cmd, &args, "qwen_python", "--qwen-python");
             push_optional_str_arg(&mut cmd, &args, "qwen_model", "--qwen-model");
+            push_optional_str_arg(&mut cmd, &args, "qwen_rust_bin", "--qwen-rust-bin");
+            push_optional_str_arg(
+                &mut cmd,
+                &args,
+                "qwen_rust_model_dir",
+                "--qwen-rust-model-dir",
+            );
+            push_optional_str_arg(&mut cmd, &args, "qwen_rust_profile", "--qwen-rust-profile");
+            push_optional_str_arg(&mut cmd, &args, "stt_model", "--stt-model");
             if verify_intelligibility {
                 cmd.arg("--check-intelligibility");
                 push_optional_str_arg(&mut cmd, &args, "stt_bin", "--stt-bin");
-                push_optional_str_arg(&mut cmd, &args, "stt_model", "--stt-model");
             }
         } else {
             cmd.arg("--freq")
@@ -312,6 +323,15 @@ impl McpTool for PresentVoiceTool {
             "intelligibility": res.get("intelligibility"),
             "word_overlap": res.get("word_overlap"),
             "stt_transcript": res.get("stt_transcript"),
+            // Qwen provenance (present for qwen3/qwen3-rust; null otherwise)
+            "qwen_runtime": res.get("qwen_runtime"),
+            "qwen_model": res.get("qwen_model"),
+            "qwen_model_profile": res.get("qwen_model_profile"),
+            "qwen_model_revision": res.get("qwen_model_revision"),
+            "qwen_integrity_verified": res.get("qwen_integrity_verified"),
+            "qwen_binary": res.get("qwen_binary"),
+            "qwen_binary_sha256": res.get("qwen_binary_sha256"),
+            "qwen_instruct_applied": res.get("qwen_instruct_applied"),
             // tone-mode fields
             "freq": if is_speech { Value::Null } else { json!(freq) },
             "rms": res.get("rms"),

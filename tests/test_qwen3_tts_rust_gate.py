@@ -95,6 +95,26 @@ def test_command_is_fixed_to_metal_f16_and_local_model(tmp_path):
     assert command[-3:] == ["custom-voice", "--speaker", "Serena"]
 
 
+def test_command_places_optional_instruct_after_custom_voice_subcommand(tmp_path):
+    command = gate.build_command(
+        tmp_path / "qwen-tts",
+        tmp_path / "model",
+        tmp_path / "out.wav",
+        "你好",
+        "serena",
+        128,
+        42,
+        "柔和、温暖",
+    )
+    assert command[-5:] == [
+        "custom-voice",
+        "--speaker",
+        "serena",
+        "--instruct",
+        "柔和、温暖",
+    ]
+
+
 def test_success_requires_and_attests_a_nonempty_wav(tmp_path):
     model_dir = tmp_path / "model"
     specs = write_tiny_model(model_dir)
@@ -124,6 +144,7 @@ def test_success_requires_and_attests_a_nonempty_wav(tmp_path):
     assert report["output_evidence"]["sample_rate"] == 24000
     assert report["output_evidence"]["frames"] == 240
     assert len(report["output_evidence"]["sha256"]) == 64
+    assert len(report["binary_evidence"]["sha256"]) == 64
 
 
 def test_existing_output_is_never_overwritten(tmp_path):

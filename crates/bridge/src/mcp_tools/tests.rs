@@ -10294,9 +10294,15 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         .expect("present_voice schema");
     assert_eq!(
         voice_schema.input_schema["properties"]["backend"]["enum"],
-        json!(["tone", "kokoro", "piper", "say", "qwen3"]),
-        "macOS native say and explicit Qwen3 must not be hidden backend aliases"
+        json!(["tone", "kokoro", "piper", "say", "qwen3", "qwen3-rust"]),
+        "macOS native say and explicit Python/Rust Qwen3 must not be hidden backend aliases"
     );
+    for field in ["qwen_rust_bin", "qwen_rust_model_dir", "qwen_rust_profile"] {
+        assert!(
+            voice_schema.input_schema["properties"].get(field).is_some(),
+            "qwen3-rust must expose its explicit local configuration field {field}"
+        );
+    }
     assert_eq!(
         voice_schema.input_schema["properties"]["capture_channel"]["enum"],
         json!(["sink_monitor", "mic", "synth_file"]),
@@ -10405,6 +10411,107 @@ fn present_is_niche_opt_in_and_registers_under_all() {
             .any(|s| s.name == "lswr_outcome_admissions_ingest"),
         "lswr_outcome_admissions_ingest must stay out of codex-essential"
     );
+}
+
+#[tokio::test]
+async fn present_voice_qwen3_rust_forwards_explicit_paths_and_persists_provenance() {
+    let _env = PRESENTATIONS_DIR_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-present-voice-qwen3-rust-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &temp_dir);
+    let script = temp_dir.join("audio_embody.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+import sys
+print(json.dumps({
+    "status": "emitted",
+    "verify_status": "rendered_ok",
+    "verify_method": "synth_file_stt",
+    "verified_to": "synthesized audio file",
+    "not_verified": "physical transducer",
+    "synth_backend": "qwen3-rust",
+    "capture_channel": "synth_file",
+    "voice": "serena",
+    "qwen_runtime": "rust",
+    "qwen_model": "/models/qwen3",
+    "qwen_model_profile": "1.7b-customvoice",
+    "qwen_model_revision": "sha256:model",
+    "qwen_integrity_verified": True,
+    "qwen_binary": "/opt/qwen-tts",
+    "qwen_binary_sha256": "abc123",
+    "qwen_instruct_applied": True,
+    "argv": sys.argv[1:]
+}))
+"#,
+    )
+    .await
+    .expect("write script");
+
+    let tool = PresentVoiceTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "backend": "qwen3-rust",
+                "text": "你好",
+                "voice": "serena",
+                "capture_channel": "synth_file",
+                "qwen_instruct": "柔和、温暖",
+                "qwen_rust_bin": "/opt/qwen-tts",
+                "qwen_rust_model_dir": "/models/qwen3",
+                "qwen_rust_profile": "1.7b-customvoice",
+                "stt_model": "base",
+                "script_path": script.to_string_lossy()
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    let payload = result_text_as_json(&out);
+    let argv = payload["argv"].as_array().expect("argv");
+    let argv: Vec<&str> = argv.iter().filter_map(Value::as_str).collect();
+    for expected in [
+        "--qwen-rust-bin",
+        "/opt/qwen-tts",
+        "--qwen-rust-model-dir",
+        "/models/qwen3",
+        "--qwen-rust-profile",
+        "1.7b-customvoice",
+        "--stt-model",
+        "base",
+    ] {
+        assert!(argv.contains(&expected), "missing {expected}: {argv:?}");
+    }
+
+    let sidecar = temp_dir.join(
+        payload["outcome_sidecar"]
+            .as_str()
+            .expect("outcome sidecar"),
+    );
+    let outcome: Value = serde_json::from_str(
+        &tokio::fs::read_to_string(&sidecar)
+            .await
+            .expect("read sidecar"),
+    )
+    .expect("sidecar json");
+    assert_eq!(outcome["backend"], "qwen3-rust");
+    assert_eq!(outcome["qwen_runtime"], "rust");
+    assert_eq!(outcome["qwen_model_profile"], "1.7b-customvoice");
+    assert_eq!(outcome["qwen_integrity_verified"], true);
+    assert_eq!(outcome["qwen_binary_sha256"], "abc123");
+
+    std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
 #[test]

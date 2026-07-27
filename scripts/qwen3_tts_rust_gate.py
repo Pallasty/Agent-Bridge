@@ -97,8 +97,9 @@ def build_command(
     speaker: str,
     max_tokens: int,
     seed: int,
+    instruct: str | None = None,
 ) -> list[str]:
-    return [
+    command = [
         str(binary),
         "--model-path",
         str(model_dir),
@@ -120,6 +121,9 @@ def build_command(
         "--speaker",
         speaker,
     ]
+    if instruct:
+        command.extend(["--instruct", instruct])
+    return command
 
 
 def inspect_wav(path: Path) -> dict:
@@ -145,6 +149,7 @@ def run_gate(
     text: str = DEFAULT_TEXT,
     speaker: str | None = None,
     model_profile: str = DEFAULT_PROFILE,
+    instruct: str | None = None,
     max_tokens: int = 128,
     seed: int = 42,
     timeout_seconds: int = 900,
@@ -176,12 +181,16 @@ def run_gate(
     if not binary.is_file() or not os.access(binary, os.X_OK):
         report["reason"] = "binary_not_executable"
         return report
+    report["binary_evidence"] = {
+        "bytes": binary.stat().st_size,
+        "sha256": sha256_file(binary),
+    }
     if output.exists():
         report["reason"] = "output_already_exists"
         return report
 
     command = build_command(
-        binary, model_dir, output, text, selected_speaker, max_tokens, seed
+        binary, model_dir, output, text, selected_speaker, max_tokens, seed, instruct
     )
     started = time.monotonic()
     report["execution"] = {
@@ -250,6 +259,7 @@ def main() -> int:
     parser.add_argument("--text", default=DEFAULT_TEXT)
     parser.add_argument("--model-profile", choices=sorted(MODEL_PROFILES), default=DEFAULT_PROFILE)
     parser.add_argument("--speaker", default=None)
+    parser.add_argument("--instruct", default=None)
     parser.add_argument("--max-tokens", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--timeout-seconds", type=int, default=900)
@@ -261,6 +271,7 @@ def main() -> int:
         text=args.text,
         speaker=args.speaker,
         model_profile=args.model_profile,
+        instruct=args.instruct,
         max_tokens=max(1, args.max_tokens),
         seed=args.seed,
         timeout_seconds=max(1, args.timeout_seconds),

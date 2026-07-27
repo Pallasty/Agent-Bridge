@@ -2,8 +2,8 @@
 
 Date: 2026-07-26 (updated 2026-07-27)
 
-Status: disposable 1.7B synthesis, intelligibility, playback, and human
-audibility gates passed; production integration remains intentionally closed
+Status: default-off source/MCP integration and disposable 1.7B gates passed;
+merge, release deployment, and default enablement remain intentionally closed
 
 ## Decision
 
@@ -181,8 +181,9 @@ it is not a claim of aggregate delivery reliability or production integration.
 6. ~~Play the named artifact and obtain human audibility confirmation.~~ Done:
    `afplay` completed and the owner confirmed hearing the artifact as
    "非常棒！柔美！".
-7. Only then design a default-off `qwen3-rust` Agent-Bridge backend. Keep
-   generated models and audio outside Git.
+7. ~~Only then design a default-off `qwen3-rust` Agent-Bridge backend.~~ Done
+   at source level. Generated models and audio remain outside Git; merge,
+   release deployment, and runtime enablement remain separate gates.
 
 ## Offline gate implementation
 
@@ -215,3 +216,43 @@ attestation, existing-output preservation, timeout honesty, and the explicit
 1.7B profile. A negative run
 against the current incomplete disposable model returned
 `model_integrity_failed` with `execution.attempted=false`.
+
+## Default-off Agent-Bridge integration
+
+The source adapter is now implemented without replacing the Python reference:
+
+- `audio_embody.py` accepts `qwen3-rust` only when
+  `AB_QWEN3_TTS_RUST_ENABLED=1`;
+- binary, model directory, and profile are explicit arguments or environment
+  values; none are discovered or downloaded;
+- synthesis runs through `qwen3_tts_rust_gate.py`, including model and binary
+  SHA-256 evidence;
+- the existing synth-file STT and serialized `afplay` chain remains
+  authoritative;
+- `present_voice` exposes the explicit Rust fields only as a Niche/all-profile
+  surface and persists Rust/model/binary provenance in its outcome sidecar.
+
+Acceptance evidence:
+
+- 78 Python tests passed;
+- the targeted Rust schema and forwarding/provenance tests passed;
+- the debug `agent-bridge mcp` process accepted a real
+  `present_voice(backend=qwen3-rust)` request;
+- MCP result: `verify_status=rendered_ok`,
+  `qwen_integrity_verified=true`, Whisper-base overlap `0.846`;
+- outcome id: `voice_qwen3-rust_1785144641`;
+- binary SHA-256:
+  `c54614d90f882dcfcee9bef2a45f3ff389e6aa5e253a4ad8bfb6434158ac6b9a`.
+
+The honesty negative control also held: a different sentence produced
+Whisper-base overlap `0.786`, so the adapter returned `no_capture` despite
+successful Rust synthesis and `afplay` completion. No threshold was weakened.
+
+The remaining blockers are operational rather than adapter correctness:
+
+1. the patched Rust CLI is still a disposable external build, not a vendored or
+   released Agent-Bridge dependency;
+2. the upstream `HF_HOME` fix is not known to be accepted in a published
+   release;
+3. this branch has not been merged, release-built, deployed, or enabled in a
+   long-lived MCP process.
