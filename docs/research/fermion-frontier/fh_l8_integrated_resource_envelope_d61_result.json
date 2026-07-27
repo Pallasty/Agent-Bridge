@@ -1,0 +1,17 @@
+{
+  "decision": "NO_GO_D61_INTEGRATED_RESOURCE_ENVELOPE_INCOMPLETE",
+  "external_resource_reservation_admitted": false,
+  "full53_execution_authorized": false,
+  "next_gate": "D62_EXTERNAL_RESERVATION_AND_FULL53_AUTHORIZATION_DECISION_ONLY_AFTER_ALL_D61_CLOSURES",
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "object_measurements_executed": 0,
+  "packed_q3_reads": 0,
+  "phase_count": 4,
+  "production_io_executed": false,
+  "scratch_shortfall_bytes": 359759114,
+  "scientific_kernel_calls_executed": 0,
+  "status": "VERIFIED_D61_INTEGRATED_RESOURCE_ENVELOPE_INCOMPLETE",
+  "timing_measurements_executed": 0,
+  "unresolved_closure_count": 4
+}
