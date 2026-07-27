@@ -47020,6 +47020,12 @@ pub(crate) fn build_registry_with_policy_surface(
         Tier::Niche,
         Arc::new(VoiceSummaryTool::new(hub.clone())),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TaskSummaryFinalizeTool::new(hub.clone())),
+    );
     // Human audibility confirmation for one existing voice outcome. Separate
     // append-only sidecar; never rewrites the machine receipt or generalises
     // across runs. Niche and explicitly scoped.

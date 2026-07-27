@@ -427,6 +427,66 @@ impl McpTool for VoiceSummaryTool {
     }
 }
 
+/// Explicit task-group terminal action. This is intentionally separate from
+/// transcript reads and session maintenance: callers choose the exact summary
+/// that becomes user-facing text and optional click-to-play audio.
+pub struct TaskSummaryFinalizeTool {
+    hub: Hub,
+}
+
+impl TaskSummaryFinalizeTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for TaskSummaryFinalizeTool {
+    fn name(&self) -> &'static str { "task_summary_finalize" }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Finalize one task-group summary and render its default click-to-play audio artifact. This is the only intended completion trigger; it never plays sound.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["status", "summary"],
+                "properties": {
+                    "status": {"type": "string", "enum": ["completed", "failed", "waiting_for_user"]},
+                    "summary": {"type": "string", "minLength": 1, "description": "Final user-facing task summary."},
+                    "backend": {"type": "string", "enum": ["sherpa", "kokoro", "piper"], "default": "sherpa"},
+                    "voice": {"type": "string", "default": "narrator_calm"},
+                    "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0},
+                    "synth_bin": {"type": "string"},
+                    "cwd": {"type": "string"},
+                    "script_path": {"type": "string"}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let status = args.get("status").and_then(Value::as_str).unwrap_or("");
+        if !matches!(status, "completed" | "failed" | "waiting_for_user") {
+            return Ok(ToolResult::error("task_summary_finalize status must be completed|failed|waiting_for_user"));
+        }
+        let summary = args.get("summary").and_then(Value::as_str).unwrap_or("").trim();
+        if summary.is_empty() {
+            return Ok(ToolResult::error("task_summary_finalize requires a non-empty summary"));
+        }
+        let voice_result = VoiceSummaryTool::new(self.hub.clone()).execute(args.clone(), ctx).await?;
+        let voice = tool_result_first_json(&voice_result).unwrap_or_else(|| json!({"status": "error", "detail": "voice_summary returned no JSON"}));
+        Ok(ToolResult::json_text(&json!({
+            "action_tool": "task_summary_finalize",
+            "status": status,
+            "summary": summary,
+            "voice_delivery_mode": "click",
+            "voice_summary": voice,
+            "hook_contract": "A completion hook may verify this action was called once for a terminal task group; it must not infer a summary from arbitrary transcript text."
+        })))
+    }
+}
+
 pub(super) fn present_voice_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
         return PathBuf::from(path);

@@ -10277,6 +10277,10 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         "voice_summary must register under the all profile"
     );
     assert!(
+        schemas.iter().any(|s| s.name == "task_summary_finalize"),
+        "task_summary_finalize must register under the all profile"
+    );
+    assert!(
         schemas
             .iter()
             .any(|s| s.name == "present_voice_confirm_audibility"),
