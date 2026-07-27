@@ -6,11 +6,11 @@ silently substitutes macOS `say` when Qwen is unavailable.
 
 ## Runtime boundary
 
-Keep PyTorch and `qwen-tts` in an isolated Python 3.12 environment. The current
-pilot environment is deliberately outside the repository:
+Keep PyTorch and `qwen-tts` in an isolated Python 3.12 environment. The
+persistent worker uses this user-local runtime (outside the repository):
 
 ```sh
-export AB_QWEN3_TTS_PYTHON=/private/tmp/ab-qwen3tts-pilot/bin/python
+export AB_QWEN3_TTS_PYTHON="$HOME/.local/share/agent-bridge/qwen3-tts-venv/bin/python"
 export AB_QWEN3_TTS_MODEL=/Users/pallasting/.cache/modelscope/models/Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master
 export AB_QWEN3_TTS_DEVICE=mps
 ```
@@ -22,6 +22,11 @@ current macOS host has a complete ModelScope snapshot at the path above. Point
 `AB_QWEN3_TTS_MODEL` at a complete local snapshot rather than relying on an
 implicit first-request download. Do not add weights, virtual environments, or
 generated WAV files to Git.
+
+The former `/private/tmp/ab-qwen3tts-pilot` path is suitable only for one-shot
+experiments: temporary storage can be cleared by the OS. The installer defaults
+to the user-local runtime above. It can still be overridden with
+`AB_QWEN3_TTS_PYTHON` for an explicitly managed runtime.
 
 The adapter uses MPS with `float16` when available and intentionally does not
 request FlashAttention: Qwen documents it as a CUDA optimization, not a macOS/MPS
@@ -36,7 +41,7 @@ environment (it holds roughly 5–7 GB of unified memory while ready):
 
 ```sh
 mkdir -p /Users/pallasting/.cache/agent-bridge/qwen3
-/private/tmp/ab-qwen3tts-pilot/bin/python scripts/qwen3_tts_worker.py \
+"$HOME/.local/share/agent-bridge/qwen3-tts-venv/bin/python" scripts/qwen3_tts_worker.py \
   --socket /Users/pallasting/.cache/agent-bridge/qwen3/worker.sock \
   --model "$AB_QWEN3_TTS_MODEL" --device mps
 ```
@@ -46,6 +51,30 @@ listener and never plays audio. Opt in per MCP call with `qwen_worker`, or set
 `AB_QWEN3_TTS_WORKER_SOCKET`; when a worker is selected, an unavailable worker
 returns an explicit Qwen failure and does **not** fall back to one-shot Python or
 macOS `say`.
+
+### Worker contract and lower-resource nodes
+
+The local socket is a versioned adapter boundary, not a promise that Qwen itself
+has an ONNX build. A worker replies with `protocol: "ab.tts.worker.v1"`, its
+actual `engine`, model, device, precision, and capabilities. The present local
+implementation identifies itself as `qwen3-pytorch`, `float16`, and supports
+`custom_voice`, `instruct`, and `zh`.
+
+Any future resource-constrained node may provide a separately validated ONNX
+worker only if it implements the same newline-delimited JSON contract:
+
+```json
+{"op":"health"}
+{"op":"synthesize","text":"...","output":"/absolute/output.wav","speaker":"...","instruct":"..."}
+```
+
+It must accurately report its own engine (for example `onnxruntime`), model and
+precision, and return an explicit error for unsupported features. Do not label a
+different voice model as Qwen, silently discard `instruct`, or fall back to a
+different engine. The existing `onnx-embed` feature and `RemoteEmbedBackend` are
+embedding-only; they are not a TTS backend. This v1 transport is intentionally
+Unix-socket local-only. Cross-node access requires a separate authenticated,
+authorized transport and is not enabled by setting this environment variable.
 
 ## Explicit MCP shape
 
@@ -57,7 +86,7 @@ Use the `qwen3` backend only after the isolated environment and model probe pass
   "text": "语音闭环已经准备完成。",
   "voice": "Serena",
   "qwen_instruct": "用平静、温暖、清晰的普通话播报，语速自然。",
-  "qwen_python": "/private/tmp/ab-qwen3tts-pilot/bin/python",
+  "qwen_python": "/Users/pallasting/Library/Application Support/agent-bridge/qwen3-tts-venv/bin/python",
   "capture_channel": "synth_file"
 }
 ```

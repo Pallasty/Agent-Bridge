@@ -8,7 +8,7 @@ label="com.pallasting.agent-bridge.qwen3-tts"
 lib_dir="$HOME/.local/lib/agent-bridge/qwen3-tts"
 runtime_dir="$HOME/.cache/agent-bridge/qwen3"
 plist="$HOME/Library/LaunchAgents/$label.plist"
-python_bin="${AB_QWEN3_TTS_PYTHON:-/private/tmp/ab-qwen3tts-pilot/bin/python}"
+python_bin="${AB_QWEN3_TTS_PYTHON:-$HOME/.local/share/agent-bridge/qwen3-tts-venv/bin/python}"
 model_dir="${AB_QWEN3_TTS_MODEL:-$HOME/.cache/modelscope/models/Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master}"
 
 [ -x "$python_bin" ] || { echo "missing isolated Qwen Python: $python_bin" >&2; exit 2; }

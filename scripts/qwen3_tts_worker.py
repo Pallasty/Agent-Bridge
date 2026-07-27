@@ -9,9 +9,25 @@ from pathlib import Path
 
 from qwen3_tts_synth import DEFAULT_MODEL, DEFAULT_SPEAKER, _device_and_dtype
 
+WORKER_PROTOCOL = "ab.tts.worker.v1"
+WORKER_ENGINE = "qwen3-pytorch"
+WORKER_CAPABILITIES = ["custom_voice", "instruct", "zh"]
+
 
 def _error(exc):
-    return {"ok": False, "backend": "qwen3", "detail": str(exc)[:600]}
+    return {"ok": False, "protocol": WORKER_PROTOCOL, "backend": "qwen3",
+            "engine": WORKER_ENGINE, "detail": str(exc)[:600]}
+
+
+def _receipt(**fields):
+    """Attach the stable worker identity to every reply.
+
+    Clients deliberately do not branch on ``engine``.  It lets a separately
+    validated ONNX implementation identify itself while retaining this local
+    request/response contract, rather than masquerading as PyTorch Qwen.
+    """
+    return {"protocol": WORKER_PROTOCOL, "backend": "qwen3",
+            "engine": WORKER_ENGINE, "capabilities": WORKER_CAPABILITIES, **fields}
 
 
 def _receive(conn):
@@ -54,16 +70,17 @@ def main():
         server.bind(str(path))
         os.chmod(path, 0o600)
         server.listen(1)
-        print(json.dumps({"ok": True, "state": "ready", "backend": "qwen3", "model": args.model,
-                          "device": device, "dtype": str(dtype).removeprefix("torch.")}, ensure_ascii=False), flush=True)
+        print(json.dumps(_receipt(ok=True, state="ready", model=args.model,
+                                  device=device, dtype=str(dtype).removeprefix("torch.")),
+                         ensure_ascii=False), flush=True)
         while True:
             conn, _ = server.accept()
             with conn:
                 try:
                     request = _receive(conn)
                     if request.get("op") == "health":
-                        reply = {"ok": True, "state": "ready", "backend": "qwen3", "model": args.model,
-                                 "device": device, "dtype": str(dtype).removeprefix("torch.")}
+                        reply = _receipt(ok=True, state="ready", model=args.model,
+                                         device=device, dtype=str(dtype).removeprefix("torch."))
                     elif request.get("op") == "synthesize":
                         text, output = str(request.get("text", "")).strip(), str(request.get("output", "")).strip()
                         if not text or not output:
@@ -71,10 +88,12 @@ def main():
                         wavs, sample_rate = model.generate_custom_voice(text=text, language="Chinese",
                             speaker=request.get("speaker") or DEFAULT_SPEAKER, instruct=request.get("instruct") or None)
                         sf.write(output, wavs[0], sample_rate)
-                        reply = {"ok": True, "backend": "qwen3", "model": args.model,
-                                 "voice": request.get("speaker") or DEFAULT_SPEAKER, "sample_rate": sample_rate,
-                                 "device": device, "dtype": str(dtype).removeprefix("torch."),
-                                 "instruct_applied": bool(request.get("instruct")), "worker": "unix_socket"}
+                        reply = _receipt(ok=True, model=args.model,
+                                         voice=request.get("speaker") or DEFAULT_SPEAKER,
+                                         sample_rate=sample_rate, device=device,
+                                         dtype=str(dtype).removeprefix("torch."),
+                                         instruct_applied=bool(request.get("instruct")),
+                                         worker="unix_socket")
                     else:
                         raise ValueError("unsupported op")
                 except Exception as exc:

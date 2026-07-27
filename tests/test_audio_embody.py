@@ -574,6 +574,25 @@ def test_qwen3_worker_is_explicit_and_never_requires_or_falls_back_to_python(mon
         _restore(saved)
 
 
+def test_qwen3_worker_receipt_preserves_declared_runtime_identity(monkeypatch):
+    """The client keeps an adapter's actual engine/precision visible to receipts."""
+    def fake_worker(sock, request, timeout):
+        with open(request["output"], "wb") as f:
+            f.write(b"RIFFfake")
+        return {"ok": True, "protocol": "ab.tts.worker.v1", "backend": "qwen3",
+                "engine": "onnxruntime", "model": "validated/export", "dtype": "int8",
+                "capabilities": ["custom_voice", "zh"], "worker": "unix_socket"}
+    saved = _patch(_qwen_worker_request=fake_worker)
+    try:
+        wav, info = ae.synth_qwen3("你好", "Serena", 1.0, qwen_worker="/tmp/future-onnx.sock")
+        assert wav and os.path.exists(wav)
+        assert info["protocol"] == "ab.tts.worker.v1"
+        assert info["engine"] == "onnxruntime"
+        assert info["dtype"] == "int8"
+    finally:
+        _restore(saved)
+
+
 def test_synth_file_qwen3_records_backend_and_expression_provenance():
     saved = _patch(
         synth_qwen3=lambda *args, **kwargs: ("/tmp/ab_fake.wav", {
