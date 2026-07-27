@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "observation_id": "FH-L8-OWNER-HOST-FINGERPRINT-D78-V1",
+  "observed_at_utc": "2026-07-27T05:09:42Z",
+  "source_pins": {
+    "fh_l8_production_io_page_cache_d59_contract.json": "7df9c5c05e12a6230bd5d2e1e33a76b01f79cfb88edeebbf0fc1fa333f71b13a",
+    "fh_l8_runtime_rule_d60_contract.json": "aedb085f4cf3f05030142f76997bf765e2ff8d817e125235055873400a97b515",
+    "fh_l8_owner_local_capacity_admission_d76_result.json": "4d1c82fbc3e24b036aadcbf50fbf8b463fd047ad7bdf50ab4cb08fa0ca205589",
+    "fh_l8_integrated_envelope_refresh_d77_contract.json": "da61c1d082968f98af7f44cb4490d929e22f7b0a1ca58bfac79c348b4d824549"
+  },
+  "host": {
+    "kernel": "Linux 7.0.0-28-generic",
+    "architecture": "x86_64",
+    "python": "Python 3.14.4",
+    "cpu_model": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "online_cpus": "0-15",
+    "filesystem_mount": "/Data",
+    "filesystem_type": "f2fs",
+    "filesystem_options": "rw,noatime,lazytime,background_gc=on,nogc_merge,discard,discard_unit=block,user_xattr,inline_xattr,acl,inline_data,inline_dentry,flush_merge,barrier,extent_cache,mode=adaptive,active_logs=6,alloc_mode=default,checkpoint_merge,fsync_mode=posix,memory=normal,errors=continue,lookup_mode=perf",
+    "cgroup_path": "/user.slice/user-1000.slice/session-3.scope",
+    "memory_max": "max",
+    "memory_high": "max",
+    "memory_swap_max": "max"
+  },
+  "authority": {
+    "host_identity_observed": true,
+    "environment_frozen": false,
+    "page_cache_bound_admitted": false,
+    "runtime_rule_precommitted": false,
+    "production_io_executed": false,
+    "scientific_execution": false,
+    "full53_execution_authorized": false
+  },
+  "decision": "OBSERVED_D78_OWNER_HOST_UNBOUNDED_CGROUP_ENVIRONMENT_NOT_YET_FROZEN"
+}
