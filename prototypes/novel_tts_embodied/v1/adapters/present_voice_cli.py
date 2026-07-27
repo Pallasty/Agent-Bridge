@@ -59,8 +59,20 @@ def main() -> None:
     if backend_cmd:
         code, msg = _run_backend_command(backend_cmd, payload)
         if code == 0:
-            if str(output_file).strip():
-                _write_placeholder_audio(output_file)
+            if not output_file.is_file() or output_file.stat().st_size <= 44:
+                print(
+                    json.dumps(
+                        {
+                            "status_code": 0,
+                            "status": "failed",
+                            "verify_status": "mismatch",
+                            "output_file": str(output_file),
+                            "message": msg or "backend command exited zero but did not create a valid output file",
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                return
             print(
                 json.dumps(
                     {

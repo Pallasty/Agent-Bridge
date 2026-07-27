@@ -44,6 +44,12 @@
    - `build_segments` 对每段保留 `annotation:...` 形式的回退证据；
    - 回归补充两类场景：合法注入落库、非法注入回退且不阻断主流程。
 
+10. 中文多角色真实合成默认走 feature-gated `sherpa-onnx` Rust API：
+   - 选择 `vits-icefall-zh-aishell3`，其 174 个说话人可由显式 `sid` 映射接入；
+   - 模型的说话人编号不含性别元数据，性别/旁白标签必须经过试听确认后写入环境映射；
+   - 情绪参数只作为语速和已有音频调制输入，不宣称模型具备原生情绪控制；
+   - 真实后端必须生成有效音频文件，成功退出码但缺输出一律按 `failed/mismatch` 处理。
+
 ## 回滚策略
 
 - 若回执判定出现误判，可回退到 `ab_runner.py` 中 `_is_success_status` 与 `_extract_freeform_receipt` 的上一版本实现。

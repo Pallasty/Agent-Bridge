@@ -104,6 +104,34 @@ export NOVEL_PRESENT_VOICE_BACKEND_CMD="tts-cli --backend {backend} --voice {voi
 
 并保持 ab_runner 输入/输出结构不变即可替换验证阶段实现。
 
+### Rust-native Chinese multi-speaker backend (Sherpa-ONNX)
+
+`ab-tts` includes an opt-in `sherpa` feature for the offline
+`vits-icefall-zh-aishell3` model. Its Chinese text frontend, VITS ONNX model and
+audio generation all execute through the official Rust API; no Python inference
+server is involved. Build the dedicated CLI outside the default AB build:
+
+```bash
+CARGO_TARGET_DIR=/Data/ab-sherpa-target \
+cargo build -p ab-tts --features sherpa --bin ab-sherpa-tts-synth
+```
+
+Download and unpack the official model under a non-repository directory, then
+provide an *auditioned* voice-to-speaker mapping. The AISHELL-3 `sid` values have
+no gender metadata, so `male_standard`, `female_standard` and `narrator_calm`
+must only be assigned after listening review:
+
+```bash
+export AB_TTS_SHERPA_MODEL_DIR=/Data/Models/sherpa-onnx/vits-icefall-zh-aishell3
+export AB_TTS_SHERPA_VOICE_MAP='male_standard=<sid>,female_standard=<sid>,narrator_calm=<sid>'
+export NOVEL_PRESENT_VOICE_EXECUTOR="python3 $(pwd)/adapters/present_voice_cli.py"
+export NOVEL_PRESENT_VOICE_BACKEND_CMD='/Data/ab-sherpa-target/debug/ab-sherpa-tts-synth --text "{text}" --voice {voice} --speed {speed} --out {output_file}'
+```
+
+The adapter now requires the command to leave a non-trivial WAV at `output_file`.
+An exit code of zero without a real audio file is a `failed/mismatch` receipt;
+it is never replaced with a placeholder WAV.
+
 `task_payload.json` 示例：
 
 ```json

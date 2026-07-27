@@ -114,6 +114,7 @@ def _run_runner(
     dry_run: bool = False,
     validate_outputs: bool = True,
     annotations: list[dict] | dict | None = None,
+    backend_cmd: str | None = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -144,6 +145,8 @@ def _run_runner(
     if executor:
         env["NOVEL_PRESENT_VOICE_EXECUTOR"] = executor
         env["AB_VOICE_EXEC_MODE"] = mode
+    if backend_cmd:
+        env["NOVEL_PRESENT_VOICE_BACKEND_CMD"] = backend_cmd
 
     result = _run(cmd, env=env)
     if result.returncode != 0:
@@ -456,6 +459,28 @@ def scenario_cli_adapter(tmpdir: Path, adapter_path: Path) -> None:
     _assert(row.get("output_file_exists") is True, "cli adapter should report output_file_exists=true")
 
 
+def scenario_cli_adapter_rejects_missing_artifact(tmpdir: Path, adapter_path: Path) -> None:
+    out = tmpdir / "cli_adapter_missing_artifact"
+    payload = _run_runner(
+        output_dir=out,
+        input_text="这是 adapter 空成功回归段落。",
+        executor=f"python3 {adapter_path}",
+        mode="json",
+        retry_limit=0,
+        validate_outputs=False,
+        backend_cmd="/bin/true",
+    )
+
+    summary = payload.get("present_voice_summary") or {}
+    _assert(summary.get("ok_count") == 0, "adapter must not accept a backend without an artifact")
+    _assert(summary.get("status_counts", {}).get("failed") == 1, "missing artifact should be failed")
+
+    row = _read_first_voice_row(out)
+    _assert(row.get("status") == "failed", "missing artifact row status should be failed")
+    _assert(row.get("verify_status") == "mismatch", "missing artifact should be a verification mismatch")
+    _assert(row.get("output_file_exists") is False, "missing artifact must not be reported as existing")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run lightweight regression checks for novel_tts_embodied v1 present_voice paths")
     parser.add_argument("--workdir", default=None)
@@ -494,6 +519,10 @@ def main() -> None:
         scenario_annotations_invalid_inputs(base)
 
         scenario_cli_adapter(
+            tmpdir=base,
+            adapter_path=ROOT / "adapters" / "present_voice_cli.py",
+        )
+        scenario_cli_adapter_rejects_missing_artifact(
             tmpdir=base,
             adapter_path=ROOT / "adapters" / "present_voice_cli.py",
         )
