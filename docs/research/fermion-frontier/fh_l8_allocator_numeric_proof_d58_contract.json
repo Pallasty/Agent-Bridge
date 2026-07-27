@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-ALLOCATOR-NUMERIC-PROOF-D58-V1",
+  "analysis_class": "SOURCE_PINNED_INDEPENDENT_RECOMPUTATION_FAIL_CLOSED",
+  "source_pins": {
+    "fh_l8_live_allocation_bound_d58_contract.json": "51d6708f0779a29026b95c39782d8a86f9e7e2b460fbccb8831f16bf82c5c98c",
+    "fh_l8_allocator_proof_interface_d64_contract.json": "e0ad3519e98ad2e8f981ee2165b080edac64400e62c7b2a1cc218b8c799e9aa0",
+    "fh_l8_closure_evidence_package_d65.json": "037bb5a5e980c0aec110c4ba6874e35000ec3f940ef0a0f399f3f7fac4841815"
+  },
+  "variables": [
+    "R_python_runtime_base",
+    "A_sector_action_dictionary",
+    "A_canonical_info_transient",
+    "A_basis_images_transient",
+    "A_fraction_objects",
+    "A_reduced_column_dictionary",
+    "A_partition_writer_state",
+    "A_sort_key_heap"
+  ],
+  "required_fields_per_variable": ["instance_count", "payload_bytes_per_instance", "allocator_overhead_bytes_per_instance", "lifetime_phase"],
+  "proof_inputs": {
+    "R_python_runtime_base": {"instance_count": null, "payload_bytes_per_instance": null, "allocator_overhead_bytes_per_instance": null, "lifetime_phase": "source_admission"},
+    "A_sector_action_dictionary": {"instance_count": null, "payload_bytes_per_instance": null, "allocator_overhead_bytes_per_instance": null, "lifetime_phase": "kernel_and_spill"},
+    "A_canonical_info_transient": {"instance_count": null, "payload_bytes_per_instance": null, "allocator_overhead_bytes_per_instance": null, "lifetime_phase": "kernel_and_spill"},
+    "A_basis_images_transient": {"instance_count": null, "payload_bytes_per_instance": null, "allocator_overhead_bytes_per_instance": null, "lifetime_phase": "kernel_and_spill"},
+    "A_fraction_objects": {"instance_count": null, "payload_bytes_per_instance": null, "allocator_overhead_bytes_per_instance": null, "lifetime_phase": "kernel_and_spill"},
+    "A_reduced_column_dictionary": {"instance_count": null, "payload_bytes_per_instance": null, "allocator_overhead_bytes_per_instance": null, "lifetime_phase": "kernel_and_spill"},
+    "A_partition_writer_state": {"instance_count": null, "payload_bytes_per_instance": null, "allocator_overhead_bytes_per_instance": null, "lifetime_phase": "kernel_and_spill"},
+    "A_sort_key_heap": {"instance_count": null, "payload_bytes_per_instance": null, "allocator_overhead_bytes_per_instance": null, "lifetime_phase": "partition_external_merge"}
+  },
+  "recomputation": {"formula": "sum(instance_count * (payload_bytes_per_instance + allocator_overhead_bytes_per_instance))", "required_numeric_domain": "non-negative integers", "missing_input_policy": "NO_GO"},
+  "authority": {"numeric_peak_memory_proven": false, "full53_execution_authorized": false, "evidence_accepted": false},
+  "decision": "NO_GO_D58_NUMERIC_INPUTS_INCOMPLETE"
+}
