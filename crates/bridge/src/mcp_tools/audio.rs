@@ -448,6 +448,12 @@ pub(super) fn task_summary_click_appendix(voice: &Value) -> Option<String> {
         .map(|path| format!("[🔊 播放总结]({path})"))
 }
 
+pub(super) fn valid_task_group_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
 #[async_trait]
 impl McpTool for TaskSummaryFinalizeTool {
     fn name(&self) -> &'static str { "task_summary_finalize" }
@@ -458,8 +464,9 @@ impl McpTool for TaskSummaryFinalizeTool {
             description: "Finalize one task-group summary and render its default click-to-play audio artifact. This is the only intended completion trigger; it never plays sound.".into(),
             input_schema: json!({
                 "type": "object",
-                "required": ["status", "summary"],
+                "required": ["task_group_id", "status", "summary"],
                 "properties": {
+                    "task_group_id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Stable ASCII task-group ID ([A-Za-z0-9_-]); exactly one terminal receipt may be recorded for it."},
                     "status": {"type": "string", "enum": ["completed", "failed", "waiting_for_user"]},
                     "summary": {"type": "string", "minLength": 1, "description": "Final user-facing task summary."},
                     "backend": {"type": "string", "enum": ["sherpa", "kokoro", "piper"], "default": "sherpa"},
@@ -474,6 +481,10 @@ impl McpTool for TaskSummaryFinalizeTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let task_group_id = args.get("task_group_id").and_then(Value::as_str).unwrap_or("");
+        if !valid_task_group_id(task_group_id) {
+            return Ok(ToolResult::error("task_summary_finalize task_group_id must be 1..128 ASCII characters from [A-Za-z0-9_-]"));
+        }
         let status = args.get("status").and_then(Value::as_str).unwrap_or("");
         if !matches!(status, "completed" | "failed" | "waiting_for_user") {
             return Ok(ToolResult::error("task_summary_finalize status must be completed|failed|waiting_for_user"));
@@ -482,11 +493,40 @@ impl McpTool for TaskSummaryFinalizeTool {
         if summary.is_empty() {
             return Ok(ToolResult::error("task_summary_finalize requires a non-empty summary"));
         }
-        let voice_result = VoiceSummaryTool::new(self.hub.clone()).execute(args.clone(), ctx).await?;
+        let receipt_dir = crate::present::presentations_dir().join("voice-summaries").join("task-finalizers");
+        let receipt_path = receipt_dir.join(format!("{task_group_id}.json"));
+        let lock_path = receipt_dir.join(format!(".{task_group_id}.lock"));
+        if receipt_path.exists() {
+            let prior = match std::fs::read_to_string(&receipt_path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) {
+                Some(value) => value,
+                None => return Ok(ToolResult::error("task_summary_finalize found an unreadable prior receipt; refusing to re-render")),
+            };
+            return Ok(ToolResult::json_text(&json!({
+                "action_tool": "task_summary_finalize", "task_group_id": task_group_id,
+                "finalizer_status": "duplicate", "prior_receipt": prior
+            })));
+        }
+        if let Err(e) = std::fs::create_dir_all(&receipt_dir) {
+            return Ok(ToolResult::error(format!("task_summary_finalize cannot create receipt directory: {e}")));
+        }
+        let lock = std::fs::OpenOptions::new().write(true).create_new(true).open(&lock_path);
+        if let Err(e) = lock {
+            return Ok(ToolResult::error(format!("task_summary_finalize duplicate or in-progress task_group_id {task_group_id}: {e}")));
+        }
+        let voice_result = match VoiceSummaryTool::new(self.hub.clone()).execute(args.clone(), ctx).await {
+            Ok(result) => result,
+            Err(e) => {
+                let _ = std::fs::remove_file(&lock_path);
+                return Err(e);
+            }
+        };
         let voice = tool_result_first_json(&voice_result).unwrap_or_else(|| json!({"status": "error", "detail": "voice_summary returned no JSON"}));
         let click_markdown = task_summary_click_appendix(&voice);
-        Ok(ToolResult::json_text(&json!({
+        let rendered = click_markdown.is_some();
+        let payload = json!({
             "action_tool": "task_summary_finalize",
+            "task_group_id": task_group_id,
+            "finalizer_status": "recorded",
             "status": status,
             "summary": summary,
             "voice_delivery_mode": "click",
@@ -494,7 +534,22 @@ impl McpTool for TaskSummaryFinalizeTool {
             "final_response_appendix_markdown": click_markdown,
             "final_response_contract": "Append final_response_appendix_markdown only when non-null. Do not synthesize a link from arbitrary transcript text.",
             "hook_contract": "A completion hook may verify this action was called once for a terminal task group; it must not infer a summary from arbitrary transcript text."
-        })))
+        });
+        if !rendered {
+            let _ = std::fs::remove_file(&lock_path);
+            return Ok(ToolResult::json_text(&payload));
+        }
+        let staged = receipt_dir.join(format!(".{task_group_id}.{}.tmp", uuid::Uuid::new_v4()));
+        let write_result = serde_json::to_vec_pretty(&payload)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| std::fs::write(&staged, bytes).map_err(|e| e.to_string()))
+            .and_then(|_| std::fs::rename(&staged, &receipt_path).map_err(|e| e.to_string()));
+        let _ = std::fs::remove_file(&lock_path);
+        if let Err(e) = write_result {
+            let _ = std::fs::remove_file(&staged);
+            return Ok(ToolResult::error(format!("task_summary_finalize could not persist receipt: {e}")));
+        }
+        Ok(ToolResult::json_text(&payload))
     }
 }
 

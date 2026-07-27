@@ -10286,9 +10286,12 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         .expect("task_summary_finalize schema");
     assert_eq!(
         task_summary_schema.input_schema["required"],
-        json!(["status", "summary"]),
+        json!(["task_group_id", "status", "summary"]),
         "only an explicit terminal summary may trigger a click artifact"
     );
+    assert!(valid_task_group_id("chapter-01_summary"));
+    assert!(!valid_task_group_id(""));
+    assert!(!valid_task_group_id("../escape"));
 
     let rendered = json!({"status": "rendered", "click_path": "/Data/voice.wav"});
     assert_eq!(
