@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-EXTERNAL-AUTHORIZATION-DECISION-D62-V1",
+  "analysis_class": "SOURCE_PINNED_FAIL_CLOSED_AUTHORIZATION_DECISION_NO_RESERVATION_OR_EXECUTION",
+  "source_pins": {
+    "fh_l8_resource_closure_plan_d56_contract.json": "3d3e5b7ef396a87daa4faa411e967b89522e980be3777bcc20bcab08b1b2c583",
+    "fh_l8_full_resource_envelope_d23_result.json": "8116d6f4ef76c7f9253629e99c80579add77742a016bd6494211dd63e8ee5dec",
+    "fh_l8_live_allocation_bound_d58_result.json": "b4fa9bc984d793d82acfa76b65b9930e1425aea658ef8eadc97fb3feb770effb",
+    "fh_l8_production_io_page_cache_d59_result.json": "a3530f2f0670b6a2eb1d7dd0b1ac8e5b4cfbc645faa528aeb533e37459a64122",
+    "fh_l8_runtime_rule_d60_result.json": "27bdf0796d0a06f92f7bad5307920a2aabacc260fae26dcfd5db2e0fe84b5b9f",
+    "fh_l8_integrated_resource_envelope_d61_contract.json": "305ffb4fbdbda66f29f57a8d94f32fbfc7d3d95bce4a03c14c8203f4b3ae9d5c",
+    "fh_l8_integrated_resource_envelope_d61_result.json": "4c1fa69a5572e7271096dc77cea339eae5bacbfee631e2399e66065c98cae6f2"
+  },
+  "required_closure_predicates": ["D58_numeric_peak_memory_proven", "D59_page_cache_environment_bound", "D60_runtime_rule_precommitted_and_environment_fixed", "D23_registered_scratch_meets_design_requirement", "D61_integrated_envelope_GO"],
+  "observed_predicate_values": {"D58_numeric_peak_memory_proven": false, "D59_page_cache_environment_bound": false, "D60_runtime_rule_precommitted_and_environment_fixed": false, "D23_registered_scratch_meets_design_requirement": false, "D61_integrated_envelope_GO": false},
+  "authority": {"external_resource_reservation_attempted": false, "external_resource_reservation_admitted": false, "scientific_kernel_calls_executed": 0, "object_measurements_executed": 0, "timing_measurements_executed": 0, "packed_q3_reads": 0, "production_io_executed": false, "numeric_peak_memory_proven": false, "numeric_runtime_seconds_proven": false, "full53_execution_authorized": false, "full53_execution_performed": false},
+  "decision": "NO_GO_D62_CLOSURE_PREDICATES_UNSATISFIED_NO_EXTERNAL_RESERVATION_OR_FULL53_AUTHORIZATION",
+  "reopen_condition": "all_required_closure_predicates_true_in_source_pinned_reverified_successors"
+}
