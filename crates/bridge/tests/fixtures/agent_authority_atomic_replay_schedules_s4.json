@@ -1,0 +1,678 @@
+{
+   "contract" : {
+      "candidate_state_only" : true,
+      "current_lifecycle_status" : "current",
+      "eligible_s3_status" : "verified",
+      "idempotency_precedes_version_check" : true,
+      "persistent_state_mutation" : false,
+      "receipt_identity_end_to_end_reverified" : false,
+      "runtime_consumer_enabled" : false
+   },
+   "expected_step_outcome_counts" : {
+      "already_committed" : 3,
+      "commit_ack_lost" : 1,
+      "committed" : 4,
+      "crashed_before_commit" : 1,
+      "lifecycle_blocked" : 8,
+      "nonce_replayed" : 3,
+      "prepared_not_committed" : 1,
+      "receipt_ineligible" : 7,
+      "transaction_identity_conflict" : 1,
+      "version_conflict" : 1
+   },
+   "initial_snapshot" : {
+      "consumed" : [
+         {
+            "commit_version" : 41,
+            "nonce" : "nonce:preexisting",
+            "receipt_id" : "receipt:preexisting",
+            "transaction_id" : "tx:preexisting"
+         }
+      ],
+      "snapshot_digest" : "sha256:1496dbf6b7d8a79e3aa9d1b22b319f7d22d6faf58eb5f0dc79f79ce8d392c988",
+      "snapshot_id" : "snapshot:agent-authority-atomic-replay-s4:v1",
+      "version" : 41
+   },
+   "schedules" : [
+      {
+         "control" : true,
+         "expected_consumed_count" : 2,
+         "expected_final_version" : 42,
+         "expected_outcomes" : [
+            "committed"
+         ],
+         "expected_reviewable_count" : 1,
+         "id" : "single_commit_control",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:single",
+               "receipt_id" : "receipt:single",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:single",
+               "worker_id" : "worker:a"
+            }
+         ]
+      },
+      {
+         "control" : true,
+         "expected_consumed_count" : 2,
+         "expected_final_version" : 42,
+         "expected_outcomes" : [
+            "committed",
+            "already_committed"
+         ],
+         "expected_reviewable_count" : 2,
+         "id" : "idempotent_retry_control",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:idempotent",
+               "receipt_id" : "receipt:idempotent",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:idempotent",
+               "worker_id" : "worker:a"
+            },
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:idempotent",
+               "receipt_id" : "receipt:idempotent",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:idempotent",
+               "worker_id" : "worker:b"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 2,
+         "expected_final_version" : 42,
+         "expected_outcomes" : [
+            "committed",
+            "nonce_replayed"
+         ],
+         "expected_reviewable_count" : 1,
+         "id" : "competing_receipts_first_wins",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:shared-race",
+               "receipt_id" : "receipt:race-a",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:race-a",
+               "worker_id" : "worker:a"
+            },
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:shared-race",
+               "receipt_id" : "receipt:race-b",
+               "s3_case_id" : "verified_secondary_control",
+               "transaction_id" : "tx:race-b",
+               "worker_id" : "worker:b"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 2,
+         "expected_final_version" : 42,
+         "expected_outcomes" : [
+            "committed",
+            "nonce_replayed"
+         ],
+         "expected_reviewable_count" : 1,
+         "id" : "competing_receipts_reverse_wins",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:shared-race",
+               "receipt_id" : "receipt:race-b",
+               "s3_case_id" : "verified_secondary_control",
+               "transaction_id" : "tx:race-b",
+               "worker_id" : "worker:b"
+            },
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:shared-race",
+               "receipt_id" : "receipt:race-a",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:race-a",
+               "worker_id" : "worker:a"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "version_conflict"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "stale_version_rejected",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 40,
+               "mode" : "commit",
+               "nonce" : "nonce:stale-version",
+               "receipt_id" : "receipt:stale-version",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:stale-version",
+               "worker_id" : "worker:a"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "prepared_not_committed"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "prepare_only_not_committed",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "prepare_only",
+               "nonce" : "nonce:prepare",
+               "receipt_id" : "receipt:prepare",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:prepare",
+               "worker_id" : "worker:a"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "crashed_before_commit"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "crash_before_commit_not_consumed",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "crash_before_commit",
+               "nonce" : "nonce:crash-before",
+               "receipt_id" : "receipt:crash-before",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:crash-before",
+               "worker_id" : "worker:a"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 2,
+         "expected_final_version" : 42,
+         "expected_outcomes" : [
+            "commit_ack_lost",
+            "already_committed"
+         ],
+         "expected_reviewable_count" : 1,
+         "id" : "ack_lost_then_idempotent_recovery",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit_ack_lost",
+               "nonce" : "nonce:ack-lost",
+               "receipt_id" : "receipt:ack-lost",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:ack-lost",
+               "worker_id" : "worker:a"
+            },
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:ack-lost",
+               "receipt_id" : "receipt:ack-lost",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:ack-lost",
+               "worker_id" : "worker:b"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "already_committed"
+         ],
+         "expected_reviewable_count" : 1,
+         "id" : "preexisting_idempotent_confirmation",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 0,
+               "mode" : "commit",
+               "nonce" : "nonce:preexisting",
+               "receipt_id" : "receipt:preexisting",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:preexisting",
+               "worker_id" : "worker:a"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "nonce_replayed"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "preexisting_nonce_replay_rejected",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:preexisting",
+               "receipt_id" : "receipt:other",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:other",
+               "worker_id" : "worker:a"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "transaction_identity_conflict"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "transaction_identity_conflict_rejected",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:tx-conflict",
+               "receipt_id" : "receipt:tx-conflict",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:preexisting",
+               "worker_id" : "worker:a"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "receipt_ineligible"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "invalid_receipt_blocked",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:ineligible-1",
+               "receipt_id" : "receipt:ineligible-1",
+               "s3_case_id" : "malformed_signature_rejected",
+               "transaction_id" : "tx:ineligible-1",
+               "worker_id" : "worker:ineligible"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "receipt_ineligible"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "untrusted_receipt_blocked",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:ineligible-2",
+               "receipt_id" : "receipt:ineligible-2",
+               "s3_case_id" : "unknown_key_rejected",
+               "transaction_id" : "tx:ineligible-2",
+               "worker_id" : "worker:ineligible"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "receipt_ineligible"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "revoked_receipt_blocked",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:ineligible-3",
+               "receipt_id" : "receipt:ineligible-3",
+               "s3_case_id" : "revoked_key_rejected",
+               "transaction_id" : "tx:ineligible-3",
+               "worker_id" : "worker:ineligible"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "receipt_ineligible"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "stale_receipt_blocked",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:ineligible-4",
+               "receipt_id" : "receipt:ineligible-4",
+               "s3_case_id" : "expired_receipt_rejected",
+               "transaction_id" : "tx:ineligible-4",
+               "worker_id" : "worker:ineligible"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "receipt_ineligible"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "replayed_receipt_blocked",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:ineligible-5",
+               "receipt_id" : "receipt:ineligible-5",
+               "s3_case_id" : "replayed_nonce_rejected",
+               "transaction_id" : "tx:ineligible-5",
+               "worker_id" : "worker:ineligible"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "receipt_ineligible"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "out_of_scope_receipt_blocked",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:ineligible-6",
+               "receipt_id" : "receipt:ineligible-6",
+               "s3_case_id" : "wrong_action_rejected",
+               "transaction_id" : "tx:ineligible-6",
+               "worker_id" : "worker:ineligible"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "receipt_ineligible"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "unavailable_receipt_blocked",
+         "lifecycle_case_id" : "current_baseline_control",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:ineligible-7",
+               "receipt_id" : "receipt:ineligible-7",
+               "s3_case_id" : "verifier_unavailable_rejected",
+               "transaction_id" : "tx:ineligible-7",
+               "worker_id" : "worker:ineligible"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "lifecycle_blocked"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "rollback_lifecycle_blocked",
+         "lifecycle_case_id" : "root_epoch_rollback_rejected",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:lifecycle-blocked-1",
+               "receipt_id" : "receipt:lifecycle-blocked-1",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:lifecycle-blocked-1",
+               "worker_id" : "worker:lifecycle-blocked"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "lifecycle_blocked"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "untrusted_lifecycle_blocked",
+         "lifecycle_case_id" : "unanchored_root_epoch_rejected",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:lifecycle-blocked-2",
+               "receipt_id" : "receipt:lifecycle-blocked-2",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:lifecycle-blocked-2",
+               "worker_id" : "worker:lifecycle-blocked"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "lifecycle_blocked"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "revoked_lifecycle_blocked",
+         "lifecycle_case_id" : "revoked_lifecycle_signer_rejected",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:lifecycle-blocked-3",
+               "receipt_id" : "receipt:lifecycle-blocked-3",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:lifecycle-blocked-3",
+               "worker_id" : "worker:lifecycle-blocked"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "lifecycle_blocked"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "stale_lifecycle_blocked",
+         "lifecycle_case_id" : "activation_before_validity_rejected",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:lifecycle-blocked-4",
+               "receipt_id" : "receipt:lifecycle-blocked-4",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:lifecycle-blocked-4",
+               "worker_id" : "worker:lifecycle-blocked"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "lifecycle_blocked"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "forked_lifecycle_blocked",
+         "lifecycle_case_id" : "previous_digest_fork_rejected",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:lifecycle-blocked-5",
+               "receipt_id" : "receipt:lifecycle-blocked-5",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:lifecycle-blocked-5",
+               "worker_id" : "worker:lifecycle-blocked"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "lifecycle_blocked"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "ambiguous_lifecycle_blocked",
+         "lifecycle_case_id" : "overlapping_active_keys_rejected",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:lifecycle-blocked-6",
+               "receipt_id" : "receipt:lifecycle-blocked-6",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:lifecycle-blocked-6",
+               "worker_id" : "worker:lifecycle-blocked"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "lifecycle_blocked"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "invalid_lifecycle_blocked",
+         "lifecycle_case_id" : "invalid_transition_rejected",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:lifecycle-blocked-7",
+               "receipt_id" : "receipt:lifecycle-blocked-7",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:lifecycle-blocked-7",
+               "worker_id" : "worker:lifecycle-blocked"
+            }
+         ]
+      },
+      {
+         "control" : false,
+         "expected_consumed_count" : 1,
+         "expected_final_version" : 41,
+         "expected_outcomes" : [
+            "lifecycle_blocked"
+         ],
+         "expected_reviewable_count" : 0,
+         "id" : "unavailable_lifecycle_blocked",
+         "lifecycle_case_id" : "lifecycle_verifier_unavailable_rejected",
+         "steps" : [
+            {
+               "expected_version" : 41,
+               "mode" : "commit",
+               "nonce" : "nonce:lifecycle-blocked-8",
+               "receipt_id" : "receipt:lifecycle-blocked-8",
+               "s3_case_id" : "verified_primary_control",
+               "transaction_id" : "tx:lifecycle-blocked-8",
+               "worker_id" : "worker:lifecycle-blocked"
+            }
+         ]
+      }
+   ],
+   "schema" : "agent_bridge.agent_authority_atomic_replay_schedules.s4_fixture.v0",
+   "source" : {
+      "files" : [
+         {
+            "id" : "s4_anchor",
+            "path" : "crates/bridge/tests/fixtures/agent_authority_trust_lifecycle_anchor_s4.json",
+            "sha256" : "daae7bea20842cd1f8116084f757843dcc9020aa2b3d40ab26ce3af9114f1fe5"
+         },
+         {
+            "id" : "s4_lifecycle_journals",
+            "path" : "crates/bridge/tests/fixtures/agent_authority_trust_lifecycle_journals_s4.json",
+            "sha256" : "b1ffd8c38060f6f39925fea97ac3c21f20a138ea1debb430c06f9fa44b7c4342"
+         },
+         {
+            "id" : "s3_signed_receipts",
+            "path" : "crates/bridge/tests/fixtures/agent_authority_signed_receipts_s3.json",
+            "sha256" : "1a15620e6dc16166d71b4458d5207eacf30579b8f631c48f85ac62fba2456d8d"
+         },
+         {
+            "id" : "s3_result",
+            "path" : "docs/reports/goal-c-u/2026-07-16-agent-authority-signed-trust-root-s3-result.md",
+            "sha256" : "fd6fe75e56ffddc64f209e3ad822186a03f618084e858892cfc15bd6cc7539fd"
+         }
+      ],
+      "latest_master_commit" : "c9c50917687c7715b031a6bfe8dd7801bfd737ee",
+      "s3_result_commit" : "149bafbc3a04126ea28f05a85c3e30d2748aceed",
+      "s4_lineage_merge_commit" : "72ba3dabd2569e651e05a90dfc1c898fa366c24e"
+   }
+}

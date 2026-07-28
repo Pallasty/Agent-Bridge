@@ -1,0 +1,124 @@
+{
+  "schema": "agent_bridge.agent_authority_provenance_envelope.s2_fixture.v0",
+  "source": {
+    "t6_source_commit": "a1c9469e9a14cd73159d34974f0e99714ce5a1f0",
+    "s1_result_commit": "232cadaced8ac1ab6e18907d451fba9208d03079",
+    "files": [
+      {
+        "id": "s1_design",
+        "path": "docs/design/CODEX_REDTEAM_MODE_T6_AGENT_COMPROMISE_MAPPING_S1_2026_07_16.md",
+        "sha256": "0d9db25cc61bfe9ccd0f146b33a01ee033b5c5451784912419609c42fad5954d"
+      },
+      {
+        "id": "s1_mapping",
+        "path": "crates/bridge/tests/fixtures/agent_compromise_resilience_s1_mapping.json",
+        "sha256": "a08d3faf25b82fd84f5f0e27bba55485a6b3f9d3e00a9f22413eb9a971b37c8e"
+      },
+      {
+        "id": "s1_result",
+        "path": "docs/reports/goal-c-u/2026-07-16-agent-compromise-resilience-s1-result.md",
+        "sha256": "8747ef00325852bdec3098565ca92c85000a8705e57a35e8381455ce8e98203e"
+      }
+    ]
+  },
+  "contract": {
+    "claims_schema": "agent_bridge.authority_provenance_claims.v0",
+    "accepted_envelope_version": "agent_bridge.authority_envelope.v0",
+    "accepted_policy_version": "ab.t6.authority_review.v0",
+    "evaluation_time_unix": 1784259000,
+    "allowed_clock_skew_secs": 30,
+    "trusted_issuers": [
+      "issuer:owner-control-plane:v1"
+    ],
+    "trusted_principals": [
+      "principal:owner:v1"
+    ],
+    "trusted_verifiers": [
+      "verifier:independent-authz:v1"
+    ],
+    "used_nonces": [
+      "nonce:already-consumed"
+    ],
+    "expected_action_class": "t6_runtime_enablement_review",
+    "expected_target_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "expected_scope_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "expected_decision_source_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "expected_session_epoch_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "expected_resume_parent_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "expected_adapter_id": "adapter:codex-desktop:v1",
+    "expected_adapter_build_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "expected_adapter_capabilities_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "expected_evidence_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+  },
+  "baseline_claims": {
+    "claims_schema": "agent_bridge.authority_provenance_claims.v0",
+    "envelope_version": "agent_bridge.authority_envelope.v0",
+    "receipt_id": "receipt:baseline-placeholder",
+    "issuer_id": "issuer:owner-control-plane:v1",
+    "principal_id": "principal:owner:v1",
+    "action_class": "t6_runtime_enablement_review",
+    "target_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "scope_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "decision_source_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "session_epoch_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "resume_parent_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "adapter_id": "adapter:codex-desktop:v1",
+    "adapter_build_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "adapter_capabilities_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "issued_at_unix": 1784258400,
+    "expires_at_unix": 1784262600,
+    "nonce": "nonce:baseline-placeholder",
+    "evidence_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+    "verifier_id": "verifier:independent-authz:v1",
+    "policy_version": "ab.t6.authority_review.v0"
+  },
+  "trusted_receipts": [
+    {"receipt_id":"receipt:verified-primary","synthetic_attestation":"fixture-attestation:verified-primary","claims_overrides":{"nonce":"nonce:verified-primary"}},
+    {"receipt_id":"receipt:verified-future-boundary","synthetic_attestation":"fixture-attestation:verified-future-boundary","claims_overrides":{"issued_at_unix":1784259030,"nonce":"nonce:verified-future-boundary"}},
+    {"receipt_id":"receipt:verified-expiry-boundary","synthetic_attestation":"fixture-attestation:verified-expiry-boundary","claims_overrides":{"issued_at_unix":1784250000,"expires_at_unix":1784258970,"nonce":"nonce:verified-expiry-boundary"}},
+    {"receipt_id":"receipt:verified-secondary","synthetic_attestation":"fixture-attestation:verified-secondary","claims_overrides":{"nonce":"nonce:verified-secondary"}},
+    {"receipt_id":"receipt:forged-attestation","synthetic_attestation":"fixture-attestation:forged-attestation","claims_overrides":{"nonce":"nonce:forged-attestation"}},
+    {"receipt_id":"receipt:tampered-claims","synthetic_attestation":"fixture-attestation:tampered-claims","claims_overrides":{"nonce":"nonce:tampered-claims"}},
+    {"receipt_id":"receipt:untrusted-chain","synthetic_attestation":"fixture-attestation:untrusted-chain","claims_overrides":{"issuer_id":"issuer:untrusted:v1","principal_id":"principal:untrusted:v1","nonce":"nonce:untrusted-chain","verifier_id":"verifier:untrusted:v1"}},
+    {"receipt_id":"receipt:wrong-policy","synthetic_attestation":"fixture-attestation:wrong-policy","claims_overrides":{"nonce":"nonce:wrong-policy","policy_version":"ab.t6.authority_review.v999"}},
+    {"receipt_id":"receipt:empty-decision-source","synthetic_attestation":"fixture-attestation:empty-decision-source","claims_overrides":{"decision_source_digest":"","nonce":"nonce:empty-decision-source"}},
+    {"receipt_id":"receipt:invalid-time-window","synthetic_attestation":"fixture-attestation:invalid-time-window","claims_overrides":{"issued_at_unix":1784262600,"expires_at_unix":1784258400,"nonce":"nonce:invalid-time-window"}},
+    {"receipt_id":"receipt:expired","synthetic_attestation":"fixture-attestation:expired","claims_overrides":{"issued_at_unix":1784250000,"expires_at_unix":1784258969,"nonce":"nonce:expired"}},
+    {"receipt_id":"receipt:future","synthetic_attestation":"fixture-attestation:future","claims_overrides":{"issued_at_unix":1784259031,"nonce":"nonce:future"}},
+    {"receipt_id":"receipt:replayed","synthetic_attestation":"fixture-attestation:replayed","claims_overrides":{"nonce":"nonce:already-consumed"}},
+    {"receipt_id":"receipt:wrong-action","synthetic_attestation":"fixture-attestation:wrong-action","claims_overrides":{"action_class":"memory_write","nonce":"nonce:wrong-action"}},
+    {"receipt_id":"receipt:wrong-target","synthetic_attestation":"fixture-attestation:wrong-target","claims_overrides":{"target_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"nonce:wrong-target"}},
+    {"receipt_id":"receipt:wrong-scope","synthetic_attestation":"fixture-attestation:wrong-scope","claims_overrides":{"scope_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","nonce":"nonce:wrong-scope"}},
+    {"receipt_id":"receipt:wrong-decision-source","synthetic_attestation":"fixture-attestation:wrong-decision-source","claims_overrides":{"decision_source_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","nonce":"nonce:wrong-decision-source"}},
+    {"receipt_id":"receipt:wrong-session","synthetic_attestation":"fixture-attestation:wrong-session","claims_overrides":{"session_epoch_digest":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","nonce":"nonce:wrong-session"}},
+    {"receipt_id":"receipt:wrong-resume","synthetic_attestation":"fixture-attestation:wrong-resume","claims_overrides":{"resume_parent_digest":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","nonce":"nonce:wrong-resume"}},
+    {"receipt_id":"receipt:wrong-adapter","synthetic_attestation":"fixture-attestation:wrong-adapter","claims_overrides":{"adapter_id":"adapter:injected:v9","adapter_build_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","adapter_capabilities_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","nonce":"nonce:wrong-adapter"}},
+    {"receipt_id":"receipt:wrong-evidence","synthetic_attestation":"fixture-attestation:wrong-evidence","claims_overrides":{"evidence_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","nonce":"nonce:wrong-evidence"}},
+    {"receipt_id":"receipt:unavailable","synthetic_attestation":"fixture-attestation:unavailable","claims_overrides":{"nonce":"nonce:unavailable"}}
+  ],
+  "cases": [
+    {"id":"verified_primary_control","control":true,"receipt_id":"receipt:verified-primary","synthetic_attestation":"fixture-attestation:verified-primary","claims_overrides":{"nonce":"nonce:verified-primary"},"verifier_available":true,"expected_status":"verified","expected_reasons":[]},
+    {"id":"verified_future_skew_boundary_control","control":true,"receipt_id":"receipt:verified-future-boundary","synthetic_attestation":"fixture-attestation:verified-future-boundary","claims_overrides":{"issued_at_unix":1784259030,"nonce":"nonce:verified-future-boundary"},"verifier_available":true,"expected_status":"verified","expected_reasons":[]},
+    {"id":"verified_expiry_skew_boundary_control","control":true,"receipt_id":"receipt:verified-expiry-boundary","synthetic_attestation":"fixture-attestation:verified-expiry-boundary","claims_overrides":{"issued_at_unix":1784250000,"expires_at_unix":1784258970,"nonce":"nonce:verified-expiry-boundary"},"verifier_available":true,"expected_status":"verified","expected_reasons":[]},
+    {"id":"verified_secondary_control","control":true,"receipt_id":"receipt:verified-secondary","synthetic_attestation":"fixture-attestation:verified-secondary","claims_overrides":{"nonce":"nonce:verified-secondary"},"verifier_available":true,"expected_status":"verified","expected_reasons":[]},
+    {"id":"unknown_receipt_rejected","control":false,"receipt_id":"receipt:unknown","synthetic_attestation":"fixture-attestation:unknown","claims_overrides":{"nonce":"nonce:unknown"},"verifier_available":true,"expected_status":"invalid","expected_reasons":["trusted_receipt_not_found"]},
+    {"id":"forged_attestation_rejected","control":false,"receipt_id":"receipt:forged-attestation","synthetic_attestation":"fixture-attestation:forged-by-agent","claims_overrides":{"nonce":"nonce:forged-attestation"},"verifier_available":true,"expected_status":"invalid","expected_reasons":["synthetic_attestation_mismatch"]},
+    {"id":"tampered_claims_rejected","control":false,"receipt_id":"receipt:tampered-claims","synthetic_attestation":"fixture-attestation:tampered-claims","claims_overrides":{"target_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"nonce:tampered-claims"},"verifier_available":true,"expected_status":"invalid","expected_reasons":["trusted_claims_digest_mismatch"]},
+    {"id":"untrusted_authority_chain_rejected","control":false,"receipt_id":"receipt:untrusted-chain","synthetic_attestation":"fixture-attestation:untrusted-chain","claims_overrides":{"issuer_id":"issuer:untrusted:v1","principal_id":"principal:untrusted:v1","nonce":"nonce:untrusted-chain","verifier_id":"verifier:untrusted:v1"},"verifier_available":true,"expected_status":"invalid","expected_reasons":["issuer_not_trusted","principal_not_trusted","verifier_not_trusted"]},
+    {"id":"wrong_policy_rejected","control":false,"receipt_id":"receipt:wrong-policy","synthetic_attestation":"fixture-attestation:wrong-policy","claims_overrides":{"nonce":"nonce:wrong-policy","policy_version":"ab.t6.authority_review.v999"},"verifier_available":true,"expected_status":"invalid","expected_reasons":["policy_version_not_accepted"]},
+    {"id":"empty_required_field_rejected","control":false,"receipt_id":"receipt:empty-decision-source","synthetic_attestation":"fixture-attestation:empty-decision-source","claims_overrides":{"decision_source_digest":"","nonce":"nonce:empty-decision-source"},"verifier_available":true,"expected_status":"invalid","expected_reasons":["required_field_empty:decision_source_digest"]},
+    {"id":"invalid_time_window_rejected","control":false,"receipt_id":"receipt:invalid-time-window","synthetic_attestation":"fixture-attestation:invalid-time-window","claims_overrides":{"issued_at_unix":1784262600,"expires_at_unix":1784258400,"nonce":"nonce:invalid-time-window"},"verifier_available":true,"expected_status":"invalid","expected_reasons":["expires_not_after_issue"]},
+    {"id":"expired_receipt_rejected","control":false,"receipt_id":"receipt:expired","synthetic_attestation":"fixture-attestation:expired","claims_overrides":{"issued_at_unix":1784250000,"expires_at_unix":1784258969,"nonce":"nonce:expired"},"verifier_available":true,"expected_status":"stale","expected_reasons":["receipt_expired"]},
+    {"id":"future_receipt_rejected","control":false,"receipt_id":"receipt:future","synthetic_attestation":"fixture-attestation:future","claims_overrides":{"issued_at_unix":1784259031,"nonce":"nonce:future"},"verifier_available":true,"expected_status":"stale","expected_reasons":["receipt_not_yet_valid"]},
+    {"id":"replayed_nonce_rejected","control":false,"receipt_id":"receipt:replayed","synthetic_attestation":"fixture-attestation:replayed","claims_overrides":{"nonce":"nonce:already-consumed"},"verifier_available":true,"expected_status":"replayed","expected_reasons":["nonce_already_consumed"]},
+    {"id":"wrong_action_rejected","control":false,"receipt_id":"receipt:wrong-action","synthetic_attestation":"fixture-attestation:wrong-action","claims_overrides":{"action_class":"memory_write","nonce":"nonce:wrong-action"},"verifier_available":true,"expected_status":"out_of_scope","expected_reasons":["action_class_mismatch"]},
+    {"id":"wrong_target_rejected","control":false,"receipt_id":"receipt:wrong-target","synthetic_attestation":"fixture-attestation:wrong-target","claims_overrides":{"target_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"nonce:wrong-target"},"verifier_available":true,"expected_status":"out_of_scope","expected_reasons":["target_digest_mismatch"]},
+    {"id":"wrong_scope_rejected","control":false,"receipt_id":"receipt:wrong-scope","synthetic_attestation":"fixture-attestation:wrong-scope","claims_overrides":{"scope_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","nonce":"nonce:wrong-scope"},"verifier_available":true,"expected_status":"out_of_scope","expected_reasons":["scope_digest_mismatch"]},
+    {"id":"wrong_decision_source_rejected","control":false,"receipt_id":"receipt:wrong-decision-source","synthetic_attestation":"fixture-attestation:wrong-decision-source","claims_overrides":{"decision_source_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","nonce":"nonce:wrong-decision-source"},"verifier_available":true,"expected_status":"out_of_scope","expected_reasons":["decision_source_digest_mismatch"]},
+    {"id":"wrong_session_rejected","control":false,"receipt_id":"receipt:wrong-session","synthetic_attestation":"fixture-attestation:wrong-session","claims_overrides":{"session_epoch_digest":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","nonce":"nonce:wrong-session"},"verifier_available":true,"expected_status":"out_of_scope","expected_reasons":["session_epoch_digest_mismatch"]},
+    {"id":"wrong_resume_parent_rejected","control":false,"receipt_id":"receipt:wrong-resume","synthetic_attestation":"fixture-attestation:wrong-resume","claims_overrides":{"resume_parent_digest":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","nonce":"nonce:wrong-resume"},"verifier_available":true,"expected_status":"out_of_scope","expected_reasons":["resume_parent_digest_mismatch"]},
+    {"id":"wrong_adapter_rejected","control":false,"receipt_id":"receipt:wrong-adapter","synthetic_attestation":"fixture-attestation:wrong-adapter","claims_overrides":{"adapter_id":"adapter:injected:v9","adapter_build_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","adapter_capabilities_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","nonce":"nonce:wrong-adapter"},"verifier_available":true,"expected_status":"out_of_scope","expected_reasons":["adapter_build_digest_mismatch","adapter_capabilities_digest_mismatch","adapter_id_mismatch"]},
+    {"id":"wrong_evidence_rejected","control":false,"receipt_id":"receipt:wrong-evidence","synthetic_attestation":"fixture-attestation:wrong-evidence","claims_overrides":{"evidence_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","nonce":"nonce:wrong-evidence"},"verifier_available":true,"expected_status":"out_of_scope","expected_reasons":["evidence_digest_mismatch"]},
+    {"id":"verifier_unavailable_rejected","control":false,"receipt_id":"receipt:unavailable","synthetic_attestation":"fixture-attestation:unavailable","claims_overrides":{"nonce":"nonce:unavailable"},"verifier_available":false,"expected_status":"unavailable","expected_reasons":["independent_verifier_unavailable"]}
+  ]
+}
