@@ -68,6 +68,7 @@
 //! + a paraphrase-cosine readiness probe) and SKIPS semantic with a clear note
 //! rather than reporting a false R@k=0.
 
+use ab_bridge::project_identity::project_scopes_alias_by_registry;
 use ab_store::{default_db_path, MemoryEdge, SqliteStore, StateStore};
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -469,7 +470,11 @@ const TOP_K: usize = 10;
 // Overfetch enough to cover the current local store so the hard-prefilter
 // variant approximates "rank all scoped rows", not "filter raw top-N".
 const SEMANTIC_SCOPE_CANDIDATE_K: usize = 10_000;
+// `memory_search` overfetches 5× when a scope filter is active, then applies
+// scope routing and coactivation over that pool before truncating to TOP_K.
+const MCP_SCOPED_SEMANTIC_INNER_K: usize = TOP_K * 5;
 const AGENT_BRIDGE_PROJECT_SCOPE: &str = "project:/Users/pallasting/Projects/agent-bridge";
+const PROJECT_SCOPE_ALIASES_ENV: &str = "AGENT_BRIDGE_PROJECT_SCOPE_ALIASES";
 const GRAPH_NEIGHBOR_LIMIT: usize = 8;
 const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
 const RECALL_EVAL_CONFIRM_SECS_ENV: &str = "AB_RECALL_EVAL_CONFIRM_SECS";
@@ -491,6 +496,11 @@ const CASE2_TOOL_SURFACE_POLICY_CLUSTER: &[&str] = &[
 const CASE8_REMOTE_SESSION_IDX1: usize = 8;
 const MIN_REMOTE_SESSION_PROJECTION_OVERLAP: usize = 4;
 const STRICT_REMOTE_SESSION_REQUIRED_TERM: &str = "projremotesession";
+// Bounded eval-only semantic overfetch for the case #8 specificity scout.
+// This is deliberately separate from SEMANTIC_SCOPE_CANDIDATE_K: the scout
+// asks whether a small semantic pool can recover a strict intent family, not
+// whether every row in the store can be post-filtered into an answer.
+const SEMANTIC_REMOTE_SESSION_CANDIDATE_K: usize = 200;
 const CASE8_REMOTE_SESSION_STEERING_CHAIN: &[&str] = &[
     "agentbridge_remote_session_steer_gap_20260529",
     "session_handoff_agent_spawn_remote_steer_retry_to_aio2_20260531",
@@ -735,6 +745,15 @@ struct SemanticScopeAgg {
     cross_row_count: usize,
     purity_by_case: Vec<Option<f64>>,
     cross_rows_by_case: Vec<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SemanticCoactivationCaseRanks {
+    raw_off: Option<usize>,
+    raw_on: Option<usize>,
+    scoped_off: Option<usize>,
+    scoped_on: Option<usize>,
+    scoped_candidates: usize,
 }
 
 impl SemanticScopeAgg {
@@ -1294,6 +1313,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut semantic_scope_raw = SemanticScopeAgg::default();
     let mut semantic_scope_soft = SemanticScopeAgg::default();
     let mut semantic_scope_hard = SemanticScopeAgg::default();
+    let mut semantic_coactivation = ModeAgg::default();
+    let mut semantic_scoped_local = ModeAgg::default();
+    let mut semantic_scoped_local_coactivation = ModeAgg::default();
+    let mut case8_semantic_coactivation = None;
     let mut fts_graph = CandidateExpansionAgg::default();
     let mut fts_candidate_counts = Vec::with_capacity(eval_cases.len());
     let scratch_cjk = ScratchCjkFts::build(&db_path)?;
@@ -1364,6 +1387,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             semantic_scope_raw.record(case, &sem_raw);
             semantic_scope_soft.record(case, &sem_soft);
             semantic_scope_hard.record(case, &sem_hard);
+
+            // Reproduce the production coactivation stage without writes.
+            // Unscoped calls rerank their returned TOP_K page. Scoped calls
+            // first overfetch 5×, apply local+global routing, rerank that
+            // candidate pool, and only then truncate to TOP_K.
+            let sem_raw_coactivation = coactivation_rerank_eval(&store, sem_raw.clone()).await?;
+            let sem_raw_coactivation_keys = keys_of_hits(&sem_raw_coactivation);
+            let raw_coactivation_rank = first_hit_rank(&sem_raw_coactivation_keys, case.expect);
+            semantic_coactivation.record(raw_coactivation_rank);
+
+            let scoped_pool = semantic_local_plus_global_production_pool(
+                &sem_candidates,
+                AGENT_BRIDGE_PROJECT_SCOPE,
+                MCP_SCOPED_SEMANTIC_INNER_K,
+            );
+            let scoped_off_keys =
+                keys_of_hits(&scoped_pool.iter().take(TOP_K).cloned().collect::<Vec<_>>());
+            let scoped_off_rank = first_hit_rank(&scoped_off_keys, case.expect);
+            let scoped_on_pool = coactivation_rerank_eval(&store, scoped_pool.clone()).await?;
+            let scoped_on_keys = keys_of_hits(
+                &scoped_on_pool
+                    .iter()
+                    .take(TOP_K)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            );
+            let scoped_on_rank = first_hit_rank(&scoped_on_keys, case.expect);
+            if case.scope == CaseScope::AgentBridgeLocal {
+                semantic_scoped_local.record(scoped_off_rank);
+                semantic_scoped_local_coactivation.record(scoped_on_rank);
+            }
+            if eval_case.idx1 == CASE8_REMOTE_SESSION_IDX1 {
+                case8_semantic_coactivation = Some(SemanticCoactivationCaseRanks {
+                    raw_off: first_hit_rank(&sem_topk_keys, case.expect),
+                    raw_on: raw_coactivation_rank,
+                    scoped_off: scoped_off_rank,
+                    scoped_on: scoped_on_rank,
+                    scoped_candidates: scoped_pool.len(),
+                });
+            }
             // Item B deployable-shape: baseline FTS unless it returns zero rows,
             // then substitute the top semantic keys — the env-gated default-path
             // fallback's shape, so the measured delta is the FTS-empty tail
@@ -1379,9 +1442,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             fts_empty_semantic.record(first_hit_rank(fe_sem_keys, case.expect));
         } else {
             semantic.record(None);
+            semantic_coactivation.record(None);
             semantic_scope_raw.record(case, &[]);
             semantic_scope_soft.record(case, &[]);
             semantic_scope_hard.record(case, &[]);
+            if case.scope == CaseScope::AgentBridgeLocal {
+                semantic_scoped_local.record(None);
+                semantic_scoped_local_coactivation.record(None);
+            }
             // No real embedder → the shipped fallback would not fire → plain FTS.
             fts_empty_semantic.record(first_hit_rank(&fts_keys, case.expect));
         }
@@ -1418,6 +1486,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &semantic_scope_soft,
             &semantic_scope_hard,
             &eval_cases,
+        );
+        print_semantic_coactivation_eval(
+            &semantic,
+            &semantic_coactivation,
+            &semantic_scoped_local,
+            &semantic_scoped_local_coactivation,
+            case8_semantic_coactivation,
         );
     }
 
@@ -1493,6 +1568,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &scratch_remote_session,
         active_case_idx1.contains(&CASE8_REMOTE_SESSION_IDX1),
     )?;
+    print_case8_semantic_role_aware_probe(
+        &store,
+        semantic_ready,
+        active_case_idx1.contains(&CASE8_REMOTE_SESSION_IDX1),
+    )
+    .await?;
     print_role_aware_hard_family_aggregate(
         &scratch_tool_surface,
         &scratch_remote_session,
@@ -1706,6 +1787,68 @@ fn semantic_scope_hard_candidates(
         .collect()
 }
 
+fn semantic_local_plus_global_production_pool(
+    candidates: &[ab_store::MemorySearchHit],
+    requested_scope: &str,
+    raw_candidate_limit: usize,
+) -> Vec<ab_store::MemorySearchHit> {
+    let aliases = std::env::var(PROJECT_SCOPE_ALIASES_ENV).ok();
+    let mut hits = candidates
+        .iter()
+        .take(raw_candidate_limit)
+        .filter_map(|hit| {
+            let relation = memory_scope_relation_with_aliases(
+                hit.record.scope.as_deref(),
+                requested_scope,
+                aliases.as_deref(),
+            );
+            if relation == ScopeRelation::Cross {
+                return None;
+            }
+            let mut hit = hit.clone();
+            hit.score *= semantic_scope_score_multiplier(relation);
+            Some(hit)
+        })
+        .collect::<Vec<_>>();
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits
+}
+
+async fn coactivation_rerank_eval(
+    store: &SqliteStore,
+    hits: Vec<ab_store::MemorySearchHit>,
+) -> Result<Vec<ab_store::MemorySearchHit>, Box<dyn std::error::Error>> {
+    if hits.len() < 2 {
+        return Ok(hits);
+    }
+    let keys = keys_of_hits(&hits);
+    let edges = store.coactivation_among(&keys).await?;
+    if edges.is_empty() {
+        return Ok(hits);
+    }
+
+    let mut per_key = HashMap::<String, u64>::new();
+    for edge in edges {
+        *per_key.entry(edge.key_a).or_insert(0) += edge.count;
+        *per_key.entry(edge.key_b).or_insert(0) += edge.count;
+    }
+    let mut reranked = hits;
+    for hit in &mut reranked {
+        let count = per_key.get(&hit.record.key).copied().unwrap_or(0);
+        hit.score *= 1.0 + 0.2 * (1.0 + count as f64).ln();
+    }
+    reranked.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(reranked)
+}
+
 fn semantic_scope_score_multiplier(relation: ScopeRelation) -> f64 {
     match relation {
         ScopeRelation::Local => 1.0,
@@ -1715,16 +1858,34 @@ fn semantic_scope_score_multiplier(relation: ScopeRelation) -> f64 {
 }
 
 fn memory_scope_relation(scope: Option<&str>, requested_scope: &str) -> ScopeRelation {
+    let aliases = std::env::var(PROJECT_SCOPE_ALIASES_ENV).ok();
+    memory_scope_relation_with_aliases(scope, requested_scope, aliases.as_deref())
+}
+
+fn memory_scope_relation_with_aliases(
+    scope: Option<&str>,
+    requested_scope: &str,
+    project_scope_aliases: Option<&str>,
+) -> ScopeRelation {
     let Some(scope) = scope.map(str::trim).filter(|scope| !scope.is_empty()) else {
         return ScopeRelation::Global;
     };
     if scope == "global" {
         return ScopeRelation::Global;
     }
-    if scope == requested_scope || project_scopes_overlap(scope, requested_scope) {
+    if project_scopes_match_approved(scope, requested_scope, project_scope_aliases) {
         return ScopeRelation::Local;
     }
     ScopeRelation::Cross
+}
+
+fn project_scopes_match_approved(a: &str, b: &str, project_scope_aliases: Option<&str>) -> bool {
+    a == b
+        || project_scopes_overlap(a, b)
+        || project_scope_aliases
+            .map(str::trim)
+            .filter(|aliases| !aliases.is_empty())
+            .is_some_and(|aliases| project_scopes_alias_by_registry(a, b, aliases))
 }
 
 fn project_scopes_overlap(a: &str, b: &str) -> bool {
@@ -2395,6 +2556,62 @@ fn role_aware_remote_session_candidates(
     });
     out.truncate(limit);
     out
+}
+
+/// Eval-only case #8 candidate arm: semantic supplies a bounded candidate
+/// pool, then the already-frozen remote-session intent vocabulary and
+/// role-aware ordering enforce specificity. This function has no store handle,
+/// performs no writes, and cannot affect production `memory_search`.
+fn semantic_remote_session_role_aware_candidates(
+    query: &str,
+    semantic_hits: &[ab_store::MemorySearchHit],
+    project_scope_aliases: Option<&str>,
+    limit: usize,
+) -> Vec<RoleAwareRemoteSessionProjectionHit> {
+    let query_terms = remote_session_projection_terms("", query);
+    let query_terms_vec = query_terms.iter().cloned().collect::<Vec<_>>();
+    if !has_strict_remote_session_steering_terms(&query_terms_vec) {
+        return Vec::new();
+    }
+
+    let projected = semantic_hits
+        .iter()
+        .filter(|hit| hit.record.status == "active")
+        .filter(|hit| {
+            is_agent_bridge_project_scope_alias(hit.record.scope.as_deref(), project_scope_aliases)
+        })
+        .filter(|hit| is_durable_remote_session_projection_candidate(&hit.record.key))
+        .filter_map(|semantic_hit| {
+            let candidate_terms = remote_session_projection_terms(
+                &semantic_hit.record.key,
+                &semantic_hit.record.content,
+            );
+            let shared_terms = query_terms
+                .intersection(&candidate_terms)
+                .cloned()
+                .collect::<Vec<_>>();
+            let hit = ProjectionHit {
+                key: semantic_hit.record.key.clone(),
+                overlap: shared_terms.len(),
+                shared_terms,
+            };
+            (hit.overlap >= MIN_REMOTE_SESSION_PROJECTION_OVERLAP
+                && has_strict_remote_session_steering_terms(&hit.shared_terms))
+            .then_some(hit)
+        })
+        .collect::<Vec<_>>();
+
+    role_aware_remote_session_candidates(query, projected, limit)
+}
+
+fn is_agent_bridge_project_scope_alias(
+    scope: Option<&str>,
+    project_scope_aliases: Option<&str>,
+) -> bool {
+    let Some(scope) = scope else {
+        return false;
+    };
+    project_scopes_match_approved(scope, AGENT_BRIDGE_PROJECT_SCOPE, project_scope_aliases)
 }
 
 fn classify_remote_session_candidate(
@@ -3125,6 +3342,189 @@ fn print_case8_remote_session_positive_controls(
     Ok(())
 }
 
+async fn print_case8_semantic_role_aware_probe(
+    store: &SqliteStore,
+    semantic_ready: bool,
+    target_active: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("## Case #8 semantic candidate + role-aware specificity scout");
+    println!(
+        "  contract: eval-only, read-only, candidate_pool={}, Agent-Bridge scope \
+         aliases only, strict remote-session steering intent, no graph input.",
+        SEMANTIC_REMOTE_SESSION_CANDIDATE_K
+    );
+    if !semantic_ready {
+        println!("  status: SKIPPED_SEMANTIC_NOT_READY");
+        println!(
+            "  authority: no runtime, write, graph, integration, deployment, or \
+             live-acceptance authority."
+        );
+        println!();
+        return Ok(());
+    }
+
+    let case = &CORPUS[CASE8_REMOTE_SESSION_IDX1 - 1];
+    if !target_active {
+        println!("  status: SKIPPED_TARGET_NOT_ACTIVE");
+        println!(
+            "  authority: no runtime, write, graph, integration, deployment, or \
+             live-acceptance authority."
+        );
+        println!();
+        return Ok(());
+    }
+
+    let main_semantic = store
+        .memory_search_semantic(case.query, SEMANTIC_REMOTE_SESSION_CANDIDATE_K as u32, 0.0)
+        .await?;
+    let project_scope_aliases = std::env::var(PROJECT_SCOPE_ALIASES_ENV).ok();
+    let main_raw_topk = keys_of_hits(
+        &main_semantic
+            .iter()
+            .take(TOP_K)
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    let main_raw_pool = keys_of_hits(&main_semantic);
+    let main_gated = semantic_remote_session_role_aware_candidates(
+        case.query,
+        &main_semantic,
+        project_scope_aliases.as_deref(),
+        TOP_K,
+    );
+    let main_gated_keys = main_gated
+        .iter()
+        .map(|hit| hit.hit.key.clone())
+        .collect::<Vec<_>>();
+    let main_raw_rank = first_hit_rank(&main_raw_topk, case.expect);
+    let main_pool_rank = first_hit_rank(&main_raw_pool, case.expect);
+    let main_gated_rank = first_hit_rank(&main_gated_keys, case.expect);
+    println!(
+        "  main: raw_top10={} raw_pool={} gated={} gated_candidates={}",
+        rank_cell(main_raw_rank),
+        rank_cell(main_pool_rank),
+        rank_cell(main_gated_rank),
+        main_gated.len()
+    );
+    for (i, hit) in main_gated.iter().take(3).enumerate() {
+        let star = if case.expect.iter().any(|target| *target == hit.hit.key) {
+            " <== EXPECTED"
+        } else {
+            ""
+        };
+        println!(
+            "      {:>2}. role={} overlap={} {}{} [{}]",
+            i + 1,
+            hit.role.label(),
+            hit.hit.overlap,
+            hit.hit.key,
+            star,
+            hit.hit.shared_terms.join(", ")
+        );
+    }
+
+    let mut positive_chain_hits = 0usize;
+    let mut positive_target_hits = 0usize;
+    println!("  positive controls:");
+    for control in REMOTE_SESSION_POSITIVE_CONTROLS {
+        let semantic = store
+            .memory_search_semantic(
+                control.query,
+                SEMANTIC_REMOTE_SESSION_CANDIDATE_K as u32,
+                0.0,
+            )
+            .await?;
+        let gated = semantic_remote_session_role_aware_candidates(
+            control.query,
+            &semantic,
+            project_scope_aliases.as_deref(),
+            TOP_K,
+        );
+        let keys = gated
+            .iter()
+            .map(|hit| hit.hit.key.clone())
+            .collect::<Vec<_>>();
+        let target_rank = first_hit_rank(&keys, case.expect);
+        let chain_rank = first_hit_rank(&keys, CASE8_REMOTE_SESSION_STEERING_CHAIN);
+        positive_target_hits += usize::from(target_rank.is_some());
+        positive_chain_hits += usize::from(chain_rank.is_some());
+        println!(
+            "    {}: target={} chain={} accepted={} - {}",
+            control.label,
+            rank_cell(target_rank),
+            rank_cell(chain_rank),
+            gated.len(),
+            control.read
+        );
+    }
+
+    let mut negative_nonempty = 0usize;
+    let mut negative_target_hits = 0usize;
+    println!("  negative controls:");
+    for control in REMOTE_SESSION_NEGATIVE_CONTROLS {
+        let semantic = store
+            .memory_search_semantic(
+                control.query,
+                SEMANTIC_REMOTE_SESSION_CANDIDATE_K as u32,
+                0.0,
+            )
+            .await?;
+        let gated = semantic_remote_session_role_aware_candidates(
+            control.query,
+            &semantic,
+            project_scope_aliases.as_deref(),
+            TOP_K,
+        );
+        let keys = gated
+            .iter()
+            .map(|hit| hit.hit.key.clone())
+            .collect::<Vec<_>>();
+        let target_hits = case
+            .expect
+            .iter()
+            .filter(|target| keys.iter().any(|key| key == **target))
+            .count();
+        negative_nonempty += usize::from(!gated.is_empty());
+        negative_target_hits += target_hits;
+        println!(
+            "    {}: accepted={} target_hits={} - {}",
+            control.label,
+            gated.len(),
+            target_hits,
+            control.read
+        );
+    }
+
+    let pass = main_gated_rank == Some(1)
+        && positive_chain_hits == REMOTE_SESSION_POSITIVE_CONTROLS.len()
+        && negative_nonempty == 0
+        && negative_target_hits == 0;
+    println!(
+        "  summary: main_rank1={} positive_chain_hits={}/{} \
+         positive_target_hits={}/{} negative_nonempty={}/{} \
+         negative_target_hits={} status={}",
+        main_gated_rank == Some(1),
+        positive_chain_hits,
+        REMOTE_SESSION_POSITIVE_CONTROLS.len(),
+        positive_target_hits,
+        REMOTE_SESSION_POSITIVE_CONTROLS.len(),
+        negative_nonempty,
+        REMOTE_SESSION_NEGATIVE_CONTROLS.len(),
+        negative_target_hits,
+        if pass {
+            "PASS_OFFLINE_SCOUT"
+        } else {
+            "NO_GO_OFFLINE_SCOUT"
+        }
+    );
+    println!(
+        "  authority: this scout grants no runtime, write, graph, integration, \
+         deployment, or live-acceptance authority."
+    );
+    println!();
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RoleAwareHardFamilyRank {
     idx1: usize,
@@ -3430,6 +3830,74 @@ fn print_semantic_scope_case_matrix(
             q
         );
     }
+    println!();
+}
+
+fn print_semantic_coactivation_eval(
+    raw_off: &ModeAgg,
+    raw_on: &ModeAgg,
+    scoped_local_off: &ModeAgg,
+    scoped_local_on: &ModeAgg,
+    case8: Option<SemanticCoactivationCaseRanks>,
+) {
+    let n = raw_off.ranks.len();
+    let local_n = scoped_local_off.ranks.len();
+    println!("## Eval-only semantic coactivation rerank A/B");
+    println!(
+        "  {:<24} {:>7} {:>7} {:>7} {:>7}",
+        "mode", "R@1", "R@5", "R@10", "MRR"
+    );
+    print_mode_row("raw / coact-OFF", raw_off, n);
+    print_mode_row("raw / coact-ON", raw_on, n);
+    print_mode_row("scoped-local / OFF", scoped_local_off, local_n);
+    print_mode_row("scoped-local / ON", scoped_local_on, local_n);
+    if let Some(case8) = case8 {
+        println!(
+            "  case #8: raw OFF={} ON={}; local+global OFF={} ON={} \
+             scoped_candidates={}",
+            rank_cell(case8.raw_off),
+            rank_cell(case8.raw_on),
+            rank_cell(case8.scoped_off),
+            rank_cell(case8.scoped_on),
+            case8.scoped_candidates
+        );
+    }
+    let raw_off_mrr = raw_off.rr_sum / n as f64;
+    let raw_on_mrr = raw_on.rr_sum / n as f64;
+    let scoped_off_mrr = scoped_local_off.rr_sum / local_n as f64;
+    let scoped_on_mrr = scoped_local_on.rr_sum / local_n as f64;
+    let case8_recovers = case8.is_some_and(|ranks| {
+        ranks.scoped_off == Some(1)
+            && ranks
+                .scoped_on
+                .map_or(true, |rank| rank > ranks.scoped_off.unwrap_or(usize::MAX))
+    });
+    let pass = raw_off.r_at_10 >= raw_on.r_at_10
+        && raw_off_mrr > raw_on_mrr
+        && scoped_local_off.r_at_10 >= scoped_local_on.r_at_10
+        && scoped_off_mrr > scoped_on_mrr
+        && case8_recovers;
+    println!(
+        "  status: {}",
+        if pass {
+            "PASS_DISABLE_COACTIVATION_RERANK_SCOUT"
+        } else {
+            "NO_GO_DISABLE_COACTIVATION_RERANK_SCOUT"
+        }
+    );
+    println!(
+        "  contract: exact production multiplier \
+         score *= 1 + 0.2*ln(1+page_coactivation_count), evaluated read-only. \
+         Scoped arm mirrors limit={TOP_K} with {MCP_SCOPED_SEMANTIC_INNER_K} \
+         raw candidates, approved alias routing, local+global filter, and \
+         post-rerank truncate. Seed boost, telemetry, graph writes, and other \
+         output stages are excluded."
+    );
+    println!(
+        "  authority: this A/B may support a reversible configuration rollout; \
+         it does not itself prove deployment, fresh-process pickup, or live \
+         consumer acceptance."
+    );
     println!();
 }
 
@@ -4318,6 +4786,16 @@ mod tests {
         }
     }
 
+    fn content_hit(key: &str, scope: Option<&str>, content: &str, score: f64) -> MemorySearchHit {
+        let mut record = record(key, scope);
+        record.content = content.to_string();
+        MemorySearchHit {
+            record,
+            score,
+            cosine: Some(score as f32),
+        }
+    }
+
     #[test]
     fn embedding_dim_from_byte_len_rejects_invalid_widths() {
         assert_eq!(embedding_dim_from_byte_len(384 * 4), Some(384));
@@ -5015,5 +5493,128 @@ mod tests {
 
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].role, RemoteSessionCandidateRole::DiagnosticOrMeta);
+    }
+
+    #[test]
+    fn agent_bridge_scope_alias_accepts_moved_project_roots_only() {
+        let aliases = concat!(
+            "project-id:git:gitlab.com/pallasting/agent-bridge=",
+            "project:/Users/pallasting/Projects/agent-bridge,",
+            "project:/Data/CascadeProjects/agent-bridge"
+        );
+        assert!(is_agent_bridge_project_scope_alias(
+            Some("project:/Users/pallasting/Projects/agent-bridge"),
+            Some(aliases)
+        ));
+        assert!(is_agent_bridge_project_scope_alias(
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+            Some(aliases)
+        ));
+        assert!(!is_agent_bridge_project_scope_alias(
+            Some("project:/Users/pallasting/Projects/agent-bridge-lab"),
+            Some(aliases)
+        ));
+        assert!(!is_agent_bridge_project_scope_alias(
+            Some("project:/elsewhere/agent-bridge"),
+            Some(aliases)
+        ));
+        assert!(!is_agent_bridge_project_scope_alias(
+            Some("global"),
+            Some(aliases)
+        ));
+        assert!(!is_agent_bridge_project_scope_alias(None, Some(aliases)));
+    }
+
+    #[test]
+    fn semantic_scope_relation_uses_only_approved_registry_aliases() {
+        let aliases = concat!(
+            "project-id:git:gitlab.com/pallasting/agent-bridge=",
+            "project:/Users/pallasting/Projects/agent-bridge,",
+            "project:/Data/CascadeProjects/agent-bridge"
+        );
+        assert_eq!(
+            memory_scope_relation_with_aliases(
+                Some("project:/Data/CascadeProjects/agent-bridge"),
+                AGENT_BRIDGE_PROJECT_SCOPE,
+                Some(aliases),
+            ),
+            ScopeRelation::Local
+        );
+        assert_eq!(
+            memory_scope_relation_with_aliases(
+                Some("project:/elsewhere/agent-bridge"),
+                AGENT_BRIDGE_PROJECT_SCOPE,
+                Some(aliases),
+            ),
+            ScopeRelation::Cross
+        );
+    }
+
+    #[test]
+    fn semantic_remote_session_role_aware_candidates_recover_primary_from_bounded_pool() {
+        let query = CORPUS[CASE8_REMOTE_SESSION_IDX1 - 1].query;
+        let candidates = vec![
+            content_hit(
+                "unrelated_remote_session_note",
+                Some("project:/Users/pallasting/Projects/onsen-hd"),
+                "remote running agent session steering send input",
+                0.95,
+            ),
+            content_hit(
+                "docs_remote_session_steering_sop_20260601",
+                Some(AGENT_BRIDGE_PROJECT_SCOPE),
+                "Agent-Bridge remote long-running agent session steering via tmux send-keys",
+                0.91,
+            ),
+            content_hit(
+                "agentbridge_remote_session_steer_gap_20260529",
+                Some("project:/Data/CascadeProjects/agent-bridge"),
+                "Agent-Bridge remote session steering gap: inject instructions into a running long-lived agent session",
+                0.89,
+            ),
+        ];
+
+        let aliases = concat!(
+            "project-id:git:gitlab.com/pallasting/agent-bridge=",
+            "project:/Users/pallasting/Projects/agent-bridge,",
+            "project:/Data/CascadeProjects/agent-bridge"
+        );
+        let ranked =
+            semantic_remote_session_role_aware_candidates(query, &candidates, Some(aliases), TOP_K);
+        let keys = ranked
+            .iter()
+            .map(|hit| hit.hit.key.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            keys,
+            vec![
+                "agentbridge_remote_session_steer_gap_20260529",
+                "docs_remote_session_steering_sop_20260601"
+            ]
+        );
+        assert_eq!(ranked[0].role, RemoteSessionCandidateRole::PrimaryAnswer);
+    }
+
+    #[test]
+    fn semantic_remote_session_role_aware_candidates_fail_closed_on_unrelated_query() {
+        let candidates = vec![content_hit(
+            "agentbridge_remote_session_steer_gap_20260529",
+            Some(AGENT_BRIDGE_PROJECT_SCOPE),
+            "Agent-Bridge remote session steering gap: inject instructions into a running agent",
+            0.99,
+        )];
+
+        let ranked = semantic_remote_session_role_aware_candidates(
+            "怎么通过 ssh 远程登录服务器",
+            &candidates,
+            Some(concat!(
+                "project-id:git:gitlab.com/pallasting/agent-bridge=",
+                "project:/Users/pallasting/Projects/agent-bridge"
+            )),
+            TOP_K,
+        );
+
+        assert!(ranked.is_empty());
     }
 }

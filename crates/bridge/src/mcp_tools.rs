@@ -14602,6 +14602,12 @@ impl McpTool for MemorySearchTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let scope_mode = memory_search_scope_mode(&args, include_global);
+        let remote_session_specificity = remote_session_specificity_policy(
+            remote_session_specificity_enabled(),
+            mode,
+            scope_filter.as_deref(),
+            &q,
+        );
 
         let mut exclude_kinds: Vec<String> = args
             .get("exclude_kinds")
@@ -14843,6 +14849,18 @@ impl McpTool for MemorySearchTool {
             );
         }
 
+        // Engram specificity v0 (default-OFF): a narrow, mechanically gated
+        // repair for the observed remote-agent-session overgeneralization.
+        // Non-steering queries cannot surface this family; strict steering
+        // queries keep the semantic page but bypass the coactivation rerank
+        // that moved the highest-cosine answer from rank 1 to rank 10.
+        //
+        // This runs before seed/coactivation so a suppressed row cannot affect
+        // another candidate's score or create a misleading coactivation trace.
+        if remote_session_specificity == RemoteSessionSpecificityPolicy::SuppressFamily {
+            hits.retain(|hit| !is_remote_session_steering_family_key(&hit.record.key));
+        }
+
         // Path C actuator: rerank using perception_filter hub_clusters.
         // Fail-soft (no state file / disable env / empty hub_clusters → pass-through).
         let hits = apply_seed_boost(hits);
@@ -14872,7 +14890,10 @@ impl McpTool for MemorySearchTool {
         // consolidation, memory_coactivation_top and prune/latch tooling
         // (NOT hybrid RRF — that reads memory_edges only, which coactivation
         // reaches solely via crystallization).
-        let hits = if !coactivation_rerank_disabled() && hits.len() >= 2 {
+        let hits = if !coactivation_rerank_disabled()
+            && remote_session_specificity != RemoteSessionSpecificityPolicy::StrictSteering
+            && hits.len() >= 2
+        {
             let keys: Vec<String> = hits.iter().map(|h| h.record.key.clone()).collect();
             match store.coactivation_among(&keys).await {
                 Ok(edges) if !edges.is_empty() => {
@@ -15180,6 +15201,130 @@ fn memory_search_env_exclude_kinds() -> Vec<String> {
             .ok()
             .as_deref(),
     )
+}
+
+const REMOTE_SESSION_SPECIFICITY_ENV: &str = "AGENT_BRIDGE_REMOTE_SESSION_SPECIFICITY_V0";
+const REMOTE_SESSION_SPECIFICITY_PROJECT_ID: &str =
+    "project-id:git:gitlab.com/pallasting/agent-bridge";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteSessionSpecificityPolicy {
+    Off,
+    StrictSteering,
+    SuppressFamily,
+}
+
+fn remote_session_specificity_enabled_from(value: Option<&str>) -> bool {
+    matches!(value, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn remote_session_specificity_enabled() -> bool {
+    remote_session_specificity_enabled_from(
+        std::env::var(REMOTE_SESSION_SPECIFICITY_ENV)
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn remote_session_specificity_policy(
+    enabled: bool,
+    mode: &str,
+    requested_scope: Option<&str>,
+    query: &str,
+) -> RemoteSessionSpecificityPolicy {
+    let aliases = std::env::var(PROJECT_SCOPE_ALIASES_ENV).ok();
+    remote_session_specificity_policy_with_aliases(
+        enabled,
+        mode,
+        requested_scope,
+        query,
+        aliases.as_deref(),
+    )
+}
+
+fn remote_session_specificity_policy_with_aliases(
+    enabled: bool,
+    mode: &str,
+    requested_scope: Option<&str>,
+    query: &str,
+    project_scope_aliases: Option<&str>,
+) -> RemoteSessionSpecificityPolicy {
+    if !enabled || mode != "semantic" {
+        return RemoteSessionSpecificityPolicy::Off;
+    }
+    let Some(scope) = requested_scope else {
+        return RemoteSessionSpecificityPolicy::Off;
+    };
+    if !project_scopes_read_time_compatible_with_aliases(
+        scope,
+        REMOTE_SESSION_SPECIFICITY_PROJECT_ID,
+        project_scope_aliases,
+    ) {
+        return RemoteSessionSpecificityPolicy::Off;
+    }
+    if is_strict_remote_session_steering_query(query) {
+        RemoteSessionSpecificityPolicy::StrictSteering
+    } else {
+        RemoteSessionSpecificityPolicy::SuppressFamily
+    }
+}
+
+fn is_strict_remote_session_steering_query(query: &str) -> bool {
+    let query = query.to_lowercase();
+    let contains_any = |needles: &[&str]| needles.iter().any(|needle| query.contains(needle));
+    let agent = contains_any(&[
+        "agent",
+        "agentbridge",
+        "agent-bridge",
+        "codex",
+        "claude",
+        "kilo",
+        "aio2",
+    ]);
+    let remote = contains_any(&["远程", "远端", "remote", "tailnet", "aio2", "远程控制"]);
+    let session = contains_any(&[
+        "会话",
+        "session",
+        "tmux",
+        "mux",
+        "pane",
+        "长驻",
+        "long-lived",
+        "long running",
+        "long-running",
+        "detached",
+        "presence",
+        "handle",
+    ]);
+    let steering = contains_any(&[
+        "注入指令",
+        "指令",
+        "输入",
+        "发送",
+        "控制",
+        "steer",
+        "steering",
+        "remote_steer",
+        "agent_steer",
+        "agent_steer_drive",
+        "send-keys",
+        "send keys",
+        "send input",
+        "drive",
+    ]);
+    agent && remote && session && steering
+}
+
+fn is_remote_session_steering_family_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.contains("agentbridge_remote_session_steer_gap")
+        || key.contains("session_handoff_agent_spawn_remote_steer")
+        || key.contains("agent_spawn_remote_ssh_and_steer")
+        || key.contains("remote_session_steering")
+        || key.contains("remote_steer")
+        || key.contains("agent_steer")
+        || key.contains("steer_presence")
+        || (key.contains("mux") && key.contains("steer"))
 }
 
 /// True when the operator has disabled the P1 coactivation read-side rerank

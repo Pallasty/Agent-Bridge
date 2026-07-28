@@ -23458,6 +23458,167 @@ fn coactivation_rerank_disable_defaults_to_enabled() {
 }
 
 #[test]
+fn remote_session_specificity_defaults_off_and_parses_only_explicit_truthy_values() {
+    assert!(!remote_session_specificity_enabled_from(None));
+    assert!(!remote_session_specificity_enabled_from(Some("")));
+    assert!(!remote_session_specificity_enabled_from(Some("0")));
+    assert!(!remote_session_specificity_enabled_from(Some("yes")));
+    assert!(remote_session_specificity_enabled_from(Some("1")));
+    assert!(remote_session_specificity_enabled_from(Some("true")));
+    assert!(remote_session_specificity_enabled_from(Some("TRUE")));
+}
+
+#[test]
+fn remote_session_specificity_requires_semantic_mode_and_approved_ab_scope() {
+    const LEGACY_SCOPE: &str = "project:/Users/pallasting/Projects/agent-bridge";
+    const ALIASES: &str = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+        project:/Users/pallasting/Projects/agent-bridge";
+    const QUERY: &str = "怎么远程给一个正在运行的长驻 agent 会话注入指令";
+
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            false,
+            "semantic",
+            Some(LEGACY_SCOPE),
+            QUERY,
+            Some(ALIASES)
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "fts",
+            Some(LEGACY_SCOPE),
+            QUERY,
+            Some(ALIASES)
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "semantic",
+            None,
+            QUERY,
+            Some(ALIASES)
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "semantic",
+            Some(LEGACY_SCOPE),
+            QUERY,
+            None
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "semantic",
+            Some("project:/Users/pallasting/Projects/other"),
+            QUERY,
+            Some(ALIASES)
+        ),
+        RemoteSessionSpecificityPolicy::Off
+    );
+    assert_eq!(
+        remote_session_specificity_policy_with_aliases(
+            true,
+            "semantic",
+            Some(REMOTE_SESSION_SPECIFICITY_PROJECT_ID),
+            QUERY,
+            None
+        ),
+        RemoteSessionSpecificityPolicy::StrictSteering
+    );
+}
+
+#[test]
+fn remote_session_specificity_classifies_frozen_positive_and_negative_controls() {
+    const LEGACY_SCOPE: &str = "project:/Users/pallasting/Projects/agent-bridge";
+    const ALIASES: &str = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+        project:/Users/pallasting/Projects/agent-bridge";
+    const POSITIVES: &[&str] = &[
+        "怎么远程给一个正在运行的长驻 agent 会话注入指令",
+        "怎么向远端正在运行的长驻 agent 会话发送新的指令",
+        "远程 tmux 里的 agent 会话卡住了,要用 agent_steer_drive 注入下一步",
+        "remote steer a running agent session by sending instructions to the tmux pane",
+        "agent_steer_drive should send input to a detached remote agent session and handle gates",
+        "ab remote session steering uses a long-lived agent handle and tmux send-keys",
+        "Agent-Bridge 当初远程控制长驻 agent 会话的缺口是什么,怎么补",
+    ];
+    const NEGATIVES: &[&str] = &[
+        "怎么通过 ssh 远程登录服务器",
+        "git remote branch 推送失败怎么处理",
+        "agent 会话上下文太长要怎么总结",
+        "怎么给正在运行的后台进程发送 kill 信号",
+        "远程数据库迁移脚本运行中怎么查看日志",
+        "memory_search 检索结果不准应该调 bm25 还是语义模型",
+    ];
+
+    for query in POSITIVES {
+        assert_eq!(
+            remote_session_specificity_policy_with_aliases(
+                true,
+                "semantic",
+                Some(LEGACY_SCOPE),
+                query,
+                Some(ALIASES)
+            ),
+            RemoteSessionSpecificityPolicy::StrictSteering,
+            "positive query was not admitted: {query}"
+        );
+    }
+    for query in NEGATIVES {
+        assert_eq!(
+            remote_session_specificity_policy_with_aliases(
+                true,
+                "semantic",
+                Some(LEGACY_SCOPE),
+                query,
+                Some(ALIASES)
+            ),
+            RemoteSessionSpecificityPolicy::SuppressFamily,
+            "negative query was not isolated: {query}"
+        );
+    }
+}
+
+#[test]
+fn remote_session_specificity_family_key_match_is_narrow() {
+    for key in [
+        "agentbridge_remote_session_steer_gap_20260529",
+        "session_handoff_agent_spawn_remote_steer_retry_to_aio2_20260531",
+        "agent_spawn_remote_ssh_and_steer",
+        "remote_session_steering_decision",
+        "agent_steer_drive_delivery",
+        "tmux_remote_steering",
+    ] {
+        assert!(
+            is_remote_session_steering_family_key(key),
+            "expected family key to match: {key}"
+        );
+    }
+    for key in [
+        "generic_ssh_login",
+        "git_remote_branch",
+        "agent_session_context_summary",
+        "remote_database_migration",
+        "memory_search_semantic_quality",
+        "tmux_session_recovery_without_control",
+    ] {
+        assert!(
+            !is_remote_session_steering_family_key(key),
+            "unrelated key matched family filter: {key}"
+        );
+    }
+}
+
+#[test]
 fn memory_class_quota_spec_parses_fail_soft() {
     assert!(memory_class_quota_from(None).is_empty());
     assert!(memory_class_quota_from(Some("")).is_empty());
