@@ -46,11 +46,10 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions,
 };
 use ab_bridge::lswr_interaction_feedback::build_interaction_feedback_packet_consumption_preflight;
-use ab_bridge::operator_request::{OperatorDecision, OperatorRequestStore, OperatorRequestView};
 use ab_bridge::seed_substrate as ab_seed_bridge;
 use ab_bridge::shadow_cortex as ab_shadow_cortex;
 use ab_bridge::warp_scheme;
-use ab_bridge::{a2ui, browser_lite, instinct, skills};
+use ab_bridge::{browser_lite, instinct, skills};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -63,11 +62,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
+mod cli;
 mod doctor;
 mod seed_substrate;
 mod setup;
 mod shadow_cortex;
 use ab_bridge::sync;
+use cli::{A2uiOp, OperatorRequestOp};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -4034,59 +4035,6 @@ enum SyncOp {
     },
 }
 
-#[derive(Subcommand, Debug)]
-enum OperatorRequestOp {
-    /// List recent staged requests without changing them.
-    List {
-        #[arg(long, default_value_t = 20)]
-        limit: usize,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show one exact request and any local decision evidence.
-    Show {
-        request_id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Record approval evidence for separate executor review.
-    Approve {
-        request_id: String,
-        /// Human/operator identifier to record with the decision.
-        #[arg(long)]
-        operator: String,
-        /// Why this exact request digest is approved for executor review.
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Reject a pending request. Rejected requests cannot be revived.
-    Reject {
-        request_id: String,
-        /// Human/operator identifier to record with the decision.
-        #[arg(long)]
-        operator: String,
-        /// Why this exact request digest is rejected.
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum A2uiOp {
-    /// Validate a JSON array, single message, or JSONL stream. Use `-` for stdin.
-    Validate {
-        /// Input path, or `-` to read stdin.
-        input: String,
-        /// Emit the complete machine-readable validation report.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum SyncProvider {
     /// Use `gh` CLI to host on GitHub (legacy default).
@@ -4785,13 +4733,13 @@ async fn real_main() -> Result<()> {
     // Operator requests are a local file-backed control plane. They do not
     // need the daemon Hub, and decisions never invoke an executor.
     if let Cmd::OperatorRequest { op } = &cmd {
-        return run_operator_request_cli(op);
+        return cli::run_operator_request(op);
     }
 
     // A2UI P0 is deliberately read-only: parse and report before any Hub,
     // renderer, action dispatcher, browser, terminal, or agent runtime exists.
     if let Cmd::A2ui { op } = &cmd {
-        return run_a2ui_cli(op);
+        return cli::run_a2ui(op);
     }
 
     // Skills subcommand: short-lived; no daemon hub needed.
@@ -8238,141 +8186,6 @@ async fn real_main() -> Result<()> {
         | Cmd::WorkflowFeedbackPromotionRecord { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
-}
-
-fn run_a2ui_cli(op: &A2uiOp) -> Result<()> {
-    use std::io::Read as _;
-
-    match op {
-        A2uiOp::Validate { input, json } => {
-            let raw = if input == "-" {
-                let mut raw = String::new();
-                std::io::stdin()
-                    .read_to_string(&mut raw)
-                    .context("read A2UI stream from stdin")?;
-                raw
-            } else {
-                std::fs::read_to_string(input)
-                    .with_context(|| format!("read A2UI stream {input}"))?
-            };
-            let report = a2ui::validate_stream(&raw);
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
-            } else if report.valid {
-                println!(
-                    "A2UI {} valid: {} messages, {} surfaces, {} components, {} described actions; execution=false rendering=false",
-                    report.protocol_version,
-                    report.message_count,
-                    report.surface_count,
-                    report.component_count,
-                    report.action_count
-                );
-            } else {
-                eprintln!(
-                    "A2UI {} invalid: {} error(s); execution=false rendering=false",
-                    report.protocol_version,
-                    report.errors.len()
-                );
-                for issue in &report.errors {
-                    eprintln!("- {}: {}", issue.code, issue.message);
-                }
-            }
-            if !report.valid {
-                std::process::exit(2);
-            }
-            Ok(())
-        }
-    }
-}
-
-fn run_operator_request_cli(op: &OperatorRequestOp) -> Result<()> {
-    let store = OperatorRequestStore::default();
-    match op {
-        OperatorRequestOp::List { limit, json } => {
-            let views = store.list(*limit)?;
-            if *json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({
-                        "schema": "agent_bridge.operator_request_list.v0",
-                        "store": store.root(),
-                        "requests": views,
-                    }))?
-                );
-            } else if views.is_empty() {
-                println!("No staged operator requests in {}.", store.root().display());
-            } else {
-                println!(
-                    "{:<38}  {:<28}  {:<20}  DIGEST",
-                    "REQUEST ID", "STATUS", "CAPABILITY"
-                );
-                for view in views {
-                    println!(
-                        "{:<38}  {:<28}  {:<20}  {}",
-                        view.request.request_id,
-                        view.status,
-                        view.request.requested_capability.as_str(),
-                        &view.request.request_digest[..12]
-                    );
-                }
-            }
-        }
-        OperatorRequestOp::Show { request_id, json } => {
-            print_operator_request_view(&store.get(request_id)?, *json)?;
-        }
-        OperatorRequestOp::Approve {
-            request_id,
-            operator,
-            reason,
-            json,
-        } => {
-            let view = store.decide(request_id, OperatorDecision::Approve, operator, reason)?;
-            print_operator_request_view(&view, *json)?;
-        }
-        OperatorRequestOp::Reject {
-            request_id,
-            operator,
-            reason,
-            json,
-        } => {
-            let view = store.decide(request_id, OperatorDecision::Reject, operator, reason)?;
-            print_operator_request_view(&view, *json)?;
-        }
-    }
-    Ok(())
-}
-
-fn print_operator_request_view(view: &OperatorRequestView, as_json: bool) -> Result<()> {
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(view)?);
-        return Ok(());
-    }
-    println!("Request: {}", view.request.request_id);
-    println!("Status: {}", view.status);
-    println!("Digest: {}", view.request.request_digest);
-    println!("Capability: {}", view.request.requested_capability.as_str());
-    println!("Target: {}", view.request.target);
-    println!("Channel: {}", view.request.channel_id);
-    println!("Identity strength: {}", view.request.identity_strength);
-    println!("Created: {}", view.request.created_at);
-    println!("Expires: {}", view.request.expires_at);
-    println!("Execution allowed: {}", view.execution_allowed);
-    println!(
-        "Canonical write performed: {}",
-        view.request.canonical_write_performed
-    );
-    if let Some(decision) = &view.decision {
-        println!("Decision: {}", decision.decision.as_str());
-        println!("Operator: {}", decision.operator_id);
-        println!("Reason: {}", decision.reason);
-        println!("Approval scope: {}", decision.approval_scope);
-        println!(
-            "Separate executor gate required: {}",
-            decision.requires_separate_executor_gate
-        );
-    }
-    println!("Next step: {}", view.next_step);
-    Ok(())
 }
 
 /// Goal C standing continuity `U` report: build the store-side embedding-space
