@@ -2,6 +2,157 @@
 
 Status date: 2026-07-26
 
+## 2026-07-26 — FH-L8 D64 owner-local capacity observation
+
+- Revalidated the reversible owner-local reservation at
+  `/Data/CascadeProjects/.ab-reservations/fh-l8-d23-capacity-reservation-v1.bin`: exact
+  3,110,572,064 logical bytes, 6,081,320 allocated 512-byte blocks, mode 0600 and uid/gid 1000.
+- Recorded it as an observation only. It is not an external attestation, does not close D23 in D62,
+  and does not alter D58/D59/D60 or full53 authority.
+- D64 allocator proof interface remains empty for all eight variables; next gate is
+  `D58_D59_D60_EVIDENCE_CLOSURE_BEFORE_D61_REVERIFY`.
+
+## 2026-07-26 — FH-L8 D60 premeasurement runtime-rule disposition
+
+- Bound D51 operation populations to the only two admissible runtime-rule forms and explicitly
+  rejected D54R cross-replay spread, fixed64 observations and posthoc host load as margins.
+- Environment, margin and timeout rules remain uncommitted, so D60 returns a fail-closed NO-GO
+  without timing measurements or scientific execution. Next gate: D61 integration.
+
+## 2026-07-26 — FH-L8 D59 production I/O/page-cache disposition
+
+- Fixed source, spill, two-generation merge and publication I/O lifetimes against D51/D57.
+- Found the required OS/filesystem writeback, cgroup file-page and target-size contracts absent;
+  page-cache therefore remains numerically unbounded and returns a fail-closed NO-GO.
+- D59 performs zero production I/O, scientific calls and packed-q3 reads. Next gate:
+  `D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE`.
+
+## 2026-07-26 — FH-L8 D58 symbolic live-allocation inventory
+
+- Mapped D51's four lifetime phases and D52/D57 allocation classes into eight independent symbolic
+  peak variables and phase expressions.
+- Frozen eight proof obligations and rejected D54 observations, host `getsizeof` values and aggregate
+  cgroup peaks as substitutes for allocator bounds.
+- The inventory is complete but numeric proofs remain pending; D58 executes zero measurements,
+  scientific kernels and packed-q3 reads. Next gate: `D59_PRODUCTION_IO_PAGE_CACHE_BOUND`.
+
+## 2026-07-26 — FH-L8 D57 production streaming adapter contract
+
+- Added an importable adapter contract for source decode, bound-kernel invocation, partition spill,
+  merge and terminal publication, with release of each column before the next source.
+- Synthetic/mock tests construct individual 32-byte records in memory; they perform no packed-q3
+  file read, production I/O, object measurement or scientific call. The full53 entrypoint fails
+  closed.
+- D5 `_reduced_column` is source-pinned as the future binding symbol but is neither imported nor
+  called by D57 verification. Numeric bounds and external reservation remain unproven/unadmitted.
+- D57 unlocks the planned parallel analysis gates D58 allocation classes, D59 production I/O/page
+  cache and D60 precommitted runtime rule; it unlocks no measurement or full53 execution.
+
+## 2026-07-26 — FH-L8 D56 ordered resource-bound closure plan
+
+- Converted all six D55 closure requirements into source-pinned D57--D62 work packages with
+  explicit deliverables, acceptance evidence, dependencies and fail-closed stop conditions.
+- D57 fixes the production adapter contract; D58 allocation bounds, D59 production I/O/page-cache
+  and D60 runtime-rule work may then proceed in parallel.
+- D61 is the mandatory three-way resource-envelope join and must reconcile the 359,759,114-byte
+  D23 scratch shortfall. D62 alone may evaluate an authentic external reservation and terminal
+  full53 authorization.
+- Machine-checkable coverage binds all four D51 phases, four D52 adapter stages and six selected
+  operation bounds to their responsible gates; per-gate rules confirm D56 grants no future
+  measurement, production-I/O, external-capacity or full53 authority.
+- D56 implements no adapter and performs zero measurements, scientific calls or packed-q3 reads.
+  Numeric resource and full53 authority remain closed.
+- Next gate: `D57_PRODUCTION_STREAMING_ADAPTER_IMPLEMENTATION_CONTRACT`.
+
+## 2026-07-26 — FH-L8 D55 measurement admissibility decision
+
+- Reviewed every D53 target against D51/D52 unresolved terms and both complete D54R replays.
+- Classified six targets as observational only, three as not separately identified and filesystem
+  page-cache accounting as not measured.
+- Admitted the evidence only for regression, descriptive fixed64 summaries and hotspot
+  prioritization; full53 extrapolation and resource bounds remain forbidden.
+- Pinned both authorizations and result checkers. The size-64 replay maxima differ by 3,231,744
+  cgroup bytes (69,332 ppm) and 85,298,967 ns (26,122 ppm); this spread is not a margin rule.
+- Returned
+  `NO_GO_D55_MEASUREMENTS_ADMISSIBLE_ONLY_AS_OBSERVATIONS_RESOURCE_BOUNDS_INCOMPLETE`.
+  D55 executes zero measurements, scientific kernels and packed-q3 reads.
+- Next gate: `D56_PRODUCTION_STREAMING_ADAPTER_AND_RESOURCE_BOUND_CLOSURE_PLAN`.
+
+## 2026-07-26 — FH-L8 D54R2 independent isolation replication
+
+- Reconciled the concurrently published D54R completion without overwriting its runner, receipts
+  or result.
+- Independently completed the same 70-process plan inside a bubblewrap network namespace that
+  exposed loopback only; CPU0, 512-MiB/384-MiB-high, zero-swap, OOM and structural gates passed.
+- Reobserved 791 scientific calls and the exact fixed64 structural digests. The size-64 maxima were
+  49,844,224 cgroup bytes and 3,350,640,149 wall nanoseconds, modestly above D54R.
+- The two finite-host samples remain separate evidence sets. D55 must treat their spread as
+  evidence against promoting either observed maximum to a worst-case bound.
+
+## 2026-07-26 — FH-L8 D54R complete bounded measurement replay
+
+- Identified a field-location defect that made the frozen D54 runner reject its own authorization;
+  preserved D54 history and froze a source-pinned D54R correction instead.
+- Completed the exact 70-process plan under CPU0, 512-MiB/384-MiB-high, zero-swap and
+  network-closed user-service isolation: 20 warmups and 50 retained measurements.
+- The receipt set records 791 scientific kernel calls, zero packed-q3 reads, no OOM/swap/cap
+  failure and stable structural digests within every measured group.
+- The fixed64 size-64 observations span 46,002,176--46,612,480 cgroup peak bytes and
+  2,992,888,732--3,265,341,182 wall nanoseconds. They remain observations, not numeric bounds.
+- A committed result binds the external manifest and ordered 70-receipt set and is independently
+  reaggregated by a fail-closed checker. Next gate:
+  `D55_D54_MEASUREMENT_REVIEW_AND_BOUND_ADMISSIBILITY_DECISION`.
+
+## 2026-07-26 — FH-L8 D54 instrumented runner and bounded authorization
+
+- Froze a one-process/one-sample runner before authorization; exact D53 expansion contains 70
+  samples (42 synthetic, 28 fixed64; 20 warmup, 50 measured).
+- Separately authorized only that exact plan under CPU0, 512-MiB/384-MiB high, zero-swap,
+  network-closed fresh-process isolation and a fresh external scratch root.
+- Fixed64 calls are capped at 67 per process and 819 total; packed-q3 reads and full-53 authority
+  remain zero/false. Per-process terminal receipts and structural-repeat checks are mandatory.
+- Authorization is unused: scratch absent, samples/object measurements/scientific calls all zero.
+  Next gate: `D54_FRESH_SAMPLE_REPLAY_AND_INDEPENDENT_AGGREGATION`.
+
+## 2026-07-26 — FH-L8 D53 object-cost measurement protocol
+
+- Mapped the unresolved D51/D52 memory and timing terms into ten measurement
+  targets across synthetic-object calibration and source-bound fixed64 tiers.
+- Froze six synthetic sizes, four fixed64 prefixes, fourteen mandatory metrics,
+  two warmups and five retained measurement runs per size under CPU0,
+  512-MiB/zero-swap isolation.
+- Baseline subtraction is limited to `tracemalloc`; process/cgroup peaks remain
+  absolute. Samples alone cannot become allocator or worst-case timing bounds.
+- D53 implements no runner and executes zero measurements, packed-q3 reads or
+  scientific kernel calls. Next gate:
+  `D54_FIXED64_INSTRUMENTED_OBJECT_COST_MEASUREMENT_AUTHORIZATION`.
+
+## 2026-07-26 — FH-L8 D52 static adapter IR and operation bounds
+
+- Bound a four-stage, non-executable adapter IR to the existing D5
+  `_reduced_column` kernel and made per-source column release explicit.
+- AST and integer checks bound full-53 calls to 48,160,374 canonical-info
+  evaluations, 385,282,992 symmetry images, 95,894,550 `Fraction`
+  constructions and 47,947,275 reduced-column updates.
+- Seven allocation/time cost classes remain unmeasured. D52 creates no
+  executable production adapter, reads no packed q3 and executes no scientific
+  kernel call; numeric memory/runtime and full-53 authority remain false.
+- Next gate:
+  `D53_OBJECT_ALLOCATION_AND_OPERATION_COST_MEASUREMENT_PROTOCOL_DESIGN`.
+
+## 2026-07-26 — FH-L8 D51 streaming lifetime and runtime-work design
+
+- Split D50's full-53 structural bound into source admission, kernel/spill, partition merge and
+  target-publication lifetime phases under the pinned 32-way external-merge design.
+- Conservative receipt-first storage requires 3,110,572,064 bytes, 359,759,114 bytes above D23's
+  registered scratch guardrail.
+- Closed integer work counts for 213,099 planned kernel calls, 47,947,275 candidate visits,
+  95,894,550 merge record reads/writes and a design upper of 958,945,500 heap comparisons.
+- The 35,520,512-byte known-buffer subtotal excludes Python runtime, kernel-column, writer/heap
+  objects and page-cache accounting; neither numeric peak memory nor host seconds is proven.
+- D51 executes zero scientific calls and reads zero packed q3. Next gate:
+  `D52_PRODUCTION_ADAPTER_STATIC_ALLOCATION_AND_OPERATION_COST_BOUND`.
+
 ## 2026-07-26 — FH-L8 D50 source-bound kernel and structural fan-out
 
 - Reconciled D22, D26 and D49: the bounded micro path already binds D5

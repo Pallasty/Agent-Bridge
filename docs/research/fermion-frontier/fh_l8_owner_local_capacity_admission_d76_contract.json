@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-OWNER-LOCAL-CAPACITY-ADMISSION-D76-V1",
+  "source_pins": {
+    "fh_l8_owner_local_attestation_d75_contract.json": "c76fef829e437c75536b5c9f1c2e300e1864180351c6158dfddff73e4aeced08",
+    "fh_l8_owner_local_attestation_d75_result.json": "e468e7fda2a11e1caf6c971847a137b46b3bd1ad32c34b9c4fff541ed3f7b69a",
+    "fh_l8_d23_capacity_attestation_d64.json": "89c8e020fb78d70e38b0bf06284070af9a3fdd96bec1531837c2d7a221ac236d"
+  },
+  "independent_checks": [
+    "reservation_file_exists_and_size_at_least_3110572064",
+    "reservation_owner_and_mode_match_D64",
+    "D75_owner_confirmation_accepted",
+    "owner_controlled_scope_matches_reservation_path"
+  ],
+  "authority": {
+    "owner_local_capacity_admitted": true,
+    "external_resource_reservation_admitted": false,
+    "production_io_executed": false,
+    "scientific_execution": false,
+    "full53_execution_authorized": false
+  },
+  "decision": "VERIFIED_D76_OWNER_LOCAL_D23_CAPACITY_ADMITTED_D58_D59_D60_REMAIN_REQUIRED"
+}

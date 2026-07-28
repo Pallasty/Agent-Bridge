@@ -1,0 +1,17 @@
+{
+  "decision": "NO_GO_D62_CLOSURE_PREDICATES_UNSATISFIED_NO_EXTERNAL_RESERVATION_OR_FULL53_AUTHORIZATION",
+  "external_resource_reservation_admitted": false,
+  "external_resource_reservation_attempted": false,
+  "full53_execution_authorized": false,
+  "full53_execution_performed": false,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "object_measurements_executed": 0,
+  "packed_q3_reads": 0,
+  "production_io_executed": false,
+  "reopen_condition": "all_required_closure_predicates_true_in_source_pinned_reverified_successors",
+  "scientific_kernel_calls_executed": 0,
+  "status": "VERIFIED_D62_FAIL_CLOSED_AUTHORIZATION_DENIAL",
+  "timing_measurements_executed": 0,
+  "unsatisfied_predicate_count": 5
+}

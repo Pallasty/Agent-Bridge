@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-PAGE-CACHE-NUMERIC-PROOF-D59-V1",
+  "analysis_class": "SOURCE_PINNED_PAGE_CACHE_RECOMPUTATION_FAIL_CLOSED",
+  "source_pins": {
+    "fh_l8_production_io_page_cache_d59_contract.json": "7df9c5c05e12a6230bd5d2e1e33a76b01f79cfb88edeebbf0fc1fa333f71b13a",
+    "fh_l8_full53_streaming_lifetime_d51_contract.json": "8def9ebd3372e6cc1fbc810a75abf663c127643e6454f07a0aafdc94f6c9d83b"
+  },
+  "phases": ["source_admission", "kernel_and_spill", "partition_external_merge", "target_publication"],
+  "required_fields_per_phase": ["base_file_bytes", "writeback_multiplier", "environment_page_cache_limit_bytes"],
+  "proof_inputs": {
+    "source_admission": {"base_file_bytes": 6819168, "writeback_multiplier": null, "environment_page_cache_limit_bytes": null},
+    "kernel_and_spill": {"base_file_bytes": 1534312800, "writeback_multiplier": null, "environment_page_cache_limit_bytes": null},
+    "partition_external_merge": {"base_file_bytes": 3068625600, "writeback_multiplier": null, "environment_page_cache_limit_bytes": null},
+    "target_publication": {"base_file_bytes": null, "writeback_multiplier": null, "environment_page_cache_limit_bytes": null}
+  },
+  "recomputation": {"formula": "max(base_file_bytes * writeback_multiplier) over phases, capped by environment_page_cache_limit_bytes", "required_numeric_domain": "non-negative integers; multiplier >= 1", "missing_input_policy": "NO_GO"},
+  "authority": {"numeric_peak_memory_proven": false, "production_io_executed": false, "full53_execution_authorized": false},
+  "decision": "NO_GO_D59_PAGE_CACHE_INPUTS_INCOMPLETE"
+}

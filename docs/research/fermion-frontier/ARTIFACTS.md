@@ -295,6 +295,149 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D50 reads no packed q3 and executes no scientific action. Production adapter, streaming peak
   memory, worst-case runtime, resource receipt and full-53 authority remain open/false.
 
+## FH-L8 D51 streaming lifetime and runtime-work design
+
+- `FH_L8_FULL53_STREAMING_LIFETIME_D51_ZH.md`: four-phase lifetime, scratch shortfall, unresolved
+  memory terms, work-unit bounds and authority report.
+- `fh_l8_full53_streaming_lifetime_d51_contract.json`: pins D16/D22/D23/D50, the 32-way buffer
+  design, two-generation spill lifetime, exact integer formulas and closed execution authority.
+- `fh_l8_full53_streaming_lifetime_d51.py`: source-pin and arithmetic checker.
+- `fh_l8_full53_streaming_lifetime_d51_result.json`: records the 3,110,572,064-byte design scratch
+  requirement, 359,759,114-byte D23 shortfall and unresolved numeric peak/runtime terms.
+- `test_fh_l8_full53_streaming_lifetime_d51.py`: result equality, source, scratch, buffer,
+  work-unit and authority drift regressions.
+- D51 performs no scientific action and supplies no production adapter, numeric peak, host seconds,
+  resource reservation or full-53 authority.
+
+## FH-L8 D52 static adapter IR and operation bounds
+
+- `FH_L8_FULL53_ADAPTER_STATIC_COST_D52_ZH.md`: operation bounds, unresolved costs and authority.
+- `fh_l8_full53_adapter_static_cost_d52_contract.json`: source-pinned four-stage static IR, AST
+  contract, integer work bounds and closed execution authority.
+- `fh_l8_full53_adapter_static_cost_d52.py`: source-pin, AST and arithmetic checker.
+- `fh_l8_full53_adapter_static_cost_d52_result.json`: records the four full-53 operation-count
+  ceilings and seven unresolved allocation/time classes.
+- `test_fh_l8_full53_adapter_static_cost_d52.py`: IR lifetime, arithmetic and authority regressions.
+- D52 creates no executable adapter, reads no packed q3 and grants no numeric resource or full-53
+  authority.
+
+## FH-L8 D53 object/allocation cost measurement protocol
+
+- `FH_L8_OBJECT_COST_MEASUREMENT_D53_ZH.md`: fixture tiers, metrics, isolation and nonclaims.
+- `fh_l8_object_cost_measurement_d53_contract.json`: source-pinned target mapping, sample design,
+  fail-closed conditions, aggregation rules and closed execution authority.
+- `fh_l8_object_cost_measurement_d53.py`: source-pin, coverage and protocol checker.
+- `fh_l8_object_cost_measurement_d53_result.json`: records the verified design-only disposition.
+- `test_fh_l8_object_cost_measurement_d53.py`: authority, metric and aggregation regressions.
+- D53 implements no runner and performs no object measurement, packed-q3 read or scientific action.
+
+## FH-L8 D54 instrumented runner and bounded authorization
+
+- `fh_l8_object_cost_measurement_d54_runner.py`: one-process/one-sample, authorization-gated
+  synthetic/fixed64 runner; frozen before authority.
+- `test_fh_l8_object_cost_measurement_d54_runner.py`: exact 70-sample plan, source-pin/authority and
+  alias-aware sizing tests without scientific execution.
+- `fh_l8_object_cost_measurement_d54_authorization.json`: exact runner/D53 pins, sample/call caps,
+  isolation, receipt requirements and zero packed-q3/full-53 boundary.
+- `fh_l8_object_cost_measurement_d54_authorization_checker.py`,
+  `fh_l8_object_cost_measurement_d54_authorization_result.json` and focused tests: verify the
+  authorization is exact, bounded and unused.
+- `FH_L8_OBJECT_COST_MEASUREMENT_D54_ZH.md`: chronology, scope and nonclaims.
+- D54 creates no scratch and consumes no sample. Measurement authority is limited to the future
+  fixed plan; numeric peak/runtime and full-53 claims remain false.
+
+## FH-L8 D54R bounded execution and aggregation
+
+- `fh_l8_object_cost_measurement_d54r_authorization.json`: source-pinned correction of D54's
+  authorization-field lookup; exact plan and isolation authority remain bounded.
+- `fh_l8_object_cost_measurement_d54r_runner.py`,
+  `fh_l8_object_cost_measurement_d54_worker.py` and
+  `fh_l8_object_cost_measurement_d54_launcher.py`: corrected sample runner, cgroup receipt worker
+  and resumable one-service-per-sample launcher.
+- `fh_l8_object_cost_measurement_d54_aggregate.py`: independently validates all 70 receipts and
+  emits measured-group structural, cgroup-memory and wall-time summaries.
+- `fh_l8_object_cost_measurement_d54r_result.json` and
+  `fh_l8_object_cost_measurement_d54r_result_checker.py`: bind the external manifest and ordered
+  receipt set, then fail closed unless complete reaggregation exactly reproduces the result.
+- `test_fh_l8_object_cost_measurement_d54r_result_checker.py`: ordered-set and fail-closed result
+  regressions.
+- `FH_L8_OBJECT_COST_MEASUREMENT_D54R_ZH.md`: defect chronology, execution evidence and nonclaims.
+- D54R completes the bounded measurement plan but does not prove numeric resource bounds or
+  authorize full-53 execution. Its next gate is D55 admissibility review.
+
+## FH-L8 D54R2 independent isolation replication
+
+- `fh_l8_object_cost_measurement_d54r2_launcher.py` and
+  `fh_l8_object_cost_measurement_d54r2_aggregator.py`: committed sequential launcher and
+  independent complete-set aggregator using a loopback-only bubblewrap network namespace.
+- `fh_l8_object_cost_measurement_d54r2_authorization.json`: fresh-root remediation authority that
+  records two pre-run fail-closed isolation attempts and admits only the same 70-sample D53 plan.
+- `fh_l8_object_cost_measurement_d54r2_result.json`,
+  `fh_l8_object_cost_measurement_d54r2_result_checker.py` and focused tests: second empirical
+  receipt-set summary and fail-closed boundary checks.
+- D54R2 is an independent host-isolation replication, not a replacement for D54R. Its slightly
+  higher observed peak/time must not be converted into a full-53 or worst-case bound.
+
+## FH-L8 D55 measurement admissibility decision
+
+- `fh_l8_measurement_admissibility_d55_contract.json`: source-pinned, target-by-target
+  admissibility levels, admitted/forbidden uses, cross-replay spread and six closure requirements.
+- `fh_l8_measurement_admissibility_d55.py` and
+  `fh_l8_measurement_admissibility_d55_result.json`: verify upstream coverage, both D54R replay
+  boundaries and the resource-incomplete NO-GO result.
+- `test_fh_l8_measurement_admissibility_d55.py`: source, coverage, basis and authority regressions.
+- `FH_L8_MEASUREMENT_ADMISSIBILITY_D55_ZH.md`: Chinese decision rationale and D56 handoff.
+- D55 performs no measurement or scientific action. It admits D54R only as observational evidence;
+  numeric resource bounds, external reservation and full53 execution remain closed.
+
+## FH-L8 D56 ordered resource-bound closure plan
+
+- `fh_l8_resource_closure_plan_d56_contract.json`: source pins, six D57--D62 packages, dependency
+  graph, D51/D52 coverage matrix, per-gate minimum authority, acceptance evidence and global stop
+  conditions.
+- `fh_l8_resource_closure_plan_d56.py` and
+  `fh_l8_resource_closure_plan_d56_result.json`: verify exact D55 requirement coverage, topological
+  ordering, the D58/D59/D60 join and closed authority.
+- `test_fh_l8_resource_closure_plan_d56.py`: requirement, dependency, join and authority
+  fail-closed regressions.
+- `FH_L8_RESOURCE_CLOSURE_PLAN_D56_ZH.md`: Chinese execution sequence and boundary summary.
+- D56 is plan-only. Its next gate is D57 production adapter implementation contract.
+
+## FH-L8 D57 production streaming adapter contract
+
+- `fh_l8_production_streaming_adapter_d57.py`: importable 32-byte source/spill, mock-kernel,
+  merge-plan and publication-order interfaces, explicit release and fail-closed full53 entrypoint.
+- `fh_l8_production_streaming_adapter_d57_contract.json`,
+  `fh_l8_production_streaming_adapter_d57_checker.py` and result: source pins, lifecycle and
+  authority verifier.
+- `test_fh_l8_production_streaming_adapter_d57.py` and focused contract tests: in-memory format,
+  release-on-failure, merge fan-in, full53 denial and contract fail-closed regressions.
+- `FH_L8_PRODUCTION_STREAMING_ADAPTER_D57_ZH.md`: Chinese scope and handoff note.
+- D57 enables D58/D59/D60 analysis only; it does not authorize full53 execution.
+
+## FH-L8 D58 live-allocation bound inventory
+
+- `fh_l8_live_allocation_bound_d58_contract.json`: source pins, eight symbolic variables, four phase
+  expressions, proof obligations and prohibited substitutions.
+- `fh_l8_live_allocation_bound_d58.py` and result: exact lifetime/allocation coverage checker.
+- `test_fh_l8_live_allocation_bound_d58.py`: variable, merge-lifetime and authority fail-closed tests.
+- `FH_L8_LIVE_ALLOCATION_BOUND_D58_ZH.md`: Chinese scope and nonclaim summary.
+
+## FH-L8 D59 production I/O/page-cache disposition
+
+- `fh_l8_production_io_page_cache_d59_contract.json`: four I/O lifetimes, fixed merge policy,
+  missing-environment disposition and closure requirements.
+- `fh_l8_production_io_page_cache_d59.py`, result and tests: fail-closed phase, two-generation,
+  environment and authority checks.
+- `FH_L8_PRODUCTION_IO_PAGE_CACHE_D59_ZH.md`: Chinese NO-GO rationale and D60 handoff.
+
+## FH-L8 D64 owner-local capacity observation
+
+- `fh_l8_d23_capacity_attestation_d64.json` and `fh_l8_d23_capacity_attestation_d64.py`: live
+  file-length, allocated-block, mode and owner checks for the reversible local reservation.
+- `test_fh_l8_d23_capacity_attestation_d64.py`: live reservation observation regression.
+- The observation is not an external capacity attestation and cannot open D62.
+
 ## Claude source session
 
 - Session:

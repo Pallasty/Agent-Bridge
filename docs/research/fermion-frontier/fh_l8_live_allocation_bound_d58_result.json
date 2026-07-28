@@ -1,0 +1,15 @@
+{
+  "bound_variable_count": 8,
+  "external_resource_reservation_admitted": false,
+  "forbidden_substitution_count": 4,
+  "full53_execution_authorized": false,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "object_measurements_executed": 0,
+  "packed_q3_reads": 0,
+  "phase_expression_count": 4,
+  "proof_obligation_count": 8,
+  "scientific_kernel_calls_executed": 0,
+  "status": "VERIFIED_D58_SYMBOLIC_LIVE_ALLOCATION_INVENTORY_NUMERIC_PROOFS_PENDING",
+  "next_gate": "D59_PRODUCTION_IO_PAGE_CACHE_BOUND"
+}

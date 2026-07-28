@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-OWNER-LOCAL-ATTESTATION-D75-V1",
+  "source_pins": {
+    "fh_l8_owner_local_attestation_d73_contract.json": "dca1f46aa93f142964a4d8b6aba797c2118784dfbf03196af6a69e8dc472aa36",
+    "fh_l8_owner_local_preflight_d74.json": "d17e9905006a6cea38093736579c0cd3d3b63829d3314aca5e54c1c658e39c9e",
+    "fh_l8_d23_capacity_attestation_d64.json": "89c8e020fb78d70e38b0bf06284070af9a3fdd96bec1531837c2d7a221ac236d"
+  },
+  "owner_attestation": {
+    "owner_identity": "pallasting",
+    "attestation_time_utc": "2026-07-27T05:13:27Z",
+    "controlled_host_identity": "owner-controlled /Data host",
+    "controlled_scope": "/Data/CascadeProjects/.ab-reservations/fh-l8-d23-capacity-reservation-v1.bin",
+    "assertion": "I authorize this reversible owner-local reservation to be used as a local capacity observation for project bookkeeping; it is not external evidence and does not authorize full-53 execution.",
+    "owner_confirmation": true
+  },
+  "reservation": {"logical_bytes": 3110572064, "allocated_blocks_512": 6081320, "mode": "0600", "sha256": "7811181ca45d32e1fa209fe977e2b047be8b53279370d7b92599f859db840a9a"},
+  "authority": {"owner_attestation_accepted": true, "capacity_attestation_admitted": false, "external_resource_reservation_admitted": false, "full53_execution_authorized": false},
+  "decision": "LOCAL_D75_OWNER_ATTESTATION_ACCEPTED_EXTERNAL_EVIDENCE_STILL_REQUIRED"
+}

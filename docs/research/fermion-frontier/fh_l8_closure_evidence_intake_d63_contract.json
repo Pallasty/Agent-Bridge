@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-CLOSURE-EVIDENCE-INTAKE-D63-V1",
+  "analysis_class": "SOURCE_PINNED_EMPTY_INTAKE_SCHEMA_NO_EVIDENCE_ACCEPTANCE_OR_EXECUTION",
+  "source_pins": {"fh_l8_external_authorization_d62_contract.json": "fe6c2769421697af4fc1c0546555f4b014094a9aa3cfb2adf8b6ddaa68663ba6", "fh_l8_external_authorization_d62_result.json": "d01b2611560ccd74fa5ac46d8acc736a3032b4d328664841c3ebfee0129d9f62"},
+  "evidence_slots": [
+    {"predicate": "D58_numeric_peak_memory_proven", "required_identity": ["interpreter_allocator_configuration", "per_class_object_graph_bound", "independent_recomputation"], "freshness": "same_source_pinned_adapter_and_runtime", "reject_if": ["host_getsizeof_only", "aggregate_cgroup_observation", "missing_allocator_overhead"]},
+    {"predicate": "D59_page_cache_environment_bound", "required_identity": ["os_filesystem_writeback_policy", "cgroup_file_page_accounting", "target_size_bound", "fsync_dirty_lifetime_rule"], "freshness": "same_production_io_path_and_host_policy", "reject_if": ["spill_bytes_substituted_for_page_cache", "single_generation_only", "host_observation_only"]},
+    {"predicate": "D60_runtime_rule_precommitted_and_environment_fixed", "required_identity": ["one_rule_form", "fixed_runtime_environment", "operation_cost_mapping", "timeout_ood_policy"], "freshness": "frozen_before_measurement", "reject_if": ["posthoc_margin", "D54R_spread", "missing_operation_class"]},
+    {"predicate": "D23_registered_scratch_meets_design_requirement", "required_identity": ["external_scratch_capacity_attestation", "filesystem_free_space_scope", "recomputed_requirement"], "freshness": "same_reserved_target_and_run_scope", "reject_if": ["capacity_below_design_requirement", "shared_unreserved_scratch", "stale_attestation"]}
+  ],
+  "intake_state": "EMPTY_NO_EVIDENCE_ACCEPTED",
+  "acceptance_rule": "all_four_slots_source_identified_fresh_and_independently_recomputed_then_reverify_D58_TO_D62_successors",
+  "authority": {"evidence_accepted": false, "external_resource_reservation_attempted": false, "scientific_execution": false, "production_io": false, "full53_execution_authorized": false},
+  "decision": "NO_GO_D63_EVIDENCE_INTAKE_EMPTY"
+}

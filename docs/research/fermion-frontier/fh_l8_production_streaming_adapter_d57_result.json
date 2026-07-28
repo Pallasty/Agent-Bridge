@@ -1,0 +1,23 @@
+{
+  "adapter_class_count": 6,
+  "adapter_function_count": 8,
+  "column_release_in_finally": true,
+  "external_resource_reservation_admitted": false,
+  "full53_execution_authorized": false,
+  "lifecycle_stage_count": 6,
+  "maximum_merge_fan_in": 32,
+  "next_gate_count": 3,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "object_measurements_executed": 0,
+  "packed_q3_reads": 0,
+  "partition_count": 256,
+  "production_adapter_interfaces_implemented": true,
+  "production_adapter_resource_ready": false,
+  "production_io_executed": false,
+  "scientific_kernel_calls_executed": 0,
+  "source_record_bytes": 32,
+  "spill_record_bytes": 32,
+  "status": "VERIFIED_D57_STREAMING_ADAPTER_INTERFACES_FULL53_FAIL_CLOSED",
+  "synthetic_mock_test_count": 7
+}

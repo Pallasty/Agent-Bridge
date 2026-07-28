@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "authorization_id": "FH-L8-D54-OBJECT-COST-MEASUREMENT-AUTH-V1",
+  "remediation_id": "FH-L8-D54R-NETWORK-ISOLATION-REMEDIATION-V2",
+  "prior_attempts": [
+    {
+      "scratch_root": "/Data/CascadeProjects/.ab-experiments/fh-l8-d54-object-cost-v1",
+      "runner_may_have_started": true,
+      "scientific_kernel_calls_upper_bound": 0,
+      "terminal_receipts_published": 0,
+      "failure": "systemd PrivateNetwork silently unavailable"
+    },
+    {
+      "scratch_root": "/Data/CascadeProjects/.ab-experiments/fh-l8-d54-object-cost-v2",
+      "runner_may_have_started": false,
+      "scientific_kernel_calls_upper_bound": 0,
+      "terminal_receipts_published": 0,
+      "failure": "nested bubblewrap namespace rejected"
+    }
+  ],
+  "old_scratch_reuse_forbidden": true,
+  "parent_protocol_id": "FH-L8-OBJECT-COST-MEASUREMENT-D53-V1",
+  "implementation_commit": "f7dfdede",
+  "runner_path": "fh_l8_object_cost_measurement_d54_runner.py",
+  "runner_sha256": "14cb72ea75bccb911dfdaee68d6ffba9b84836d35aa6857c3be5fba8ef8986d0",
+  "d53_contract_sha256": "8d2d9532035a4edf968036a4260896effd803a85f54d5e2f795b997d50b9d5cb",
+  "measurement_execution_authorized": true,
+  "sample_plan": {
+    "total_fresh_processes": 70,
+    "synthetic_processes": 42,
+    "fixed64_processes": 28,
+    "warmup_processes": 20,
+    "measured_processes": 50,
+    "maximum_scientific_kernel_calls_per_process": 67,
+    "maximum_scientific_kernel_calls_total": 819,
+    "maximum_object_measurements_total": 70
+  },
+  "isolation": {
+    "scratch_root": "/Data/CascadeProjects/.ab-experiments/fh-l8-d54-object-cost-v3",
+    "scratch_must_be_absent_before_launch": true,
+    "fresh_process_per_sample": true,
+    "cpu_affinity": "cpu0",
+    "memory_max_bytes": 536870912,
+    "memory_high_bytes": 402653184,
+    "swap_max_bytes": 0,
+    "network_allowed": false,
+    "network_enforcement": "bubblewrap_unshare_net_loopback_only_verified_before_commit",
+    "writes_outside_scratch_allowed": false
+  },
+  "admission": {
+    "launcher_required": true,
+    "sample_must_belong_to_exact_d53_plan": true,
+    "terminal_receipt_per_process": true,
+    "full64_structural_digest_required": "38aaeffb8f178e918e4f326888493166c21afc7fb1379e91ab965c345b4adc12",
+    "prefix_digest_exact_across_repetitions": true,
+    "nonzero_swap_or_oom_fails_closed": true,
+    "partial_plan_is_not_complete_result": true
+  },
+  "packed_q3_reads_authorized": 0,
+  "full53_execution_authorized": false,
+  "full53_extrapolation_forbidden": true
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "observation_id": "FH-L8-OWNER-LOCAL-PREFLIGHT-D74-V1",
+  "observed_at_utc": "2026-07-27T05:09:42Z",
+  "source_pins": {
+    "fh_l8_d23_capacity_attestation_d64.json": "89c8e020fb78d70e38b0bf06284070af9a3fdd96bec1531837c2d7a221ac236d",
+    "fh_l8_owner_local_attestation_d73_contract.json": "dca1f46aa93f142964a4d8b6aba797c2118784dfbf03196af6a69e8dc472aa36"
+  },
+  "owner_local_observation": {
+    "reservation_logical_bytes": 3110572064,
+    "reservation_allocated_blocks_512": 6081320,
+    "filesystem_mount": "/Data",
+    "filesystem_type": "f2fs",
+    "filesystem_available_bytes": 161032269824,
+    "cgroup_path": "/user.slice/user-1000.slice/session-3.scope"
+  },
+  "authority": {
+    "owner_confirmation_present": false,
+    "capacity_attestation_admitted": false,
+    "external_resource_reservation_admitted": false,
+    "production_io_executed": false,
+    "scientific_execution": false,
+    "full53_execution_authorized": false
+  },
+  "decision": "OBSERVED_D74_OWNER_LOCAL_PREFLIGHT_OWNER_CONFIRMATION_STILL_REQUIRED"
+}

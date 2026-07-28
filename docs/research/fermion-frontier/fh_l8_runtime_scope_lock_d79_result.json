@@ -1,0 +1,36 @@
+{
+  "status": "VERIFIED_D79_RUNTIME_SCOPE_LOCK_INCOMPLETE",
+  "probe_execution": {
+    "scope": {
+      "unit_prefix": "ab-fh-l8-d79-runtime-lock-scope",
+      "launch_exit_code": 0,
+      "scope_memory_controller_present": false,
+      "reason": "scope_path_has_no_memory_controller_files",
+      "observed_memory_max_file_present": false,
+      "observed_memory_high_file_present": false,
+      "observed_memory_swap_max_file_present": false,
+      "runtime_lock_candidate": "NOT_ADMISSIBLE"
+    },
+    "service": {
+      "unit_prefix": "ab-fh-l8-d79-runtime-lock-service",
+      "launch_exit_code": 0,
+      "observed_memory_max": "1073741824",
+      "observed_memory_high": "805306368",
+      "observed_memory_swap_max": "0",
+      "runtime_lock_candidate": "MEMORY_LIMIT_VISIBLE_SERVICE_ONLY"
+    }
+  },
+  "authority": {
+    "scope_probe_executed": true,
+    "service_probe_executed": true,
+    "scope_memory_limits_verified": false,
+    "service_memory_limits_verified": true,
+    "runtime_lock_precommitted": false,
+    "d59_request_issued": false,
+    "external_request_sent": false,
+    "d60_environment_fixed": false,
+    "full53_execution_authorized": false
+  },
+  "decision": "NO_GO_D79_RUNTIME_SCOPE_LOCK_INCOMPLETE",
+  "next_gate": "D60_RUNTIME_BOUND_OR_PRECOMMITTED_MARGIN_RULE"
+}

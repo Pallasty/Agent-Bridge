@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-OWNER-ALLOCATOR-PROOF-D78-V1",
+  "source_pins": {"fh_l8_d58_allocator_proof_request_d70.json": "b21ab84ef78ade12e26741fe2a6c93d7f42b89e695b0051afae9fb82583eab3d", "fh_l8_allocator_proof_interface_d64_contract.json": "e0ad3519e98ad2e8f981ee2165b080edac64400e62c7b2a1cc218b8c799e9aa0"},
+  "variables": ["R_python_runtime_base", "A_sector_action_dictionary", "A_canonical_info_transient", "A_basis_images_transient", "A_fraction_objects", "A_reduced_column_dictionary", "A_partition_writer_state", "A_sort_key_heap"],
+  "required_fields": ["instance_count", "payload_bytes", "allocator_overhead_bytes", "lifetime_bound"],
+  "proof_inputs": {
+    "R_python_runtime_base": {"instance_count": null, "payload_bytes": null, "allocator_overhead_bytes": null, "lifetime_bound": null},
+    "A_sector_action_dictionary": {"instance_count": null, "payload_bytes": null, "allocator_overhead_bytes": null, "lifetime_bound": null},
+    "A_canonical_info_transient": {"instance_count": null, "payload_bytes": null, "allocator_overhead_bytes": null, "lifetime_bound": null},
+    "A_basis_images_transient": {"instance_count": null, "payload_bytes": null, "allocator_overhead_bytes": null, "lifetime_bound": null},
+    "A_fraction_objects": {"instance_count": null, "payload_bytes": null, "allocator_overhead_bytes": null, "lifetime_bound": null},
+    "A_reduced_column_dictionary": {"instance_count": null, "payload_bytes": null, "allocator_overhead_bytes": null, "lifetime_bound": null},
+    "A_partition_writer_state": {"instance_count": null, "payload_bytes": null, "allocator_overhead_bytes": null, "lifetime_bound": null},
+    "A_sort_key_heap": {"instance_count": null, "payload_bytes": null, "allocator_overhead_bytes": null, "lifetime_bound": null}
+  },
+  "recomputation_formula": "sum(instance_count * (payload_bytes + allocator_overhead_bytes))",
+  "authority": {"owner_local_template_ready": true, "object_measurements_executed": 0, "numeric_peak_memory_proven": false, "full53_execution_authorized": false},
+  "decision": "NO_GO_D78_ALLOCATOR_NUMERIC_INPUTS_MISSING"
+}

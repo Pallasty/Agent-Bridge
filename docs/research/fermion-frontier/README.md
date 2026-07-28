@@ -178,6 +178,60 @@ shape has a 225-candidate/source structural upper: 47,947,275 candidate actions 
 neither simultaneous-residency memory nor worst-case runtime. Its next gate is
 `FULL_53_STREAMING_MEMORY_LIFETIME_AND_RUNTIME_UPPER_BOUND_DESIGN`; full-53 remains unauthorized.
 
+D51 subsequently fixes a four-phase streaming lifetime and identifies a 3,110,572,064-byte
+conservative scratch requirement, leaving D23 short by 359,759,114 bytes. D52 then binds a
+non-executable four-stage adapter IR to `_reduced_column` and closes operation-count arithmetic,
+while leaving seven Python allocation/time cost classes unresolved. Neither gate creates an
+executable production adapter or authorizes full-53.
+
+D53 freezes the follow-on measurement protocol: synthetic object calibration plus source-bound
+fixed64 prefixes, fourteen metrics, repeated fresh-process samples, CPU0 and 512-MiB/zero-swap
+isolation. It executes no measurement itself. `tracemalloc`, RSS/cgroup peaks and timing samples
+remain observations until independent allocator and precommitted timing-margin bounds are supplied.
+
+D54R preserves that historical state while correcting D54's authorization-field lookup in a newly
+pinned execution path. The exact 70-process plan has now completed: 50 retained measurements,
+791 scientific kernel calls, zero packed-q3 reads and no swap/OOM/cgroup-cap failure. The committed
+result binds the external manifest and ordered receipt set. These finite-host observations do not
+prove allocator, worst-case runtime or full-53 bounds; D55 is the admissibility review.
+
+D55 completes that review against both D54R receipt sets. Six targets are observational only,
+three costs are not separately identified and filesystem page-cache accounting is not measured.
+The evidence is accepted for regression and hotspot prioritization but rejected as a full53
+peak-memory, worst-case-time or resource-reservation bound. The cross-replay size-64 maxima differ
+by 3,231,744 bytes (6.93%) and 85,298,967 ns (2.61%); this observed spread is explicitly not a
+margin rule. D56 must design the production adapter and remaining resource-bound closure path;
+full53 authority stays closed.
+
+D56 turns the six remaining requirements into an ordered D57--D62 closure plan. D57 freezes the
+production adapter; D58 allocation bounds, D59 production I/O/page-cache and D60 timing-rule work
+may proceed in parallel; D61 integrates the resource envelope and D23 scratch reconciliation.
+D62 alone can assess an authentic external reservation and terminal authorization. D56 itself is
+plan-only and leaves every execution and numeric-bound authority closed. Its checked matrix covers
+all four D51 phases, four D52 adapter stages and six operation bounds; D62's future decision is
+explicitly not an execution.
+
+D57 now supplies importable streaming adapter interfaces for the frozen 32-byte packed source and
+spill formats, one-source mock-kernel processing, bounded merge planning and terminal publication
+ordering. Every source column is cleared in `finally`; the full53 entrypoint always fails closed,
+and D5 remains a source-pinned future binding rather than an executed kernel. D58--D60 may now
+proceed in parallel; production I/O and full53 authority remain closed.
+
+D54R2 independently replicated the same plan after the concurrent D54R result appeared. Its
+bubblewrap network namespace exposed loopback only, and all 70 fresh-process receipts again passed
+CPU0, 512-MiB/384-MiB-high, zero-swap and structural-digest checks. The fixed64 size-64 maxima were
+49,844,224 cgroup bytes and 3.351 seconds, versus D54R's 46,612,480 bytes and 3.265 seconds. This
+host-level spread reinforces the existing boundary: both sets are empirical observations, not
+allocator/timing upper bounds, full-53 extrapolations or resource authority.
+
+D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
+and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
+3,110,572,064-byte scratch design, 359,759,114 bytes above D23. It also fixes integer work counts,
+but the 35,520,512-byte known I/O-buffer subtotal excludes Python runtime, kernel-column,
+writer/heap objects and page-cache accounting. Numeric peak memory and host seconds remain
+unproven; D52 must statically bind production-adapter allocations and operation costs before any
+resource authorization.
+
 Status date: 2026-07-23
 
 Scope: physical fermions, not the historical Fermion Memory service.

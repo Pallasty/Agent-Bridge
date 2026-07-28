@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-REOPENING-CONTRACT-D63-V1",
+  "analysis_class": "SOURCE_PINNED_D62_REOPENING_EVIDENCE_INTERFACE_NO_EXECUTION",
+  "source_pins": {
+    "fh_l8_external_authorization_d62_contract.json": "fe6c2769421697af4fc1c0546555f4b014094a9aa3cfb2adf8b6ddaa68663ba6",
+    "fh_l8_external_authorization_d62_result.json": "d01b2611560ccd74fa5ac46d8acc736a3032b4d328664841c3ebfee0129d9f62",
+    "fh_l8_integrated_resource_envelope_d61_contract.json": "305ffb4fbdbda66f29f57a8d94f32fbfc7d3d95bce4a03c14c8203f4b3ae9d5c",
+    "fh_l8_resource_closure_plan_d56_contract.json": "3d3e5b7ef396a87daa4faa411e967b89522e980be3777bcc20bcab08b1b2c583"
+  },
+  "predicate_evidence": {
+    "D58_numeric_peak_memory_proven": ["source_pinned_allocator_object_size_proof", "independent_integer_peak_recomputation"],
+    "D59_page_cache_environment_bound": ["source_pinned_os_filesystem_cgroup_contract", "page_cache_lifetime_expression_checker"],
+    "D60_runtime_rule_precommitted_and_environment_fixed": ["pre_measurement_rule_commit", "operation_cost_coverage_and_timeout_checker"],
+    "D23_registered_scratch_meets_design_requirement": ["authentic_capacity_reservation_or_registered_guardrail_update", "capacity_expiry_and_custody_checker"],
+    "D61_integrated_envelope_GO": ["source_pinned_recomputed_D61_GO_result", "independent_checker_reproduces_D61_GO_result"]
+  },
+  "reopening_order": ["D58_numeric_peak_memory_proven", "D59_page_cache_environment_bound", "D60_runtime_rule_precommitted_and_environment_fixed", "D23_registered_scratch_meets_design_requirement", "D61_integrated_envelope_GO", "D62_reverification"],
+  "rejection_conditions": ["missing_or_unpinned_evidence", "expired_capacity_receipt", "numeric_claim_without_independent_checker", "attempted_full53_execution_before_D62_reverification"],
+  "authority": {"scientific_kernel_calls_executed":0,"object_measurements_executed":0,"timing_measurements_executed":0,"packed_q3_reads":0,"full53_execution_authorized":false},
+  "status": "VERIFIED_D63_REOPENING_INTERFACE_D62_REMAINS_CLOSED",
+  "next_gate": "D58_D59_D60_D23_EVIDENCE_ACQUISITION_OR_STATIC_PROOF"
+}

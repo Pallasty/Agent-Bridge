@@ -1,0 +1,11 @@
+{
+  "status": "VERIFIED_D60_RUNTIME_PROOF_FAIL_CLOSED",
+  "decision": "NO_GO_D60_RUNTIME_INPUTS_INCOMPLETE",
+  "population_count": 5,
+  "missing_input_count": 9,
+  "missing_inputs": ["python_implementation_and_version_fixed", "cpu_model_frequency_governor_fixed", "filesystem_and_cgroup_policy_fixed", "concurrent_load_excluded", "selected_form", "per_operation_upper_bound_seconds", "measurement_margin", "ood_policy", "timeout_policy"],
+  "numeric_runtime_seconds_proven": false,
+  "timing_measurements_executed": 0,
+  "scientific_kernel_calls_executed": 0,
+  "full53_execution_authorized": false
+}
