@@ -4,16 +4,21 @@
 //! invoke an MCP tool, load live state, or grant runtime authority.
 
 use anyhow::{ensure, Context};
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 
 const MAPPING_BYTES: &[u8] =
     include_bytes!("../tests/fixtures/agent_compromise_resilience_s1_mapping.json");
 const S0_CORPUS_BYTES: &[u8] =
     include_bytes!("../tests/fixtures/agent_compromise_resilience_s0.json");
 const T6_SOURCE_BYTES: &[u8] = include_bytes!("../src/mcp_tools/memory_biocortex.rs");
-const T6_TEST_BYTES: &[u8] = include_bytes!("../src/mcp_tools/tests.rs");
+#[cfg(test)]
+const LIVE_T6_TEST_BYTES: &[u8] = include_bytes!("../src/mcp_tools/tests.rs");
+const FROZEN_T6_TEST_GZIP_BYTES: &[u8] =
+    include_bytes!("../tests/fixtures/agent_compromise_resilience_s1_t6_tests_a1c9469.rs.gz");
 
 const MAPPING_SCHEMA: &str = "agent_bridge.agent_compromise_resilience.s1_mapping.v0";
 const REPORT_SCHEMA: &str = "agent_bridge.agent_compromise_resilience.s1_report.v0";
@@ -22,6 +27,11 @@ const T6_SOURCE_COMMIT: &str = "a1c9469e9a14cd73159d34974f0e99714ce5a1f0";
 const S0_RESULT_COMMIT: &str = "69bd131499b6f1968bafc56da3247cf53a551698";
 const S1_LINEAGE_MERGE_COMMIT: &str = "e216544255b2900e3d1a19fbda8571683592d96d";
 const S0_CORPUS_SHA256: &str = "239d5ca7c823fdf8c946abb4d2563e51fc6732cc9dd9a40c8c57946715325849";
+const FROZEN_T6_TEST_GZIP_SHA256: &str =
+    "7377fc1297da8253847e6a225e8e7b2e59c048468184f8757747a024d3da4b98";
+const FROZEN_T6_TEST_SHA256: &str =
+    "d8b89e32212f2df1a5188c5d47addcc912f2f0b17518861cb53dea08d7cc1707";
+const FROZEN_T6_TEST_BYTES_LEN: usize = 1_205_712;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -135,12 +145,12 @@ impl MappingStatus {
 }
 
 #[derive(Clone, Copy)]
-struct EmbeddedSource {
+struct EmbeddedSource<'a> {
     path: &'static str,
-    bytes: &'static [u8],
+    bytes: &'a [u8],
 }
 
-type EmbeddedSources = BTreeMap<&'static str, EmbeddedSource>;
+type EmbeddedSources<'a> = BTreeMap<&'static str, EmbeddedSource<'a>>;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 struct Authority {
@@ -192,7 +202,8 @@ struct Report {
 
 fn main() -> anyhow::Result<()> {
     let mapping = load_mapping(MAPPING_BYTES)?;
-    let sources = embedded_sources(T6_SOURCE_BYTES, T6_TEST_BYTES);
+    let frozen_t6_tests = load_frozen_t6_test_snapshot()?;
+    let sources = embedded_sources(T6_SOURCE_BYTES, &frozen_t6_tests);
     let report = evaluate_mapping(&mapping, &sources, S0_CORPUS_BYTES, MAPPING_BYTES)?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
@@ -202,7 +213,30 @@ fn load_mapping(bytes: &[u8]) -> anyhow::Result<Mapping> {
     serde_json::from_slice(bytes).context("parse S1 agent-compromise mapping")
 }
 
-fn embedded_sources(t6_source: &'static [u8], t6_tests: &'static [u8]) -> EmbeddedSources {
+fn load_frozen_t6_test_snapshot() -> anyhow::Result<Vec<u8>> {
+    ensure!(
+        sha256(FROZEN_T6_TEST_GZIP_BYTES) == FROZEN_T6_TEST_GZIP_SHA256,
+        "compressed historical T6 test snapshot hash changed"
+    );
+
+    let mut decoder =
+        GzDecoder::new(FROZEN_T6_TEST_GZIP_BYTES).take((FROZEN_T6_TEST_BYTES_LEN + 1) as u64);
+    let mut bytes = Vec::with_capacity(FROZEN_T6_TEST_BYTES_LEN);
+    decoder
+        .read_to_end(&mut bytes)
+        .context("decompress historical T6 test snapshot")?;
+    ensure!(
+        bytes.len() == FROZEN_T6_TEST_BYTES_LEN,
+        "historical T6 test snapshot length changed"
+    );
+    ensure!(
+        sha256(&bytes) == FROZEN_T6_TEST_SHA256,
+        "historical T6 test snapshot hash changed"
+    );
+    Ok(bytes)
+}
+
+fn embedded_sources<'a>(t6_source: &'a [u8], t6_tests: &'a [u8]) -> EmbeddedSources<'a> {
     BTreeMap::from([
         (
             "t6_source",
@@ -223,7 +257,7 @@ fn embedded_sources(t6_source: &'static [u8], t6_tests: &'static [u8]) -> Embedd
 
 fn validate_mapping(
     mapping: &Mapping,
-    sources: &EmbeddedSources,
+    sources: &EmbeddedSources<'_>,
     s0_corpus_bytes: &[u8],
 ) -> anyhow::Result<usize> {
     ensure!(
@@ -366,7 +400,7 @@ fn validate_mapping(
     Ok(source_anchor_count)
 }
 
-fn validate_source_pins(mapping: &Mapping, sources: &EmbeddedSources) -> anyhow::Result<()> {
+fn validate_source_pins(mapping: &Mapping, sources: &EmbeddedSources<'_>) -> anyhow::Result<()> {
     ensure!(
         mapping.source.files.len() == sources.len(),
         "source pin count differs from embedded source count"
@@ -424,7 +458,7 @@ fn validate_anchors(
     label: &str,
     source_id: &str,
     anchors: &[String],
-    sources: &EmbeddedSources,
+    sources: &EmbeddedSources<'_>,
 ) -> anyhow::Result<usize> {
     ensure!(!anchors.is_empty(), "{label} has no source anchors");
     let source = sources
@@ -481,7 +515,7 @@ fn derive_status(requirement_count: usize, evidence_count: usize) -> MappingStat
 
 fn evaluate_mapping(
     mapping: &Mapping,
-    sources: &EmbeddedSources,
+    sources: &EmbeddedSources<'_>,
     s0_corpus_bytes: &[u8],
     mapping_bytes: &[u8],
 ) -> anyhow::Result<Report> {
@@ -559,7 +593,9 @@ mod tests {
     #[test]
     fn frozen_mapping_derives_five_partial_and_five_gaps() {
         let mapping = load_mapping(MAPPING_BYTES).expect("mapping parses");
-        let sources = embedded_sources(T6_SOURCE_BYTES, T6_TEST_BYTES);
+        let frozen_tests =
+            load_frozen_t6_test_snapshot().expect("historical T6 test snapshot loads");
+        let sources = embedded_sources(T6_SOURCE_BYTES, &frozen_tests);
         let report = evaluate_mapping(&mapping, &sources, S0_CORPUS_BYTES, MAPPING_BYTES)
             .expect("mapping evaluates");
 
@@ -575,7 +611,9 @@ mod tests {
     #[test]
     fn stale_hash_and_missing_anchor_fail_closed() {
         let mapping = load_mapping(MAPPING_BYTES).expect("mapping parses");
-        let sources = embedded_sources(T6_SOURCE_BYTES, T6_TEST_BYTES);
+        let frozen_tests =
+            load_frozen_t6_test_snapshot().expect("historical T6 test snapshot loads");
+        let sources = embedded_sources(T6_SOURCE_BYTES, &frozen_tests);
 
         let mut stale = mapping.clone();
         stale.source.files[0].sha256 = "0".repeat(64);
@@ -591,7 +629,9 @@ mod tests {
     #[test]
     fn malformed_guard_partitions_and_statuses_fail_closed() {
         let mapping = load_mapping(MAPPING_BYTES).expect("mapping parses");
-        let sources = embedded_sources(T6_SOURCE_BYTES, T6_TEST_BYTES);
+        let frozen_tests =
+            load_frozen_t6_test_snapshot().expect("historical T6 test snapshot loads");
+        let sources = embedded_sources(T6_SOURCE_BYTES, &frozen_tests);
 
         let mut duplicate = mapping.clone();
         duplicate.categories.push(duplicate.categories[0].clone());
@@ -613,7 +653,9 @@ mod tests {
     #[test]
     fn report_is_deterministic_and_non_authorizing() {
         let mapping = load_mapping(MAPPING_BYTES).expect("mapping parses");
-        let sources = embedded_sources(T6_SOURCE_BYTES, T6_TEST_BYTES);
+        let frozen_tests =
+            load_frozen_t6_test_snapshot().expect("historical T6 test snapshot loads");
+        let sources = embedded_sources(T6_SOURCE_BYTES, &frozen_tests);
         let first = evaluate_mapping(&mapping, &sources, S0_CORPUS_BYTES, MAPPING_BYTES)
             .expect("first evaluation");
         let second = evaluate_mapping(&mapping, &sources, S0_CORPUS_BYTES, MAPPING_BYTES)
@@ -630,5 +672,25 @@ mod tests {
         assert!(!first.authority.may_change_session);
         assert!(!first.authority.live_runtime_containment_proven);
         assert!(!first.authority.production_security_claim);
+    }
+
+    #[test]
+    fn historical_snapshot_replays_while_live_source_drift_fails_closed() {
+        let mapping = load_mapping(MAPPING_BYTES).expect("mapping parses");
+        let frozen_tests =
+            load_frozen_t6_test_snapshot().expect("historical T6 test snapshot loads");
+        assert_eq!(frozen_tests.len(), FROZEN_T6_TEST_BYTES_LEN);
+        assert_eq!(sha256(&frozen_tests), FROZEN_T6_TEST_SHA256);
+        let frozen_sources = embedded_sources(T6_SOURCE_BYTES, &frozen_tests);
+        validate_mapping(&mapping, &frozen_sources, S0_CORPUS_BYTES)
+            .expect("historical source replay validates");
+
+        let live_hash = sha256(LIVE_T6_TEST_BYTES);
+        let live_sources = embedded_sources(T6_SOURCE_BYTES, LIVE_T6_TEST_BYTES);
+        let live_result = validate_mapping(&mapping, &live_sources, S0_CORPUS_BYTES);
+        assert_eq!(live_result.is_ok(), live_hash == FROZEN_T6_TEST_SHA256);
+        if let Err(error) = live_result {
+            assert_eq!(error.to_string(), "t6_tests source hash changed");
+        }
     }
 }
