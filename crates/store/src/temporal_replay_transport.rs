@@ -17,6 +17,18 @@ use std::fmt;
 #[cfg(feature = "temporal-evidence-s7-durable-replay-synthetic")]
 mod durable_replay_registry;
 
+#[cfg(all(
+    test,
+    feature = "agent-authority-s5-durable-replay-composition-synthetic"
+))]
+mod agent_authority_signed_trust_root_s3_adapter;
+
+#[cfg(all(
+    test,
+    feature = "agent-authority-s5-durable-replay-composition-synthetic"
+))]
+mod agent_authority_receipt_durable_replay_s5;
+
 #[cfg(feature = "temporal-evidence-s8-restore-bound-key-epoch-synthetic")]
 mod restore_bound_key_epoch;
 
@@ -69,7 +81,7 @@ pub(crate) struct TrackBDetachedVerifierV1Error {
 
 impl TrackBDetachedVerifierV1Error {
     #[cfg(test)]
-    fn code(&self) -> &str {
+    fn code(&self) -> &'static str {
         self.code
     }
 }

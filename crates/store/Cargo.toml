@@ -11,6 +11,9 @@ temporal-evidence-s4-synthetic = []
 temporal-evidence-s5-candidate-synthetic = ["temporal-evidence-s4-synthetic", "dep:ring"]
 temporal-evidence-s6-detached-verifier-synthetic = ["temporal-evidence-s5-candidate-synthetic"]
 temporal-evidence-s7-durable-replay-synthetic = ["temporal-evidence-s6-detached-verifier-synthetic"]
+agent-authority-s5-durable-replay-composition-synthetic = [
+    "temporal-evidence-s7-durable-replay-synthetic",
+]
 temporal-evidence-s8-restore-bound-key-epoch-synthetic = ["temporal-evidence-s7-durable-replay-synthetic"]
 temporal-evidence-s9-external-authority-provider-synthetic = ["temporal-evidence-s8-restore-bound-key-epoch-synthetic"]
 temporal-evidence-s10-operation-recovery-synthetic = ["temporal-evidence-s9-external-authority-provider-synthetic"]
@@ -72,4 +75,6 @@ name = "backfill-embeddings"
 path = "src/bin/backfill_embeddings.rs"
 
 [dev-dependencies]
+anyhow.workspace = true
+base64.workspace = true
 tempfile = "3"

@@ -159,7 +159,9 @@ name = "ab-store"
 version = "0.14.0"
 dependencies = [
  "ab-core",
+ "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "fastembed",
  "libc",
  "ring",
