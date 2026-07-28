@@ -3023,8 +3023,46 @@ fn memory_import_embed_batch_size() -> usize {
         .clamp(1, 128)
 }
 
+fn memory_import_skip_embeddings_from(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// Sync services can defer embedding expensive imported active records, then
+/// fill them with the existing explicit reindex path once the node is idle.
+/// Default-on preserves the interactive/MCP import contract.
+fn memory_import_embeddings_enabled() -> bool {
+    !memory_import_skip_embeddings_from(
+        std::env::var("AGENT_BRIDGE_MEMORY_IMPORT_SKIP_EMBEDDINGS")
+            .ok()
+            .as_deref(),
+    )
+}
+
 fn memory_import_record_needs_embedding(record: &MemoryRecord) -> bool {
     record.status.is_empty() || record.status == "active"
+}
+
+/// Return the records that need vectors for a memory import. Keeping this
+/// separate from the backend invocation makes the headless-sync policy
+/// directly testable without loading an embedding model.
+fn memory_import_embedding_indices(
+    actions: &[ImportAction],
+    parsed: &[MemoryRecord],
+    embeddings_enabled: bool,
+) -> Vec<usize> {
+    actions
+        .iter()
+        .enumerate()
+        .filter(|(i, action)| {
+            embeddings_enabled
+                && !matches!(action, ImportAction::Skip)
+                && memory_import_record_needs_embedding(&parsed[*i])
+        })
+        .map(|(i, _)| i)
+        .collect()
 }
 
 /// Gate for dimension-aware stale repair inside `memory_reindex_embeddings`.
@@ -7959,18 +7997,13 @@ impl StateStore for SqliteStore {
 
         let actions = plan_import_actions(&parsed, &incoming_vv, &existing_meta, policy);
 
-        // Embed only rows we're actually going to persist. When everything
-        // is Skip (the common sync-no-op case), we never touch the embedding
-        // backend → fastembed never cold-starts.
-        let to_embed_idx: Vec<usize> = actions
-            .iter()
-            .enumerate()
-            .filter(|(i, a)| {
-                !matches!(a, ImportAction::Skip)
-                    && memory_import_record_needs_embedding(&parsed[*i])
-            })
-            .map(|(i, _)| i)
-            .collect();
+        // Embed only rows we're actually going to persist. Headless sync can
+        // explicitly defer embeddings to avoid loading the ONNX model while
+        // importing a large divergent snapshot; records remain eligible for
+        // the normal explicit reindex path once the node is idle.
+        let embeddings_enabled = memory_import_embeddings_enabled();
+        let to_embed_idx =
+            memory_import_embedding_indices(&actions, &parsed, embeddings_enabled);
         let mut embeddings: Vec<Option<Vec<u8>>> = vec![None; parsed.len()];
         let mut embedding_backends: Vec<Option<String>> = vec![None; parsed.len()];
         if !to_embed_idx.is_empty() {
@@ -13887,6 +13920,38 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memory_import_skip_embeddings_flag_is_explicit_and_tolerant() {
+        for value in ["1", " true ", "YES", "on"] {
+            assert!(memory_import_skip_embeddings_from(Some(value)), "{value}");
+        }
+        for value in [None, Some("0"), Some("false"), Some("unexpected")] {
+            assert!(!memory_import_skip_embeddings_from(value), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn memory_import_can_defer_all_embedding_work_without_changing_actions() {
+        let mut archived = mk_record("archived", 2);
+        archived.status = "archived".into();
+        let records = vec![mk_record("insert", 1), archived, mk_record("skip", 3)];
+        let actions = vec![
+            ImportAction::Insert,
+            ImportAction::Update,
+            ImportAction::Skip,
+        ];
+
+        assert_eq!(
+            memory_import_embedding_indices(&actions, &records, true),
+            vec![0],
+            "normal imports embed active persisted rows only"
+        );
+        assert!(
+            memory_import_embedding_indices(&actions, &records, false).is_empty(),
+            "headless sync defers vectors for every imported row"
+        );
+    }
+
     use super::*;
     #[cfg(feature = "codebase-index-bounded-native-a1")]
     use crate::CodebaseIndexA1DispatchStrategy;
