@@ -39,6 +39,7 @@ express. A packet is S0-valid only when it passes both.
 - `story_plan.schema.json`: S1 static story-ingest and review schema.
 - `story_render_manifest.schema.json`: S2 segment/chapter render evidence.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
+- `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `fixtures/story.json`: novel-performance contract example.
 - `fixtures/story_s1.md`: deterministic TXT/Markdown ingest sample.
 - `fixtures/meeting.json`: meeting reconstruction contract example.
@@ -47,6 +48,22 @@ express. A packet is S0-valid only when it passes both.
 - `NOVEL_TTS_V1_MIGRATION.md`: mapping from the existing novel prototype.
 - `ADR-0003-story-offline-render.md`: cache, assembly, and playback gates.
 - `ADR-0004-memory-grounded-character-state.md`: knowledge and branch gates.
+- `ADR-0005-realtime-story-interaction.md`: realtime state and consent gates.
+
+## S4 realtime story interaction
+
+`scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
+orchestrator. It pauses the story, captures only with explicit microphone
+authorization, routes the stable transcript through S3 grounding and spoiler
+checks, renders a response, emits it only under a separate output gate, and
+resumes the exact playback position.
+
+Fixture tests do not open a microphone or sound device. A real closed-loop
+trial remains a separate explicit owner-authorized acceptance action.
+
+For retained session artifacts, `withdraw_artifacts()` requires separate owner
+authorization and deletes only the explicitly named files; directories and
+unrelated session files are never recursively removed.
 
 ## S3 memory-grounded character state
 
