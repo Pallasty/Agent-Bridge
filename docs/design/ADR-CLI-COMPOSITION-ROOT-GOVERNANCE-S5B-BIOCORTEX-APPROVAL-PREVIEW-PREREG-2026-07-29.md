@@ -77,9 +77,11 @@ Before production movement, capture from exact base `001fd07d`:
 5. JSON and text output with every command option populated using fixed
    deterministic values.
 
-All help, stdout, stderr, and exit-status artifacts must compare byte-for-byte.
-No normalization is expected because this preview packet has no generated
-timestamp.
+All help, text stdout, stderr, and exit-status artifacts must compare
+byte-for-byte. The JSON preview contains the accepted-base `generated_at`
+epoch field. Normalize only that field before comparing JSON; schema, purpose,
+approval state, decisions, evidence, gates, safety fields, and all caller
+values must remain byte-equivalent.
 
 The first Rust edit must add a focused ownership test that fails while
 `run_biocortex_retrieval_approval_packet` remains defined in `main.rs`.
