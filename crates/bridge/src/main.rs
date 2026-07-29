@@ -43,7 +43,7 @@ use ab_bridge::lswr_interaction_feedback::build_interaction_feedback_packet_cons
 use ab_bridge::seed_substrate as ab_seed_bridge;
 use ab_bridge::shadow_cortex as ab_shadow_cortex;
 use ab_bridge::warp_scheme;
-use ab_bridge::{browser_lite, instinct, skills};
+use ab_bridge::{instinct, skills};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
 use ab_browser::{BrowserBackend, ChromiumCdpBackend};
 use ab_mcp::server::serve_stdio;
@@ -70,8 +70,8 @@ use cli::workflow_feedback::{
 };
 use cli::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
-    run_biocortex_shadow_digest, run_substrate, shadow_json_display, A2uiOp, OperatorRequestOp,
-    SubstrateOp,
+    run_biocortex_shadow_digest, run_browser_lite, run_substrate, shadow_json_display, A2uiOp,
+    BrowserLiteOp, OperatorRequestOp, SubstrateOp,
 };
 
 #[derive(Parser, Debug)]
@@ -831,36 +831,6 @@ enum InstinctOp {
         #[arg(long)]
         json: bool,
     },
-}
-
-#[derive(Subcommand, Debug)]
-enum BrowserLiteOp {
-    /// Probe an optional browser-lite backend and print a capability report.
-    Probe {
-        /// Backend to probe. Defaults to obscura.
-        #[arg(value_enum, default_value = "obscura")]
-        backend: BrowserLiteBackend,
-        /// Override backend binary path. Otherwise uses AGENT_BRIDGE_OBSCURA_BIN, then PATH.
-        #[arg(long)]
-        bin: Option<PathBuf>,
-        /// Probe MCP tools/list in addition to `--help`.
-        ///
-        /// Enabled by default because tool count is part of the provenance
-        /// evidence for external browser-lite routing decisions.
-        #[arg(long = "no-mcp-tools", default_value_t = false)]
-        no_mcp_tools: bool,
-        /// Per-probe timeout for backend commands.
-        #[arg(long, default_value_t = 5_000)]
-        timeout_ms: u64,
-        /// Emit raw JSON payload instead of a command line summary.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
-enum BrowserLiteBackend {
-    Obscura,
 }
 
 #[derive(Subcommand, Debug)]
@@ -4765,20 +4735,7 @@ async fn real_main() -> Result<()> {
 
     // Browser-lite probes: short-lived; no Hub and no persistent backend service.
     if let Cmd::BrowserLite { op } = &cmd {
-        return match op {
-            BrowserLiteOp::Probe {
-                backend: BrowserLiteBackend::Obscura,
-                bin,
-                no_mcp_tools,
-                timeout_ms,
-                json,
-            } => browser_lite::run_obscura_probe(browser_lite::ObscuraProbeOptions {
-                bin: bin.clone(),
-                timeout_ms: *timeout_ms,
-                probe_mcp_tools: !*no_mcp_tools,
-                json: *json,
-            }),
-        };
+        return run_browser_lite(op);
     }
 
     // Avatar subcommand: short-lived read-only terminal surface over presence rows.
