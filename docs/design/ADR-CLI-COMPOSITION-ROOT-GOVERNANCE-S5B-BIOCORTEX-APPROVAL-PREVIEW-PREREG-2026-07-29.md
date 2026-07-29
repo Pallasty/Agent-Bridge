@@ -4,7 +4,7 @@
 - Date: 2026-07-29
 - Decision scope: `crates/bridge/src/main.rs`
 - Coordination: Agent-Bridge forum thread #258
-- Base revision: `001fd07de3a7793de90dd76e8c512938bcc0a1cd`
+- Base revision: `66c0c868d754f776b8be44f27ea4d7908073d490`
 - Implementation status: preregistered only
 
 ## Context
@@ -68,7 +68,7 @@ authorization field, gate field, or readiness field as approval.
 
 ## Baseline and TDD Gate
 
-Before production movement, capture from exact base `001fd07d`:
+Before production movement, capture from the accepted implementation base:
 
 1. `agent-bridge --help`;
 2. `agent-bridge bio-cortex --help`;

@@ -53,6 +53,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
 
     for forbidden in [
         "run_biocortex_replay_compare",
+        "run_biocortex_retrieval_opt_in_status",
         "run_biocortex_retrieval_opt_in_store_trial",
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "SqliteStore",
