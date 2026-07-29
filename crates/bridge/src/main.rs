@@ -14,9 +14,9 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_readiness_packet,
     biocortex_retrieval_opt_in_runtime_transition_gate, biocortex_retrieval_opt_in_runtime_trial,
-    biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_retrieval_opt_in_store_trial,
-    BioCortexReplayComparisonOptions, BioCortexRetrievalApprovalPacketOptions,
-    BioCortexRetrievalCandidate, BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
+    biocortex_retrieval_opt_in_store_trial, BioCortexReplayComparisonOptions,
+    BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalCandidate,
+    BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInBatchDiagnosticsOptions, BioCortexRetrievalOptInBatchQueryCase,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
@@ -69,9 +69,10 @@ use cli::workflow_feedback::{
 use cli::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
     run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
-    run_biocortex_retrieval_opt_in_review_packet, run_biocortex_retrieval_opt_in_status,
-    run_biocortex_shadow_digest, run_browser_lite, run_substrate, shadow_json_display, A2uiOp,
-    BrowserLiteOp, OperatorRequestOp, SubstrateOp,
+    run_biocortex_retrieval_opt_in_review_packet,
+    run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
+    run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
+    run_substrate, shadow_json_display, A2uiOp, BrowserLiteOp, OperatorRequestOp, SubstrateOp,
 };
 
 #[derive(Parser, Debug)]
@@ -5945,10 +5946,15 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let body = std::fs::read_to_string(runtime_trial_json).map_err(|e| {
+                    anyhow::anyhow!("read runtime-trial JSON at {runtime_trial_json:?}: {e}")
+                })?;
+                let runtime_trial = serde_json::from_str(&body).map_err(|e| {
+                    anyhow::anyhow!("parse runtime-trial JSON at {runtime_trial_json:?}: {e}")
+                })?;
                 run_biocortex_retrieval_opt_in_runtime_trial_review_packet(
-                    runtime_trial_json,
                     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
-                        runtime_trial: Value::Null,
+                        runtime_trial,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -11467,69 +11473,6 @@ async fn run_biocortex_retrieval_opt_in_runtime_trial(
         shadow_json_display(side_signal.get("attempted"), "false"),
         shadow_json_display(side_signal.get("coverage"), "0"),
         shadow_json_display(side_signal.get("latency_ms"), "0")
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_runtime_trial_review_packet(
-    runtime_trial_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(runtime_trial_json)
-        .map_err(|e| anyhow::anyhow!("read runtime-trial JSON at {runtime_trial_json:?}: {e}"))?;
-    opts.runtime_trial = serde_json::from_str(&body)
-        .map_err(|e| anyhow::anyhow!("parse runtime-trial JSON at {runtime_trial_json:?}: {e}"))?;
-    let payload = biocortex_retrieval_opt_in_runtime_trial_review_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime trial review packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "review_ready={} approval_state={} may_implement_ordering_now={}",
-        shadow_json_display(
-            boundary.get("review_ready_for_baseline_runtime_trial"),
-            "false"
-        ),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
-    );
-    let target = payload.get("review_target").unwrap_or(&Value::Null);
-    println!(
-        "mode={} per_call_opt_in={} commit={}",
-        shadow_json_display(target.get("mode"), "-"),
-        shadow_json_display(target.get("per_call_opt_in"), "false"),
-        shadow_json_display(target.get("commit"), "-")
-    );
-    let summary = payload.get("runtime_trial_summary").unwrap_or(&Value::Null);
-    let side_signal = summary.get("side_signal").unwrap_or(&Value::Null);
-    println!(
-        "side_signal_status={} attempted={} coverage={} latency_ms={}",
-        shadow_json_display(side_signal.get("status"), "-"),
-        shadow_json_display(side_signal.get("attempted"), "false"),
-        shadow_json_display(side_signal.get("coverage"), "0"),
-        shadow_json_display(side_signal.get("latency_ms"), "0")
-    );
-    let returned = summary.get("returned_order").unwrap_or(&Value::Null);
-    println!(
-        "returned_order={} baseline_returned={} violations={}",
-        shadow_json_display(returned.get("source"), "baseline"),
-        shadow_json_display(returned.get("baseline_returned"), "true"),
-        boundary
-            .get("violations")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
     );
     println!(
         "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
