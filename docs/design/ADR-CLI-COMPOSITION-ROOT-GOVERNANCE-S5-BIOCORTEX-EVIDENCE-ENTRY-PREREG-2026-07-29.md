@@ -94,7 +94,7 @@ operation.
 
 The later implementation must preserve:
 
-- root `biocortex` spelling and all 28 nested command names;
+- root `bio-cortex` spelling and all 28 nested command names;
 - every flag, default, required/optional rule, help paragraph, and parse
   failure for the two selected operations;
 - execution before shared Hub construction;
@@ -116,11 +116,12 @@ retrieval-quality, runtime-readiness, or authority claim.
 Before production movement, capture from the accepted implementation base:
 
 1. `agent-bridge --help`;
-2. `agent-bridge biocortex --help`;
+2. `agent-bridge bio-cortex --help`;
 3. help for `shadow-digest`;
 4. help for `capability-ledger-report-packet`;
-5. `shadow-digest --json` and text output against an explicitly missing
-   checkout, so the failure/degraded contract is deterministic;
+5. `shadow-digest --json` and text output with an invalid benchmark, so the
+   fail-closed contract is deterministic and exits before checkout resolution
+   or external-process execution;
 6. capability-ledger JSON and text output for the checked-in v3 and v5
    fixtures;
 7. missing-ledger stderr and exit status.
@@ -143,10 +144,10 @@ Acceptance requires:
 - scoped `rustfmt`, `git diff --check`, and
   `cargo check --locked --offline -p ab-bridge --all-targets --quiet`.
 
-If external shadow output contains an accepted-base nondeterministic duration
-or temporary path, the baseline packet must name and normalize only that
-field. Boundary, status, benchmark, example, verdict, demonstrated keys,
-failed predicates, and limitations must remain compared.
+The invalid-benchmark JSON contains the accepted-base `generated_at` epoch
+field. Normalize only that field. Boundary, status, requested benchmark,
+supported benchmarks, text output, stderr, and exit status must remain
+compared byte-for-byte.
 
 ## Stop Conditions
 
