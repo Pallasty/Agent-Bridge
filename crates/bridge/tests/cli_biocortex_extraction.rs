@@ -20,6 +20,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_shadow_digest",
         "run_biocortex_capability_ledger_report_packet",
         "run_biocortex_retrieval_approval_packet",
+        "run_biocortex_retrieval_opt_in_status",
         "shadow_json_display",
     ] {
         assert!(
@@ -39,12 +40,18 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
     assert!(
         composition_root.contains("BioCortexOp::ShadowDigest")
             && composition_root.contains("BioCortexOp::CapabilityLedgerReportPacket")
-            && composition_root.contains("BioCortexOp::RetrievalApprovalPacket"),
+            && composition_root.contains("BioCortexOp::RetrievalApprovalPacket")
+            && composition_root.contains("BioCortexOp::RetrievalOptInStatus"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
-        composition_root.contains("BioCortexRetrievalApprovalPacketOptions {"),
-        "main.rs must retain retrieval approval option assembly"
+        composition_root.contains("BioCortexRetrievalApprovalPacketOptions {")
+            && composition_root.contains("BioCortexRetrievalOptInAuditOptions {"),
+        "main.rs must retain retrieval option assembly"
+    );
+    assert!(
+        composition_root.contains("read_optional_json_file("),
+        "main.rs must retain optional JSON file loading"
     );
     assert!(
         composition_root.contains("run_biocortex_replay_compare"),
@@ -53,7 +60,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
 
     for forbidden in [
         "run_biocortex_replay_compare",
-        "run_biocortex_retrieval_opt_in_status",
+        "read_optional_json_file",
         "run_biocortex_retrieval_opt_in_store_trial",
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "SqliteStore",

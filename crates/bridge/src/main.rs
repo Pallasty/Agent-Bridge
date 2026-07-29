@@ -4,7 +4,6 @@ use ab_agent::{
 };
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
-    biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
     biocortex_retrieval_opt_in_execution_packet,
@@ -70,8 +69,8 @@ use cli::workflow_feedback::{
 };
 use cli::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
-    run_biocortex_shadow_digest, run_browser_lite, run_substrate, shadow_json_display, A2uiOp,
-    BrowserLiteOp, OperatorRequestOp, SubstrateOp,
+    run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
+    run_substrate, shadow_json_display, A2uiOp, BrowserLiteOp, OperatorRequestOp, SubstrateOp,
 };
 
 #[derive(Parser, Debug)]
@@ -11306,83 +11305,6 @@ async fn run_biocortex_replay_compare(
     println!(
         "next={}",
         shadow_json_display(comparison.get("next_step"), "-")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_status(
-    opts: BioCortexRetrievalOptInAuditOptions,
-    as_json: bool,
-) -> Result<()> {
-    let payload = biocortex_retrieval_opt_in_audit_report(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in status");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "mode={} mode_authorized={} implementation_stage={}",
-        shadow_json_display(payload.get("mode"), "-"),
-        shadow_json_display(payload.get("mode_authorized"), "false"),
-        shadow_json_display(payload.get("implementation_stage"), "-")
-    );
-    let gate = payload.get("gate").unwrap_or(&Value::Null);
-    println!(
-        "gate_status={} gate_ready={} per_call_opt_in={}",
-        shadow_json_display(gate.get("status"), "-"),
-        shadow_json_display(gate.get("ready_for_explicit_opt_in_experiment"), "false"),
-        shadow_json_display(
-            payload
-                .get("per_call_opt_in")
-                .and_then(|value| value.get("present")),
-            "false"
-        )
-    );
-    println!(
-        "runtime_enabled={} operator_disabled={}",
-        shadow_json_display(gate.get("runtime_enabled"), "false"),
-        shadow_json_display(gate.get("operator_disabled"), "false")
-    );
-    let baseline = payload.get("baseline_order").unwrap_or(&Value::Null);
-    println!(
-        "baseline_key_count={} baseline_hash={} raw_keys_included={} content_included={}",
-        shadow_json_display(baseline.get("key_count"), "0"),
-        shadow_json_display(baseline.get("hash"), "-"),
-        shadow_json_display(baseline.get("raw_keys_included"), "false"),
-        shadow_json_display(baseline.get("content_included"), "false")
-    );
-    let fallback = payload.get("fallback").unwrap_or(&Value::Null);
-    println!(
-        "returned_order={} fallback_reason={}",
-        shadow_json_display(
-            payload
-                .get("returned_order")
-                .and_then(|value| value.get("source")),
-            "baseline"
-        ),
-        shadow_json_display(fallback.get("reason"), "-")
-    );
-    println!(
-        "ordering_behavior_connected={} may_change_search_order_now={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("ordering_behavior_connected"), "false"),
-        shadow_json_display(payload.get("may_change_search_order_now"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    let controlled = payload
-        .get("controlled_trial_readiness")
-        .unwrap_or(&Value::Null);
-    println!(
-        "controlled_trial_status={} ready={} evidence_provided={} blockers={}",
-        shadow_json_display(controlled.get("status"), "-"),
-        shadow_json_display(controlled.get("ready_for_controlled_trial"), "false"),
-        shadow_json_display(controlled.get("evidence_provided"), "false"),
-        controlled
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
     );
     Ok(())
 }
