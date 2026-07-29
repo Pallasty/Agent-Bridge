@@ -1,7 +1,9 @@
 mod local_control;
+mod substrate;
 pub(super) mod workflow_feedback;
 
 pub(super) use local_control::{run_a2ui, run_operator_request, A2uiOp, OperatorRequestOp};
+pub(super) use substrate::{run_substrate, SubstrateOp};
 
 #[cfg(test)]
 mod ownership_tests {
