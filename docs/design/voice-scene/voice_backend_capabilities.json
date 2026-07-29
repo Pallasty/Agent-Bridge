@@ -1,0 +1,109 @@
+{
+  "schema": "agent_bridge.voice_backend_capability_matrix.v1",
+  "backends": [
+    {
+      "backend_id": "sherpa-aishell3",
+      "role": "cpu_multispeaker_baseline",
+      "language": ["zh-CN"],
+      "speaker_count": 174,
+      "speaker_metadata": {
+        "identity_kind": "opaque_numeric_id",
+        "gender_inference_allowed": false,
+        "real_person_binding": "owner_review_required"
+      },
+      "capabilities": {
+        "multi_speaker": true,
+        "instruction_emotion": false,
+        "speed": true,
+        "pitch": false,
+        "streaming": false,
+        "voice_clone": false
+      },
+      "model_source": {
+        "provider": "k2-fsa/sherpa-onnx",
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-icefall-zh-aishell3.tar.bz2",
+        "artifact_identity": {
+          "bytes": 31559701,
+          "sha256": "ab468db3a3308cdd861495e0db2f25d79418a0c00639f74944c7cdf5dd8c6ec1",
+          "observed_at": "2026-07-29"
+        },
+        "model_sample_rate_hz": 8000
+      },
+      "license": {
+        "status": "unverified",
+        "reason": "The inspected official release archive contains no license file; repository licensing is not silently inherited by model weights."
+      },
+      "resource_profile": {
+        "preferred_device": "cpu",
+        "model_file_megabytes_documented": 29,
+        "local_benchmark_status": "pending"
+      },
+      "runtime": {
+        "installed": false,
+        "default_enabled": false,
+        "model_downloaded_to_runtime_store": false
+      },
+      "promotion": {
+        "production_eligible": false,
+        "blockers": [
+          "model_license_unverified",
+          "local_render_pending",
+          "blind_audition_pending",
+          "chinese_asr_cer_pending"
+        ]
+      }
+    },
+    {
+      "backend_id": "qwen3-rust-customvoice",
+      "role": "expressive_custom_voice_candidate",
+      "language": ["zh-CN", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"],
+      "speaker_count": 9,
+      "speaker_metadata": {
+        "identity_kind": "model_named_preset",
+        "gender_inference_allowed": false,
+        "real_person_binding": "forbidden_without_separate_consent"
+      },
+      "capabilities": {
+        "multi_speaker": true,
+        "instruction_emotion": true,
+        "speed": false,
+        "pitch": false,
+        "streaming": true,
+        "voice_clone": false
+      },
+      "model_source": {
+        "provider": "QwenLM/Qwen3-TTS",
+        "url": "https://github.com/QwenLM/Qwen3-TTS",
+        "artifact_identity": {
+          "profile": "1.7b-customvoice",
+          "model_sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+          "speech_tokenizer_sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+        },
+        "model_sample_rate_hz": 24000
+      },
+      "license": {
+        "status": "verified",
+        "spdx": "Apache-2.0",
+        "source": "https://github.com/QwenLM/Qwen3-TTS/blob/main/LICENSE"
+      },
+      "resource_profile": {
+        "preferred_device": "macos_metal",
+        "linux_cpu_status": "not_benchmarked",
+        "local_benchmark_status": "single_voice_only"
+      },
+      "runtime": {
+        "installed": false,
+        "default_enabled": false,
+        "model_downloaded_to_runtime_store": false
+      },
+      "promotion": {
+        "production_eligible": false,
+        "blockers": [
+          "multi_voice_blind_audition_pending",
+          "speaker_consistency_benchmark_pending",
+          "runtime_dependency_release_pending"
+        ]
+      }
+    }
+  ]
+}

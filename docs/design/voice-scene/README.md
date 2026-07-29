@@ -40,6 +40,8 @@ express. A packet is S0-valid only when it passes both.
 - `story_render_manifest.schema.json`: S2 segment/chapter render evidence.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
+- `voice_audition.schema.json`: S5 blinded three-voice audition plan.
+- `voice_backend_capabilities.json`: S5 backend provenance and capability matrix.
 - `fixtures/story.json`: novel-performance contract example.
 - `fixtures/story_s1.md`: deterministic TXT/Markdown ingest sample.
 - `fixtures/meeting.json`: meeting reconstruction contract example.
@@ -49,6 +51,19 @@ express. A packet is S0-valid only when it passes both.
 - `ADR-0003-story-offline-render.md`: cache, assembly, and playback gates.
 - `ADR-0004-memory-grounded-character-state.md`: knowledge and branch gates.
 - `ADR-0005-realtime-story-interaction.md`: realtime state and consent gates.
+- `ADR-0006-chinese-multispeaker-audition.md`: S5 audition and promotion gates.
+
+## S5 Chinese multi-speaker audition
+
+`scripts/story_voice_audition.py` defines the static S5A gate. It validates
+backend capability and license posture, creates a deterministic blinded plan
+for narrator plus two distinct characters, computes Chinese ASR character error
+rate, and evaluates explicit owner review receipts.
+
+S5A does not install a backend, download a runtime model, render or play audio,
+or bind a speaker to a character. AISHELL-3 remains local-evaluation-only while
+its model-weight license is unverified. Full S5 exit requires three real,
+hash-bound artifacts and owner confirmation.
 
 ## S4 realtime story interaction
 

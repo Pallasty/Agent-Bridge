@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice-audition-v1.json",
+  "title": "Agent-Bridge S5 Chinese multi-speaker audition plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "plan_id",
+    "status",
+    "scene_id",
+    "backend_id",
+    "model_artifact_sha256",
+    "voice_profile_version",
+    "items",
+    "acceptance",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.story_voice_audition_plan.v1"
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "^audition_plan_[0-9a-f]{20}$"
+    },
+    "status": {
+      "const": "audition_plan_ready_no_audio"
+    },
+    "scene_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "backend_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_artifact_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "voice_profile_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "items": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blind_label",
+          "role_id",
+          "speaker_id",
+          "voice_profile_version",
+          "text",
+          "render_status"
+        ],
+        "properties": {
+          "blind_label": {
+            "enum": ["voice_a", "voice_b", "voice_c"]
+          },
+          "role_id": {
+            "enum": ["narrator", "character_lin", "character_su"]
+          },
+          "speaker_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "voice_profile_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "render_status": {
+            "const": "pending"
+          }
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_human_score",
+        "maximum_asr_cer",
+        "all_voice_pairs_distinguishable",
+        "owner_confirmation_required",
+        "real_person_voice_clone_forbidden"
+      ],
+      "properties": {
+        "minimum_human_score": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "maximum_asr_cer": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "all_voice_pairs_distinguishable": {
+          "const": true
+        },
+        "owner_confirmation_required": {
+          "const": true
+        },
+        "real_person_voice_clone_forbidden": {
+          "const": true
+        }
+      }
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "downloads_models",
+        "renders_audio",
+        "plays_audio",
+        "writes_memory"
+      ],
+      "properties": {
+        "downloads_models": {
+          "const": false
+        },
+        "renders_audio": {
+          "const": false
+        },
+        "plays_audio": {
+          "const": false
+        },
+        "writes_memory": {
+          "const": false
+        }
+      }
+    }
+  }
+}
