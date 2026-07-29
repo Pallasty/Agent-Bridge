@@ -5,8 +5,7 @@ use ab_agent::{
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
     biocortex_retrieval_opt_in_authorization_decision_packet,
-    biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
-    biocortex_retrieval_opt_in_execution_packet,
+    biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_execution_packet,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial, biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
@@ -69,8 +68,9 @@ use cli::workflow_feedback::{
 };
 use cli::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
-    run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
-    run_substrate, shadow_json_display, A2uiOp, BrowserLiteOp, OperatorRequestOp, SubstrateOp,
+    run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_status,
+    run_biocortex_shadow_digest, run_browser_lite, run_substrate, shadow_json_display, A2uiOp,
+    BrowserLiteOp, OperatorRequestOp, SubstrateOp,
 };
 
 #[derive(Parser, Debug)]
@@ -11361,58 +11361,6 @@ fn run_lswr_interaction_feedback_consumption_preflight(
         shadow_json_display(payload.pointer("/guardrails/store_access_required"), "false"),
         shadow_json_display(payload.pointer("/guardrails/mcp_tool_registered"), "false"),
         shadow_json_display(payload.get("implicit_live_runtime_lookup_attempted"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_dry_run(
-    opts: BioCortexRetrievalOptInDryRunOptions,
-    as_json: bool,
-) -> Result<()> {
-    let payload = biocortex_retrieval_opt_in_dry_run_plan(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in dry run");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "mode={} mode_authorized={} dry_run={} implementation_stage={}",
-        shadow_json_display(payload.get("mode"), "-"),
-        shadow_json_display(payload.get("mode_authorized"), "false"),
-        shadow_json_display(payload.get("dry_run"), "true"),
-        shadow_json_display(payload.get("implementation_stage"), "-")
-    );
-    let baseline = payload.get("baseline_order").unwrap_or(&Value::Null);
-    println!(
-        "baseline_completed={} baseline_key_count={} baseline_hash={} raw_keys_included={} content_included={}",
-        shadow_json_display(baseline.get("completed"), "false"),
-        shadow_json_display(baseline.get("key_count"), "0"),
-        shadow_json_display(baseline.get("hash"), "-"),
-        shadow_json_display(baseline.get("raw_keys_included"), "false"),
-        shadow_json_display(baseline.get("content_included"), "false")
-    );
-    let planner = payload.get("planner_result").unwrap_or(&Value::Null);
-    println!(
-        "returned_order={} fallback_reason={} execution_ready={}",
-        shadow_json_display(planner.get("returned_order_source"), "baseline"),
-        shadow_json_display(planner.get("fallback_reason"), "-"),
-        shadow_json_display(planner.get("execution_ready"), "false")
-    );
-    let side_signal = payload.get("planned_side_signal").unwrap_or(&Value::Null);
-    println!(
-        "side_signal_status={} timeout_ms={} coverage_threshold={} runs_biocortex={}",
-        shadow_json_display(side_signal.get("status"), "-"),
-        shadow_json_display(side_signal.get("timeout_ms"), "-"),
-        shadow_json_display(side_signal.get("coverage_threshold"), "-"),
-        shadow_json_display(payload.get("runs_biocortex"), "false")
-    );
-    println!(
-        "calls_memory_search={} ordering_behavior_connected={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("ordering_behavior_connected"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
     );
     Ok(())
 }

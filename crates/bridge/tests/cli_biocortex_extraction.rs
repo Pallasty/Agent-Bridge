@@ -21,6 +21,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_capability_ledger_report_packet",
         "run_biocortex_retrieval_approval_packet",
         "run_biocortex_retrieval_opt_in_status",
+        "run_biocortex_retrieval_opt_in_dry_run",
         "shadow_json_display",
     ] {
         assert!(
@@ -41,12 +42,14 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         composition_root.contains("BioCortexOp::ShadowDigest")
             && composition_root.contains("BioCortexOp::CapabilityLedgerReportPacket")
             && composition_root.contains("BioCortexOp::RetrievalApprovalPacket")
-            && composition_root.contains("BioCortexOp::RetrievalOptInStatus"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInStatus")
+            && composition_root.contains("BioCortexOp::RetrievalOptInDryRun"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
         composition_root.contains("BioCortexRetrievalApprovalPacketOptions {")
-            && composition_root.contains("BioCortexRetrievalOptInAuditOptions {"),
+            && composition_root.contains("BioCortexRetrievalOptInAuditOptions {")
+            && composition_root.contains("BioCortexRetrievalOptInDryRunOptions {"),
         "main.rs must retain retrieval option assembly"
     );
     assert!(
