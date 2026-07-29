@@ -41,6 +41,7 @@ express. A packet is S0-valid only when it passes both.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
+- `sherpa_render_pack.schema.json`: S5B atomic render and ASR receipt.
 - `voice_backend_capabilities.json`: S5 backend provenance and capability matrix.
 - `fixtures/story.json`: novel-performance contract example.
 - `fixtures/story_s1.md`: deterministic TXT/Markdown ingest sample.
@@ -52,6 +53,7 @@ express. A packet is S0-valid only when it passes both.
 - `ADR-0004-memory-grounded-character-state.md`: knowledge and branch gates.
 - `ADR-0005-realtime-story-interaction.md`: realtime state and consent gates.
 - `ADR-0006-chinese-multispeaker-audition.md`: S5 audition and promotion gates.
+- `ADR-0007-sherpa-render-asr-gate.md`: S5B integrity and atomic render gate.
 
 ## S5 Chinese multi-speaker audition
 
@@ -64,6 +66,17 @@ S5A does not install a backend, download a runtime model, render or play audio,
 or bind a speaker to a character. AISHELL-3 remains local-evaluation-only while
 its model-weight license is unverified. Full S5 exit requires three real,
 hash-bound artifacts and owner confirmation.
+
+## S5B integrity-gated render pack
+
+`scripts/story_sherpa_render_gate.py` verifies the complete AISHELL-3 asset
+manifest and an isolated synthesis binary before rendering. It publishes a
+three-file pack atomically, refuses existing output directories, validates PCM
+WAV shape, and binds file-level Chinese ASR results and CER into one receipt.
+
+The machine-verified pack is not played automatically. Its speaker IDs remain
+opaque until a separate owner-authorized blind audition records audibility,
+naturalness, role fit, and pairwise distinguishability.
 
 ## S4 realtime story interaction
 

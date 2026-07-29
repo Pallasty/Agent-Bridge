@@ -36,20 +36,23 @@
       "resource_profile": {
         "preferred_device": "cpu",
         "model_file_megabytes_documented": 29,
-        "local_benchmark_status": "pending"
+        "local_benchmark_status": "three_voice_file_render_verified",
+        "verified_reference_text": "今天阳光很好，我们一起回家。",
+        "verified_speaker_ids": [10, 33, 99],
+        "sense_voice_cer": [0.0, 0.0, 0.0]
       },
       "runtime": {
-        "installed": false,
+        "installed": true,
         "default_enabled": false,
-        "model_downloaded_to_runtime_store": false
+        "model_downloaded_to_runtime_store": true,
+        "installation_scope": "isolated_evaluation_only"
       },
       "promotion": {
         "production_eligible": false,
         "blockers": [
           "model_license_unverified",
-          "local_render_pending",
           "blind_audition_pending",
-          "chinese_asr_cer_pending"
+          "long_form_consistency_pending"
         ]
       }
     },
