@@ -61,4 +61,3 @@ Fixture adapters test orchestration without opening a microphone or sound
 device. Full S4 exit requires a separately authorized real capture, ASR,
 grounded response, TTS and audible delivery trial. Machine receipts alone do
 not establish that human gate.
-
