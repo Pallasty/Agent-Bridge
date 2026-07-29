@@ -202,6 +202,51 @@ def test_successful_turn_pauses_captures_routes_grounds_speaks_and_resumes(
     assert result["overlap_detected"] is False
 
 
+def test_english_character_alias_is_routed_and_removed_before_grounding(
+    tmp_path: Path,
+) -> None:
+    interaction = load_module()
+    calls: list[str] = []
+
+    def english_asr(receipt: dict) -> dict:
+        calls.append("asr")
+        return {
+            "ok": True,
+            "text": "Lin Mo, where is the key?",
+            "language": "en",
+            "stability": "stable",
+            "confidence": 0.9,
+            "source_audio_sha256": receipt["sha256"],
+        }
+
+    english_canon = canon()
+    english_canon[0]["text"] = "Lin Mo entered the old station."
+    english_canon[1]["text"] = "The key is under the station clock."
+    result = interaction.run_turn(
+        session_id="session-english-alias",
+        player_position_ms=1200,
+        cursor_sequence=2,
+        canon=english_canon,
+        default_character_id="character_su",
+        owner_microphone_authorized=True,
+        owner_output_authorized=False,
+        retention_policy="session",
+        capture=Recorder(tmp_path, calls),
+        asr=english_asr,
+        generate_response=lambda request: request["grounded_answer"],
+        tts=successful_tts(tmp_path, calls),
+        player=Player(calls),
+    )
+
+    assert result["route"] == {
+        "character_id": "character_lin",
+        "basis": "explicit_name",
+        "matched_text": "Lin Mo",
+    }
+    assert result["response"]["text"] == "The key is under the station clock."
+    assert result["response"]["evidence_event_ids"] == ["canon_002"]
+
+
 def test_asr_failure_still_resumes_exact_position_and_skips_tts(
     tmp_path: Path,
 ) -> None:

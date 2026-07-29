@@ -48,16 +48,20 @@ def route_character(
 ) -> dict[str, Any]:
     """Use an explicit addressee when known, otherwise retain session default."""
 
-    display_hints = {
-        "林默": "character_lin",
-        "苏岚": "character_su",
-    }
-    for name, character_id in display_hints.items():
-        if name in transcript:
+    display_hints = (
+        ("林默", "character_lin"),
+        ("苏岚", "character_su"),
+        ("Lin Mo", "character_lin"),
+        ("Su Lan", "character_su"),
+    )
+    transcript_folded = transcript.casefold()
+    for name, character_id in display_hints:
+        offset = transcript_folded.find(name.casefold())
+        if offset >= 0:
             return {
                 "character_id": character_id,
                 "basis": "explicit_name",
-                "matched_text": name,
+                "matched_text": transcript[offset : offset + len(name)],
             }
     return {
         "character_id": default_character_id,
