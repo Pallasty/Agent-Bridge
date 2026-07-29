@@ -42083,6 +42083,9 @@ impl ToolProfile {
 enum ToolSet {
     Profile,
     CodexEssential,
+    /// Explicit opt-in Codex surface for grounded voice projection. It keeps
+    /// the compact codex-essential base and adds only the bounded voice lane.
+    CodexVoice,
     CodexLean,
     /// An opt-in Codex profile for inspecting static A2UI previews.
     /// It is deliberately the codex-lean allowlist plus one read-only tool.
@@ -42100,6 +42103,7 @@ impl ToolSet {
         match self {
             Self::Profile => "profile",
             Self::CodexEssential => "codex-essential",
+            Self::CodexVoice => "codex-voice",
             Self::CodexLean => "codex-lean",
             Self::CodexA2ui => "codex-a2ui",
             Self::ChatGptRead => "chatgpt-read",
@@ -42115,6 +42119,7 @@ impl ToolSet {
         match value.map(normalize_tool_policy_value).as_deref() {
             Some("profile") | Some("legacy") => Some(Self::Profile),
             Some("codex-essential") | Some("codex") => Some(Self::CodexEssential),
+            Some("codex-voice") | Some("codex-audio") => Some(Self::CodexVoice),
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
             Some("codex-a2ui") | Some("codex-a2ui-preview") => Some(Self::CodexA2ui),
             Some("chatgpt-read") | Some("chatgpt") | Some("openai-chat") => Some(Self::ChatGptRead),
@@ -42137,6 +42142,12 @@ impl ToolSet {
                 .iter()
                 .flat_map(|g| g.iter().copied())
                 .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
+                .collect(),
+            Self::CodexVoice => CODEX_ESSENTIAL_GROUPS
+                .iter()
+                .flat_map(|g| g.iter().copied())
+                .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
+                .chain(CODEX_VOICE_EXTRAS.iter().copied())
                 .collect(),
             Self::CodexA2ui => vec!["a2ui_preview"],
             _ => Vec::new(),
@@ -42173,7 +42184,7 @@ impl ToolPolicy {
         let legacy_profile = ToolProfile::from_value(profile);
         let profile = match set {
             ToolSet::Profile => legacy_profile,
-            ToolSet::CodexEssential => ToolProfile::Compact,
+            ToolSet::CodexEssential | ToolSet::CodexVoice => ToolProfile::Compact,
             ToolSet::CodexLean
             | ToolSet::CodexA2ui
             | ToolSet::ChatGptRead
@@ -42209,6 +42220,9 @@ impl ToolPolicy {
                 self.profile.includes(tier)
             }
             ToolSet::CodexEssential => codex_essential_tool(tier, tool_name),
+            ToolSet::CodexVoice => {
+                codex_essential_tool(tier, tool_name) || CODEX_VOICE_EXTRAS.contains(&tool_name)
+            }
             ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::CodexA2ui => codex_lean_tool(tool_name) || tool_name == "a2ui_preview",
             ToolSet::ChatGptRead => chatgpt_read_tool(tool_name),
@@ -42409,6 +42423,18 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "skills_feedback",
     "session_finalize",
     "pet_state_ritual",
+];
+
+/// Explicitly bounded voice lane for `AGENT_BRIDGE_TOOLSET=codex-voice`.
+/// The default codex-essential surface remains non-audio. The preflight and
+/// health tools are read-only; `present_voice` remains an explicit call with
+/// the same backend/channel honesty gates as the all profile.
+const CODEX_VOICE_EXTRAS: &[&str] = &[
+    "present_voice",
+    "present_voice_confirm_audibility",
+    "voice_runtime_preflight",
+    "voice_delivery_health",
+    "embodiment_operating_readiness",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
@@ -47156,6 +47182,15 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(PresentVoiceTool::new(hub.clone())),
+    );
+    // Non-actuating voice readiness inspection. It checks configured
+    // binaries/assets/channel commands but never synthesizes, plays, records,
+    // downloads, restarts, or claims delivery.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(VoiceRuntimePreflightTool::new(hub.clone())),
     );
     // Default-safe task-final summary delivery: renders an audio artifact for an
     // explicit click, without emitting it to any physical output device.

@@ -364,6 +364,289 @@ impl McpTool for PresentVoiceTool {
     }
 }
 
+/// Read-only readiness inspection for one explicit voice backend/channel pair.
+/// It never starts a synthesizer, player, recorder, model download, or daemon.
+pub struct VoiceRuntimePreflightTool {
+    _hub: Hub,
+}
+
+impl VoiceRuntimePreflightTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+fn voice_arg_or_env_path(args: &Value, field: &str, env_name: &str) -> Option<PathBuf> {
+    args.get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os(env_name)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        })
+}
+
+fn voice_command_path(command: &str) -> Option<PathBuf> {
+    let candidate = PathBuf::from(command);
+    if candidate.components().count() > 1 {
+        return candidate.exists().then_some(candidate);
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(command))
+            .find(|path| path.is_file())
+    })
+}
+
+fn voice_preflight_check(
+    checks: &mut Vec<Value>,
+    blockers: &mut Vec<String>,
+    label: &str,
+    path: Option<PathBuf>,
+) {
+    let present = path.as_ref().is_some_and(|value| value.exists());
+    checks.push(json!({
+        "label": label,
+        "present": present,
+        "path": path.as_ref().map(|value| value.display().to_string()),
+    }));
+    if !present {
+        blockers.push(format!("{label} is missing or not configured"));
+    }
+}
+
+#[async_trait]
+impl McpTool for VoiceRuntimePreflightTool {
+    fn name(&self) -> &'static str {
+        "voice_runtime_preflight"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only, non-actuating readiness preflight for one present_voice backend and capture channel. Checks the adapter, configured binaries/models, and channel commands without synthesizing, playing, recording, downloading, restarting, or changing runtime state. A ready result proves configuration presence only; it does not prove intelligibility, bus delivery, acoustic output, or human audibility.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "backend": {"type": "string", "enum": ["tone", "kokoro", "piper", "sherpa", "say", "qwen3", "qwen3-rust"], "default": "tone"},
+                    "capture_channel": {"type": "string", "enum": ["sink_monitor", "mic", "synth_file"], "default": "sink_monitor"},
+                    "cwd": {"type": "string"},
+                    "script_path": {"type": "string"},
+                    "synth_bin": {"type": "string"},
+                    "kokoro_model": {"type": "string"},
+                    "kokoro_voices": {"type": "string"},
+                    "piper_model": {"type": "string"},
+                    "piper_phonemize": {"type": "string"},
+                    "sherpa_model": {"type": "string"},
+                    "sherpa_voice_map": {"type": "string"},
+                    "stt_bin": {"type": "string"},
+                    "stt_model": {"type": "string"},
+                    "qwen_python": {"type": "string"},
+                    "qwen_model": {"type": "string"},
+                    "qwen_rust_bin": {"type": "string"},
+                    "qwen_rust_model_dir": {"type": "string"}
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let backend = args
+            .get("backend")
+            .and_then(Value::as_str)
+            .unwrap_or("tone");
+        let capture_channel = args
+            .get("capture_channel")
+            .and_then(Value::as_str)
+            .unwrap_or("sink_monitor");
+        if !matches!(
+            backend,
+            "tone" | "kokoro" | "piper" | "sherpa" | "say" | "qwen3" | "qwen3-rust"
+        ) {
+            return Ok(ToolResult::error("unsupported voice backend"));
+        }
+        if !matches!(capture_channel, "sink_monitor" | "mic" | "synth_file") {
+            return Ok(ToolResult::error("unsupported capture_channel"));
+        }
+
+        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
+        let mut checks = Vec::new();
+        let mut blockers = Vec::new();
+        voice_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "audio adapter",
+            Some(present_voice_script_path(&args, cwd.as_ref())),
+        );
+
+        let synth_bin = || {
+            voice_arg_or_env_path(&args, "synth_bin", "AB_TTS_SYNTH_BIN")
+                .or_else(|| voice_command_path("ab-tts-synth"))
+        };
+        match backend {
+            "tone" => {}
+            "kokoro" => {
+                voice_preflight_check(&mut checks, &mut blockers, "TTS synthesizer", synth_bin());
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Kokoro model",
+                    voice_arg_or_env_path(&args, "kokoro_model", "AB_TTS_KOKORO_MODEL"),
+                );
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Kokoro voices",
+                    voice_arg_or_env_path(&args, "kokoro_voices", "AB_TTS_KOKORO_VOICES"),
+                );
+            }
+            "piper" => {
+                voice_preflight_check(&mut checks, &mut blockers, "TTS synthesizer", synth_bin());
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Piper model",
+                    voice_arg_or_env_path(&args, "piper_model", "AB_TTS_PIPER_MODEL"),
+                );
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Piper phonemizer",
+                    voice_arg_or_env_path(
+                        &args,
+                        "piper_phonemize",
+                        "AB_TTS_PIPER_PHONEMIZE",
+                    ),
+                );
+            }
+            "sherpa" => {
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Sherpa synthesizer",
+                    voice_arg_or_env_path(&args, "synth_bin", "AB_TTS_SHERPA_SYNTH_BIN")
+                        .or_else(|| voice_command_path("ab-sherpa-tts-synth")),
+                );
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Sherpa model",
+                    voice_arg_or_env_path(&args, "sherpa_model", "AB_TTS_SHERPA_MODEL"),
+                );
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Sherpa voice map",
+                    voice_arg_or_env_path(
+                        &args,
+                        "sherpa_voice_map",
+                        "AB_TTS_SHERPA_VOICE_MAP",
+                    ),
+                );
+            }
+            "say" => {
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "macOS say",
+                    Some(PathBuf::from("/usr/bin/say")),
+                );
+            }
+            "qwen3" => {
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Qwen3 Python",
+                    voice_arg_or_env_path(&args, "qwen_python", "AB_QWEN3_TTS_PYTHON"),
+                );
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Qwen3 model",
+                    voice_arg_or_env_path(&args, "qwen_model", "AB_QWEN3_TTS_MODEL"),
+                );
+            }
+            "qwen3-rust" => {
+                let enabled = std::env::var("AB_QWEN3_TTS_RUST_ENABLED")
+                    .ok()
+                    .is_some_and(|value| value == "1");
+                checks.push(json!({"label": "Qwen3 Rust opt-in", "present": enabled}));
+                if !enabled {
+                    blockers.push("Qwen3 Rust remains disabled (AB_QWEN3_TTS_RUST_ENABLED!=1)".to_string());
+                }
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Qwen3 Rust binary",
+                    voice_arg_or_env_path(&args, "qwen_rust_bin", "AB_QWEN3_TTS_RUST_BIN"),
+                );
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    "Qwen3 Rust model directory",
+                    voice_arg_or_env_path(
+                        &args,
+                        "qwen_rust_model_dir",
+                        "AB_QWEN3_TTS_RUST_MODEL_DIR",
+                    ),
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        if capture_channel == "synth_file" {
+            voice_preflight_check(
+                &mut checks,
+                &mut blockers,
+                "STT runtime",
+                voice_arg_or_env_path(&args, "stt_bin", "AB_TTS_STT_BIN")
+                    .or_else(|| voice_command_path("whisper-cli")),
+            );
+            voice_preflight_check(
+                &mut checks,
+                &mut blockers,
+                "STT model",
+                voice_arg_or_env_path(&args, "stt_model", "AB_TTS_STT_MODEL"),
+            );
+        } else {
+            for command in ["pactl", "ffmpeg", "paplay"] {
+                voice_preflight_check(
+                    &mut checks,
+                    &mut blockers,
+                    &format!("{command} command"),
+                    voice_command_path(command),
+                );
+            }
+            if capture_channel == "mic" {
+                checks.push(json!({
+                    "label": "mic boundary",
+                    "present": true,
+                    "detail": "readiness does not record; a later explicit live call may capture the default microphone"
+                }));
+            }
+        }
+
+        let ready = blockers.is_empty();
+        Ok(ToolResult::json_text(&json!({
+            "schema": "voice_runtime_preflight/v0",
+            "status": if ready { "ready" } else { "blocked" },
+            "ready": ready,
+            "backend": backend,
+            "capture_channel": capture_channel,
+            "checks": checks,
+            "blockers": blockers,
+            "emits_audio": false,
+            "records_audio": false,
+            "mutates_runtime": false,
+            "verified_to": "configuration and local path/command presence only",
+            "not_verified": "synthesis, intelligibility, output bus, acoustic output, listener audibility, and future runs"
+        })))
+    }
+}
+
 /// Render a concise task summary into a durable, click-to-play audio artifact.
 /// Unlike `present_voice`, this tool never emits audio to a sink: it is the
 /// default-safe completion path for a task-group final summary.

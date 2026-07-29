@@ -35,6 +35,8 @@
 # Env:
 #   AGENT_BRIDGE_INSTALL_DIR   install dir (default ~/.local/bin)
 #   AGENT_BRIDGE_REAL_BIN      real binary path (default $INSTALL_DIR/agent-bridge.real)
+#   AGENT_BRIDGE_AUDIO_EMBODY_PATH installed adapter path
+#                              (default ~/.local/share/ab-tts/audio_embody.py)
 #   CARGO_TARGET_DIR           build target dir (default ~/.cache/agent-bridge-deploy-target,
 #                              kept OFF /Data so the ntfs-3g volume filling up can't
 #                              ENOSPC the release build; honored if you set it)
@@ -46,6 +48,8 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="${AGENT_BRIDGE_INSTALL_DIR:-$HOME/.local/bin}"
 REAL_PATH="${AGENT_BRIDGE_REAL_BIN:-$INSTALL_DIR/agent-bridge.real}"
 WRAPPER_PATH="$INSTALL_DIR/agent-bridge"
+ADAPTER_SOURCE="$REPO/scripts/audio_embody.py"
+ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
 
 # Lane feature-markers. The gate asserts: every marker present in the CURRENT
 # deployed binary is also present in the NEW one (new may add more — superset OK).
@@ -83,6 +87,7 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # markers_in would return EMPTY for every binary and the gate would falsely pass
 # ("superset" of nothing) — deploying completely unguarded. Fail closed instead.
 command -v strings >/dev/null 2>&1 || die "strings (binutils) is required for the regression gate; install binutils"
+[ -f "$ADAPTER_SOURCE" ] || die "repository audio adapter missing: $ADAPTER_SOURCE"
 
 # pipe-free native-executable check — ELF on Linux, Mach-O on macOS.
 # (avoids `head | grep -q` SIGPIPE-under-pipefail flake). The byte magics below
@@ -224,6 +229,7 @@ say "  source     : $PROVENANCE"
 say "  new binary : $NEW_BIN ($new_size bytes)"
 say "  target     : $REAL_PATH (current $cur_size bytes)"
 say "  wrapper    : $WRAPPER_PATH (left untouched)"
+say "  adapter    : $ADAPTER_SOURCE -> $ADAPTER_PATH"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     say
@@ -252,6 +258,23 @@ if [ -f "$REAL_PATH" ]; then
     say ">> backed up current binary -> $bak"
 fi
 
+# Install the repository-matched adapter before the binary. A brief
+# interruption can therefore leave the old binary with a backward-compatible
+# newer adapter, never the newer voice schema with a silently older adapter.
+mkdir -p "$(dirname "$ADAPTER_PATH")"
+if [ -f "$ADAPTER_PATH" ]; then
+    adapter_bak="$ADAPTER_PATH.bak-deploy-$(date +%Y%m%dT%H%M%S)"
+    cp "$ADAPTER_PATH" "$adapter_bak"
+    say ">> backed up current audio adapter -> $adapter_bak"
+fi
+adapter_stage="$ADAPTER_PATH.stage.$$"
+cp "$ADAPTER_SOURCE" "$adapter_stage"
+chmod +x "$adapter_stage"
+mv -f "$adapter_stage" "$ADAPTER_PATH"
+cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
+    die "installed audio adapter differs from repository source"
+say ">> deployed matched audio adapter -> $ADAPTER_PATH"
+
 cp -f "$NEW_BIN" "$REAL_PATH"
 say ">> deployed -> $REAL_PATH"
 copied_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
@@ -268,6 +291,9 @@ say
 say "=== post-deploy verification ==="
 dep_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
 [ "$dep_size" = "$new_size" ] || die "deployed size $dep_size != built $new_size (copy failed?)"
+cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
+    die "post-deploy audio adapter parity check failed"
+say "audio adapter parity: OK ($ADAPTER_PATH)"
 # unquoted on purpose: markers are one-per-line + whitespace-free, so word-splitting
 # gives one printf arg per marker (each gets its own "  + " prefix).
 # shellcheck disable=SC2046,SC2086
@@ -307,6 +333,7 @@ if [ "$stale" -gt 0 ]; then
     printf '%s\n' "$stale_list"
 fi
 if [ -n "${bak:-}" ]; then say "      rollback: cp '$bak' '$REAL_PATH' && /mcp reconnect"; fi
+if [ -n "${adapter_bak:-}" ]; then say "      adapter rollback: cp '$adapter_bak' '$ADAPTER_PATH'"; fi
 # Explicit success: the final command above must not leave a nonzero status (a
 # bare `[ -n "" ] && …` on a first install returns 1 and, as the last command
 # under `set -e`, would falsely report deploy failure to callers checking $?).

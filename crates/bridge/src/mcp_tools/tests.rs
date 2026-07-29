@@ -6876,6 +6876,55 @@ fn tool_policy_codex_essential_exposes_extras_list() {
 }
 
 #[test]
+fn tool_policy_codex_voice_adds_only_the_bounded_voice_surface() {
+    let essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+    let voice = ToolPolicy::from_values(Some("codex-voice"), None, None, None);
+    let voice_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), voice)
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+
+    assert_eq!(voice.label(), "codex-voice");
+    assert_eq!(voice.profile().label(), "compact");
+
+    let voice_tools = [
+        "present_voice",
+        "present_voice_confirm_audibility",
+        "voice_runtime_preflight",
+        "voice_delivery_health",
+        "embodiment_operating_readiness",
+    ];
+    for tool_name in voice_tools {
+        assert!(
+            !essential.includes(Tier::Niche, tool_name),
+            "{tool_name} must stay out of codex-essential"
+        );
+        assert!(
+            voice.includes(Tier::Niche, tool_name),
+            "{tool_name} must be available in the explicit codex-voice toolset"
+        );
+        assert!(
+            voice.extras().contains(&tool_name),
+            "{tool_name} must be surfaced in capabilities.tool_profile_extras"
+        );
+        assert!(
+            voice_names.iter().any(|name| name == tool_name),
+            "{tool_name} must register in the codex-voice manifest"
+        );
+    }
+
+    assert!(
+        !voice.includes(Tier::Niche, "present_dashboard"),
+        "codex-voice must not widen to unrelated Niche presentation tools"
+    );
+    assert!(
+        !voice.includes(Tier::Niche, "browser_navigate"),
+        "codex-voice must not widen to unrelated browser mutation"
+    );
+}
+
+#[test]
 fn tool_policy_non_codex_essential_has_empty_extras() {
     for label in [
         "claude-standard",
@@ -10456,6 +10505,59 @@ fn present_is_niche_opt_in_and_registers_under_all() {
             .any(|s| s.name == "lswr_outcome_admissions_ingest"),
         "lswr_outcome_admissions_ingest must stay out of codex-essential"
     );
+}
+
+#[tokio::test]
+async fn voice_runtime_preflight_is_non_actuating_and_fails_closed() {
+    let root = std::env::temp_dir().join(format!(
+        "ab-voice-preflight-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let tool = VoiceRuntimePreflightTool::new(Hub::builder().build());
+    let result = tool
+        .execute(
+            json!({
+                "backend": "kokoro",
+                "capture_channel": "sink_monitor",
+                "script_path": root.join("missing-audio-embody.py"),
+                "synth_bin": root.join("missing-ab-tts-synth"),
+                "kokoro_model": root.join("missing-kokoro.onnx"),
+                "kokoro_voices": root.join("missing-voices.bin")
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .unwrap();
+    let payload = tool_result_first_json(&result).unwrap();
+
+    assert_eq!(payload["schema"], "voice_runtime_preflight/v0");
+    assert_eq!(payload["ready"], false);
+    assert_eq!(payload["status"], "blocked");
+    assert_eq!(payload["emits_audio"], false);
+    assert_eq!(payload["records_audio"], false);
+    assert_eq!(payload["mutates_runtime"], false);
+    assert_eq!(payload["backend"], "kokoro");
+    assert_eq!(payload["capture_channel"], "sink_monitor");
+    assert!(
+        payload["blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("audio adapter"))
+    );
+    assert!(
+        payload["blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("Kokoro model"))
+    );
+
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]
