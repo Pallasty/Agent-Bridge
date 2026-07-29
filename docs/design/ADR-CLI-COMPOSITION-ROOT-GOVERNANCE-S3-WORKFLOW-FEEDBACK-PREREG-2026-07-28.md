@@ -84,7 +84,7 @@ The implementation gate must preserve:
 - all seven command names, flags, defaults, required/repeated argument rules,
   help text, and parse failures;
 - the current pre-Hub execution order;
-- `AGENT_BRIDGE_DB_PATH` behavior for `workflow-feedback-report`;
+- `AB_BASELINE_DB` behavior for `workflow-feedback-report`;
 - stdout/stderr shape, JSON schemas, Markdown rendering, exit codes, and error
   context;
 - read-only behavior and every existing non-authority claim;
