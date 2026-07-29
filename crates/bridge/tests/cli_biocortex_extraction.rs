@@ -19,6 +19,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
     for adapter in [
         "run_biocortex_shadow_digest",
         "run_biocortex_capability_ledger_report_packet",
+        "run_biocortex_retrieval_approval_packet",
         "shadow_json_display",
     ] {
         assert!(
@@ -37,8 +38,13 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
     );
     assert!(
         composition_root.contains("BioCortexOp::ShadowDigest")
-            && composition_root.contains("BioCortexOp::CapabilityLedgerReportPacket"),
-        "main.rs must retain both selected dispatch arms"
+            && composition_root.contains("BioCortexOp::CapabilityLedgerReportPacket")
+            && composition_root.contains("BioCortexOp::RetrievalApprovalPacket"),
+        "main.rs must retain the selected dispatch arms"
+    );
+    assert!(
+        composition_root.contains("BioCortexRetrievalApprovalPacketOptions {"),
+        "main.rs must retain retrieval approval option assembly"
     );
     assert!(
         composition_root.contains("run_biocortex_replay_compare"),

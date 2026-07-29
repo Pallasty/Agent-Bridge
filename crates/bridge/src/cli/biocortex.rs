@@ -2,7 +2,8 @@ use ab_bridge::biocortex_capability_ledger::{
     build_biocortex_capability_ledger_report_packet, consume_biocortex_capability_ledger,
 };
 use ab_bridge::biocortex_shadow::{
-    biocortex_shadow_digest, supported_benchmarks, BioCortexShadowOptions,
+    biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
+    supported_benchmarks, BioCortexRetrievalApprovalPacketOptions, BioCortexShadowOptions,
 };
 use anyhow::Result;
 use serde_json::Value;
@@ -113,6 +114,72 @@ pub(crate) async fn run_biocortex_capability_ledger_report_packet(
         packet.safety.language_generation_observed,
         packet.safety.cognition_claim_observed
     );
+    Ok(())
+}
+
+pub(crate) async fn run_biocortex_retrieval_approval_packet(
+    opts: BioCortexRetrievalApprovalPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_runtime_approval_packet_preview(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval runtime approval packet preview");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "approval_state={} default_decision={}",
+        shadow_json_display(payload.get("approval_state"), "-"),
+        shadow_json_display(payload.get("default_decision"), "-")
+    );
+    println!(
+        "runtime_adapter_approved={} approval_writes_allowed={} default_search_order_change_allowed={}",
+        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
+        shadow_json_display(payload.get("approval_writes_allowed"), "false"),
+        shadow_json_display(payload.get("default_search_order_change_allowed"), "false")
+    );
+    println!(
+        "requires_separate_human_approval={} ready_for_human_approval_review={}",
+        shadow_json_display(payload.get("requires_separate_human_approval"), "true"),
+        shadow_json_display(payload.get("ready_for_human_approval_review"), "false")
+    );
+    let attestation = payload
+        .get("agent_technical_attestation")
+        .unwrap_or(&Value::Null);
+    let authorization = payload.get("human_authorization").unwrap_or(&Value::Null);
+    println!(
+        "agent_attestation_decision={} agent_can_authorize_runtime_influence={}",
+        shadow_json_display(attestation.get("decision"), "-"),
+        shadow_json_display(attestation.get("can_authorize_runtime_influence"), "false")
+    );
+    println!(
+        "human_authorization_status={} human_authorization_scope={}",
+        shadow_json_display(authorization.get("status"), "not_authorized"),
+        shadow_json_display(authorization.get("scope"), "-")
+    );
+    let gates = payload.get("gates").unwrap_or(&Value::Null);
+    println!(
+        "gates feature_enabled={} runtime_enabled={} operator_disabled={}",
+        shadow_json_display(gates.get("compile_feature_enabled"), "false"),
+        shadow_json_display(gates.get("runtime_enabled"), "false"),
+        shadow_json_display(gates.get("operator_disabled"), "false")
+    );
+    let missing_count = payload
+        .get("missing_evidence")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    println!("missing_evidence_count={missing_count}");
+    if let Some(paths) = payload.get("missing_evidence").and_then(Value::as_array) {
+        for path in paths.iter().take(8).filter_map(Value::as_str) {
+            println!("missing={path}");
+        }
+        if paths.len() > 8 {
+            println!("missing=...{} more", paths.len() - 8);
+        }
+    }
     Ok(())
 }
 
