@@ -40,17 +40,25 @@ not module ownership.
 
 The family has a wider dependency boundary than S1:
 
-- `ab_seed_bridge` snapshot, topology, configuration, and replay APIs;
+- the binary-local `seed_substrate` compatibility shim, imported as
+  `ab_seed_bridge`, for snapshot, topology, configuration, and replay-shaped
+  APIs;
 - `ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend}`;
 - `anyhow`, clap, serde/JSON, `PathBuf`, `Arc`, filesystem, process, time, and
   environment APIs.
 
-The authority boundary remains bounded but is not uniformly read-only.
-`stats`, `neighbors`, and `snapshot` inspect process or snapshot state.
-`replay` reads caller-supplied JSONL, constructs an in-process Seed backend,
-and writes or replaces the selected output snapshot. It does not open or
-mutate `state.db`, but its existing filesystem effect is load-bearing and must
-not be described as read-only.
+At the accepted base, `crates/bridge/src/seed_substrate.rs` is an
+unconditional disabled compatibility shim. The reserved `seed-substrate`
+Cargo feature does not relink the standalone legacy `ab-seed-bridge` crate.
+`stats` reports the disabled state; existing-file snapshot reads fail closed
+through the shim. `replay` still reads and classifies caller-supplied JSONL,
+constructs the shim backend, and attempts a final snapshot append, but the
+append returns the disabled error. The command emits that warning and exits
+successfully even when every input line is skipped, reports zero rows and null
+fingerprints, and creates no output file. This observed
+attempt-and-fail-closed behavior is load-bearing.
+Restoring the legacy writer would be a separate Cargo/runtime design change,
+not part of composition-root extraction.
 
 ## Decision
 
@@ -90,20 +98,22 @@ The implementation gate must preserve:
 - execution before shared store and Hub construction;
 - `AB_SUBSTRATE` detection and disabled-state reporting;
 - snapshot path precedence and `$HOME` fallback behavior;
-- missing-path and missing-file success behavior for `neighbors`;
-- `snapshot` tier filtering, limit semantics, fingerprint-only output, and
-  unknown-tier failures;
+- no-path and missing-file success behavior for `neighbors`, plus the
+  disabled-shim failure when an explicit path exists and reaches `read_all`;
+- `snapshot`'s current disabled-shim failure before tier filtering, limit, or
+  fingerprint rendering can observe rows;
 - `replay` JSONL skip rules, optional `key` fallback, reserved-but-ineffective
-  seed disclosure, hash/ONNX selection, default temporary output naming,
-  caller-selected output replacement, snapshot append, warnings, and exit
-  status;
+  seed disclosure, hash/ONNX selection, output-path reporting, failed append
+  warning, zero-row/null-fingerprint JSON, no-output-file postcondition, and
+  success/failure exit rules;
 - stdout/stderr text, JSON field names and values, fingerprints, error
   contexts, and filesystem effects;
 - default tool profiles, MCP manifests, store schemas, memory/retrieval
   routing, runtime admission, policy, and authority.
 
-The implementation must not claim replay determinism while
-`NeuronGrid::new` and `step` continue to use thread-local randomness.
+The implementation must preserve the existing RNG caveat text even though the
+disabled shim currently reports null fingerprints. It must not imply that the
+reserved feature marker restores the legacy writer.
 
 ## Implementation preregistration
 
@@ -112,20 +122,21 @@ accepted implementation base:
 
 1. repository status and local/GitLab/GitHub base identities;
 2. root `--help`, `substrate --help`, and `--help` for all four operations;
-3. `stats --json` with substrate disabled and with an isolated snapshot path;
-4. `neighbors --json` for missing snapshot, no Long row, and a fixed Long-row
-   fixture;
-5. `snapshot --json`, `--fingerprint-only`, tier filtering, limit behavior,
-   missing-file failure, and invalid-tier failure;
+3. `stats --json` with no snapshot path, a missing explicit path, and an
+   existing isolated file that triggers the disabled read warning;
+4. `neighbors --json` with no resolved path, a missing explicit path, and an
+   existing explicit file that reaches the disabled-shim failure;
+5. `snapshot --json` with missing and existing explicit paths, capturing the
+   disabled-shim failure before row-level flags take effect;
 6. `replay --use-hash --json` against fixed valid, partially malformed, and
    empty JSONL fixtures, using an isolated output path;
-7. output-file existence and normalized snapshot content after replay.
+7. the no-output-file postcondition after successful valid/partial replay.
 
-Replay fingerprints are not suitable as a cross-run equality gate while the
-documented RNG caveat remains true. Compare deterministic fields directly and
-normalize only explicitly nondeterministic fingerprint, timestamp, PID-derived
-path, and ordering fields. The baseline packet must list every normalization;
-it must not drop warnings, event counts, configuration, or write effects.
+The disabled shim emits null Replay fingerprints and zero rows, so no
+fingerprint or timestamp normalization is currently needed. Normalize only an
+explicit default temporary path if that path is exercised. The baseline packet
+must list every normalization and must not drop warnings, event counts,
+configuration, exit status, or the no-file postcondition.
 
 The first implementation change must add a focused ownership test that fails
 while `SubstrateOp` and the four executors remain owned by `main.rs`. Only
@@ -135,7 +146,8 @@ Acceptance requires:
 
 - byte-for-byte equality for all six help surfaces;
 - equivalent success/failure exit codes and stdout/stderr;
-- explicit filesystem postcondition checks for replay;
+- explicit no-output-file postcondition checks for valid and partially
+  malformed replay;
 - all moved helper tests and existing Seed/substrate tests;
 - a source-boundary test proving Dream correlation audit remains in
   `main.rs`;
@@ -153,6 +165,8 @@ Stop and return to design if:
   or daemon state;
 - a public library or Cargo feature change becomes necessary;
 - replay output behavior, seed disclosure, or filesystem effects drift;
+- the extraction requires relinking the standalone legacy seed bridge or
+  making the reserved feature marker functional;
 - any help, parse, JSON, Markdown/text, warning, error, or exit contract
   changes;
 - another owner starts overlapping `main.rs` work without an explicit forum
@@ -167,7 +181,8 @@ This preregistration does not authorize:
 - substrate algorithm, snapshot schema, embedding backend, RNG, or
   determinism changes;
 - changes to `run_dream_substrate_corr_audit`;
-- new read-only claims for replay;
+- new claims that replay currently persists a snapshot or that the reserved
+  feature marker restores persistence;
 - `mcp_tools.rs`, library exports, Cargo manifests, store migrations, memory
   writes, retrieval influence, runtime enablement, deployment, or reconnect.
 
@@ -176,9 +191,9 @@ This preregistration does not authorize:
 Moving the complete nested family restores the S0-preferred ownership model
 after S3's justified flat-command exception. It removes more schema and tests
 from the composition root than S3, but carries a broader dependency set and a
-real filesystem-writing command. The stronger replay fixture and
-postcondition gate are therefore part of the decision, not optional test
-polish.
+legacy replay-shaped command whose write attempt currently fails closed. The
+stronger replay fixture, warning check, and no-file postcondition are therefore
+part of the decision, not optional test polish.
 
 Keeping Dream correlation audit in `main.rs` leaves a nearby substrate-themed
 function outside the new module. That is intentional: command ownership and
