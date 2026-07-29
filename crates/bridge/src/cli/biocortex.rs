@@ -3,10 +3,12 @@ use ab_bridge::biocortex_capability_ledger::{
 };
 use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_audit_report, biocortex_retrieval_opt_in_dry_run_plan,
-    biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_runtime_approval_packet_preview,
-    biocortex_shadow_digest, supported_benchmarks, BioCortexRetrievalApprovalPacketOptions,
+    biocortex_retrieval_opt_in_execution_packet, biocortex_retrieval_opt_in_review_packet,
+    biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
+    supported_benchmarks, BioCortexRetrievalApprovalPacketOptions,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInDryRunOptions,
-    BioCortexRetrievalOptInReviewPacketOptions, BioCortexShadowOptions,
+    BioCortexRetrievalOptInExecutionPacketOptions, BioCortexRetrievalOptInReviewPacketOptions,
+    BioCortexShadowOptions,
 };
 use anyhow::Result;
 use serde_json::Value;
@@ -369,6 +371,66 @@ pub(crate) async fn run_biocortex_retrieval_opt_in_review_packet(
         shadow_json_display(payload.get("calls_memory_search"), "false"),
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+pub(crate) async fn run_biocortex_retrieval_opt_in_execution_packet(
+    opts: BioCortexRetrievalOptInExecutionPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_opt_in_execution_packet(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in execution packet");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "execution_allowed={} approval_state={} may_change_search_order_now={}",
+        shadow_json_display(
+            payload
+                .get("preflight")
+                .and_then(|value| value.get("execution_allowed")),
+            "false"
+        ),
+        shadow_json_display(payload.get("approval_state"), "not_approved"),
+        shadow_json_display(payload.get("may_change_search_order_now"), "false")
+    );
+    let attempt = payload.get("attempt").unwrap_or(&Value::Null);
+    println!(
+        "attempt_id={} mode={} per_call_opt_in={}",
+        shadow_json_display(attempt.get("attempt_id"), "-"),
+        shadow_json_display(attempt.get("mode"), "-"),
+        shadow_json_display(attempt.get("per_call_opt_in"), "false")
+    );
+    let preflight = payload.get("preflight").unwrap_or(&Value::Null);
+    println!(
+        "baseline_preflight={} fallback_reason={} packet_blockers={} store_blockers={}",
+        shadow_json_display(
+            preflight.get("preflight_passed_for_baseline_only_contract"),
+            "false"
+        ),
+        shadow_json_display(preflight.get("fallback_reason"), "-"),
+        preflight
+            .get("packet_blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string()),
+        preflight
+            .get("store_blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string())
+    );
+    let execution = payload.get("execution_decision").unwrap_or(&Value::Null);
+    println!(
+        "returned_order={} baseline_returned={} calls_memory_search={} runs_biocortex={}",
+        shadow_json_display(execution.get("returned_order_source"), "baseline"),
+        shadow_json_display(execution.get("baseline_returned"), "true"),
+        shadow_json_display(execution.get("calls_memory_search_now"), "false"),
+        shadow_json_display(execution.get("runs_biocortex_now"), "false")
     );
     Ok(())
 }

@@ -6,8 +6,9 @@ pub(super) mod workflow_feedback;
 
 pub(super) use biocortex::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
-    run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_review_packet,
-    run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, shadow_json_display,
+    run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
+    run_biocortex_retrieval_opt_in_review_packet, run_biocortex_retrieval_opt_in_status,
+    run_biocortex_shadow_digest, shadow_json_display,
 };
 pub(super) use browser_lite::{run_browser_lite, BrowserLiteOp};
 pub(super) use local_control::{run_a2ui, run_operator_request, A2uiOp, OperatorRequestOp};

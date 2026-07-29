@@ -23,6 +23,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_status",
         "run_biocortex_retrieval_opt_in_dry_run",
         "run_biocortex_retrieval_opt_in_review_packet",
+        "run_biocortex_retrieval_opt_in_execution_packet",
         "shadow_json_display",
     ] {
         assert!(
@@ -45,14 +46,16 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("BioCortexOp::RetrievalApprovalPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInStatus")
             && composition_root.contains("BioCortexOp::RetrievalOptInDryRun")
-            && composition_root.contains("BioCortexOp::RetrievalOptInReviewPacket"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInReviewPacket")
+            && composition_root.contains("BioCortexOp::RetrievalOptInExecutionPacket"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
         composition_root.contains("BioCortexRetrievalApprovalPacketOptions {")
             && composition_root.contains("BioCortexRetrievalOptInAuditOptions {")
             && composition_root.contains("BioCortexRetrievalOptInDryRunOptions {")
-            && composition_root.contains("BioCortexRetrievalOptInReviewPacketOptions {"),
+            && composition_root.contains("BioCortexRetrievalOptInReviewPacketOptions {")
+            && composition_root.contains("BioCortexRetrievalOptInExecutionPacketOptions {"),
         "main.rs must retain retrieval option assembly"
     );
     assert!(
@@ -60,6 +63,12 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("read dry-run JSON at {dry_run_json:?}")
             && composition_root.contains("parse dry-run JSON at {dry_run_json:?}"),
         "main.rs must retain review-packet input custody and exact errors"
+    );
+    assert!(
+        composition_root.contains("std::fs::read_to_string(review_packet_json)")
+            && composition_root.contains("read review-packet JSON at {review_packet_json:?}")
+            && composition_root.contains("parse review-packet JSON at {review_packet_json:?}"),
+        "main.rs must retain execution-packet input custody and exact errors"
     );
     assert!(
         composition_root.contains("read_optional_json_file("),
@@ -74,6 +83,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_replay_compare",
         "read_optional_json_file",
         "std::fs::read_to_string(dry_run_json)",
+        "std::fs::read_to_string(review_packet_json)",
+        "run_biocortex_retrieval_opt_in_runtime_trial",
         "run_biocortex_retrieval_opt_in_store_trial",
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "SqliteStore",
