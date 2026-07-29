@@ -1,0 +1,81 @@
+{
+  "schema": "agent_bridge.voice_scene.v0",
+  "scene": {
+    "scene_id": "scene_meeting_fixture",
+    "mode": "meeting",
+    "source_id": "source_meeting_fixture",
+    "canonical_branch_id": "branch_canonical",
+    "policy_profile": "meeting_s0_static"
+  },
+  "sources": [
+    {
+      "source_id": "source_meeting_fixture",
+      "kind": "meeting_audio",
+      "uri": "fixture://meeting.wav",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "version": "fixture-v1",
+      "retention_policy": "fixture_only",
+      "consent_status": "required"
+    }
+  ],
+  "speakers": [
+    {
+      "speaker_id": "speaker_01",
+      "kind": "participant",
+      "display_name": "Speaker 01",
+      "aliases": [],
+      "identity_status": "provisional"
+    }
+  ],
+  "voice_profiles": [],
+  "branches": [
+    {
+      "branch_id": "branch_canonical",
+      "kind": "canonical",
+      "parent_branch_id": null,
+      "fork_event_id": null
+    }
+  ],
+  "timeline": [
+    {
+      "event_id": "event_meeting_0001",
+      "sequence": 1,
+      "idempotency_key": "meeting-fixture:1",
+      "branch_id": "branch_canonical",
+      "event_type": "utterance",
+      "source_ref": {
+        "source_id": "source_meeting_fixture",
+        "locator": "time=1000..3200ms"
+      },
+      "utterance": {
+        "speaker_id": "speaker_01",
+        "text": "We will review the proposal.",
+        "language": "en",
+        "origin": "transcript",
+        "start_ms": 1000,
+        "end_ms": 3200,
+        "stability": "stable"
+      }
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim_meeting_0001",
+      "kind": "observation",
+      "text": "The transcript attributes the proposal review statement to speaker_01.",
+      "branch_id": "branch_canonical",
+      "evidence_refs": ["event_meeting_0001"],
+      "derived_from_claim_ids": [],
+      "confidence": 0.9,
+      "counter_evidence_refs": []
+    }
+  ],
+  "runtime_boundary": {
+    "emits_audio": false,
+    "records_audio": false,
+    "writes_memory": false,
+    "writes_forum": false,
+    "mutates_runtime": false,
+    "downloads_models": false
+  }
+}

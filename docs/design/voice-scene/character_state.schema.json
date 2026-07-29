@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/character_state.v1.json",
+  "title": "Agent-Bridge S3 Character State Snapshot",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "session_id",
+    "scene_id",
+    "cursor_sequence",
+    "active_branch_id",
+    "canon_ledger",
+    "character_knowledge_ledger",
+    "psychological_profiles",
+    "snapshot_digest",
+    "write_posture"
+  ],
+  "properties": {
+    "schema": { "const": "agent_bridge.character_state_snapshot.v1" },
+    "status": { "const": "character_interaction_text_grounded" },
+    "session_id": { "$ref": "#/$defs/identifier" },
+    "scene_id": { "$ref": "#/$defs/identifier" },
+    "cursor_sequence": { "type": "integer", "minimum": 0 },
+    "active_branch_id": { "$ref": "#/$defs/identifier" },
+    "canon_ledger": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/canon_event" }
+    },
+    "character_knowledge_ledger": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/knowledge_event" }
+    },
+    "psychological_profiles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/psychological_profile" }
+    },
+    "snapshot_digest": { "$ref": "#/$defs/identifier" },
+    "write_posture": { "const": "proposal_only_owner_review_required" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_ref": {
+      "type": "object",
+      "required": ["source_id", "locator", "digest"],
+      "properties": {
+        "source_id": { "$ref": "#/$defs/identifier" },
+        "locator": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "canon_event": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "sequence",
+        "branch_id",
+        "kind",
+        "text",
+        "known_by",
+        "source_ref"
+      ],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "branch_id": { "const": "branch_canonical" },
+        "kind": { "const": "canon" },
+        "text": { "type": "string", "minLength": 1 },
+        "known_by": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "source_ref": { "$ref": "#/$defs/source_ref" }
+      },
+      "additionalProperties": false
+    },
+    "knowledge_event": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "sequence",
+        "branch_id",
+        "kind",
+        "character_id",
+        "text",
+        "source_event_ids"
+      ],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "branch_id": { "$ref": "#/$defs/identifier" },
+        "kind": { "const": "character_knowledge" },
+        "character_id": { "$ref": "#/$defs/identifier" },
+        "text": { "type": "string", "minLength": 1 },
+        "source_event_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "psychological_profile": {
+      "type": "object",
+      "required": [
+        "profile_id",
+        "character_id",
+        "cursor_sequence",
+        "hypothesis",
+        "claim_kind",
+        "evidence_event_ids",
+        "counter_evidence_event_ids",
+        "confidence",
+        "state_delta"
+      ],
+      "properties": {
+        "profile_id": { "$ref": "#/$defs/identifier" },
+        "character_id": { "$ref": "#/$defs/identifier" },
+        "cursor_sequence": { "type": "integer", "minimum": 0 },
+        "hypothesis": { "type": "string", "minLength": 1 },
+        "claim_kind": { "const": "inference" },
+        "evidence_event_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "counter_evidence_event_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "state_delta": {
+          "type": "object",
+          "additionalProperties": { "type": "number", "minimum": -1, "maximum": 1 }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

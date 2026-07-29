@@ -1,0 +1,88 @@
+{
+  "schema": "agent_bridge.voice_scene.v0",
+  "scene": {
+    "scene_id": "scene_agent_theater_fixture",
+    "mode": "agent_theater",
+    "source_id": "source_agent_fixture",
+    "canonical_branch_id": "branch_canonical",
+    "policy_profile": "agent_theater_s0_static"
+  },
+  "sources": [
+    {
+      "source_id": "source_agent_fixture",
+      "kind": "agent_transcript",
+      "uri": "fixture://agent-session.jsonl",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "version": "fixture-v1",
+      "consent_status": "not_applicable"
+    }
+  ],
+  "speakers": [
+    {
+      "speaker_id": "agent_reviewer",
+      "kind": "agent",
+      "display_name": "Reviewer",
+      "aliases": ["reviewer"],
+      "identity_status": "source_grounded"
+    }
+  ],
+  "voice_profiles": [
+    {
+      "voice_profile_id": "voice_reviewer_v1",
+      "speaker_id": "agent_reviewer",
+      "version": 1,
+      "backend": "unassigned",
+      "model": "unassigned",
+      "voice": "unassigned",
+      "language": "en",
+      "audition_status": "needs_review"
+    }
+  ],
+  "branches": [
+    {
+      "branch_id": "branch_canonical",
+      "kind": "canonical",
+      "parent_branch_id": null,
+      "fork_event_id": null
+    }
+  ],
+  "timeline": [
+    {
+      "event_id": "event_agent_0001",
+      "sequence": 1,
+      "idempotency_key": "agent-fixture:1",
+      "branch_id": "branch_canonical",
+      "event_type": "utterance",
+      "source_ref": {
+        "source_id": "source_agent_fixture",
+        "locator": "turn=1"
+      },
+      "utterance": {
+        "speaker_id": "agent_reviewer",
+        "text": "The contract keeps runtime effects disabled.",
+        "language": "en",
+        "origin": "source"
+      }
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim_agent_0001",
+      "kind": "source_truth",
+      "text": "The reviewer stated that runtime effects are disabled.",
+      "branch_id": "branch_canonical",
+      "evidence_refs": ["event_agent_0001"],
+      "derived_from_claim_ids": [],
+      "confidence": 1.0,
+      "counter_evidence_refs": []
+    }
+  ],
+  "runtime_boundary": {
+    "emits_audio": false,
+    "records_audio": false,
+    "writes_memory": false,
+    "writes_forum": false,
+    "mutates_runtime": false,
+    "downloads_models": false
+  }
+}

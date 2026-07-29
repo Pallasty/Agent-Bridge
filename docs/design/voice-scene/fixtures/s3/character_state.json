@@ -1,0 +1,40 @@
+{
+  "schema": "agent_bridge.character_state_snapshot.v1",
+  "status": "character_interaction_text_grounded",
+  "session_id": "session_story_fixture",
+  "scene_id": "scene_story_fixture",
+  "cursor_sequence": 2,
+  "active_branch_id": "branch_canonical",
+  "canon_ledger": [
+    {
+      "event_id": "canon_001",
+      "sequence": 1,
+      "branch_id": "branch_canonical",
+      "kind": "canon",
+      "text": "林默走进旧车站。",
+      "known_by": ["character_lin"],
+      "source_ref": {
+        "source_id": "source_story",
+        "locator": "chapter=1;line=3",
+        "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "event_id": "canon_002",
+      "sequence": 2,
+      "branch_id": "branch_canonical",
+      "kind": "canon",
+      "text": "钥匙藏在车站时钟下面。",
+      "known_by": ["character_lin", "character_su"],
+      "source_ref": {
+        "source_id": "source_story",
+        "locator": "chapter=1;line=5",
+        "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    }
+  ],
+  "character_knowledge_ledger": [],
+  "psychological_profiles": [],
+  "snapshot_digest": "snapshot_fixture_v1",
+  "write_posture": "proposal_only_owner_review_required"
+}
