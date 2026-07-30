@@ -170,6 +170,17 @@ nonzero, deterministic `float32[1,2048]` step embedding. The output is not
 forwarded, so this remains isolated graph evidence rather than a generated
 codec frame or connected autoregressive path.
 
+S5N uses `scripts/story_voice_cpu_int4_single_frame_loop_probe.py` to connect
+the CPU INT4 talker cache, code predictor, and residual embed graphs for one
+raw-greedy codec frame and one cache feedback. The
+`s5n_cpu_int4_single_frame_loop_probe.json` receipt validates against
+`voice_cpu_int4_single_frame_loop_probe.schema.json`, records the selected
+16-code frame, and binds deterministic full-sequence hashes. Because this
+snapshot lacks local model configuration, the probe applies no codec-EOS or
+reserved-token suppression and explicitly makes no reference-generation
+equivalence claim. It stops before a second frame, waveform decoding, audio,
+GPU work, or community-Python import.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

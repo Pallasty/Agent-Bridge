@@ -236,3 +236,35 @@ talker recurrence, waveform decoding, audio, GPU work, or community-Python
 import occurs. It does not prove a connected autoregressive path, semantic
 correctness, source-model parity, quality, real-time performance,
 supply-chain clearance, or MI50/ROCm support.
+
+## S5N bounded CPU INT4 single-frame structural loop evidence
+
+The next stage connects `talker_cache`, `code_predictor`, and
+`residual_embed` for one frame. It uses S5K's bounded synthetic embedding for
+the first talker step, selects the first codec ID by raw argmax over the
+exported 3072 logits, then calls the code predictor once per remaining group
+and takes raw argmax for each corresponding 2048-wide group. The resulting
+16-code frame is embedded by `residual_embed` and fed into exactly one second
+talker-cache step.
+
+The snapshot has no local model `config.json`, so the probe cannot identify
+codec EOS or reproduce the reference implementation's reserved-token
+suppression. Its enforced selection policy is therefore
+`raw_argmax_exported_logits_no_suppression`; it explicitly records that no
+reference-generation equivalence is claimed.
+
+Two independent full sequences selected the same frame:
+`[780, 1224, 1618, 1182, 614, 904, 22, 244, 14, 415, 6, 529, 322, 299, 1065, 23]`.
+The residual embedding was finite, nonzero `float32[1,2048]`; the second
+talker logits were finite and nonzero `float32[1,1,3072]`; and all 56 caches
+grew to `float32[1,8,2,128]`. Both complete sequences produced SHA-256
+`afce7c6414374f1ee5d67b2a574f64497732579c1067169676bd0610a1f3a674`.
+
+This promotes only one raw-greedy synthetic structural loop to
+`single_codec_frame_loop_passed_no_audio`. Codec IDs were selected, not
+sampled, and exactly one unique frame was derived. Without the missing model
+configuration, source-framework parity, EOS handling, and semantic codec
+validity remain unproven. The probe does not continue to a second frame,
+decode a waveform, produce or play audio, use a GPU, or import community
+Python. It makes no voice-quality, real-time, supply-chain, or MI50/ROCm
+claim.
