@@ -123,3 +123,23 @@ This promotes only the CPU INT4 lane to
 `session_creation_passed_no_inference`. It does not clear S5G supply-chain
 blockers, prove numerical correctness, prove that one autoregressive step can
 run, establish real-time performance, or provide any MI50/ROCm evidence.
+
+## S5I bounded CPU INT4 numeric evidence
+
+The owner authorized the next bounded stage: one non-autoregressive,
+non-audio graph execution. `story_voice_cpu_int4_numeric_probe.py` selects only
+`cpu_int4/codec_embed.onnx`, validates its one-input/one-output contract, and
+supplies the fixed synthetic input `codec_ids=int64[[0, 1, 2, 3]]`. It runs
+the same input twice in an isolated CPU-only session and retains only shape,
+dtype, finite-value statistics, and output hashes.
+
+Under ONNX Runtime 1.28.0 both executions produced the same SHA-256. The
+output was finite `float32[1,4,2048]`, with values bounded between
+-0.07802734524011612 and 0.08056640625 for this fixture. No output was passed
+to the talker, tokenizer, or decoder.
+
+This promotes only `codec_embed` to
+`numeric_probe_passed_no_audio`. It does not validate semantic codec IDs,
+numerical parity against the source framework, other ONNX graphs,
+autoregressive generation, waveform decoding, latency, voice quality,
+audibility, supply-chain clearance, or MI50/ROCm execution.

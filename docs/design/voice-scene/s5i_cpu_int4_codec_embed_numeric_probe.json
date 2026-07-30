@@ -1,0 +1,56 @@
+{
+  "schema": "agent_bridge.voice_cpu_int4_numeric_probe.v1",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "model": "cpu_int4/codec_embed.onnx",
+  "runtime": {
+    "name": "onnxruntime",
+    "version": "1.28.0",
+    "executable": "/Data/Models/agent-bridge/tooling/onnxruntime-cpu-smoke-venv/bin/python",
+    "provider": "CPUExecutionProvider"
+  },
+  "status": "numeric_probe_passed_no_audio",
+  "probe": {
+    "status": "numeric_probe_passed",
+    "input": {
+      "name": "codec_ids",
+      "dtype": "tensor(int64)",
+      "shape": [
+        1,
+        4
+      ],
+      "values": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "output": {
+      "name": "codec_embeds_Q4",
+      "dtype": "float32",
+      "shape": [
+        1,
+        4,
+        2048
+      ],
+      "all_finite": true,
+      "minimum": -0.07802734524011612,
+      "maximum": 0.08056640625,
+      "mean": -9.034524555318058e-05,
+      "sha256_run_1": "cf91c13dfd86ec0e639e155010c914a92afa5edb59a96a66bfca1e429844dd7f",
+      "sha256_run_2": "cf91c13dfd86ec0e639e155010c914a92afa5edb59a96a66bfca1e429844dd7f",
+      "deterministic": true
+    }
+  },
+  "blockers": [],
+  "runtime_effects": {
+    "created_inference_session": true,
+    "executed_graphs": true,
+    "execution_count": 2,
+    "generated_tokens": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "used_gpu": false,
+    "imported_community_python": false
+  }
+}

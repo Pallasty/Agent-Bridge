@@ -60,6 +60,8 @@ express. A packet is S0-valid only when it passes both.
   audit receipt.
 - `voice_cpu_int4_smoke_receipt.schema.json`: S5H CPU INT4 session-creation
   receipt with no graph execution.
+- `voice_cpu_int4_numeric_probe.schema.json`: S5I bounded codec-embedding
+  numeric probe receipt.
 
 ## S5 Chinese multi-speaker audition
 
@@ -122,6 +124,13 @@ never calls `session.run()`. The current receipt,
 seven graphs under ONNX Runtime 1.28.0. This is a compatibility precheck only:
 it does not execute inference, synthesize audio, clear S5G supply-chain
 blockers, or imply ROCm/MI50 support.
+
+S5I uses `scripts/story_voice_cpu_int4_numeric_probe.py` to execute only the
+CPU INT4 `codec_embed` graph twice with fixed synthetic IDs `[0,1,2,3]`. The
+current `s5i_cpu_int4_codec_embed_numeric_probe.json` receipt records a finite,
+deterministic `float32[1,4,2048]` output. The embedding is not forwarded to any
+autoregressive or waveform graph, so this stage produces no token stream or
+audio and makes no quality, parity, performance, or MI50 claim.
 
 ## S4 realtime story interaction
 
