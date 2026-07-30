@@ -62,6 +62,8 @@ express. A packet is S0-valid only when it passes both.
   receipt with no graph execution.
 - `voice_cpu_int4_numeric_probe.schema.json`: S5I bounded codec-embedding
   numeric probe receipt.
+- `voice_cpu_int4_predictor_probe.schema.json`: S5J bounded code-predictor
+  numeric probe receipt.
 
 ## S5 Chinese multi-speaker audition
 
@@ -131,6 +133,13 @@ current `s5i_cpu_int4_codec_embed_numeric_probe.json` receipt records a finite,
 deterministic `float32[1,4,2048]` output. The embedding is not forwarded to any
 autoregressive or waveform graph, so this stage produces no token stream or
 audio and makes no quality, parity, performance, or MI50 claim.
+
+S5J uses `scripts/story_voice_cpu_int4_predictor_probe.py` to execute only the
+CPU INT4 `code_predictor` graph with zero-valued hidden-state and codec-ID
+fixtures. The current `s5j_cpu_int4_code_predictor_probe.json` receipt records
+finite, deterministic `float32[1,15,2048]` logits. The probe performs no
+argmax, sampling, recurrence, token generation, or audio work; it is graph
+numerics evidence, not a generation or quality claim.
 
 ## S4 realtime story interaction
 

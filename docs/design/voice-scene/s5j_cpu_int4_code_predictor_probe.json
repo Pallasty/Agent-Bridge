@@ -1,0 +1,63 @@
+{
+  "schema": "agent_bridge.voice_cpu_int4_predictor_probe.v1",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "model": "cpu_int4/code_predictor.onnx",
+  "runtime": {
+    "name": "onnxruntime",
+    "version": "1.28.0",
+    "executable": "/Data/Models/agent-bridge/tooling/onnxruntime-cpu-smoke-venv/bin/python",
+    "provider": "CPUExecutionProvider"
+  },
+  "status": "predictor_probe_passed_no_generation",
+  "probe": {
+    "status": "predictor_probe_passed",
+    "inputs": [
+      {
+        "name": "talker_hidden",
+        "dtype": "tensor(float)",
+        "shape": [
+          1,
+          2048
+        ],
+        "fixture": "zeros"
+      },
+      {
+        "name": "codec_ids",
+        "dtype": "tensor(int64)",
+        "shape": [
+          1,
+          16
+        ],
+        "fixture": "zeros"
+      }
+    ],
+    "output": {
+      "name": "group_logits",
+      "dtype": "float32",
+      "shape": [
+        1,
+        15,
+        2048
+      ],
+      "all_finite": true,
+      "minimum": -21.297151565551758,
+      "maximum": 19.180789947509766,
+      "mean": 3.166487693786621,
+      "sha256_run_1": "6e346ed436ff64e83b07ebef40154909e23b4d34c3f7191bd629e5866a512a29",
+      "sha256_run_2": "6e346ed436ff64e83b07ebef40154909e23b4d34c3f7191bd629e5866a512a29",
+      "deterministic": true
+    }
+  },
+  "blockers": [],
+  "runtime_effects": {
+    "created_inference_session": true,
+    "executed_graphs": true,
+    "execution_count": 2,
+    "sampled_codec_ids": false,
+    "generated_tokens": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "used_gpu": false,
+    "imported_community_python": false
+  }
+}

@@ -143,3 +143,23 @@ This promotes only `codec_embed` to
 numerical parity against the source framework, other ONNX graphs,
 autoregressive generation, waveform decoding, latency, voice quality,
 audibility, supply-chain clearance, or MI50/ROCm execution.
+
+## S5J bounded CPU INT4 code-predictor evidence
+
+The next owner-authorized stage executes only
+`cpu_int4/code_predictor.onnx`. The probe validates the two-input contract and
+uses fixed zero fixtures: `talker_hidden=float32[1,2048]` and
+`codec_ids=int64[1,16]`. It runs twice under the same isolated, CPU-only,
+single-thread configuration and retains only output statistics and hashes.
+
+Both executions produced the same SHA-256. The output was finite
+`group_logits=float32[1,15,2048]`, with values between
+-21.297151565551758 and 19.180789947509766 for the zero fixture. The probe did
+not select an argmax, sample codec IDs, or feed any result into another graph.
+
+This promotes only the isolated code-predictor graph to
+`predictor_probe_passed_no_generation`. It does not validate that zero
+fixtures are semantically meaningful hidden states, establish source-model
+parity, implement an autoregressive loop, generate tokens, decode waveforms,
+measure quality or latency, clear supply-chain blockers, or prove MI50/ROCm
+support.
