@@ -162,6 +162,14 @@ a synthetic fixture rather than a sampled/model-derived token representation;
 no sampling, further recurrence, decoding, audio, GPU work, or
 community-Python import occurs.
 
+S5M uses `scripts/story_voice_cpu_int4_residual_embed_probe.py` to execute only
+the CPU INT4 `residual_embed` graph twice with the fixed synthetic codec IDs
+`[0..15]`. The `s5m_cpu_int4_residual_embed_probe.json` receipt validates
+against `voice_cpu_int4_residual_embed_probe.schema.json` and records a finite,
+nonzero, deterministic `float32[1,2048]` step embedding. The output is not
+forwarded, so this remains isolated graph evidence rather than a generated
+codec frame or connected autoregressive path.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

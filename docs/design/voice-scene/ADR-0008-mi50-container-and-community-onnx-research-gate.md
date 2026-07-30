@@ -216,3 +216,23 @@ continue beyond one feedback, decode a waveform, produce audio, use a GPU, or
 import community Python. It therefore does not prove semantic autoregression,
 source-model parity, sustained stability, voice quality, real-time
 performance, supply-chain clearance, or MI50/ROCm support.
+
+## S5M bounded CPU INT4 residual-embedding evidence
+
+The next stage executes only `cpu_int4/residual_embed.onnx` with the fixed
+synthetic 16-code input `[0, 1, ..., 15]`. It runs the same input twice in an
+isolated CPU-only session and does not forward the resulting step embedding to
+the talker or any other graph.
+
+Under ONNX Runtime 1.28.0, both executions produced the same SHA-256,
+`4b84ed89abc7c8dda088b35ebc285108d8eb6dc9e6f909220ba376442dda3ee6`.
+The output was finite, nonzero `float32[1,2048]`, ranging from
+-0.2817627191543579 to 0.20749510824680328.
+
+This promotes only the isolated residual-embedding graph to
+`residual_embed_probe_passed_no_forwarding`. The fixed input is not a
+model-selected codec frame. No output forwarding, codec-frame generation,
+talker recurrence, waveform decoding, audio, GPU work, or community-Python
+import occurs. It does not prove a connected autoregressive path, semantic
+correctness, source-model parity, quality, real-time performance,
+supply-chain clearance, or MI50/ROCm support.
