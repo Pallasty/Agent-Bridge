@@ -25,6 +25,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_review_packet",
         "run_biocortex_retrieval_opt_in_execution_packet",
         "run_biocortex_retrieval_opt_in_runtime_trial_review_packet",
+        "run_biocortex_retrieval_opt_in_order_diff_packet",
         "shadow_json_display",
     ] {
         assert!(
@@ -49,7 +50,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("BioCortexOp::RetrievalOptInDryRun")
             && composition_root.contains("BioCortexOp::RetrievalOptInReviewPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInExecutionPacket")
-            && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeTrialReviewPacket"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeTrialReviewPacket")
+            && composition_root.contains("BioCortexOp::RetrievalOptInOrderDiffPacket"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -59,7 +61,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("BioCortexRetrievalOptInReviewPacketOptions {")
             && composition_root.contains("BioCortexRetrievalOptInExecutionPacketOptions {")
             && composition_root
-                .contains("BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {"),
+                .contains("BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {")
+            && composition_root.contains("BioCortexRetrievalOptInOrderDiffPacketOptions {"),
         "main.rs must retain retrieval option assembly"
     );
     assert!(
@@ -81,6 +84,12 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "main.rs must retain runtime-trial-review input custody and exact errors"
     );
     assert!(
+        composition_root.contains("std::fs::read_to_string(source_json)")
+            && composition_root.contains("read order-diff source JSON at {source_json:?}")
+            && composition_root.contains("parse order-diff source JSON at {source_json:?}"),
+        "main.rs must retain order-diff input custody and exact errors"
+    );
+    assert!(
         composition_root.contains("fn run_biocortex_retrieval_opt_in_runtime_trial("),
         "main.rs must retain the side-signal-capable runtime-trial executor"
     );
@@ -100,6 +109,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "std::fs::read_to_string(review_packet_json)",
         "fn run_biocortex_retrieval_opt_in_runtime_trial(",
         "std::fs::read_to_string(runtime_trial_json)",
+        "std::fs::read_to_string(source_json)",
         "run_biocortex_retrieval_opt_in_store_trial",
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "SqliteStore",
