@@ -6,7 +6,7 @@
       "candidate_id": "qwen3-tts-0.6b-streaming-onnx-community",
       "upstream_model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
       "source_url": "https://huggingface.co/pltobing/Qwen3-TTS-Streaming-ONNX",
-      "source_revision": null,
+      "source_revision": "3717103c6fa278c1810e97672c02b185a7239737",
       "license": {"status": "unverified", "spdx": null},
       "artifact_manifest": [],
       "operator_inventory": [],

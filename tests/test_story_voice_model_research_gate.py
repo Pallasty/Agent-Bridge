@@ -15,6 +15,20 @@ SCHEMA_PATH = (
     / "voice-scene"
     / "voice_model_research_receipt.schema.json"
 )
+PROFILE_PATH = (
+    ROOT
+    / "docs"
+    / "design"
+    / "voice-scene"
+    / "mi50_qwen_onnx.compose.yaml"
+)
+SUPPLY_CHAIN_PATH = (
+    ROOT
+    / "docs"
+    / "design"
+    / "voice-scene"
+    / "qwen3_tts_streaming_onnx_supply_chain.json"
+)
 
 
 def load_module():
@@ -107,6 +121,40 @@ services:
     assert "broad_dri_mapping" not in result["blockers"]
 
 
+def test_repository_mi50_profile_is_least_privilege_static_ready() -> None:
+    gate = load_module()
+
+    result = gate.audit_mi50_container(PROFILE_PATH)
+
+    assert result["status"] == "static_ready"
+    assert result["capabilities_dropped"] is True
+    assert result["no_new_privileges"] is True
+    assert result["mi50_only"] is True
+    assert result["runtime_profile_gated"] is True
+
+
+def test_pinned_metadata_does_not_upgrade_unverified_weights() -> None:
+    gate = load_module()
+    snapshot = json.loads(SUPPLY_CHAIN_PATH.read_text())
+
+    result = gate.audit_supply_chain_snapshot(snapshot)
+
+    assert result["status"] == "metadata_pinned_weights_blocked"
+    assert result["source_revision"] == (
+        "3717103c6fa278c1810e97672c02b185a7239737"
+    )
+    assert result["license_claim"] == "Apache-2.0"
+    assert result["blockers"] == [
+        "current_head_unresolved",
+        "standalone_license_file_unverified",
+        "model_artifact_hashes_unverified",
+        "operator_inventory_unverified",
+        "reference_parity_missing",
+        "mi50_execution_provider_unverified",
+    ]
+    assert result["downloads_models"] is False
+
+
 def candidate(**overrides) -> dict:
     value = {
         "candidate_id": "qwen3-tts-0.6b-onnx-community",
@@ -191,7 +239,9 @@ def test_report_keeps_container_and_model_gates_independent(
         "candidates": [candidate()],
     }
 
-    report = gate.build_report(manifest, container_config=compose)
+    report = gate.build_report(
+        manifest, container_config=compose, supply_chain_snapshot=None
+    )
 
     assert report["status"] == "blocked"
     assert report["runtime_effects"] == {
@@ -203,6 +253,7 @@ def test_report_keeps_container_and_model_gates_independent(
     }
     assert report["container"]["status"] == "blocked"
     assert report["candidates"][0]["status"] == "blocked"
+    assert report["supply_chain"] is None
 
 
 def test_cli_receipt_validates_against_schema(tmp_path: Path) -> None:

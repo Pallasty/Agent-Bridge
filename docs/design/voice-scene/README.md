@@ -88,6 +88,13 @@ manifest. It fails closed for broad GPU exposure, privileged containers,
 unpinned images, runtime networking, writable root filesystems, or incomplete
 community ONNX evidence.
 
+S5E adds an inert least-privilege profile,
+`mi50_qwen_onnx.compose.yaml`, and a metadata-only supply-chain snapshot for
+the selected Qwen3-TTS streaming ONNX conversion. The profile cannot infer:
+its runtime opt-in is false and its entrypoint is `/bin/false`. The snapshot
+does not treat a model-card license declaration, remote file listing, or
+historical revision as verified model weights.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

@@ -1,0 +1,31 @@
+services:
+  qwen-onnx-mi50-static:
+    image: rocm/dev-ubuntu-22.04@sha256:1864693936e5cd54c7ed0b77640632ebfe7ec91faa9df2af38e1d7c5754c2a4a
+    profiles:
+      - owner-authorized-runtime
+    privileged: false
+    network_mode: "none"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri/renderD129:/dev/dri/renderD129
+    group_add:
+      - render
+      - video
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: "9.0.6"
+      HIP_VISIBLE_DEVICES: "0"
+      ROCR_VISIBLE_DEVICES: "0"
+      AB_QWEN_ONNX_RUNTIME_ENABLED: "0"
+    volumes:
+      - ${AB_QWEN_ONNX_MODEL_DIR:?owner must provide a verified model directory}:/models/qwen:ro
+      - ${AB_QWEN_ONNX_OUTPUT_DIR:?owner must provide an isolated output directory}:/output
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=1g
+    entrypoint:
+      - /bin/false
+    restart: "no"

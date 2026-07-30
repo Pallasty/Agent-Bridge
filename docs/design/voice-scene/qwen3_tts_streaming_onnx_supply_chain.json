@@ -1,0 +1,67 @@
+{
+  "schema": "agent_bridge.voice_model_supply_chain_snapshot.v1",
+  "observed_at": "2026-07-30",
+  "source": {
+    "repository": "pltobing/Qwen3-TTS-Streaming-ONNX",
+    "url": "https://huggingface.co/pltobing/Qwen3-TTS-Streaming-ONNX",
+    "pinned_revision": "3717103c6fa278c1810e97672c02b185a7239737",
+    "revision_evidence": "https://huggingface.co/pltobing/Qwen3-TTS-Streaming-ONNX/tree/3717103c6fa278c1810e97672c02b185a7239737",
+    "current_head": {
+      "status": "unresolved",
+      "observed_short_revision": "4e24bde",
+      "reason": "Hugging Face API and git transport reset from the local host; search-index evidence is not sufficient to expand the current short revision."
+    }
+  },
+  "upstream_model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+  "repository_size_bytes": {
+    "value": 4140000000,
+    "kind": "display_rounded",
+    "revision": "3717103c6fa278c1810e97672c02b185a7239737"
+  },
+  "license": {
+    "claim": "Apache-2.0",
+    "status": "model_card_declaration_only",
+    "standalone_file_verified": false,
+    "evidence": "https://huggingface.co/pltobing/Qwen3-TTS-Streaming-ONNX/blob/main/README.md"
+  },
+  "components": {
+    "status": "model_card_inventory_only",
+    "sample_rate_hz": 24000,
+    "onnx_models": [
+      "talker_model_prefill.onnx",
+      "talker_model_step.onnx",
+      "talker_local_model_prefill.onnx",
+      "talker_local_model_step.onnx",
+      "talker_local_lm_head.onnx",
+      "codec_decoder_model.onnx",
+      "speaker_encoder_model.onnx",
+      "talker_codec_embed_model.onnx",
+      "text_embed_proj_model.onnx"
+    ],
+    "configuration_files": [
+      "config.json",
+      "speech_tokenizer_config.json",
+      "preprocessor_config.json",
+      "tokenizer_config.json",
+      "vocab.json",
+      "merges.txt"
+    ]
+  },
+  "artifact_hashes": [],
+  "operator_inventory": [],
+  "reference_parity": {
+    "status": "not_run",
+    "reference_wav_sha256": null
+  },
+  "mi50_execution_provider": {
+    "status": "not_run",
+    "runtime": "onnxruntime-rocm-in-container"
+  },
+  "runtime_effects": {
+    "downloaded_weights": false,
+    "started_container": false,
+    "used_gpu": false,
+    "rendered_audio": false,
+    "played_audio": false
+  }
+}

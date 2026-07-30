@@ -41,3 +41,17 @@ contract.
 The official reference and community conversions are separate evidence
 lanes. A community conversion cannot inherit upstream correctness or license
 claims without verification.
+
+## S5E evidence
+
+S5E adds `mi50_qwen_onnx.compose.yaml`, an inert profile based on the locally
+observed ROCm 5.7 image digest. It is protected by a non-default Compose
+profile and `/bin/false`; those controls make it a reviewable isolation
+artifact, not an inference runtime.
+
+The selected community repository has one pinned historical revision and a
+model-card Apache-2.0 declaration. Direct API and Git HEAD resolution failed
+from the local host, and the repository root did not expose a separately
+verified license file. No weight was downloaded. Consequently
+`qwen3_tts_streaming_onnx_supply_chain.json` remains
+`metadata_pinned_weights_blocked`.

@@ -4,7 +4,7 @@
   "title": "Agent-Bridge voice model research receipt",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "status", "manifest_schema", "container", "candidates", "blockers", "runtime_effects"],
+  "required": ["schema", "status", "manifest_schema", "container", "candidates", "supply_chain", "blockers", "runtime_effects"],
   "properties": {
     "schema": {"const": "agent_bridge.voice_model_research_receipt.v1"},
     "status": {"enum": ["blocked", "trial_plan_ready"]},
@@ -12,7 +12,7 @@
     "container": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "exists", "sha256", "status", "execution_attempted", "observed_gfx_override", "image_digest_pinned", "network_disabled", "read_only_rootfs", "blockers"],
+      "required": ["path", "exists", "sha256", "status", "execution_attempted", "observed_gfx_override", "image_digest_pinned", "network_disabled", "read_only_rootfs", "capabilities_dropped", "no_new_privileges", "mi50_only", "runtime_profile_gated", "blockers"],
       "properties": {
         "path": {"type": "string"},
         "exists": {"type": "boolean"},
@@ -23,6 +23,10 @@
         "image_digest_pinned": {"type": "boolean"},
         "network_disabled": {"type": "boolean"},
         "read_only_rootfs": {"type": "boolean"},
+        "capabilities_dropped": {"type": "boolean"},
+        "no_new_privileges": {"type": "boolean"},
+        "mi50_only": {"type": "boolean"},
+        "runtime_profile_gated": {"type": "boolean"},
         "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
       }
     },
@@ -42,6 +46,24 @@
           "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
         }
       }
+    },
+    "supply_chain": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "source_revision", "license_claim", "status", "downloads_models", "blockers"],
+          "properties": {
+            "repository": {"type": ["string", "null"]},
+            "source_revision": {"type": ["string", "null"]},
+            "license_claim": {"type": ["string", "null"]},
+            "status": {"enum": ["trial_ready", "metadata_pinned_weights_blocked"]},
+            "downloads_models": {"type": ["boolean", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+          }
+        }
+      ]
     },
     "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
     "runtime_effects": {
