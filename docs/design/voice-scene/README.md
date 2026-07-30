@@ -141,6 +141,16 @@ finite, deterministic `float32[1,15,2048]` logits. The probe performs no
 argmax, sampling, recurrence, token generation, or audio work; it is graph
 numerics evidence, not a generation or quality claim.
 
+S5K uses `scripts/story_voice_cpu_int4_talker_cache_probe.py` to execute one
+zero-history step of the CPU INT4 `talker_cache` graph with a bounded,
+deterministic nonzero embedding. The
+`s5k_cpu_int4_talker_cache_probe.json` receipt validates against
+`voice_cpu_int4_talker_cache_probe.schema.json` and records nonzero finite
+logits, a finite hidden state, 56 finite present-cache tensors, and identical
+aggregate hashes across two runs. The cache is not fed back and the probe
+performs no sampling, recurrence, token generation, waveform decoding, audio,
+GPU work, or community-Python import.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

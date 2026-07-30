@@ -163,3 +163,29 @@ fixtures are semantically meaningful hidden states, establish source-model
 parity, implement an autoregressive loop, generate tokens, decode waveforms,
 measure quality or latency, clear supply-chain blockers, or prove MI50/ROCm
 support.
+
+## S5K bounded CPU INT4 talker-cache evidence
+
+The next owner-authorized stage executes one zero-history step of
+`cpu_int4/talker_cache.onnx`. The probe supplies a deterministic synthetic
+`float32[1,1,2048]` embedding linearly spanning `[-0.01, 0.01]`, zero position
+IDs, an enabled one-token attention mask, and 56 empty
+`float32[1,8,0,128]` key/value inputs. An earlier all-zero embedding produced
+all-zero logits and was rejected as degenerate rather than promoted as useful
+numeric evidence.
+
+Under ONNX Runtime 1.28.0, both bounded executions produced the same aggregate
+SHA-256,
+`87b234ae0265c7e670b7e7c0b28165382304f3ae0af0f13cbb206605e31b2454`.
+The output included finite, nonzero `float32[1,1,3072]` logits ranging from
+-16.334016799926758 to 10.391515731811523, a finite
+`float32[1,1,2048]` hidden state, and 56 finite present-cache tensors with
+shape `float32[1,8,1,128]`.
+
+This promotes only one synthetic zero-past talker step to
+`talker_single_step_passed_no_sampling`. The produced cache was inspected but
+never fed into a subsequent step. The probe performs no argmax or sampling,
+autoregressive loop, token generation, waveform decoding, GPU work, or
+community-Python import. It does not prove semantic prefill correctness,
+source-model parity, sustained generation, voice quality, real-time
+performance, supply-chain clearance, or MI50/ROCm support.
