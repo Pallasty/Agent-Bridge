@@ -151,6 +151,17 @@ aggregate hashes across two runs. The cache is not fed back and the probe
 performs no sampling, recurrence, token generation, waveform decoding, audio,
 GPU work, or community-Python import.
 
+S5L uses `scripts/story_voice_cpu_int4_cache_feedback_probe.py` to run two
+independent copies of an exactly two-step CPU sequence. Within each sequence,
+the first step's 56 present KV tensors are fed back once with position one and
+a two-token attention mask. The
+`s5l_cpu_int4_cache_feedback_probe.json` receipt validates against
+`voice_cpu_int4_cache_feedback_probe.schema.json` and records deterministic
+cache growth from `[1,8,1,128]` to `[1,8,2,128]`. The second embedding remains
+a synthetic fixture rather than a sampled/model-derived token representation;
+no sampling, further recurrence, decoding, audio, GPU work, or
+community-Python import occurs.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

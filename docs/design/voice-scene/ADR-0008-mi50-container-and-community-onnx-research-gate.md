@@ -189,3 +189,30 @@ autoregressive loop, token generation, waveform decoding, GPU work, or
 community-Python import. It does not prove semantic prefill correctness,
 source-model parity, sustained generation, voice quality, real-time
 performance, supply-chain clearance, or MI50/ROCm support.
+
+## S5L bounded CPU INT4 cache-feedback evidence
+
+The next owner-authorized stage feeds the S5K-style first-step present cache
+into exactly one second `talker_cache` step. The first step uses position zero,
+a one-token attention mask, and the bounded linear `[-0.01, 0.01]` embedding.
+The second uses position one, a two-token attention mask, the deterministic
+reverse `[0.01, -0.01]` embedding, and the first step's 56 present tensors in
+their original input order. This follows the statically inspected community
+cache-call convention without importing or executing community Python.
+
+Two independent two-step sequences ran under isolated ONNX Runtime 1.28.0.
+Each first-step cache had shape `float32[1,8,1,128]`; after one feedback, all
+56 second-step caches grew to `float32[1,8,2,128]`. Second-step logits were
+finite and nonzero `float32[1,1,3072]`, ranging from
+-14.616663932800293 to 12.355203628540039. Both complete sequences produced
+the same aggregate SHA-256,
+`79fa85a3f1f5233219b558a01e3fcf6ed00ecbf6a6c07dd9cb78e45005d8429c`.
+
+This promotes only a synthetic two-step cache transition to
+`talker_cache_feedback_passed_no_sampling`. It proves that this ONNX graph and
+CPU runtime accept one ordered cache feedback and grow the cache as expected.
+It does not select a token, derive the second embedding from model output,
+continue beyond one feedback, decode a waveform, produce audio, use a GPU, or
+import community Python. It therefore does not prove semantic autoregression,
+source-model parity, sustained stability, voice quality, real-time
+performance, supply-chain clearance, or MI50/ROCm support.
