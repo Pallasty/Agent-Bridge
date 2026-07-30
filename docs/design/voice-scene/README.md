@@ -56,6 +56,8 @@ express. A packet is S0-valid only when it passes both.
 - `ADR-0007-sherpa-render-asr-gate.md`: S5B integrity and atomic render gate.
 - `ADR-0008-mi50-container-and-community-onnx-research-gate.md`: S5D
   static research and isolation gates.
+- `voice_snapshot_static_audit.schema.json`: S5G downloaded-snapshot static
+  audit receipt.
 
 ## S5 Chinese multi-speaker audition
 
@@ -100,6 +102,15 @@ fixed-revision, small-file-only acquisition. It never imports the downloaded
 Python. Failed or incomplete acquisition leaves no final evidence directory.
 The current fixed-revision transport result is recorded in
 `s5f_small_file_acquisition_evidence.json`.
+
+S5G uses `scripts/story_voice_snapshot_audit.py` for a separately downloaded
+ModelScope snapshot. It streams complete file hashes, validates all six
+variant manifests, scans Python with `ast`, and optionally parses ONNX protobuf
+graphs with external tensor loading disabled. The current 1.7B CustomVoice
+receipt is `s5g_modelscope_snapshot_static_audit.json`. Its status is blocked,
+not trial-ready: ModelScope supplied mutable `master`, the snapshot lacks a
+standalone license file, and a build utility contains a subprocess primitive.
+The advertised CUDA execution provider is not evidence of MI50 support.
 
 ## S4 realtime story interaction
 

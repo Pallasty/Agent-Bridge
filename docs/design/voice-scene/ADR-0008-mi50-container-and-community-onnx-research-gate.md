@@ -70,3 +70,34 @@ directory was not created and the empty temporary directory was removed.
 Search-indexed `main` content was not substituted for the fixed revision.
 Therefore the code audit remains blocked rather than inferred from partial or
 mutable content.
+
+## S5G ModelScope snapshot evidence
+
+The owner separately authorized and acquired
+`onnx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice` from ModelScope. This is a
+different 1.7B CustomVoice conversion and does not supersede the S5E/S5F 0.6B
+streaming candidate. ModelScope exposed only the mutable `master` revision.
+
+`story_voice_snapshot_audit.py` examined the complete local snapshot without
+importing community Python, creating an ONNX Runtime session, loading external
+tensor data, or using a GPU. The hash-bound receipt records:
+
+- 71 files and exactly 36,202,013,026 bytes with no symlinks or incomplete
+  files;
+- six CPU/CUDA FP16, FP32, and INT4 variants with all manifest references
+  present;
+- SHA-256 for every file;
+- 43 parsed ONNX graphs, ONNX opset 20, Microsoft domain opset 1, 45 distinct
+  operator kinds, and five safe existing external-data locations;
+- two Microsoft contrib operators: `MatMulNBits` and
+  `GatherBlockQuantized`;
+- an Apache-2.0 model-card declaration but no standalone license file; and
+- a statically observed `subprocess.run` in the model-building utility
+  `optimize.py`.
+
+The static result is `blocked`. An immutable upstream revision, a standalone
+license artifact or authoritative license resolution, and explicit review of
+the build-time subprocess behavior are still required. The CUDA manifests name
+`CUDAExecutionProvider`; they do not prove ROCm/MI50 compatibility. No
+inference, parity, quality, audibility, or MI50 execution claim follows from
+snapshot completeness.

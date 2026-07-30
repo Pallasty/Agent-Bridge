@@ -1,0 +1,1032 @@
+{
+  "schema": "agent_bridge.voice_snapshot_static_audit.v1",
+  "status": "blocked",
+  "repository": "onnx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+  "revision": "master",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "inventory": {
+    "file_count": 71,
+    "total_size_bytes": 36202013026,
+    "variant_count": 6,
+    "variants": [
+      "cpu_fp16",
+      "cpu_fp32",
+      "cpu_int4",
+      "cuda_fp16",
+      "cuda_fp32",
+      "cuda_int4"
+    ],
+    "incomplete_files": [],
+    "symlinks": []
+  },
+  "integrity": {
+    "expected_size_bytes": 36202013026,
+    "size_matches": true,
+    "file_hashes": [
+      {
+        "path": ".gitattributes",
+        "size": 2532,
+        "sha256": "e3823648291edebe7a6668cbe14a43d6bf64c1e12c6e5dcb8245a716fae41ecc"
+      },
+      {
+        "path": "README.md",
+        "size": 57988,
+        "sha256": "b7011a26e52c36482ff94337142ce16fc6f7c8218c97b22fda9f2bf238428ab4"
+      },
+      {
+        "path": "STATUS.md",
+        "size": 19422,
+        "sha256": "cea7919bbc5ec4c278f86a67386e971d50b0b4347d59046a583d005d33977d96"
+      },
+      {
+        "path": "check_precision.py",
+        "size": 2353,
+        "sha256": "6c5576a0e070f575af1763ae4aea76d51ce8195f1c8a2505c3773cefe75c032d"
+      },
+      {
+        "path": "configuration.json",
+        "size": 72,
+        "sha256": "30458d769bcf25aa4e8fd30bbde901f817e382a49f7c7da8c4380dd97b616876"
+      },
+      {
+        "path": "cpu_fp16/code_predictor.onnx",
+        "size": 354761116,
+        "sha256": "cd28bd48aed8660e6e28bec08be088975bcb8736174819b4664dbe899c229c4b"
+      },
+      {
+        "path": "cpu_fp16/codec_embed.onnx",
+        "size": 12583253,
+        "sha256": "b25f6a9966b69612a749c951b34381b7f480e40ef1030cc3007b96389b99690a"
+      },
+      {
+        "path": "cpu_fp16/manifest.json",
+        "size": 638,
+        "sha256": "f8bc216e8e4515f18f96675e74515ffee0d033f1dcbcc27162cbd404c83fa757"
+      },
+      {
+        "path": "cpu_fp16/residual_embed.onnx",
+        "size": 138421796,
+        "sha256": "248b2d1941638f0352817181286ec54f432a5c1a68ba7c2f1dfa8c846af8c521"
+      },
+      {
+        "path": "cpu_fp16/talker_cache.onnx",
+        "size": 4562040,
+        "sha256": "97e2ee993004d7c2af0296283946964802d6b710b9c0a822b4fc1d89ba77c39d"
+      },
+      {
+        "path": "cpu_fp16/talker_cache.onnx.data",
+        "size": 2831388672,
+        "sha256": "5e367c9f87ee3f7a8c81d29ec2cbbcdd92337cd68d180a5a280cc66fa5ad3017"
+      },
+      {
+        "path": "cpu_fp16/text_embed.onnx",
+        "size": 639117111,
+        "sha256": "f1489fa11712974eea0ca5e13779887a73bd3e76f783d01c8b86ea703ee486cf"
+      },
+      {
+        "path": "cpu_fp16/tok_decoder.onnx",
+        "size": 458268831,
+        "sha256": "8ec10051735029f6e08b04834128c9108428885c39384f443e49a6790ccb129f"
+      },
+      {
+        "path": "cpu_fp16/tok_encoder.onnx",
+        "size": 225554101,
+        "sha256": "4a335eaf525ceef17b457f82704d3bc835d4cb15f42fc6f5908f2e860d3da400"
+      },
+      {
+        "path": "cpu_fp32/code_predictor.onnx",
+        "size": 709140126,
+        "sha256": "88ba8ff48ff27f165e53d3a94f673819aef2c6978a86263d2a16f31efa2c2af3"
+      },
+      {
+        "path": "cpu_fp32/codec_embed.onnx",
+        "size": 25166118,
+        "sha256": "fdb73c0f03f376f959b1eaf1950a0b9e787f8873c08b16ec7594732750f1dfbf"
+      },
+      {
+        "path": "cpu_fp32/manifest.json",
+        "size": 638,
+        "sha256": "e51d9c824246dd0ac62e1e1ac4aa9f21fbbd7e6b970f276e267dd991c0574697"
+      },
+      {
+        "path": "cpu_fp32/residual_embed.onnx",
+        "size": 276831737,
+        "sha256": "1baa0ceb032d7384ae06e55c10e6c24b8d57427b817537a0f3d6404b750baeb4"
+      },
+      {
+        "path": "cpu_fp32/talker.onnx",
+        "size": 3945610,
+        "sha256": "a1e2572acde1fdf27a085e1a8033aba6753fe602fabbe7c9a54aa595c7825592"
+      },
+      {
+        "path": "cpu_fp32/talker.onnx.data",
+        "size": 5662834688,
+        "sha256": "cfe2c823942b139ff667fe810f7bfaac8428f7abe3c532effe8e699aea8d7cd2"
+      },
+      {
+        "path": "cpu_fp32/talker_cache.onnx",
+        "size": 4551434,
+        "sha256": "afad6ff804da6537c276fb204fe0f4d5e8db2792594a961423ed4aa9af35ad6d"
+      },
+      {
+        "path": "cpu_fp32/talker_cache.onnx.data",
+        "size": 5662834688,
+        "sha256": "fd326c231ebfd11a5e3a656a7250792c0e757a40953f7b2680f0e6ae29271fe1"
+      },
+      {
+        "path": "cpu_fp32/text_embed.onnx",
+        "size": 1278232036,
+        "sha256": "fda3cd6c2cbe344c3a3d0467c5ef8f55f963358c954e3255426d96349f20ed66"
+      },
+      {
+        "path": "cpu_fp32/tok_decoder.onnx",
+        "size": 458268831,
+        "sha256": "8ec10051735029f6e08b04834128c9108428885c39384f443e49a6790ccb129f"
+      },
+      {
+        "path": "cpu_fp32/tok_encoder.onnx",
+        "size": 225554101,
+        "sha256": "4a335eaf525ceef17b457f82704d3bc835d4cb15f42fc6f5908f2e860d3da400"
+      },
+      {
+        "path": "cpu_int4/code_predictor.onnx",
+        "size": 113841219,
+        "sha256": "5f134a8cdb4b68fceca2791d7cde3584dd1a5692a3ce8fb4c9d9f644a67ffec1"
+      },
+      {
+        "path": "cpu_int4/codec_embed.onnx",
+        "size": 4031014,
+        "sha256": "c268d24060a87ad790cbd56206a7eac2b9c6878d3cb11ac518997e84b51669d2"
+      },
+      {
+        "path": "cpu_int4/manifest.json",
+        "size": 638,
+        "sha256": "74bf84bc0910094b7b9996c7bf5ac79e2053702bbb7e77570b7f72fe4970f8c4"
+      },
+      {
+        "path": "cpu_int4/residual_embed.onnx",
+        "size": 44346842,
+        "sha256": "e21df5b0160784e642910d2038931da782d56c234b8ad5da50f2f3d647e4960d"
+      },
+      {
+        "path": "cpu_int4/talker_cache.onnx",
+        "size": 911514323,
+        "sha256": "fa3de5daa36a7a1b9859b02f1536fda37d3f2479caba23930ec754d3009ef5bc"
+      },
+      {
+        "path": "cpu_int4/text_embed.onnx",
+        "size": 204732501,
+        "sha256": "7af915442cfb3912fd9d66ed0881a45f9d35c559b34f016cfb113f073e459942"
+      },
+      {
+        "path": "cpu_int4/tok_decoder.onnx",
+        "size": 458268831,
+        "sha256": "8ec10051735029f6e08b04834128c9108428885c39384f443e49a6790ccb129f"
+      },
+      {
+        "path": "cpu_int4/tok_encoder.onnx",
+        "size": 225554101,
+        "sha256": "4a335eaf525ceef17b457f82704d3bc835d4cb15f42fc6f5908f2e860d3da400"
+      },
+      {
+        "path": "cuda_fp16/code_predictor.onnx",
+        "size": 354761116,
+        "sha256": "cd28bd48aed8660e6e28bec08be088975bcb8736174819b4664dbe899c229c4b"
+      },
+      {
+        "path": "cuda_fp16/codec_embed.onnx",
+        "size": 12583253,
+        "sha256": "b25f6a9966b69612a749c951b34381b7f480e40ef1030cc3007b96389b99690a"
+      },
+      {
+        "path": "cuda_fp16/manifest.json",
+        "size": 640,
+        "sha256": "649b893f9a3bebb797495bb744994c653c6ae30feeb2f1fc584e1fa158d5298b"
+      },
+      {
+        "path": "cuda_fp16/residual_embed.onnx",
+        "size": 138421796,
+        "sha256": "248b2d1941638f0352817181286ec54f432a5c1a68ba7c2f1dfa8c846af8c521"
+      },
+      {
+        "path": "cuda_fp16/talker_cache.onnx",
+        "size": 4562040,
+        "sha256": "97e2ee993004d7c2af0296283946964802d6b710b9c0a822b4fc1d89ba77c39d"
+      },
+      {
+        "path": "cuda_fp16/talker_cache.onnx.data",
+        "size": 2831388672,
+        "sha256": "5e367c9f87ee3f7a8c81d29ec2cbbcdd92337cd68d180a5a280cc66fa5ad3017"
+      },
+      {
+        "path": "cuda_fp16/text_embed.onnx",
+        "size": 639117111,
+        "sha256": "f1489fa11712974eea0ca5e13779887a73bd3e76f783d01c8b86ea703ee486cf"
+      },
+      {
+        "path": "cuda_fp16/tok_decoder.onnx",
+        "size": 458268831,
+        "sha256": "8ec10051735029f6e08b04834128c9108428885c39384f443e49a6790ccb129f"
+      },
+      {
+        "path": "cuda_fp16/tok_encoder.onnx",
+        "size": 225554101,
+        "sha256": "4a335eaf525ceef17b457f82704d3bc835d4cb15f42fc6f5908f2e860d3da400"
+      },
+      {
+        "path": "cuda_fp32/code_predictor.onnx",
+        "size": 709140126,
+        "sha256": "88ba8ff48ff27f165e53d3a94f673819aef2c6978a86263d2a16f31efa2c2af3"
+      },
+      {
+        "path": "cuda_fp32/codec_embed.onnx",
+        "size": 25166118,
+        "sha256": "fdb73c0f03f376f959b1eaf1950a0b9e787f8873c08b16ec7594732750f1dfbf"
+      },
+      {
+        "path": "cuda_fp32/manifest.json",
+        "size": 640,
+        "sha256": "f2088fe914adce3df7f836e50bb7dcaedb2f54b0657023ccb572917a3cee6ecc"
+      },
+      {
+        "path": "cuda_fp32/residual_embed.onnx",
+        "size": 276831737,
+        "sha256": "1baa0ceb032d7384ae06e55c10e6c24b8d57427b817537a0f3d6404b750baeb4"
+      },
+      {
+        "path": "cuda_fp32/talker_cache.onnx",
+        "size": 4551434,
+        "sha256": "afad6ff804da6537c276fb204fe0f4d5e8db2792594a961423ed4aa9af35ad6d"
+      },
+      {
+        "path": "cuda_fp32/talker_cache.onnx.data",
+        "size": 5662834688,
+        "sha256": "fd326c231ebfd11a5e3a656a7250792c0e757a40953f7b2680f0e6ae29271fe1"
+      },
+      {
+        "path": "cuda_fp32/text_embed.onnx",
+        "size": 1278232036,
+        "sha256": "fda3cd6c2cbe344c3a3d0467c5ef8f55f963358c954e3255426d96349f20ed66"
+      },
+      {
+        "path": "cuda_fp32/tok_decoder.onnx",
+        "size": 458268831,
+        "sha256": "8ec10051735029f6e08b04834128c9108428885c39384f443e49a6790ccb129f"
+      },
+      {
+        "path": "cuda_fp32/tok_encoder.onnx",
+        "size": 225554101,
+        "sha256": "4a335eaf525ceef17b457f82704d3bc835d4cb15f42fc6f5908f2e860d3da400"
+      },
+      {
+        "path": "cuda_int4/code_predictor.onnx",
+        "size": 113841219,
+        "sha256": "5f134a8cdb4b68fceca2791d7cde3584dd1a5692a3ce8fb4c9d9f644a67ffec1"
+      },
+      {
+        "path": "cuda_int4/codec_embed.onnx",
+        "size": 4031014,
+        "sha256": "c268d24060a87ad790cbd56206a7eac2b9c6878d3cb11ac518997e84b51669d2"
+      },
+      {
+        "path": "cuda_int4/manifest.json",
+        "size": 640,
+        "sha256": "351d6572df70de9f4b9d5ace7e6a893f860fccabcd98d76e8421caf202f56e05"
+      },
+      {
+        "path": "cuda_int4/residual_embed.onnx",
+        "size": 44346842,
+        "sha256": "e21df5b0160784e642910d2038931da782d56c234b8ad5da50f2f3d647e4960d"
+      },
+      {
+        "path": "cuda_int4/talker_cache.onnx",
+        "size": 911514323,
+        "sha256": "fa3de5daa36a7a1b9859b02f1536fda37d3f2479caba23930ec754d3009ef5bc"
+      },
+      {
+        "path": "cuda_int4/text_embed.onnx",
+        "size": 204732501,
+        "sha256": "7af915442cfb3912fd9d66ed0881a45f9d35c559b34f016cfb113f073e459942"
+      },
+      {
+        "path": "cuda_int4/tok_decoder.onnx",
+        "size": 458268831,
+        "sha256": "8ec10051735029f6e08b04834128c9108428885c39384f443e49a6790ccb129f"
+      },
+      {
+        "path": "cuda_int4/tok_encoder.onnx",
+        "size": 225554101,
+        "sha256": "4a335eaf525ceef17b457f82704d3bc835d4cb15f42fc6f5908f2e860d3da400"
+      },
+      {
+        "path": "eval_cache.py",
+        "size": 1883,
+        "sha256": "91b4e8d4dcb31a1abd70c8119b85cc2512de5b5bc788128c5ba0192e2850fe04"
+      },
+      {
+        "path": "eval_embed.py",
+        "size": 2039,
+        "sha256": "01a7bf69a0d4a624ff907726c95810c09a8a784087703b60004545ecf8644606"
+      },
+      {
+        "path": "eval_generate.py",
+        "size": 4681,
+        "sha256": "5fe2847c2524a321ddfa3d0822d97e7bd9c35d642f35a985f697d6a302000645"
+      },
+      {
+        "path": "eval_predictor.py",
+        "size": 2779,
+        "sha256": "e876d26477dd4f3f39421029045e1463eff96872976e2213ed79f989f6699910"
+      },
+      {
+        "path": "eval_speaker.py",
+        "size": 1954,
+        "sha256": "dffd837624e069d65571f8bf658a5221514821e3b00cb7ed59427409bc0f27bc"
+      },
+      {
+        "path": "eval_tokenizer.py",
+        "size": 7585,
+        "sha256": "84d4fafacc506000a84eae8a6351374f059b212e77de6e7ebcdb8ca6bcf798ce"
+      },
+      {
+        "path": "inference.py",
+        "size": 31374,
+        "sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75"
+      },
+      {
+        "path": "info.yml",
+        "size": 178,
+        "sha256": "ccba4e31c6ce42fc53e80f86c95b6e446164938bf2ed9e76dbafc48b4b8b4d26"
+      },
+      {
+        "path": "optimize.py",
+        "size": 12651,
+        "sha256": "137dcdf7bb5065e49f707ac7a3a40c785993b04ab278e792689f6c368e87c102"
+      },
+      {
+        "path": "requirements.txt",
+        "size": 245,
+        "sha256": "60adc3f255ea8d806aa824c17c6e49484e39c341742f79094193fe0f891ee75f"
+      },
+      {
+        "path": "test_modelbuilder_talker.py",
+        "size": 2934,
+        "sha256": "843904166adf147f59dab0036b98817fa5d394217ffb008404b6948ff552fcb5"
+      },
+      {
+        "path": "user_script.py",
+        "size": 28580,
+        "sha256": "c980786c7c960fe2f7b598fb27179f30c2671f86c1d4767ad7211d425a50776b"
+      }
+    ]
+  },
+  "license_audit": {
+    "declared": "apache-2.0",
+    "standalone_file": null,
+    "status": "declaration_only"
+  },
+  "requirements": [
+    "olive-ai",
+    "onnxruntime>=1.20",
+    "onnxruntime-genai",
+    "torch",
+    "transformers>=5.10",
+    "safetensors",
+    "numpy",
+    "soundfile",
+    "librosa"
+  ],
+  "manifest_audit": {
+    "manifests": [
+      {
+        "path": "cpu_fp16/manifest.json",
+        "device": "cpu",
+        "precision": "fp16",
+        "execution_provider": "CPUExecutionProvider",
+        "referenced_files": [
+          "cpu_fp16/code_predictor.onnx",
+          "cpu_fp16/codec_embed.onnx",
+          "cpu_fp16/residual_embed.onnx",
+          "cpu_fp16/talker_cache.onnx",
+          "cpu_fp16/text_embed.onnx",
+          "cpu_fp16/tok_decoder.onnx",
+          "cpu_fp16/tok_encoder.onnx"
+        ]
+      },
+      {
+        "path": "cpu_fp32/manifest.json",
+        "device": "cpu",
+        "precision": "fp32",
+        "execution_provider": "CPUExecutionProvider",
+        "referenced_files": [
+          "cpu_fp32/code_predictor.onnx",
+          "cpu_fp32/codec_embed.onnx",
+          "cpu_fp32/residual_embed.onnx",
+          "cpu_fp32/talker_cache.onnx",
+          "cpu_fp32/text_embed.onnx",
+          "cpu_fp32/tok_decoder.onnx",
+          "cpu_fp32/tok_encoder.onnx"
+        ]
+      },
+      {
+        "path": "cpu_int4/manifest.json",
+        "device": "cpu",
+        "precision": "int4",
+        "execution_provider": "CPUExecutionProvider",
+        "referenced_files": [
+          "cpu_int4/code_predictor.onnx",
+          "cpu_int4/codec_embed.onnx",
+          "cpu_int4/residual_embed.onnx",
+          "cpu_int4/talker_cache.onnx",
+          "cpu_int4/text_embed.onnx",
+          "cpu_int4/tok_decoder.onnx",
+          "cpu_int4/tok_encoder.onnx"
+        ]
+      },
+      {
+        "path": "cuda_fp16/manifest.json",
+        "device": "cuda",
+        "precision": "fp16",
+        "execution_provider": "CUDAExecutionProvider",
+        "referenced_files": [
+          "cuda_fp16/code_predictor.onnx",
+          "cuda_fp16/codec_embed.onnx",
+          "cuda_fp16/residual_embed.onnx",
+          "cuda_fp16/talker_cache.onnx",
+          "cuda_fp16/text_embed.onnx",
+          "cuda_fp16/tok_decoder.onnx",
+          "cuda_fp16/tok_encoder.onnx"
+        ]
+      },
+      {
+        "path": "cuda_fp32/manifest.json",
+        "device": "cuda",
+        "precision": "fp32",
+        "execution_provider": "CUDAExecutionProvider",
+        "referenced_files": [
+          "cuda_fp32/code_predictor.onnx",
+          "cuda_fp32/codec_embed.onnx",
+          "cuda_fp32/residual_embed.onnx",
+          "cuda_fp32/talker_cache.onnx",
+          "cuda_fp32/text_embed.onnx",
+          "cuda_fp32/tok_decoder.onnx",
+          "cuda_fp32/tok_encoder.onnx"
+        ]
+      },
+      {
+        "path": "cuda_int4/manifest.json",
+        "device": "cuda",
+        "precision": "int4",
+        "execution_provider": "CUDAExecutionProvider",
+        "referenced_files": [
+          "cuda_int4/code_predictor.onnx",
+          "cuda_int4/codec_embed.onnx",
+          "cuda_int4/residual_embed.onnx",
+          "cuda_int4/talker_cache.onnx",
+          "cuda_int4/text_embed.onnx",
+          "cuda_int4/tok_decoder.onnx",
+          "cuda_int4/tok_encoder.onnx"
+        ]
+      }
+    ],
+    "missing_files": [],
+    "malformed": []
+  },
+  "onnx_audit": {
+    "status": "inventoried",
+    "model_count": 43,
+    "models": [
+      {
+        "path": "cpu_fp16/code_predictor.onnx",
+        "node_count": 1488
+      },
+      {
+        "path": "cpu_fp16/codec_embed.onnx",
+        "node_count": 1
+      },
+      {
+        "path": "cpu_fp16/residual_embed.onnx",
+        "node_count": 63
+      },
+      {
+        "path": "cpu_fp16/talker_cache.onnx",
+        "node_count": 2597
+      },
+      {
+        "path": "cpu_fp16/text_embed.onnx",
+        "node_count": 7
+      },
+      {
+        "path": "cpu_fp16/tok_decoder.onnx",
+        "node_count": 781
+      },
+      {
+        "path": "cpu_fp16/tok_encoder.onnx",
+        "node_count": 1100
+      },
+      {
+        "path": "cpu_fp32/code_predictor.onnx",
+        "node_count": 1567
+      },
+      {
+        "path": "cpu_fp32/codec_embed.onnx",
+        "node_count": 1
+      },
+      {
+        "path": "cpu_fp32/residual_embed.onnx",
+        "node_count": 63
+      },
+      {
+        "path": "cpu_fp32/talker.onnx",
+        "node_count": 2176
+      },
+      {
+        "path": "cpu_fp32/talker_cache.onnx",
+        "node_count": 2597
+      },
+      {
+        "path": "cpu_fp32/text_embed.onnx",
+        "node_count": 7
+      },
+      {
+        "path": "cpu_fp32/tok_decoder.onnx",
+        "node_count": 781
+      },
+      {
+        "path": "cpu_fp32/tok_encoder.onnx",
+        "node_count": 1100
+      },
+      {
+        "path": "cpu_int4/code_predictor.onnx",
+        "node_count": 1567
+      },
+      {
+        "path": "cpu_int4/codec_embed.onnx",
+        "node_count": 1
+      },
+      {
+        "path": "cpu_int4/residual_embed.onnx",
+        "node_count": 63
+      },
+      {
+        "path": "cpu_int4/talker_cache.onnx",
+        "node_count": 2597
+      },
+      {
+        "path": "cpu_int4/text_embed.onnx",
+        "node_count": 7
+      },
+      {
+        "path": "cpu_int4/tok_decoder.onnx",
+        "node_count": 781
+      },
+      {
+        "path": "cpu_int4/tok_encoder.onnx",
+        "node_count": 1100
+      },
+      {
+        "path": "cuda_fp16/code_predictor.onnx",
+        "node_count": 1488
+      },
+      {
+        "path": "cuda_fp16/codec_embed.onnx",
+        "node_count": 1
+      },
+      {
+        "path": "cuda_fp16/residual_embed.onnx",
+        "node_count": 63
+      },
+      {
+        "path": "cuda_fp16/talker_cache.onnx",
+        "node_count": 2597
+      },
+      {
+        "path": "cuda_fp16/text_embed.onnx",
+        "node_count": 7
+      },
+      {
+        "path": "cuda_fp16/tok_decoder.onnx",
+        "node_count": 781
+      },
+      {
+        "path": "cuda_fp16/tok_encoder.onnx",
+        "node_count": 1100
+      },
+      {
+        "path": "cuda_fp32/code_predictor.onnx",
+        "node_count": 1567
+      },
+      {
+        "path": "cuda_fp32/codec_embed.onnx",
+        "node_count": 1
+      },
+      {
+        "path": "cuda_fp32/residual_embed.onnx",
+        "node_count": 63
+      },
+      {
+        "path": "cuda_fp32/talker_cache.onnx",
+        "node_count": 2597
+      },
+      {
+        "path": "cuda_fp32/text_embed.onnx",
+        "node_count": 7
+      },
+      {
+        "path": "cuda_fp32/tok_decoder.onnx",
+        "node_count": 781
+      },
+      {
+        "path": "cuda_fp32/tok_encoder.onnx",
+        "node_count": 1100
+      },
+      {
+        "path": "cuda_int4/code_predictor.onnx",
+        "node_count": 1567
+      },
+      {
+        "path": "cuda_int4/codec_embed.onnx",
+        "node_count": 1
+      },
+      {
+        "path": "cuda_int4/residual_embed.onnx",
+        "node_count": 63
+      },
+      {
+        "path": "cuda_int4/talker_cache.onnx",
+        "node_count": 2597
+      },
+      {
+        "path": "cuda_int4/text_embed.onnx",
+        "node_count": 7
+      },
+      {
+        "path": "cuda_int4/tok_decoder.onnx",
+        "node_count": 781
+      },
+      {
+        "path": "cuda_int4/tok_encoder.onnx",
+        "node_count": 1100
+      }
+    ],
+    "operators": [
+      {
+        "domain": "ai.onnx",
+        "op_type": "Add",
+        "count": 3487
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "And",
+        "count": 14
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "ArgMin",
+        "count": 192
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Cast",
+        "count": 343
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Clip",
+        "count": 204
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Concat",
+        "count": 2403
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Constant",
+        "count": 3636
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "ConstantOfShape",
+        "count": 78
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Conv",
+        "count": 288
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "ConvTranspose",
+        "count": 36
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Cos",
+        "count": 13
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Div",
+        "count": 474
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Elu",
+        "count": 78
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Equal",
+        "count": 78
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Expand",
+        "count": 504
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Gather",
+        "count": 1258
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "GatherND",
+        "count": 7
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Gelu",
+        "count": 60
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "LayerNormalization",
+        "count": 108
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "LessOrEqual",
+        "count": 13
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "MatMul",
+        "count": 2706
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Max",
+        "count": 7
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Mul",
+        "count": 5096
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Neg",
+        "count": 644
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Pad",
+        "count": 6
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Pow",
+        "count": 1577
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Range",
+        "count": 60
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Reciprocal",
+        "count": 893
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "ReduceMean",
+        "count": 1019
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "ReduceSum",
+        "count": 384
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Reshape",
+        "count": 2567
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "ScatterND",
+        "count": 28
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Shape",
+        "count": 860
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Sigmoid",
+        "count": 280
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Sin",
+        "count": 187
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Slice",
+        "count": 1778
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Softmax",
+        "count": 322
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Sqrt",
+        "count": 1211
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Squeeze",
+        "count": 446
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Sub",
+        "count": 180
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Transpose",
+        "count": 2445
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Unsqueeze",
+        "count": 2087
+      },
+      {
+        "domain": "ai.onnx",
+        "op_type": "Where",
+        "count": 91
+      },
+      {
+        "domain": "com.microsoft",
+        "op_type": "GatherBlockQuantized",
+        "count": 66
+      },
+      {
+        "domain": "com.microsoft",
+        "op_type": "MatMulNBits",
+        "count": 500
+      }
+    ],
+    "opsets": [
+      {
+        "domain": "ai.onnx",
+        "version": 20
+      },
+      {
+        "domain": "com.microsoft",
+        "version": 1
+      }
+    ],
+    "external_data": [
+      {
+        "model": "cpu_fp16/talker_cache.onnx",
+        "location": "talker_cache.onnx.data",
+        "safe_relative": true,
+        "exists": true
+      },
+      {
+        "model": "cpu_fp32/talker.onnx",
+        "location": "talker.onnx.data",
+        "safe_relative": true,
+        "exists": true
+      },
+      {
+        "model": "cpu_fp32/talker_cache.onnx",
+        "location": "talker_cache.onnx.data",
+        "safe_relative": true,
+        "exists": true
+      },
+      {
+        "model": "cuda_fp16/talker_cache.onnx",
+        "location": "talker_cache.onnx.data",
+        "safe_relative": true,
+        "exists": true
+      },
+      {
+        "model": "cuda_fp32/talker_cache.onnx",
+        "location": "talker_cache.onnx.data",
+        "safe_relative": true,
+        "exists": true
+      }
+    ],
+    "parse_failures": [],
+    "runtime_effects": {
+      "loaded_external_tensor_data": false,
+      "created_inference_session": false,
+      "executed_graph": false,
+      "used_gpu": false
+    }
+  },
+  "python_audit": [
+    {
+      "path": "check_precision.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "eval_cache.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "eval_embed.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "eval_generate.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "eval_predictor.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "eval_speaker.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "eval_tokenizer.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "inference.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "optimize.py",
+      "parsed": true,
+      "executed": false,
+      "findings": [
+        "process_execution:subprocess.run"
+      ]
+    },
+    {
+      "path": "test_modelbuilder_talker.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    },
+    {
+      "path": "user_script.py",
+      "parsed": true,
+      "executed": false,
+      "findings": []
+    }
+  ],
+  "blockers": [
+    "revision_not_immutable",
+    "standalone_license_file_missing",
+    "python_dangerous_primitives_present"
+  ],
+  "runtime_effects": {
+    "imported_community_code": false,
+    "loaded_onnx": false,
+    "installed_dependencies": false,
+    "used_gpu": false,
+    "rendered_audio": false,
+    "played_audio": false
+  }
+}

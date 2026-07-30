@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_snapshot_static_audit.schema.json",
+  "title": "Agent-Bridge voice snapshot static audit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "repository",
+    "revision",
+    "snapshot",
+    "inventory",
+    "integrity",
+    "license_audit",
+    "requirements",
+    "manifest_audit",
+    "onnx_audit",
+    "python_audit",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_snapshot_static_audit.v1"
+    },
+    "status": {
+      "enum": ["blocked", "static_audit_passed"]
+    },
+    "repository": {"type": "string", "minLength": 1},
+    "revision": {"type": "string", "minLength": 1},
+    "snapshot": {"type": "string", "minLength": 1},
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file_count",
+        "total_size_bytes",
+        "variant_count",
+        "variants",
+        "incomplete_files",
+        "symlinks"
+      ],
+      "properties": {
+        "file_count": {"type": "integer", "minimum": 0},
+        "total_size_bytes": {"type": "integer", "minimum": 0},
+        "variant_count": {"type": "integer", "minimum": 0},
+        "variants": {"type": "array", "items": {"type": "string"}},
+        "incomplete_files": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "symlinks": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_size_bytes",
+        "size_matches",
+        "file_hashes"
+      ],
+      "properties": {
+        "expected_size_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "size_matches": {"type": ["boolean", "null"]},
+        "file_hashes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "size", "sha256"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "size": {"type": "integer", "minimum": 0},
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "license_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "standalone_file", "status"],
+      "properties": {
+        "declared": {"type": ["string", "null"]},
+        "standalone_file": {"type": ["string", "null"]},
+        "status": {
+          "enum": ["declaration_only", "standalone_file_present"]
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "manifest_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifests", "missing_files", "malformed"],
+      "properties": {
+        "manifests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "device",
+              "precision",
+              "execution_provider",
+              "referenced_files"
+            ],
+            "properties": {
+              "path": {"type": "string"},
+              "device": {"type": ["string", "null"]},
+              "precision": {"type": ["string", "null"]},
+              "execution_provider": {"type": ["string", "null"]},
+              "referenced_files": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            }
+          }
+        },
+        "missing_files": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "malformed": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "onnx_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "model_count",
+        "models",
+        "operators",
+        "opsets",
+        "external_data",
+        "parse_failures",
+        "runtime_effects"
+      ],
+      "properties": {
+        "status": {
+          "enum": ["not_run", "inventoried", "blocked_parse_failure"]
+        },
+        "model_count": {"type": "integer", "minimum": 0},
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "node_count"],
+            "properties": {
+              "path": {"type": "string"},
+              "node_count": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "operators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["domain", "op_type", "count"],
+            "properties": {
+              "domain": {"type": "string"},
+              "op_type": {"type": "string"},
+              "count": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        "opsets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["domain", "version"],
+            "properties": {
+              "domain": {"type": "string"},
+              "version": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "external_data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "location", "safe_relative", "exists"],
+            "properties": {
+              "model": {"type": "string"},
+              "location": {"type": "string"},
+              "safe_relative": {"type": "boolean"},
+              "exists": {"type": "boolean"}
+            }
+          }
+        },
+        "parse_failures": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "runtime_effects": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "loaded_external_tensor_data",
+            "created_inference_session",
+            "executed_graph",
+            "used_gpu"
+          ],
+          "properties": {
+            "loaded_external_tensor_data": {"const": false},
+            "created_inference_session": {"const": false},
+            "executed_graph": {"const": false},
+            "used_gpu": {"const": false}
+          }
+        }
+      }
+    },
+    "python_audit": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "parsed", "executed", "findings"],
+        "properties": {
+          "path": {"type": "string"},
+          "parsed": {"type": "boolean"},
+          "executed": {"const": false},
+          "findings": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "imported_community_code",
+        "loaded_onnx",
+        "installed_dependencies",
+        "used_gpu",
+        "rendered_audio",
+        "played_audio"
+      ],
+      "properties": {
+        "imported_community_code": {"const": false},
+        "loaded_onnx": {"const": false},
+        "installed_dependencies": {"const": false},
+        "used_gpu": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false}
+      }
+    }
+  }
+}
