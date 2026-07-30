@@ -7,7 +7,9 @@ pub(super) mod workflow_feedback;
 pub(super) use biocortex::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
     run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
-    run_biocortex_retrieval_opt_in_order_diff_packet, run_biocortex_retrieval_opt_in_review_packet,
+    run_biocortex_retrieval_opt_in_order_diff_packet,
+    run_biocortex_retrieval_opt_in_redacted_order_artifact,
+    run_biocortex_retrieval_opt_in_review_packet,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
     run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, shadow_json_display,
 };

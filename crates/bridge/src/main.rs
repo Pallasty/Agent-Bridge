@@ -9,7 +9,6 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
-    biocortex_retrieval_opt_in_redacted_order_artifact,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_readiness_packet,
@@ -69,7 +68,9 @@ use cli::workflow_feedback::{
 use cli::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
     run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
-    run_biocortex_retrieval_opt_in_order_diff_packet, run_biocortex_retrieval_opt_in_review_packet,
+    run_biocortex_retrieval_opt_in_order_diff_packet,
+    run_biocortex_retrieval_opt_in_redacted_order_artifact,
+    run_biocortex_retrieval_opt_in_review_packet,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
     run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
     run_substrate, shadow_json_display, A2uiOp, BrowserLiteOp, OperatorRequestOp, SubstrateOp,
@@ -5998,10 +5999,19 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let body = std::fs::read_to_string(source_json).map_err(|e| {
+                    anyhow::anyhow!(
+                        "read redacted-order artifact source JSON at {source_json:?}: {e}"
+                    )
+                })?;
+                let source_packet = serde_json::from_str(&body).map_err(|e| {
+                    anyhow::anyhow!(
+                        "parse redacted-order artifact source JSON at {source_json:?}: {e}"
+                    )
+                })?;
                 run_biocortex_retrieval_opt_in_redacted_order_artifact(
-                    source_json,
                     BioCortexRetrievalOptInRedactedOrderArtifactOptions {
-                        source_packet: Value::Null,
+                        source_packet,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -11478,73 +11488,6 @@ async fn run_biocortex_retrieval_opt_in_runtime_trial(
         shadow_json_display(side_signal.get("attempted"), "false"),
         shadow_json_display(side_signal.get("coverage"), "0"),
         shadow_json_display(side_signal.get("latency_ms"), "0")
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_redacted_order_artifact(
-    source_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRedactedOrderArtifactOptions,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(source_json).map_err(|e| {
-        anyhow::anyhow!("read redacted-order artifact source JSON at {source_json:?}: {e}")
-    })?;
-    opts.source_packet = serde_json::from_str(&body).map_err(|e| {
-        anyhow::anyhow!("parse redacted-order artifact source JSON at {source_json:?}: {e}")
-    })?;
-    let payload = biocortex_retrieval_opt_in_redacted_order_artifact(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in redacted order artifact");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "artifact_ready={} approval_state={} may_implement_ordering_now={}",
-        shadow_json_display(boundary.get("artifact_ready"), "false"),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
-    );
-    let comparison = payload
-        .get("redacted_order_comparison")
-        .unwrap_or(&Value::Null);
-    let distribution = comparison
-        .get("rank_delta_distribution")
-        .unwrap_or(&Value::Null);
-    println!(
-        "improved={} regressed={} unchanged={} max_abs_delta={}",
-        shadow_json_display(distribution.get("improved_count"), "0"),
-        shadow_json_display(distribution.get("regressed_count"), "0"),
-        shadow_json_display(distribution.get("unchanged_count"), "0"),
-        shadow_json_display(distribution.get("max_abs_delta"), "0")
-    );
-    let overlap_k1 = comparison
-        .get("top_k_overlap")
-        .and_then(Value::as_array)
-        .and_then(|rows| {
-            rows.iter()
-                .find(|row| row.get("k").and_then(Value::as_u64) == Some(1))
-        })
-        .unwrap_or(&Value::Null);
-    println!(
-        "top1_overlap={} top1_jaccard={} redacted_rows_comparable={} violations={}",
-        shadow_json_display(overlap_k1.get("overlap_count"), "0"),
-        shadow_json_display(overlap_k1.get("jaccard"), "-"),
-        shadow_json_display(boundary.get("redacted_rows_comparable"), "false"),
-        boundary
-            .get("violations")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
     );
     println!(
         "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",

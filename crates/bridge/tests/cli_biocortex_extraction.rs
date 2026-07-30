@@ -26,6 +26,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_execution_packet",
         "run_biocortex_retrieval_opt_in_runtime_trial_review_packet",
         "run_biocortex_retrieval_opt_in_order_diff_packet",
+        "run_biocortex_retrieval_opt_in_redacted_order_artifact",
         "shadow_json_display",
     ] {
         assert!(
@@ -51,7 +52,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("BioCortexOp::RetrievalOptInReviewPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInExecutionPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeTrialReviewPacket")
-            && composition_root.contains("BioCortexOp::RetrievalOptInOrderDiffPacket"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInOrderDiffPacket")
+            && composition_root.contains("BioCortexOp::RetrievalOptInRedactedOrderArtifact"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -62,7 +64,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("BioCortexRetrievalOptInExecutionPacketOptions {")
             && composition_root
                 .contains("BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {")
-            && composition_root.contains("BioCortexRetrievalOptInOrderDiffPacketOptions {"),
+            && composition_root.contains("BioCortexRetrievalOptInOrderDiffPacketOptions {")
+            && composition_root.contains("BioCortexRetrievalOptInRedactedOrderArtifactOptions {"),
         "main.rs must retain retrieval option assembly"
     );
     assert!(
@@ -88,6 +91,12 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("read order-diff source JSON at {source_json:?}")
             && composition_root.contains("parse order-diff source JSON at {source_json:?}"),
         "main.rs must retain order-diff input custody and exact errors"
+    );
+    assert!(
+        composition_root.contains("read redacted-order artifact source JSON at {source_json:?}")
+            && composition_root
+                .contains("parse redacted-order artifact source JSON at {source_json:?}"),
+        "main.rs must retain redacted-order artifact input custody and exact errors"
     );
     assert!(
         composition_root.contains("fn run_biocortex_retrieval_opt_in_runtime_trial("),
