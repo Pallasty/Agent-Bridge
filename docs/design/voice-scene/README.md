@@ -54,6 +54,8 @@ express. A packet is S0-valid only when it passes both.
 - `ADR-0005-realtime-story-interaction.md`: realtime state and consent gates.
 - `ADR-0006-chinese-multispeaker-audition.md`: S5 audition and promotion gates.
 - `ADR-0007-sherpa-render-asr-gate.md`: S5B integrity and atomic render gate.
+- `ADR-0008-mi50-container-and-community-onnx-research-gate.md`: S5D
+  static research and isolation gates.
 
 ## S5 Chinese multi-speaker audition
 
@@ -77,6 +79,14 @@ WAV shape, and binds file-level Chinese ASR results and CER into one receipt.
 The machine-verified pack is not played automatically. Its speaker IDs remain
 opaque until a separate owner-authorized blind audition records audibility,
 naturalness, role fit, and pairwise distinguishability.
+
+## S5D voice-model research gate
+
+`scripts/story_voice_model_research_gate.py` performs a static, non-actuating
+audit of an MI50 container configuration and experimental voice-model
+manifest. It fails closed for broad GPU exposure, privileged containers,
+unpinned images, runtime networking, writable root filesystems, or incomplete
+community ONNX evidence.
 
 ## S4 realtime story interaction
 

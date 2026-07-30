@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_model_research_receipt.schema.json",
+  "title": "Agent-Bridge voice model research receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "manifest_schema", "container", "candidates", "blockers", "runtime_effects"],
+  "properties": {
+    "schema": {"const": "agent_bridge.voice_model_research_receipt.v1"},
+    "status": {"enum": ["blocked", "trial_plan_ready"]},
+    "manifest_schema": {"type": ["string", "null"]},
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "exists", "sha256", "status", "execution_attempted", "observed_gfx_override", "image_digest_pinned", "network_disabled", "read_only_rootfs", "blockers"],
+      "properties": {
+        "path": {"type": "string"},
+        "exists": {"type": "boolean"},
+        "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "status": {"enum": ["blocked", "static_ready"]},
+        "execution_attempted": {"const": false},
+        "observed_gfx_override": {"type": ["string", "null"]},
+        "image_digest_pinned": {"type": "boolean"},
+        "network_disabled": {"type": "boolean"},
+        "read_only_rootfs": {"type": "boolean"},
+        "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidate_id", "upstream_model", "source_url", "status", "production_eligible", "execution_attempted", "blockers"],
+        "properties": {
+          "candidate_id": {"type": ["string", "null"]},
+          "upstream_model": {"type": ["string", "null"]},
+          "source_url": {"type": ["string", "null"]},
+          "status": {"enum": ["blocked", "trial_ready"]},
+          "production_eligible": {"const": false},
+          "execution_attempted": {"const": false},
+          "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        }
+      }
+    },
+    "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["downloads_models", "starts_containers", "uses_gpu", "plays_audio", "writes_memory"],
+      "properties": {
+        "downloads_models": {"const": false},
+        "starts_containers": {"const": false},
+        "uses_gpu": {"const": false},
+        "plays_audio": {"const": false},
+        "writes_memory": {"const": false}
+      }
+    }
+  }
+}

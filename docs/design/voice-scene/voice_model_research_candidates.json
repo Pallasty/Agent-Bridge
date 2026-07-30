@@ -1,0 +1,86 @@
+{
+  "schema": "agent_bridge.voice_model_research_manifest.v1",
+  "observed_at": "2026-07-30",
+  "candidates": [
+    {
+      "candidate_id": "qwen3-tts-0.6b-streaming-onnx-community",
+      "upstream_model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+      "source_url": "https://huggingface.co/pltobing/Qwen3-TTS-Streaming-ONNX",
+      "source_revision": null,
+      "license": {"status": "unverified", "spdx": null},
+      "artifact_manifest": [],
+      "operator_inventory": [],
+      "components": {
+        "text_model": false,
+        "speech_tokenizer": false,
+        "vocoder": false
+      },
+      "reference_parity": {
+        "status": "not_run",
+        "reference_wav_sha256": null
+      },
+      "intended_runtime": "onnxruntime-isolated-sidecar",
+      "intended_device": "mi50-gfx906-container"
+    },
+    {
+      "candidate_id": "qwen3-tts-0.6b-candle-rust",
+      "upstream_model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+      "source_url": "https://github.com/TrevorS/qwen3-tts-rs",
+      "source_revision": null,
+      "license": {"status": "unverified", "spdx": null},
+      "artifact_manifest": [],
+      "operator_inventory": [],
+      "components": {
+        "text_model": false,
+        "speech_tokenizer": false,
+        "vocoder": false
+      },
+      "reference_parity": {
+        "status": "not_run",
+        "reference_wav_sha256": null
+      },
+      "intended_runtime": "candle-rust-isolated-pilot",
+      "intended_device": "cpu-or-separately-supported-accelerator"
+    },
+    {
+      "candidate_id": "qwen3-tts-0.6b-official-python-reference",
+      "upstream_model": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+      "source_url": "https://github.com/QwenLM/Qwen3-TTS",
+      "source_revision": null,
+      "license": {"status": "verified", "spdx": "Apache-2.0"},
+      "artifact_manifest": [],
+      "operator_inventory": [],
+      "components": {
+        "text_model": false,
+        "speech_tokenizer": false,
+        "vocoder": false
+      },
+      "reference_parity": {
+        "status": "not_run",
+        "reference_wav_sha256": null
+      },
+      "intended_runtime": "python-reference-sidecar",
+      "intended_device": "cpu-first-reference"
+    },
+    {
+      "candidate_id": "fun-cosyvoice3-reference",
+      "upstream_model": "FunAudioLLM/Fun-CosyVoice3-0.5B",
+      "source_url": "https://github.com/FunAudioLLM/CosyVoice",
+      "source_revision": null,
+      "license": {"status": "unverified", "spdx": null},
+      "artifact_manifest": [],
+      "operator_inventory": [],
+      "components": {
+        "text_model": false,
+        "speech_tokenizer": false,
+        "vocoder": false
+      },
+      "reference_parity": {
+        "status": "not_run",
+        "reference_wav_sha256": null
+      },
+      "intended_runtime": "python-reference-sidecar",
+      "intended_device": "cpu-or-mi50-container-after-compatibility-proof"
+    }
+  ]
+}
