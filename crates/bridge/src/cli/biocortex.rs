@@ -10,6 +10,7 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     biocortex_retrieval_opt_in_runtime_influence_review_request,
+    biocortex_retrieval_opt_in_runtime_readiness_packet,
     biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexRetrievalApprovalPacketOptions,
@@ -21,6 +22,7 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalOptInReviewPacketOptions,
     BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
     BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
+    BioCortexRetrievalOptInRuntimeReadinessPacketOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
 };
 use anyhow::Result;
@@ -809,6 +811,64 @@ pub(crate) async fn run_biocortex_retrieval_opt_in_runtime_influence_decision_pa
         shadow_json_display(payload.get("calls_memory_search"), "false"),
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+pub(crate) fn run_biocortex_retrieval_opt_in_runtime_readiness_packet(
+    opts: BioCortexRetrievalOptInRuntimeReadinessPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_opt_in_runtime_readiness_packet(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in runtime readiness packet");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} control_plane_ready={} live_probe_state={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.pointer("/readiness/control_plane_ready"), "false"),
+        shadow_json_display(payload.pointer("/readiness/live_probe_state"), "-")
+    );
+    println!(
+        "may_accept_controlled_opt_in={} live_order_influence_ready={} default_influence_ready={}",
+        shadow_json_display(
+            payload.pointer("/readiness/may_accept_controlled_explicit_opt_in_fts_calls"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/readiness/live_order_influence_ready"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/readiness/default_influence_ready"),
+            "false"
+        )
+    );
+    println!(
+        "batch_evidence_source={} transition_gated={}",
+        shadow_json_display(payload.pointer("/batch_summary/evidence_source"), "-"),
+        shadow_json_display(payload.pointer("/batch_summary/transition_gated"), "false")
+    );
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "runtime_readiness_ready={} blockers={}",
+        shadow_json_display(boundary.get("runtime_readiness_ready"), "false"),
+        boundary
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string())
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false"),
+        shadow_json_display(payload.get("default_calls_unchanged"), "true")
     );
     Ok(())
 }
