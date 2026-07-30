@@ -7,7 +7,6 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial,
-    biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     biocortex_retrieval_opt_in_runtime_readiness_packet,
     biocortex_retrieval_opt_in_runtime_transition_gate, biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_store_trial, BioCortexReplayComparisonOptions,
@@ -70,6 +69,7 @@ use cli::{
     run_biocortex_retrieval_opt_in_post_implementation_review_gate,
     run_biocortex_retrieval_opt_in_redacted_order_artifact,
     run_biocortex_retrieval_opt_in_review_packet,
+    run_biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     run_biocortex_retrieval_opt_in_runtime_influence_review_request,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
     run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
@@ -6227,12 +6227,34 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let request_body =
+                    std::fs::read_to_string(runtime_influence_review_request_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in runtime influence review request JSON at {runtime_influence_review_request_json:?}: {e}"
+                        )
+                    })?;
+                let runtime_influence_review_request =
+                    serde_json::from_str(&request_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in runtime influence review request JSON at {runtime_influence_review_request_json:?}: {e}"
+                        )
+                    })?;
+                let decision_body =
+                    std::fs::read_to_string(runtime_influence_decision_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in runtime influence decision JSON at {runtime_influence_decision_json:?}: {e}"
+                        )
+                    })?;
+                let runtime_influence_decision =
+                    serde_json::from_str(&decision_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in runtime influence decision JSON at {runtime_influence_decision_json:?}: {e}"
+                        )
+                    })?;
                 run_biocortex_retrieval_opt_in_runtime_influence_decision_packet(
-                    runtime_influence_review_request_json,
-                    runtime_influence_decision_json,
                     BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
-                        runtime_influence_review_request: Value::Null,
-                        runtime_influence_decision: Value::Null,
+                        runtime_influence_review_request,
+                        runtime_influence_decision,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -11607,70 +11629,6 @@ async fn run_biocortex_retrieval_opt_in_runtime_trial(
     );
     println!(
         "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_runtime_influence_decision_packet(
-    runtime_influence_review_request_json: &std::path::Path,
-    runtime_influence_decision_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
-    as_json: bool,
-) -> Result<()> {
-    let request_body = std::fs::read_to_string(runtime_influence_review_request_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in runtime influence review request JSON at {runtime_influence_review_request_json:?}: {e}"
-        )
-    })?;
-    opts.runtime_influence_review_request = serde_json::from_str(&request_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in runtime influence review request JSON at {runtime_influence_review_request_json:?}: {e}"
-        )
-    })?;
-    let decision_body = std::fs::read_to_string(runtime_influence_decision_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in runtime influence decision JSON at {runtime_influence_decision_json:?}: {e}"
-        )
-    })?;
-    opts.runtime_influence_decision = serde_json::from_str(&decision_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in runtime influence decision JSON at {runtime_influence_decision_json:?}: {e}"
-        )
-    })?;
-    let payload = biocortex_retrieval_opt_in_runtime_influence_decision_packet(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime-influence decision packet");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "runtime_influence_authorized={} approval_state={} authorization_state={}",
-        shadow_json_display(boundary.get("runtime_influence_authorized"), "false"),
-        shadow_json_display(payload.get("approval_state"), "not_approved"),
-        shadow_json_display(payload.get("authorization_state"), "not_authorized")
-    );
-    println!(
-        "runtime_adapter_approved={} default_search_order_change_allowed={} ordering_behavior_connection_authorized={}",
-        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
-        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
-        shadow_json_display(
-            payload.get("ordering_behavior_connection_authorized"),
-            "false"
-        )
-    );
-    println!(
-        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
         shadow_json_display(payload.get("calls_memory_search"), "false"),
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")

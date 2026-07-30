@@ -8,6 +8,7 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
+    biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
@@ -18,6 +19,7 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalOptInPostImplementationReviewGateOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
     BioCortexRetrievalOptInReviewPacketOptions,
+    BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
     BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
 };
@@ -752,6 +754,48 @@ pub(crate) async fn run_biocortex_retrieval_opt_in_runtime_influence_review_requ
         shadow_json_display(evidence.get("redacted_evidence_aggregate_ready"), "false"),
         shadow_json_display(
             evidence.get("post_runtime_evidence_summary_ready"),
+            "false"
+        )
+    );
+    println!(
+        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        boundary
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string()),
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+pub(crate) async fn run_biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+    opts: BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_opt_in_runtime_influence_decision_packet(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in runtime-influence decision packet");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "runtime_influence_authorized={} approval_state={} authorization_state={}",
+        shadow_json_display(boundary.get("runtime_influence_authorized"), "false"),
+        shadow_json_display(payload.get("approval_state"), "not_approved"),
+        shadow_json_display(payload.get("authorization_state"), "not_authorized")
+    );
+    println!(
+        "runtime_adapter_approved={} default_search_order_change_allowed={} ordering_behavior_connection_authorized={}",
+        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
+        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
+        shadow_json_display(
+            payload.get("ordering_behavior_connection_authorized"),
             "false"
         )
     );
