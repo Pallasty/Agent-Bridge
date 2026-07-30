@@ -27,6 +27,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_runtime_trial_review_packet",
         "run_biocortex_retrieval_opt_in_order_diff_packet",
         "run_biocortex_retrieval_opt_in_redacted_order_artifact",
+        "run_biocortex_retrieval_opt_in_authorization_decision_packet",
         "shadow_json_display",
     ] {
         assert!(
@@ -53,7 +54,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("BioCortexOp::RetrievalOptInExecutionPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeTrialReviewPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInOrderDiffPacket")
-            && composition_root.contains("BioCortexOp::RetrievalOptInRedactedOrderArtifact"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInRedactedOrderArtifact")
+            && composition_root.contains("BioCortexOp::RetrievalOptInAuthorizationDecisionPacket"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -65,7 +67,9 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root
                 .contains("BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {")
             && composition_root.contains("BioCortexRetrievalOptInOrderDiffPacketOptions {")
-            && composition_root.contains("BioCortexRetrievalOptInRedactedOrderArtifactOptions {"),
+            && composition_root.contains("BioCortexRetrievalOptInRedactedOrderArtifactOptions {")
+            && composition_root
+                .contains("BioCortexRetrievalOptInAuthorizationDecisionPacketOptions {"),
         "main.rs must retain retrieval option assembly"
     );
     assert!(
@@ -99,6 +103,23 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "main.rs must retain redacted-order artifact input custody and exact errors"
     );
     assert!(
+        composition_root.contains("std::fs::read_to_string(authorization_request_json)")
+            && composition_root.contains(
+                "read opt-in authorization request JSON at {authorization_request_json:?}",
+            )
+            && composition_root.contains(
+                "parse opt-in authorization request JSON at {authorization_request_json:?}",
+            )
+            && composition_root.contains("std::fs::read_to_string(authorization_decision_json)")
+            && composition_root.contains(
+                "read opt-in authorization decision JSON at {authorization_decision_json:?}",
+            )
+            && composition_root.contains(
+                "parse opt-in authorization decision JSON at {authorization_decision_json:?}",
+            ),
+        "main.rs must retain authorization-decision input custody and exact errors"
+    );
+    assert!(
         composition_root.contains("fn run_biocortex_retrieval_opt_in_runtime_trial("),
         "main.rs must retain the side-signal-capable runtime-trial executor"
     );
@@ -119,6 +140,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "fn run_biocortex_retrieval_opt_in_runtime_trial(",
         "std::fs::read_to_string(runtime_trial_json)",
         "std::fs::read_to_string(source_json)",
+        "std::fs::read_to_string(authorization_request_json)",
+        "std::fs::read_to_string(authorization_decision_json)",
         "run_biocortex_retrieval_opt_in_store_trial",
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "SqliteStore",

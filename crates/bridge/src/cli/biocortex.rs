@@ -2,14 +2,17 @@ use ab_bridge::biocortex_capability_ledger::{
     build_biocortex_capability_ledger_report_packet, consume_biocortex_capability_ledger,
 };
 use ab_bridge::biocortex_shadow::{
-    biocortex_retrieval_opt_in_audit_report, biocortex_retrieval_opt_in_dry_run_plan,
-    biocortex_retrieval_opt_in_execution_packet, biocortex_retrieval_opt_in_order_diff_packet,
+    biocortex_retrieval_opt_in_audit_report,
+    biocortex_retrieval_opt_in_authorization_decision_packet,
+    biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
+    biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexRetrievalApprovalPacketOptions,
-    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInDryRunOptions,
-    BioCortexRetrievalOptInExecutionPacketOptions, BioCortexRetrievalOptInOrderDiffPacketOptions,
+    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
+    BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
     BioCortexRetrievalOptInReviewPacketOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
@@ -604,6 +607,60 @@ pub(crate) async fn run_biocortex_retrieval_opt_in_redacted_order_artifact(
     );
     println!(
         "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+pub(crate) async fn run_biocortex_retrieval_opt_in_authorization_decision_packet(
+    opts: BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_opt_in_authorization_decision_packet(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in authorization decision packet");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "implementation_authorized={} approval_state={} authorization_state={}",
+        shadow_json_display(boundary.get("implementation_authorized"), "false"),
+        shadow_json_display(payload.get("approval_state"), "not_approved"),
+        shadow_json_display(payload.get("authorization_state"), "not_authorized")
+    );
+    println!(
+        "runtime_adapter_approved={} default_search_order_change_allowed={} may_implement_ordering_now={}",
+        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
+        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
+        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
+    );
+    let authorized = payload
+        .get("authorized_implementation")
+        .unwrap_or(&Value::Null);
+    println!(
+        "fts_only={} per_call_surface={} post_review_required={}",
+        shadow_json_display(
+            authorized.get("may_affect_only_explicitly_opted_in_fts_calls"),
+            "false"
+        ),
+        shadow_json_display(authorized.get("may_add_per_call_opt_in_surface"), "false"),
+        shadow_json_display(
+            authorized.get("requires_post_implementation_review_before_use"),
+            "true"
+        )
+    );
+    println!(
+        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        boundary
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string()),
         shadow_json_display(payload.get("calls_memory_search"), "false"),
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
