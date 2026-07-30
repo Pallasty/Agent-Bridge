@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_cpu_int4_smoke_receipt.schema.json",
+  "title": "Agent-Bridge CPU INT4 voice-model smoke receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "snapshot",
+    "provider",
+    "runtime",
+    "planned_models",
+    "probed_models",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_cpu_int4_smoke_receipt.v1"
+    },
+    "status": {
+      "enum": ["blocked", "session_creation_passed_no_inference"]
+    },
+    "snapshot": {"type": "string", "minLength": 1},
+    "provider": {"const": "CPUExecutionProvider"},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "executable", "available_providers"],
+      "properties": {
+        "name": {"const": "onnxruntime"},
+        "version": {"type": "string", "minLength": 1},
+        "executable": {"type": "string", "minLength": 1},
+        "available_providers": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "planned_models": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "probed_models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "status"],
+        "properties": {
+          "path": {"type": "string"},
+          "status": {"enum": ["session_created", "session_failed"]},
+          "providers": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "inputs": {"type": "integer", "minimum": 0},
+          "outputs": {"type": "integer", "minimum": 0},
+          "error_type": {"type": "string"},
+          "error": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "created_inference_sessions",
+        "executed_graphs",
+        "generated_tokens",
+        "rendered_audio",
+        "played_audio",
+        "used_gpu",
+        "imported_community_python"
+      ],
+      "properties": {
+        "created_inference_sessions": {"type": "boolean"},
+        "executed_graphs": {"const": false},
+        "generated_tokens": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false},
+        "used_gpu": {"const": false},
+        "imported_community_python": {"const": false}
+      }
+    }
+  }
+}

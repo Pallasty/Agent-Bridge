@@ -58,6 +58,8 @@ express. A packet is S0-valid only when it passes both.
   static research and isolation gates.
 - `voice_snapshot_static_audit.schema.json`: S5G downloaded-snapshot static
   audit receipt.
+- `voice_cpu_int4_smoke_receipt.schema.json`: S5H CPU INT4 session-creation
+  receipt with no graph execution.
 
 ## S5 Chinese multi-speaker audition
 
@@ -111,6 +113,15 @@ receipt is `s5g_modelscope_snapshot_static_audit.json`. Its status is blocked,
 not trial-ready: ModelScope supplied mutable `master`, the snapshot lacks a
 standalone license file, and a build utility contains a subprocess primitive.
 The advertised CUDA execution provider is not evidence of MI50 support.
+
+S5H uses `scripts/story_voice_cpu_int4_smoke_gate.py` to create isolated
+ONNX Runtime sessions for only the seven graphs referenced by the CPU INT4
+manifest. It pins `CPUExecutionProvider`, disables graph optimization, and
+never calls `session.run()`. The current receipt,
+`s5h_cpu_int4_session_smoke.json`, records successful session creation for all
+seven graphs under ONNX Runtime 1.28.0. This is a compatibility precheck only:
+it does not execute inference, synthesize audio, clear S5G supply-chain
+blockers, or imply ROCm/MI50 support.
 
 ## S4 realtime story interaction
 

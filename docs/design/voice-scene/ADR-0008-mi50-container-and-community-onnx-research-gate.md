@@ -101,3 +101,25 @@ the build-time subprocess behavior are still required. The CUDA manifests name
 `CUDAExecutionProvider`; they do not prove ROCm/MI50 compatibility. No
 inference, parity, quality, audibility, or MI50 execution claim follows from
 snapshot completeness.
+
+## S5H CPU INT4 session-creation evidence
+
+The owner authorized the next bounded goal after S5G:
+CPU INT4 compatibility probing without graph execution or audio.
+`story_voice_cpu_int4_smoke_gate.py` reads only the `cpu_int4/manifest.json`
+references and launches one isolated child process per graph. Each child pins
+`CPUExecutionProvider`, disables graph optimization, limits ONNX Runtime to one
+intra-op and one inter-op thread, creates a session, records input/output
+counts, and exits. It never calls `session.run()`.
+
+Using isolated ONNX Runtime 1.28.0, all seven CPU INT4 graphs created sessions:
+`code_predictor`, `codec_embed`, `residual_embed`, `talker_cache`,
+`text_embed`, `tok_decoder`, and `tok_encoder`. The largest interface observed
+was `talker_cache` with 59 inputs and 58 outputs. The receipt remains explicit
+that no graph, token generation, waveform synthesis, GPU, community Python, or
+audio output was exercised.
+
+This promotes only the CPU INT4 lane to
+`session_creation_passed_no_inference`. It does not clear S5G supply-chain
+blockers, prove numerical correctness, prove that one autoregressive step can
+run, establish real-time performance, or provide any MI50/ROCm evidence.

@@ -1,0 +1,99 @@
+{
+  "schema": "agent_bridge.voice_cpu_int4_smoke_receipt.v1",
+  "status": "session_creation_passed_no_inference",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "provider": "CPUExecutionProvider",
+  "runtime": {
+    "name": "onnxruntime",
+    "version": "1.28.0",
+    "executable": "/Data/Models/agent-bridge/tooling/onnxruntime-cpu-smoke-venv/bin/python",
+    "available_providers": [
+      "AzureExecutionProvider",
+      "CPUExecutionProvider"
+    ]
+  },
+  "planned_models": [
+    "cpu_int4/code_predictor.onnx",
+    "cpu_int4/codec_embed.onnx",
+    "cpu_int4/residual_embed.onnx",
+    "cpu_int4/talker_cache.onnx",
+    "cpu_int4/text_embed.onnx",
+    "cpu_int4/tok_decoder.onnx",
+    "cpu_int4/tok_encoder.onnx"
+  ],
+  "probed_models": [
+    {
+      "path": "cpu_int4/code_predictor.onnx",
+      "status": "session_created",
+      "providers": [
+        "CPUExecutionProvider"
+      ],
+      "inputs": 2,
+      "outputs": 1
+    },
+    {
+      "path": "cpu_int4/codec_embed.onnx",
+      "status": "session_created",
+      "providers": [
+        "CPUExecutionProvider"
+      ],
+      "inputs": 1,
+      "outputs": 1
+    },
+    {
+      "path": "cpu_int4/residual_embed.onnx",
+      "status": "session_created",
+      "providers": [
+        "CPUExecutionProvider"
+      ],
+      "inputs": 1,
+      "outputs": 1
+    },
+    {
+      "path": "cpu_int4/talker_cache.onnx",
+      "status": "session_created",
+      "providers": [
+        "CPUExecutionProvider"
+      ],
+      "inputs": 59,
+      "outputs": 58
+    },
+    {
+      "path": "cpu_int4/text_embed.onnx",
+      "status": "session_created",
+      "providers": [
+        "CPUExecutionProvider"
+      ],
+      "inputs": 1,
+      "outputs": 1
+    },
+    {
+      "path": "cpu_int4/tok_decoder.onnx",
+      "status": "session_created",
+      "providers": [
+        "CPUExecutionProvider"
+      ],
+      "inputs": 1,
+      "outputs": 1
+    },
+    {
+      "path": "cpu_int4/tok_encoder.onnx",
+      "status": "session_created",
+      "providers": [
+        "CPUExecutionProvider"
+      ],
+      "inputs": 1,
+      "outputs": 1
+    }
+  ],
+  "blockers": [],
+  "runtime_effects": {
+    "created_inference_sessions": true,
+    "executed_graphs": false,
+    "generated_tokens": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "used_gpu": false,
+    "imported_community_python": false
+  }
+}
