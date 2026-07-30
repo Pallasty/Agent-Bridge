@@ -55,3 +55,18 @@ from the local host, and the repository root did not expose a separately
 verified license file. No weight was downloaded. Consequently
 `qwen3_tts_streaming_onnx_supply_chain.json` remains
 `metadata_pinned_weights_blocked`.
+
+## S5F evidence
+
+The owner authorized only fixed-revision source, configuration, and
+license-related small files. `story_voice_small_file_audit.py` enforces a
+path allowlist, rejects model/audio/log paths, applies per-file and total byte
+limits, publishes atomically, and scans Python with `ast` without importing
+it.
+
+All available host transports to the fixed Hugging Face revision failed by
+connection reset, HTTP 502, or bounded fetch failure. The final evidence
+directory was not created and the empty temporary directory was removed.
+Search-indexed `main` content was not substituted for the fixed revision.
+Therefore the code audit remains blocked rather than inferred from partial or
+mutable content.

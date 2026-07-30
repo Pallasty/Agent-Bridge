@@ -95,6 +95,12 @@ its runtime opt-in is false and its entrypoint is `/bin/false`. The snapshot
 does not treat a model-card license declaration, remote file listing, or
 historical revision as verified model weights.
 
+S5F uses `scripts/story_voice_small_file_audit.py` for an owner-authorized,
+fixed-revision, small-file-only acquisition. It never imports the downloaded
+Python. Failed or incomplete acquisition leaves no final evidence directory.
+The current fixed-revision transport result is recorded in
+`s5f_small_file_acquisition_evidence.json`.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

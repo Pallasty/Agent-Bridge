@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_small_file_audit_receipt.schema.json",
+  "title": "Agent-Bridge voice small-file audit receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "repository",
+    "revision",
+    "output_dir",
+    "files",
+    "completed_files",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_small_file_audit_receipt.v1"
+    },
+    "status": {
+      "enum": ["blocked", "small_files_acquired"]
+    },
+    "repository": {"type": "string", "minLength": 1},
+    "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "output_dir": {"type": "string", "minLength": 1},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "size", "sha256", "source_url"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "size": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "source_url": {"type": "string", "pattern": "^https://"}
+        }
+      }
+    },
+    "completed_files": {"type": "integer", "minimum": 0},
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "downloaded_weights",
+        "executed_community_code",
+        "installed_dependencies",
+        "started_containers",
+        "used_gpu",
+        "played_audio"
+      ],
+      "properties": {
+        "downloaded_weights": {"const": false},
+        "executed_community_code": {"const": false},
+        "installed_dependencies": {"const": false},
+        "started_containers": {"const": false},
+        "used_gpu": {"const": false},
+        "played_audio": {"const": false}
+      }
+    }
+  }
+}

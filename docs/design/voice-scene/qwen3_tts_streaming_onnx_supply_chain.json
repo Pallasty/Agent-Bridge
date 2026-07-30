@@ -57,6 +57,12 @@
     "status": "not_run",
     "runtime": "onnxruntime-rocm-in-container"
   },
+  "small_file_acquisition": {
+    "status": "transport_blocked_no_files_acquired",
+    "evidence": "s5f_small_file_acquisition_evidence.json",
+    "completed_files": 0,
+    "code_audit_status": "blocked_no_fixed_revision_source"
+  },
   "runtime_effects": {
     "downloaded_weights": false,
     "started_container": false,

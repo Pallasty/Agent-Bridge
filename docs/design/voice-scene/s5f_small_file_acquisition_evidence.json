@@ -1,0 +1,52 @@
+{
+  "schema": "agent_bridge.voice_small_file_acquisition_evidence.v1",
+  "observed_at": "2026-07-30",
+  "repository": "pltobing/Qwen3-TTS-Streaming-ONNX",
+  "revision": "3717103c6fa278c1810e97672c02b185a7239737",
+  "authorization": "source_config_license_small_files_only",
+  "status": "transport_blocked_no_files_acquired",
+  "attempts": [
+    {
+      "transport": "huggingface_api_https",
+      "result": "connection_reset"
+    },
+    {
+      "transport": "huggingface_git_smart_https",
+      "result": "connection_reset"
+    },
+    {
+      "transport": "hf_mirror_api_https",
+      "result": "http_502_or_connection_reset"
+    },
+    {
+      "transport": "fixed_revision_resolve_https_via_bounded_fetcher",
+      "result": "transport_or_fetch_failed"
+    }
+  ],
+  "requested_paths": [
+    "README.md",
+    "requirements.txt",
+    "test_qwen3-tts-streaming_onnx.py",
+    "configs/config.json",
+    "configs/speech_tokenizer_config.json",
+    "configs/preprocessor_config.json",
+    "configs/tokenizer_config.json",
+    "configs/vocab.json",
+    "configs/merges.txt",
+    "src/inference/qwen3_tts_inferencer_onnx.py",
+    "src/utils/audio_utils.py"
+  ],
+  "completed_files": 0,
+  "final_evidence_directory_created": false,
+  "partial_directory_retained": false,
+  "code_audit_status": "blocked_no_fixed_revision_source",
+  "runtime_effects": {
+    "downloaded_weights": false,
+    "executed_community_code": false,
+    "installed_dependencies": false,
+    "started_containers": false,
+    "used_gpu": false,
+    "rendered_audio": false,
+    "played_audio": false
+  }
+}
