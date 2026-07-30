@@ -29,6 +29,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_redacted_order_artifact",
         "run_biocortex_retrieval_opt_in_authorization_decision_packet",
         "run_biocortex_retrieval_opt_in_post_implementation_review_gate",
+        "run_biocortex_retrieval_opt_in_runtime_influence_review_request",
         "shadow_json_display",
     ] {
         assert!(
@@ -57,7 +58,9 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("BioCortexOp::RetrievalOptInOrderDiffPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInRedactedOrderArtifact")
             && composition_root.contains("BioCortexOp::RetrievalOptInAuthorizationDecisionPacket")
-            && composition_root.contains("BioCortexOp::RetrievalOptInPostImplementationReviewGate"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInPostImplementationReviewGate")
+            && composition_root
+                .contains("BioCortexOp::RetrievalOptInRuntimeInfluenceReviewRequest"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -73,7 +76,9 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root
                 .contains("BioCortexRetrievalOptInAuthorizationDecisionPacketOptions {")
             && composition_root
-                .contains("BioCortexRetrievalOptInPostImplementationReviewGateOptions {"),
+                .contains("BioCortexRetrievalOptInPostImplementationReviewGateOptions {")
+            && composition_root
+                .contains("BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {"),
         "main.rs must retain retrieval option assembly"
     );
     assert!(
@@ -140,6 +145,45 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "main.rs must retain post-implementation review-gate input custody and exact errors"
     );
     assert!(
+        composition_root
+            .contains("std::fs::read_to_string(post_implementation_review_gate_json)")
+            && composition_root.contains(
+                "read opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}",
+            )
+            && composition_root.contains(
+                "parse opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}",
+            )
+            && composition_root.contains("std::fs::read_to_string(redacted_order_artifact_json)")
+            && composition_root.contains(
+                "read opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}",
+            )
+            && composition_root.contains(
+                "parse opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}",
+            )
+            && composition_root
+                .contains("std::fs::read_to_string(redacted_evidence_aggregate_json)")
+            && composition_root.contains(
+                "read opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}",
+            )
+            && composition_root.contains(
+                "parse opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}",
+            )
+            && composition_root.contains("std::fs::read_to_string(evidence_summary_json)")
+            && composition_root
+                .contains("read opt-in evidence summary JSON at {evidence_summary_json:?}")
+            && composition_root
+                .contains("parse opt-in evidence summary JSON at {evidence_summary_json:?}")
+            && composition_root
+                .contains("std::fs::read_to_string(capability_ledger_report_packet_json)")
+            && composition_root.contains(
+                "read BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}",
+            )
+            && composition_root.contains(
+                "parse BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}",
+            ),
+        "main.rs must retain runtime-influence review-request input custody and exact errors"
+    );
+    assert!(
         composition_root.contains("fn run_biocortex_retrieval_opt_in_runtime_trial("),
         "main.rs must retain the side-signal-capable runtime-trial executor"
     );
@@ -164,6 +208,11 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "std::fs::read_to_string(authorization_decision_json)",
         "std::fs::read_to_string(authorization_decision_packet_json)",
         "std::fs::read_to_string(opt_in_plan_json)",
+        "std::fs::read_to_string(post_implementation_review_gate_json)",
+        "std::fs::read_to_string(redacted_order_artifact_json)",
+        "std::fs::read_to_string(redacted_evidence_aggregate_json)",
+        "std::fs::read_to_string(evidence_summary_json)",
+        "std::fs::read_to_string(capability_ledger_report_packet_json)",
         "run_biocortex_retrieval_opt_in_store_trial",
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "SqliteStore",

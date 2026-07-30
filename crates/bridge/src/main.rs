@@ -8,7 +8,6 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
-    biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_readiness_packet,
     biocortex_retrieval_opt_in_runtime_transition_gate, biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_store_trial, BioCortexReplayComparisonOptions,
@@ -71,6 +70,7 @@ use cli::{
     run_biocortex_retrieval_opt_in_post_implementation_review_gate,
     run_biocortex_retrieval_opt_in_redacted_order_artifact,
     run_biocortex_retrieval_opt_in_review_packet,
+    run_biocortex_retrieval_opt_in_runtime_influence_review_request,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
     run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
     run_substrate, shadow_json_display, A2uiOp, BrowserLiteOp, OperatorRequestOp, SubstrateOp,
@@ -6121,18 +6121,94 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let gate_body =
+                    std::fs::read_to_string(post_implementation_review_gate_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
+                        )
+                    })?;
+                let post_implementation_review_gate =
+                    serde_json::from_str(&gate_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
+                        )
+                    })?;
+                let artifact_body =
+                    std::fs::read_to_string(redacted_order_artifact_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
+                        )
+                    })?;
+                let redacted_order_artifact =
+                    serde_json::from_str(&artifact_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
+                        )
+                    })?;
+                let redacted_evidence_aggregate = if let Some(redacted_evidence_aggregate_json) =
+                    redacted_evidence_aggregate_json.as_deref()
+                {
+                    let aggregate_body =
+                            std::fs::read_to_string(redacted_evidence_aggregate_json).map_err(
+                                |e| {
+                                    anyhow::anyhow!(
+                                        "read opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
+                                    )
+                                },
+                            )?;
+                    Some(serde_json::from_str(&aggregate_body).map_err(|e| {
+                            anyhow::anyhow!(
+                                "parse opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
+                            )
+                        })?)
+                } else {
+                    None
+                };
+                let evidence_summary = if let Some(evidence_summary_json) =
+                    evidence_summary_json.as_deref()
+                {
+                    let evidence_body =
+                            std::fs::read_to_string(evidence_summary_json).map_err(|e| {
+                                anyhow::anyhow!(
+                                    "read opt-in evidence summary JSON at {evidence_summary_json:?}: {e}"
+                                )
+                            })?;
+                    Some(serde_json::from_str(&evidence_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in evidence summary JSON at {evidence_summary_json:?}: {e}"
+                        )
+                    })?)
+                } else {
+                    None
+                };
+                let capability_ledger_report_packet = if let Some(
+                    capability_ledger_report_packet_json,
+                ) =
+                    capability_ledger_report_packet_json.as_deref()
+                {
+                    let ledger_body =
+                        std::fs::read_to_string(capability_ledger_report_packet_json).map_err(
+                            |e| {
+                                anyhow::anyhow!(
+                                    "read BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
+                                )
+                            },
+                        )?;
+                    Some(serde_json::from_str(&ledger_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
+                        )
+                    })?)
+                } else {
+                    None
+                };
                 run_biocortex_retrieval_opt_in_runtime_influence_review_request(
-                    post_implementation_review_gate_json,
-                    redacted_order_artifact_json,
-                    redacted_evidence_aggregate_json.as_deref(),
-                    evidence_summary_json.as_deref(),
-                    capability_ledger_report_packet_json.as_deref(),
                     BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
-                        post_implementation_review_gate: Value::Null,
-                        redacted_order_artifact: Value::Null,
-                        redacted_evidence_aggregate: None,
-                        evidence_summary: None,
-                        capability_ledger_report_packet: None,
+                        post_implementation_review_gate,
+                        redacted_order_artifact,
+                        redacted_evidence_aggregate,
+                        evidence_summary,
+                        capability_ledger_report_packet,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -11531,121 +11607,6 @@ async fn run_biocortex_retrieval_opt_in_runtime_trial(
     );
     println!(
         "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_runtime_influence_review_request(
-    post_implementation_review_gate_json: &std::path::Path,
-    redacted_order_artifact_json: &std::path::Path,
-    redacted_evidence_aggregate_json: Option<&std::path::Path>,
-    evidence_summary_json: Option<&std::path::Path>,
-    capability_ledger_report_packet_json: Option<&std::path::Path>,
-    mut opts: BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
-    as_json: bool,
-) -> Result<()> {
-    let gate_body = std::fs::read_to_string(post_implementation_review_gate_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
-        )
-    })?;
-    opts.post_implementation_review_gate = serde_json::from_str(&gate_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
-        )
-    })?;
-    let artifact_body = std::fs::read_to_string(redacted_order_artifact_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
-        )
-    })?;
-    opts.redacted_order_artifact = serde_json::from_str(&artifact_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
-        )
-    })?;
-    if let Some(redacted_evidence_aggregate_json) = redacted_evidence_aggregate_json {
-        let aggregate_body = std::fs::read_to_string(redacted_evidence_aggregate_json).map_err(|e| {
-            anyhow::anyhow!(
-                "read opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
-            )
-        })?;
-        opts.redacted_evidence_aggregate =
-            Some(serde_json::from_str(&aggregate_body).map_err(|e| {
-                anyhow::anyhow!(
-                    "parse opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
-                )
-            })?);
-    }
-    if let Some(evidence_summary_json) = evidence_summary_json {
-        let evidence_body = std::fs::read_to_string(evidence_summary_json).map_err(|e| {
-            anyhow::anyhow!("read opt-in evidence summary JSON at {evidence_summary_json:?}: {e}")
-        })?;
-        opts.evidence_summary = Some(serde_json::from_str(&evidence_body).map_err(|e| {
-            anyhow::anyhow!("parse opt-in evidence summary JSON at {evidence_summary_json:?}: {e}")
-        })?);
-    }
-    if let Some(capability_ledger_report_packet_json) = capability_ledger_report_packet_json {
-        let ledger_body =
-            std::fs::read_to_string(capability_ledger_report_packet_json).map_err(|e| {
-                anyhow::anyhow!(
-                    "read BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
-                )
-            })?;
-        opts.capability_ledger_report_packet =
-            Some(serde_json::from_str(&ledger_body).map_err(|e| {
-                anyhow::anyhow!(
-                    "parse BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
-                )
-            })?);
-    }
-    let payload = biocortex_retrieval_opt_in_runtime_influence_review_request(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime-influence review request");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "request_ready={} request_state={} approval_state={}",
-        shadow_json_display(
-            boundary.get("runtime_influence_review_request_ready"),
-            "false"
-        ),
-        shadow_json_display(payload.get("review_request_state"), "blocked"),
-        shadow_json_display(payload.get("approval_state"), "not_approved")
-    );
-    println!(
-        "runtime_adapter_approved={} default_search_order_change_allowed={} ordering_behavior_connected={}",
-        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
-        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
-        shadow_json_display(payload.get("ordering_behavior_connected"), "false")
-    );
-    let evidence = payload.get("evidence_summary").unwrap_or(&Value::Null);
-    println!(
-        "redacted_evidence_aggregate_provided={} redacted_evidence_aggregate_ready={} post_runtime_evidence_summary_ready={}",
-        shadow_json_display(
-            evidence.get("redacted_evidence_aggregate_provided"),
-            "false"
-        ),
-        shadow_json_display(evidence.get("redacted_evidence_aggregate_ready"), "false"),
-        shadow_json_display(
-            evidence.get("post_runtime_evidence_summary_ready"),
-            "false"
-        )
-    );
-    println!(
-        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
         shadow_json_display(payload.get("calls_memory_search"), "false"),
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
