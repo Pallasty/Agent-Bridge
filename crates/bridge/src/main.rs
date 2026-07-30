@@ -7,7 +7,6 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial,
-    biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_readiness_packet,
@@ -69,6 +68,7 @@ use cli::{
     run_biocortex_retrieval_opt_in_authorization_decision_packet,
     run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
     run_biocortex_retrieval_opt_in_order_diff_packet,
+    run_biocortex_retrieval_opt_in_post_implementation_review_gate,
     run_biocortex_retrieval_opt_in_redacted_order_artifact,
     run_biocortex_retrieval_opt_in_review_packet,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
@@ -6076,12 +6076,30 @@ async fn real_main() -> Result<()> {
                 memory_key,
                 json,
             } => {
+                let packet_body = std::fs::read_to_string(authorization_decision_packet_json)
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in authorization decision packet JSON at {authorization_decision_packet_json:?}: {e}"
+                        )
+                    })?;
+                let authorization_decision_packet =
+                    serde_json::from_str(&packet_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in authorization decision packet JSON at {authorization_decision_packet_json:?}: {e}"
+                        )
+                    })?;
+                let plan_body = std::fs::read_to_string(opt_in_plan_json).map_err(|e| {
+                    anyhow::anyhow!("read opt-in experiment plan JSON at {opt_in_plan_json:?}: {e}")
+                })?;
+                let opt_in_plan = serde_json::from_str(&plan_body).map_err(|e| {
+                    anyhow::anyhow!(
+                        "parse opt-in experiment plan JSON at {opt_in_plan_json:?}: {e}"
+                    )
+                })?;
                 run_biocortex_retrieval_opt_in_post_implementation_review_gate(
-                    authorization_decision_packet_json,
-                    opt_in_plan_json,
                     BioCortexRetrievalOptInPostImplementationReviewGateOptions {
-                        authorization_decision_packet: Value::Null,
-                        opt_in_plan: Value::Null,
+                        authorization_decision_packet,
+                        opt_in_plan,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -11513,66 +11531,6 @@ async fn run_biocortex_retrieval_opt_in_runtime_trial(
     );
     println!(
         "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false")
-    );
-    Ok(())
-}
-
-async fn run_biocortex_retrieval_opt_in_post_implementation_review_gate(
-    authorization_decision_packet_json: &std::path::Path,
-    opt_in_plan_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInPostImplementationReviewGateOptions,
-    as_json: bool,
-) -> Result<()> {
-    let packet_body = std::fs::read_to_string(authorization_decision_packet_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in authorization decision packet JSON at {authorization_decision_packet_json:?}: {e}"
-        )
-    })?;
-    opts.authorization_decision_packet = serde_json::from_str(&packet_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in authorization decision packet JSON at {authorization_decision_packet_json:?}: {e}"
-        )
-    })?;
-    let plan_body = std::fs::read_to_string(opt_in_plan_json).map_err(|e| {
-        anyhow::anyhow!("read opt-in experiment plan JSON at {opt_in_plan_json:?}: {e}")
-    })?;
-    opts.opt_in_plan = serde_json::from_str(&plan_body).map_err(|e| {
-        anyhow::anyhow!("parse opt-in experiment plan JSON at {opt_in_plan_json:?}: {e}")
-    })?;
-    let payload = biocortex_retrieval_opt_in_post_implementation_review_gate(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in post-implementation review gate");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "ready_for_human_runtime_influence_review={} review_state={} approval_state={}",
-        shadow_json_display(
-            boundary.get("ready_for_human_runtime_influence_review"),
-            "false"
-        ),
-        shadow_json_display(payload.get("review_state"), "blocked"),
-        shadow_json_display(payload.get("approval_state"), "not_approved")
-    );
-    println!(
-        "runtime_adapter_approved={} default_search_order_change_allowed={} ordering_behavior_connected={}",
-        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
-        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
-        shadow_json_display(payload.get("ordering_behavior_connected"), "false")
-    );
-    println!(
-        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string()),
         shadow_json_display(payload.get("calls_memory_search"), "false"),
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
