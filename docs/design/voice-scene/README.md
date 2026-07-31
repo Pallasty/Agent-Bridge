@@ -192,6 +192,19 @@ Hugging Face raw transfer was unavailable. The receipt therefore retains
 `reference_generation_ready=false` and blocks reference-compatible
 multi-frame claims despite structural compatibility.
 
+S5P uses `scripts/story_voice_provenance_remediation_decision.py` to make the
+next provenance action executable and fail closed. Published converter
+evidence identifies the official base model but does not bind the current ONNX
+artifacts to an upstream revision, so path A cannot currently close lineage.
+The decision selects path B: an isolated re-export from immutable official
+Qwen commit `6c3e96b6a2c593ce3e546ee699a5d944de81850e`, beginning with a CPU FP32
+reference lane before quantization comparison. Path A remains reopenable only
+with artifact-bound publisher evidence. The
+`s5p_provenance_remediation_decision.json` receipt records no downloads,
+converter or graph execution, snapshot replacement, GPU use, playback, or
+global memory/forum writes. Weight acquisition and every later adoption step
+remain separately authorized; `reference_generation_ready=false`.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
