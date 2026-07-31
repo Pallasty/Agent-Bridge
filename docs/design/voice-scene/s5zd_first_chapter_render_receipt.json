@@ -1,6 +1,6 @@
 {
   "schema": "agent_bridge.story_bounded_chapter_render.v1",
-  "status": "machine_verified_owner_feedback_pending",
+  "status": "owner_accepted",
   "voice_plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
   "scope": {
     "selected_segments": 4,
@@ -101,7 +101,15 @@
   },
   "playback": {
     "authorized": true,
-    "completed": false
+    "completed": true,
+    "backend": "pw-play"
+  },
+  "owner_feedback": {
+    "narrative_continuity": "自然连贯",
+    "clarity": "清晰可辨识",
+    "intervals": "适中",
+    "overall": "已经很不错",
+    "verbatim_zh": "连贯自然，中间间隔也适中，已经很不错了。"
   },
   "claims": {
     "first_chapter_scope_enforced": true,
@@ -109,8 +117,9 @@
     "all_audio_hashes_recomputed": true,
     "segment_machine_gate_passed": true,
     "assembly_machine_gate_passed": true,
-    "owner_accepted": false,
+    "owner_accepted": true,
+    "bounded_first_chapter_admitted": true,
     "production_story_command_registered": false
   },
-  "next_gate": "owner_first_chapter_playback_feedback"
+  "next_gate": "cross_chapter_continuity_trial"
 }

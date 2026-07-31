@@ -15,6 +15,8 @@ fail closed. The verifier independently recomputes every WAV SHA-256 instead of
 trusting declared validity.
 
 The four segments are assembled with 0.65, 1.0, and 1.0-second pauses into an
-11.05-second mono PCM16 24 kHz artifact. Machine verification is complete;
-human judgments about chapter-level narration flow, attribution splitting, and
-role transition remain pending playback.
+11.05-second mono PCM16 24 kHz artifact. Owner playback accepted it as coherent,
+natural, clearly identifiable, and appropriately paced. S5ZD is admitted for
+this bounded first chapter. This does not generalize acceptance to arbitrary
+chapters or register the production `/story` command; cross-chapter continuity
+is the next gate.

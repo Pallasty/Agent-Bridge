@@ -354,7 +354,9 @@ Dylan audition was reused. Segment verification recomputes WAV hashes and
 requires exact non-entity ASR; a finite allowlist handles the inherently
 homophonic Chinese names while explicitly not claiming Hanzi identity. The
 11.05-second PCM16 artifact uses 0.65, 1.0, and 1.0-second pauses. Machine gates
-are complete, but owner chapter-flow acceptance remains pending playback.
+passed, and owner playback accepted its continuity, naturalness, clarity, and
+intervals. This admits the bounded first chapter only; cross-chapter continuity
+is next, while production `/story` registration remains out of scope.
 
 ## S4 realtime story interaction
 
