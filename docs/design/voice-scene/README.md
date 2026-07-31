@@ -40,6 +40,8 @@ express. A packet is S0-valid only when it passes both.
 - `story_render_manifest.schema.json`: S2 segment/chapter render evidence.
 - `story_command_integration_preflight.schema.json`: S5ZF non-actuating
   `/story` integration packet.
+- `story_command_registration_contract.schema.json`: S5ZG default-hidden MCP
+  registration proposal.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
@@ -381,6 +383,16 @@ gaps plus the preceding 2.2-second scene break. Runtime flags and unavailable
 chapters fail closed. All runtime effects remain false: this does not register
 `/story`, execute ONNX, render or play audio, or write cache or memory. A static
 production-registration contract is the next gate.
+
+S5ZG adds `scripts/story_command_registration_contract.py`. It proposes the
+Niche `story_command_preflight` MCP boundary with no default, codex-essential,
+or codex-voice exposure. The accepted input has only a TXT/Markdown path,
+explicit chapter selector, and `dry_run=true`; its handler remains a future
+isolated adapter with subprocess use forbidden. The durable contract binds the
+S5ZF receipt, implementation, output schema, and the exact inspected Rust
+registry source hash, while a negative control rejects a pre-existing tool-name
+collision. No Rust registry is changed and no runtime tool exists. An isolated
+in-process preflight adapter is the next gate.
 
 ## S4 realtime story interaction
 

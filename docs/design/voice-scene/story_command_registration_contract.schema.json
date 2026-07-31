@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/story_command_static_registration_contract.v1.json",
+  "title": "Agent-Bridge static story command registration contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "tool", "activation", "handler", "execution_authorized", "runtime_effects", "contract_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_command_static_registration_contract.v1"},
+    "status": {"const": "story_command_static_registration_contract_reviewable"},
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "proposed_tier", "proposed_toolset_extras", "input_schema", "output_schema"],
+      "properties": {
+        "name": {"const": "story_command_preflight"},
+        "description": {"type": "string", "minLength": 1},
+        "proposed_tier": {"const": "Niche"},
+        "proposed_toolset_extras": {"type": "array", "maxItems": 0},
+        "input_schema": {
+          "type": "object",
+          "required": ["type", "additionalProperties", "properties", "required"],
+          "properties": {
+            "type": {"const": "object"},
+            "additionalProperties": {"const": false},
+            "properties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_path", "start", "dry_run"],
+              "properties": {
+                "source_path": {"type": "object"},
+                "start": {"type": "object"},
+                "dry_run": {
+                  "type": "object",
+                  "required": ["const"],
+                  "properties": {"const": {"const": true}}
+                }
+              }
+            },
+            "required": {"const": ["source_path", "start", "dry_run"]}
+          }
+        },
+        "output_schema": {"const": "agent_bridge.story_command_integration_preflight.v1"}
+      }
+    },
+    "activation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compiled_registered", "current_registry_collision", "registry_source_path", "registry_source_sha256", "default_exposed", "codex_essential_exposed", "codex_voice_exposed", "activation_env", "activation_env_required_value", "activation_env_evaluated"],
+      "properties": {
+        "compiled_registered": {"const": false},
+        "current_registry_collision": {"const": false},
+        "registry_source_path": {"type": "string", "minLength": 1},
+        "registry_source_sha256": {"$ref": "#/$defs/sha256"},
+        "default_exposed": {"const": false},
+        "codex_essential_exposed": {"const": false},
+        "codex_voice_exposed": {"const": false},
+        "activation_env": {"const": "AB_STORY_COMMAND_PREFLIGHT_ENABLE"},
+        "activation_env_required_value": {"const": "1"},
+        "activation_env_evaluated": {"const": false}
+      }
+    },
+    "handler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "preflight_script_path", "preflight_script_sha256", "preflight_schema_path", "preflight_schema_sha256", "accepted_preflight_receipt_path", "accepted_preflight_sha256", "subprocess_allowed"],
+      "properties": {
+        "kind": {"const": "future_isolated_python_adapter"},
+        "preflight_script_path": {"type": "string", "minLength": 1},
+        "preflight_script_sha256": {"$ref": "#/$defs/sha256"},
+        "preflight_schema_path": {"type": "string", "minLength": 1},
+        "preflight_schema_sha256": {"$ref": "#/$defs/sha256"},
+        "accepted_preflight_receipt_path": {"type": "string", "minLength": 1},
+        "accepted_preflight_sha256": {"$ref": "#/$defs/sha256"},
+        "subprocess_allowed": {"const": false}
+      }
+    },
+    "execution_authorized": {"const": false},
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modified_rust_registry", "registered_story_command", "loaded_model", "executed_onnx", "rendered_audio", "played_audio", "wrote_cache", "wrote_memory"],
+      "properties": {
+        "modified_rust_registry": {"const": false},
+        "registered_story_command": {"const": false},
+        "loaded_model": {"const": false},
+        "executed_onnx": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false},
+        "wrote_cache": {"const": false},
+        "wrote_memory": {"const": false}
+      }
+    },
+    "contract_sha256": {"$ref": "#/$defs/sha256"},
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_boundary_defined", "implementation_and_schema_hash_bound", "current_registry_collision_absent", "default_hidden", "static_registration_contract_ready", "runtime_registration_ready"],
+      "properties": {
+        "input_boundary_defined": {"const": true},
+        "implementation_and_schema_hash_bound": {"const": true},
+        "current_registry_collision_absent": {"const": true},
+        "default_hidden": {"const": true},
+        "static_registration_contract_ready": {"const": true},
+        "runtime_registration_ready": {"const": false}
+      }
+    },
+    "next_gate": {"const": "isolated_story_preflight_adapter"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
