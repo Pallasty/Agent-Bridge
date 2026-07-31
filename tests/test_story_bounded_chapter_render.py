@@ -27,7 +27,9 @@ def voice_plan() -> dict:
         ("event_2.narration", "Vivian", "林默说。", "speaker_turn", 1.0),
         ("event_2.dialogue", "Dylan", "快走。", "speaker_turn", 1.0),
         ("event_3", "Vivian", "门关上了。", "scene_break", 2.2),
-        ("event_4", "Serena", "我听见了。", None, None),
+        ("event_4.narration", "Vivian", "苏岚回答。", "speaker_turn", 1.0),
+        ("event_4.dialogue", "Serena", "我听见了。", "speaker_turn", 1.0),
+        ("event_5", "Vivian", "门打开了。", None, None),
     ]
     for index, (event_id, speaker, text, transition, pause) in enumerate(rows):
         row = {
@@ -60,7 +62,24 @@ def test_first_chapter_requests_stop_at_scene_break_without_trailing_pause() -> 
     ]
     assert result["assembly_gap_seconds"] == [0.65, 1.0, 1.0]
     assert all(row["voice_plan_sha256"] == "1" * 64 for row in result["requests"])
-    assert result["excluded_later_segments"] == 1
+    assert result["excluded_later_segments"] == 3
+
+
+def test_second_chapter_requests_inherit_scene_gap_and_internal_pauses() -> None:
+    result = load_module().build_chapter_requests(voice_plan(), chapter_number=2)
+
+    assert [row["event_id"] for row in result["requests"]] == [
+        "event_4.narration",
+        "event_4.dialogue",
+        "event_5",
+    ]
+    assert result["assembly_gap_seconds"] == [1.0, 1.0]
+    assert result["preceding_scene_gap_seconds"] == 2.2
+    assert result["excluded_earlier_segments"] == 4
+    assert result["excluded_later_segments"] == 0
+
+    with pytest.raises(ValueError, match="chapter number out of range"):
+        load_module().build_chapter_requests(voice_plan(), chapter_number=3)
 
 
 def test_first_chapter_requests_require_review_ready_plan() -> None:

@@ -46,7 +46,9 @@ def _canonicalize_named_entities(
     return normalized
 
 
-def build_first_chapter_requests(plan: dict[str, Any]) -> dict[str, Any]:
+def build_chapter_requests(
+    plan: dict[str, Any], *, chapter_number: int
+) -> dict[str, Any]:
     if (
         plan.get("status") != "chapter_voice_plan_reviewable"
         or plan.get("chapter_render_ready") is not True
@@ -56,15 +58,22 @@ def build_first_chapter_requests(plan: dict[str, Any]) -> dict[str, Any]:
     if not all_segments:
         raise ValueError("chapter voice plan empty")
 
-    selected = []
-    found_scene_break = False
+    chapters: list[list[dict[str, Any]]] = []
+    scene_gaps: list[float | None] = [None]
+    current = []
     for segment in all_segments:
-        selected.append(segment)
+        current.append(segment)
         if segment.get("transition_after") == "scene_break":
-            found_scene_break = True
-            break
-    if not found_scene_break and len(selected) != len(all_segments):
-        raise ValueError("first chapter boundary unresolved")
+            chapters.append(current)
+            current = []
+            scene_gaps.append(segment["pause_after_seconds"])
+    if current:
+        chapters.append(current)
+    if chapter_number < 1 or chapter_number > len(chapters):
+        raise ValueError("chapter number out of range")
+    selected = chapters[chapter_number - 1]
+    earlier_count = sum(len(chapter) for chapter in chapters[: chapter_number - 1])
+    later_count = sum(len(chapter) for chapter in chapters[chapter_number:])
 
     requests = []
     for index, segment in enumerate(selected):
@@ -83,17 +92,24 @@ def build_first_chapter_requests(plan: dict[str, Any]) -> dict[str, Any]:
     gaps = [row["pause_after_seconds"] for row in selected[:-1]]
     return {
         "schema": "agent_bridge.story_bounded_chapter_requests.v1",
-        "status": "first_chapter_requests_reviewable",
+        "status": "chapter_requests_reviewable",
+        "chapter_number": chapter_number,
         "voice_plan_sha256": plan["plan_sha256"],
         "requests": requests,
         "assembly_gap_seconds": gaps,
-        "excluded_later_segments": len(all_segments) - len(selected),
+        "preceding_scene_gap_seconds": scene_gaps[chapter_number - 1],
+        "excluded_earlier_segments": earlier_count,
+        "excluded_later_segments": later_count,
         "runtime_effects": {
             "loaded_model": False,
             "rendered_audio": False,
             "played_audio": False,
         },
     }
+
+
+def build_first_chapter_requests(plan: dict[str, Any]) -> dict[str, Any]:
+    return build_chapter_requests(plan, chapter_number=1)
 
 
 def verify_segment_evidence(

@@ -1,0 +1,121 @@
+{
+  "schema": "agent_bridge.story_cross_chapter_continuity.v1",
+  "status": "machine_verified_owner_feedback_pending",
+  "voice_plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
+  "scope": {
+    "chapter_number": 2,
+    "selected_segments": 3,
+    "excluded_earlier_segments": 4,
+    "excluded_later_segments": 0,
+    "preceding_transition": "scene_break",
+    "preceding_scene_gap_seconds": 2.2,
+    "first_chapter_rerendered": false
+  },
+  "model": {
+    "name": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "variant": "community_cpu_int4_onnx",
+    "inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+    "provider_policy": "cpu_only_gpu_hidden"
+  },
+  "segments": [
+    {
+      "event_id": "event_75676e738dacbfa37b90.narration",
+      "text": "苏岚回答。",
+      "speaker": "Vivian",
+      "generated_codec_frames": 16,
+      "frame_cap": 100,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5ze-cross-chapter-20260731/00-vivian.wav",
+      "audio_sha256": "94c56d143ad196df5a078c2c4919c9112e674b5d04dd7b63a8dbacef2ea40c88",
+      "duration_seconds": 1.28,
+      "asr_transcript": "苏兰回答",
+      "reused": false
+    },
+    {
+      "event_id": "event_75676e738dacbfa37b90.dialogue",
+      "text": "我听见钟声了。",
+      "speaker": "Serena",
+      "generated_codec_frames": 18,
+      "frame_cap": 100,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5z-three-role-excerpt-20260731/02-serena.wav",
+      "audio_sha256": "1a638f1cfc33902eb41e051b57beda1a3b7de41b73d94b3fe8636ef3cf2d0cba",
+      "duration_seconds": 1.44,
+      "asr_transcript": "我听见钟声了",
+      "reused": true
+    },
+    {
+      "event_id": "event_ef9cc37b3f50ca6583d7",
+      "text": "苏岚打开了旧木门。",
+      "speaker": "Vivian",
+      "generated_codec_frames": 27,
+      "frame_cap": 100,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5ze-cross-chapter-20260731/02-vivian.wav",
+      "audio_sha256": "41ccb934d6d112cef0d587004b20441dec19f57aea8a01184849e8584a703997",
+      "duration_seconds": 2.16,
+      "asr_transcript": "苏兰打开了旧木门",
+      "reused": false
+    }
+  ],
+  "asr_policy": {
+    "non_entity_text_normalized_exact": true,
+    "normalized_hanzi_exact": false,
+    "named_entity_pronunciation_equivalent": true,
+    "bounded_named_entity_variants": {
+      "苏岚": ["苏兰"]
+    },
+    "claim_boundary": "pronunciation_equivalence_not_hanzi_identity"
+  },
+  "chapter_2_assembly": {
+    "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5ze-cross-chapter-20260731/chapter-2.wav",
+    "audio_sha256": "104d6b6152dd9dd9057c2c9a1c261f884c15a56d8d2be506ad8f7b55078fb6aa",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "gap_seconds": [1.0, 1.0],
+    "frames": 165120,
+    "duration_seconds": 6.88,
+    "rms": 0.07721891148428575,
+    "peak": 0.509979248046875,
+    "finite": true,
+    "non_silent": true,
+    "combined_asr_transcript": "苏兰回答我听见钟声了苏兰打开了旧木门"
+  },
+  "cross_chapter_assembly": {
+    "chapter_1_audio_sha256": "650a842a428ed454f12a98bf5e9e07ca8faddd3bfe77dfb33ed5b7d535e99339",
+    "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5ze-cross-chapter-20260731/chapters-1-2.wav",
+    "audio_sha256": "367c8393d466fafdf6cb998bf10675ae3ea01d9831b7ad26c31042bc5d0a86ba",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "cross_chapter_gap_seconds": 2.2,
+    "frames": 483120,
+    "duration_seconds": 20.13,
+    "rms": 0.08391879289986046,
+    "peak": 0.577423095703125,
+    "finite": true,
+    "non_silent": true,
+    "combined_asr_transcript": "林墨又名阿莫走进车站林墨对苏兰说我们得马上离开林墨是苏兰的朋友苏兰回答我听见钟声了苏兰打开了旧木门",
+    "all_non_entity_content_present": true,
+    "named_entity_pronunciation_equivalent": true
+  },
+  "playback": {
+    "authorized": true,
+    "completed": false,
+    "backend": "pw-play"
+  },
+  "owner_feedback": null,
+  "claims": {
+    "chapter_selection_scope_enforced": true,
+    "all_segments_natural_eos": true,
+    "all_audio_hashes_recomputed": true,
+    "segment_machine_gate_passed": true,
+    "chapter_2_machine_gate_passed": true,
+    "cross_chapter_machine_gate_passed": true,
+    "owner_accepted": false,
+    "cross_chapter_continuity_admitted": false,
+    "production_story_command_registered": false
+  },
+  "next_gate": "owner_cross_chapter_playback_review"
+}

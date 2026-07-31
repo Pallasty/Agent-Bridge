@@ -358,6 +358,16 @@ passed, and owner playback accepted its continuity, naturalness, clarity, and
 intervals. This admits the bounded first chapter only; cross-chapter continuity
 is next, while production `/story` registration remains out of scope.
 
+S5ZE generalizes the bounded selector to any available 1-based chapter and
+fail-closes out-of-range requests. The three second-chapter segments reuse the
+accepted Serena line and generate only two new Vivian lines; the accepted first
+chapter is not rerendered. The 6.88-second second chapter uses two 1.0-second
+speaker-turn pauses, then joins chapter one with the source-derived 2.2-second
+scene break. Hash, PCM, finite/non-silent, segment ASR, and combined ASR gates
+pass for the 20.13-second result. Owner playback review remains pending, so
+cross-chapter continuity and production `/story` registration are not yet
+admitted.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
