@@ -34,6 +34,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_runtime_readiness_packet",
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff",
+        "run_lswr_interaction_feedback_consumption_preflight",
         "shadow_json_display",
     ] {
         assert!(
@@ -70,7 +71,9 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeReadinessPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeTransitionGate")
             && composition_root
-                .contains("BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff"),
+                .contains("BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff")
+            && composition_root
+                .contains("BioCortexOp::LswrInteractionFeedbackConsumptionPreflight"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -285,6 +288,18 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "main.rs must retain downstream handoff exact errors and optional-input semantics"
     );
     assert!(
+        composition_root.contains("std::fs::read_to_string(input_json)")
+            && composition_root.contains(
+                "read LSWR interaction feedback input JSON at {input_json:?}",
+            )
+            && composition_root.contains(
+                "parse LSWR interaction feedback input JSON at {input_json:?}",
+            )
+            && composition_root
+                .contains("run_lswr_interaction_feedback_consumption_preflight(input, *json)"),
+        "main.rs must retain LSWR preflight input custody, exact errors, and populated-input dispatch"
+    );
+    assert!(
         composition_root.contains("fn run_biocortex_retrieval_opt_in_runtime_trial("),
         "main.rs must retain the side-signal-capable runtime-trial executor"
     );
@@ -323,6 +338,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "std::fs::read_to_string(checkpoint_selection_json)",
         "std::fs::read_to_string(post_semantic_diverse_review_json)",
         "std::fs::read_to_string(controlled_trial_readiness_json)",
+        "std::fs::read_to_string(input_json)",
         "cli_env_truthy",
         "BIOCORTEX_RETRIEVAL_DISABLE_ENV",
         "run_biocortex_retrieval_opt_in_store_trial",

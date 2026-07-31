@@ -29,6 +29,7 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalOptInRuntimeTransitionGateOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
 };
+use ab_bridge::lswr_interaction_feedback::build_interaction_feedback_packet_consumption_preflight;
 use anyhow::Result;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -962,6 +963,45 @@ pub(crate) fn run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
             payload.pointer("/boundary_check/this_packet_executes_lswr_actions"),
             "false"
         )
+    );
+    Ok(())
+}
+
+pub(crate) fn run_lswr_interaction_feedback_consumption_preflight(
+    input: Value,
+    as_json: bool,
+) -> Result<()> {
+    let payload = build_interaction_feedback_packet_consumption_preflight(&input);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# LSWR interaction feedback consumption preflight");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} accepted={} input_kind={} source_kind={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.get("accepted"), "false"),
+        shadow_json_display(payload.get("input_kind"), "-"),
+        shadow_json_display(payload.get("source_kind"), "-")
+    );
+    println!(
+        "world_verdict={} reason={} blockers={}",
+        shadow_json_display(payload.get("world_verdict"), "-"),
+        shadow_json_display(payload.get("reason"), "-"),
+        payload
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string())
+    );
+    println!(
+        "writes_state={} store_access_required={} mcp_tool_registered={} implicit_live_runtime_lookup_attempted={}",
+        shadow_json_display(payload.pointer("/guardrails/writes_state"), "false"),
+        shadow_json_display(payload.pointer("/guardrails/store_access_required"), "false"),
+        shadow_json_display(payload.pointer("/guardrails/mcp_tool_registered"), "false"),
+        shadow_json_display(payload.get("implicit_live_runtime_lookup_attempted"), "false")
     );
     Ok(())
 }

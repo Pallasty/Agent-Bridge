@@ -30,7 +30,6 @@ use ab_bridge::biocortex_shadow::{
 use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions,
 };
-use ab_bridge::lswr_interaction_feedback::build_interaction_feedback_packet_consumption_preflight;
 use ab_bridge::seed_substrate as ab_seed_bridge;
 use ab_bridge::shadow_cortex as ab_shadow_cortex;
 use ab_bridge::warp_scheme;
@@ -74,7 +73,8 @@ use cli::{
     run_biocortex_retrieval_opt_in_runtime_transition_gate,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
     run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
-    run_substrate, shadow_json_display, A2uiOp, BrowserLiteOp, OperatorRequestOp, SubstrateOp,
+    run_lswr_interaction_feedback_consumption_preflight, run_substrate, shadow_json_display, A2uiOp,
+    BrowserLiteOp, OperatorRequestOp, SubstrateOp,
 };
 
 #[derive(Parser, Debug)]
@@ -6583,7 +6583,17 @@ async fn real_main() -> Result<()> {
                 )
             }
             BioCortexOp::LswrInteractionFeedbackConsumptionPreflight { input_json, json } => {
-                run_lswr_interaction_feedback_consumption_preflight(input_json, *json)
+                let body = std::fs::read_to_string(input_json).map_err(|e| {
+                    anyhow::anyhow!(
+                        "read LSWR interaction feedback input JSON at {input_json:?}: {e}"
+                    )
+                })?;
+                let input = serde_json::from_str(&body).map_err(|e| {
+                    anyhow::anyhow!(
+                        "parse LSWR interaction feedback input JSON at {input_json:?}: {e}"
+                    )
+                })?;
+                run_lswr_interaction_feedback_consumption_preflight(input, *json)
             }
             BioCortexOp::RetrievalOptInControlledOrderFixture {
                 runtime_influence_decision_packet_json,
@@ -11571,51 +11581,6 @@ fn read_optional_json_file(path: Option<&std::path::Path>, label: &str) -> Resul
     serde_json::from_str(&body)
         .map(Some)
         .map_err(|e| anyhow::anyhow!("parse opt-in {label} JSON at {path:?}: {e}"))
-}
-
-fn run_lswr_interaction_feedback_consumption_preflight(
-    input_json: &std::path::Path,
-    as_json: bool,
-) -> Result<()> {
-    let body = std::fs::read_to_string(input_json).map_err(|e| {
-        anyhow::anyhow!("read LSWR interaction feedback input JSON at {input_json:?}: {e}")
-    })?;
-    let input: Value = serde_json::from_str(&body).map_err(|e| {
-        anyhow::anyhow!("parse LSWR interaction feedback input JSON at {input_json:?}: {e}")
-    })?;
-    let payload = build_interaction_feedback_packet_consumption_preflight(&input);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# LSWR interaction feedback consumption preflight");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} accepted={} input_kind={} source_kind={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.get("accepted"), "false"),
-        shadow_json_display(payload.get("input_kind"), "-"),
-        shadow_json_display(payload.get("source_kind"), "-")
-    );
-    println!(
-        "world_verdict={} reason={} blockers={}",
-        shadow_json_display(payload.get("world_verdict"), "-"),
-        shadow_json_display(payload.get("reason"), "-"),
-        payload
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "writes_state={} store_access_required={} mcp_tool_registered={} implicit_live_runtime_lookup_attempted={}",
-        shadow_json_display(payload.pointer("/guardrails/writes_state"), "false"),
-        shadow_json_display(payload.pointer("/guardrails/store_access_required"), "false"),
-        shadow_json_display(payload.pointer("/guardrails/mcp_tool_registered"), "false"),
-        shadow_json_display(payload.get("implicit_live_runtime_lookup_attempted"), "false")
-    );
-    Ok(())
 }
 
 async fn run_biocortex_retrieval_opt_in_runtime_trial(
