@@ -38,6 +38,8 @@ express. A packet is S0-valid only when it passes both.
 - `voice_scene.schema.json`: Draft 2020-12 interchange schema.
 - `story_plan.schema.json`: S1 static story-ingest and review schema.
 - `story_render_manifest.schema.json`: S2 segment/chapter render evidence.
+- `story_command_integration_preflight.schema.json`: S5ZF non-actuating
+  `/story` integration packet.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
@@ -369,6 +371,16 @@ continuity and the overall result. Greater separation between the two female
 voices is recorded as a character-setting-dependent, non-blocking preference.
 Cross-chapter continuity is admitted; production `/story` registration remains
 out of scope, and its non-actuating integration preflight is the next gate.
+
+S5ZF adds `scripts/story_command_integration_preflight.py`. It rereads and
+hashes the requested source, confirms the selected chapter, binds the accepted
+mapping, role audition, voice plan, cross-chapter result, and model inference
+hash, then derives version-sensitive per-segment cache keys. The real chapter
+two packet selects three segments and preserves its two 1.0-second internal
+gaps plus the preceding 2.2-second scene break. Runtime flags and unavailable
+chapters fail closed. All runtime effects remain false: this does not register
+`/story`, execute ONNX, render or play audio, or write cache or memory. A static
+production-registration contract is the next gate.
 
 ## S4 realtime story interaction
 
