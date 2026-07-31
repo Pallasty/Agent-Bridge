@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_quantization_toolchain_audit.schema.json",
+  "title": "Agent-Bridge voice quantization toolchain audit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "snapshot",
+    "source_identity",
+    "converter",
+    "dependency_audit",
+    "quantization",
+    "existing_artifacts",
+    "artifact_size_evidence",
+    "mi50",
+    "arrowquant_image",
+    "decision",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_quantization_toolchain_audit.v1"
+    },
+    "status": {"const": "audited_lock_and_execution_blocked"},
+    "snapshot": {"type": "string"},
+    "source_identity": {"type": "object"},
+    "converter": {"type": "object"},
+    "dependency_audit": {"type": "object"},
+    "quantization": {"type": "object"},
+    "existing_artifacts": {"type": "object"},
+    "artifact_size_evidence": {"type": "object"},
+    "mi50": {"type": "object"},
+    "arrowquant_image": {"type": "object"},
+    "decision": {"type": "object"},
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started_container",
+        "installed_packages",
+        "downloaded_files",
+        "loaded_source_model",
+        "executed_converter",
+        "executed_quantizer",
+        "created_onnx",
+        "used_gpu",
+        "played_audio"
+      ],
+      "properties": {
+        "started_container": {"const": false},
+        "installed_packages": {"const": false},
+        "downloaded_files": {"const": false},
+        "loaded_source_model": {"const": false},
+        "executed_converter": {"const": false},
+        "executed_quantizer": {"const": false},
+        "created_onnx": {"const": false},
+        "used_gpu": {"const": false},
+        "played_audio": {"const": false}
+      }
+    }
+  }
+}

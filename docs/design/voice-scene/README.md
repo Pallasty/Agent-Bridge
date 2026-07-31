@@ -226,6 +226,20 @@ extra root `configuration.json` and a different README), so
 `packaging_exact_fixed_revision=false` and `conversion_ready=false`. No model
 or converter execution, snapshot replacement, GPU work, or playback occurs.
 
+S5S uses `scripts/story_voice_quantization_toolchain_audit.py` to inspect the
+community converter, its dependency declarations, existing precision variants,
+the MI50 lane, and the local `arrowquant-rocm:5.7` image without running any of
+them. Olive block-wise asymmetric RTN (`int4`, block 32) is implemented and is
+the selected candidate only after a fresh fixed-source CPU FP32 reference.
+The audit blocks execution because most dependencies float, two Transformers
+requirements conflict, `uv` is absent, and the converter writes inside its own
+snapshot. CUDA artifacts remain non-evidence for ROCm. The ArrowQuant image is
+not admitted for TTS because it is mutable, package-mutating, contains a
+network-tunnel build step, and lacks identified Olive/ORT versions.
+The community manifest-declared CPU INT4 payload is 1.962 GB versus 8.641 GB
+for FP32 (4.403× smaller), but size is not treated as parity, quality, or speed
+evidence.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
