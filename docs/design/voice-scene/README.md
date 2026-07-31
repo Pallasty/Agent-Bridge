@@ -347,6 +347,15 @@ seven voice segments with an empty review queue and
 `chapter_render_ready=true`; bounded first-chapter Qwen rendering is the next
 gate, not an action performed by S5ZC.
 
+S5ZD adds `scripts/story_bounded_chapter_render.py` and renders only the four
+S5ZC segments before the first scene break; all second-chapter segments remain
+excluded. Three Vivian segments naturally emitted EOS and the hash-identical
+Dylan audition was reused. Segment verification recomputes WAV hashes and
+requires exact non-entity ASR; a finite allowlist handles the inherently
+homophonic Chinese names while explicitly not claiming Hanzi identity. The
+11.05-second PCM16 artifact uses 0.65, 1.0, and 1.0-second pauses. Machine gates
+are complete, but owner chapter-flow acceptance remains pending playback.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

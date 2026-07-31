@@ -1,0 +1,116 @@
+{
+  "schema": "agent_bridge.story_bounded_chapter_render.v1",
+  "status": "machine_verified_owner_feedback_pending",
+  "voice_plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
+  "scope": {
+    "selected_segments": 4,
+    "excluded_later_segments": 3,
+    "stopped_at_transition": "scene_break",
+    "chapter_end_pause_included": false
+  },
+  "model": {
+    "name": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "variant": "community_cpu_int4_onnx",
+    "inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+    "provider_policy": "cpu_only_gpu_hidden"
+  },
+  "segments": [
+    {
+      "event_id": "event_1b5ea67f7f42735bcc9d",
+      "text": "林默（又名阿默）走进车站。",
+      "speaker": "Vivian",
+      "generated_codec_frames": 53,
+      "frame_cap": 100,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5zd-first-chapter-20260731/00-vivian.wav",
+      "audio_sha256": "6497b8b5e13c37f0609274fde9a498abaf2628a2e5c644cd11daf48eb9160735",
+      "duration_seconds": 4.24,
+      "asr_transcript": "林末又名阿莫走进车站",
+      "reused": false
+    },
+    {
+      "event_id": "event_91865f54bd0a137ae957.narration",
+      "text": "林默对苏岚说。",
+      "speaker": "Vivian",
+      "generated_codec_frames": 18,
+      "frame_cap": 100,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5zd-first-chapter-20260731/01-vivian.wav",
+      "audio_sha256": "a80a7784962ee0bbb17022be2e97dc6116d707d5459cd1bab7f53786ee8dbe89",
+      "duration_seconds": 1.44,
+      "asr_transcript": "林墨对苏兰说",
+      "reused": false
+    },
+    {
+      "event_id": "event_91865f54bd0a137ae957.dialogue",
+      "text": "我们得马上离开。",
+      "speaker": "Dylan",
+      "generated_codec_frames": 15,
+      "frame_cap": 100,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5z-three-role-excerpt-20260731/01-dylan.wav",
+      "audio_sha256": "8f4737565917ab0741e35cd258445d67a5159c8814e6d6d8cf3d3cc141bc7351",
+      "duration_seconds": 1.2,
+      "asr_transcript": "我们得马上离开",
+      "reused": true
+    },
+    {
+      "event_id": "event_14f990cfa1125874bdbd",
+      "text": "林默是苏岚的朋友。",
+      "speaker": "Vivian",
+      "generated_codec_frames": 19,
+      "frame_cap": 100,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5zd-first-chapter-20260731/03-vivian.wav",
+      "audio_sha256": "090c5954cdbf91ed1ae51ed8bd8558ac68904dd67522c31a440e5f74d47792fb",
+      "duration_seconds": 1.52,
+      "asr_transcript": "林墨是苏兰的朋友",
+      "reused": false
+    }
+  ],
+  "asr_policy": {
+    "non_entity_text_normalized_exact": true,
+    "normalized_hanzi_exact": false,
+    "named_entity_pronunciation_equivalent": true,
+    "bounded_named_entity_variants": {
+      "林默": ["林末", "林墨"],
+      "阿默": ["阿莫"],
+      "苏岚": ["苏兰"]
+    },
+    "claim_boundary": "pronunciation_equivalence_not_hanzi_identity"
+  },
+  "assembly": {
+    "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5zd-first-chapter-20260731/chapter-1.wav",
+    "audio_sha256": "650a842a428ed454f12a98bf5e9e07ca8faddd3bfe77dfb33ed5b7d535e99339",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "gap_seconds": [0.65, 1.0, 1.0],
+    "frames": 265200,
+    "duration_seconds": 11.05,
+    "rms": 0.09548115472481121,
+    "peak": 0.577423095703125,
+    "finite": true,
+    "non_silent": true
+  },
+  "combined_asr": {
+    "engine": "sherpa-onnx-sense-voice-int8-2024-07-17",
+    "transcript": "林墨又名阿莫走进车站林墨对苏兰说我们得马上离开林墨是苏兰的朋友",
+    "all_non_entity_content_present": true,
+    "named_entity_pronunciation_equivalent": true
+  },
+  "playback": {
+    "authorized": true,
+    "completed": false
+  },
+  "claims": {
+    "first_chapter_scope_enforced": true,
+    "all_segments_natural_eos": true,
+    "all_audio_hashes_recomputed": true,
+    "segment_machine_gate_passed": true,
+    "assembly_machine_gate_passed": true,
+    "owner_accepted": false,
+    "production_story_command_registered": false
+  },
+  "next_gate": "owner_first_chapter_playback_feedback"
+}
