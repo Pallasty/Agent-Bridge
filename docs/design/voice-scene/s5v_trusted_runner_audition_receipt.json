@@ -1,0 +1,60 @@
+{
+  "schema": "agent_bridge.voice_trusted_onnx_audition_receipt.v1",
+  "status": "owner_audition_accepted_with_length_followup",
+  "runner": {
+    "path": "scripts/story_voice_existing_onnx_trusted_runner.py",
+    "inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+    "tokenizer_fix_mistral_regex": true,
+    "local_files_only": true,
+    "provider_policy": "cpu_only_gpu_hidden"
+  },
+  "request": {
+    "text": "你好，我是小树。请听听这段声音是否清晰、自然。",
+    "speaker": "Vivian",
+    "language": "Chinese",
+    "greedy": true,
+    "seed": 0,
+    "max_new_tokens": 60
+  },
+  "audio": {
+    "path": "/Data/Models/agent-bridge/evidence/voice-scene/s5v-trusted-runner-20260730/vivian.wav",
+    "bytes": 230444,
+    "sha256": "a7e7dbe21c313dc9662062d2c0d81ee5aa6ddfc2e273b67c9212127394395180",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "frames": 115200,
+    "duration_seconds": 4.8,
+    "rms": 0.08507413417100906,
+    "peak": 0.498199462890625
+  },
+  "asr": {
+    "engine": "sherpa-onnx-sense-voice-int8-2024-07-17",
+    "language": "zh",
+    "emotion": "neutral",
+    "transcript": "你好，我是小树，请听听这段声音。",
+    "real_time_factor": 0.07,
+    "full_requested_text_recovered": false
+  },
+  "playback": {
+    "authorized": true,
+    "backend": "pw-play",
+    "completed": true
+  },
+  "owner_feedback": {
+    "audible": true,
+    "clarity": "clear",
+    "voice_impression": "gentle",
+    "verbatim_zh": "清晰，温柔。"
+  },
+  "claims": {
+    "this_candidate_human_audible": true,
+    "this_candidate_clear": true,
+    "this_candidate_gentle": true,
+    "full_text_completed": false,
+    "all_texts_natural": false,
+    "mi50_verified": false,
+    "production_admitted": false
+  },
+  "next_gate": "length_control_and_complete_sentence_audition"
+}

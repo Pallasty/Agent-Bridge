@@ -270,6 +270,16 @@ not played. A Transformers warning requires the next trusted runner to set
 `fix_mistral_regex=True`; therefore linguistic correctness and naturalness
 remain unclaimed.
 
+S5V adds `scripts/story_voice_existing_onnx_trusted_runner.py`, which
+SHA-256-binds the audited community inference source, forces offline tokenizer
+loading with `fix_mistral_regex=True`, hides all GPU devices, and produces a
+deterministic Vivian audition candidate. SenseVoice recognized the generated
+4.8-second WAV as `你好，我是小树，请听听这段声音。`; the 60-frame cap
+truncated the requested suffix. Owner-authorized playback completed and the
+owner reported `清晰，温柔。`. Those human claims apply only to this candidate;
+full-sentence completion, general naturalness, MI50, and production admission
+remain open.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
