@@ -7,8 +7,8 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial,
-    biocortex_retrieval_opt_in_runtime_transition_gate, biocortex_retrieval_opt_in_runtime_trial,
-    biocortex_retrieval_opt_in_store_trial, BioCortexReplayComparisonOptions,
+    biocortex_retrieval_opt_in_runtime_trial, biocortex_retrieval_opt_in_store_trial,
+    BioCortexReplayComparisonOptions,
     BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalCandidate,
     BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
@@ -71,6 +71,7 @@ use cli::{
     run_biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     run_biocortex_retrieval_opt_in_runtime_influence_review_request,
     run_biocortex_retrieval_opt_in_runtime_readiness_packet,
+    run_biocortex_retrieval_opt_in_runtime_transition_gate,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
     run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
     run_substrate, shadow_json_display, A2uiOp, BrowserLiteOp, OperatorRequestOp, SubstrateOp,
@@ -6487,21 +6488,34 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_opt_in_runtime_transition_gate(
-                runtime_readiness_packet_json,
-                BioCortexRetrievalOptInRuntimeTransitionGateOptions {
-                    runtime_readiness_packet: Value::Null,
-                    mode: mode.clone(),
-                    per_call_opt_in: *per_call_opt_in,
-                    operator_disabled: *operator_disabled
-                        || cli_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
-                    reviewer: reviewer.clone(),
-                    commit: commit.clone(),
-                    forum_post_id: forum_post_id.clone(),
-                    memory_key: memory_key.clone(),
-                },
-                *json,
-            ),
+            } => {
+                let readiness_body =
+                    std::fs::read_to_string(runtime_readiness_packet_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}: {e}"
+                        )
+                    })?;
+                let runtime_readiness_packet =
+                    serde_json::from_str(&readiness_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}: {e}"
+                        )
+                    })?;
+                run_biocortex_retrieval_opt_in_runtime_transition_gate(
+                    BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                        runtime_readiness_packet,
+                        mode: mode.clone(),
+                        per_call_opt_in: *per_call_opt_in,
+                        operator_disabled: *operator_disabled
+                            || cli_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+            }
             BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff {
                 checkpoint_selection_json,
                 post_semantic_diverse_review_json,
@@ -12028,64 +12042,6 @@ fn cli_env_falsey(key: &str) -> bool {
             )
         })
         .unwrap_or(false)
-}
-
-fn run_biocortex_retrieval_opt_in_runtime_transition_gate(
-    runtime_readiness_packet_json: &std::path::Path,
-    mut opts: BioCortexRetrievalOptInRuntimeTransitionGateOptions,
-    as_json: bool,
-) -> Result<()> {
-    let readiness_body = std::fs::read_to_string(runtime_readiness_packet_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}: {e}"
-        )
-    })?;
-    opts.runtime_readiness_packet = serde_json::from_str(&readiness_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}: {e}"
-        )
-    })?;
-
-    let payload = biocortex_retrieval_opt_in_runtime_transition_gate(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in runtime transition gate");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} transition_allowed={} mode={} per_call_opt_in={} operator_disabled={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.pointer("/transition/transition_allowed"), "false"),
-        shadow_json_display(payload.pointer("/requested_transition/mode"), "-"),
-        shadow_json_display(
-            payload.pointer("/requested_transition/per_call_opt_in"),
-            "false"
-        ),
-        shadow_json_display(
-            payload.pointer("/requested_transition/operator_disabled"),
-            "false"
-        )
-    );
-    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
-    println!(
-        "runtime_transition_allowed={} blockers={}",
-        shadow_json_display(boundary.get("runtime_transition_allowed"), "false"),
-        boundary
-            .get("blockers")
-            .and_then(Value::as_array)
-            .map(|items| items.len().to_string())
-            .unwrap_or_else(|| "0".to_string())
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(payload.get("changes_memory_search_order"), "false"),
-        shadow_json_display(payload.get("default_calls_unchanged"), "true")
-    );
-    Ok(())
 }
 
 fn run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(

@@ -15,6 +15,7 @@ pub(super) use biocortex::{
     run_biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     run_biocortex_retrieval_opt_in_runtime_influence_review_request,
     run_biocortex_retrieval_opt_in_runtime_readiness_packet,
+    run_biocortex_retrieval_opt_in_runtime_transition_gate,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
     run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, shadow_json_display,
 };

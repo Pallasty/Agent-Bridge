@@ -32,6 +32,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_runtime_influence_review_request",
         "run_biocortex_retrieval_opt_in_runtime_influence_decision_packet",
         "run_biocortex_retrieval_opt_in_runtime_readiness_packet",
+        "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "shadow_json_display",
     ] {
         assert!(
@@ -65,7 +66,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
                 .contains("BioCortexOp::RetrievalOptInRuntimeInfluenceReviewRequest")
             && composition_root
                 .contains("BioCortexOp::RetrievalOptInRuntimeInfluenceDecisionPacket")
-            && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeReadinessPacket"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeReadinessPacket")
+            && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeTransitionGate"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -86,7 +88,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
                 .contains("BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {")
             && composition_root
                 .contains("BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {")
-            && composition_root.contains("BioCortexRetrievalOptInRuntimeReadinessPacketOptions {"),
+            && composition_root.contains("BioCortexRetrievalOptInRuntimeReadinessPacketOptions {")
+            && composition_root.contains("BioCortexRetrievalOptInRuntimeTransitionGateOptions {"),
         "main.rs must retain retrieval option assembly"
     );
     assert!(
@@ -232,6 +235,18 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "main.rs must retain runtime-readiness input custody and exact errors"
     );
     assert!(
+        composition_root.contains("std::fs::read_to_string(runtime_readiness_packet_json)")
+            && composition_root.contains(
+                "read opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}",
+            )
+            && composition_root.contains(
+                "parse opt-in runtime readiness packet JSON at {runtime_readiness_packet_json:?}",
+            )
+            && composition_root.contains("operator_disabled: *operator_disabled")
+            && composition_root.contains("|| cli_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV)",),
+        "main.rs must retain runtime-transition input and operator-disable custody"
+    );
+    assert!(
         composition_root.contains("fn run_biocortex_retrieval_opt_in_runtime_trial("),
         "main.rs must retain the side-signal-capable runtime-trial executor"
     );
@@ -266,8 +281,10 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "std::fs::read_to_string(runtime_influence_decision_packet_json)",
         "std::fs::read_to_string(store_trial_json)",
         "std::fs::read_to_string(batch_diagnostics_json)",
+        "std::fs::read_to_string(runtime_readiness_packet_json)",
+        "cli_env_truthy",
+        "BIOCORTEX_RETRIEVAL_DISABLE_ENV",
         "run_biocortex_retrieval_opt_in_store_trial",
-        "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "SqliteStore",
         "BioCortexOp",
     ] {

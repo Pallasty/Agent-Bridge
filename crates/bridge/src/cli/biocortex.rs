@@ -11,6 +11,7 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_readiness_packet,
+    biocortex_retrieval_opt_in_runtime_transition_gate,
     biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexRetrievalApprovalPacketOptions,
@@ -23,6 +24,7 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
     BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     BioCortexRetrievalOptInRuntimeReadinessPacketOptions,
+    BioCortexRetrievalOptInRuntimeTransitionGateOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
 };
 use anyhow::Result;
@@ -857,6 +859,52 @@ pub(crate) fn run_biocortex_retrieval_opt_in_runtime_readiness_packet(
     println!(
         "runtime_readiness_ready={} blockers={}",
         shadow_json_display(boundary.get("runtime_readiness_ready"), "false"),
+        boundary
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string())
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false"),
+        shadow_json_display(payload.get("default_calls_unchanged"), "true")
+    );
+    Ok(())
+}
+
+pub(crate) fn run_biocortex_retrieval_opt_in_runtime_transition_gate(
+    opts: BioCortexRetrievalOptInRuntimeTransitionGateOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_opt_in_runtime_transition_gate(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in runtime transition gate");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} transition_allowed={} mode={} per_call_opt_in={} operator_disabled={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.pointer("/transition/transition_allowed"), "false"),
+        shadow_json_display(payload.pointer("/requested_transition/mode"), "-"),
+        shadow_json_display(
+            payload.pointer("/requested_transition/per_call_opt_in"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/requested_transition/operator_disabled"),
+            "false"
+        )
+    );
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "runtime_transition_allowed={} blockers={}",
+        shadow_json_display(boundary.get("runtime_transition_allowed"), "false"),
         boundary
             .get("blockers")
             .and_then(Value::as_array)
