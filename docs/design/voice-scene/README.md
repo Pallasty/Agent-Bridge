@@ -216,6 +216,16 @@ until offline acquisition rather than being inferred from mutable files. The
 `s5q_fixed_source_acquisition_plan.json` receipt records zero network,
 filesystem-creation, model-execution, GPU, and playback effects.
 
+S5R uses `scripts/story_voice_fixed_source_acquisition_gate.py` to hash every
+byte of the downloaded ModelScope `master` weight payload and compare it with
+the two SHA-256 values published at the immutable official Qwen revision.
+Both weight files match exactly and their Safetensors headers parse, so the
+receipt promotes only `weight_payload_fixed_revision_equivalent=true`.
+ModelScope packaging still differs from the Hugging Face tree (including an
+extra root `configuration.json` and a different README), so
+`packaging_exact_fixed_revision=false` and `conversion_ready=false`. No model
+or converter execution, snapshot replacement, GPU work, or playback occurs.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
