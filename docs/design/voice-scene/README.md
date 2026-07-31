@@ -240,6 +240,15 @@ The community manifest-declared CPU INT4 payload is 1.962 GB versus 8.641 GB
 for FP32 (4.403× smaller), but size is not treated as parity, quality, or speed
 evidence.
 
+S5S1 uses `scripts/story_voice_offline_lock_contract.py` to select an exact
+CPython 3.12 CPU conversion baseline and reserve a fail-closed isolated
+workspace layout. The receipt deliberately distinguishes exact critical direct
+pins from a complete transitive lock: the wheelhouse, full SHA-256 ledger,
+offline installation, and converter command all remain absent or blocked.
+TorchAudio and ONNX Runtime GenAI are excluded from the selected conversion
+lane because neither is used by the admitted converter path. No packages,
+directories, model files, ONNX graphs, GPU work, or audio are produced.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

@@ -1,0 +1,128 @@
+{
+  "schema": "agent_bridge.voice_offline_lock_contract.v1",
+  "status": "direct_lock_contract_ready_wheelhouse_pending",
+  "inputs": {
+    "s5s_status": "audited_lock_and_execution_blocked",
+    "weight_payload_fixed_revision_equivalent": true,
+    "converter_source_hashes": {
+      "optimize.py": "137dcdf7bb5065e49f707ac7a3a40c785993b04ab278e792689f6c368e87c102",
+      "user_script.py": "c980786c7c960fe2f7b598fb27179f30c2671f86c1d4767ad7211d425a50776b",
+      "requirements.txt": "60adc3f255ea8d806aa824c17c6e49484e39c341742f79094193fe0f891ee75f"
+    }
+  },
+  "dependency_lock": {
+    "python_abi": "cp312",
+    "platform": "manylinux_x86_64",
+    "critical_direct_pins": [
+      {
+        "name": "python",
+        "version": "3.12.13",
+        "source": "cpython"
+      },
+      {
+        "name": "torch",
+        "version": "2.12.0+cpu",
+        "source": "pytorch_cpu_index"
+      },
+      {
+        "name": "torchvision",
+        "version": "0.27.0+cpu",
+        "source": "pytorch_cpu_index"
+      },
+      {
+        "name": "transformers",
+        "version": "4.57.3",
+        "source": "pypi"
+      },
+      {
+        "name": "olive-ai",
+        "version": "0.13.0",
+        "source": "pypi"
+      },
+      {
+        "name": "onnx",
+        "version": "1.21.0",
+        "source": "pypi"
+      },
+      {
+        "name": "onnxruntime",
+        "version": "1.27.0",
+        "source": "pypi"
+      }
+    ],
+    "critical_direct_pins_exact": true,
+    "transitive_lock_complete": false,
+    "wheel_hash_ledger_complete": false,
+    "excluded": [
+      {
+        "name": "torchaudio",
+        "reason": "not_imported_by_converter_and_absent_from_official_torch_2_12_cpu_recipe"
+      },
+      {
+        "name": "onnxruntime-genai",
+        "reason": "modelbuilder_path_rejected_for_qwen_tts_and_not_imported_by_selected_converter"
+      }
+    ]
+  },
+  "workspace": {
+    "available_bytes_observed": 1672870338560,
+    "minimum_available_bytes": 137438953472,
+    "destinations_absent": true,
+    "destinations_disjoint": true,
+    "paths": {
+      "workspace": "/4TNVMe2/aiot_weights/qwen3_tts/reexport/6c3e96b6a2c593ce3e546ee699a5d944de81850e/workspace",
+      "wheelhouse": "/4TNVMe2/aiot_weights/qwen3_tts/toolchains/s5s1-py312-cpu/wheelhouse",
+      "venv": "/4TNVMe2/aiot_weights/qwen3_tts/toolchains/s5s1-py312-cpu/venv",
+      "source_model": "/4TNVMe2/aiot_weights/modelscope/models/Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+      "current_onnx": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+      "community_converter": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master"
+    },
+    "future_layout": {
+      "converter_copy": "/4TNVMe2/aiot_weights/qwen3_tts/reexport/6c3e96b6a2c593ce3e546ee699a5d944de81850e/workspace/source",
+      "cpu_fp32": "/4TNVMe2/aiot_weights/qwen3_tts/reexport/6c3e96b6a2c593ce3e546ee699a5d944de81850e/workspace/output/cpu_fp32",
+      "cpu_int4": "/4TNVMe2/aiot_weights/qwen3_tts/reexport/6c3e96b6a2c593ce3e546ee699a5d944de81850e/workspace/output/cpu_int4",
+      "cache": "/4TNVMe2/aiot_weights/qwen3_tts/reexport/6c3e96b6a2c593ce3e546ee699a5d944de81850e/workspace/cache"
+    },
+    "run_converter_inside_community_snapshot": false
+  },
+  "commands": {
+    "offline_install_argv_template": [
+      "/4TNVMe2/aiot_weights/qwen3_tts/toolchains/s5s1-py312-cpu/venv/bin/python",
+      "-m",
+      "pip",
+      "install",
+      "--no-index",
+      "--find-links",
+      "/4TNVMe2/aiot_weights/qwen3_tts/toolchains/s5s1-py312-cpu/wheelhouse",
+      "--require-hashes",
+      "-r",
+      "/4TNVMe2/aiot_weights/qwen3_tts/reexport/6c3e96b6a2c593ce3e546ee699a5d944de81850e/workspace/locks/requirements.lock"
+    ],
+    "converter_argv": null
+  },
+  "readiness": {
+    "offline_install_ready": false,
+    "converter_execution_ready": false
+  },
+  "blockers": [
+    "transitive_dependency_resolution_not_run",
+    "wheelhouse_not_materialized",
+    "wheel_sha256_ledger_incomplete",
+    "isolated_workspace_not_created",
+    "offline_install_not_verified",
+    "converter_execution_not_authorized"
+  ],
+  "next_gate": "materialize_and_hash_offline_wheelhouse",
+  "runtime_effects": {
+    "used_network": false,
+    "created_directories": false,
+    "created_external_files": false,
+    "installed_packages": false,
+    "loaded_source_model": false,
+    "executed_converter": false,
+    "executed_quantizer": false,
+    "created_onnx": false,
+    "used_gpu": false,
+    "played_audio": false
+  }
+}
