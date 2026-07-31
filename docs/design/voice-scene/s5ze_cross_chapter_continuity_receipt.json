@@ -102,7 +102,7 @@
   },
   "playback": {
     "authorized": true,
-    "completed": false,
+    "completed": true,
     "backend": "pw-play"
   },
   "owner_feedback": null,
