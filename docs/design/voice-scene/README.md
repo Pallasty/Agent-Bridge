@@ -50,6 +50,8 @@ express. A packet is S0-valid only when it passes both.
   JSON, SHA-256, and cache-key parity receipt.
 - `story_rust_source_ingest.schema.json`: S5ZK Rust source-byte, chapter-index,
   span, and selection parity receipt.
+- `story_rust_voice_plan.schema.json`: S5ZL Rust role-voice, source-span,
+  structural-transition, plan-hash, and cache-key parity receipt.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
@@ -434,6 +436,14 @@ Unicode character spans, and `from_start` or explicit-chapter selection. The
 non-UTF-8 files fail closed. Cast/event extraction and voice planning remain
 outside this unit, with no registry or runtime effects. Rust voice-plan parity
 is the next gate.
+
+S5ZL adds accepted role/pacing evidence validation, attributed-dialogue
+splitting, narrator/character voice projection, Unicode source spans, four
+explicit structural transitions, and canonical voice-plan hashing. A fixed
+five-segment vector reproduces both the Python plan digest and a
+model-provenance-bound segment cache key. The module remains unexported and
+does not execute a model or touch audio/cache/runtime state. Complete Rust
+preflight adapter parity is the next gate.
 
 ## S4 realtime story interaction
 

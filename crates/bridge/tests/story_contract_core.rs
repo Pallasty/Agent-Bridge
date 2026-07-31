@@ -4,8 +4,8 @@ mod story_contract;
 use serde_json::json;
 use std::path::Path;
 use story_contract::{
-    canonical_json, ingest_story_source, segment_cache_key, sha256_canonical_json,
-    SegmentCacheKeyInput, StoryRequest, StoryStart,
+    build_chapter_voice_plan, canonical_json, ingest_story_source, segment_cache_key,
+    sha256_canonical_json, SegmentCacheKeyInput, StoryRequest, StoryStart,
 };
 
 #[test]
@@ -145,4 +145,116 @@ fn source_ingest_fails_closed_for_missing_chapter_and_non_utf8() {
     let result = ingest_story_source(&invalid, &StoryStart::FromStart);
     std::fs::remove_file(&invalid).expect("remove invalid fixture");
     assert!(result.is_err());
+}
+
+fn voice_plan_inputs() -> (
+    serde_json::Value,
+    serde_json::Value,
+    serde_json::Value,
+    serde_json::Value,
+) {
+    let plan = json!({
+        "status": "story_plan_reviewable",
+        "source": {"sha256": "1".repeat(64)},
+        "chapters": [
+            {"chapter_id": "chapter_1", "selected": true, "source_span": {"line_start": 1, "line_end": 5}},
+            {"chapter_id": "chapter_2", "selected": true, "source_span": {"line_start": 6, "line_end": 9}}
+        ],
+        "voice_scene": {"timeline": [
+            {"event_id": "event_1", "sequence": 1, "source_ref": {"locator": "line=2;chars=5:10"}, "utterance": {"speaker_id": "narrator", "text": "雨声渐近。"}},
+            {"event_id": "event_2", "sequence": 2, "source_ref": {"locator": "line=4;chars=11:20"}, "utterance": {"speaker_id": "lin", "text": "林默说：“快走。”"}},
+            {"event_id": "event_3", "sequence": 3, "source_ref": {"locator": "line=5;chars=21:30"}, "utterance": {"speaker_id": "su", "text": "等等。"}},
+            {"event_id": "event_4", "sequence": 4, "source_ref": {"locator": "line=7;chars=31:40"}, "utterance": {"speaker_id": "narrator", "text": "门开了。"}}
+        ]}
+    });
+    let mapping = json!({
+        "source_sha256": "1".repeat(64),
+        "mapping_sha256": "2".repeat(64),
+        "roles": [
+            {"speaker_id": "narrator", "display_name": "旁白", "role_kind": "narrator", "qwen_speaker": "Vivian", "style_instruction": "旁白风格。", "voice_profile_version": 2},
+            {"speaker_id": "lin", "display_name": "林默", "role_kind": "character", "qwen_speaker": "Dylan", "style_instruction": "林默风格。", "voice_profile_version": 2},
+            {"speaker_id": "su", "display_name": "苏岚", "role_kind": "character", "qwen_speaker": "Serena", "style_instruction": "苏岚风格。", "voice_profile_version": 2}
+        ]
+    });
+    let role_acceptance = json!({
+        "mapping_sha256": "2".repeat(64),
+        "claims": {"owner_accepted_both": true, "voices_distinguishable": true, "chapter_render_ready": true}
+    });
+    let pacing = json!({
+        "policy": {"same_paragraph": 0.65, "speaker_turn": 1.0, "paragraph_break": 1.4, "scene_break": 2.2, "selection_authority": "explicit_structural_label", "freeform_model_guessing": false},
+        "claims": {"owner_pacing_accepted": true}
+    });
+    (plan, mapping, role_acceptance, pacing)
+}
+
+#[test]
+fn voice_plan_transitions_and_digest_match_python_oracle() {
+    let (plan, mapping, role_acceptance, pacing) = voice_plan_inputs();
+    let result =
+        build_chapter_voice_plan(&plan, &mapping, &role_acceptance, &pacing).expect("voice plan");
+
+    assert_eq!(
+        result["plan_sha256"],
+        "f6cbc5aa1eba5b4b5a722fe3be6224a17b8ffd14c95325b31d0ed060ad6a0113"
+    );
+    assert_eq!(
+        result["segments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["text"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["雨声渐近。", "林默说。", "快走。", "等等。", "门开了。"]
+    );
+    assert_eq!(
+        result["segments"].as_array().unwrap()[1]["source_span"],
+        json!({"line": 4, "char_start": 11, "char_end": 15, "source_text": "林默说：", "normalization": "terminal_colon_to_full_stop"})
+    );
+    assert_eq!(
+        result["segments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|row| row["transition_after"].as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "paragraph_break",
+            "speaker_turn",
+            "speaker_turn",
+            "scene_break"
+        ]
+    );
+}
+
+#[test]
+fn voice_plan_segment_cache_key_matches_python_oracle() {
+    let (plan, mapping, role_acceptance, pacing) = voice_plan_inputs();
+    let result =
+        build_chapter_voice_plan(&plan, &mapping, &role_acceptance, &pacing).expect("voice plan");
+    let segment = &result["segments"][0];
+    let key = segment_cache_key(&SegmentCacheKeyInput {
+        source_sha256: result["source_sha256"].as_str().unwrap().into(),
+        voice_plan_sha256: result["plan_sha256"].as_str().unwrap().into(),
+        event_id: segment["event_id"].as_str().unwrap().into(),
+        text: segment["text"].as_str().unwrap().into(),
+        qwen_speaker: segment["qwen_speaker"].as_str().unwrap().into(),
+        style_instruction: segment["style_instruction"].as_str().unwrap().into(),
+        voice_profile_version: segment["voice_profile_version"].as_u64().unwrap() as u32,
+        model_inference_sha256: "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75"
+            .into(),
+    })
+    .unwrap();
+
+    assert_eq!(
+        key,
+        "5599579c3cc255c44ba645750dc1fafa0d12904ecc158e85905c7f506703a7b6"
+    );
+}
+
+#[test]
+fn voice_plan_fails_closed_on_unaccepted_pacing() {
+    let (plan, mapping, role_acceptance, mut pacing) = voice_plan_inputs();
+    pacing["claims"]["owner_pacing_accepted"] = json!(false);
+
+    assert!(build_chapter_voice_plan(&plan, &mapping, &role_acceptance, &pacing).is_err());
 }

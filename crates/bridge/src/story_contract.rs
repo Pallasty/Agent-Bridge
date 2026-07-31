@@ -153,6 +153,8 @@ pub enum StoryContractError {
     InvalidCacheKey(&'static str),
     #[error("story source error: {0}")]
     InvalidSource(String),
+    #[error("story voice plan error: {0}")]
+    InvalidVoicePlan(String),
     #[error("cannot read story source {path}: {source}")]
     SourceIo {
         path: String,
@@ -253,6 +255,366 @@ pub fn ingest_story_source(
         },
         chapters,
     })
+}
+
+/// Build the deterministic S5ZL voice-plan projection without model or audio access.
+pub fn build_chapter_voice_plan(
+    plan: &Value,
+    mapping: &Value,
+    role_acceptance: &Value,
+    pacing_acceptance: &Value,
+) -> Result<Value, StoryContractError> {
+    if plan["status"] != "story_plan_reviewable" {
+        return voice_plan_error("story plan not reviewable");
+    }
+    if plan["source"]["sha256"] != mapping["source_sha256"] {
+        return voice_plan_error("source SHA-256 mismatch");
+    }
+    if mapping["mapping_sha256"] != role_acceptance["mapping_sha256"] {
+        return voice_plan_error("mapping SHA-256 mismatch");
+    }
+    for claim in [
+        "owner_accepted_both",
+        "voices_distinguishable",
+        "chapter_render_ready",
+    ] {
+        if role_acceptance["claims"][claim] != true {
+            return voice_plan_error("role voices not accepted");
+        }
+    }
+    if pacing_acceptance["claims"]["owner_pacing_accepted"] != true {
+        return voice_plan_error("pacing policy not accepted");
+    }
+    let policy = pacing_acceptance["policy"]
+        .as_object()
+        .ok_or_else(|| StoryContractError::InvalidVoicePlan("pause policy invalid".into()))?;
+    let expected_policy_keys = [
+        "same_paragraph",
+        "speaker_turn",
+        "paragraph_break",
+        "scene_break",
+        "selection_authority",
+        "freeform_model_guessing",
+    ];
+    if policy.len() != expected_policy_keys.len()
+        || expected_policy_keys
+            .iter()
+            .any(|key| !policy.contains_key(*key))
+        || policy["selection_authority"] != "explicit_structural_label"
+        || policy["freeform_model_guessing"] != false
+    {
+        return voice_plan_error("pause policy invalid");
+    }
+    let mut pause_policy = Map::new();
+    for transition in [
+        "same_paragraph",
+        "speaker_turn",
+        "paragraph_break",
+        "scene_break",
+    ] {
+        let seconds = policy[transition]
+            .as_f64()
+            .filter(|value| (0.0..=3.0).contains(value))
+            .ok_or_else(|| StoryContractError::InvalidVoicePlan("pause policy invalid".into()))?;
+        pause_policy.insert(transition.into(), Value::from(seconds));
+    }
+
+    let roles = mapping["roles"]
+        .as_array()
+        .ok_or_else(|| StoryContractError::InvalidVoicePlan("voice mapping invalid".into()))?;
+    let role_by_speaker = roles
+        .iter()
+        .filter_map(|role| role["speaker_id"].as_str().map(|id| (id, role)))
+        .collect::<BTreeMap<_, _>>();
+    let narrator_ids = roles
+        .iter()
+        .filter(|role| role["role_kind"] == "narrator")
+        .filter_map(|role| role["speaker_id"].as_str())
+        .collect::<Vec<_>>();
+    if narrator_ids.len() != 1 {
+        return voice_plan_error("unique narrator voice mapping required");
+    }
+
+    let mut timeline = plan["voice_scene"]["timeline"]
+        .as_array()
+        .cloned()
+        .ok_or_else(|| StoryContractError::InvalidVoicePlan("chapter timeline empty".into()))?;
+    if timeline.is_empty() {
+        return voice_plan_error("chapter timeline empty");
+    }
+    timeline.sort_by_key(|event| event["sequence"].as_u64().unwrap_or(u64::MAX));
+    let mut expanded = Vec::new();
+    let mut review_queue = Vec::new();
+    for event in timeline {
+        match split_attributed_dialogue(&event, narrator_ids[0])? {
+            (units, None) => expanded.extend(units),
+            (units, Some(reason)) => {
+                review_queue.push(serde_json::json!({
+                    "event_id": event["event_id"],
+                    "reason": reason,
+                }));
+                expanded.extend(units);
+            }
+        }
+    }
+
+    let mut segments = Vec::new();
+    for (index, event) in expanded.iter().enumerate() {
+        let speaker_id = required_str(&event["utterance"]["speaker_id"], "speaker_id")?;
+        let role = role_by_speaker.get(speaker_id).ok_or_else(|| {
+            StoryContractError::InvalidVoicePlan(format!("voice mapping missing:{speaker_id}"))
+        })?;
+        let text = required_str(&event["utterance"]["text"], "utterance text")?;
+        let source_span = if event.get("source_span").is_some() {
+            event["source_span"].clone()
+        } else {
+            source_span(event, 0, text.chars().count(), text, "none")?
+        };
+        let mut row = serde_json::json!({
+            "segment_index": index,
+            "event_id": event["event_id"],
+            "source_event_id": event.get("source_event_id").unwrap_or(&event["event_id"]),
+            "sequence": index + 1,
+            "source_line": source_line(event)?,
+            "source_span": source_span,
+            "speaker_id": speaker_id,
+            "display_name": role["display_name"],
+            "qwen_speaker": role["qwen_speaker"],
+            "style_instruction": role["style_instruction"],
+            "voice_profile_version": role["voice_profile_version"],
+            "text": text,
+        });
+        if let Some(following) = expanded.get(index + 1) {
+            let transition = transition_after(plan, event, following)?;
+            row["pause_after_seconds"] = pause_policy[transition].clone();
+            row["transition_after"] = Value::String(transition.into());
+        }
+        segments.push(row);
+    }
+
+    let chapter_render_ready = review_queue.is_empty();
+    let bound = serde_json::json!({
+        "source_sha256": plan["source"]["sha256"],
+        "mapping_sha256": mapping["mapping_sha256"],
+        "pause_policy": pause_policy,
+        "segments": segments,
+        "review_queue": review_queue,
+        "chapter_render_ready": chapter_render_ready,
+    });
+    let plan_sha256 = sha256_canonical_json(&bound)?;
+    Ok(serde_json::json!({
+        "schema": "agent_bridge.story_chapter_voice_plan.v1",
+        "status": "chapter_voice_plan_reviewable",
+        "source_sha256": bound["source_sha256"],
+        "mapping_sha256": bound["mapping_sha256"],
+        "pause_policy": bound["pause_policy"],
+        "segments": bound["segments"],
+        "review_queue": bound["review_queue"],
+        "chapter_render_ready": chapter_render_ready,
+        "plan_sha256": plan_sha256,
+        "runtime_effects": {
+            "loaded_model": false,
+            "rendered_audio": false,
+            "played_audio": false,
+            "registered_story_command": false,
+        },
+        "next_gate": if chapter_render_ready {"bounded_first_chapter_qwen_render"} else {"source_grounded_utterance_segmentation"},
+    }))
+}
+
+fn split_attributed_dialogue(
+    event: &Value,
+    narrator_speaker_id: &str,
+) -> Result<(Vec<Value>, Option<&'static str>), StoryContractError> {
+    let text = required_str(&event["utterance"]["text"], "utterance text")?;
+    let attributed = ["说", "说道", "问", "答道", "回答", "喊道", "低声说"]
+        .iter()
+        .any(|verb| {
+            text.contains(&format!("{verb}：“"))
+                || text.contains(&format!("{verb}:\""))
+                || text.contains(&format!("{verb}:\""))
+                || text.contains(&format!("{verb}\""))
+        });
+    if !attributed {
+        return Ok((vec![event.clone()], None));
+    }
+    let characters = text.chars().collect::<Vec<_>>();
+    let mut matches = Vec::new();
+    for (opening, closing) in [('“', '”'), ('"', '"')] {
+        let positions = characters
+            .iter()
+            .enumerate()
+            .filter_map(|(index, character)| (*character == opening).then_some(index))
+            .collect::<Vec<_>>();
+        let closing_positions = characters
+            .iter()
+            .enumerate()
+            .filter_map(|(index, character)| (*character == closing).then_some(index))
+            .collect::<Vec<_>>();
+        let valid_count = if opening == closing {
+            positions.len() == 2
+        } else {
+            positions.len() == 1 && closing_positions.len() == 1
+        };
+        let opening_index = positions.first().copied().unwrap_or(0);
+        let closing_index = closing_positions.last().copied().unwrap_or(0);
+        if valid_count
+            && opening_index > 0
+            && closing_index == characters.len() - 1
+            && closing_index > opening_index + 1
+        {
+            matches.push((opening_index, closing_index));
+        }
+    }
+    if matches.len() != 1 {
+        return Ok((
+            vec![event.clone()],
+            Some("attributed_dialogue_split_ambiguous"),
+        ));
+    }
+    let (opening_index, closing_index) = matches[0];
+    let prefix = characters[..opening_index].iter().collect::<String>();
+    let dialogue = characters[opening_index + 1..closing_index]
+        .iter()
+        .collect::<String>();
+    if prefix.trim().is_empty() || dialogue.trim().is_empty() {
+        return Ok((
+            vec![event.clone()],
+            Some("attributed_dialogue_split_ambiguous"),
+        ));
+    }
+    let (spoken_prefix, normalization) = if prefix.ends_with(['：', ':']) {
+        let mut characters = prefix.chars().collect::<Vec<_>>();
+        characters.pop();
+        (
+            format!("{}。", characters.iter().collect::<String>()),
+            "terminal_colon_to_full_stop",
+        )
+    } else {
+        (prefix.clone(), "none")
+    };
+    let mut narration = event.clone();
+    narration["event_id"] = Value::String(format!(
+        "{}.narration",
+        event["event_id"].as_str().unwrap_or_default()
+    ));
+    narration["source_event_id"] = event["event_id"].clone();
+    narration["source_span"] = source_span(event, 0, opening_index, &prefix, normalization)?;
+    narration["utterance"]["speaker_id"] = Value::String(narrator_speaker_id.into());
+    narration["utterance"]["text"] = Value::String(spoken_prefix);
+
+    let mut spoken = event.clone();
+    spoken["event_id"] = Value::String(format!(
+        "{}.dialogue",
+        event["event_id"].as_str().unwrap_or_default()
+    ));
+    spoken["source_event_id"] = event["event_id"].clone();
+    spoken["source_span"] =
+        source_span(event, opening_index + 1, closing_index, &dialogue, "none")?;
+    spoken["utterance"]["text"] = Value::String(dialogue);
+    Ok((vec![narration, spoken], None))
+}
+
+fn source_line(event: &Value) -> Result<u64, StoryContractError> {
+    let locator = required_str(&event["source_ref"]["locator"], "event source locator")?;
+    locator
+        .split(';')
+        .find_map(|part| part.strip_prefix("line=")?.parse().ok())
+        .ok_or_else(|| StoryContractError::InvalidVoicePlan("event source line missing".into()))
+}
+
+fn source_chars(event: &Value) -> Result<(usize, usize), StoryContractError> {
+    let locator = required_str(&event["source_ref"]["locator"], "event source locator")?;
+    let range = locator
+        .split(';')
+        .find_map(|part| part.strip_prefix("chars="))
+        .ok_or_else(|| StoryContractError::InvalidVoicePlan("event source chars missing".into()))?;
+    let (start, end) = range
+        .split_once(':')
+        .ok_or_else(|| StoryContractError::InvalidVoicePlan("event source chars invalid".into()))?;
+    let start = start
+        .parse::<usize>()
+        .map_err(|_| StoryContractError::InvalidVoicePlan("event source chars invalid".into()))?;
+    let end = end
+        .parse::<usize>()
+        .map_err(|_| StoryContractError::InvalidVoicePlan("event source chars invalid".into()))?;
+    if end <= start {
+        return voice_plan_error("event source chars invalid");
+    }
+    Ok((start, end))
+}
+
+fn source_span(
+    event: &Value,
+    local_start: usize,
+    local_end: usize,
+    source_text: &str,
+    normalization: &str,
+) -> Result<Value, StoryContractError> {
+    let (char_start, char_end) = source_chars(event)?;
+    if local_end <= local_start || char_start + local_end > char_end {
+        return voice_plan_error("derived source span invalid");
+    }
+    Ok(serde_json::json!({
+        "line": source_line(event)?,
+        "char_start": char_start + local_start,
+        "char_end": char_start + local_end,
+        "source_text": source_text,
+        "normalization": normalization,
+    }))
+}
+
+fn selected_chapter_id<'a>(plan: &'a Value, line: u64) -> Result<&'a str, StoryContractError> {
+    let matches = plan["chapters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|chapter| {
+            chapter["selected"] == true
+                && chapter["source_span"]["line_start"]
+                    .as_u64()
+                    .is_some_and(|start| start <= line)
+                && chapter["source_span"]["line_end"]
+                    .as_u64()
+                    .is_some_and(|end| line <= end)
+        })
+        .filter_map(|chapter| chapter["chapter_id"].as_str())
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return voice_plan_error("selected chapter unresolved");
+    }
+    Ok(matches[0])
+}
+
+fn transition_after(
+    plan: &Value,
+    current: &Value,
+    following: &Value,
+) -> Result<&'static str, StoryContractError> {
+    let current_line = source_line(current)?;
+    let next_line = source_line(following)?;
+    if next_line < current_line {
+        return voice_plan_error("timeline source lines must be strictly increasing");
+    }
+    if selected_chapter_id(plan, current_line)? != selected_chapter_id(plan, next_line)? {
+        Ok("scene_break")
+    } else if next_line - current_line > 1 {
+        Ok("paragraph_break")
+    } else if current["utterance"]["speaker_id"] != following["utterance"]["speaker_id"] {
+        Ok("speaker_turn")
+    } else {
+        Ok("same_paragraph")
+    }
+}
+
+fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str, StoryContractError> {
+    value
+        .as_str()
+        .ok_or_else(|| StoryContractError::InvalidVoicePlan(format!("{field} invalid")))
+}
+
+fn voice_plan_error<T>(message: &str) -> Result<T, StoryContractError> {
+    Err(StoryContractError::InvalidVoicePlan(message.into()))
 }
 
 #[derive(Debug)]
