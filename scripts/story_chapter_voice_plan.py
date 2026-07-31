@@ -18,6 +18,7 @@ TRANSITIONS = {
     "scene_break",
 }
 LINE_RE = re.compile(r"(?:^|;)line=(\d+)(?:;|$)")
+CHARS_RE = re.compile(r"(?:^|;)chars=(\d+):(\d+)(?:;|$)")
 ATTRIBUTED_DIALOGUE_RE = re.compile(r"(?:说|说道|问|答道|回答|喊道|低声说)[：:]?[“\"]")
 
 
@@ -34,6 +35,107 @@ def _line_number(event: dict[str, Any]) -> int:
     if match is None:
         raise ValueError(f"event source line missing:{event.get('event_id', '')}")
     return int(match.group(1))
+
+
+def _source_chars(event: dict[str, Any]) -> tuple[int, int]:
+    locator = event.get("source_ref", {}).get("locator", "")
+    match = CHARS_RE.search(locator)
+    if match is None:
+        raise ValueError(f"event source chars missing:{event.get('event_id', '')}")
+    start, end = int(match.group(1)), int(match.group(2))
+    if end <= start:
+        raise ValueError(f"event source chars invalid:{event.get('event_id', '')}")
+    return start, end
+
+
+def _source_span(
+    event: dict[str, Any],
+    *,
+    local_start: int,
+    local_end: int,
+    source_text: str,
+    normalization: str = "none",
+) -> dict[str, Any]:
+    char_start, char_end = _source_chars(event)
+    if local_start < 0 or local_end <= local_start or char_start + local_end > char_end:
+        raise ValueError(f"derived source span invalid:{event['event_id']}")
+    return {
+        "line": _line_number(event),
+        "char_start": char_start + local_start,
+        "char_end": char_start + local_end,
+        "source_text": source_text,
+        "normalization": normalization,
+    }
+
+
+def _split_attributed_dialogue(
+    event: dict[str, Any], narrator_speaker_id: str
+) -> tuple[list[dict[str, Any]], str | None]:
+    text = event["utterance"]["text"]
+    if not ATTRIBUTED_DIALOGUE_RE.search(text):
+        return [event], None
+    pairs = [("“", "”"), ('"', '"')]
+    matches = []
+    for opening, closing in pairs:
+        opening_index = text.find(opening)
+        closing_index = text.rfind(closing)
+        quote_count_valid = (
+            text.count(opening) == 2
+            if opening == closing
+            else text.count(opening) == 1 and text.count(closing) == 1
+        )
+        if (
+            opening_index > 0
+            and closing_index == len(text) - 1
+            and closing_index > opening_index + 1
+            and quote_count_valid
+        ):
+            matches.append((opening_index, closing_index))
+    if len(matches) != 1:
+        return [event], "attributed_dialogue_split_ambiguous"
+
+    opening_index, closing_index = matches[0]
+    prefix = text[:opening_index]
+    dialogue = text[opening_index + 1 : closing_index]
+    if not prefix.strip() or not dialogue.strip():
+        return [event], "attributed_dialogue_split_ambiguous"
+    spoken_prefix = prefix
+    normalization = "none"
+    if spoken_prefix.endswith(("：", ":")):
+        spoken_prefix = spoken_prefix[:-1] + "。"
+        normalization = "terminal_colon_to_full_stop"
+
+    base = {key: value for key, value in event.items() if key != "utterance"}
+    narration = {
+        **base,
+        "event_id": f"{event['event_id']}.narration",
+        "source_event_id": event["event_id"],
+        "source_span": _source_span(
+            event,
+            local_start=0,
+            local_end=opening_index,
+            source_text=prefix,
+            normalization=normalization,
+        ),
+        "utterance": {
+            **event["utterance"],
+            "speaker_id": narrator_speaker_id,
+            "text": spoken_prefix,
+        },
+    }
+    dialogue_event = {
+        **base,
+        "event_id": f"{event['event_id']}.dialogue",
+        "source_event_id": event["event_id"],
+        "source_span": _source_span(
+            event,
+            local_start=opening_index + 1,
+            local_end=closing_index,
+            source_text=dialogue,
+        ),
+        "utterance": {**event["utterance"], "text": dialogue},
+    }
+    return [narration, dialogue_event], None
 
 
 def _chapter_id(plan: dict[str, Any], line: int) -> str:
@@ -54,7 +156,7 @@ def _transition(
 ) -> str:
     current_line = _line_number(current)
     next_line = _line_number(following)
-    if next_line <= current_line:
+    if next_line < current_line:
         raise ValueError("timeline source lines must be strictly increasing")
     if _chapter_id(plan, current_line) != _chapter_id(plan, next_line):
         return "scene_break"
@@ -114,26 +216,41 @@ def build_chapter_voice_plan(
     )
     if not timeline:
         raise ValueError("chapter timeline empty")
-    segments = []
+    narrator_ids = [
+        row["speaker_id"]
+        for row in mapping["roles"]
+        if row.get("role_kind") == "narrator"
+    ]
+    if len(narrator_ids) != 1:
+        raise ValueError("unique narrator voice mapping required")
+    expanded_timeline = []
     review_queue = []
-    for index, event in enumerate(timeline):
+    for event in timeline:
+        units, error = _split_attributed_dialogue(event, narrator_ids[0])
+        expanded_timeline.extend(units)
+        if error:
+            review_queue.append({"event_id": event["event_id"], "reason": error})
+
+    segments = []
+    for index, event in enumerate(expanded_timeline):
         speaker_id = event["utterance"]["speaker_id"]
         role = roles.get(speaker_id)
         if role is None:
             raise ValueError(f"voice mapping missing:{speaker_id}")
         text = event["utterance"]["text"]
-        if role.get("role_kind") != "narrator" and ATTRIBUTED_DIALOGUE_RE.search(text):
-            review_queue.append(
-                {
-                    "event_id": event["event_id"],
-                    "reason": "attributed_dialogue_requires_source_grounded_split",
-                }
-            )
+        source_span = event.get("source_span") or _source_span(
+            event,
+            local_start=0,
+            local_end=len(text),
+            source_text=text,
+        )
         row = {
             "segment_index": index,
             "event_id": event["event_id"],
-            "sequence": event["sequence"],
+            "source_event_id": event.get("source_event_id", event["event_id"]),
+            "sequence": index + 1,
             "source_line": _line_number(event),
+            "source_span": source_span,
             "speaker_id": speaker_id,
             "display_name": role["display_name"],
             "qwen_speaker": role["qwen_speaker"],
@@ -141,8 +258,8 @@ def build_chapter_voice_plan(
             "voice_profile_version": role["voice_profile_version"],
             "text": text,
         }
-        if index + 1 < len(timeline):
-            transition = _transition(plan, event, timeline[index + 1])
+        if index + 1 < len(expanded_timeline):
+            transition = _transition(plan, event, expanded_timeline[index + 1])
             row["transition_after"] = transition
             row["pause_after_seconds"] = pause_policy[transition]
         segments.append(row)

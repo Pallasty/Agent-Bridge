@@ -81,6 +81,7 @@ def mapping() -> dict:
             {
                 "speaker_id": speaker_id,
                 "display_name": name,
+                "role_kind": "narrator" if speaker_id == "narrator" else "character",
                 "qwen_speaker": voice,
                 "style_instruction": f"{name}风格。",
                 "voice_profile_version": 2,
@@ -126,16 +127,46 @@ def test_chapter_plan_derives_structural_transitions_deterministically() -> None
     )
 
     assert result["status"] == "chapter_voice_plan_reviewable"
+    assert [row["text"] for row in result["segments"]] == [
+        "雨声渐近。",
+        "林默说。",
+        "快走。",
+        "等等。",
+        "门开了。",
+    ]
+    assert [row["qwen_speaker"] for row in result["segments"]] == [
+        "Vivian",
+        "Vivian",
+        "Dylan",
+        "Serena",
+        "Vivian",
+    ]
     assert [row["transition_after"] for row in result["segments"][:-1]] == [
         "paragraph_break",
+        "speaker_turn",
         "speaker_turn",
         "scene_break",
     ]
     assert [row["pause_after_seconds"] for row in result["segments"][:-1]] == [
         1.4,
         1.0,
+        1.0,
         2.2,
     ]
+    assert result["segments"][1]["source_span"] == {
+        "line": 4,
+        "char_start": 11,
+        "char_end": 15,
+        "source_text": "林默说：",
+        "normalization": "terminal_colon_to_full_stop",
+    }
+    assert result["segments"][2]["source_span"] == {
+        "line": 4,
+        "char_start": 16,
+        "char_end": 19,
+        "source_text": "快走。",
+        "normalization": "none",
+    }
     assert "transition_after" not in result["segments"][-1]
     assert result["runtime_effects"] == {
         "loaded_model": False,
@@ -143,14 +174,9 @@ def test_chapter_plan_derives_structural_transitions_deterministically() -> None
         "played_audio": False,
         "registered_story_command": False,
     }
-    assert result["chapter_render_ready"] is False
-    assert result["review_queue"] == [
-        {
-            "event_id": "event_2",
-            "reason": "attributed_dialogue_requires_source_grounded_split",
-        }
-    ]
-    assert result["next_gate"] == "source_grounded_utterance_segmentation"
+    assert result["chapter_render_ready"] is True
+    assert result["review_queue"] == []
+    assert result["next_gate"] == "bounded_first_chapter_qwen_render"
 
 
 def test_chapter_plan_fails_closed_on_unaccepted_pacing_and_provenance() -> None:
@@ -176,3 +202,35 @@ def test_chapter_plan_rejects_missing_role_mapping() -> None:
         load_module().build_chapter_voice_plan(
             story_plan(), changed, role_acceptance(), pacing_acceptance()
         )
+
+
+def test_unbalanced_attributed_dialogue_remains_review_blocked() -> None:
+    changed = story_plan()
+    changed["voice_scene"]["timeline"][1]["utterance"]["text"] = "林默说：“快走。"
+
+    result = load_module().build_chapter_voice_plan(
+        changed, mapping(), role_acceptance(), pacing_acceptance()
+    )
+
+    assert result["chapter_render_ready"] is False
+    assert result["review_queue"] == [
+        {
+            "event_id": "event_2",
+            "reason": "attributed_dialogue_split_ambiguous",
+        }
+    ]
+
+
+def test_single_ascii_quote_pair_is_source_grounded() -> None:
+    changed = story_plan()
+    changed["voice_scene"]["timeline"][1]["utterance"]["text"] = '林默说:"快走。"'
+
+    result = load_module().build_chapter_voice_plan(
+        changed, mapping(), role_acceptance(), pacing_acceptance()
+    )
+
+    derived = [
+        row for row in result["segments"] if row["source_event_id"] == "event_2"
+    ]
+    assert [row["text"] for row in derived] == ["林默说。", "快走。"]
+    assert result["review_queue"] == []

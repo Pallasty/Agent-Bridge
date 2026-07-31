@@ -337,6 +337,16 @@ split. The durable receipt remains `chapter_render_ready=false`; source-grounded
 utterance segmentation is the next gate. No model, audio, playback, or runtime
 `/story` registration is involved.
 
+S5ZC upgrades the chapter preflight with source-grounded attributed-dialogue
+segmentation. One complete Chinese or ASCII quote pair becomes a Vivian
+attribution segment and an accepted character dialogue segment, each bound to
+the original event and exact source character slice. Colon-to-full-stop is the
+only spoken punctuation normalization and is recorded explicitly. Ambiguous or
+unbalanced quotes remain blocked. The real fixture expands from five events to
+seven voice segments with an empty review queue and
+`chapter_render_ready=true`; bounded first-chapter Qwen rendering is the next
+gate, not an action performed by S5ZC.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
