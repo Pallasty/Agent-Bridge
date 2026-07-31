@@ -1,6 +1,6 @@
 {
   "schema": "agent_bridge.story_cross_chapter_continuity.v1",
-  "status": "machine_verified_owner_feedback_pending",
+  "status": "owner_accepted",
   "voice_plan_sha256": "36dc73518b4f166afb98c97403376df05b6245cfdb9d56abd8c2d1981ff120cb",
   "scope": {
     "chapter_number": 2,
@@ -105,7 +105,13 @@
     "completed": true,
     "backend": "pw-play"
   },
-  "owner_feedback": null,
+  "owner_feedback": {
+    "cross_chapter_continuity": "很好",
+    "overall": "都很好了",
+    "female_voice_distinguishability": "可适当增加，但取决于小说角色设定",
+    "female_voice_distinguishability_blocking": false,
+    "verbatim_zh": "连贯性很好！只是两个女性声音之间的差异可以适当增加，提升辨识度，不过这与小说角色设定有关，可以不用现在考虑。都很好了！"
+  },
   "claims": {
     "chapter_selection_scope_enforced": true,
     "all_segments_natural_eos": true,
@@ -113,9 +119,9 @@
     "segment_machine_gate_passed": true,
     "chapter_2_machine_gate_passed": true,
     "cross_chapter_machine_gate_passed": true,
-    "owner_accepted": false,
-    "cross_chapter_continuity_admitted": false,
+    "owner_accepted": true,
+    "cross_chapter_continuity_admitted": true,
     "production_story_command_registered": false
   },
-  "next_gate": "owner_cross_chapter_playback_review"
+  "next_gate": "story_command_integration_preflight"
 }

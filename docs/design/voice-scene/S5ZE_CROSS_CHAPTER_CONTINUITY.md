@@ -19,7 +19,9 @@ chapter using the source-derived 2.2-second scene-break pause. The resulting
 20.13-second artifact is finite and non-silent, and its combined ASR retains
 all story content subject only to the receipt-bound name homophones.
 
-Machine verification admits the artifact for owner audition only. Until the
-owner reviews the cross-chapter break, Vivian continuity, Serena transition,
-and overall narrative flow, S5ZE remains pending. This trial neither registers
-the production `/story` command nor generalizes quality to arbitrary chapters.
+Owner playback accepted the cross-chapter continuity and the overall result.
+The owner noted that the two female voices could be separated further, but
+explicitly classified that preference as dependent on novel character settings
+and non-blocking for this gate. S5ZE is therefore admitted. This trial neither
+registers the production `/story` command nor generalizes quality to arbitrary
+chapters; the next gate is a non-actuating `/story` integration preflight.
