@@ -38,6 +38,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_evidence_summary",
         "run_biocortex_retrieval_opt_in_redacted_evidence_aggregate",
         "run_biocortex_retrieval_opt_in_controlled_order_fixture_result",
+        "run_biocortex_retrieval_opt_in_store_trial_result",
         "shadow_json_display",
     ] {
         assert!(
@@ -355,6 +356,13 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "main.rs must retain controlled-order authorization, store, diagnostics, and payload custody"
     );
     assert!(
+        composition_root.contains("async fn run_biocortex_retrieval_opt_in_store_trial(")
+            && composition_root.contains("SqliteStore::open(&db_path)")
+            && composition_root
+                .contains("biocortex_retrieval_opt_in_store_trial(&store, opts).await"),
+        "main.rs must retain store-trial input, Store, and executor custody"
+    );
+    assert!(
         composition_root.contains("read_optional_json_file("),
         "main.rs must retain optional JSON file loading"
     );
@@ -370,6 +378,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "std::fs::read_to_string(review_packet_json)",
         "fn run_biocortex_retrieval_opt_in_runtime_trial(",
         "async fn run_biocortex_retrieval_opt_in_controlled_order_fixture(",
+        "async fn run_biocortex_retrieval_opt_in_store_trial(",
         "controlled_fixture_db_path",
         "memory_save",
         "biocortex_retrieval_opt_in_batch_diagnostics",
@@ -399,7 +408,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "BIOCORTEX_RETRIEVAL_OPT_IN_EVIDENCE_SUMMARY_SCHEMA",
         "cli_env_truthy",
         "BIOCORTEX_RETRIEVAL_DISABLE_ENV",
-        "run_biocortex_retrieval_opt_in_store_trial",
+        "biocortex_retrieval_opt_in_store_trial(&store",
         "SqliteStore",
         "BioCortexOp",
     ] {

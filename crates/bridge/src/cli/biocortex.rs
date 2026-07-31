@@ -1048,6 +1048,61 @@ pub(crate) fn run_biocortex_retrieval_opt_in_controlled_order_fixture_result(
     Ok(())
 }
 
+pub(crate) fn run_biocortex_retrieval_opt_in_store_trial_result(
+    payload: Value,
+    as_json: bool,
+) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+    println!("# BioCortex retrieval opt-in store trial");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} implementation_stage={} approval_state={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.get("implementation_stage"), "-"),
+        shadow_json_display(payload.get("approval_state"), "not_approved")
+    );
+    let preflight = payload.get("runtime_preflight").unwrap_or(&Value::Null);
+    println!(
+        "adapter_allowed={} blockers={} compile_feature_enabled={} runtime_enabled={} operator_disabled={}",
+        shadow_json_display(preflight.get("adapter_allowed"), "false"),
+        preflight.get("blockers").and_then(Value::as_array).map(|items| items.len().to_string()).unwrap_or_else(|| "0".to_string()),
+        shadow_json_display(preflight.get("compile_feature_enabled"), "false"),
+        shadow_json_display(preflight.get("runtime_enabled"), "false"),
+        shadow_json_display(preflight.get("operator_disabled"), "false")
+    );
+    let baseline = payload.get("baseline_order").unwrap_or(&Value::Null);
+    println!(
+        "baseline_completed={} baseline_key_count={} baseline_hash={} raw_keys_included={} content_included={}",
+        shadow_json_display(baseline.get("completed"), "false"), shadow_json_display(baseline.get("key_count"), "0"),
+        shadow_json_display(baseline.get("hash"), "-"), shadow_json_display(baseline.get("raw_keys_included"), "false"),
+        shadow_json_display(baseline.get("content_included"), "false")
+    );
+    let side_signal = payload.get("side_signal").unwrap_or(&Value::Null);
+    println!(
+        "side_signal_attempted={} side_signal_status={} matched_candidate_count={} coverage={} raw_included={}",
+        shadow_json_display(side_signal.get("attempted"), "false"), shadow_json_display(side_signal.get("status"), "-"),
+        shadow_json_display(side_signal.get("matched_candidate_count"), "0"), shadow_json_display(side_signal.get("coverage"), "0"),
+        shadow_json_display(side_signal.get("raw_included"), "false")
+    );
+    let returned = payload.get("returned_order").unwrap_or(&Value::Null);
+    println!(
+        "returned_source={} baseline_returned={} actual_return_order_changed={} fallback_reason={}",
+        shadow_json_display(returned.get("source"), "baseline"),
+        shadow_json_display(returned.get("baseline_returned"), "true"),
+        shadow_json_display(returned.get("actual_return_order_changed"), "false"),
+        shadow_json_display(returned.get("fallback_reason"), "-")
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"), shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false"), shadow_json_display(payload.get("default_calls_unchanged"), "true")
+    );
+    Ok(())
+}
+
 pub(crate) fn run_biocortex_retrieval_opt_in_evidence_summary(
     payload: Value,
     as_json: bool,

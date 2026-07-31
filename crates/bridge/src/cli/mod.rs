@@ -21,8 +21,9 @@ pub(super) use biocortex::{
     run_biocortex_retrieval_opt_in_runtime_readiness_packet,
     run_biocortex_retrieval_opt_in_runtime_transition_gate,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
-    run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest,
-    run_lswr_interaction_feedback_consumption_preflight, shadow_json_display,
+    run_biocortex_retrieval_opt_in_status, run_biocortex_retrieval_opt_in_store_trial_result,
+    run_biocortex_shadow_digest, run_lswr_interaction_feedback_consumption_preflight,
+    shadow_json_display,
 };
 pub(super) use browser_lite::{run_browser_lite, BrowserLiteOp};
 pub(super) use local_control::{run_a2ui, run_operator_request, A2uiOp, OperatorRequestOp};
