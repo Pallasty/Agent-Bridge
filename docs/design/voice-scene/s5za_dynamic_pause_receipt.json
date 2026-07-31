@@ -1,6 +1,6 @@
 {
   "schema": "agent_bridge.story_dynamic_pause_trial.v1",
-  "status": "machine_verified_owner_feedback_pending",
+  "status": "owner_accepted",
   "source_stage": "S5Z",
   "source_audio_sha256": "28b9496897327c654eaf0634f4c75d76d48be78a8d94f9c87589606f0d043ef3",
   "render_plan_sha256": "1df2a04b8e7b100e63e3056398fda0152a46c671da0da85f230e8d7661d44008",
@@ -62,12 +62,21 @@
     "played_audio": false,
     "used_gpu": false
   },
+  "playback": {
+    "authorized": true,
+    "completed": true,
+    "backend": "pw-play"
+  },
+  "owner_feedback": {
+    "pacing_accepted": true,
+    "verbatim_zh": "可以了，先这样。"
+  },
   "claims": {
     "dynamic_pause_policy_tested": true,
     "source_audio_identity_preserved": true,
     "assembly_machine_gate_passed": true,
-    "owner_pacing_accepted": false,
-    "chapter_pipeline_admitted": false
+    "owner_pacing_accepted": true,
+    "chapter_pipeline_admitted": true
   },
-  "next_gate": "owner_dynamic_pause_feedback"
+  "next_gate": "chapter_voice_render_preflight"
 }

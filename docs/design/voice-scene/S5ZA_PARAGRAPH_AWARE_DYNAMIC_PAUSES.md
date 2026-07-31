@@ -11,4 +11,6 @@ producing gaps of 1.4, 1.0, and 1.4 seconds. It reuses the four hash-identical
 S5Z segment WAVs, so no TTS model ran and voice quality did not change. The
 result is 18.92 seconds, finite and non-silent, and its combined SenseVoice
 transcript matches the S5Z combined transcript exactly. Machine validation does
-not establish good pacing; owner playback remains the admission gate.
+not establish good pacing. Owner playback subsequently accepted the dynamic
+timing with `可以了，先这样。`; S5ZA is admitted as the bounded baseline, while
+future chapter-specific tuning may revise the policy through a new audition.

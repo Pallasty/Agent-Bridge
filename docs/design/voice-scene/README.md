@@ -324,7 +324,18 @@ speaker turn, 1.4 for a paragraph break, and 2.2 for a scene break. Unknown
 labels fail closed. The current trial reuses the four hash-identical S5Z source
 segments and applies 1.4, 1.0, then 1.4 seconds without executing TTS. The
 18.92-second assembly is finite/non-silent and retains the same combined ASR
-content. Owner pacing feedback remains the next gate.
+content. Owner playback accepted this bounded dynamic timing baseline. The next
+gate is a non-actuating chapter voice render preflight derived from a real
+`/story` static plan.
+
+S5ZB adds `scripts/story_chapter_voice_plan.py`. It binds the S1 source plan,
+S5X mapping, S5Y voice acceptance, and S5ZA pacing acceptance before deriving
+chapter, paragraph, and speaker transitions. The `story_s1.md` preflight found
+five ordered segments and a real cross-chapter scene break, but it also blocked
+two attributed-dialogue lines whose narration and quoted speech are not yet
+split. The durable receipt remains `chapter_render_ready=false`; source-grounded
+utterance segmentation is the next gate. No model, audio, playback, or runtime
+`/story` registration is involved.
 
 ## S4 realtime story interaction
 
