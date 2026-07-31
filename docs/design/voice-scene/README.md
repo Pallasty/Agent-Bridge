@@ -42,6 +42,8 @@ express. A packet is S0-valid only when it passes both.
   `/story` integration packet.
 - `story_command_registration_contract.schema.json`: S5ZG default-hidden MCP
   registration proposal.
+- `story_command_inprocess_adapter.schema.json`: S5ZH Python same-process
+  adapter evidence.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
@@ -393,6 +395,15 @@ S5ZF receipt, implementation, output schema, and the exact inspected Rust
 registry source hash, while a negative control rejects a pre-existing tool-name
 collision. No Rust registry is changed and no runtime tool exists. An isolated
 in-process preflight adapter is the next gate.
+
+S5ZH adds `scripts/story_command_inprocess_adapter.py`. It accepts the exact
+structured S5ZG arguments and directly calls the S5ZF function in the same
+Python interpreter after rechecking every bound implementation, schema,
+receipt, and registry-source hash. AST and runtime tests show no shell or child
+process path. This is intentionally not described as a Rust in-process result:
+the Rust registry remains untouched, no MCP tool exists, and production still
+has no embedded/native adapter. A Rust-native versus embedded-interpreter
+design decision is the next gate.
 
 ## S4 realtime story interaction
 

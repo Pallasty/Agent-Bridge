@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/story_command_inprocess_adapter.v1.json",
+  "title": "Agent-Bridge story command same-process adapter receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "request", "registration_contract_sha256", "adapter", "preflight", "adapter_receipt_sha256", "runtime_effects", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_command_inprocess_adapter.v1"},
+    "status": {"const": "python_inprocess_adapter_verified"},
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_path", "start", "dry_run"],
+      "properties": {
+        "source_path": {"type": "string", "minLength": 1},
+        "start": {
+          "oneOf": [
+            {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "from_start"}}},
+            {"type": "object", "additionalProperties": false, "required": ["kind", "chapter"], "properties": {"kind": {"const": "chapter"}, "chapter": {"type": "integer", "minimum": 1}}}
+          ]
+        },
+        "dry_run": {"const": true}
+      }
+    },
+    "registration_contract_sha256": {"$ref": "#/$defs/sha256"},
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["script_path", "script_sha256", "adapter", "same_process", "used_shell", "spawned_subprocess", "registered_mcp_tool"],
+      "properties": {
+        "script_path": {"type": "string", "minLength": 1},
+        "script_sha256": {"$ref": "#/$defs/sha256"},
+        "adapter": {"const": "python_direct_function_call"},
+        "same_process": {"const": true},
+        "used_shell": {"const": false},
+        "spawned_subprocess": {"const": false},
+        "registered_mcp_tool": {"const": false}
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "required": ["schema", "status", "preflight_sha256", "execution_authorized", "runtime_effects"],
+      "properties": {
+        "schema": {"const": "agent_bridge.story_command_integration_preflight.v1"},
+        "status": {"const": "story_command_integration_preflight_reviewable"},
+        "preflight_sha256": {"$ref": "#/$defs/sha256"},
+        "execution_authorized": {"const": false},
+        "runtime_effects": {
+          "type": "object",
+          "additionalProperties": {"const": false}
+        }
+      }
+    },
+    "adapter_receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modified_rust_registry", "registered_story_command", "spawned_subprocess", "used_shell", "loaded_model", "executed_onnx", "rendered_audio", "played_audio", "wrote_cache", "wrote_memory"],
+      "properties": {
+        "modified_rust_registry": {"const": false},
+        "registered_story_command": {"const": false},
+        "spawned_subprocess": {"const": false},
+        "used_shell": {"const": false},
+        "loaded_model": {"const": false},
+        "executed_onnx": {"const": false},
+        "rendered_audio": {"const": false},
+        "played_audio": {"const": false},
+        "wrote_cache": {"const": false},
+        "wrote_memory": {"const": false}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python_same_process_direct_call", "shell_or_subprocess_required", "rust_inprocess_adapter_proven", "mcp_tool_registered", "production_story_command_ready"],
+      "properties": {
+        "python_same_process_direct_call": {"const": true},
+        "shell_or_subprocess_required": {"const": false},
+        "rust_inprocess_adapter_proven": {"const": false},
+        "mcp_tool_registered": {"const": false},
+        "production_story_command_ready": {"const": false}
+      }
+    },
+    "next_gate": {"const": "rust_inprocess_story_preflight_design"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}
