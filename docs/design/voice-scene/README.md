@@ -205,6 +205,17 @@ converter or graph execution, snapshot replacement, GPU use, playback, or
 global memory/forum writes. Weight acquisition and every later adoption step
 remain separately authorized; `reference_generation_ready=false`.
 
+S5Q uses `scripts/story_voice_fixed_source_acquisition_plan.py` to produce a
+revision-pinned, small-file-only offline acquisition packet. Its explicit
+11-path allowlist contains no `.safetensors`; no weight command is emitted.
+The isolated destination is outside the current ModelScope ONNX snapshot, and
+the planner fails closed on an existing/overlapping destination or less than
+the 128 GiB workspace policy floor. Because fixed-revision Hugging Face
+transport remains unavailable on this host, the SHA-256 ledger stays pending
+until offline acquisition rather than being inferred from mutable files. The
+`s5q_fixed_source_acquisition_plan.json` receipt records zero network,
+filesystem-creation, model-execution, GPU, and playback effects.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

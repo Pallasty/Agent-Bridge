@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_fixed_source_acquisition_plan.schema.json",
+  "title": "Agent-Bridge fixed-source voice acquisition plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "official_model_id",
+    "revision",
+    "revision_immutable",
+    "destination",
+    "current_onnx_snapshot",
+    "small_files",
+    "weights",
+    "commands",
+    "disk_preflight",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_fixed_source_acquisition_plan.v1"
+    },
+    "status": {"enum": ["blocked", "offline_plan_ready"]},
+    "official_model_id": {
+      "const": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    },
+    "revision": {
+      "const": "6c3e96b6a2c593ce3e546ee699a5d944de81850e"
+    },
+    "revision_immutable": {"const": true},
+    "destination": {"type": "string", "minLength": 1},
+    "current_onnx_snapshot": {"type": "string", "minLength": 1},
+    "small_files": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "expected_sha256", "hash_state"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "expected_sha256": {"type": "null"},
+          "hash_state": {
+            "const": "pending_fixed_revision_offline_acquisition"
+          }
+        }
+      }
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorized",
+        "download_command_emitted",
+        "files",
+        "total_bytes"
+      ],
+      "properties": {
+        "authorized": {"const": false},
+        "download_command_emitted": {"const": false},
+        "files": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "expected_bytes"],
+            "properties": {
+              "path": {"type": "string"},
+              "expected_bytes": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        "total_bytes": {"const": 4515695644}
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "small_files_only_argv",
+        "post_download_hash_argv",
+        "weight_download_command"
+      ],
+      "properties": {
+        "small_files_only_argv": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1
+        },
+        "post_download_hash_argv": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1
+        },
+        "weight_download_command": {"type": "null"}
+      }
+    },
+    "disk_preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "available_bytes",
+        "minimum_workspace_reserve_bytes",
+        "reserve_policy",
+        "passes"
+      ],
+      "properties": {
+        "available_bytes": {"type": "integer", "minimum": 0},
+        "minimum_workspace_reserve_bytes": {"const": 137438953472},
+        "reserve_policy": {
+          "const": "planning_floor_not_an_export_size_estimate"
+        },
+        "passes": {"type": "boolean"}
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network_requests",
+        "created_destination",
+        "downloaded_small_files",
+        "downloaded_weights",
+        "executed_converter",
+        "executed_onnx_graphs",
+        "replaced_current_snapshot",
+        "used_gpu",
+        "played_audio"
+      ],
+      "properties": {
+        "network_requests": {"const": false},
+        "created_destination": {"const": false},
+        "downloaded_small_files": {"const": false},
+        "downloaded_weights": {"const": false},
+        "executed_converter": {"const": false},
+        "executed_onnx_graphs": {"const": false},
+        "replaced_current_snapshot": {"const": false},
+        "used_gpu": {"const": false},
+        "played_audio": {"const": false}
+      }
+    }
+  }
+}
