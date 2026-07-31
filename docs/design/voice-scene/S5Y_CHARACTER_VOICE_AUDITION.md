@@ -11,7 +11,7 @@ usable, and considered the inter-clip interval appropriate. A small clarity
 increase is recorded as a non-blocking tuning preference, conditional on
 preserving naturalness.
 
-The feedback described the interval between clips, not whether the two voice
-identities are sufficiently distinguishable. That narrower gate remains
-unconfirmed, so chapter rendering still fails closed rather than inferring an
-acceptance the owner did not state.
+After replay, the owner explicitly confirmed that the two voice identities are
+easy to distinguish and clearly identifiable, with an appropriate inter-clip
+interval. S5Y is therefore owner-accepted and the three-role story excerpt is
+the next gate.

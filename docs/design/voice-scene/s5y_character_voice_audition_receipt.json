@@ -1,6 +1,6 @@
 {
   "schema": "agent_bridge.story_character_voice_audition.v1",
-  "status": "owner_naturalness_and_intelligibility_accepted",
+  "status": "owner_accepted",
   "mapping_sha256": "175a0ea89c28bd98b11f4c30ae9073d73de62d74f1aa833ccf10d8539b4affa5",
   "candidates": [
     {
@@ -41,14 +41,15 @@
   "claims": {
     "machine_gate_passed": true,
     "owner_accepted_both": true,
-    "voices_distinguishable": false,
-    "chapter_render_ready": false
+    "voices_distinguishable": true,
+    "chapter_render_ready": true
   },
   "playback_feedback": {
     "inter_clip_interval": "适中",
     "clarity": "可懂且可接受",
     "clarity_tuning": "非阻断建议：在不损害自然度的前提下小幅提升",
-    "voice_identity_distinguishability_confirmed": false
+    "voice_identity_distinguishability_confirmed": true,
+    "voice_identity_distinguishability": "容易区分，清晰可辨识"
   },
-  "next_gate": "owner_voice_identity_distinguishability_feedback"
+  "next_gate": "three_role_story_excerpt"
 }

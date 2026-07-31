@@ -300,9 +300,10 @@ S5Y forwards each S5X style instruction into the trusted ONNX runner. Dylan's
 SenseVoice transcripts before owner-authorized playback. The committed receipt
 records owner acceptance of both voices as natural, intelligible, and usable,
 plus an appropriate inter-clip interval. A small clarity increase is a
-non-blocking preference only if naturalness is preserved. Pairwise voice-identity
-distinguishability was not explicitly assessed, so chapter rendering remains
-fail-closed pending that narrow gate.
+non-blocking preference only if naturalness is preserved. After replay, the
+owner explicitly confirmed that Dylan and Serena are easy to distinguish and
+clearly identifiable. S5Y is accepted and the three-role story excerpt is the
+next gate.
 
 ## S4 realtime story interaction
 
