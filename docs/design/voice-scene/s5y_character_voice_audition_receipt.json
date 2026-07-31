@@ -1,0 +1,48 @@
+{
+  "schema": "agent_bridge.story_character_voice_audition.v1",
+  "status": "played_owner_feedback_pending",
+  "mapping_sha256": "175a0ea89c28bd98b11f4c30ae9073d73de62d74f1aa833ccf10d8539b4affa5",
+  "candidates": [
+    {
+      "role": "林默",
+      "qwen_speaker": "Dylan",
+      "text": "我们得马上离开。",
+      "style_instruction": "青年声线，冷静而坚定，紧张时仍保持清楚吐字。",
+      "generated_codec_frames": 15,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5y-role-auditions-20260731/dylan-lin.wav",
+      "audio_sha256": "8f4737565917ab0741e35cd258445d67a5159c8814e6d6d8cf3d3cc141bc7351",
+      "duration_seconds": 1.2,
+      "rms": 0.03687290474772453,
+      "peak": 0.255615234375,
+      "asr_transcript": "我们得马上离开。",
+      "asr_complete": true,
+      "playback_completed": true,
+      "owner_feedback": null
+    },
+    {
+      "role": "苏岚",
+      "qwen_speaker": "Serena",
+      "text": "我听见钟声了。",
+      "style_instruction": "温暖而警觉，语速自然，避免过度戏剧化。",
+      "generated_codec_frames": 18,
+      "natural_eos": true,
+      "audio_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5y-role-auditions-20260731/serena-su.wav",
+      "audio_sha256": "1a638f1cfc33902eb41e051b57beda1a3b7de41b73d94b3fe8636ef3cf2d0cba",
+      "duration_seconds": 1.44,
+      "rms": 0.06765399128198624,
+      "peak": 0.24700927734375,
+      "asr_transcript": "我听见钟声了。",
+      "asr_complete": true,
+      "playback_completed": true,
+      "owner_feedback": null
+    }
+  ],
+  "claims": {
+    "machine_gate_passed": true,
+    "owner_accepted_both": false,
+    "voices_distinguishable": false,
+    "chapter_render_ready": false
+  },
+  "next_gate": "owner_character_voice_feedback"
+}

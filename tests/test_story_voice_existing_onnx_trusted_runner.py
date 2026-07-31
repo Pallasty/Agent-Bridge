@@ -23,14 +23,16 @@ def load_module():
 
 
 class FakePipeline:
-    def __init__(self, frames: int = 24) -> None:
+    def __init__(self, frames: int = 24, expected_instruct=None) -> None:
         self._tok = None
         self.frames = frames
+        self.expected_instruct = expected_instruct
 
     def generate(self, *args, **kwargs):
         assert self._tok == "fixed-tokenizer"
         assert kwargs["do_sample"] is False
         assert kwargs["sub_do_sample"] is False
+        assert kwargs["instruct"] == self.expected_instruct
         return FakeArray((self.frames, 16))
 
     def decode_chunked(self, codes):
@@ -94,6 +96,33 @@ def test_runner_hash_binds_inference_and_fixes_tokenizer(tmp_path: Path) -> None
     assert receipt["tokenizer_fix_mistral_regex"] is True
     assert receipt["generated_codec_frames"] == 24
     assert receipt["stopped_before_frame_cap"] is True
+
+
+def test_runner_forwards_bounded_character_style_instruction(
+    tmp_path: Path,
+) -> None:
+    inference = tmp_path / "inference.py"
+    inference.write_text("trusted fixture")
+    module = load_module()
+    style = "青年声线，冷静而坚定。"
+
+    receipt = module.run_trial(
+        inference_path=inference,
+        expected_inference_sha256=module.sha256(inference),
+        model_path=tmp_path / "model",
+        tts_dir=tmp_path / "original",
+        output_path=tmp_path / "candidate.wav",
+        text="我们得马上离开。",
+        speaker="Dylan",
+        language="Chinese",
+        style_instruction=style,
+        max_new_tokens=25,
+        pipeline_factory=lambda *_: FakePipeline(expected_instruct=style),
+        tokenizer_factory=lambda *_args, **_kwargs: "fixed-tokenizer",
+        audio_writer=lambda *_: None,
+    )
+
+    assert receipt["style_instruction"] == style
 
 
 def test_runner_rejects_frame_cap_as_truncated(tmp_path: Path) -> None:

@@ -295,6 +295,11 @@ pending, so chapter rendering fails closed. Mapping stability is bound to the
 source hash, speaker ID, Qwen speaker, and profile version; changes require a
 new version and re-audition. This stage loads no model and emits no audio.
 
+S5Y forwards each S5X style instruction into the trusted ONNX runner. Dylan's
+林默 line and Serena's 苏岚 line both naturally emitted EOS and achieved full
+SenseVoice transcripts before owner-authorized playback. The committed receipt
+keeps owner acceptance, distinguishability, and chapter rendering pending.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

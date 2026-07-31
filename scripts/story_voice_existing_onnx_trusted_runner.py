@@ -38,6 +38,7 @@ def run_trial(
     speaker: str,
     language: str,
     max_new_tokens: int,
+    style_instruction: str | None = None,
     pipeline_factory: Callable[..., Any] | None = None,
     tokenizer_factory: Callable[..., Any] | None = None,
     audio_writer: Callable[..., Any] | None = None,
@@ -48,6 +49,10 @@ def run_trial(
         raise ValueError("inference SHA-256 mismatch")
     if max_new_tokens < 1 or max_new_tokens > 100:
         raise ValueError("max_new_tokens must be between 1 and 100")
+    if style_instruction is not None:
+        style_instruction = style_instruction.strip()
+        if not style_instruction or len(style_instruction) > 120:
+            raise ValueError("style_instruction must contain 1-120 characters")
     output_path = output_path.resolve()
     if output_path.exists():
         raise ValueError("output path already exists")
@@ -84,6 +89,7 @@ def run_trial(
         text,
         language=language,
         speaker=speaker,
+        instruct=style_instruction,
         max_new_tokens=max_new_tokens,
         do_sample=False,
         sub_do_sample=False,
@@ -103,6 +109,7 @@ def run_trial(
         "generated_codec_frames": codes.shape[0],
         "frame_cap": max_new_tokens,
         "stopped_before_frame_cap": True,
+        "style_instruction": style_instruction,
         "output_path": str(output_path),
     }
 
@@ -117,6 +124,7 @@ def main() -> int:
     parser.add_argument("--text", required=True)
     parser.add_argument("--speaker", default="Vivian")
     parser.add_argument("--language", default="Chinese")
+    parser.add_argument("--style-instruction")
     parser.add_argument("--max-new-tokens", type=int, default=40)
     args = parser.parse_args()
     result = run_trial(
@@ -128,6 +136,7 @@ def main() -> int:
         text=args.text,
         speaker=args.speaker,
         language=args.language,
+        style_instruction=args.style_instruction,
         max_new_tokens=args.max_new_tokens,
     )
     print(json.dumps(result, ensure_ascii=False))
