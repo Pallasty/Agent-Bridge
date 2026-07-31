@@ -56,7 +56,12 @@ The converter must be copied into `workspace/source` and write only beneath
 The receipt records the planned paths and a 128 GiB free-space policy floor.
 Generating the receipt does not create those paths.
 
-## Next gate
+## Deferred fallback gate
+
+Owner review after S5S1 selected the already downloaded ONNX snapshot as the
+active trial lane. The wheelhouse and re-export described below are now
+fallback work, not the next required stage. Resume them only if the existing
+ONNX snapshot fails quality, compatibility, or lineage acceptance.
 
 S5S2 may materialize the wheelhouse only as a separately reviewed operation.
 It must:

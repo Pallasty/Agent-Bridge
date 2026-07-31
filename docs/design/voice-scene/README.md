@@ -249,6 +249,17 @@ TorchAudio and ONNX Runtime GenAI are excluded from the selected conversion
 lane because neither is used by the admitted converter path. No packages,
 directories, model files, ONNX graphs, GPU work, or audio are produced.
 
+S5T uses `scripts/story_voice_existing_onnx_adoption_decision.py` to promote
+the already downloaded community CPU INT4 ONNX snapshot to the active trial
+lane. This is supported by the existing six-variant inventory, seven-graph CPU
+session gate, bounded component numerics, and single-codec-frame loop. The
+multi-gigabyte conversion wheelhouse and fixed-source re-export are paused as
+fallback-only work. The retained original weights remain a future reference.
+The current minimal ONNX runtime lacks Transformers, SoundFile, and Librosa;
+closing that smaller runtime gap and attempting bounded text-to-WAV synthesis
+is the next gate. No dependency installation, graph execution, rendering,
+playback, GPU work, or model conversion occurs in this decision stage.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

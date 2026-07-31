@@ -1,0 +1,65 @@
+{
+  "schema": "agent_bridge.voice_existing_onnx_adoption_decision.v1",
+  "status": "existing_onnx_trial_selected",
+  "active_lane": "community_cpu_int4",
+  "reexport_lane": "paused_fallback_only",
+  "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "existing_onnx_evidence": {
+    "six_variant_manifests_valid": true,
+    "cpu_int4_sessions_created": 7,
+    "single_codec_frame_loop_passed": true,
+    "end_to_end_text_to_wav_verified": false
+  },
+  "original_model": {
+    "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+    "role": "immutable_weight_equivalent_fallback_and_future_reference",
+    "loaded": false
+  },
+  "runtime_gap": {
+    "observed_modules": {
+      "onnxruntime": true,
+      "numpy": true,
+      "transformers": false,
+      "soundfile": false,
+      "librosa": false
+    },
+    "missing": [
+      "transformers",
+      "soundfile",
+      "librosa"
+    ],
+    "multi_gb_conversion_wheelhouse_required": false,
+    "dependency_install_authorized": false
+  },
+  "paused_work": {
+    "wheelhouse_materialization": true,
+    "olive_installation": true,
+    "fixed_source_reexport": true,
+    "fp32_int4_reexport_parity": true,
+    "resume_condition": "existing_onnx_quality_compatibility_or_lineage_failure"
+  },
+  "claims": {
+    "publisher_lineage_verified": false,
+    "production_admitted": false,
+    "end_to_end_text_to_wav_verified": false,
+    "mi50_verified": false,
+    "human_audibility_verified": false
+  },
+  "supply_chain_blockers_retained": [
+    "revision_not_immutable",
+    "standalone_license_file_missing",
+    "python_dangerous_primitives_present"
+  ],
+  "next_gate": "existing_onnx_minimal_runtime_and_bounded_text_to_wav_trial",
+  "runtime_effects": {
+    "downloaded_files": false,
+    "installed_packages": false,
+    "loaded_original_model": false,
+    "executed_converter": false,
+    "created_onnx": false,
+    "executed_onnx_graphs": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "used_gpu": false
+  }
+}
