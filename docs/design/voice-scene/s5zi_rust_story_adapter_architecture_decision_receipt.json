@@ -1,0 +1,78 @@
+{
+  "schema": "agent_bridge.story_rust_adapter_architecture_decision.v1",
+  "status": "architecture_decision_accepted_static",
+  "evidence": {
+    "bridge_cargo_path": "/Data/CascadeProjects/agent-bridge/crates/bridge/Cargo.toml",
+    "bridge_cargo_sha256": "78737bfe059a95d836af460298afe8cd92cdba49ae2885488d5e6a22417bbdef",
+    "workspace_cargo_path": "/Data/CascadeProjects/agent-bridge/Cargo.toml",
+    "workspace_cargo_sha256": "ea3fc2647c8a84c3f04afcd83bfb516fa540bfdda6623bdf02eb35e134765a9a",
+    "deploy_script_path": "/Data/CascadeProjects/agent-bridge/scripts/deploy_from_master.sh",
+    "deploy_script_sha256": "c5084db4368f338477a44532c7f9407c6b02cf1fde5c5d1df2c90277ec197fae",
+    "adapter_receipt_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5zh_story_command_inprocess_adapter_receipt.json",
+    "adapter_receipt_sha256": "62f3335d3787b4c4bac1146bf2c18f4601c7d8486bb80f8f3580599aa8fac629",
+    "bridge_has_pyo3": false,
+    "rust_primitives_available": {"serde_json": true, "sha2": true},
+    "python_stdlib_imports": ["__future__", "argparse", "hashlib", "importlib", "json", "pathlib", "re", "shlex", "sys", "typing", "unicodedata"],
+    "python_third_party_imports": [],
+    "python_total_lines": 1694,
+    "python_module_sha256": {
+      "/Data/CascadeProjects/agent-bridge/scripts/story_static_ingest.py": "6a770631cac5b94d23194cd804494795c6e785366f40863fd0766ae47f8f71f1",
+      "/Data/CascadeProjects/agent-bridge/scripts/story_chapter_voice_plan.py": "fc2988c8db7acb688e8afc72944b98c7f6e92c588a30aa23f95efd5d0be28f52",
+      "/Data/CascadeProjects/agent-bridge/scripts/story_bounded_chapter_render.py": "f7e5115dc04b23fa72a4db6f638840179e0fea4c9760eaeabba929e72ea64b75",
+      "/Data/CascadeProjects/agent-bridge/scripts/story_command_integration_preflight.py": "cda6bfbf9b1dae56e52e21fb63ee742fe590a4dd5380c3ef8ef2c5933debef78",
+      "/Data/CascadeProjects/agent-bridge/scripts/story_command_inprocess_adapter.py": "a822ef513f3cf2ef2b4cb590312ede57e66bbefe20ba9ca58f7ec0b1d2320bf6"
+    },
+    "native_binary_deploy_contract": true
+  },
+  "options": [
+    {
+      "name": "incremental_rust_native_port",
+      "verdict": "selected",
+      "benefits": ["preserves_single_native_binary_runtime", "avoids_python_abi_gil_and_interpreter_lifecycle", "reuses_serde_json_and_sha2", "keeps_mcp_cancellation_and_error_model_native"],
+      "costs": ["ports_deterministic_story_logic", "requires_cross_language_golden_parity", "temporarily_maintains_python_oracle"]
+    },
+    {
+      "name": "embedded_python_interpreter",
+      "verdict": "rejected_for_current_scope",
+      "benefits": ["reuses_current_python_implementation"],
+      "costs": ["adds_python_abi_and_packaging_to_bridge", "adds_gil_and_interpreter_lifecycle", "widens_binary_supply_chain", "conflicts_with_current_native_deploy_contract"],
+      "revisit_trigger": "a_required_python_only_dependency_blocks_a_bounded_native_port_or_measured_parity_maintenance_cost_exceeds_embedding_cost"
+    }
+  ],
+  "decision": {
+    "selected": "incremental_rust_native_port",
+    "embedded_python": "rejected_for_current_scope",
+    "rationale": ["story_preflight_is_stdlib_only_deterministic_logic", "required_rust_json_and_hash_primitives_already_exist", "bridge_has_no_embedded_python_dependency_or_lifecycle", "deployment_is_centered_on_one_native_binary"],
+    "revisit_policy": "evidence_required_no_preference_only_reversal"
+  },
+  "migration": {
+    "python_role": "test_oracle_only",
+    "runtime_authority_transfer": false,
+    "rollback": "remove_unregistered_rust_module_and_keep_python_oracle",
+    "stages": [
+      {"id": "S5ZJ", "goal": "rust_story_contract_core", "required_proof": "typed_request_canonical_json_and_hash_parity", "registered_mcp_tool": false},
+      {"id": "S5ZK", "goal": "rust_story_source_ingest_parity", "required_proof": "chapter_source_and_selection_golden_parity", "registered_mcp_tool": false},
+      {"id": "S5ZL", "goal": "rust_story_voice_plan_parity", "required_proof": "segment_transition_and_cache_key_parity", "registered_mcp_tool": false},
+      {"id": "S5ZM", "goal": "rust_story_preflight_adapter_parity", "required_proof": "full_s5zf_schema_and_negative_control_parity", "registered_mcp_tool": false}
+    ],
+    "post_parity_gate": "separate_owner_authorized_mcp_registration"
+  },
+  "decision_sha256": "1fd5cb1a054a26dcab3260d120d5ea30b257dd912f710d2503d114d2ccb4fce1",
+  "execution_authorized": false,
+  "runtime_effects": {
+    "modified_cargo_dependencies": false,
+    "added_pyo3": false,
+    "implemented_rust_adapter": false,
+    "modified_rust_registry": false,
+    "registered_story_command": false,
+    "spawned_subprocess": false,
+    "loaded_python_interpreter": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "next_gate": "rust_story_contract_core"
+}

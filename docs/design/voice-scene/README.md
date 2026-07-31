@@ -44,6 +44,8 @@ express. A packet is S0-valid only when it passes both.
   registration proposal.
 - `story_command_inprocess_adapter.schema.json`: S5ZH Python same-process
   adapter evidence.
+- `story_rust_adapter_architecture_decision.schema.json`: S5ZI native-versus-
+  embedded integration decision.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
@@ -404,6 +406,14 @@ process path. This is intentionally not described as a Rust in-process result:
 the Rust registry remains untouched, no MCP tool exists, and production still
 has no embedded/native adapter. A Rust-native versus embedded-interpreter
 design decision is the next gate.
+
+S5ZI adds `scripts/story_rust_adapter_architecture_decision.py` and accepts an
+incremental Rust-native port over embedding Python. The audited 1694-line
+Python surface is standard-library-only; bridge already has `serde_json` and
+`sha2`, no PyO3/libpython lifecycle, and a native-binary deployment contract.
+Python remains a non-authoritative golden oracle across four reversible parity
+stages (S5ZJ-S5ZM). No Cargo dependency, Rust adapter, registry entry, model, or
+audio action is added. The pure Rust story contract core is the next gate.
 
 ## S4 realtime story interaction
 

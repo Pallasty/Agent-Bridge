@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/story_rust_adapter_architecture_decision.v1.json",
+  "title": "Agent-Bridge story Rust adapter architecture decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "evidence", "options", "decision", "migration", "decision_sha256", "execution_authorized", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_rust_adapter_architecture_decision.v1"},
+    "status": {"const": "architecture_decision_accepted_static"},
+    "evidence": {
+      "type": "object",
+      "required": ["bridge_cargo_sha256", "workspace_cargo_sha256", "deploy_script_sha256", "adapter_receipt_sha256", "bridge_has_pyo3", "rust_primitives_available", "python_third_party_imports", "python_total_lines", "native_binary_deploy_contract"],
+      "properties": {
+        "bridge_cargo_sha256": {"$ref": "#/$defs/sha256"},
+        "workspace_cargo_sha256": {"$ref": "#/$defs/sha256"},
+        "deploy_script_sha256": {"$ref": "#/$defs/sha256"},
+        "adapter_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "bridge_has_pyo3": {"const": false},
+        "rust_primitives_available": {
+          "type": "object",
+          "required": ["serde_json", "sha2"],
+          "properties": {"serde_json": {"const": true}, "sha2": {"const": true}}
+        },
+        "python_third_party_imports": {"type": "array", "maxItems": 0},
+        "python_total_lines": {"type": "integer", "minimum": 1},
+        "native_binary_deploy_contract": {"const": true}
+      }
+    },
+    "options": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"type": "object", "required": ["name", "verdict", "benefits", "costs"]}
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selected", "embedded_python", "rationale", "revisit_policy"],
+      "properties": {
+        "selected": {"const": "incremental_rust_native_port"},
+        "embedded_python": {"const": "rejected_for_current_scope"},
+        "rationale": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "revisit_policy": {"const": "evidence_required_no_preference_only_reversal"}
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python_role", "runtime_authority_transfer", "rollback", "stages", "post_parity_gate"],
+      "properties": {
+        "python_role": {"const": "test_oracle_only"},
+        "runtime_authority_transfer": {"const": false},
+        "rollback": {"type": "string", "minLength": 1},
+        "stages": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": ["id", "goal", "required_proof", "registered_mcp_tool"],
+            "properties": {"registered_mcp_tool": {"const": false}}
+          }
+        },
+        "post_parity_gate": {"const": "separate_owner_authorized_mcp_registration"}
+      }
+    },
+    "decision_sha256": {"$ref": "#/$defs/sha256"},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": {"const": false},
+      "minProperties": 1
+    },
+    "next_gate": {"const": "rust_story_contract_core"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}
