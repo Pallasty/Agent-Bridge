@@ -312,8 +312,11 @@ Vivian, Dylan, Serena, then Vivian with exact 0.8-second transition gaps. All
 admitted segments naturally emitted EOS; one longer Serena attempt hit the
 100-frame cap and correctly produced no WAV. The final 17.52-second PCM16
 24 kHz artifact is finite and non-silent, and SenseVoice found all story
-content with a single combined-ASR homophone substitution. Playback and owner
-acceptance remain the next gate.
+content with a single combined-ASR homophone substitution. Owner playback
+accepted naturalness, clarity, and role identifiability, but found the fixed
+0.8-second gaps slightly short and correctly noted that pacing depends on
+paragraph context. Voice quality is accepted; chapter admission remains
+blocked on a paragraph-aware dynamic pause policy.
 
 ## S4 realtime story interaction
 

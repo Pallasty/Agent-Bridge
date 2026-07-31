@@ -1,6 +1,6 @@
 {
   "schema": "agent_bridge.story_three_role_excerpt.v1",
-  "status": "machine_verified_owner_feedback_pending",
+  "status": "owner_voice_accepted_transition_tuning_pending",
   "mapping_sha256": "175a0ea89c28bd98b11f4c30ae9073d73de62d74f1aa833ccf10d8539b4affa5",
   "render_plan_sha256": "cbe5ee587cc24e2b7b480a4bd231595c8744ca030e29725a670caa8db0bad9ae",
   "model": {
@@ -87,15 +87,29 @@
     "wav_written": false,
     "resolution": "retained meaning with previously accepted bounded text"
   },
+  "playback": {
+    "authorized": true,
+    "completed": true,
+    "backend": "pw-play"
+  },
+  "owner_feedback": {
+    "natural": true,
+    "clear_and_identifiable": true,
+    "fixed_gap_accepted": false,
+    "gap_feedback": "间隔取决于段落，当前来说感觉短了点。",
+    "verbatim_zh": "声音自然，清晰可辨识，间隔取决于段落，当前来说感觉短了点。"
+  },
   "claims": {
     "mapping_and_acceptance_bound": true,
     "all_segments_natural_eos": true,
     "wav_machine_gate_passed": true,
     "all_story_content_present_in_asr": true,
     "verbatim_asr_verified": false,
-    "playback_completed": false,
+    "playback_completed": true,
+    "owner_voice_quality_accepted": true,
+    "owner_transition_pacing_accepted": false,
     "owner_accepted": false,
     "chapter_pipeline_admitted": false
   },
-  "next_gate": "owner_three_role_excerpt_feedback"
+  "next_gate": "paragraph_aware_dynamic_pause_policy"
 }

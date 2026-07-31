@@ -16,5 +16,10 @@ SenseVoice found all four story segments in the combined audio. It made one
 combined-ASR homophone substitution (`渐近` to `渐静`), and the isolated closing
 narration read `尘封` as `尘风` even though combined ASR recovered `尘封`.
 Therefore content presence is machine-verified, but verbatim ASR is not claimed.
-Human judgments about transitions, character continuity, pacing, and overall
-naturalness remain pending playback feedback.
+
+Owner playback accepted the voices as natural, clear, and identifiable. The
+fixed 0.8-second transition policy did not pass pacing acceptance: the owner
+reported that pause length should depend on paragraph context and that the
+current pauses felt slightly short. S5Z therefore closes voice-quality
+validation but does not admit the chapter pipeline. The next gate is a bounded,
+paragraph-aware dynamic pause policy, not a uniform global increase.
