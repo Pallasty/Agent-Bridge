@@ -287,6 +287,14 @@ The 4.64-second WAV was played under owner authorization. The committed receipt
 records the owner's `完整！清晰，自然` acceptance. Story-renderer mapping remains
 the next gate.
 
+S5X adds `scripts/story_voice_mapping.py`, a deterministic one-to-one mapping
+from S1 speaker IDs to Qwen CustomVoice speakers and bounded style
+instructions. The current fixture maps narrator to owner-accepted Vivian,
+林默 to Dylan, and 苏岚 to Serena. The two character voices remain audition
+pending, so chapter rendering fails closed. Mapping stability is bound to the
+source hash, speaker ID, Qwen speaker, and profile version; changes require a
+new version and re-audition. This stage loads no model and emits no audio.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
