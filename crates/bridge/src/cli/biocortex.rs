@@ -1078,6 +1078,63 @@ pub(crate) fn run_biocortex_retrieval_opt_in_evidence_summary(
     Ok(())
 }
 
+pub(crate) fn run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
+    payload: Value,
+    as_json: bool,
+) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in redacted evidence aggregate");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "review_state={} aggregate_ready={} default_influence_ready={}",
+        shadow_json_display(payload.pointer("/interpretation/review_state"), "-"),
+        shadow_json_display(
+            payload.pointer("/interpretation/aggregate_evidence_ready"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/interpretation/default_influence_ready"),
+            "false"
+        )
+    );
+    println!(
+        "movement_moved={} coverage_queries={} coverage_experimental={} coverage_moved={}",
+        shadow_json_display(
+            payload.pointer("/movement_evidence/actual_order_changed_count"),
+            "0"
+        ),
+        shadow_json_display(payload.pointer("/coverage_evidence/query_count"), "0"),
+        shadow_json_display(
+            payload.pointer("/coverage_evidence/experimental_source_count"),
+            "0"
+        ),
+        shadow_json_display(
+            payload.pointer("/coverage_evidence/actual_order_changed_count"),
+            "0"
+        )
+    );
+    println!(
+        "recommended_next_step={} raw_flags movement={} coverage={}",
+        shadow_json_display(
+            payload.pointer("/interpretation/recommended_next_step"),
+            "-"
+        ),
+        shadow_json_display(
+            payload.pointer("/movement_evidence/raw_flags_all_false"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/coverage_evidence/raw_flags_all_false"),
+            "false"
+        )
+    );
+    Ok(())
+}
+
 pub(crate) fn shadow_json_display(value: Option<&Value>, default: &str) -> String {
     match value {
         Some(Value::String(s)) => s.clone(),

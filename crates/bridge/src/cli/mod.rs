@@ -12,6 +12,7 @@ pub(super) use biocortex::{
     run_biocortex_retrieval_opt_in_execution_packet,
     run_biocortex_retrieval_opt_in_order_diff_packet,
     run_biocortex_retrieval_opt_in_post_implementation_review_gate,
+    run_biocortex_retrieval_opt_in_redacted_evidence_aggregate,
     run_biocortex_retrieval_opt_in_redacted_order_artifact,
     run_biocortex_retrieval_opt_in_review_packet,
     run_biocortex_retrieval_opt_in_runtime_influence_decision_packet,

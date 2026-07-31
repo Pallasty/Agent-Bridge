@@ -65,6 +65,7 @@ use cli::{
     run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
     run_biocortex_retrieval_opt_in_order_diff_packet,
     run_biocortex_retrieval_opt_in_post_implementation_review_gate,
+    run_biocortex_retrieval_opt_in_redacted_evidence_aggregate,
     run_biocortex_retrieval_opt_in_redacted_order_artifact,
     run_biocortex_retrieval_opt_in_review_packet,
     run_biocortex_retrieval_opt_in_runtime_influence_decision_packet,
@@ -6663,15 +6664,17 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
-                movement_fixture_run_json,
-                coverage_fixture_run_json,
-                reviewer.clone(),
-                commit.clone(),
-                forum_post_id.clone(),
-                memory_key.clone(),
-                *json,
-            ),
+            } => {
+                let payload = build_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
+                    movement_fixture_run_json,
+                    coverage_fixture_run_json,
+                    reviewer.clone(),
+                    commit.clone(),
+                    forum_post_id.clone(),
+                    memory_key.clone(),
+                )?;
+                run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(payload, *json)
+            }
             #[cfg(feature = "biocortex-retrieval-shadow")]
             BioCortexOp::RetrievalShadow {
                 query,
@@ -12677,15 +12680,14 @@ fn build_biocortex_retrieval_opt_in_evidence_summary(
     Ok(payload)
 }
 
-fn run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
+fn build_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
     movement_fixture_run_json: &std::path::Path,
     coverage_fixture_run_json: &std::path::Path,
     reviewer: Option<String>,
     commit: Option<String>,
     forum_post_id: Option<String>,
     memory_key: Option<String>,
-    as_json: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let movement = load_biocortex_redacted_json(
         movement_fixture_run_json,
         "opt-in movement fixture run JSON",
@@ -12770,42 +12772,7 @@ fn run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
         "side_signal_raw_included": false,
     });
 
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in redacted evidence aggregate");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "review_state={} aggregate_ready={} default_influence_ready={}",
-        shadow_json_display(payload.pointer("/interpretation/review_state"), "-"),
-        shadow_json_display(
-            payload.pointer("/interpretation/aggregate_evidence_ready"),
-            "false"
-        ),
-        shadow_json_display(
-            payload.pointer("/interpretation/default_influence_ready"),
-            "false"
-        )
-    );
-    println!(
-        "movement_moved={} coverage_queries={} coverage_experimental={} coverage_moved={}",
-        movement_summary.actual_order_changed_count,
-        coverage_summary.query_count,
-        coverage_summary.experimental_source_count,
-        coverage_summary.actual_order_changed_count
-    );
-    println!(
-        "recommended_next_step={} raw_flags movement={} coverage={}",
-        shadow_json_display(
-            payload.pointer("/interpretation/recommended_next_step"),
-            "-"
-        ),
-        movement_summary.raw_flags_all_false,
-        coverage_summary.raw_flags_all_false
-    );
-    Ok(())
+    Ok(payload)
 }
 
 #[derive(Debug, Clone)]

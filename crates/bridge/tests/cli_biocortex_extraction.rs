@@ -36,6 +36,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff",
         "run_lswr_interaction_feedback_consumption_preflight",
         "run_biocortex_retrieval_opt_in_evidence_summary",
+        "run_biocortex_retrieval_opt_in_redacted_evidence_aggregate",
         "shadow_json_display",
     ] {
         assert!(
@@ -75,8 +76,24 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
                 .contains("BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff")
             && composition_root
                 .contains("BioCortexOp::LswrInteractionFeedbackConsumptionPreflight")
-            && composition_root.contains("BioCortexOp::RetrievalOptInEvidenceSummary"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInEvidenceSummary")
+            && composition_root.contains("BioCortexOp::RetrievalOptInRedactedEvidenceAggregate"),
         "main.rs must retain the selected dispatch arms"
+    );
+    assert!(
+        composition_root
+            .contains("fn build_biocortex_retrieval_opt_in_redacted_evidence_aggregate(")
+            && composition_root
+                .contains("load_biocortex_redacted_json(\n        movement_fixture_run_json,")
+            && composition_root
+                .contains("load_biocortex_redacted_json(\n        coverage_fixture_run_json,"),
+        "main.rs must retain redacted-evidence aggregate construction and input custody"
+    );
+    assert!(
+        !module.contains("fn load_biocortex_redacted_json(")
+            && !module.contains("fn summarize_biocortex_redacted_fixture_run(")
+            && !module.contains("BIOCORTEX_RETRIEVAL_OPT_IN_REDACTED_EVIDENCE_AGGREGATE_SCHEMA"),
+        "cli::biocortex must not own aggregate loading, summarization, or schema custody"
     );
     assert!(
         composition_root.contains("BioCortexRetrievalApprovalPacketOptions {")
