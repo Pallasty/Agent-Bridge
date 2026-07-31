@@ -46,6 +46,8 @@ express. A packet is S0-valid only when it passes both.
   adapter evidence.
 - `story_rust_adapter_architecture_decision.schema.json`: S5ZI native-versus-
   embedded integration decision.
+- `story_rust_contract_core.schema.json`: S5ZJ pure Rust request, canonical
+  JSON, SHA-256, and cache-key parity receipt.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
@@ -414,6 +416,14 @@ Python surface is standard-library-only; bridge already has `serde_json` and
 Python remains a non-authoritative golden oracle across four reversible parity
 stages (S5ZJ-S5ZM). No Cargo dependency, Rust adapter, registry entry, model, or
 audio action is added. The pure Rust story contract core is the next gate.
+
+S5ZJ adds an intentionally unexported `crates/bridge/src/story_contract.rs`.
+The pure module provides the typed S5ZG request, fail-closed dry-run validation,
+recursively canonical JSON, SHA-256, and the S5ZF segment cache key. Fixed Rust
+tests reproduce Python-oracle hashes, including UTF-8 content. It performs no
+source ingest, is absent from the Rust module tree and MCP registry, and has no
+model, audio, cache, or memory effects. Rust source ingest parity is the next
+gate.
 
 ## S4 realtime story interaction
 

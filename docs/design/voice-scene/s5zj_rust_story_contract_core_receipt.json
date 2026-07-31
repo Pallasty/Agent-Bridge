@@ -1,0 +1,43 @@
+{
+  "schema": "agent_bridge.story_rust_contract_core.v1",
+  "status": "rust_contract_core_parity_verified",
+  "evidence": {
+    "rust_module_path": "crates/bridge/src/story_contract.rs",
+    "rust_module_sha256": "887126a2bc76684ed6855229447abce166a6274dea7d05a658ed5199e8022783",
+    "rust_test_path": "crates/bridge/tests/story_contract_core.rs",
+    "rust_test_sha256": "fc5b44d1bd07af0b6783219d38806c8a3673a10fb5c0d233f95736bcdaad5f1c",
+    "python_oracles": {
+      "scripts/story_static_ingest.py": "6a770631cac5b94d23194cd804494795c6e785366f40863fd0766ae47f8f71f1",
+      "scripts/story_command_integration_preflight.py": "cda6bfbf9b1dae56e52e21fb63ee742fe590a4dd5380c3ef8ef2c5933debef78"
+    },
+    "vectors": {
+      "canonical_json_sha256": "e1d2acda1cf0ff8dcee119f0c5525cd3107d0b201c559564076a7dac0396fff8",
+      "request_sha256": "680d34a1b0bf669a1da3c338f4809f655b7ca19306995936b2ca512959ef986e",
+      "segment_cache_key": "cf77113811bd2477b2f848a7c78cf5d641e1e8c1834b6132b9f565f112700a2a"
+    }
+  },
+  "parity": {
+    "typed_request_shape": true,
+    "canonical_json": true,
+    "canonical_sha256": true,
+    "segment_cache_key": true
+  },
+  "scope": {
+    "module_exported": false,
+    "mcp_registered": false,
+    "source_ingest_implemented": false,
+    "full_preflight_implemented": false
+  },
+  "runtime_effects": {
+    "modified_cargo_dependencies": false,
+    "modified_rust_registry": false,
+    "spawned_subprocess": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "next_gate": "rust_story_source_ingest_parity"
+}

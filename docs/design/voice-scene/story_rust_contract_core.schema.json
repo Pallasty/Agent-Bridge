@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/story_rust_contract_core.v1.json",
+  "title": "Agent-Bridge Rust story contract core receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "evidence", "parity", "scope", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_rust_contract_core.v1"},
+    "status": {"const": "rust_contract_core_parity_verified"},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rust_module_path", "rust_module_sha256", "rust_test_path", "rust_test_sha256", "python_oracles", "vectors"],
+      "properties": {
+        "rust_module_path": {"type": "string", "minLength": 1},
+        "rust_module_sha256": {"$ref": "#/$defs/sha256"},
+        "rust_test_path": {"type": "string", "minLength": 1},
+        "rust_test_sha256": {"$ref": "#/$defs/sha256"},
+        "python_oracles": {"type": "object", "minProperties": 2, "additionalProperties": {"$ref": "#/$defs/sha256"}},
+        "vectors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["canonical_json_sha256", "request_sha256", "segment_cache_key"],
+          "properties": {
+            "canonical_json_sha256": {"$ref": "#/$defs/sha256"},
+            "request_sha256": {"$ref": "#/$defs/sha256"},
+            "segment_cache_key": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "parity": {"type": "object", "minProperties": 4, "additionalProperties": {"const": true}},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module_exported", "mcp_registered", "source_ingest_implemented", "full_preflight_implemented"],
+      "properties": {
+        "module_exported": {"const": false},
+        "mcp_registered": {"const": false},
+        "source_ingest_implemented": {"const": false},
+        "full_preflight_implemented": {"const": false}
+      }
+    },
+    "runtime_effects": {"type": "object", "minProperties": 1, "additionalProperties": {"const": false}},
+    "next_gate": {"const": "rust_story_source_ingest_parity"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}
