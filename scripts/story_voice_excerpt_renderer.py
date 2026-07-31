@@ -11,6 +11,14 @@ from pathlib import Path
 from typing import Any
 
 
+PAUSE_SECONDS = {
+    "same_paragraph": 0.65,
+    "speaker_turn": 1.0,
+    "paragraph_break": 1.4,
+    "scene_break": 2.2,
+}
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -45,28 +53,46 @@ def build_render_plan(
         if not text or len(text) > 200:
             raise ValueError("excerpt text must contain 1-200 characters")
         role = roles[speaker_id]
-        plan.append(
-            {
-                "segment_index": index,
-                "speaker_id": speaker_id,
-                "display_name": role["display_name"],
-                "qwen_speaker": role["qwen_speaker"],
-                "style_instruction": role["style_instruction"],
-                "text": text,
-            }
-        )
+        row = {
+            "segment_index": index,
+            "speaker_id": speaker_id,
+            "display_name": role["display_name"],
+            "qwen_speaker": role["qwen_speaker"],
+            "style_instruction": role["style_instruction"],
+            "text": text,
+        }
+        is_last = index == len(excerpt) - 1
+        transition = segment.get("transition_after")
+        if is_last:
+            if transition is not None:
+                raise ValueError("final segment must not define transition_after")
+        else:
+            if transition not in PAUSE_SECONDS:
+                raise ValueError(f"unknown transition_after: {transition}")
+            row["transition_after"] = transition
+            row["pause_after_seconds"] = PAUSE_SECONDS[transition]
+        plan.append(row)
     if not plan:
         raise ValueError("excerpt must contain at least one segment")
     return plan
 
 
 def concatenate_wavs(
-    paths: list[Path], output_path: Path, *, gap_seconds: float
+    paths: list[Path],
+    output_path: Path,
+    *,
+    gap_seconds: float | list[float],
 ) -> dict[str, Any]:
     if not paths:
         raise ValueError("at least one WAV is required")
-    if gap_seconds < 0 or gap_seconds > 2:
-        raise ValueError("gap_seconds must be between 0 and 2")
+    if isinstance(gap_seconds, list):
+        gaps = gap_seconds
+        if len(gaps) != len(paths) - 1:
+            raise ValueError("provide exactly one gap per transition")
+    else:
+        gaps = [gap_seconds] * (len(paths) - 1)
+    if any(gap < 0 or gap > 3 for gap in gaps):
+        raise ValueError("gap_seconds must be between 0 and 3")
     if output_path.exists():
         raise ValueError("output path already exists")
 
@@ -92,9 +118,12 @@ def concatenate_wavs(
     channels, sample_width, sample_rate = expected_format
     if expected_format != (1, 2, 24000):
         raise ValueError("WAV format mismatch: expected mono PCM16 24 kHz")
-    gap_frames = round(gap_seconds * sample_rate)
-    silence = b"\x00" * gap_frames * channels * sample_width
-    combined = silence.join(payloads)
+    gap_frames = [round(gap * sample_rate) for gap in gaps]
+    combined_parts = [payloads[0]]
+    for frames, payload in zip(gap_frames, payloads[1:]):
+        combined_parts.append(b"\x00" * frames * channels * sample_width)
+        combined_parts.append(payload)
+    combined = b"".join(combined_parts)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(output_path), "wb") as wav:
         wav.setnchannels(channels)
@@ -102,7 +131,8 @@ def concatenate_wavs(
         wav.setframerate(sample_rate)
         wav.writeframes(combined)
 
-    total_frames = audio_frames + gap_frames * (len(paths) - 1)
+    total_frames = audio_frames + sum(gap_frames)
+    uniform_gap = len(set(gaps)) <= 1
     return {
         "output_path": str(output_path.resolve()),
         "sha256": sha256(output_path),
@@ -110,8 +140,8 @@ def concatenate_wavs(
         "channels": channels,
         "sample_width_bytes": sample_width,
         "segment_count": len(paths),
-        "gap_seconds": gap_seconds,
-        "gap_frames": gap_frames,
+        "gap_seconds": gaps[0] if uniform_gap and gaps else gaps,
+        "gap_frames": gap_frames[0] if uniform_gap and gap_frames else gap_frames,
         "audio_frames": audio_frames,
         "total_frames": total_frames,
         "duration_seconds": total_frames / sample_rate,
@@ -127,6 +157,7 @@ def main() -> int:
     parser.add_argument("--segment-wav", action="append", type=Path, default=[])
     parser.add_argument("--output", type=Path)
     parser.add_argument("--gap-seconds", type=float, default=0.8)
+    parser.add_argument("--dynamic-gaps", action="store_true")
     args = parser.parse_args()
 
     plan = build_render_plan(
@@ -141,8 +172,11 @@ def main() -> int:
     if args.segment_wav:
         if args.output is None:
             parser.error("--output is required with --segment-wav")
+        gaps: float | list[float] = args.gap_seconds
+        if args.dynamic_gaps:
+            gaps = [row["pause_after_seconds"] for row in plan[:-1]]
         result["audio"] = concatenate_wavs(
-            args.segment_wav, args.output, gap_seconds=args.gap_seconds
+            args.segment_wav, args.output, gap_seconds=gaps
         )
     print(json.dumps(result, ensure_ascii=False))
     return 0

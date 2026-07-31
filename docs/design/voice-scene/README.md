@@ -318,6 +318,14 @@ accepted naturalness, clarity, and role identifiability, but found the fixed
 paragraph context. Voice quality is accepted; chapter admission remains
 blocked on a paragraph-aware dynamic pause policy.
 
+S5ZA extends the excerpt renderer with explicit structural transitions and a
+bounded pause table: 0.65 seconds for same-paragraph continuation, 1.0 for a
+speaker turn, 1.4 for a paragraph break, and 2.2 for a scene break. Unknown
+labels fail closed. The current trial reuses the four hash-identical S5Z source
+segments and applies 1.4, 1.0, then 1.4 seconds without executing TTS. The
+18.92-second assembly is finite/non-silent and retains the same combined ASR
+content. Owner pacing feedback remains the next gate.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

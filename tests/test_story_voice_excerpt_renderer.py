@@ -63,8 +63,16 @@ def acceptance(*, accepted: bool = True) -> dict:
 
 def excerpt() -> list[dict[str, str]]:
     return [
-        {"speaker_id": "narrator", "text": "雨声渐近。"},
-        {"speaker_id": "lin", "text": "我们得马上离开。"},
+        {
+            "speaker_id": "narrator",
+            "text": "雨声渐近。",
+            "transition_after": "paragraph_break",
+        },
+        {
+            "speaker_id": "lin",
+            "text": "我们得马上离开。",
+            "transition_after": "speaker_turn",
+        },
         {"speaker_id": "su", "text": "等等，我听见钟声了。"},
     ]
 
@@ -77,6 +85,22 @@ def test_build_plan_binds_accepted_mapping_and_preserves_order() -> None:
     assert plan[2]["qwen_speaker"] == "Serena"
     assert [row["segment_index"] for row in plan] == [0, 1, 2]
     assert all(row["style_instruction"] for row in plan)
+    assert [row.get("pause_after_seconds") for row in plan] == [1.4, 1.0, None]
+
+
+def test_pause_policy_is_explicit_bounded_and_rejects_unknown_labels() -> None:
+    module = load_module()
+
+    assert module.PAUSE_SECONDS == {
+        "same_paragraph": 0.65,
+        "speaker_turn": 1.0,
+        "paragraph_break": 1.4,
+        "scene_break": 2.2,
+    }
+    invalid = excerpt()
+    invalid[0]["transition_after"] = "dramatic_guess"
+    with pytest.raises(ValueError, match="unknown transition_after"):
+        module.build_render_plan(mapping(), acceptance(), invalid)
 
 
 def test_build_plan_fails_closed_on_unaccepted_or_mismatched_mapping() -> None:
@@ -134,4 +158,27 @@ def test_concatenate_wavs_rejects_format_mismatch(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="WAV format mismatch"):
         load_module().concatenate_wavs(
             [first, second], tmp_path / "out.wav", gap_seconds=0.5
+        )
+
+
+def test_concatenate_wavs_supports_one_gap_per_transition(tmp_path: Path) -> None:
+    paths = [tmp_path / f"{index}.wav" for index in range(3)]
+    for path in paths:
+        _write_wav(path, b"\x01\x00" * 10)
+
+    result = load_module().concatenate_wavs(
+        paths,
+        tmp_path / "dynamic.wav",
+        gap_seconds=[0.65, 1.4],
+    )
+
+    assert result["gap_seconds"] == [0.65, 1.4]
+    assert result["gap_frames"] == [15600, 33600]
+    assert result["total_frames"] == 49230
+
+    with pytest.raises(ValueError, match="one gap per transition"):
+        load_module().concatenate_wavs(
+            paths,
+            tmp_path / "invalid.wav",
+            gap_seconds=[0.65],
         )
