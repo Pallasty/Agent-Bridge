@@ -268,3 +268,43 @@ validity remain unproven. The probe does not continue to a second frame,
 decode a waveform, produce or play audio, use a GPU, or import community
 Python. It makes no voice-quality, real-time, supply-chain, or MI50/ROCm
 claim.
+
+## S5O configuration compatibility and provenance evidence
+
+The next stage resolves the configuration gap before any multi-frame claim.
+The conversion snapshot's `STATUS.md` names
+`Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`, but neither it nor the variant
+manifest records the exact upstream source revision used for export.
+
+The official Qwen Hugging Face repository exposes `config.json` at immutable
+commit `6c3e96b6a2c593ce3e546ee699a5d944de81850e`. Its declared values include
+talker vocabulary 3072, hidden size 2048, 16 code groups, 28 layers, eight KV
+heads, head dimension 128, code-predictor vocabulary 2048, codec pad 2148,
+codec BOS 2149, and codec EOS 2150. Repeated direct raw/resolve downloads from
+Hugging Face failed by connection reset and left no partial file.
+
+The same official Qwen model was available through ModelScope only at mutable
+`master`. The two small JSON files were acquired without weights on
+2026-07-30. The observed `config.json` is 4,908 bytes with SHA-256
+`17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9`;
+`generation_config.json` is 245 bytes with SHA-256
+`f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa`.
+
+`story_voice_config_provenance_gate.py` verifies the observed config hash and
+creates three CPU-only ONNX sessions strictly for metadata inspection. It
+does not call `session.run()`. Every configuration dimension reconciles with
+the exports:
+
+- talker logits 3072 and hidden width 2048;
+- 56 cache inputs = 28 layers × key/value, with eight heads × 128 dimensions;
+- predictor output `[batch,15,2048]` for the remaining 15 of 16 groups; and
+- residual-embedding input width 16 and output width 2048.
+
+The resulting status is
+`configuration_compatible_provenance_incomplete`, not reference-ready.
+Compatibility cannot replace lineage: the converter source revision is
+missing, the locally acquired ModelScope revision is mutable, and the
+immutable Hugging Face config could not be acquired locally for byte-level
+comparison. Therefore `reference_generation_ready=false`; S5N remains a raw
+structural loop, and reference-compatible multi-frame generation stays
+blocked.

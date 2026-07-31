@@ -181,6 +181,17 @@ reserved-token suppression and explicitly makes no reference-generation
 equivalence claim. It stops before a second frame, waveform decoding, audio,
 GPU work, or community-Python import.
 
+S5O uses `scripts/story_voice_config_provenance_gate.py` to hash-check an
+official Qwen configuration observed through ModelScope and reconcile it with
+fresh metadata from the three CPU INT4 graphs. The
+`s5o_config_provenance_gate.json` receipt validates against
+`voice_config_provenance_gate.schema.json`. All model dimensions and codec
+IDs match the graph contracts, but the converter did not record its upstream
+revision, ModelScope exposed only mutable `master`, and fixed-revision
+Hugging Face raw transfer was unavailable. The receipt therefore retains
+`reference_generation_ready=false` and blocks reference-compatible
+multi-frame claims despite structural compatibility.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

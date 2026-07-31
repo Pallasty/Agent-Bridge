@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_config_provenance_gate.schema.json",
+  "title": "Agent-Bridge voice configuration provenance gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "snapshot",
+    "official_model_id",
+    "official_config",
+    "converter_provenance",
+    "status",
+    "config_graph_compatible",
+    "reference_generation_ready",
+    "config_contract",
+    "graph_contracts",
+    "blockers",
+    "runtime_effects"
+  ],
+  "properties": {
+    "schema": {"const": "agent_bridge.voice_config_provenance_gate.v1"},
+    "snapshot": {"type": "string", "minLength": 1},
+    "official_model_id": {
+      "const": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    },
+    "official_config": {"type": "object"},
+    "converter_provenance": {"type": "object"},
+    "status": {
+      "enum": [
+        "blocked",
+        "configuration_compatible_provenance_incomplete"
+      ]
+    },
+    "config_graph_compatible": {"type": ["boolean", "null"]},
+    "reference_generation_ready": {"const": false},
+    "config_contract": {"type": ["object", "null"]},
+    "graph_contracts": {"type": ["object", "null"]},
+    "missing_models": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
+    "runtime_effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "created_inference_sessions",
+        "executed_graphs",
+        "downloaded_weights",
+        "generated_codec_frames",
+        "decoded_waveform",
+        "played_audio",
+        "used_gpu",
+        "imported_community_python"
+      ],
+      "properties": {
+        "created_inference_sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "executed_graphs": {"const": false},
+        "downloaded_weights": {"const": false},
+        "generated_codec_frames": {"const": false},
+        "decoded_waveform": {"const": false},
+        "played_audio": {"const": false},
+        "used_gpu": {"const": false},
+        "imported_community_python": {"const": false}
+      }
+    }
+  }
+}
