@@ -48,6 +48,8 @@ express. A packet is S0-valid only when it passes both.
   embedded integration decision.
 - `story_rust_contract_core.schema.json`: S5ZJ pure Rust request, canonical
   JSON, SHA-256, and cache-key parity receipt.
+- `story_rust_source_ingest.schema.json`: S5ZK Rust source-byte, chapter-index,
+  span, and selection parity receipt.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
@@ -424,6 +426,14 @@ tests reproduce Python-oracle hashes, including UTF-8 content. It performs no
 source ingest, is absent from the Rust module tree and MCP registry, and has no
 model, audio, cache, or memory effects. Rust source ingest parity is the next
 gate.
+
+S5ZK extends that unexported module with bounded TXT/Markdown file reading,
+exact source-byte hashing, strict UTF-8 decoding, stable source/chapter IDs,
+Unicode character spans, and `from_start` or explicit-chapter selection. The
+`story_s1.md` golden packet matches the Python oracle; missing chapters and
+non-UTF-8 files fail closed. Cast/event extraction and voice planning remain
+outside this unit, with no registry or runtime effects. Rust voice-plan parity
+is the next gate.
 
 ## S4 realtime story interaction
 

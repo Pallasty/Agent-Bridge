@@ -2,9 +2,10 @@
 mod story_contract;
 
 use serde_json::json;
+use std::path::Path;
 use story_contract::{
-    canonical_json, segment_cache_key, sha256_canonical_json, SegmentCacheKeyInput, StoryRequest,
-    StoryStart,
+    canonical_json, ingest_story_source, segment_cache_key, sha256_canonical_json,
+    SegmentCacheKeyInput, StoryRequest, StoryStart,
 };
 
 #[test]
@@ -95,4 +96,53 @@ fn invalid_requests_fail_closed() {
     ] {
         assert!(request.validate().is_err());
     }
+}
+
+#[test]
+fn source_ingest_matches_python_chapter_two_oracle() {
+    let ingest = ingest_story_source(
+        Path::new("../../docs/design/voice-scene/fixtures/story_s1.md"),
+        &StoryStart::Chapter { chapter: 2 },
+    )
+    .expect("fixture ingest");
+
+    assert_eq!(
+        canonical_json(&serde_json::to_value(ingest).unwrap()).unwrap(),
+        r#"{"chapters":[{"chapter_id":"chapter_f29cded10e417c151b85","ordinal":1,"selected":false,"source_span":{"char_end":53,"char_start":0,"line_end":6,"line_start":1,"source_id":"source_4982d79cfc3172771f4a"},"title":"第一章 夜雨"},{"chapter_id":"chapter_dea6e639ff06f2cc5ce9","ordinal":2,"selected":true,"source_span":{"char_end":88,"char_start":53,"line_end":10,"line_start":7,"source_id":"source_4982d79cfc3172771f4a"},"title":"第二章 回声"}],"selection":{"first_chapter":2,"selected_chapter_ids":["chapter_dea6e639ff06f2cc5ce9"]},"source":{"byte_length":232,"char_length":88,"encoding":"utf-8","format":"md","kind":"novel","sha256":"a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566","source_id":"source_4982d79cfc3172771f4a","uri":"/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/fixtures/story_s1.md","version":"source-v1"}}"#
+    );
+}
+
+#[test]
+fn source_ingest_from_start_selects_every_chapter() {
+    let ingest = ingest_story_source(
+        Path::new("../../docs/design/voice-scene/fixtures/story_s1.md"),
+        &StoryStart::FromStart,
+    )
+    .expect("fixture ingest");
+
+    assert_eq!(ingest.selection.first_chapter, 1);
+    assert_eq!(
+        ingest.selection.selected_chapter_ids,
+        vec![
+            "chapter_f29cded10e417c151b85",
+            "chapter_dea6e639ff06f2cc5ce9"
+        ]
+    );
+    assert!(ingest.chapters.iter().all(|chapter| chapter.selected));
+}
+
+#[test]
+fn source_ingest_fails_closed_for_missing_chapter_and_non_utf8() {
+    let fixture = Path::new("../../docs/design/voice-scene/fixtures/story_s1.md");
+    assert!(ingest_story_source(fixture, &StoryStart::Chapter { chapter: 99 }).is_err());
+
+    let invalid = std::env::temp_dir().join(format!(
+        "ab-s5zk-invalid-utf8-{}-{}.md",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("test")
+    ));
+    std::fs::write(&invalid, [0xff, 0xfe]).expect("write invalid fixture");
+    let result = ingest_story_source(&invalid, &StoryStart::FromStart);
+    std::fs::remove_file(&invalid).expect("remove invalid fixture");
+    assert!(result.is_err());
 }

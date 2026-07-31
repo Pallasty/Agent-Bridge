@@ -1,0 +1,46 @@
+{
+  "schema": "agent_bridge.story_rust_source_ingest.v1",
+  "status": "rust_story_source_ingest_parity_verified",
+  "evidence": {
+    "rust_module_path": "crates/bridge/src/story_contract.rs",
+    "rust_module_sha256": "ab735afaf55228d2db6dfb0979d1564faedfec0e5d079761e07d3cd1c936ede7",
+    "rust_test_path": "crates/bridge/tests/story_contract_core.rs",
+    "rust_test_sha256": "868e06bc196d55c5b4234bf0efea75949534cefda92e73db564a5efa7b633623",
+    "python_oracle_path": "scripts/story_static_ingest.py",
+    "python_oracle_sha256": "6a770631cac5b94d23194cd804494795c6e785366f40863fd0766ae47f8f71f1",
+    "fixture_path": "docs/design/voice-scene/fixtures/story_s1.md",
+    "fixture_sha256": "a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566",
+    "fixture_byte_length": 232,
+    "fixture_char_length": 88
+  },
+  "parity": {
+    "source_byte_sha256": true,
+    "source_identifier": true,
+    "utf8_character_length": true,
+    "chapter_identifiers": true,
+    "line_and_character_spans": true,
+    "chapter_selection": true
+  },
+  "negative_controls": {
+    "missing_chapter_rejected": true,
+    "non_utf8_rejected": true
+  },
+  "scope": {
+    "module_exported": false,
+    "mcp_registered": false,
+    "voice_plan_implemented": false,
+    "full_preflight_implemented": false
+  },
+  "runtime_effects": {
+    "modified_cargo_dependencies": false,
+    "modified_rust_registry": false,
+    "spawned_subprocess": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "next_gate": "rust_story_voice_plan_parity"
+}
