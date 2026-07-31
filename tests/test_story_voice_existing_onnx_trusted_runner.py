@@ -23,17 +23,18 @@ def load_module():
 
 
 class FakePipeline:
-    def __init__(self) -> None:
+    def __init__(self, frames: int = 24) -> None:
         self._tok = None
+        self.frames = frames
 
     def generate(self, *args, **kwargs):
         assert self._tok == "fixed-tokenizer"
         assert kwargs["do_sample"] is False
         assert kwargs["sub_do_sample"] is False
-        return FakeArray((25, 16))
+        return FakeArray((self.frames, 16))
 
     def decode_chunked(self, codes):
-        assert codes.shape == (1, 25, 16)
+        assert codes.shape == (1, self.frames, 16)
         return FakeArray((1, 1, 24000))
 
 
@@ -91,7 +92,32 @@ def test_runner_hash_binds_inference_and_fixes_tokenizer(tmp_path: Path) -> None
     ]
     assert written == [(tmp_path / "candidate.wav", (24000,), 24000)]
     assert receipt["tokenizer_fix_mistral_regex"] is True
-    assert receipt["generated_codec_frames"] == 25
+    assert receipt["generated_codec_frames"] == 24
+    assert receipt["stopped_before_frame_cap"] is True
+
+
+def test_runner_rejects_frame_cap_as_truncated(tmp_path: Path) -> None:
+    inference = tmp_path / "inference.py"
+    inference.write_text("trusted fixture")
+    module = load_module()
+    written = []
+
+    with pytest.raises(ValueError, match="generation reached frame cap"):
+        module.run_trial(
+            inference_path=inference,
+            expected_inference_sha256=module.sha256(inference),
+            model_path=tmp_path / "model",
+            tts_dir=tmp_path / "original",
+            output_path=tmp_path / "candidate.wav",
+            text="你好。",
+            speaker="Vivian",
+            language="Chinese",
+            max_new_tokens=25,
+            pipeline_factory=lambda *_: FakePipeline(frames=25),
+            tokenizer_factory=lambda *_args, **_kwargs: "fixed-tokenizer",
+            audio_writer=lambda *_: written.append(True),
+        )
+    assert written == []
 
 
 def test_runner_rejects_inference_hash_mismatch(tmp_path: Path) -> None:

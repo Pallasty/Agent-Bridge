@@ -91,6 +91,8 @@ def run_trial(
     )
     if codes.shape[0] == 0:
         raise ValueError("generation returned no codec frames")
+    if codes.shape[0] >= max_new_tokens:
+        raise ValueError("generation reached frame cap before EOS")
     waveform = pipeline.decode_chunked(codes[None]).reshape(-1)
     audio_writer(output_path, waveform, 24000)
     return {
@@ -99,6 +101,8 @@ def run_trial(
         "local_files_only": True,
         "provider_policy": "cpu_only_gpu_hidden",
         "generated_codec_frames": codes.shape[0],
+        "frame_cap": max_new_tokens,
+        "stopped_before_frame_cap": True,
         "output_path": str(output_path),
     }
 

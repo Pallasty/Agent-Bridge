@@ -280,6 +280,13 @@ owner reported `清晰，温柔。`. Those human claims apply only to this candi
 full-sentence completion, general naturalness, MI50, and production admission
 remain open.
 
+S5W makes reaching `max_new_tokens` a hard truncation failure. The next Vivian
+candidate naturally emitted EOS at frame 58 under a 100-frame cap, and
+SenseVoice recovered the complete sentence `你好，我是小树，今天很高兴和你说话。`.
+The 4.64-second WAV was played under owner authorization. The committed receipt
+records the owner's `完整！清晰，自然` acceptance. Story-renderer mapping remains
+the next gate.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
