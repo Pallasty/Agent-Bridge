@@ -35,6 +35,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
         "run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff",
         "run_lswr_interaction_feedback_consumption_preflight",
+        "run_biocortex_retrieval_opt_in_evidence_summary",
         "shadow_json_display",
     ] {
         assert!(
@@ -73,7 +74,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root
                 .contains("BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff")
             && composition_root
-                .contains("BioCortexOp::LswrInteractionFeedbackConsumptionPreflight"),
+                .contains("BioCortexOp::LswrInteractionFeedbackConsumptionPreflight")
+            && composition_root.contains("BioCortexOp::RetrievalOptInEvidenceSummary"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -299,6 +301,26 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
                 .contains("run_lswr_interaction_feedback_consumption_preflight(input, *json)"),
         "main.rs must retain LSWR preflight input custody, exact errors, and populated-input dispatch"
     );
+    let evidence_batch_read = composition_root
+        .find("load_biocortex_redacted_json(batch_diagnostics_json")
+        .expect("main.rs must retain evidence-summary batch input custody");
+    let evidence_controlled_read = composition_root
+        .find("load_biocortex_redacted_json(\n        controlled_order_fixture_run_json")
+        .expect("main.rs must retain evidence-summary controlled input custody");
+    let evidence_optional_readiness = composition_root
+        .find("let runtime_readiness = if let Some(path) = runtime_readiness_packet_json")
+        .expect("main.rs must retain optional runtime-readiness input custody");
+    assert!(
+        evidence_batch_read < evidence_controlled_read
+            && evidence_controlled_read < evidence_optional_readiness,
+        "main.rs must retain evidence-summary batch -> controlled -> optional readiness precedence"
+    );
+    assert!(
+        composition_root.contains("fn build_biocortex_retrieval_opt_in_evidence_summary(")
+            && composition_root
+                .contains("run_biocortex_retrieval_opt_in_evidence_summary(payload, *json)",),
+        "main.rs must retain evidence-summary planning and dispatch only the populated payload"
+    );
     assert!(
         composition_root.contains("fn run_biocortex_retrieval_opt_in_runtime_trial("),
         "main.rs must retain the side-signal-capable runtime-trial executor"
@@ -339,6 +361,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "std::fs::read_to_string(post_semantic_diverse_review_json)",
         "std::fs::read_to_string(controlled_trial_readiness_json)",
         "std::fs::read_to_string(input_json)",
+        "load_biocortex_redacted_json",
+        "BIOCORTEX_RETRIEVAL_OPT_IN_EVIDENCE_SUMMARY_SCHEMA",
         "cli_env_truthy",
         "BIOCORTEX_RETRIEVAL_DISABLE_ENV",
         "run_biocortex_retrieval_opt_in_store_trial",

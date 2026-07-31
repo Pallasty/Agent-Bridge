@@ -72,9 +72,10 @@ use cli::{
     run_biocortex_retrieval_opt_in_runtime_readiness_packet,
     run_biocortex_retrieval_opt_in_runtime_transition_gate,
     run_biocortex_retrieval_opt_in_runtime_trial_review_packet,
-    run_biocortex_retrieval_opt_in_status, run_biocortex_shadow_digest, run_browser_lite,
-    run_lswr_interaction_feedback_consumption_preflight, run_substrate, shadow_json_display, A2uiOp,
-    BrowserLiteOp, OperatorRequestOp, SubstrateOp,
+    run_biocortex_retrieval_opt_in_status, run_biocortex_retrieval_opt_in_evidence_summary,
+    run_biocortex_shadow_digest, run_browser_lite,
+    run_lswr_interaction_feedback_consumption_preflight, run_substrate, shadow_json_display,
+    A2uiOp, BrowserLiteOp, OperatorRequestOp, SubstrateOp,
 };
 
 #[derive(Parser, Debug)]
@@ -6642,16 +6643,18 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_opt_in_evidence_summary(
-                batch_diagnostics_json,
-                controlled_order_fixture_run_json,
-                runtime_readiness_packet_json.as_deref(),
-                reviewer.clone(),
-                commit.clone(),
-                forum_post_id.clone(),
-                memory_key.clone(),
-                *json,
-            ),
+            } => {
+                let payload = build_biocortex_retrieval_opt_in_evidence_summary(
+                    batch_diagnostics_json,
+                    controlled_order_fixture_run_json,
+                    runtime_readiness_packet_json.as_deref(),
+                    reviewer.clone(),
+                    commit.clone(),
+                    forum_post_id.clone(),
+                    memory_key.clone(),
+                )?;
+                run_biocortex_retrieval_opt_in_evidence_summary(payload, *json)
+            }
             BioCortexOp::RetrievalOptInRedactedEvidenceAggregate {
                 movement_fixture_run_json,
                 coverage_fixture_run_json,
@@ -12273,7 +12276,7 @@ async fn run_biocortex_retrieval_opt_in_controlled_order_fixture(
     Ok(())
 }
 
-fn run_biocortex_retrieval_opt_in_evidence_summary(
+fn build_biocortex_retrieval_opt_in_evidence_summary(
     batch_diagnostics_json: &std::path::Path,
     controlled_order_fixture_run_json: &std::path::Path,
     runtime_readiness_packet_json: Option<&std::path::Path>,
@@ -12281,8 +12284,7 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
     commit: Option<String>,
     forum_post_id: Option<String>,
     memory_key: Option<String>,
-    as_json: bool,
-) -> Result<()> {
+) -> Result<Value> {
     let batch =
         load_biocortex_redacted_json(batch_diagnostics_json, "opt-in batch diagnostics JSON")?;
     let controlled = load_biocortex_redacted_json(
@@ -12672,53 +12674,7 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
         "side_signal_raw_included": false,
     });
 
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in evidence summary");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "review_state={} evidence_ready={} default_influence_ready={}",
-        shadow_json_display(payload.pointer("/interpretation/review_state"), "-"),
-        shadow_json_display(payload.pointer("/interpretation/evidence_ready"), "false"),
-        shadow_json_display(
-            payload.pointer("/interpretation/default_influence_ready"),
-            "false"
-        )
-    );
-    println!(
-        "batch_queries={} batch_moved={} controlled_moved={} controlled_expected_met={}",
-        batch_query_count, batch_actual_moved, controlled_actual_moved, controlled_expected_met
-    );
-    if runtime_readiness_provided {
-        println!(
-            "runtime_readiness_ready={} readiness_batch_source={} transition_gated={}",
-            shadow_json_display(
-                payload.pointer("/runtime_readiness/runtime_readiness_ready"),
-                "false"
-            ),
-            shadow_json_display(
-                payload.pointer("/runtime_readiness/batch_evidence_source"),
-                "-"
-            ),
-            shadow_json_display(
-                payload.pointer("/runtime_readiness/batch_transition_gated"),
-                "false"
-            )
-        );
-    }
-    println!(
-        "recommended_next_step={} raw_flags batch={} controlled={}",
-        shadow_json_display(
-            payload.pointer("/interpretation/recommended_next_step"),
-            "-"
-        ),
-        batch_raw_flags_all_false,
-        controlled_raw_flags_all_false
-    );
-    Ok(())
+    Ok(payload)
 }
 
 fn run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(

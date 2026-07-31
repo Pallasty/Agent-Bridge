@@ -1006,6 +1006,78 @@ pub(crate) fn run_lswr_interaction_feedback_consumption_preflight(
     Ok(())
 }
 
+pub(crate) fn run_biocortex_retrieval_opt_in_evidence_summary(
+    payload: Value,
+    as_json: bool,
+) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in evidence summary");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "review_state={} evidence_ready={} default_influence_ready={}",
+        shadow_json_display(payload.pointer("/interpretation/review_state"), "-"),
+        shadow_json_display(payload.pointer("/interpretation/evidence_ready"), "false"),
+        shadow_json_display(
+            payload.pointer("/interpretation/default_influence_ready"),
+            "false"
+        )
+    );
+    println!(
+        "batch_queries={} batch_moved={} controlled_moved={} controlled_expected_met={}",
+        shadow_json_display(payload.pointer("/batch_diagnostics/query_count"), "0"),
+        shadow_json_display(
+            payload.pointer("/batch_diagnostics/actual_order_changed_count"),
+            "0"
+        ),
+        shadow_json_display(
+            payload.pointer("/controlled_order/actual_order_changed_count"),
+            "0"
+        ),
+        shadow_json_display(payload.pointer("/controlled_order/expected_met"), "false")
+    );
+    if payload
+        .pointer("/runtime_readiness/provided")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        println!(
+            "runtime_readiness_ready={} readiness_batch_source={} transition_gated={}",
+            shadow_json_display(
+                payload.pointer("/runtime_readiness/runtime_readiness_ready"),
+                "false"
+            ),
+            shadow_json_display(
+                payload.pointer("/runtime_readiness/batch_evidence_source"),
+                "-"
+            ),
+            shadow_json_display(
+                payload.pointer("/runtime_readiness/batch_transition_gated"),
+                "false"
+            )
+        );
+    }
+    println!(
+        "recommended_next_step={} raw_flags batch={} controlled={}",
+        shadow_json_display(
+            payload.pointer("/interpretation/recommended_next_step"),
+            "-"
+        ),
+        shadow_json_display(
+            payload.pointer("/batch_diagnostics/raw_flags_all_false"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/controlled_order/raw_flags_all_false"),
+            "false"
+        )
+    );
+    Ok(())
+}
+
 pub(crate) fn shadow_json_display(value: Option<&Value>, default: &str) -> String {
     match value {
         Some(Value::String(s)) => s.clone(),
