@@ -1006,6 +1006,48 @@ pub(crate) fn run_lswr_interaction_feedback_consumption_preflight(
     Ok(())
 }
 
+pub(crate) fn run_biocortex_retrieval_opt_in_controlled_order_fixture_result(
+    payload: Value,
+    as_json: bool,
+) -> Result<()> {
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in controlled order fixture");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} expected_met={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.pointer("/expected/met"), "false")
+    );
+    println!(
+        "seeded_memories={} queries={} actual_order_changed={} experimental_source={} side_signal_ok={}",
+        shadow_json_display(payload.pointer("/attempt/seeded_memory_count"), "0"),
+        shadow_json_display(payload.pointer("/attempt/query_count"), "0"),
+        shadow_json_display(
+            payload.pointer("/diagnostics/summary/actual_order_changed_count"),
+            "0"
+        ),
+        shadow_json_display(
+            payload.pointer("/diagnostics/summary/experimental_source_count"),
+            "0"
+        ),
+        shadow_json_display(
+            payload.pointer("/diagnostics/summary/side_signal_ok_count"),
+            "0"
+        )
+    );
+    println!(
+        "raw_queries_included={} raw_keys_included={} content_included={}",
+        shadow_json_display(payload.get("raw_queries_included"), "false"),
+        shadow_json_display(payload.get("raw_keys_included"), "false"),
+        shadow_json_display(payload.get("content_included"), "false")
+    );
+    Ok(())
+}
+
 pub(crate) fn run_biocortex_retrieval_opt_in_evidence_summary(
     payload: Value,
     as_json: bool,

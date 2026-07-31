@@ -37,6 +37,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_lswr_interaction_feedback_consumption_preflight",
         "run_biocortex_retrieval_opt_in_evidence_summary",
         "run_biocortex_retrieval_opt_in_redacted_evidence_aggregate",
+        "run_biocortex_retrieval_opt_in_controlled_order_fixture_result",
         "shadow_json_display",
     ] {
         assert!(
@@ -77,7 +78,8 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root
                 .contains("BioCortexOp::LswrInteractionFeedbackConsumptionPreflight")
             && composition_root.contains("BioCortexOp::RetrievalOptInEvidenceSummary")
-            && composition_root.contains("BioCortexOp::RetrievalOptInRedactedEvidenceAggregate"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInRedactedEvidenceAggregate")
+            && composition_root.contains("BioCortexOp::RetrievalOptInControlledOrderFixture"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -343,6 +345,16 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "main.rs must retain the side-signal-capable runtime-trial executor"
     );
     assert!(
+        composition_root
+            .contains("async fn run_biocortex_retrieval_opt_in_controlled_order_fixture(")
+            && composition_root.contains("controlled_fixture_db_path()?")
+            && composition_root.contains("SqliteStore::open(&db_path)")
+            && composition_root.contains("store\n            .memory_save(&mem)")
+            && composition_root.contains("biocortex_retrieval_opt_in_batch_diagnostics(&store, opts).await")
+            && composition_root.contains("BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_RUN_SCHEMA"),
+        "main.rs must retain controlled-order authorization, store, diagnostics, and payload custody"
+    );
+    assert!(
         composition_root.contains("read_optional_json_file("),
         "main.rs must retain optional JSON file loading"
     );
@@ -357,6 +369,11 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "std::fs::read_to_string(dry_run_json)",
         "std::fs::read_to_string(review_packet_json)",
         "fn run_biocortex_retrieval_opt_in_runtime_trial(",
+        "async fn run_biocortex_retrieval_opt_in_controlled_order_fixture(",
+        "controlled_fixture_db_path",
+        "memory_save",
+        "biocortex_retrieval_opt_in_batch_diagnostics",
+        "BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_RUN_SCHEMA",
         "std::fs::read_to_string(runtime_trial_json)",
         "std::fs::read_to_string(source_json)",
         "std::fs::read_to_string(authorization_request_json)",

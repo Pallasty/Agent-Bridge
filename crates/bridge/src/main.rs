@@ -62,6 +62,7 @@ use cli::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
     run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
     run_biocortex_retrieval_opt_in_authorization_decision_packet,
+    run_biocortex_retrieval_opt_in_controlled_order_fixture_result,
     run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
     run_biocortex_retrieval_opt_in_order_diff_packet,
     run_biocortex_retrieval_opt_in_post_implementation_review_gate,
@@ -12250,33 +12251,7 @@ async fn run_biocortex_retrieval_opt_in_controlled_order_fixture(
         "default_calls_unchanged": true,
     });
 
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex retrieval opt-in controlled order fixture");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} expected_met={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.pointer("/expected/met"), "false")
-    );
-    println!(
-        "seeded_memories={} queries={} actual_order_changed={} experimental_source={} side_signal_ok={}",
-        shadow_json_display(payload.pointer("/attempt/seeded_memory_count"), "0"),
-        shadow_json_display(payload.pointer("/attempt/query_count"), "0"),
-        actual_moved,
-        experimental_source,
-        side_signal_ok
-    );
-    println!(
-        "raw_queries_included={} raw_keys_included={} content_included={}",
-        shadow_json_display(payload.get("raw_queries_included"), "false"),
-        shadow_json_display(payload.get("raw_keys_included"), "false"),
-        shadow_json_display(payload.get("content_included"), "false")
-    );
-    Ok(())
+    run_biocortex_retrieval_opt_in_controlled_order_fixture_result(payload, as_json)
 }
 
 fn build_biocortex_retrieval_opt_in_evidence_summary(
