@@ -260,6 +260,16 @@ closing that smaller runtime gap and attempting bounded text-to-WAV synthesis
 is the next gate. No dependency installation, graph execution, rendering,
 playback, GPU work, or model conversion occurs in this decision stage.
 
+S5U creates a 303 MB isolated inference environment with ONNX Runtime,
+Transformers, and SoundFile—no Torch, Olive, Librosa, or source builds—and
+runs the existing CPU INT4 CustomVoice path on a bounded Chinese prompt. The
+receipt `s5u_existing_onnx_text_to_wav_receipt.json` binds the downloaded
+inference driver, manifest, environment, request, and resulting 0.64-second
+mono PCM16 24 kHz WAV. The artifact is non-silent and machine-verified but was
+not played. A Transformers warning requires the next trusted runner to set
+`fix_mistral_regex=True`; therefore linguistic correctness and naturalness
+remain unclaimed.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

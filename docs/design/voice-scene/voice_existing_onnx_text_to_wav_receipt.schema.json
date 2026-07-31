@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/voice_existing_onnx_text_to_wav_receipt.schema.json",
+  "title": "Agent-Bridge existing ONNX text-to-WAV receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "status", "request", "model", "runtime", "audio",
+    "synthesis_stdout", "claims", "runtime_effects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.voice_existing_onnx_text_to_wav_receipt.v1"
+    },
+    "status": {"const": "text_to_wav_machine_verified_no_playback"},
+    "request": {"type": "object"},
+    "model": {"type": "object"},
+    "runtime": {"type": "object"},
+    "audio": {"type": "object"},
+    "synthesis_stdout": {"type": "string"},
+    "claims": {
+      "type": "object",
+      "properties": {
+        "text_to_wav_machine_verified": {"const": true},
+        "human_audibility_verified": {"const": false},
+        "naturalness_verified": {"const": false},
+        "mi50_verified": {"const": false},
+        "production_admitted": {"const": false}
+      }
+    },
+    "runtime_effects": {
+      "type": "object",
+      "properties": {
+        "played_audio": {"const": false},
+        "loaded_original_pytorch_model": {"const": false},
+        "executed_converter": {"const": false},
+        "created_onnx": {"const": false},
+        "used_gpu": {"const": false}
+      }
+    }
+  }
+}

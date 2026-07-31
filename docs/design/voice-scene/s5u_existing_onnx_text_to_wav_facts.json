@@ -1,0 +1,21 @@
+{
+  "wav_path": "/Data/Models/agent-bridge/evidence/voice-scene/s5u-existing-onnx-20260730/trial.wav",
+  "text": "你好，这是现有ONNX模型的最小合成测试。",
+  "speaker": "Vivian",
+  "language": "Chinese",
+  "runtime": {
+    "python": "3.14.4",
+    "onnxruntime": "1.28.0",
+    "numpy": "2.5.1",
+    "transformers": "4.57.3",
+    "tokenizers": "0.22.2",
+    "soundfile": "0.13.1",
+    "environment": "/Data/Models/agent-bridge/tooling/qwen3-tts-onnx-runtime-py314",
+    "environment_bytes": "302760495"
+  },
+  "model_snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+  "model_variant": "cpu_int4",
+  "inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+  "manifest_sha256": "74bf84bc0910094b7b9996c7bf5ac79e2053702bbb7e77570b7f72fe4970f8c4",
+  "stdout": "model_type=custom_voice; tokenizer loaded locally with Transformers warning that fix_mistral_regex was not explicitly enabled; generated 8 frames (KV-cache); wrote 0.64s WAV"
+}

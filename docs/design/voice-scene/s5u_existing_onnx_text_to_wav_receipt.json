@@ -1,0 +1,56 @@
+{
+  "schema": "agent_bridge.voice_existing_onnx_text_to_wav_receipt.v1",
+  "status": "text_to_wav_machine_verified_no_playback",
+  "request": {
+    "text": "你好，这是现有ONNX模型的最小合成测试。",
+    "speaker": "Vivian",
+    "language": "Chinese"
+  },
+  "model": {
+    "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+    "variant": "cpu_int4",
+    "inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+    "manifest_sha256": "74bf84bc0910094b7b9996c7bf5ac79e2053702bbb7e77570b7f72fe4970f8c4"
+  },
+  "runtime": {
+    "python": "3.14.4",
+    "onnxruntime": "1.28.0",
+    "numpy": "2.5.1",
+    "transformers": "4.57.3",
+    "tokenizers": "0.22.2",
+    "soundfile": "0.13.1",
+    "environment": "/Data/Models/agent-bridge/tooling/qwen3-tts-onnx-runtime-py314",
+    "environment_bytes": "302760495"
+  },
+  "audio": {
+    "path": "/Data/Models/agent-bridge/evidence/voice-scene/s5u-existing-onnx-20260730/trial.wav",
+    "bytes": 30764,
+    "sha256": "ff6f57b54cd009ae180d340d8b59edd0dc83238a0d7d654937f8ef9320365b8e",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "frames": 15360,
+    "duration_seconds": 0.64,
+    "rms": 0.11123210610676958,
+    "peak": 0.45037841796875
+  },
+  "synthesis_stdout": "model_type=custom_voice; tokenizer loaded locally with Transformers warning that fix_mistral_regex was not explicitly enabled; generated 8 frames (KV-cache); wrote 0.64s WAV",
+  "claims": {
+    "text_to_wav_machine_verified": true,
+    "human_audibility_verified": false,
+    "naturalness_verified": false,
+    "mi50_verified": false,
+    "production_admitted": false
+  },
+  "runtime_effects": {
+    "created_inference_sessions": true,
+    "executed_onnx_graphs": true,
+    "generated_codec_frames": true,
+    "rendered_audio": true,
+    "played_audio": false,
+    "loaded_original_pytorch_model": false,
+    "executed_converter": false,
+    "created_onnx": false,
+    "used_gpu": false
+  }
+}
