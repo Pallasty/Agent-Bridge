@@ -3,8 +3,7 @@ use ab_agent::{
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
 use ab_bridge::biocortex_shadow::{
-    biocortex_replay_comparison, biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
-    biocortex_retrieval_opt_in_batch_diagnostics,
+    biocortex_replay_comparison, biocortex_retrieval_opt_in_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial,
     biocortex_retrieval_opt_in_runtime_trial, biocortex_retrieval_opt_in_store_trial,
@@ -62,6 +61,7 @@ use cli::workflow_feedback::{
 };
 use cli::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
+    run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
     run_biocortex_retrieval_opt_in_authorization_decision_packet,
     run_biocortex_retrieval_opt_in_dry_run, run_biocortex_retrieval_opt_in_execution_packet,
     run_biocortex_retrieval_opt_in_order_diff_packet,
@@ -6525,21 +6525,63 @@ async fn real_main() -> Result<()> {
                 forum_post_id,
                 memory_key,
                 json,
-            } => run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
-                checkpoint_selection_json,
-                post_semantic_diverse_review_json,
-                controlled_trial_readiness_json.as_deref(),
-                BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
-                    checkpoint_selection: Value::Null,
-                    post_semantic_diverse_review: Value::Null,
-                    controlled_trial_readiness: None,
-                    reviewer: reviewer.clone(),
-                    commit: commit.clone(),
-                    forum_post_id: forum_post_id.clone(),
-                    memory_key: memory_key.clone(),
-                },
-                *json,
-            ),
+            } => {
+                let checkpoint_body =
+                    std::fs::read_to_string(checkpoint_selection_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
+                        )
+                    })?;
+                let checkpoint_selection =
+                    serde_json::from_str(&checkpoint_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
+                        )
+                    })?;
+                let review_body =
+                    std::fs::read_to_string(post_semantic_diverse_review_json).map_err(|e| {
+                        anyhow::anyhow!(
+                            "read post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
+                        )
+                    })?;
+                let post_semantic_diverse_review =
+                    serde_json::from_str(&review_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
+                        )
+                    })?;
+                let controlled_trial_readiness = if let Some(controlled_trial_readiness_json) =
+                    controlled_trial_readiness_json.as_deref()
+                {
+                    let controlled_body = std::fs::read_to_string(
+                        controlled_trial_readiness_json,
+                    )
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "read controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
+                        )
+                    })?;
+                    Some(serde_json::from_str(&controlled_body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "parse controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
+                        )
+                    })?)
+                } else {
+                    None
+                };
+                run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+                    BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+                        checkpoint_selection,
+                        post_semantic_diverse_review,
+                        controlled_trial_readiness,
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+            }
             BioCortexOp::LswrInteractionFeedbackConsumptionPreflight { input_json, json } => {
                 run_lswr_interaction_feedback_consumption_preflight(input_json, *json)
             }
@@ -12042,87 +12084,6 @@ fn cli_env_falsey(key: &str) -> bool {
             )
         })
         .unwrap_or(false)
-}
-
-fn run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
-    checkpoint_selection_json: &std::path::Path,
-    post_semantic_diverse_review_json: &std::path::Path,
-    controlled_trial_readiness_json: Option<&std::path::Path>,
-    mut opts: BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
-    as_json: bool,
-) -> Result<()> {
-    let checkpoint_body = std::fs::read_to_string(checkpoint_selection_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
-        )
-    })?;
-    opts.checkpoint_selection = serde_json::from_str(&checkpoint_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
-        )
-    })?;
-    let review_body = std::fs::read_to_string(post_semantic_diverse_review_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
-        )
-    })?;
-    opts.post_semantic_diverse_review = serde_json::from_str(&review_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
-        )
-    })?;
-    if let Some(controlled_trial_readiness_json) = controlled_trial_readiness_json {
-        let controlled_body =
-            std::fs::read_to_string(controlled_trial_readiness_json).map_err(|e| {
-                anyhow::anyhow!(
-                    "read controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
-                )
-            })?;
-        opts.controlled_trial_readiness =
-            Some(serde_json::from_str(&controlled_body).map_err(|e| {
-                anyhow::anyhow!(
-                    "parse controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
-                )
-            })?);
-    }
-
-    let payload = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(opts);
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
-    }
-
-    println!("# BioCortex downstream AIO runtime evidence handoff");
-    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
-    println!(
-        "status={} handoff_ready={} checkpoint={}",
-        shadow_json_display(payload.get("status"), "-"),
-        shadow_json_display(payload.pointer("/boundary_check/handoff_ready"), "false"),
-        shadow_json_display(
-            payload.pointer("/checkpoint_summary/selected_checkpoint"),
-            "-"
-        )
-    );
-    println!(
-        "ssb_target={} recover={} raw_available={}",
-        shadow_json_display(payload.pointer("/ssb_handoff/target_schema_family"), "-"),
-        shadow_json_display(payload.pointer("/ssb_handoff/recover"), "-"),
-        shadow_json_display(payload.pointer("/ssb_handoff/raw_available"), "false")
-    );
-    println!(
-        "calls_memory_search={} runs_biocortex={} calls_aiot_runtime={} executes_lswr_actions={}",
-        shadow_json_display(payload.get("calls_memory_search"), "false"),
-        shadow_json_display(payload.get("runs_biocortex"), "false"),
-        shadow_json_display(
-            payload.pointer("/boundary_check/this_packet_calls_aiot_runtime"),
-            "false"
-        ),
-        shadow_json_display(
-            payload.pointer("/boundary_check/this_packet_executes_lswr_actions"),
-            "false"
-        )
-    );
-    Ok(())
 }
 
 const BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA: &str =

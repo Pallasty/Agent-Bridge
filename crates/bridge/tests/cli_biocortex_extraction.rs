@@ -33,6 +33,7 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "run_biocortex_retrieval_opt_in_runtime_influence_decision_packet",
         "run_biocortex_retrieval_opt_in_runtime_readiness_packet",
         "run_biocortex_retrieval_opt_in_runtime_transition_gate",
+        "run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff",
         "shadow_json_display",
     ] {
         assert!(
@@ -67,7 +68,9 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root
                 .contains("BioCortexOp::RetrievalOptInRuntimeInfluenceDecisionPacket")
             && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeReadinessPacket")
-            && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeTransitionGate"),
+            && composition_root.contains("BioCortexOp::RetrievalOptInRuntimeTransitionGate")
+            && composition_root
+                .contains("BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff"),
         "main.rs must retain the selected dispatch arms"
     );
     assert!(
@@ -89,7 +92,9 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root
                 .contains("BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {")
             && composition_root.contains("BioCortexRetrievalOptInRuntimeReadinessPacketOptions {")
-            && composition_root.contains("BioCortexRetrievalOptInRuntimeTransitionGateOptions {"),
+            && composition_root.contains("BioCortexRetrievalOptInRuntimeTransitionGateOptions {")
+            && composition_root
+                .contains("BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {"),
         "main.rs must retain retrieval option assembly"
     );
     assert!(
@@ -246,6 +251,39 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
             && composition_root.contains("|| cli_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV)",),
         "main.rs must retain runtime-transition input and operator-disable custody"
     );
+    let checkpoint_read = composition_root
+        .find("std::fs::read_to_string(checkpoint_selection_json)")
+        .expect("main.rs must retain downstream checkpoint input custody");
+    let review_read = composition_root
+        .find("std::fs::read_to_string(post_semantic_diverse_review_json)")
+        .expect("main.rs must retain downstream review input custody");
+    let controlled_read = composition_root
+        .find("let controlled_body = std::fs::read_to_string(")
+        .expect("main.rs must retain optional controlled-readiness input custody");
+    assert!(
+        checkpoint_read < review_read && review_read < controlled_read,
+        "main.rs must retain checkpoint -> review -> optional controlled-readiness precedence"
+    );
+    assert!(
+        composition_root.contains(
+            "read downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}",
+        ) && composition_root.contains(
+            "parse downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}",
+        ) && composition_root.contains(
+            "read post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}",
+        ) && composition_root.contains(
+            "parse post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}",
+        ) && composition_root.contains(
+            "let controlled_trial_readiness = if let Some(controlled_trial_readiness_json)",
+        ) && composition_root.contains("controlled_trial_readiness_json.as_deref()")
+            && composition_root.contains(
+                "read controlled trial readiness JSON at {controlled_trial_readiness_json:?}",
+            )
+            && composition_root.contains(
+                "parse controlled trial readiness JSON at {controlled_trial_readiness_json:?}",
+            ),
+        "main.rs must retain downstream handoff exact errors and optional-input semantics"
+    );
     assert!(
         composition_root.contains("fn run_biocortex_retrieval_opt_in_runtime_trial("),
         "main.rs must retain the side-signal-capable runtime-trial executor"
@@ -282,6 +320,9 @@ fn biocortex_evidence_entry_has_the_preregistered_module_boundary() {
         "std::fs::read_to_string(store_trial_json)",
         "std::fs::read_to_string(batch_diagnostics_json)",
         "std::fs::read_to_string(runtime_readiness_packet_json)",
+        "std::fs::read_to_string(checkpoint_selection_json)",
+        "std::fs::read_to_string(post_semantic_diverse_review_json)",
+        "std::fs::read_to_string(controlled_trial_readiness_json)",
         "cli_env_truthy",
         "BIOCORTEX_RETRIEVAL_DISABLE_ENV",
         "run_biocortex_retrieval_opt_in_store_trial",

@@ -2,6 +2,7 @@ use ab_bridge::biocortex_capability_ledger::{
     build_biocortex_capability_ledger_report_packet, consume_biocortex_capability_ledger,
 };
 use ab_bridge::biocortex_shadow::{
+    biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
     biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
@@ -15,6 +16,7 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexRetrievalApprovalPacketOptions,
+    BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
     BioCortexRetrievalOptInOrderDiffPacketOptions,
@@ -917,6 +919,49 @@ pub(crate) fn run_biocortex_retrieval_opt_in_runtime_transition_gate(
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false"),
         shadow_json_display(payload.get("default_calls_unchanged"), "true")
+    );
+    Ok(())
+}
+
+pub(crate) fn run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+    opts: BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex downstream AIO runtime evidence handoff");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} handoff_ready={} checkpoint={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.pointer("/boundary_check/handoff_ready"), "false"),
+        shadow_json_display(
+            payload.pointer("/checkpoint_summary/selected_checkpoint"),
+            "-"
+        )
+    );
+    println!(
+        "ssb_target={} recover={} raw_available={}",
+        shadow_json_display(payload.pointer("/ssb_handoff/target_schema_family"), "-"),
+        shadow_json_display(payload.pointer("/ssb_handoff/recover"), "-"),
+        shadow_json_display(payload.pointer("/ssb_handoff/raw_available"), "false")
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} calls_aiot_runtime={} executes_lswr_actions={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(
+            payload.pointer("/boundary_check/this_packet_calls_aiot_runtime"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/boundary_check/this_packet_executes_lswr_actions"),
+            "false"
+        )
     );
     Ok(())
 }
