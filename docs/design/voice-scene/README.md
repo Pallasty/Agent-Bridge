@@ -305,6 +305,16 @@ owner explicitly confirmed that Dylan and Serena are easy to distinguish and
 clearly identifiable. S5Y is accepted and the three-role story excerpt is the
 next gate.
 
+S5Z adds `scripts/story_voice_excerpt_renderer.py`, which binds the S5X mapping
+to the S5Y acceptance, preserves source segment order, and fail-closes on an
+unknown role or missing authorization. Its first four-segment scene combines
+Vivian, Dylan, Serena, then Vivian with exact 0.8-second transition gaps. All
+admitted segments naturally emitted EOS; one longer Serena attempt hit the
+100-frame cap and correctly produced no WAV. The final 17.52-second PCM16
+24 kHz artifact is finite and non-silent, and SenseVoice found all story
+content with a single combined-ASR homophone substitution. Playback and owner
+acceptance remain the next gate.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
