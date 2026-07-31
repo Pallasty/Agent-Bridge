@@ -6,6 +6,12 @@ stopped naturally before the 100-frame cap, passed finite/non-silent WAV
 checks, and achieved complete SenseVoice transcripts.
 
 Dylan voices 林默 and Serena voices 苏岚. Both files were played under standing
-owner authorization. The machine gate is complete, but role fit,
-distinguishability, and owner acceptance remain pending until feedback is
-recorded. Chapter rendering therefore remains blocked.
+owner authorization. The owner accepted both as natural, intelligible, and
+usable, and considered the inter-clip interval appropriate. A small clarity
+increase is recorded as a non-blocking tuning preference, conditional on
+preserving naturalness.
+
+The feedback described the interval between clips, not whether the two voice
+identities are sufficiently distinguishable. That narrower gate remains
+unconfirmed, so chapter rendering still fails closed rather than inferring an
+acceptance the owner did not state.

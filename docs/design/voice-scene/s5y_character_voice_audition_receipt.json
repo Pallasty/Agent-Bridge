@@ -1,6 +1,6 @@
 {
   "schema": "agent_bridge.story_character_voice_audition.v1",
-  "status": "played_owner_feedback_pending",
+  "status": "owner_naturalness_and_intelligibility_accepted",
   "mapping_sha256": "175a0ea89c28bd98b11f4c30ae9073d73de62d74f1aa833ccf10d8539b4affa5",
   "candidates": [
     {
@@ -18,7 +18,7 @@
       "asr_transcript": "我们得马上离开。",
       "asr_complete": true,
       "playback_completed": true,
-      "owner_feedback": null
+      "owner_feedback": "很自然，当前能听清语音内容；若清晰度可调，可以再提一点，否则当前效果也可接受。"
     },
     {
       "role": "苏岚",
@@ -35,14 +35,20 @@
       "asr_transcript": "我听见钟声了。",
       "asr_complete": true,
       "playback_completed": true,
-      "owner_feedback": null
+      "owner_feedback": "很自然，当前能听清语音内容；若清晰度可调，可以再提一点，否则当前效果也可接受。"
     }
   ],
   "claims": {
     "machine_gate_passed": true,
-    "owner_accepted_both": false,
+    "owner_accepted_both": true,
     "voices_distinguishable": false,
     "chapter_render_ready": false
   },
-  "next_gate": "owner_character_voice_feedback"
+  "playback_feedback": {
+    "inter_clip_interval": "适中",
+    "clarity": "可懂且可接受",
+    "clarity_tuning": "非阻断建议：在不损害自然度的前提下小幅提升",
+    "voice_identity_distinguishability_confirmed": false
+  },
+  "next_gate": "owner_voice_identity_distinguishability_feedback"
 }

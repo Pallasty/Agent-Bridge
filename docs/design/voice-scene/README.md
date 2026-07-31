@@ -298,7 +298,11 @@ new version and re-audition. This stage loads no model and emits no audio.
 S5Y forwards each S5X style instruction into the trusted ONNX runner. Dylan's
 林默 line and Serena's 苏岚 line both naturally emitted EOS and achieved full
 SenseVoice transcripts before owner-authorized playback. The committed receipt
-keeps owner acceptance, distinguishability, and chapter rendering pending.
+records owner acceptance of both voices as natural, intelligible, and usable,
+plus an appropriate inter-clip interval. A small clarity increase is a
+non-blocking preference only if naturalness is preserved. Pairwise voice-identity
+distinguishability was not explicitly assessed, so chapter rendering remains
+fail-closed pending that narrow gate.
 
 ## S4 realtime story interaction
 
