@@ -64,6 +64,8 @@ express. A packet is S0-valid only when it passes both.
   binary, configuration, process, and live-client adoption decision.
 - `story_source_configuration_adoption.schema.json`: S5ZV hash-bound fixture-
   pilot environment packet with source-origin adoption kept separate.
+- `story_source_origin_adoption.schema.json`: S5ZW dual-remote source adoption
+  receipt with configuration installation and deployment still closed.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
