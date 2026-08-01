@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_secure_machine_env_relocation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "installation", "probe", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_secure_machine_env_relocation.v1"},
+    "status": {"const": "story_machine_env_secure_relocation_verified"},
+    "decision": {"const": {"security_blocker_closed": true, "deployment_dry_run_admitted": true, "deployment_authorized": false}},
+    "installation": {"const": {"compatibility_path": "/home/pallasting/.config/agent-bridge/machine.env", "secure_target": "/home/pallasting/.agent-bridge-secure/machine.env", "secure_directory_mode": "700", "secure_target_mode": "600", "secure_target_owner": "pallasting:pallasting", "content_sha256": "520dd17c52097b94141a089fe42c56facbd12637f40a523bf5cc1a315a1f51c3", "rollback_path": "/home/pallasting/.config/agent-bridge/machine.env.pre-s5zy-520dd17c"}},
+    "probe": {"const": {"standard_profile_story_visible": false, "all_profile_story_visible": true, "persistent_mcp_processes_before": 7, "persistent_mcp_processes_after": 7, "installed_binary_source": "5a02c8fdeccc", "installed_binary_has_story": false}},
+    "runtime_effects": {"const": {"relocated_machine_env": true, "deployed_binary": false, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false}},
+    "next_gate": {"const": "story_deployment_dry_run"}
+  }
+}
