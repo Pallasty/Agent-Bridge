@@ -456,6 +456,17 @@ parity only: no Rust module export, MCP registration, embedded interpreter,
 model/audio action, or execution authorization is added. A separate
 owner-authorized Rust registration review is the next gate.
 
+S5ZN completes that registration review without modifying the module tree or
+MCP registry. The review selects native-adapter hardening before registration:
+the current reader has neither an allowed-root/byte-ceiling admission policy,
+nor a configured resolver for the accepted evidence bundle, nor an async
+cancellation ownership contract. A machine-readable receipt binds the current
+registry, library, native module, and S5ZM evidence hashes; collision and
+mutated-authority controls fail closed. The future surface remains a gated
+Niche `story_command_preflight`, but it is not registered, deployed, exposed,
+or execution-authorized. Rust story preflight adapter hardening is the next
+gate.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn
