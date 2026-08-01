@@ -114,6 +114,9 @@ express. A packet is S0-valid only when it passes both.
 - `story_render_secure_configuration_installation_result.schema.json`: redacted
   S614 fixed-path installation result; it records created custody objects while
   keeping nonce creation and executor/model/audio effects false.
+- `s614_story_render_secure_configuration_installation_result.json`: actual
+  owner-authorized S614 installation result with no key bytes or content digest;
+  the nonce store and executor invocation remain absent.
 - `story_executor_secure_configuration_installer_review.schema.json`: S614
   source-only installer acceptance with no-replace publication, durable owned
   rollback, and post-publication recovery gating; real installation and

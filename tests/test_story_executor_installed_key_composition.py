@@ -162,10 +162,10 @@ def test_key_is_cleared_before_non_secret_preparation(monkeypatch):
     assert observed == [("build", False), ("finish", True, True)]
 
 
-def test_fixed_installed_key_is_still_absent_and_not_read_by_tests():
+def test_fixed_installed_key_is_present_after_authorized_installation():
     key_path = Path(
         "/home/pallasting/.agent-bridge-secure/story-render/authority-keys.v1.json")
-    assert not key_path.exists()
+    assert key_path.is_file()
 
 
 def test_source_has_no_executor_invocation_cli_or_key_path_override():

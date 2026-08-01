@@ -1,0 +1,28 @@
+{
+  "schema": "agent_bridge.story_render_secure_configuration_installation.v1",
+  "status": "story_render_secure_configuration_installed",
+  "decision": "configuration_installed_executor_invocation_blocked",
+  "installation": {
+    "secure_root": "/home/pallasting/.agent-bridge-secure",
+    "runtime_directory": "/home/pallasting/.agent-bridge-secure/story-render",
+    "key_bundle": "/home/pallasting/.agent-bridge-secure/story-render/authority-keys.v1.json",
+    "active_key_id": "story-render-owner-v1",
+    "runtime_directory_mode": "0700",
+    "key_bundle_mode": "0600",
+    "publication": "same_directory_link_no_replace",
+    "file_and_directory_fsync": true,
+    "nonce_store_absent": true,
+    "key_material_disclosed": false
+  },
+  "execution_authorized": false,
+  "runtime_effects": {
+    "created_runtime_directory": true,
+    "created_key_bundle": true,
+    "generated_key": true,
+    "created_nonce_store": false,
+    "called_executor": false,
+    "loaded_model": false,
+    "rendered_audio": false,
+    "wrote_memory": false
+  }
+}

@@ -112,7 +112,7 @@ def build_review(
         "test_publication_collision_preserves_unowned_target",
         "test_postpublication_failure_requires_recovery_without_deleting_key",
         "test_process_umask_is_restored_after_success",
-        "test_public_surface_is_fixed_and_not_invoked_by_tests",
+        "test_public_surface_is_fixed_after_authorized_installation",
         "test_fixed_policy_parses_the_same_bytes_that_were_hashed",
     }
     if not required_tests.issubset(tests):

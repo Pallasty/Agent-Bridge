@@ -30,16 +30,30 @@ def build(module, **overrides):
     return module.build_contract(**args)
 
 
-def test_contract_selects_posix_private_custody_without_installing():
-    result = build(load_module())
+def test_contract_selects_posix_private_custody_in_synthetic_preinstall_root(
+        tmp_path):
+    secure_root = tmp_path / "secure-root"
+    secure_root.mkdir(mode=0o700)
+    os.chmod(secure_root, 0o700)
+    runtime_directory = secure_root / "story-render"
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(
+        "1 0 0:1 / / rw - ext4 /dev/synthetic rw\n"
+        "2 1 0:2 / /Data rw - fuseblk /dev/synthetic-data rw\n",
+        encoding="utf-8",
+    )
+    result = build(
+        load_module(), secure_root=secure_root,
+        runtime_directory=runtime_directory, mountinfo_path=mountinfo)
     assert result["status"] == "story_executor_secure_runtime_configuration_contract_reviewable"
     assert result["decision"] == "posix_private_custody_selected_installation_blocked"
     custody = result["custody"]
     assert custody["secure_root"]["filesystem_type"] == "ext4"
     assert custody["secure_root"]["mode"] == "0700"
-    assert custody["runtime_directory"]["path"] == str(RUNTIME_DIR)
+    assert custody["runtime_directory"]["path"] == str(runtime_directory)
     assert custody["runtime_directory"]["mode"] == "0700"
-    assert custody["key_bundle"]["path"] == str(RUNTIME_DIR / "authority-keys.v1.json")
+    assert custody["key_bundle"]["path"] == str(
+        runtime_directory / "authority-keys.v1.json")
     assert custody["key_bundle"]["mode"] == "0600"
     assert custody["key_bundle"]["key_bytes"] == 32
     assert custody["key_bundle"]["required_link_count"] == 1
@@ -48,7 +62,8 @@ def test_contract_selects_posix_private_custody_without_installing():
     assert custody["key_bundle"]["loader_open_flags"] == ["O_RDONLY", "O_NOFOLLOW", "O_CLOEXEC"]
     assert custody["key_bundle"]["loader_identity_check"] == "fstat_same_fd_regular_uid_gid_mode_nlink"
     assert custody["key_bundle"]["content_digest_in_public_receipt"] is False
-    assert custody["nonce_store"]["path"] == str(RUNTIME_DIR / "story-render-nonces.sqlite3")
+    assert custody["nonce_store"]["path"] == str(
+        runtime_directory / "story-render-nonces.sqlite3")
     assert custody["nonce_store"]["mode"] == "0600"
     assert custody["nonce_store"]["trusted_schema"] is False
     assert custody["nonce_store"]["synchronous"] == "FULL"
@@ -61,7 +76,7 @@ def test_contract_selects_posix_private_custody_without_installing():
     assert result["installation_authorized"] is False
     assert result["execution_authorized"] is False
     assert not any(result["runtime_effects"].values())
-    assert not RUNTIME_DIR.exists()
+    assert not runtime_directory.exists()
     assert result["next_gate"] == "story_executor_posix_runtime_binding_implementation_review"
 
 

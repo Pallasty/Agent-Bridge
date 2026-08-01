@@ -81,14 +81,14 @@ def test_loader_rejects_unknown_revoked_and_non_closed_schema(tmp_path):
         module._load_authority_key(path, "story-render-owner-v1")
 
 
-def test_fixed_binding_comes_from_s611_and_stays_uninstalled():
+def test_fixed_binding_comes_from_s611_with_key_installed_and_nonce_absent():
     module = load_module()
     nonce = module.secure_nonce_store_path()
     key_path = module.secure_key_bundle_path()
     assert nonce == Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
     assert key_path == Path("/home/pallasting/.agent-bridge-secure/story-render/authority-keys.v1.json")
     assert not nonce.exists()
-    assert not key_path.exists()
+    assert key_path.is_file()
 
 
 def test_source_uses_fd_identity_checks_and_has_no_fallback_surface():

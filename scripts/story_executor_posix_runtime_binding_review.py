@@ -96,7 +96,7 @@ def build_review(*, binding_path: Path, binding_test_path: Path,
         "test_fd_loader_returns_requested_key_and_clears_context",
         "test_loader_rejects_mode_symlink_and_hardlink",
         "test_loader_rejects_unknown_revoked_and_non_closed_schema",
-        "test_fixed_binding_comes_from_s611_and_stays_uninstalled",
+        "test_fixed_binding_comes_from_s611_with_key_installed_and_nonce_absent",
         "test_source_uses_fd_identity_checks_and_has_no_fallback_surface",
     }
     if not required_tests.issubset(tests):

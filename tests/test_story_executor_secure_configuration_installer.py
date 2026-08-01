@@ -247,7 +247,7 @@ def test_process_umask_is_restored_after_success(tmp_path):
     assert after == before
 
 
-def test_public_surface_is_fixed_and_not_invoked_by_tests():
+def test_public_surface_is_fixed_after_authorized_installation():
     module = load(MODULE, "s614_surface")
     signature = inspect.signature(module.install_story_render_secure_configuration)
     assert list(signature.parameters) == []
@@ -264,7 +264,7 @@ def test_public_surface_is_fixed_and_not_invoked_by_tests():
     assert "onnxruntime" not in source
     assert "os.environ" not in source
     assert 'if __name__ == "__main__"' not in source
-    assert not FIXED_RUNTIME.exists()
+    assert FIXED_RUNTIME.is_dir()
 
 
 def test_fixed_policy_parses_the_same_bytes_that_were_hashed(monkeypatch):
