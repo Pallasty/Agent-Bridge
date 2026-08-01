@@ -1,0 +1,46 @@
+{
+  "schema": "agent_bridge.story_wiring_readiness_recheck.v1",
+  "status": "story_wiring_readiness_recheck_complete",
+  "decision": {
+    "selected": "keep_wiring_deferred_shared_surfaces_not_clean",
+    "wiring_implementation_admitted": false
+  },
+  "freshness": {
+    "lib_hash_unchanged": true,
+    "registry_hash_unchanged": true,
+    "cargo_hash_unchanged": true,
+    "all_shared_surface_hashes_unchanged": true
+  },
+  "evidence": {
+    "prior_receipt_sha256": "400e9114e0d84630f595ba444a1084d611bb878e904020d80260b76e8371f56e",
+    "current_lib_sha256": "7fb33d55d9c91b74aec1dc288319f3ec2a3af95912764801df11ac22db6b0b81",
+    "current_registry_sha256": "8dd22fac1e38ce4011a005f262145df02060694f5eb18fbf9b06788413efecd6",
+    "current_cargo_sha256": "78737bfe059a95d836af460298afe8cd92cdba49ae2885488d5e6a22417bbdef",
+    "active_agent_bridge_cargo_processes": 2
+  },
+  "cleanliness": {
+    "lib_worktree_clean": false,
+    "registry_worktree_clean": false,
+    "cargo_worktree_clean": false
+  },
+  "blockers": [
+    "lib_module_tree_not_clean",
+    "registry_not_clean",
+    "cargo_manifest_not_clean",
+    "agent_bridge_cargo_activity_active"
+  ],
+  "execution_authorized": false,
+  "runtime_effects": {
+    "modified_module_tree": false,
+    "modified_rust_registry": false,
+    "modified_cargo_manifest": false,
+    "registered_story_command": false,
+    "deployed": false,
+    "client_refreshed": false,
+    "loaded_model": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_memory": false
+  },
+  "next_gate": "shared_surface_cleanliness_recheck"
+}
