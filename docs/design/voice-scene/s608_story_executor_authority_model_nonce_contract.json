@@ -1,0 +1,31 @@
+{
+  "schema": "agent_bridge.story_executor_authority_model_nonce_contract.v1",
+  "status": "story_executor_authority_model_nonce_contract_reviewable",
+  "decision": "static_contract_complete_runtime_configuration_uninstalled",
+  "evidence": {"s607_review_file_sha256": "15d2be22c5051193598282b86182d050321a1ad8c2bab356491f582686b89286", "s607_review_sha256": "7fb6b4710e1151a68a5d5d9a6002a7f5b95813e6a70dffa9d8ed16cc0b1f532f", "executor_sha256": "0a22dded241dc94c7976943bf5c5e43c495c0b79568fe0bbbfac3461668f47fd"},
+  "authority_proof": {"algorithm": "hmac-sha256", "domain_separator": "agent-bridge.story-render-authorization.v1", "canonicalization": "utf8-jcs-rfc8785", "maximum_ttl_seconds": 600, "signed_fields": ["authorization_id", "contract_sha256", "preflight_sha256", "output_directory", "action", "issued_at", "expires_at", "single_use_nonce", "issuer", "subject", "key_id"], "proof_field": "mac_sha256", "secret_material_in_envelope": false, "constant_time_comparison_required": true, "key_custody": "external_secure_runtime_configuration", "key_installed_now": false},
+  "model_bundle": {
+    "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master", "variant": "cpu_int4", "execution_provider": "CPUExecutionProvider",
+    "manifest_path": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master/cpu_int4/manifest.json", "manifest_sha256": "74bf84bc0910094b7b9996c7bf5ac79e2053702bbb7e77570b7f72fe4970f8c4",
+    "inference_path": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master/inference.py", "inference_sha256": "70d3911f6923000d776cd16d575bf6518f6a638ee0adf8c1b60d0e1d34fdeb75",
+    "snapshot_audit_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5g_modelscope_snapshot_static_audit.json", "snapshot_audit_file_sha256": "4d8155c33eaef0a9d54313298a585ce512f03088eb02c50fb2e54f3a7540cb9d",
+    "files": [
+      {"path": "cpu_int4/code_predictor.onnx", "size": 113841219, "sha256": "5f134a8cdb4b68fceca2791d7cde3584dd1a5692a3ce8fb4c9d9f644a67ffec1"},
+      {"path": "cpu_int4/codec_embed.onnx", "size": 4031014, "sha256": "c268d24060a87ad790cbd56206a7eac2b9c6878d3cb11ac518997e84b51669d2"},
+      {"path": "cpu_int4/residual_embed.onnx", "size": 44346842, "sha256": "e21df5b0160784e642910d2038931da782d56c234b8ad5da50f2f3d647e4960d"},
+      {"path": "cpu_int4/talker_cache.onnx", "size": 911514323, "sha256": "fa3de5daa36a7a1b9859b02f1536fda37d3f2479caba23930ec754d3009ef5bc"},
+      {"path": "cpu_int4/text_embed.onnx", "size": 204732501, "sha256": "7af915442cfb3912fd9d66ed0881a45f9d35c559b34f016cfb113f073e459942"},
+      {"path": "cpu_int4/tok_decoder.onnx", "size": 458268831, "sha256": "8ec10051735029f6e08b04834128c9108428885c39384f443e49a6790ccb129f"},
+      {"path": "cpu_int4/tok_encoder.onnx", "size": 225554101, "sha256": "4a335eaf525ceef17b457f82704d3bc835d4cb15f42fc6f5908f2e860d3da400"}
+    ],
+    "large_files_rehashed_now": false, "large_files_size_checked_now": true, "runtime_verifier_must_stream_sha256_before_nonce_consumption": true
+  },
+  "nonce_store": {"path": "/Data/Models/agent-bridge/runtime/voice-scene/story-render-nonces.sqlite3", "backend": "sqlite3", "parent_mode": "0700", "database_mode": "0600", "reject_symlinks": true, "single_writer_transaction": "BEGIN IMMEDIATE", "unique_key": "single_use_nonce", "caller_configurable": false, "outside_render_output_root": true, "installed_now": false},
+  "receipt_schema": {"path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/story_bounded_render_receipt.schema.json", "$schema": "https://json-schema.org/draft/2020-12/schema", "schema_id": "agent_bridge.story_bounded_render_receipt.v1", "sha256": "cb6752b0118da3b07a5a5d84252373c1baa6070641ed217e9622f9e78ae099db", "playback_authorized": false, "memory_authorized": false},
+  "blockers": ["authority_and_model_verifiers_not_implemented", "secure_key_and_nonce_paths_not_installed", "executor_not_wired_to_fixed_contracts"],
+  "execution_authorized": false,
+  "runtime_effects": {"created_key": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false},
+  "contract_sha256": "032e02f8f158ed36e4ff8489231620f7924b1b6a42fd3661dfc77ae10e65607b",
+  "claims": {"authority_proof_format_defined": true, "cpu_int4_bundle_bound": true, "nonce_custody_defined": true, "render_receipt_schema_defined": true, "verifiers_implemented": false, "real_model_executed": false},
+  "next_gate": "story_executor_authority_model_nonce_verifier_implementation_review"
+}

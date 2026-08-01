@@ -90,6 +90,11 @@ express. A packet is S0-valid only when it passes both.
 - `story_bounded_render_executor_source_review.schema.json`: S607 static S606
   source acceptance, verified enforcement order, and explicit external
   authority/model/nonce blockers with runtime still closed.
+- `story_executor_authority_model_nonce_contract.schema.json`: S608 HMAC
+  authorization, audited CPU INT4 bundle, fixed nonce custody, and receipt
+  schema contract with runtime configuration and execution still closed.
+- `story_bounded_render_receipt.schema.json`: machine-audio render receipt with
+  playback and memory authority kept false.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
