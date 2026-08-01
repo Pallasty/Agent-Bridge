@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 from pathlib import Path
+import types
 from typing import Any
 
 
@@ -48,13 +48,12 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _load_verifiers():
-    if _sha256_file(VERIFIER_PATH) != VERIFIER_SHA256:
+    source = VERIFIER_PATH.read_bytes()
+    if hashlib.sha256(source).hexdigest() != VERIFIER_SHA256:
         raise ValueError("runtime verifier source drift")
-    spec = importlib.util.spec_from_file_location("s610_pinned_runtime_verifiers", VERIFIER_PATH)
-    if spec is None or spec.loader is None:
-        raise ValueError("runtime verifier import failed")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = types.ModuleType("s610_pinned_runtime_verifiers")
+    module.__file__ = str(VERIFIER_PATH)
+    exec(compile(source, str(VERIFIER_PATH), "exec"), module.__dict__)
     return module
 
 
@@ -106,18 +105,31 @@ def _validate_request(request: dict[str, Any], execution_contract: dict[str, Any
     _validate_tts_support_assets(verifiers.FIXED_TTS_DIR)
 
 
-def prepare_secure_bounded_render(
-    *, execution_contract: dict[str, Any], envelope: dict[str, Any],
-    key: bytes, request: dict[str, Any]
-) -> dict[str, Any]:
-    """Return exact S606 keyword arguments while performing no execution."""
-    _validate_execution_contract(execution_contract)
+def _build_authority_verifier_context_with_key(
+    *, envelope: dict[str, Any], key: bytes
+):
+    """Build a keyless verifier/dependency context while key bytes are available."""
     runtime_contract = _read_json(RUNTIME_CONTRACT_PATH)
     verifiers = _load_verifiers()
     authority_verifier = verifiers.build_authority_verifier(
         envelope=envelope, key=key, contract=runtime_contract)
+    return authority_verifier, runtime_contract, verifiers
+
+
+def _prepare_secure_bounded_render_with_authority_verifier_context(
+    *, execution_contract: dict[str, Any], envelope: dict[str, Any],
+    authority_verifier_context, request: dict[str, Any]
+) -> dict[str, Any]:
+    """Finish preparation after the authority-key context has been cleared."""
+    if (not isinstance(authority_verifier_context, tuple)
+            or len(authority_verifier_context) != 3):
+        raise ValueError("authority verifier context invalid")
+    authority_verifier, runtime_contract, verifiers = authority_verifier_context
+    _validate_execution_contract(execution_contract)
     _validate_request(request, execution_contract, envelope, runtime_contract, verifiers)
     authorization = {name: envelope[name] for name in EXECUTOR_AUTHORIZATION_FIELDS}
+    if not callable(authority_verifier) or authority_verifier(authorization) is not True:
+        raise ValueError("authority verifier binding invalid")
     return {
         "contract": execution_contract,
         "authorization": authorization,
@@ -126,3 +138,18 @@ def prepare_secure_bounded_render(
         "model_verifier": verifiers.build_model_verifier(runtime_contract),
         "nonce_store_path": verifiers.fixed_nonce_store_path(runtime_contract),
     }
+
+
+def _prepare_secure_bounded_render_with_key(
+    *, execution_contract: dict[str, Any], envelope: dict[str, Any],
+    key: bytes, request: dict[str, Any]
+) -> dict[str, Any]:
+    """Private synthetic-key seam retained only for deterministic tests."""
+    authority_verifier_context = _build_authority_verifier_context_with_key(
+        envelope=envelope, key=key)
+    return _prepare_secure_bounded_render_with_authority_verifier_context(
+        execution_contract=execution_contract,
+        envelope=envelope,
+        authority_verifier_context=authority_verifier_context,
+        request=request,
+    )

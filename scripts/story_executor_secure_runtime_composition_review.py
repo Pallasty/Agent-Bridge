@@ -55,7 +55,11 @@ def build_review(*, composition_path: Path, composition_test_path: Path,
         raise ValueError("executor execution surface forbidden")
     tree = ast.parse(source)
     functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
-    if "prepare_secure_bounded_render" not in functions:
+    preparation_seams = {
+        "prepare_secure_bounded_render",
+        "_prepare_secure_bounded_render_with_key",
+    }
+    if functions.isdisjoint(preparation_seams):
         raise ValueError("preparation composition missing")
     test_tree = ast.parse(composition_test_path.read_text(encoding="utf-8"))
     tests = sorted(node.name for node in test_tree.body

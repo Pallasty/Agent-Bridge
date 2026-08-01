@@ -59,7 +59,7 @@ def fixture():
 
 def test_prepare_composes_exact_executor_arguments_without_execution():
     module, contract, envelope, key, request = fixture()
-    prepared = module.prepare_secure_bounded_render(
+    prepared = module._prepare_secure_bounded_render_with_key(
         execution_contract=contract, envelope=envelope, key=key, request=request)
     assert set(prepared) == {"contract", "authorization", "request", "authority_verifier", "model_verifier", "nonce_store_path"}
     assert prepared["contract"] == contract
@@ -73,21 +73,21 @@ def test_prepare_rejects_envelope_request_and_model_path_drift():
     module, contract, envelope, key, request = fixture()
     changed = dict(envelope, mac_sha256="0" * 64)
     with pytest.raises(ValueError, match="MAC"):
-        module.prepare_secure_bounded_render(execution_contract=contract, envelope=changed, key=key, request=request)
+        module._prepare_secure_bounded_render_with_key(execution_contract=contract, envelope=changed, key=key, request=request)
     changed_request = dict(request, playback=True)
     with pytest.raises(ValueError, match="request"):
-        module.prepare_secure_bounded_render(execution_contract=contract, envelope=envelope, key=key, request=changed_request)
+        module._prepare_secure_bounded_render_with_key(execution_contract=contract, envelope=envelope, key=key, request=changed_request)
     changed_request = json.loads(json.dumps(request))
     changed_request["model"]["tts_dir"] = "/tmp/caller-selected"
     with pytest.raises(ValueError, match="model"):
-        module.prepare_secure_bounded_render(execution_contract=contract, envelope=envelope, key=key, request=changed_request)
+        module._prepare_secure_bounded_render_with_key(execution_contract=contract, envelope=envelope, key=key, request=changed_request)
 
 
 def test_prepare_rejects_execution_contract_drift():
     module, contract, envelope, key, request = fixture()
     contract["bounds"]["gpu_allowed"] = True
     with pytest.raises(ValueError, match="execution contract"):
-        module.prepare_secure_bounded_render(execution_contract=contract, envelope=envelope, key=key, request=request)
+        module._prepare_secure_bounded_render_with_key(execution_contract=contract, envelope=envelope, key=key, request=request)
 
 
 def test_source_has_no_execution_cli_secret_or_database_surface():

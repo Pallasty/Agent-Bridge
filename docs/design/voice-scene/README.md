@@ -107,6 +107,10 @@ express. A packet is S0-valid only when it passes both.
 - `story_executor_posix_runtime_binding_review.schema.json`: S612 active nonce
   migration plus fd-based authority-key loader, with installation, installed-key
   composition, and executor invocation still closed.
+- `story_executor_installed_key_composition_review.schema.json`: S613
+  installed-key-only public preparation, closed-envelope prevalidation,
+  short-lived best-effort key clearing, and pinned keyless completion context;
+  secure configuration installation and executor invocation remain closed.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
