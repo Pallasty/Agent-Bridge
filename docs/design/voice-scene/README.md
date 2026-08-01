@@ -78,6 +78,9 @@ express. A packet is S0-valid only when it passes both.
   deployed manifest proof, rollback, and current-client restart boundary.
 - `story_fixture_mcp_preflight.schema.json`: S602 real installed-MCP fixture
   call, bounded render plan, provenance, and zero-actuation receipt.
+- `story_fixture_bounded_render.schema.json`: S603 authorized three-segment
+  fixture render, machine audio evidence, owner acceptance, and retained
+  non-actuating Story-command boundary.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
