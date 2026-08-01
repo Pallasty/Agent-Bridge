@@ -70,6 +70,8 @@ express. A packet is S0-valid only when it passes both.
   fixture configuration, profile probe, rollback, and FUSE permission blocker.
 - `story_secure_machine_env_relocation.schema.json`: S5ZY POSIX-backed secure
   target, compatibility symlink, rollback, and deployment dry-run admission.
+- `story_deployment_dry_run.schema.json`: S5ZZ release candidate provenance,
+  anti-regression gate, profile visibility, and non-deployment evidence.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

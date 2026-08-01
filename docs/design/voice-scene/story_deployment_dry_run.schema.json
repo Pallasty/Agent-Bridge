@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_deployment_dry_run.v1",
+  "type": "object",
+  "required": ["schema", "status", "source", "candidate", "profile_probe", "installation", "adapter", "rollback_plan", "decision", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_deployment_dry_run.v1"},
+    "status": {"const": "story_deployment_dry_run_verified"},
+    "source": {"type": "object", "required": ["commit", "origin_before_build", "origin_after_build", "origin_stable"], "properties": {"commit": {"pattern": "^[0-9a-f]{40}$"}, "origin_before_build": {"pattern": "^[0-9a-f]{40}$"}, "origin_after_build": {"pattern": "^[0-9a-f]{40}$"}, "origin_stable": {"const": true}}, "additionalProperties": false},
+    "candidate": {"type": "object", "required": ["path", "sha256", "size_bytes", "version", "native_executable", "story_marker", "current_feature_markers_preserved", "feature_marker_count"], "properties": {"path": {"type": "string"}, "sha256": {"pattern": "^[0-9a-f]{64}$"}, "size_bytes": {"type": "integer", "minimum": 1}, "version": {"type": "string"}, "native_executable": {"const": true}, "story_marker": {"const": true}, "current_feature_markers_preserved": {"const": true}, "feature_marker_count": {"const": 9}}, "additionalProperties": false},
+    "profile_probe": {"const": {"standard": {"tool_count": 108, "story_visible": false}, "all": {"tool_count": 250, "story_visible": true}}},
+    "installation": {"type": "object", "required": ["binary_path", "sha256_before", "sha256_after", "size_bytes_before", "size_bytes_after", "mtime_epoch_before", "mtime_epoch_after", "inode_before", "inode_after", "source", "story_marker"], "properties": {"binary_path": {"type": "string"}, "sha256_before": {"pattern": "^[0-9a-f]{64}$"}, "sha256_after": {"pattern": "^[0-9a-f]{64}$"}, "size_bytes_before": {"type": "integer"}, "size_bytes_after": {"type": "integer"}, "mtime_epoch_before": {"type": "integer"}, "mtime_epoch_after": {"type": "integer"}, "inode_before": {"type": "integer"}, "inode_after": {"type": "integer"}, "source": {"const": "5a02c8fdeccc"}, "story_marker": {"const": false}}, "additionalProperties": false},
+    "adapter": {"type": "object"},
+    "rollback_plan": {"type": "object"},
+    "decision": {"const": {"dry_run_passed": true, "candidate_deployment_eligible": true, "deployment_authorized": false}},
+    "runtime_effects": {"const": {"built_release_candidate": true, "backed_up_installed_files": false, "deployed_binary": false, "deployed_adapter": false, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false, "persistent_mcp_processes_before": 7, "persistent_mcp_processes_after": 7}},
+    "next_gate": {"const": "story_guarded_deployment_authorization"}
+  },
+  "additionalProperties": false
+}
