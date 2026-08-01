@@ -121,6 +121,14 @@ express. A packet is S0-valid only when it passes both.
   source-only installer acceptance with no-replace publication, durable owned
   rollback, and post-publication recovery gating; real installation and
   executor invocation remain closed.
+- `story_render_authorization_proposal_review.schema.json`: S615 unsigned
+  owner-review proposal acceptance, exact request/content binding, five-minute
+  TTL, and fixed issuer/subject/key ID with real signing and execution closed.
+- `s615_story_render_authorization_proposal_review.json`: S615 source review
+  receipt proving metadata-only custody inspection, synthetic canonical-field
+  compatibility, no real key read, no MAC, and no nonce-store creation.
+- `S615_STORY_RENDER_AUTHORIZATION_PROPOSAL_REVIEW.md`: S615 authority boundary,
+  verified behavior, non-goals, and the explicit next signing-preflight gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

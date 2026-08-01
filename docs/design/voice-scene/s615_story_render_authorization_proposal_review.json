@@ -1,0 +1,70 @@
+{
+  "schema": "agent_bridge.story_render_authorization_proposal_review.v1",
+  "status": "story_render_authorization_proposal_reviewable",
+  "decision": "unsigned_proposal_source_accepted_owner_signature_blocked",
+  "evidence": {
+    "review_builder_path": "scripts/story_render_authorization_proposal_review.py",
+    "review_builder_sha256": "c78972b3ec5371643c8d6b9e4de4d09aac533ff36623290d71713916710465f6",
+    "installation_result_path": "docs/design/voice-scene/s614_story_render_secure_configuration_installation_result.json",
+    "installation_result_sha256": "c3e50d1b9bd716e3274c670f15a47622416fbe6b7b5391486f085acc85a9edb4",
+    "proposal_path": "scripts/story_render_authorization_proposal.py",
+    "proposal_sha256": "9a919414be6966738885965af493b03ccea88ddc88f746e80d57b0b4b635fecb",
+    "proposal_test_path": "tests/test_story_render_authorization_proposal.py",
+    "proposal_test_sha256": "79bdf2d5a02dfda13bf0f9173d002908caea8038e1edebf6c60647eb3c18d6b2",
+    "test_count": 6,
+    "public_arguments": [
+      "execution_contract",
+      "request"
+    ]
+  },
+  "boundaries": {
+    "public_surface_accepts_only_contract_and_request": true,
+    "composition_source_sha256_pinned": true,
+    "s614_installation_receipt_required": true,
+    "s614_installation_receipt_hash_pinned": true,
+    "installed_key_checked_by_metadata_only": true,
+    "installed_key_content_access_absent": true,
+    "installed_key_loader_absent": true,
+    "mac_implementation_absent": true,
+    "fixed_non_secret_key_id": true,
+    "fixed_issuer_and_subject": true,
+    "fixed_five_minute_ttl": true,
+    "public_identifiers_use_csprng": true,
+    "exact_contract_request_and_model_validated": true,
+    "output_is_single_absent_child_of_contract_root": true,
+    "nonce_store_family_must_remain_absent": true,
+    "proof_is_explicitly_absent": true,
+    "owner_signature_remains_required": true,
+    "execution_remains_blocked": true,
+    "executor_database_model_and_audio_runtime_absent": true,
+    "environment_and_cli_surface_absent": true
+  },
+  "blockers": [
+    "owner_authorized_envelope_signature_not_granted",
+    "executor_invocation_not_authorized"
+  ],
+  "implementation_present": true,
+  "owner_signature_authorized": false,
+  "execution_authorized": false,
+  "runtime_effects": {
+    "read_real_key": false,
+    "generated_real_mac": false,
+    "created_nonce_store": false,
+    "called_executor": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "recorded_audio": false,
+    "wrote_memory": false
+  },
+  "review_sha256": "8cf6c922efca8d7a322a2ed17a5695a3b0da1f4bd12dfd51c32620a4d1f66950",
+  "claims": {
+    "unsigned_owner_review_proposal_implemented": true,
+    "exact_request_content_addressed": true,
+    "real_authority_key_read": false,
+    "real_owner_mac_generated": false,
+    "executor_invoked": false
+  },
+  "next_gate": "owner_authorized_story_render_envelope_signing_preflight"
+}
