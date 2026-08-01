@@ -76,6 +76,8 @@ express. A packet is S0-valid only when it passes both.
   recoverable backups, profile visibility, and stale-process separation.
 - `story_codex_voice_adoption.schema.json`: S601 narrow codex-voice allowlist,
   deployed manifest proof, rollback, and current-client restart boundary.
+- `story_fixture_mcp_preflight.schema.json`: S602 real installed-MCP fixture
+  call, bounded render plan, provenance, and zero-actuation receipt.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
