@@ -75,6 +75,8 @@ use tokio::process::Command as TokioCommand;
 
 mod operator_request;
 use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
+mod story;
+use story::{StoryCommandPreflightTool, StoryMcpConfig};
 
 use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
@@ -44226,6 +44228,20 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     let chatgpt_forum_tags = configured_chatgpt_forum_tags();
     register_chatgpt_forum_tools(&mut reg, &hub, policy, chatgpt_forum_tags.clone());
     register_chatgpt_collab_tools(&mut reg, policy);
+    match StoryMcpConfig::from_env() {
+        Ok(Some(config)) => reg_if(
+            &mut reg,
+            policy,
+            Tier::Niche,
+            Arc::new(StoryCommandPreflightTool::new(config)),
+        ),
+        Ok(None) => {}
+        Err(error) => tracing::warn!(
+            tool = "story_command_preflight",
+            %error,
+            "invalid story MCP configuration; tool left unregistered"
+        ),
+    }
     tracing::info!(
         profile = policy.profile().label(),
         toolset = policy.label(),

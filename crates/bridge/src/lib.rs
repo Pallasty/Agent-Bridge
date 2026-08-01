@@ -123,6 +123,7 @@ pub mod session_handoff;
 pub mod shadow_cortex;
 pub mod skills;
 pub mod socket_path;
+pub(crate) mod story_contract;
 pub mod sync;
 pub mod tailscale_api;
 pub mod tool_atlas;

@@ -58,6 +58,8 @@ express. A packet is S0-valid only when it passes both.
   surface overlap decision and frozen minimal MCP wiring contract.
 - `story_wiring_readiness_recheck.schema.json`: S5ZS freshness-versus-
   cleanliness recheck for shared Rust composition surfaces.
+- `story_mcp_registry_wiring.schema.json`: S5ZT default-off, Niche Story MCP
+  source wiring and clean staged-tree verification receipt.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

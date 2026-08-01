@@ -58,8 +58,12 @@ def test_receipt_defers_shared_surface_wiring() -> None:
     ]
 
 
-def test_patch_contract_is_niche_fail_closed_and_dependency_free() -> None:
-    contract = build()["minimal_patch_contract"]
+def test_patch_contract_is_niche_fail_closed_and_dependency_free(
+    tmp_path: Path,
+) -> None:
+    registry = tmp_path / "mcp_tools.rs"
+    registry.write_text("// pre-wiring registry fixture\n", encoding="utf-8")
+    contract = build(registry_path=registry)["minimal_patch_contract"]
 
     assert contract["module_tree_declaration"] == "pub(crate) mod story_contract;"
     assert contract["registry_module_declaration"] == "mod story;"
@@ -70,8 +74,13 @@ def test_patch_contract_is_niche_fail_closed_and_dependency_free() -> None:
     assert contract["eager_profile_exposure"] is False
 
 
-def test_clean_surfaces_admit_implementation_review_not_execution() -> None:
+def test_clean_surfaces_admit_implementation_review_not_execution(
+    tmp_path: Path,
+) -> None:
+    registry = tmp_path / "mcp_tools.rs"
+    registry.write_text("// pre-wiring registry fixture\n", encoding="utf-8")
     result = build(
+        registry_path=registry,
         lib_worktree_overlap=False,
         registry_worktree_overlap=False,
         cargo_worktree_overlap=False,

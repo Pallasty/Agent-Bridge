@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 
@@ -56,8 +57,21 @@ def test_receipt_distinguishes_stable_from_clean() -> None:
     ]
 
 
-def test_clean_and_unchanged_surfaces_admit_next_review() -> None:
+def test_clean_and_unchanged_surfaces_admit_next_review(tmp_path: Path) -> None:
+    prior = json.loads(PRIOR.read_text(encoding="utf-8"))
+    prior["evidence"]["lib_sha256"] = hashlib.sha256(
+        (ROOT / "crates" / "bridge" / "src" / "lib.rs").read_bytes()
+    ).hexdigest()
+    prior["evidence"]["registry_sha256"] = hashlib.sha256(
+        (ROOT / "crates" / "bridge" / "src" / "mcp_tools.rs").read_bytes()
+    ).hexdigest()
+    prior["evidence"]["cargo_sha256"] = hashlib.sha256(
+        (ROOT / "crates" / "bridge" / "Cargo.toml").read_bytes()
+    ).hexdigest()
+    current_authority = tmp_path / "current-surface-authority.json"
+    current_authority.write_text(json.dumps(prior), encoding="utf-8")
     result = build(
+        prior_receipt_path=current_authority,
         lib_worktree_clean=True,
         registry_worktree_clean=True,
         cargo_worktree_clean=True,
