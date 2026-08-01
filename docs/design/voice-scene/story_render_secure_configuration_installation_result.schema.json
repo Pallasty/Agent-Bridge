@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_secure_configuration_installation.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "installation", "execution_authorized", "runtime_effects"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_render_secure_configuration_installation.v1"},
+    "status": {"const": "story_render_secure_configuration_installed"},
+    "decision": {"const": "configuration_installed_executor_invocation_blocked"},
+    "installation": {
+      "type": "object",
+      "required": ["secure_root", "runtime_directory", "key_bundle", "active_key_id", "runtime_directory_mode", "key_bundle_mode", "publication", "file_and_directory_fsync", "nonce_store_absent", "key_material_disclosed"],
+      "properties": {
+        "secure_root": {"type": "string", "minLength": 1},
+        "runtime_directory": {"type": "string", "minLength": 1},
+        "key_bundle": {"type": "string", "minLength": 1},
+        "active_key_id": {"type": "string", "minLength": 1},
+        "runtime_directory_mode": {"const": "0700"},
+        "key_bundle_mode": {"const": "0600"},
+        "publication": {"const": "same_directory_link_no_replace"},
+        "file_and_directory_fsync": {"const": true},
+        "nonce_store_absent": {"const": true},
+        "key_material_disclosed": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "execution_authorized": {"const": false},
+    "runtime_effects": {
+      "const": {
+        "created_runtime_directory": true,
+        "created_key_bundle": true,
+        "generated_key": true,
+        "created_nonce_store": false,
+        "called_executor": false,
+        "loaded_model": false,
+        "rendered_audio": false,
+        "wrote_memory": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

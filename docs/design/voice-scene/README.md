@@ -111,6 +111,13 @@ express. A packet is S0-valid only when it passes both.
   installed-key-only public preparation, closed-envelope prevalidation,
   short-lived best-effort key clearing, and pinned keyless completion context;
   secure configuration installation and executor invocation remain closed.
+- `story_render_secure_configuration_installation_result.schema.json`: redacted
+  S614 fixed-path installation result; it records created custody objects while
+  keeping nonce creation and executor/model/audio effects false.
+- `story_executor_secure_configuration_installer_review.schema.json`: S614
+  source-only installer acceptance with no-replace publication, durable owned
+  rollback, and post-publication recovery gating; real installation and
+  executor invocation remain closed.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
