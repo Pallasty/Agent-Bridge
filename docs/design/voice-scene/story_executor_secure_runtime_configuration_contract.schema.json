@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_executor_secure_runtime_configuration_contract.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "custody", "installation", "blockers", "installation_authorized", "execution_authorized", "runtime_effects", "contract_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_executor_secure_runtime_configuration_contract.v1"},
+    "status": {"const": "story_executor_secure_runtime_configuration_contract_reviewable"},
+    "decision": {"const": "posix_private_custody_selected_installation_blocked"},
+    "evidence": {"type": "object"}, "custody": {"type": "object"}, "installation": {"type": "object"},
+    "blockers": {"const": ["posix_nonce_and_key_binding_not_implemented", "owner_authorized_secure_configuration_installation_not_granted", "executor_invocation_not_authorized"]},
+    "installation_authorized": {"const": false}, "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 14, "additionalProperties": {"const": false}},
+    "contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claims": {"const": {"posix_private_custody_selected": true, "legacy_fuse_custody_rejected": true, "atomic_install_and_rollback_defined": true, "configuration_installed": false, "real_key_generated": false, "executor_invoked": false}},
+    "next_gate": {"const": "story_executor_posix_runtime_binding_implementation_review"}
+  },
+  "additionalProperties": false
+}

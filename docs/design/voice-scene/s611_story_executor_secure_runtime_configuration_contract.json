@@ -1,0 +1,28 @@
+{
+  "schema": "agent_bridge.story_executor_secure_runtime_configuration_contract.v1",
+  "status": "story_executor_secure_runtime_configuration_contract_reviewable",
+  "decision": "posix_private_custody_selected_installation_blocked",
+  "evidence": {"s610_review_file_sha256": "1efd5d2d156a10f2a9c054db27b9b1fb4968bf37b680a2fb75fb5e614398b113", "s610_review_sha256": "7127be1e21cdff95c449fe85087cda992c32be6b6e654cbfa4830dd415b38160", "mountinfo_path": "/proc/self/mountinfo", "mountinfo_read_only": true, "current_uid": 1000, "current_gid": 1000, "runtime_directory_absent": true, "key_bundle_absent": true, "nonce_store_absent": true},
+  "custody": {
+    "secure_root": {"path": "/home/pallasting/.agent-bridge-secure", "filesystem_type": "ext4", "mode": "0700", "uid": 1000, "gid": 1000, "owner": "pallasting", "group": "pallasting", "symlink": false, "already_present": true},
+    "runtime_directory": {"path": "/home/pallasting/.agent-bridge-secure/story-render", "filesystem_type": "ext4", "mode": "0700", "uid": 1000, "gid": 1000, "symlink_allowed": false, "installed_now": false},
+    "key_bundle": {"path": "/home/pallasting/.agent-bridge-secure/story-render/authority-keys.v1.json", "schema": "agent_bridge.story_render_authority_keys.v1", "mode": "0600", "uid": 1000, "gid": 1000, "key_bytes": 32, "encoding": "lowercase_hex", "zero_key_allowed": false, "maximum_versions": 16, "active_key_count": 1, "states": ["active", "verify_only", "revoked"], "random_source": "python_secrets_token_bytes_os_csprng", "required_link_count": 1, "environment_source_allowed": false, "default_path_allowed": false, "generation_fallback_allowed": false, "runtime_caller_path_override_allowed": false, "loader_open_flags": ["O_RDONLY", "O_NOFOLLOW", "O_CLOEXEC"], "loader_identity_check": "fstat_same_fd_regular_uid_gid_mode_nlink", "parent_walk": "dirfd_O_DIRECTORY_O_NOFOLLOW_each_component", "content_digest_in_public_receipt": false, "raw_key_in_logs_or_receipts": false, "symlink_allowed": false, "installed_now": false},
+    "nonce_store": {"path": "/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3", "backend": "sqlite3", "mode": "0600", "uid": 1000, "gid": 1000, "symlink_allowed": false, "journal_mode": "WAL", "transaction": "BEGIN IMMEDIATE", "primary_key": "single_use_nonce", "installed_now": false, "trusted_schema": false, "synchronous": "FULL", "application_id": 1094865475, "user_version": 1, "sidecars": ["database", "wal", "shm", "lock"], "sidecar_mode": "0600", "sidecar_symlink_allowed": false, "automatic_corruption_recovery": false},
+    "legacy_nonce_path": {"path": "/Data/Models/agent-bridge/runtime/voice-scene/story-render-nonces.sqlite3", "filesystem_type": "fuseblk", "allowed": false, "reason": "fuse_or_shared_storage_not_secret_custody"}
+  },
+  "installation": {
+    "authorized_now": false,
+    "preconditions": ["fresh_owner_authorization", "runtime_directory_still_absent", "secure_root_identity_mode_owner_and_filesystem_reverified", "absolute_canonical_paths", "lstat_no_symlink_in_any_existing_component", "process_umask_0077"],
+    "creation_order": ["mkdir_runtime_directory_0700", "fsync_secure_root", "create_key_bundle_with_O_CREAT_O_EXCL_O_NOFOLLOW_0600", "write_complete_bundle_and_fsync_file", "fsync_runtime_directory", "leave_nonce_database_absent_until_first_authorized_consumption"],
+    "rotation": {"temporary_file_same_directory": true, "temporary_mode": "0600", "temporary_link_count": 1, "fsync_before_atomic_replace": true, "directory_fsync_after_replace": true, "retain_previous_as_verify_only": true, "raw_key_backup_forbidden": true},
+    "rollback": {"initial_install_failure": "remove_only_transaction_owned_new_files_then_runtime_directory", "preexisting_targets_deleted": false, "key_material_printed": false, "nonce_history_reverted": false, "automatic_rollback_after_key_use_or_nonce_consumption": false},
+    "acceptance_checks": ["lstat_non_symlink_types_and_nlink_one", "exact_uid_gid_and_modes", "key_bundle_schema_and_single_active_key", "nonzero_32_byte_key", "legacy_path_unused", "nonce_store_absent_before_first_authorized_use"]
+  },
+  "blockers": ["posix_nonce_and_key_binding_not_implemented", "owner_authorized_secure_configuration_installation_not_granted", "executor_invocation_not_authorized"],
+  "installation_authorized": false,
+  "execution_authorized": false,
+  "runtime_effects": {"created_runtime_directory": false, "created_key_bundle": false, "generated_key": false, "created_nonce_store": false, "changed_permissions": false, "created_symlink": false, "loaded_secret": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false},
+  "contract_sha256": "29f52ebff83425d876ae38dbd48e3bfcb3b08700e2465ee4c6b744e0079bac9b",
+  "claims": {"posix_private_custody_selected": true, "legacy_fuse_custody_rejected": true, "atomic_install_and_rollback_defined": true, "configuration_installed": false, "real_key_generated": false, "executor_invoked": false},
+  "next_gate": "story_executor_posix_runtime_binding_implementation_review"
+}
