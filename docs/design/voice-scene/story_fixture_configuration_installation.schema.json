@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_fixture_configuration_installation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "installation", "probe", "blockers", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_fixture_configuration_installation.v1"},
+    "status": {"const": "story_fixture_configuration_installed_security_blocked"},
+    "decision": {"const": {"configuration_installed": true, "runtime_adoption_admitted": false, "deployment_dry_run_admitted": false}},
+    "installation": {"type": "object", "required": ["machine_env_path", "machine_env_sha256", "backup_path", "backup_sha256", "fragment_exact_match", "story_keys", "reported_mode", "reported_owner", "filesystem"], "properties": {"machine_env_path": {"type": "string"}, "machine_env_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "backup_path": {"type": "string"}, "backup_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "fragment_exact_match": {"const": true}, "story_keys": {"const": 12}, "reported_mode": {"const": "777"}, "reported_owner": {"const": "root:root"}, "filesystem": {"const": "fuseblk"}}, "additionalProperties": false},
+    "probe": {"const": {"standard_profile_story_visible": false, "all_profile_story_visible": true, "persistent_mcp_processes_before": 7, "persistent_mcp_processes_after": 7}},
+    "blockers": {"const": ["machine_env_permissions_not_enforceable_on_fuseblk"]},
+    "runtime_effects": {"const": {"modified_machine_env": true, "deployed_binary": false, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false}},
+    "next_gate": {"const": "secure_machine_env_relocation_review"}
+  }
+}
