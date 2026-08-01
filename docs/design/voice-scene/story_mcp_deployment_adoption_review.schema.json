@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_mcp_deployment_adoption_review.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "decision", "source_adoption", "binary_adoption", "configuration_adoption", "client_adoption", "blockers", "execution_authorized", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_mcp_deployment_adoption_review.v1"},
+    "status": {"const": "story_mcp_deployment_adoption_review_complete"},
+    "decision": {"const": {"selected": "defer_deployment_until_source_and_configuration_adopted", "deployment_admitted": false, "client_refresh_admitted": false}},
+    "source_adoption": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_commit", "origin_master_commit", "source_commit_in_origin_master", "source_receipt_sha256"],
+      "properties": {
+        "source_commit": {"const": "26334149d2fc685501289b16ca5552b59a72c56a"},
+        "origin_master_commit": {"const": "9b198da9571d8a6b2975161ce1e87b50ee6a35eb"},
+        "source_commit_in_origin_master": {"const": false},
+        "source_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "binary_adoption": {"type": "object", "additionalProperties": false, "required": ["installed_binary_sha256", "installed_binary_version", "installed_binary_has_story_marker"], "properties": {"installed_binary_sha256": {"const": "762c27bee788045dc23681881e1011be8722d9696b2205068a75b2a7c0c045ed"}, "installed_binary_version": {"type": "string", "minLength": 1}, "installed_binary_has_story_marker": {"const": false}}},
+    "configuration_adoption": {"const": {"wrapper_has_story_activation": false, "machine_env_has_story_activation": false, "activation_configured": false}},
+    "client_adoption": {"const": {"installed_mcp_processes": 7, "installed_mcp_processes_with_story_binary": 0, "live_client_tool_observed": false}},
+    "blockers": {"const": ["source_commit_not_in_origin_master", "installed_binary_missing_story_marker", "story_activation_not_configured", "running_mcp_processes_use_pre_story_binary", "live_client_tool_not_observed"]},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"type": "object", "minProperties": 12, "additionalProperties": {"const": false}},
+    "next_gate": {"const": "story_source_origin_and_configuration_adoption"}
+  }
+}

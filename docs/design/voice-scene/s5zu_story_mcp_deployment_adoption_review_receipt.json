@@ -1,0 +1,53 @@
+{
+  "schema": "agent_bridge.story_mcp_deployment_adoption_review.v1",
+  "status": "story_mcp_deployment_adoption_review_complete",
+  "decision": {
+    "selected": "defer_deployment_until_source_and_configuration_adopted",
+    "deployment_admitted": false,
+    "client_refresh_admitted": false
+  },
+  "source_adoption": {
+    "source_commit": "26334149d2fc685501289b16ca5552b59a72c56a",
+    "origin_master_commit": "9b198da9571d8a6b2975161ce1e87b50ee6a35eb",
+    "source_commit_in_origin_master": false,
+    "source_receipt_sha256": "6138ed1eb6cf859d4eeb8d2f94ef5daa27601da72db69a5b1fa930f887bb7010"
+  },
+  "binary_adoption": {
+    "installed_binary_sha256": "762c27bee788045dc23681881e1011be8722d9696b2205068a75b2a7c0c045ed",
+    "installed_binary_version": "agent-bridge 0.14.0 (v0.14.0-1253-g5a02c8fd-dirty; 5a02c8fdeccc)",
+    "installed_binary_has_story_marker": false
+  },
+  "configuration_adoption": {
+    "wrapper_has_story_activation": false,
+    "machine_env_has_story_activation": false,
+    "activation_configured": false
+  },
+  "client_adoption": {
+    "installed_mcp_processes": 7,
+    "installed_mcp_processes_with_story_binary": 0,
+    "live_client_tool_observed": false
+  },
+  "blockers": [
+    "source_commit_not_in_origin_master",
+    "installed_binary_missing_story_marker",
+    "story_activation_not_configured",
+    "running_mcp_processes_use_pre_story_binary",
+    "live_client_tool_not_observed"
+  ],
+  "execution_authorized": false,
+  "runtime_effects": {
+    "fetched_remote": false,
+    "built_release_binary": false,
+    "backed_up_binary": false,
+    "deployed_binary": false,
+    "modified_wrapper": false,
+    "modified_machine_env": false,
+    "restarted_mcp": false,
+    "refreshed_client": false,
+    "called_story_tool": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_memory": false
+  },
+  "next_gate": "story_source_origin_and_configuration_adoption"
+}
