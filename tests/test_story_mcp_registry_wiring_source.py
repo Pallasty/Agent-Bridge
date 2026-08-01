@@ -33,14 +33,14 @@ def test_runtime_registry_is_opt_in_niche_and_fail_closed() -> None:
     assert "Tier::Niche" in block
 
 
-def test_story_tool_is_not_promoted_to_eager_allowlists() -> None:
+def test_story_tool_is_exposed_only_by_the_explicit_codex_voice_allowlist() -> None:
     registry = REGISTRY.read_text(encoding="utf-8")
     essential_start = registry.index("const CODEX_ESSENTIAL_DIRECT_EXTRAS")
     voice_start = registry.index("const CODEX_VOICE_EXTRAS")
     helper_start = registry.index("fn codex_essential_tool", voice_start)
 
     assert "story_command_preflight" not in registry[essential_start:voice_start]
-    assert "story_command_preflight" not in registry[voice_start:helper_start]
+    assert '"story_command_preflight"' in registry[voice_start:helper_start]
 
 
 def test_s5zt_receipt_validates_against_schema() -> None:

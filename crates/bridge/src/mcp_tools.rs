@@ -42432,6 +42432,7 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
 /// health tools are read-only; `present_voice` remains an explicit call with
 /// the same backend/channel honesty gates as the all profile.
 const CODEX_VOICE_EXTRAS: &[&str] = &[
+    "story_command_preflight",
     "present_voice",
     "present_voice_confirm_audibility",
     "voice_runtime_preflight",
