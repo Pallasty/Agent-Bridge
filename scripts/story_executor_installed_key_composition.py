@@ -11,7 +11,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSITION_PATH = ROOT / "scripts/story_executor_secure_runtime_composition.py"
-COMPOSITION_SHA256 = "0ac4ba4116a341310a34a02bf94833bc2d582fa7728b6eac905150c7fb9c27fe"
+COMPOSITION_SHA256 = "d7ae11a44fe1e121b3c0e7c101a4d145f513432b5740f87d79eabb314bf551e0"
 BINDING_PATH = ROOT / "scripts/story_executor_posix_runtime_binding.py"
 BINDING_SHA256 = "e2fd3d719a9b0996500c7447f1df3d4726db0bca6f3edb9336200aa8aa481208"
 SIGNED_AUTHORIZATION_FIELDS = (

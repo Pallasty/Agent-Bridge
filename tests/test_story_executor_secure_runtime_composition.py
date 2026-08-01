@@ -59,14 +59,25 @@ def fixture():
 
 def test_prepare_composes_exact_executor_arguments_without_execution():
     module, contract, envelope, key, request = fixture()
+    nonce_path = Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
+    nonce_before = nonce_path.lstat() if nonce_path.exists() else None
     prepared = module._prepare_secure_bounded_render_with_key(
         execution_contract=contract, envelope=envelope, key=key, request=request)
     assert set(prepared) == {"contract", "authorization", "request", "authority_verifier", "model_verifier", "nonce_store_path"}
     assert prepared["contract"] == contract
     assert prepared["authorization"] == {name: envelope[name] for name in module.EXECUTOR_AUTHORIZATION_FIELDS}
     assert prepared["authority_verifier"](prepared["authorization"]) is True
-    assert prepared["nonce_store_path"] == Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
-    assert not prepared["nonce_store_path"].exists()
+    assert prepared["nonce_store_path"] == nonce_path
+    nonce_after = nonce_path.lstat() if nonce_path.exists() else None
+    assert (
+        None
+        if nonce_before is None
+        else (nonce_before.st_ino, nonce_before.st_size, nonce_before.st_mtime_ns)
+    ) == (
+        None
+        if nonce_after is None
+        else (nonce_after.st_ino, nonce_after.st_size, nonce_after.st_mtime_ns)
+    )
 
 
 def test_prepare_rejects_envelope_request_and_model_path_drift():
@@ -88,6 +99,30 @@ def test_prepare_rejects_execution_contract_drift():
     contract["bounds"]["gpu_allowed"] = True
     with pytest.raises(ValueError, match="execution contract"):
         module._prepare_secure_bounded_render_with_key(execution_contract=contract, envelope=envelope, key=key, request=request)
+
+
+def test_model_verifier_adapter_binds_s604_executor_view_to_s608_runtime_contract():
+    module, execution_contract, _envelope, _key, _request = fixture()
+    runtime_contract = json.loads(S608.read_text())
+    calls = []
+
+    def runtime_model_verifier(model, supplied_contract):
+        calls.append((model, supplied_contract))
+        return supplied_contract == runtime_contract
+
+    verifier = module._build_executor_model_verifier(
+        execution_contract=execution_contract,
+        runtime_contract=runtime_contract,
+        runtime_model_verifier=runtime_model_verifier,
+    )
+    model = {"fixed": "model"}
+    assert verifier(model, execution_contract) is True
+    assert calls == [(model, runtime_contract)]
+
+    drifted = json.loads(json.dumps(execution_contract))
+    drifted["bounds"]["gpu_allowed"] = True
+    assert verifier(model, drifted) is False
+    assert calls == [(model, runtime_contract)]
 
 
 def test_source_has_no_execution_cli_secret_or_database_surface():

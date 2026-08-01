@@ -2,7 +2,7 @@
   "schema": "agent_bridge.story_executor_authority_model_nonce_contract.v1",
   "status": "story_executor_authority_model_nonce_contract_reviewable",
   "decision": "static_contract_complete_runtime_configuration_uninstalled",
-  "evidence": {"s607_review_file_sha256": "15d2be22c5051193598282b86182d050321a1ad8c2bab356491f582686b89286", "s607_review_sha256": "7fb6b4710e1151a68a5d5d9a6002a7f5b95813e6a70dffa9d8ed16cc0b1f532f", "executor_sha256": "0a22dded241dc94c7976943bf5c5e43c495c0b79568fe0bbbfac3461668f47fd"},
+  "evidence": {"s607_review_file_sha256": "931fd08899672ac9145a52482b418db3b9e8ccb4b29f116b2eec5a674d4f1b57", "s607_review_sha256": "5e680b20fb4f6239cce0d02cc4935a5e72a6e6cfa5fbbdf815653c828eae3fb5", "executor_sha256": "e469e51f109f5e5427175d824eb84d14155e257879c7e438279065d27dbc9e46"},
   "authority_proof": {"algorithm": "hmac-sha256", "domain_separator": "agent-bridge.story-render-authorization.v1", "canonicalization": "utf8-jcs-rfc8785", "maximum_ttl_seconds": 600, "signed_fields": ["authorization_id", "contract_sha256", "preflight_sha256", "output_directory", "action", "issued_at", "expires_at", "single_use_nonce", "issuer", "subject", "key_id"], "proof_field": "mac_sha256", "secret_material_in_envelope": false, "constant_time_comparison_required": true, "key_custody": "external_secure_runtime_configuration", "key_installed_now": false},
   "model_bundle": {
     "snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master", "variant": "cpu_int4", "execution_provider": "CPUExecutionProvider",
@@ -25,7 +25,7 @@
   "blockers": ["authority_and_model_verifiers_not_implemented", "secure_key_and_nonce_paths_not_installed", "executor_not_wired_to_fixed_contracts"],
   "execution_authorized": false,
   "runtime_effects": {"created_key": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false},
-  "contract_sha256": "ff70faa056e95c45745ad463744979a369e6a7abf2ff3858a7ecdddd1a47130b",
+  "contract_sha256": "228c5936521d2a07be2074a538acc654a306f80fff7264b47024490fbf3fbbfd",
   "claims": {"authority_proof_format_defined": true, "cpu_int4_bundle_bound": true, "nonce_custody_defined": true, "render_receipt_schema_defined": true, "verifiers_implemented": false, "real_model_executed": false},
   "next_gate": "story_executor_authority_model_nonce_verifier_implementation_review"
 }

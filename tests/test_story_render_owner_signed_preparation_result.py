@@ -24,6 +24,11 @@ OUTPUT = Path(
     "/Data/Models/agent-bridge/evidence/voice-scene/"
     "story-command-runtime/s616-owner-signed-preparation"
 )
+S617_RESULT = (
+    ROOT
+    / "docs/design/voice-scene/"
+    "s617_story_bounded_render_execution_result.json"
+)
 
 
 def test_recorded_s616_result_is_redacted_exact_and_live_safe():
@@ -51,15 +56,22 @@ def test_recorded_s616_result_is_redacted_exact_and_live_safe():
     assert key_metadata.st_nlink == 1
     assert result["preparation"]["real_key_load_count"] == 1
     assert result["preparation"]["loaded_key_buffer_cleared"] is True
-    assert all(
-        not path.exists()
-        for path in (
-            NONCE_STORE,
-            Path(str(NONCE_STORE) + "-wal"),
-            Path(str(NONCE_STORE) + "-shm"),
-            Path(str(NONCE_STORE) + ".lock"),
+    assert result["preparation"]["nonce_store_absent"] is True
+    if S617_RESULT.exists():
+        s617 = json.loads(S617_RESULT.read_text(encoding="utf-8"))
+        assert s617["status"] == "story_bounded_render_execution_verified"
+        assert NONCE_STORE.is_file()
+        assert s617["execution"]["nonce_rows_after_execution"] >= 1
+    else:
+        assert all(
+            not path.exists()
+            for path in (
+                NONCE_STORE,
+                Path(str(NONCE_STORE) + "-wal"),
+                Path(str(NONCE_STORE) + "-shm"),
+                Path(str(NONCE_STORE) + ".lock"),
+            )
         )
-    )
     assert not OUTPUT.exists()
     assert result["execution_authorized"] is False
     assert result["grant_references_discarded_after_preparation"] is True

@@ -138,6 +138,15 @@ express. A packet is S0-valid only when it passes both.
 - `S616_STORY_RENDER_OWNER_SIGNED_PREPARATION.md`: S616 single-read mechanism,
   S613 public-entrypoint evidence, grant-reference disposal, and next authority
   gate.
+- `story_bounded_render_execution_result.schema.json`: S617 strict redacted
+  result contract binding the successful render receipt, live WAV evidence,
+  nonce audit count, and closed playback/memory gates.
+- `s617_story_bounded_render_execution_result.json`: actual S617 CPU INT4
+  three-segment render result, including the preserved pre-nonce rejection and
+  post-nonce failed-attempt evidence without MAC, nonce, or authorization ID.
+- `S617_STORY_BOUNDED_RENDER_EXECUTION.md`: S617 runtime boundary, the two
+  integration defects discovered by real execution, their regression fixes,
+  FUSE output-mode semantics, and the separate playback/review next gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

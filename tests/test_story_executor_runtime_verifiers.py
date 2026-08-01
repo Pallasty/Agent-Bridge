@@ -139,9 +139,14 @@ def test_real_tts_support_assets_are_fixed_outside_onnx_snapshot():
 def test_fixed_nonce_path_is_contract_bound_without_creation(tmp_path):
     module = load_module()
     contract = json.loads(S608.read_text())
+    expected = Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
+    before = expected.lstat() if expected.exists() else None
     nonce = module.fixed_nonce_store_path(contract)
-    assert nonce == Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
-    assert not nonce.exists()
+    assert nonce == expected
+    after = expected.lstat() if expected.exists() else None
+    assert (None if before is None else (before.st_ino, before.st_size, before.st_mtime_ns)) == (
+        None if after is None else (after.st_ino, after.st_size, after.st_mtime_ns)
+    )
     changed = copy.deepcopy(contract)
     changed["nonce_store"]["path"] = str(tmp_path / "caller.sqlite3")
     with pytest.raises(ValueError, match="contract"):

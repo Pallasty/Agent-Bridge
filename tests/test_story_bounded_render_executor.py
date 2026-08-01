@@ -244,6 +244,31 @@ def test_executor_renders_to_new_directory_and_emits_machine_receipt(
         assert connection.execute("select count(*) from consumed_nonces").fetchone()[0] == 1
 
 
+def test_executor_keeps_wav_suffix_on_atomic_segment_temporary_files(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    contract, authorization, request, nonce_store, _output = fixture(tmp_path)
+    observed = []
+
+    def suffix_observing_runner(*, output_path: Path, **kwargs):
+        observed.append(output_path.name)
+        return wav_runner(output_path=output_path, **kwargs)
+
+    module._load_runner = lambda _path: suffix_observing_runner
+    module.execute_bounded_render(
+        contract=contract,
+        authorization=authorization,
+        request=request,
+        now=NOW,
+        authority_verifier=verified,
+        model_verifier=verified_model,
+        nonce_store_path=nonce_store,
+    )
+
+    assert observed == ["00.part.wav", "01.part.wav"]
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

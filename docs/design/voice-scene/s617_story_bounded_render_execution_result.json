@@ -1,0 +1,90 @@
+{
+  "schema": "agent_bridge.story_bounded_render_execution_result.v1",
+  "status": "story_bounded_render_execution_verified",
+  "decision": "bounded_render_completed_playback_and_memory_blocked",
+  "authorization": {
+    "owner_authorized": true,
+    "key_id": "story-render-owner-v1",
+    "ttl_seconds": 300,
+    "issued_at": "2026-08-01T19:35:17+00:00",
+    "expires_at": "2026-08-01T19:40:17+00:00",
+    "signed_fields_sha256": "171223410f97f2536f38eb47f484e7a3c8dca0e623ab88df63bb304dfc093815",
+    "envelope_sha256": "b61fd4a441a0d073b722c1fdd9ead6597d9fed684149c723bcf961ec00a30acc",
+    "request_sha256": "ca56beebc99a7df0357f5f4c240e258c0112cfb7bc7238d806c7bd27e3f9c149",
+    "successful_envelope_real_key_load_count": 1,
+    "total_real_key_load_count": 3,
+    "real_mac_generated_count": 3,
+    "envelope_attempts": 3,
+    "pre_nonce_rejections": 1,
+    "post_nonce_failures": 1,
+    "loaded_key_buffers_cleared": true,
+    "key_material_disclosed": false,
+    "mac_disclosed": false,
+    "nonce_disclosed": false,
+    "authorization_id_disclosed": false,
+    "envelope_persisted": false,
+    "grant_references_discarded_after_execution": true
+  },
+  "model": {
+    "name": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "variant": "community_cpu_int4_onnx",
+    "execution_provider": "CPUExecutionProvider",
+    "offline": true
+  },
+  "execution": {
+    "s613_entrypoint": "prepare_installed_secure_bounded_render",
+    "executor_entrypoint": "execute_bounded_render",
+    "output_root_created_for_execution": true,
+    "output_directory": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime/s617-bounded-render",
+    "output_filesystem": "fuseblk",
+    "output_directory_mode_observed": "0777",
+    "output_permission_semantics": "mount_reports_fixed_permissions_posix_privacy_not_claimed",
+    "render_receipt_path": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime/s617-bounded-render/render-receipt.json",
+    "render_receipt_sha256": "0c0b58d2553f99bb6ff6cc4f2c929374b8d68de3e188b3b9ed15ee32a7cdc514",
+    "nonce_store_path": "/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3",
+    "nonce_store_mode": "0600",
+    "nonce_rows_after_execution": 2,
+    "consumed_nonce_attempts": 2,
+    "failed_post_nonce_attempts": 1,
+    "failed_attempt_cleanup_verified": true,
+    "successful_attempts": 1,
+    "segment_count": 3,
+    "segment_audio_sha256": [
+      "94c56d143ad196df5a078c2c4919c9112e674b5d04dd7b63a8dbacef2ea40c88",
+      "1a638f1cfc33902eb41e051b57beda1a3b7de41b73d94b3fe8636ef3cf2d0cba",
+      "41ccb934d6d112cef0d587004b20441dec19f57aea8a01184849e8584a703997"
+    ],
+    "all_segments_natural_eos": true,
+    "assembly": {
+      "audio_sha256": "104d6b6152dd9dd9057c2c9a1c261f884c15a56d8d2be506ad8f7b55078fb6aa",
+      "duration_seconds": 6.88,
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "sample_width_bytes": 2,
+      "non_silent": true,
+      "gap_seconds": [
+        1.0,
+        1.0
+      ]
+    },
+    "playback_authorized": false,
+    "memory_authorized": false
+  },
+  "runtime_effects": {
+    "read_real_key": true,
+    "generated_real_mac": true,
+    "created_output_root": true,
+    "created_nonce_store": true,
+    "consumed_nonce": true,
+    "imported_executor": true,
+    "called_executor": true,
+    "loaded_model": true,
+    "executed_onnx": true,
+    "rendered_audio": true,
+    "played_audio": false,
+    "recorded_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "next_gate": "separate_playback_authorization_or_render_review"
+}

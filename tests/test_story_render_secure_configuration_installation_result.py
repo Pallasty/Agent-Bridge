@@ -39,8 +39,20 @@ def test_recorded_installation_result_validates_and_matches_custody():
     assert key_metadata.st_uid == os.getuid()
     assert key_metadata.st_gid == os.getgid()
     assert key_metadata.st_nlink == 1
-    assert {path.name for path in RUNTIME.iterdir()} == {KEY_BUNDLE.name}
-    assert not NONCE_STORE.exists()
+    allowed = {
+        KEY_BUNDLE.name,
+        NONCE_STORE.name,
+        NONCE_STORE.name + "-wal",
+        NONCE_STORE.name + "-shm",
+        NONCE_STORE.name + ".lock",
+    }
+    assert {path.name for path in RUNTIME.iterdir()} <= allowed
+    if NONCE_STORE.exists():
+        nonce_metadata = NONCE_STORE.lstat()
+        assert stat.S_ISREG(nonce_metadata.st_mode)
+        assert stat.S_IMODE(nonce_metadata.st_mode) == 0o600
+        assert nonce_metadata.st_nlink == 1
+    assert receipt["installation"]["nonce_store_absent"] is True
     assert not (RUNTIME / ".authority-keys.v1.json.installing").exists()
     encoded = json.dumps(receipt, sort_keys=True)
     assert "key_hex" not in encoded

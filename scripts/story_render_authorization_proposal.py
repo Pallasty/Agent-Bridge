@@ -17,7 +17,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSITION_PATH = ROOT / "scripts/story_executor_secure_runtime_composition.py"
 COMPOSITION_SHA256 = (
-    "0ac4ba4116a341310a34a02bf94833bc2d582fa7728b6eac905150c7fb9c27fe"
+    "d7ae11a44fe1e121b3c0e7c101a4d145f513432b5740f87d79eabb314bf551e0"
 )
 INSTALLATION_RESULT_PATH = (
     ROOT
@@ -102,6 +102,30 @@ def _validate_installed_custody(
         raise ValueError("S614 installation result invalid")
     runtime_metadata = runtime.lstat()
     key_metadata = key_bundle.lstat()
+    nonce_store = Path(runtime_contract["nonce_store"]["path"])
+    nonce_family = (
+        nonce_store,
+        Path(str(nonce_store) + "-wal"),
+        Path(str(nonce_store) + "-shm"),
+        Path(str(nonce_store) + ".lock"),
+    )
+    nonce_present = nonce_store.exists()
+    allowed_names = {key_bundle.name}
+    for path in nonce_family:
+        if not path.exists():
+            continue
+        if path != nonce_store and not nonce_present:
+            raise ValueError("nonce sidecar exists without nonce store")
+        metadata = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != os.getuid()
+            or metadata.st_gid != os.getgid()
+            or metadata.st_nlink != 1
+        ):
+            raise ValueError("installed nonce custody metadata invalid")
+        allowed_names.add(path.name)
     if (
         not stat.S_ISDIR(runtime_metadata.st_mode)
         or stat.S_IMODE(runtime_metadata.st_mode) != 0o700
@@ -112,18 +136,9 @@ def _validate_installed_custody(
         or key_metadata.st_uid != os.getuid()
         or key_metadata.st_gid != os.getgid()
         or key_metadata.st_nlink != 1
-        or sorted(path.name for path in runtime.iterdir()) != [key_bundle.name]
+        or {path.name for path in runtime.iterdir()} != allowed_names
     ):
         raise ValueError("installed authority custody metadata invalid")
-    nonce_store = Path(runtime_contract["nonce_store"]["path"])
-    nonce_family = (
-        nonce_store,
-        Path(str(nonce_store) + "-wal"),
-        Path(str(nonce_store) + "-shm"),
-        Path(str(nonce_store) + ".lock"),
-    )
-    if any(path.exists() for path in nonce_family):
-        raise ValueError("nonce store must remain absent before execution")
     return {
         "installation_result_path": str(INSTALLATION_RESULT_PATH),
         "installation_result_sha256": INSTALLATION_RESULT_SHA256,
@@ -131,7 +146,10 @@ def _validate_installed_custody(
         "active_key_id": ACTIVE_KEY_ID,
         "metadata_only": True,
         "key_material_read": False,
-        "nonce_store_absent": True,
+        "nonce_store_state": (
+            "existing_trusted" if nonce_present else "absent_before_first_use"
+        ),
+        "nonce_store_metadata_only": True,
     }
 
 

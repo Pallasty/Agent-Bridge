@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -81,14 +82,42 @@ def test_loader_rejects_unknown_revoked_and_non_closed_schema(tmp_path):
         module._load_authority_key(path, "story-render-owner-v1")
 
 
-def test_fixed_binding_comes_from_s611_with_key_installed_and_nonce_absent():
+def test_fixed_binding_comes_from_s611_and_preserves_current_nonce_state():
     module = load_module()
+    expected_nonce = Path(
+        "/home/pallasting/.agent-bridge-secure/story-render/"
+        "story-render-nonces.sqlite3"
+    )
+    before = expected_nonce.lstat() if expected_nonce.exists() else None
     nonce = module.secure_nonce_store_path()
     key_path = module.secure_key_bundle_path()
-    assert nonce == Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
+    assert nonce == expected_nonce
     assert key_path == Path("/home/pallasting/.agent-bridge-secure/story-render/authority-keys.v1.json")
-    assert not nonce.exists()
+    after = expected_nonce.lstat() if expected_nonce.exists() else None
+    assert (
+        None
+        if before is None
+        else (before.st_ino, before.st_size, before.st_mtime_ns)
+    ) == (
+        None
+        if after is None
+        else (after.st_ino, after.st_size, after.st_mtime_ns)
+    )
+    if after is not None:
+        assert stat.S_ISREG(after.st_mode)
+        assert stat.S_IMODE(after.st_mode) == 0o600
+        assert after.st_nlink == 1
     assert key_path.is_file()
+
+
+def test_fixed_binding_comes_from_s611_with_key_installed_and_nonce_absent():
+    """Preserve S611's historical first-use contract after later execution."""
+    contract = load_module()._read_contract()
+    assert contract["custody"]["key_bundle"]["installed_now"] is False
+    assert contract["custody"]["nonce_store"]["installed_now"] is False
+    assert "nonce_store_absent_before_first_authorized_use" in contract[
+        "installation"
+    ]["acceptance_checks"]
 
 
 def test_source_uses_fd_identity_checks_and_has_no_fallback_surface():

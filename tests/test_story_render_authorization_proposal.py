@@ -3,6 +3,7 @@ import hmac
 import importlib.util
 import inspect
 import json
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -183,6 +184,13 @@ def test_proposal_reads_no_real_key_and_creates_no_nonce(monkeypatch):
     contract, _key, request = fixture()
     deterministic_identity(module, monkeypatch)
     before = KEY_BUNDLE.lstat()
+    nonce_before = NONCE_STORE.lstat() if NONCE_STORE.exists() else None
+    rows_before = None
+    if nonce_before is not None:
+        with sqlite3.connect(f"file:{NONCE_STORE}?mode=ro", uri=True) as connection:
+            rows_before = connection.execute(
+                "select count(*) from consumed_nonces"
+            ).fetchone()[0]
 
     result = module.build_story_render_authorization_proposal(
         execution_contract=contract,
@@ -195,7 +203,26 @@ def test_proposal_reads_no_real_key_and_creates_no_nonce(monkeypatch):
         after.st_size,
         after.st_mtime_ns,
     )
-    assert not NONCE_STORE.exists()
+    nonce_after = NONCE_STORE.lstat() if NONCE_STORE.exists() else None
+    if nonce_before is None:
+        assert nonce_after is None
+        assert result["custody"]["nonce_store_state"] == (
+            "absent_before_first_use"
+        )
+    else:
+        assert nonce_after is not None
+        assert (nonce_after.st_ino, nonce_after.st_size, nonce_after.st_mtime_ns) == (
+            nonce_before.st_ino,
+            nonce_before.st_size,
+            nonce_before.st_mtime_ns,
+        )
+        with sqlite3.connect(f"file:{NONCE_STORE}?mode=ro", uri=True) as connection:
+            rows_after = connection.execute(
+                "select count(*) from consumed_nonces"
+            ).fetchone()[0]
+        assert rows_after == rows_before
+        assert result["custody"]["nonce_store_state"] == "existing_trusted"
+    assert result["custody"]["nonce_store_metadata_only"] is True
     assert result["boundaries"]["real_key_read"] is False
     assert result["boundaries"]["real_mac_generated"] is False
     assert result["boundaries"]["nonce_store_created"] is False

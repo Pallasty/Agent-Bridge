@@ -198,8 +198,14 @@ def build_review(
             "output.resolve().parent != output_root" in source
             and "output.exists()" in source
         ),
-        "nonce_store_family_must_remain_absent": (
-            "nonce store must remain absent before execution" in source
+        "nonce_store_absent_or_trusted_metadata_only": all(
+            marker in source
+            for marker in (
+                '"nonce_store_state"',
+                '"nonce_store_metadata_only": True',
+                "installed nonce custody metadata invalid",
+                "nonce sidecar exists without nonce store",
+            )
         ),
         "proof_is_explicitly_absent": '"proof_present": False' in source,
         "owner_signature_remains_required": (

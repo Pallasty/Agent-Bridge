@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import types
-from typing import Any
+from typing import Any, Callable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,6 +116,35 @@ def _build_authority_verifier_context_with_key(
     return authority_verifier, runtime_contract, verifiers
 
 
+def _build_executor_model_verifier(
+    *,
+    execution_contract: dict[str, Any],
+    runtime_contract: dict[str, Any],
+    runtime_model_verifier: Callable[
+        [dict[str, Any], dict[str, Any]], bool
+    ],
+):
+    """Adapt S606's S604 contract argument to the bound S608 verifier view."""
+    _validate_execution_contract(execution_contract)
+    captured_execution_sha256 = execution_contract["contract_sha256"]
+
+    def verify(
+        model: dict[str, Any], supplied_execution_contract: dict[str, Any]
+    ) -> bool:
+        try:
+            _validate_execution_contract(supplied_execution_contract)
+            if (
+                supplied_execution_contract.get("contract_sha256")
+                != captured_execution_sha256
+            ):
+                return False
+            return runtime_model_verifier(model, runtime_contract) is True
+        except (KeyError, OSError, TypeError, ValueError):
+            return False
+
+    return verify
+
+
 def _prepare_secure_bounded_render_with_authority_verifier_context(
     *, execution_contract: dict[str, Any], envelope: dict[str, Any],
     authority_verifier_context, request: dict[str, Any]
@@ -130,12 +159,17 @@ def _prepare_secure_bounded_render_with_authority_verifier_context(
     authorization = {name: envelope[name] for name in EXECUTOR_AUTHORIZATION_FIELDS}
     if not callable(authority_verifier) or authority_verifier(authorization) is not True:
         raise ValueError("authority verifier binding invalid")
+    runtime_model_verifier = verifiers.build_model_verifier(runtime_contract)
     return {
         "contract": execution_contract,
         "authorization": authorization,
         "request": request,
         "authority_verifier": authority_verifier,
-        "model_verifier": verifiers.build_model_verifier(runtime_contract),
+        "model_verifier": _build_executor_model_verifier(
+            execution_contract=execution_contract,
+            runtime_contract=runtime_contract,
+            runtime_model_verifier=runtime_model_verifier,
+        ),
         "nonce_store_path": verifiers.fixed_nonce_store_path(runtime_contract),
     }
 

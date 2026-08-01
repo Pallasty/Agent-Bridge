@@ -365,7 +365,7 @@ def execute_bounded_render(
         segment_rows = []
         segment_paths = []
         for index, row in enumerate(render_requests):
-            temporary = output / f"{index:02d}.wav.part"
+            temporary = output / f"{index:02d}.part.wav"
             final = output / f"{index:02d}.wav"
             owned.extend([temporary, final])
             result = runner(
