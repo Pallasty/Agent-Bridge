@@ -12728,6 +12728,29 @@ mod tests {
             .expect("drop timestamp guards");
     }
 
+    async fn pin_memory_durable_timestamps(
+        store: &SqliteStore,
+        key: &str,
+        created_at: i64,
+        updated_at: i64,
+    ) {
+        let key = key.to_string();
+        let updated = store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories
+                        SET created_at = ?1,
+                            updated_at = ?2
+                      WHERE key = ?3",
+                    params![created_at, updated_at, key],
+                )
+            })
+            .await
+            .expect("pin durable memory timestamps");
+        assert_eq!(updated, 1, "fixture row must exist before timestamp pin");
+    }
+
     #[tokio::test]
     async fn a1_memory_save_auto_links_corrects_edge_for_out_of_tool_correction() {
         // A1: a `correction:<target>:*` feedback memory saved DIRECTLY via
@@ -15143,7 +15166,15 @@ mod tests {
         };
         // Insert in scrambled order so rowid/insertion order != key order.
         for k in ["m_c", "m_a", "m_b"] {
-            store.memory_save(&mk(k)).await.expect("save");
+            let record = mk(k);
+            store.memory_save(&record).await.expect("save");
+            pin_memory_durable_timestamps(
+                &store,
+                &record.key,
+                record.created_at,
+                record.updated_at,
+            )
+            .await;
         }
 
         let out = temp_dir.join("mem.jsonl");
@@ -15186,12 +15217,14 @@ mod tests {
                 .as_nanos()
         ));
         tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
-        let store_a = SqliteStore::open(&temp_dir.join("a.db"))
+        let mut store_a = SqliteStore::open(&temp_dir.join("a.db"))
             .await
             .expect("open a");
-        let store_b = SqliteStore::open(&temp_dir.join("b.db"))
+        let mut store_b = SqliteStore::open(&temp_dir.join("b.db"))
             .await
             .expect("open b");
+        store_a.set_node_id(0);
+        store_b.set_node_id(0);
 
         let rec = MemoryRecord {
             key: "stable_sync_meta".to_string(),
@@ -15211,6 +15244,9 @@ mod tests {
         };
         store_a.memory_save(&rec).await.expect("save a");
         store_b.memory_save(&rec).await.expect("save b");
+        for store in [&store_a, &store_b] {
+            pin_memory_durable_timestamps(store, &rec.key, rec.created_at, rec.updated_at).await;
+        }
 
         store_b
             .conn
@@ -15299,12 +15335,14 @@ mod tests {
                 .as_nanos()
         ));
         tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
-        let store_a = SqliteStore::open(&temp_dir.join("a.db"))
+        let mut store_a = SqliteStore::open(&temp_dir.join("a.db"))
             .await
             .expect("open a");
-        let store_b = SqliteStore::open(&temp_dir.join("b.db"))
+        let mut store_b = SqliteStore::open(&temp_dir.join("b.db"))
             .await
             .expect("open b");
+        store_a.set_node_id(0);
+        store_b.set_node_id(0);
 
         let base_tags = vec![
             "present_outcome".to_string(),
@@ -15329,6 +15367,9 @@ mod tests {
         };
         store_a.memory_save(&rec).await.expect("save a");
         store_b.memory_save(&rec).await.expect("save b");
+        for store in [&store_a, &store_b] {
+            pin_memory_durable_timestamps(store, &rec.key, rec.created_at, rec.updated_at).await;
+        }
 
         // Node A runs its valence apply: importance derived + stamp minted.
         // Node B never applied. This is exactly the local divergence sync
