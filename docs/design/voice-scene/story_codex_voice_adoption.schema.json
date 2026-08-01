@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_codex_voice_adoption.v1",
+  "type": "object",
+  "required": ["schema", "status", "source", "policy", "binary", "backups", "manifest_probe", "adoption", "verification", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_codex_voice_adoption.v1"},
+    "status": {"const": "story_codex_voice_deployed_restart_pending"},
+    "source": {"type": "object", "required": ["commit", "origin_after_build", "origin_stable"], "properties": {"commit": {"pattern": "^[0-9a-f]{40}$"}, "origin_after_build": {"pattern": "^[0-9a-f]{40}$"}, "origin_stable": {"const": true}}, "additionalProperties": false},
+    "policy": {"const": {"toolset": "codex-voice", "profile": "essential", "added_extras": ["story_command_preflight"], "codex_essential_unchanged": true, "default_profile_unchanged": true, "unrelated_niche_tools_added": 0}},
+    "binary": {"type": "object", "required": ["path", "candidate_path", "sha256", "candidate_sha256", "size_bytes", "version_source", "feature_marker_count"], "properties": {"path": {"type": "string"}, "candidate_path": {"type": "string"}, "sha256": {"pattern": "^[0-9a-f]{64}$"}, "candidate_sha256": {"pattern": "^[0-9a-f]{64}$"}, "size_bytes": {"type": "integer", "minimum": 1}, "version_source": {"const": "82fc5f169438"}, "feature_marker_count": {"const": 9}}, "additionalProperties": false},
+    "backups": {"type": "object"},
+    "manifest_probe": {"const": {"tool_count_before": 102, "tool_count_after": 103, "story_visible_before": false, "story_visible_after": true, "voice_tools_after": ["present_voice", "present_voice_confirm_audibility", "voice_delivery_health", "voice_runtime_preflight"]}},
+    "adoption": {"const": {"persistent_mcp_processes": 9, "processes_on_new_binary": 0, "processes_on_old_deleted_inode": 9, "current_client_runtime_adopted": false, "current_client_restart_required": true}},
+    "verification": {"const": {"tdd_red_observed": true, "source_contract_green": true, "precommit_all_targets_check_passed": true, "candidate_matches_installed": true, "feature_gate_passed": true}},
+    "runtime_effects": {"const": {"modified_allowlist": true, "deployed_binary": true, "deployed_adapter": true, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false}},
+    "next_gate": {"const": "current_codex_restart_and_direct_manifest_verification"}
+  },
+  "additionalProperties": false
+}

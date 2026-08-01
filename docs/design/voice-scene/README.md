@@ -74,6 +74,8 @@ express. A packet is S0-valid only when it passes both.
   anti-regression gate, profile visibility, and non-deployment evidence.
 - `story_guarded_deployment.schema.json`: S600 installed binary parity,
   recoverable backups, profile visibility, and stale-process separation.
+- `story_codex_voice_adoption.schema.json`: S601 narrow codex-voice allowlist,
+  deployed manifest proof, rollback, and current-client restart boundary.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
