@@ -1,9 +1,12 @@
 #[path = "../src/story_contract.rs"]
 mod story_contract;
 
-use serde_json::json;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use story_contract::{
     build_chapter_voice_plan, build_story_command_preflight, canonical_json, ingest_story_source,
     ingest_story_source_with_policy, resolve_story_evidence, run_story_preflight_hardened,
@@ -11,6 +14,14 @@ use story_contract::{
     StoryEvidenceBundleConfig, StoryPreflightCancellation, StoryRequest, StorySourcePolicy,
     StoryStart,
 };
+
+fn story_fixture_input_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/design/voice-scene/fixtures/story_s1.md")
+}
+
+fn canonical_story_fixture_path(input: &Path) -> PathBuf {
+    input.canonicalize().expect("canonical story fixture")
+}
 
 #[test]
 fn typed_request_matches_structured_s5zg_shape() {
@@ -104,15 +115,29 @@ fn invalid_requests_fail_closed() {
 
 #[test]
 fn source_ingest_matches_python_chapter_two_oracle() {
-    let ingest = ingest_story_source(
-        Path::new("../../docs/design/voice-scene/fixtures/story_s1.md"),
-        &StoryStart::Chapter { chapter: 2 },
+    let fixture_input = story_fixture_input_path();
+    assert!(fixture_input
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir)));
+    let canonical_fixture = canonical_story_fixture_path(&fixture_input);
+    let ingest = ingest_story_source(&fixture_input, &StoryStart::Chapter { chapter: 2 })
+        .expect("fixture ingest");
+    let actual = serde_json::to_value(ingest).unwrap();
+    let expected_uri = canonical_fixture.to_string_lossy().into_owned();
+    let mut expected: Value = serde_json::from_str(
+        r#"{"chapters":[{"chapter_id":"chapter_f29cded10e417c151b85","ordinal":1,"selected":false,"source_span":{"char_end":53,"char_start":0,"line_end":6,"line_start":1,"source_id":"source_4982d79cfc3172771f4a"},"title":"第一章 夜雨"},{"chapter_id":"chapter_dea6e639ff06f2cc5ce9","ordinal":2,"selected":true,"source_span":{"char_end":88,"char_start":53,"line_end":10,"line_start":7,"source_id":"source_4982d79cfc3172771f4a"},"title":"第二章 回声"}],"selection":{"first_chapter":2,"selected_chapter_ids":["chapter_dea6e639ff06f2cc5ce9"]},"source":{"byte_length":232,"char_length":88,"encoding":"utf-8","format":"md","kind":"novel","sha256":"a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566","source_id":"source_4982d79cfc3172771f4a","uri":null,"version":"source-v1"}}"#,
     )
-    .expect("fixture ingest");
+    .expect("source ingest oracle");
 
     assert_eq!(
-        canonical_json(&serde_json::to_value(ingest).unwrap()).unwrap(),
-        r#"{"chapters":[{"chapter_id":"chapter_f29cded10e417c151b85","ordinal":1,"selected":false,"source_span":{"char_end":53,"char_start":0,"line_end":6,"line_start":1,"source_id":"source_4982d79cfc3172771f4a"},"title":"第一章 夜雨"},{"chapter_id":"chapter_dea6e639ff06f2cc5ce9","ordinal":2,"selected":true,"source_span":{"char_end":88,"char_start":53,"line_end":10,"line_start":7,"source_id":"source_4982d79cfc3172771f4a"},"title":"第二章 回声"}],"selection":{"first_chapter":2,"selected_chapter_ids":["chapter_dea6e639ff06f2cc5ce9"]},"source":{"byte_length":232,"char_length":88,"encoding":"utf-8","format":"md","kind":"novel","sha256":"a485b7f3151f62c5ed0e118a03f66ee3dc3ddb57eb23b5e7ea93e0abb14f6566","source_id":"source_4982d79cfc3172771f4a","uri":"/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/fixtures/story_s1.md","version":"source-v1"}}"#
+        actual.pointer("/source/uri").and_then(Value::as_str),
+        Some(expected_uri.as_str())
+    );
+    expected["source"]["uri"] = Value::String(expected_uri);
+
+    assert_eq!(
+        canonical_json(&actual).unwrap(),
+        canonical_json(&expected).unwrap()
     );
 }
 
@@ -270,8 +295,14 @@ fn load_voice_scene_json(name: &str) -> serde_json::Value {
 
 #[test]
 fn full_preflight_matches_s5zf_python_receipt() {
+    let fixture_input = story_fixture_input_path();
+    assert!(fixture_input
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir)));
+    let canonical_fixture = canonical_story_fixture_path(&fixture_input);
+    let expected_source_path = canonical_fixture.to_string_lossy().into_owned();
     let request = StoryRequest {
-        source_path: "../../docs/design/voice-scene/fixtures/story_s1.md".into(),
+        source_path: fixture_input.to_string_lossy().into_owned(),
         start: StoryStart::Chapter { chapter: 2 },
         dry_run: true,
     };
@@ -284,7 +315,16 @@ fn full_preflight_matches_s5zf_python_receipt() {
         &load_voice_scene_json("s5ze_cross_chapter_continuity_receipt.json"),
     )
     .expect("preflight");
-    let expected = load_voice_scene_json("s5zf_story_command_integration_preflight_receipt.json");
+    let mut expected =
+        load_voice_scene_json("s5zf_story_command_integration_preflight_receipt.json");
+
+    assert_eq!(
+        result
+            .pointer("/command/source_path")
+            .and_then(Value::as_str),
+        Some(expected_source_path.as_str())
+    );
+    expected["command"]["source_path"] = Value::String(expected_source_path);
 
     assert_eq!(result, expected);
     assert_eq!(

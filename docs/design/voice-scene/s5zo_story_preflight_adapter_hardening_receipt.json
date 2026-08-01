@@ -5,7 +5,7 @@
     "rust_module_path": "crates/bridge/src/story_contract.rs",
     "rust_module_sha256": "ccfa045db403441cf06a2f88699dc773fe89b6a6ffddd42d89fc142d61e88598",
     "rust_test_path": "crates/bridge/tests/story_contract_core.rs",
-    "rust_test_sha256": "f2c79dcd3841b9b003f0b113782fde5c53836a8e55f2489b128159bad45e2b2d",
+    "rust_test_sha256": "ddcb6a0af70a3ef585b6929a62a42969e0a8d604e1d496c8f014383a05a4ad17",
     "s5zf_preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb",
     "isolated_rust_tests": 18
   },
