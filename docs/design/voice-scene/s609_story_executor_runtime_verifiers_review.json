@@ -1,0 +1,13 @@
+{
+  "schema": "agent_bridge.story_executor_runtime_verifiers_review.v1",
+  "status": "story_executor_runtime_verifiers_reviewable",
+  "decision": "verifier_source_accepted_runtime_configuration_blocked",
+  "evidence": {"s608_contract_file_sha256": "46c261216f2984b2f79690063d215d3922237b7f5b6702abb7b0003dea3bc65c", "s608_contract_sha256": "032e02f8f158ed36e4ff8489231620f7924b1b6a42fd3661dfc77ae10e65607b", "verifier_path": "/Data/CascadeProjects/agent-bridge/scripts/story_executor_runtime_verifiers.py", "verifier_sha256": "2ec0c182b2ac96885b134740e1c2b63afd1f6280c17c8a94dcd97ca53e1b5825", "verifier_test_path": "/Data/CascadeProjects/agent-bridge/tests/test_story_executor_runtime_verifiers.py", "verifier_test_sha256": "376a67f0f63b9d171767e95508798fdd40d6ca6c7f02210b2c467696a4615106", "test_count": 6},
+  "boundaries": {"constant_time_mac_comparison": true, "domain_separated_canonical_message": true, "executor_view_exactly_bound": true, "all_model_files_stream_hashed": true, "model_symlinks_rejected": true, "nonce_path_fixed": true, "secret_loading_absent": true, "executor_import_absent": true, "model_runtime_import_absent": true, "nonce_database_creation_absent": true, "cli_entrypoint_absent": true},
+  "blockers": ["secure_authority_key_not_installed", "nonce_store_parent_not_installed", "executor_composition_entrypoint_not_implemented"],
+  "implementation_present": true, "configuration_installed": false, "execution_authorized": false,
+  "runtime_effects": {"loaded_secret": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false},
+  "review_sha256": "aaaba65034a37749a3f2e671d3812f0a057c62223b18efb7756e30d8192e7e5d",
+  "claims": {"authority_verifier_implemented": true, "model_bundle_verifier_implemented": true, "fixed_nonce_path_adapter_implemented": true, "secure_configuration_installed": false, "executor_composed": false, "real_model_executed": false},
+  "next_gate": "story_executor_secure_runtime_composition_implementation_review"
+}

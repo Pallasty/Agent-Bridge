@@ -95,6 +95,9 @@ express. A packet is S0-valid only when it passes both.
   schema contract with runtime configuration and execution still closed.
 - `story_bounded_render_receipt.schema.json`: machine-audio render receipt with
   playback and memory authority kept false.
+- `story_executor_runtime_verifiers_review.schema.json`: S609 static acceptance
+  of HMAC authority, streaming model-bundle, and fixed nonce-path verifiers;
+  secure configuration and executor composition remain closed.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
