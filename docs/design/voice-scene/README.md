@@ -129,6 +129,15 @@ express. A packet is S0-valid only when it passes both.
   compatibility, no real key read, no MAC, and no nonce-store creation.
 - `S615_STORY_RENDER_AUTHORIZATION_PROPOSAL_REVIEW.md`: S615 authority boundary,
   verified behavior, non-goals, and the explicit next signing-preflight gate.
+- `story_render_owner_signed_preparation_result.schema.json`: S616 exact,
+  redacted single-key-load preparation result with real MAC generation admitted
+  but nonce, executor, model, audio, and memory effects closed.
+- `s616_story_render_owner_signed_preparation_result.json`: actual S616
+  owner-authorized preparation receipt containing no MAC, nonce, authorization
+  ID, key material, or replayable envelope.
+- `S616_STORY_RENDER_OWNER_SIGNED_PREPARATION.md`: S616 single-read mechanism,
+  S613 public-entrypoint evidence, grant-reference disposal, and next authority
+  gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
