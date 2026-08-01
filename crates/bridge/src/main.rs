@@ -9710,6 +9710,8 @@ async fn run_avatar_install_cortex_runner(
         return Ok(());
     }
 
+    ab_bridge::avatar_cortex::require_avatar_cortex_replay_capability()?;
+
     std::fs::create_dir_all(plist_path.parent().unwrap())
         .with_context(|| format!("create {}", plist_path.parent().unwrap().display()))?;
     std::fs::create_dir_all(stdout_path.parent().unwrap())

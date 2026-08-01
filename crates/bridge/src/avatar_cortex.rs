@@ -5603,11 +5603,22 @@ pub fn avatar_cortex_voice_confirm(
     ))
 }
 
+/// Fail closed until both legacy snapshot I/O and an atomic replacement path
+/// are available. The reserved `seed-substrate` feature marker enables neither.
+pub fn require_avatar_cortex_replay_capability() -> Result<()> {
+    ab_seed_bridge::snapshot::require_write_capability()
+        .map_err(|err| anyhow::anyhow!("avatar cortex replay is unavailable: {err}"))?;
+    Err(anyhow::anyhow!(
+        "avatar cortex replay is unavailable: atomic snapshot replacement is not implemented"
+    ))
+}
+
 pub fn avatar_cortex_replay(opts: &AvatarCortexReplayOptions<'_>) -> Result<Value> {
     use ab_seed_bridge::snapshot::{self, SnapshotTier};
     use ab_seed_bridge::{SeedBackend, SubstrateConfig};
     use ab_store::embedding::{EmbeddingBackend, HashBackend, OnnxBackend};
 
+    require_avatar_cortex_replay_capability()?;
     let seed_opts = crate::avatar_seed::AvatarSeedEventsOptions {
         label: opts.label,
         project: opts.project,
@@ -7873,43 +7884,88 @@ mod tests {
         })
     }
 
-    // The snapshot-append path under test goes through `snapshot::append_row`,
-    // which is compiled to a "seed substrate support is disabled at build time"
-    // error stub unless the `seed-substrate` feature is on. Without the feature
-    // this test fails deterministically (default `cargo test` build), so skip it
-    // there and let CI runs with `--features seed-substrate` exercise it.
-    #[test]
-    #[cfg_attr(
-        not(feature = "seed-substrate"),
-        ignore = "needs --features seed-substrate (parquet snapshot::append_row is a disabled stub otherwise)"
-    )]
-    fn avatar_cortex_replay_writes_isolated_snapshot() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let input = dir.path().join("events.jsonl");
-        let output = dir.path().join("xiao-shu-cortex.parquet");
-        let body = [
-            serde_json::to_string(&event(1, "healthy")).unwrap(),
-            serde_json::to_string(&event(2, "failing")).unwrap(),
-        ]
-        .join("\n");
-        std::fs::write(&input, body).expect("write events");
-        let opts = AvatarCortexReplayOptions {
+    fn replay_options<'a>(input: &'a Path, output: &'a Path) -> AvatarCortexReplayOptions<'a> {
+        AvatarCortexReplayOptions {
             label: None,
             project: Some("agent-bridge"),
-            input: Some(&input),
-            output: Some(&output),
+            input: Some(input),
+            output: Some(output),
             limit: 20,
             include_preview: false,
             use_hash: true,
             n: 8,
             d: 8,
-        };
-        let payload = avatar_cortex_replay(&opts).expect("replay");
-        assert_eq!(payload["mode"], "shadow_only");
-        assert_eq!(payload["perceived"], 2);
-        assert_eq!(payload["snapshot_rows"], 1);
-        assert_eq!(payload["mutates_global_substrate"], false);
-        assert!(output.exists());
+        }
+    }
+
+    fn write_replay_events(input: &Path) {
+        let body = [
+            serde_json::to_string(&event(1, "healthy")).unwrap(),
+            serde_json::to_string(&event(2, "failing")).unwrap(),
+        ]
+        .join("\n");
+        std::fs::write(input, body).expect("write events");
+    }
+
+    #[test]
+    fn test_avatar_cortex_replay_rejects_disabled_capability_before_reading_missing_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = dir.path().join("missing-events.jsonl");
+        let output = dir.path().join("xiao-shu-cortex.parquet");
+
+        let err = avatar_cortex_replay(&replay_options(&input, &output))
+            .expect_err("disabled replay capability must reject before source I/O");
+
+        let message = format!("{err:#}");
+        assert!(message.contains("avatar cortex replay is unavailable"));
+        assert!(message.contains("reserved compatibility marker"));
+        assert!(
+            !message.contains("read avatar alert events"),
+            "source I/O must remain behind the replay capability gate: {message}"
+        );
+        assert!(!output.exists());
+    }
+
+    #[test]
+    fn test_avatar_cortex_replay_preserves_existing_snapshot_when_snapshot_io_is_disabled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = dir.path().join("events.jsonl");
+        let output = dir.path().join("xiao-shu-cortex.parquet");
+        let sentinel = b"existing-cortex-snapshot";
+        write_replay_events(&input);
+        std::fs::write(&output, sentinel).expect("write sentinel snapshot");
+
+        let err = avatar_cortex_replay(&replay_options(&input, &output))
+            .expect_err("disabled snapshot I/O must reject replay");
+
+        assert_eq!(
+            std::fs::read(&output).expect("existing snapshot must remain readable"),
+            sentinel
+        );
+        let message = format!("{err:#}");
+        assert!(message.contains("avatar cortex replay is unavailable"));
+        assert!(message.contains("reserved compatibility marker"));
+        assert!(!message.contains("rebuild with --features seed-substrate"));
+    }
+
+    #[test]
+    fn test_avatar_cortex_replay_leaves_missing_output_parent_absent_when_snapshot_io_is_disabled()
+    {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = dir.path().join("events.jsonl");
+        let output_parent = dir.path().join("missing").join("nested");
+        let output = output_parent.join("xiao-shu-cortex.parquet");
+        write_replay_events(&input);
+
+        let err = avatar_cortex_replay(&replay_options(&input, &output))
+            .expect_err("disabled snapshot I/O must reject replay");
+
+        assert!(
+            !output_parent.exists(),
+            "replay capability preflight must run before creating the output parent"
+        );
+        assert!(!output.exists());
+        assert!(format!("{err:#}").contains("avatar cortex replay is unavailable"));
     }
 
     #[test]
