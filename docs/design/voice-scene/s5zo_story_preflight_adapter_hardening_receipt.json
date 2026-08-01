@@ -1,0 +1,44 @@
+{
+  "schema": "agent_bridge.story_preflight_adapter_hardening.v1",
+  "status": "rust_story_preflight_adapter_hardened",
+  "evidence": {
+    "rust_module_path": "crates/bridge/src/story_contract.rs",
+    "rust_module_sha256": "ccfa045db403441cf06a2f88699dc773fe89b6a6ffddd42d89fc142d61e88598",
+    "rust_test_path": "crates/bridge/tests/story_contract_core.rs",
+    "rust_test_sha256": "f2c79dcd3841b9b003f0b113782fde5c53836a8e55f2489b128159bad45e2b2d",
+    "s5zf_preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb",
+    "isolated_rust_tests": 18
+  },
+  "hardening": {
+    "canonical_allowed_root": true,
+    "fixed_source_byte_ceiling": true,
+    "strict_utf8": true,
+    "hash_bound_evidence_bundle": true,
+    "cooperative_chunk_cancellation": true,
+    "owned_worker_join_on_cancel": true,
+    "structured_errors": true
+  },
+  "negative_controls": {
+    "root_escape_rejected": true,
+    "oversize_source_rejected": true,
+    "evidence_hash_drift_rejected": true,
+    "pre_cancel_rejected_before_work": true,
+    "runtime_flags_still_rejected": true
+  },
+  "scope": {
+    "module_exported": false,
+    "mcp_registered": false,
+    "tool_exposed": false,
+    "deployed": false,
+    "execution_authorized": false
+  },
+  "runtime_effects": {
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "next_gate": "owner_authorized_rust_story_registration_implementation_review"
+}

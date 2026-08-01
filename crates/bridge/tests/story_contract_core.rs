@@ -2,10 +2,14 @@
 mod story_contract;
 
 use serde_json::json;
-use std::path::Path;
+use sha2::{Digest, Sha256};
+use std::{path::Path, sync::Arc};
 use story_contract::{
     build_chapter_voice_plan, build_story_command_preflight, canonical_json, ingest_story_source,
-    segment_cache_key, sha256_canonical_json, SegmentCacheKeyInput, StoryRequest, StoryStart,
+    ingest_story_source_with_policy, resolve_story_evidence, run_story_preflight_hardened,
+    segment_cache_key, sha256_canonical_json, EvidenceFileSpec, SegmentCacheKeyInput,
+    StoryEvidenceBundleConfig, StoryPreflightCancellation, StoryRequest, StorySourcePolicy,
+    StoryStart,
 };
 
 #[test]
@@ -342,4 +346,147 @@ fn full_preflight_fails_closed_on_runtime_flag_and_evidence_drift() {
         &continuity,
     )
     .is_err());
+}
+
+fn file_sha256(path: &Path) -> String {
+    let mut digest = Sha256::new();
+    digest.update(std::fs::read(path).expect("fixture bytes"));
+    format!("{:x}", digest.finalize())
+}
+
+fn evidence_config(root: &Path) -> StoryEvidenceBundleConfig {
+    let spec = |name: &str| {
+        let path = root.join(name);
+        EvidenceFileSpec {
+            sha256: file_sha256(&path),
+            path,
+        }
+    };
+    StoryEvidenceBundleConfig {
+        voice_plan: spec("s5zc_source_grounded_utterance_plan_receipt.json"),
+        mapping: spec("s5x_story_voice_mapping_receipt.json"),
+        role_acceptance: spec("s5y_character_voice_audition_receipt.json"),
+        continuity_acceptance: spec("s5ze_cross_chapter_continuity_receipt.json"),
+        allowed_root: root.to_path_buf(),
+        max_file_bytes: 1_048_576,
+    }
+}
+
+#[test]
+fn hardened_source_admission_rejects_escape_and_oversize() {
+    let root = std::env::temp_dir().join(format!("ab-s5zo-root-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("create root");
+    let inside = root.join("inside.md");
+    std::fs::write(&inside, "# 第一章\n内容。\n").expect("write inside");
+    let policy = StorySourcePolicy {
+        allowed_root: root.clone(),
+        max_bytes: 8,
+    };
+    let outside = root.with_extension("md");
+    std::fs::write(&outside, "# 第一章\n外部。\n").expect("write outside");
+
+    let oversized = ingest_story_source_with_policy(
+        &inside,
+        &StoryStart::FromStart,
+        &policy,
+        &StoryPreflightCancellation::new(),
+    );
+    let escaped = ingest_story_source_with_policy(
+        &outside,
+        &StoryStart::FromStart,
+        &StorySourcePolicy {
+            max_bytes: 1024,
+            ..policy
+        },
+        &StoryPreflightCancellation::new(),
+    );
+
+    std::fs::remove_file(inside).expect("remove inside");
+    std::fs::remove_file(outside).expect("remove outside");
+    std::fs::remove_dir(root).expect("remove root");
+    assert!(oversized.unwrap_err().to_string().contains("byte_limit"));
+    assert!(escaped.unwrap_err().to_string().contains("allowed_root"));
+}
+
+#[test]
+fn configured_evidence_resolver_is_root_and_hash_bound() {
+    let root = Path::new("../../docs/design/voice-scene")
+        .canonicalize()
+        .expect("voice scene root");
+    let config = evidence_config(&root);
+    let bundle = resolve_story_evidence(&config, &StoryPreflightCancellation::new())
+        .expect("resolved evidence");
+    assert_eq!(bundle.voice_plan["status"], "chapter_voice_plan_reviewable");
+
+    let mut drifted = config;
+    drifted.mapping.sha256 = "0".repeat(64);
+    assert!(
+        resolve_story_evidence(&drifted, &StoryPreflightCancellation::new())
+            .unwrap_err()
+            .to_string()
+            .contains("SHA-256")
+    );
+}
+
+#[tokio::test]
+async fn hardened_preflight_honors_pre_cancel_without_runtime_effects() {
+    let root = Path::new("../../docs/design/voice-scene")
+        .canonicalize()
+        .expect("voice scene root");
+    let cancellation = Arc::new(StoryPreflightCancellation::new());
+    cancellation.cancel();
+    let request = StoryRequest {
+        source_path: root.join("fixtures/story_s1.md").display().to_string(),
+        start: StoryStart::Chapter { chapter: 2 },
+        dry_run: true,
+    };
+    let error = run_story_preflight_hardened(
+        "/story fixtures/story_s1.md chapter 2",
+        request,
+        StorySourcePolicy {
+            allowed_root: root.clone(),
+            max_bytes: 1_048_576,
+        },
+        evidence_config(&root),
+        cancellation,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("cancelled"));
+}
+
+#[tokio::test]
+async fn hardened_preflight_preserves_s5zf_parity() {
+    let root = Path::new("../../docs/design/voice-scene")
+        .canonicalize()
+        .expect("voice scene root");
+    let request = StoryRequest {
+        source_path: root.join("fixtures/story_s1.md").display().to_string(),
+        start: StoryStart::Chapter { chapter: 2 },
+        dry_run: true,
+    };
+    let result = run_story_preflight_hardened(
+        "/story fixtures/story_s1.md chapter 2",
+        request,
+        StorySourcePolicy {
+            allowed_root: root.clone(),
+            max_bytes: 1_048_576,
+        },
+        evidence_config(&root),
+        Arc::new(StoryPreflightCancellation::new()),
+    )
+    .await
+    .expect("hardened preflight");
+
+    assert_eq!(
+        result["preflight_sha256"],
+        "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb"
+    );
+    assert!(result["execution_authorized"] == false);
+    assert!(result["runtime_effects"]
+        .as_object()
+        .expect("runtime effects")
+        .values()
+        .all(|value| value == false));
 }

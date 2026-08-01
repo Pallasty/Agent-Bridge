@@ -467,6 +467,16 @@ Niche `story_command_preflight`, but it is not registered, deployed, exposed,
 or execution-authorized. Rust story preflight adapter hardening is the next
 gate.
 
+S5ZO hardens the still-unexported native adapter. Story sources now require a
+canonical configured root and fixed byte ceiling; the four accepted evidence
+documents are root-, size-, and SHA-256-bound; and an async wrapper cooperatively
+cancels chunked blocking reads and joins owned work before returning. The
+hardened path preserves the S5ZF preflight digest and rejects root escape,
+oversize input, evidence drift, pre-cancelled work, and runtime flags. This does
+not export the module, register or expose a tool, deploy a binary, or authorize
+execution. An owner-authorized Rust story registration implementation review is
+the next gate.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

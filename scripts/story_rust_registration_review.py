@@ -76,7 +76,12 @@ def build_registration_review(
     )
     bounded_source_admission = all(
         marker in story_source
-        for marker in ("MAX_STORY_SOURCE_BYTES", "STORY_SOURCE_ALLOWED_ROOT")
+        for marker in (
+            "MAX_STORY_SOURCE_BYTES",
+            "StorySourcePolicy",
+            "allowed_root",
+            "read_admitted_file",
+        )
     )
     evidence_bundle_resolver = all(
         marker in story_source + lib_source + registry_source
@@ -94,12 +99,17 @@ def build_registration_review(
     ]
     blockers = [name for name, present in blocker_probes if not present]
 
+    implementation_admitted = not blockers
     return {
         "schema": "agent_bridge.story_rust_registration_review.v1",
         "status": "rust_story_registration_review_complete",
         "decision": {
-            "selected": "harden_native_adapter_before_registration",
-            "registration_implementation_admitted": not blockers,
+            "selected": (
+                "request_owner_authorized_registration_implementation_review"
+                if implementation_admitted
+                else "harden_native_adapter_before_registration"
+            ),
+            "registration_implementation_admitted": implementation_admitted,
             "rejected_options": [
                 "register_current_adapter_now",
                 "reintroduce_python_adapter",
@@ -153,7 +163,11 @@ def build_registration_review(
             "wrote_cache": False,
             "wrote_memory": False,
         },
-        "next_gate": "rust_story_preflight_adapter_hardening",
+        "next_gate": (
+            "owner_authorized_rust_story_registration_implementation_review"
+            if implementation_admitted
+            else "rust_story_preflight_adapter_hardening"
+        ),
     }
 
 

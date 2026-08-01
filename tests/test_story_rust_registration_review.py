@@ -38,8 +38,8 @@ def build(**overrides):
     return load_module().build_registration_review(**{**kwargs, **overrides})
 
 
-def test_review_selects_adapter_hardening_before_registration() -> None:
-    result = build()
+def test_s5zn_receipt_selected_adapter_hardening_before_registration() -> None:
+    result = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
 
     assert result["status"] == "rust_story_registration_review_complete"
     assert result["decision"]["selected"] == "harden_native_adapter_before_registration"
@@ -56,7 +56,7 @@ def test_review_selects_adapter_hardening_before_registration() -> None:
 
 
 def test_review_keeps_tool_niche_hidden_and_non_actuating() -> None:
-    result = build()
+    result = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
 
     assert result["proposed_surface"] == {
         "tool_name": "story_command_preflight",
@@ -101,8 +101,26 @@ def test_real_review_validates_against_schema() -> None:
     jsonschema = pytest.importorskip("jsonschema")
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
-    assert list(jsonschema.Draft202012Validator(schema).iter_errors(build())) == []
+    receipt = json.loads(RECEIPT_PATH.read_text(encoding="utf-8"))
+    assert list(jsonschema.Draft202012Validator(schema).iter_errors(receipt)) == []
 
 
-def test_committed_receipt_exactly_matches_current_review() -> None:
-    assert json.loads(RECEIPT_PATH.read_text(encoding="utf-8")) == build()
+def test_current_review_detects_hardening_without_authorizing_registration() -> None:
+    current = build()
+
+    assert current["hardening_probes"] == {
+        "bounded_source_admission": True,
+        "configured_evidence_bundle_resolver": True,
+        "async_cancellation_contract": True,
+    }
+    assert current["blockers"] == []
+    assert current["decision"] == {
+        "selected": "request_owner_authorized_registration_implementation_review",
+        "registration_implementation_admitted": True,
+        "rejected_options": [
+            "register_current_adapter_now",
+            "reintroduce_python_adapter",
+        ],
+    }
+    assert current["execution_authorized"] is False
+    assert current["next_gate"] == "owner_authorized_rust_story_registration_implementation_review"

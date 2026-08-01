@@ -5,12 +5,84 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashSet},
-    fs,
-    path::Path,
+    fs::{self, File},
+    io::Read,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 use thiserror::Error;
+use tokio::sync::Notify;
 
 const SUPPORTED_SOURCE_SUFFIXES: [&str; 3] = [".txt", ".md", ".markdown"];
+pub const MAX_STORY_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+const READ_CHUNK_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone)]
+pub struct StorySourcePolicy {
+    pub allowed_root: PathBuf,
+    pub max_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct EvidenceFileSpec {
+    pub path: PathBuf,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoryEvidenceBundleConfig {
+    pub voice_plan: EvidenceFileSpec,
+    pub mapping: EvidenceFileSpec,
+    pub role_acceptance: EvidenceFileSpec,
+    pub continuity_acceptance: EvidenceFileSpec,
+    pub allowed_root: PathBuf,
+    pub max_file_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoryEvidenceBundle {
+    pub voice_plan: Value,
+    pub mapping: Value,
+    pub role_acceptance: Value,
+    pub continuity_acceptance: Value,
+}
+
+#[derive(Debug, Default)]
+pub struct StoryPreflightCancellation {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+impl StoryPreflightCancellation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        self.notify.notify_one();
+    }
+
+    fn check(&self) -> Result<(), StoryContractError> {
+        if self.cancelled.load(Ordering::Acquire) {
+            Err(StoryContractError::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn cancelled(&self) {
+        loop {
+            if self.cancelled.load(Ordering::Acquire) {
+                return;
+            }
+            self.notify.notified().await;
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -165,6 +237,10 @@ pub enum StoryContractError {
     },
     #[error("cannot serialize canonical JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("story preflight cancelled")]
+    Cancelled,
+    #[error("story preflight worker failed: {0}")]
+    Worker(String),
 }
 
 /// Serialize JSON with recursively sorted object keys, compact separators, and UTF-8 text.
@@ -189,6 +265,35 @@ pub fn ingest_story_source(
     path: &Path,
     start: &StoryStart,
 ) -> Result<StorySourceIngest, StoryContractError> {
+    let source_bytes = fs::read(path).map_err(|source| StoryContractError::SourceIo {
+        path: path.display().to_string(),
+        source,
+    })?;
+    build_story_source_ingest(path, start, source_bytes)
+}
+
+/// Read a story only after canonical-root and byte-ceiling admission.
+pub fn ingest_story_source_with_policy(
+    path: &Path,
+    start: &StoryStart,
+    policy: &StorySourcePolicy,
+    cancellation: &StoryPreflightCancellation,
+) -> Result<StorySourceIngest, StoryContractError> {
+    let source_bytes = read_admitted_file(
+        path,
+        &policy.allowed_root,
+        policy.max_bytes.min(MAX_STORY_SOURCE_BYTES),
+        cancellation,
+        "story_source",
+    )?;
+    build_story_source_ingest(path, start, source_bytes)
+}
+
+fn build_story_source_ingest(
+    path: &Path,
+    start: &StoryStart,
+    source_bytes: Vec<u8>,
+) -> Result<StorySourceIngest, StoryContractError> {
     let suffix = path
         .extension()
         .and_then(|value| value.to_str())
@@ -201,10 +306,6 @@ pub fn ingest_story_source(
         )));
     }
 
-    let source_bytes = fs::read(path).map_err(|source| StoryContractError::SourceIo {
-        path: path.display().to_string(),
-        source,
-    })?;
     let text = std::str::from_utf8(&source_bytes)
         .map_err(|_| StoryContractError::InvalidSource("story_source_must_be_utf8".into()))?;
     let source_sha256 = hex_sha256(&source_bytes);
@@ -256,6 +357,110 @@ pub fn ingest_story_source(
             selected_chapter_ids,
         },
         chapters,
+    })
+}
+
+fn read_admitted_file(
+    path: &Path,
+    allowed_root: &Path,
+    max_bytes: u64,
+    cancellation: &StoryPreflightCancellation,
+    label: &str,
+) -> Result<Vec<u8>, StoryContractError> {
+    cancellation.check()?;
+    if max_bytes == 0 {
+        return Err(StoryContractError::InvalidSource(format!(
+            "{label}_byte_limit_invalid"
+        )));
+    }
+    let canonical_root =
+        allowed_root
+            .canonicalize()
+            .map_err(|source| StoryContractError::SourceIo {
+                path: allowed_root.display().to_string(),
+                source,
+            })?;
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|source| StoryContractError::SourceIo {
+            path: path.display().to_string(),
+            source,
+        })?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(StoryContractError::InvalidSource(format!(
+            "{label}_outside_allowed_root"
+        )));
+    }
+    let metadata = canonical_path
+        .metadata()
+        .map_err(|source| StoryContractError::SourceIo {
+            path: canonical_path.display().to_string(),
+            source,
+        })?;
+    if !metadata.is_file() {
+        return Err(StoryContractError::InvalidSource(format!(
+            "{label}_not_regular_file"
+        )));
+    }
+    if metadata.len() > max_bytes {
+        return Err(StoryContractError::InvalidSource(format!(
+            "{label}_byte_limit_exceeded"
+        )));
+    }
+
+    let mut file = File::open(&canonical_path).map_err(|source| StoryContractError::SourceIo {
+        path: canonical_path.display().to_string(),
+        source,
+    })?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut chunk = [0_u8; READ_CHUNK_BYTES];
+    loop {
+        cancellation.check()?;
+        let read = file
+            .read(&mut chunk)
+            .map_err(|source| StoryContractError::SourceIo {
+                path: canonical_path.display().to_string(),
+                source,
+            })?;
+        if read == 0 {
+            break;
+        }
+        if bytes.len().saturating_add(read) > max_bytes as usize {
+            return Err(StoryContractError::InvalidSource(format!(
+                "{label}_byte_limit_exceeded"
+            )));
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+    cancellation.check()?;
+    Ok(bytes)
+}
+
+pub fn resolve_story_evidence(
+    config: &StoryEvidenceBundleConfig,
+    cancellation: &StoryPreflightCancellation,
+) -> Result<StoryEvidenceBundle, StoryContractError> {
+    let resolve = |spec: &EvidenceFileSpec, label: &str| -> Result<Value, StoryContractError> {
+        if !is_lowercase_sha256(&spec.sha256) {
+            return preflight_error(&format!("{label} configured SHA-256 invalid"));
+        }
+        let bytes = read_admitted_file(
+            &spec.path,
+            &config.allowed_root,
+            config.max_file_bytes.min(MAX_STORY_SOURCE_BYTES),
+            cancellation,
+            label,
+        )?;
+        if hex_sha256(&bytes) != spec.sha256 {
+            return preflight_error(&format!("{label} configured SHA-256 mismatch"));
+        }
+        Ok(serde_json::from_slice(&bytes)?)
+    };
+    Ok(StoryEvidenceBundle {
+        voice_plan: resolve(&config.voice_plan, "voice_plan")?,
+        mapping: resolve(&config.mapping, "mapping")?,
+        role_acceptance: resolve(&config.role_acceptance, "role_acceptance")?,
+        continuity_acceptance: resolve(&config.continuity_acceptance, "continuity_acceptance")?,
     })
 }
 
@@ -449,6 +654,26 @@ pub fn build_story_command_preflight(
         }
     }
     let source_ingest = ingest_story_source(Path::new(&request.source_path), &request.start)?;
+    compose_story_command_preflight(
+        raw_command,
+        request,
+        source_ingest,
+        voice_plan,
+        mapping,
+        role_acceptance,
+        continuity_acceptance,
+    )
+}
+
+fn compose_story_command_preflight(
+    raw_command: &str,
+    request: &StoryRequest,
+    source_ingest: StorySourceIngest,
+    voice_plan: &Value,
+    mapping: &Value,
+    role_acceptance: &Value,
+    continuity_acceptance: &Value,
+) -> Result<Value, StoryContractError> {
     validate_preflight_evidence(
         &source_ingest.source.sha256,
         voice_plan,
@@ -572,6 +797,65 @@ pub fn build_story_command_preflight(
         },
         "next_gate": "story_command_static_registration_contract",
     }))
+}
+
+/// Run the hardened pure preflight on owned blocking work with cooperative cancellation.
+pub async fn run_story_preflight_hardened(
+    raw_command: &str,
+    request: StoryRequest,
+    source_policy: StorySourcePolicy,
+    evidence_config: StoryEvidenceBundleConfig,
+    cancellation: Arc<StoryPreflightCancellation>,
+) -> Result<Value, StoryContractError> {
+    cancellation.check()?;
+    let raw_command = raw_command.to_owned();
+    let worker_cancellation = Arc::clone(&cancellation);
+    let mut worker = tokio::task::spawn_blocking(move || {
+        request.validate()?;
+        for forbidden in [
+            "--play",
+            "--emit-voice",
+            "--record",
+            "--download-model",
+            "--write-memory",
+        ] {
+            if raw_command
+                .split_whitespace()
+                .any(|token| token == forbidden)
+            {
+                return preflight_error(&format!("runtime_option_forbidden:{forbidden}"));
+            }
+        }
+        let evidence = resolve_story_evidence(&evidence_config, &worker_cancellation)?;
+        let source_ingest = ingest_story_source_with_policy(
+            Path::new(&request.source_path),
+            &request.start,
+            &source_policy,
+            &worker_cancellation,
+        )?;
+        worker_cancellation.check()?;
+        compose_story_command_preflight(
+            &raw_command,
+            &request,
+            source_ingest,
+            &evidence.voice_plan,
+            &evidence.mapping,
+            &evidence.role_acceptance,
+            &evidence.continuity_acceptance,
+        )
+    });
+
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => {
+            cancellation.cancel();
+            let _ = worker.await;
+            Err(StoryContractError::Cancelled)
+        }
+        result = &mut worker => {
+            result.map_err(|error| StoryContractError::Worker(error.to_string()))?
+        }
+    }
 }
 
 fn validate_preflight_evidence(
