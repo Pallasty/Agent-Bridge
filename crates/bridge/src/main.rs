@@ -11358,6 +11358,10 @@ async fn run_avatar_heartbeat_health(
     stale_secs: i64,
     as_json: bool,
 ) -> Result<()> {
+    ab_bridge::avatar_health::resolve_heartbeat_health_identity(
+        label.as_deref(),
+        project.as_deref(),
+    )?;
     let store = SqliteStore::open(&default_db_path())
         .await
         .context("open state.db")?;
@@ -11397,12 +11401,15 @@ async fn run_avatar_heartbeat_health(
         avatar_health_display(launchd.get("run_interval_secs"), "-")
     );
     println!(
-        "binary.path={} exists={} supports_sync_presence={} supports_heartbeat_health={} missing_command={}",
+        "binary.path={} exists={} supports_sync_presence={} supports_heartbeat_health={} missing_command={} configured_sync_presence={} probe_mode={} executable_invoked={}",
         avatar_health_display(binary.get("path"), "-"),
         avatar_health_display(binary.get("exists"), "false"),
-        avatar_health_display(binary.get("supports_sync_presence"), "false"),
-        avatar_health_display(binary.get("supports_heartbeat_health"), "false"),
-        avatar_health_display(binary.get("missing_command"), "false")
+        avatar_health_display(binary.get("supports_sync_presence"), "unknown"),
+        avatar_health_display(binary.get("supports_heartbeat_health"), "unknown"),
+        avatar_health_display(binary.get("missing_command"), "false"),
+        avatar_health_display(binary.get("configured_sync_presence"), "false"),
+        avatar_health_display(binary.get("probe_mode"), "unknown"),
+        avatar_health_display(binary.get("executable_invoked"), "false")
     );
     println!(
         "presence.exists={} fresh={} age_secs={} heartbeat={}",
@@ -11444,6 +11451,10 @@ async fn run_avatar_heartbeat_alert(
     tts_rate: Option<u64>,
     as_json: bool,
 ) -> Result<()> {
+    ab_bridge::avatar_health::resolve_heartbeat_health_identity(
+        label.as_deref(),
+        project.as_deref(),
+    )?;
     let store = SqliteStore::open(&default_db_path())
         .await
         .context("open state.db")?;

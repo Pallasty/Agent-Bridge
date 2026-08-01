@@ -389,19 +389,24 @@ read back `agent_id=com.agentbridge.avatar-heartbeat.agent-bridge`,
 11 seconds.
 
 Heartbeat health status: `agent-bridge avatar heartbeat-health` evaluates the
-LaunchAgent, the actual binary named in the plist, and the stable presence row
-through one shared read-only module. It reports launchd load state, run count,
-last exit code, interval, plist/log paths, binary path, binary command support,
-presence freshness, and the projected avatar fields. This is the
-operator-facing health answer for independent Xiao Shu runtime checks.
+LaunchAgent, the passive `ProgramArguments` contract in its plist, and the
+stable presence row through one shared read-only module. It never executes the
+binary named by the plist. It reports launchd load state, run count, last exit
+code, interval, plist/log paths, binary path/existence, whether the plist is
+configured for `avatar sync-presence`, presence freshness, and the projected
+avatar fields. Dynamic command-support fields remain `null` unless a future
+separately authorized local probe is introduced. This is the operator-facing
+health answer for independent Xiao Shu runtime checks.
 
 Binary drift guard: `agent-bridge avatar install-heartbeat` now prefers
 `~/.local/bin/agent-bridge.real` when it exists, then falls back to
 `~/.local/bin/agent-bridge`. This aligns with the existing wrapper/background
 job layout and keeps the heartbeat on the stable real binary even if the
 front-door `agent-bridge` path is replaced. `heartbeat-health` reports
-`binary_missing` or `binary_missing_command` when the configured binary cannot
-run the required avatar heartbeat command.
+`binary_missing` when the configured binary path is absent, or
+`binary_missing_command` when the passive plist contract does not configure
+`avatar sync-presence`; it does not run the configured binary to make that
+distinction.
 
 Sparse alert gate: `agent-bridge avatar heartbeat-alert` consumes the same
 read-only health payload and maintains a local transition receipt. It emits
@@ -634,7 +639,7 @@ external watchdogs and non-MCP clients.
 | Standard `pet_presence_sync` | Presence row carries canonical `avatar_state` plus compatibility `pet_state` |
 | `agent-bridge avatar sync-presence` | Same presence projection is available for CLI/launchd heartbeats without an MCP client |
 | `agent-bridge avatar install-heartbeat` | A per-user launchd job periodically refreshes one stable presence row |
-| `agent-bridge avatar heartbeat-health` | Launchd, binary command support, and the stable presence row are summarized by one read-only health payload |
+| `agent-bridge avatar heartbeat-health` | Launchd, passive plist command configuration, and the stable presence row are summarized without executing the configured binary |
 | `agent-bridge avatar heartbeat-alert` | Health transitions are gated sparsely, optionally notified/spoken, and logged as Seed-ready JSONL events |
 | `agent-bridge avatar install-heartbeat-alert` | A separate per-user launchd job periodically runs the sparse alert gate without writing presence |
 | `agent-bridge avatar seed-events` | Avatar alert JSONL projects into Seed replay-compatible perception records without live substrate mutation |

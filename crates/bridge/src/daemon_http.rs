@@ -1092,6 +1092,11 @@ async fn avatar_heartbeat_health(
     State(s): State<AppState>,
     Query(q): Query<AvatarHeartbeatHealthQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    crate::avatar_health::resolve_heartbeat_health_identity(
+        q.label.as_deref(),
+        q.project.as_deref(),
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     let payload = crate::avatar_health::heartbeat_health(
         s.store.as_ref(),
         q.label.as_deref(),
@@ -3757,9 +3762,11 @@ fn avatar_surface_health_html(health: &Value) -> String {
         None => html_escape("-"),
     };
     let binary_path = avatar_surface_html_json_value(binary.get("path"), "-");
-    let sync = avatar_surface_html_json_value(binary.get("supports_sync_presence"), "false");
+    let configured_sync =
+        avatar_surface_html_json_value(binary.get("configured_sync_presence"), "false");
+    let sync = avatar_surface_html_json_value(binary.get("supports_sync_presence"), "unknown");
     let health_cmd =
-        avatar_surface_html_json_value(binary.get("supports_heartbeat_health"), "false");
+        avatar_surface_html_json_value(binary.get("supports_heartbeat_health"), "unknown");
     let exit_code = avatar_surface_html_json_value(launchd.get("last_exit_code"), "-");
     let runs = avatar_surface_html_json_value(launchd.get("runs"), "-");
 
@@ -3772,7 +3779,7 @@ fn avatar_surface_health_html(health: &Value) -> String {
       </div>
       <dl>
         <div><dt>binary</dt><dd>{binary_path}</dd></div>
-        <div><dt>commands</dt><dd>sync={sync} health={health_cmd}</dd></div>
+        <div><dt>commands</dt><dd>configured_sync={configured_sync} support_sync={sync} health={health_cmd}</dd></div>
         <div><dt>launchd</dt><dd>exit={exit_code} runs={runs}</dd></div>
         <div><dt>presence</dt><dd>{age}</dd></div>
       </dl>
@@ -7630,6 +7637,32 @@ mod tests {
         assert_eq!(req.text, "hello world");
     }
 
+    #[tokio::test]
+    async fn avatar_heartbeat_health_rejects_unsafe_label_as_bad_request() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let store: std::sync::Arc<dyn StateStore> = std::sync::Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open temporary store"),
+        );
+        let result = avatar_heartbeat_health(
+            State(AppState {
+                store,
+                embed_backend: build_raw_embed_backend(),
+            }),
+            Query(AvatarHeartbeatHealthQuery {
+                label: Some("/tmp/escape".to_string()),
+                project: None,
+                stale_secs: 300,
+            }),
+        )
+        .await;
+
+        let (status, message) = result.expect_err("unsafe label must be rejected");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(message.contains("invalid heartbeat label"), "message={message}");
+    }
+
     #[test]
     fn avatar_surface_query_include_stale_disables_ttl() {
         let q = AvatarSurfaceQuery {
@@ -7753,8 +7786,9 @@ mod tests {
             "summary": "healthy <binary>",
             "binary": {
                 "path": "/Users/me/.local/bin/agent-bridge.real",
-                "supports_sync_presence": true,
-                "supports_heartbeat_health": true
+                "configured_sync_presence": true,
+                "supports_sync_presence": null,
+                "supports_heartbeat_health": null
             },
             "launchd": {
                 "last_exit_code": 0,
@@ -8093,7 +8127,7 @@ mod tests {
         assert!(html.contains("delta=0 lag=20s unhealthy=0"));
         assert!(html.contains("abc&lt;123&gt;"));
         assert!(html.contains("/Users/me/.local/bin/agent-bridge.real"));
-        assert!(html.contains("sync=true health=true"));
+        assert!(html.contains("configured_sync=true support_sync=unknown health=unknown"));
         assert!(html.contains(r#"<meta http-equiv="refresh" content="10">"#));
         assert!(html.contains("last update=1779193140 refresh=10s stale_after=300s"));
         assert!(html.contains("status-fresh"));
