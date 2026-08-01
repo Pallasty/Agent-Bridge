@@ -1,0 +1,14 @@
+{
+  "schema": "agent_bridge.story_guarded_deployment.v1",
+  "status": "story_binary_deployed_runtime_not_adopted",
+  "source": {"commit": "f3ae34c0e15723b8d7a6cf12b2dbc969a2aaf5b4", "origin_after_build": "f3ae34c0e15723b8d7a6cf12b2dbc969a2aaf5b4", "origin_stable": true},
+  "binary": {"path": "/home/pallasting/.local/bin/agent-bridge.real", "candidate_path": "/home/pallasting/.cache/agent-bridge-story-deploy-dry-run-target/release/agent-bridge", "sha256": "bde3918eb342cd42c61fb2932a01456e2f91cc0b9af99ea30b15f33b2931d133", "candidate_sha256": "bde3918eb342cd42c61fb2932a01456e2f91cc0b9af99ea30b15f33b2931d133", "size_bytes": 76406104, "version": "agent-bridge 0.14.0 (v0.14.0-1279-gf3ae34c0; f3ae34c0e157)", "story_marker": true, "current_feature_markers_preserved": true, "feature_marker_count": 9},
+  "backups": {"binary_path": "/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-f3ae34c-20260801T071234", "binary_sha256": "762c27bee788045dc23681881e1011be8722d9696b2205068a75b2a7c0c045ed", "adapter_path": "/home/pallasting/.local/share/ab-tts/audio_embody.py.bak-deploy-20260801T071235", "adapter_sha256": "7372ae3317c790cd099e67874205c631c3053ede35a278511f565ed9becae241"},
+  "wrapper": {"path": "/home/pallasting/.local/bin/agent-bridge", "sha256_before": "a0ccbddee2160a67b45071af4b614f76792e22916c536a816d055511e37b234d", "sha256_after": "a0ccbddee2160a67b45071af4b614f76792e22916c536a816d055511e37b234d", "untouched": true},
+  "adapter": {"repository_sha256": "7372ae3317c790cd099e67874205c631c3053ede35a278511f565ed9becae241", "installed_sha256": "7372ae3317c790cd099e67874205c631c3053ede35a278511f565ed9becae241", "matched": true},
+  "profile_probe": {"standard": {"tool_count": 108, "story_visible": false}, "all": {"tool_count": 250, "story_visible": true}},
+  "adoption": {"persistent_mcp_processes": 7, "processes_on_new_binary": 0, "processes_on_old_deleted_inode": 7, "runtime_adopted": false, "client_refreshed": false},
+  "decision": {"deployment_authorized": true, "deployment_completed": true, "reconnect_authorized": false},
+  "runtime_effects": {"built_release_candidate": true, "backed_up_installed_files": true, "deployed_binary": true, "deployed_adapter": true, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false},
+  "next_gate": "story_mcp_reconnect_authorization"
+}

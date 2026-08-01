@@ -72,6 +72,8 @@ express. A packet is S0-valid only when it passes both.
   target, compatibility symlink, rollback, and deployment dry-run admission.
 - `story_deployment_dry_run.schema.json`: S5ZZ release candidate provenance,
   anti-regression gate, profile visibility, and non-deployment evidence.
+- `story_guarded_deployment.schema.json`: S600 installed binary parity,
+  recoverable backups, profile visibility, and stale-process separation.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
