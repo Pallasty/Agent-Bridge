@@ -87,6 +87,9 @@ express. A packet is S0-valid only when it passes both.
 - `story_bounded_render_executor_implementation_review.schema.json`: S605
   source-only executor boundary, output custody, authorization envelope, and
   sixteen-case failure matrix with implementation and execution still closed.
+- `story_bounded_render_executor_source_review.schema.json`: S607 static S606
+  source acceptance, verified enforcement order, and explicit external
+  authority/model/nonce blockers with runtime still closed.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
