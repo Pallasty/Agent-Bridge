@@ -5037,7 +5037,11 @@ impl StateStore for SqliteStore {
         // current tombstones (used in tests; in production callers should
         // pass at least the sync round-trip window, default 7+).
         let days = older_than_days.max(0);
-        let cutoff = now_secs() - days.saturating_mul(86_400);
+        let cutoff = if days == 0 {
+            i64::MAX
+        } else {
+            now_secs() - days.saturating_mul(86_400)
+        };
         let removed = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<String>> {
@@ -17159,6 +17163,100 @@ mod tests {
             .await
             .expect("purge all");
         assert_eq!(purged_all, vec!["fresh_tomb".to_string()]);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn purge_zero_ignores_future_logical_timestamps() {
+        use crate::MemoryRecord;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-purge-zero-future-tombstone-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("gc.db"))
+            .await
+            .expect("open");
+        let record = MemoryRecord {
+            key: "future_tomb".into(),
+            kind: "fact".into(),
+            content: "body-future_tomb".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&record).await.expect("save");
+        store.memory_delete("future_tomb").await.expect("delete");
+
+        let future_timestamp = now_secs() + 3_600;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET updated_at = ?1 WHERE key = 'future_tomb'",
+                    params![future_timestamp],
+                )
+            })
+            .await
+            .expect("move tombstone into logical future");
+
+        let positive_window = store
+            .memory_purge_tombstones(1, true)
+            .await
+            .expect("positive-window preview");
+        assert!(
+            positive_window.is_empty(),
+            "positive retention windows must preserve future tombstones"
+        );
+
+        let zero_preview = store
+            .memory_purge_tombstones(0, true)
+            .await
+            .expect("zero-day preview");
+        assert_eq!(zero_preview, vec!["future_tomb".to_string()]);
+        let still_present: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE key = 'future_tomb'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .expect("count after preview");
+        assert_eq!(still_present, 1, "dry-run must not delete the tombstone");
+
+        let purged = store
+            .memory_purge_tombstones(0, false)
+            .await
+            .expect("zero-day purge");
+        assert_eq!(purged, vec!["future_tomb".to_string()]);
+        let remaining: i64 = store
+            .conn
+            .call(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE key = 'future_tomb'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .expect("count after purge");
+        assert_eq!(remaining, 0);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
