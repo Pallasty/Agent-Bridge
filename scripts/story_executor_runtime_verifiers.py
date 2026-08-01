@@ -20,6 +20,10 @@ SIGNED_AUTHORIZATION_FIELDS = EXECUTOR_AUTHORIZATION_FIELDS + (
 FIXED_NONCE_STORE = Path(
     "/Data/Models/agent-bridge/runtime/voice-scene/story-render-nonces.sqlite3"
 )
+FIXED_TTS_DIR = Path(
+    "/4TNVMe2/aiot_weights/modelscope/models/"
+    "Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master"
+)
 AuthorityVerifier = Callable[[dict[str, Any]], bool]
 ModelVerifier = Callable[[dict[str, Any], dict[str, Any]], bool]
 
@@ -120,7 +124,7 @@ def build_model_verifier(contract: dict[str, Any]) -> ModelVerifier:
     captured_digest = contract["contract_sha256"]
     snapshot = Path(bundle["snapshot"])
     expected_model = snapshot / "cpu_int4"
-    expected_tts = snapshot / "tts"
+    expected_tts = FIXED_TTS_DIR
 
     def verify(model: dict[str, Any], supplied_contract: dict[str, Any]) -> bool:
         try:

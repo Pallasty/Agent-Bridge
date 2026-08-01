@@ -102,26 +102,38 @@ def model_fixture(tmp_path: Path):
     return contract, model, cpu
 
 
-def test_model_verifier_stream_hashes_exact_bound_bundle(tmp_path):
+def test_model_verifier_stream_hashes_exact_bound_bundle(tmp_path, monkeypatch):
     module = load_module()
     contract, model, _cpu = model_fixture(tmp_path)
+    monkeypatch.setattr(module, "FIXED_TTS_DIR", Path(model["tts_dir"]))
     verifier = module.build_model_verifier(contract)
     assert verifier(model, contract) is True
 
 
-def test_model_verifier_rejects_content_path_and_symlink_drift(tmp_path):
+def test_model_verifier_rejects_content_path_and_symlink_drift(tmp_path, monkeypatch):
     module = load_module()
     contract, model, cpu = model_fixture(tmp_path)
+    monkeypatch.setattr(module, "FIXED_TTS_DIR", Path(model["tts_dir"]))
     verifier = module.build_model_verifier(contract)
     (cpu / "tok_encoder.onnx").write_bytes(b"tampered")
     assert verifier(model, contract) is False
     contract, model, cpu = model_fixture(tmp_path / "second")
+    monkeypatch.setattr(module, "FIXED_TTS_DIR", Path(model["tts_dir"]))
     verifier = module.build_model_verifier(contract)
     assert verifier(dict(model, model_path=str(tmp_path)), contract) is False
     target = cpu / "tok_encoder.onnx"
     target.unlink()
     target.symlink_to(cpu / "tok_decoder.onnx")
     assert verifier(model, contract) is False
+
+
+def test_real_tts_support_assets_are_fixed_outside_onnx_snapshot():
+    module = load_module()
+    contract = json.loads(S608.read_text())
+    expected = Path("/4TNVMe2/aiot_weights/modelscope/models/Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master")
+    assert module.FIXED_TTS_DIR == expected
+    assert module.FIXED_TTS_DIR.is_dir()
+    assert module.FIXED_TTS_DIR != Path(contract["model_bundle"]["snapshot"]) / "tts"
 
 
 def test_fixed_nonce_path_is_contract_bound_without_creation(tmp_path):

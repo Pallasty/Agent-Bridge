@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_executor_secure_runtime_composition_review.v1",
+  "type": "object",
+  "required": ["schema", "status", "decision", "evidence", "boundaries", "blockers", "implementation_present", "configuration_installed", "execution_authorized", "runtime_effects", "review_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_executor_secure_runtime_composition_review.v1"},
+    "status": {"const": "story_executor_secure_runtime_composition_reviewable"},
+    "decision": {"const": "preparation_composition_accepted_invocation_blocked"},
+    "evidence": {"type": "object"}, "boundaries": {"type": "object", "minProperties": 12, "additionalProperties": {"const": true}},
+    "blockers": {"const": ["secure_authority_key_not_installed", "nonce_store_parent_not_installed", "executor_invocation_not_authorized"]},
+    "implementation_present": {"const": true}, "configuration_installed": {"const": false}, "execution_authorized": {"const": false},
+    "runtime_effects": {"const": {"loaded_secret": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false}},
+    "review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claims": {"const": {"secure_preparation_composed": true, "external_tts_support_path_corrected": true, "executor_invocation_present": false, "secure_configuration_installed": false, "real_model_executed": false}},
+    "next_gate": {"const": "story_executor_secure_runtime_configuration_installation_contract"}
+  },
+  "additionalProperties": false
+}

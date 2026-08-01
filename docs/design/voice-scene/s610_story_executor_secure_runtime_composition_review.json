@@ -1,0 +1,13 @@
+{
+  "schema": "agent_bridge.story_executor_secure_runtime_composition_review.v1",
+  "status": "story_executor_secure_runtime_composition_reviewable",
+  "decision": "preparation_composition_accepted_invocation_blocked",
+  "evidence": {"s609_review_file_sha256": "67ce9517d0422746b9c2ea9718f8a89c07c5a5d693edb0311e5fc5f0d542bd88", "s609_review_sha256": "ab82061abf80aa7393954961deda97462e5a75b0dbc3575591b942cbbcae7890", "composition_path": "/Data/CascadeProjects/agent-bridge/scripts/story_executor_secure_runtime_composition.py", "composition_sha256": "8c20a893b731dbe30c1991931bb46bb531f465e2bdcb9037fbde3767375941ba", "composition_test_path": "/Data/CascadeProjects/agent-bridge/tests/test_story_executor_secure_runtime_composition.py", "composition_test_sha256": "91d7ea08cc36c825f2a0e581be6b5fe722bf2beab1a74a0c9fd1ca31bc71ac9b", "test_count": 4},
+  "boundaries": {"s604_execution_contract_digest_checked": true, "s608_runtime_contract_fixed": true, "s609_verifier_source_pinned": true, "signed_executor_view_composed": true, "external_tts_support_path_bound": true, "external_tts_support_hash_checked": true, "playback_recording_memory_rejected": true, "executor_import_and_invocation_absent": true, "secret_loading_absent": true, "nonce_creation_absent": true, "onnx_runtime_absent": true, "cli_absent": true},
+  "blockers": ["secure_authority_key_not_installed", "nonce_store_parent_not_installed", "executor_invocation_not_authorized"],
+  "implementation_present": true, "configuration_installed": false, "execution_authorized": false,
+  "runtime_effects": {"loaded_secret": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false},
+  "review_sha256": "7127be1e21cdff95c449fe85087cda992c32be6b6e654cbfa4830dd415b38160",
+  "claims": {"secure_preparation_composed": true, "external_tts_support_path_corrected": true, "executor_invocation_present": false, "secure_configuration_installed": false, "real_model_executed": false},
+  "next_gate": "story_executor_secure_runtime_configuration_installation_contract"
+}
