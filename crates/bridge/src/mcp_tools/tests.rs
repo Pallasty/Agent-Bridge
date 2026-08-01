@@ -3281,13 +3281,15 @@ async fn avatar_cortex_renderer_snapshot_returns_compact_sidecar_view() {
 }
 
 #[test]
-fn xiao_shu_action_request_schema_is_dry_run_only() {
+fn xiao_shu_action_request_schema_discloses_fail_closed_enqueue() {
     let tool = XiaoShuActionRequestTool::new(crate::Hub::builder().build());
     let schema = tool.schema();
 
     assert_eq!(schema.name, "xiao_shu_action_request");
     assert!(schema.description.contains("LLM-safe"));
     assert!(schema.description.contains("never directly"));
+    assert!(schema.description.contains("enqueue=true is disabled"));
+    assert!(schema.description.contains("per-call write capability"));
     assert!(schema.description.contains("Real audio still requires"));
     assert_eq!(
         schema.input_schema["properties"]["confirm"]["description"],
@@ -3300,7 +3302,7 @@ fn xiao_shu_action_request_schema_is_dry_run_only() {
     assert!(schema.input_schema["properties"]["enqueue"]["description"]
         .as_str()
         .unwrap()
-        .contains("does not emit audio"));
+        .contains("fails closed"));
     assert_eq!(
         schema.input_schema["properties"]["list_queue"]["default"],
         false
@@ -3316,6 +3318,90 @@ fn xiao_shu_action_request_schema_is_dry_run_only() {
         schema.input_schema["properties"]["intent"]["enum"][0],
         "voice_alert"
     );
+}
+
+#[tokio::test]
+async fn xiao_shu_action_request_enqueue_fails_closed_without_write_authority() {
+    struct RemoveTestDirOnDrop(std::path::PathBuf);
+
+    impl Drop for RemoveTestDirOnDrop {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    let tool = XiaoShuActionRequestTool::new(crate::Hub::builder().build());
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock")
+        .as_nanos();
+    let project = format!(
+        "mcp-enqueue-authority-gate-test-{}-{unique}",
+        std::process::id()
+    );
+    let project_dir = std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"))
+        .join("Library")
+        .join("Application Support")
+        .join("agent-bridge")
+        .join("avatar_cortex_action_requests")
+        .join(&project);
+    let queue_path = project_dir.join("requests.jsonl");
+    let _cleanup = RemoveTestDirOnDrop(project_dir);
+    assert!(!queue_path.exists(), "test queue path must start absent");
+
+    for args in [
+        json!({"project": &project, "enqueue": true}),
+        json!({"project": &project, "enqueue": true, "list_queue": true}),
+    ] {
+        let out = tool
+            .execute(args, &ToolContext::default())
+            .await
+            .expect("enqueue gate must return an MCP result");
+
+        assert!(out.is_error, "enqueue must fail closed: {out:?}");
+        assert_eq!(
+            result_text(&out),
+            "xiao_shu_action_request enqueue is disabled until a per-call write capability is defined"
+        );
+    }
+    assert!(
+        !queue_path.exists(),
+        "fail-closed MCP enqueue must not create a queue record"
+    );
+}
+
+#[tokio::test]
+async fn xiao_shu_action_request_preview_and_list_remain_read_only() {
+    let tool = XiaoShuActionRequestTool::new(crate::Hub::builder().build());
+    let project = format!("mcp-read-only-characterization-{}", std::process::id());
+
+    let preview = tool
+        .execute(
+            json!({"project": project, "intent": "voice_alert"}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("preview result");
+    assert!(
+        !preview.is_error,
+        "preview must remain available: {preview:?}"
+    );
+    let preview_payload = result_text_as_json(&preview);
+    assert_eq!(preview_payload["surface"], "xiao_shu_action_request");
+    assert_eq!(preview_payload["read_only"], true);
+    assert_eq!(preview_payload["writes_request_record"], false);
+
+    let list = tool
+        .execute(
+            json!({"project": project, "list_queue": true}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("list result");
+    assert!(!list.is_error, "queue list must remain available: {list:?}");
+    let list_payload = result_text_as_json(&list);
+    assert_eq!(list_payload["surface"], "xiao_shu_action_request_queue");
+    assert_eq!(list_payload["read_only"], true);
 }
 
 #[test]

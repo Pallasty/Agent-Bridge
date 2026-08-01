@@ -20729,6 +20729,9 @@ impl XiaoShuActionRequestTool {
     }
 }
 
+const XIAO_SHU_ACTION_REQUEST_ENQUEUE_DISABLED: &str =
+    "xiao_shu_action_request enqueue is disabled until a per-call write capability is defined";
+
 fn xiao_shu_action_request_string_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key)
         .and_then(Value::as_str)
@@ -20752,9 +20755,11 @@ impl McpTool for XiaoShuActionRequestTool {
             name: self.name().into(),
             description: "LLM-safe Xiao Shu action request surface. \
                  Maps high-level intents such as voice_alert or alert_peek into \
-                 the existing read-only action preview chain. It never directly \
-                 controls the pet, emits audio, writes request records, mutates \
-                 cooldown state, or changes the official Codex pet package. \
+                 the existing read-only action preview chain. Preview and queue \
+                 reads never directly control the pet, emit audio, write request \
+                 records, mutate cooldown state, or change the official Codex pet \
+                 package. MCP enqueue=true is disabled until a separately governed \
+                 per-call write capability is defined. \
                  It can also read the pending-action queue when list_queue=true. \
                  Default preview responses include a compact queue_summary (pending \
                  count and newest pending ids) without flooding nested renderer payloads. \
@@ -20812,7 +20817,7 @@ impl McpTool for XiaoShuActionRequestTool {
                     "enqueue": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When true, append this request to Xiao Shu's sidecar pending-action queue. This writes only an auditable request record; it still does not emit audio, mutate cooldown state, or control the pet."
+                        "description": "Reserved compatibility flag. MCP enqueue currently fails closed because no per-call write capability is defined; the separate local CLI enqueue workflow is unchanged."
                     },
                     "list_queue": {
                         "type": "boolean",
@@ -20871,6 +20876,14 @@ impl McpTool for XiaoShuActionRequestTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let enqueue = args
+            .get("enqueue")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if enqueue {
+            return Ok(ToolResult::error(XIAO_SHU_ACTION_REQUEST_ENQUEUE_DISABLED));
+        }
+
         let label = xiao_shu_action_request_string_arg(&args, "label");
         let heartbeat_label = xiao_shu_action_request_string_arg(&args, "heartbeat_label");
         let project = xiao_shu_action_request_string_arg(&args, "project");
@@ -20889,10 +20902,6 @@ impl McpTool for XiaoShuActionRequestTool {
             .unwrap_or(false);
         let confirm = args
             .get("confirm")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let enqueue = args
-            .get("enqueue")
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let all_states = args
@@ -20944,18 +20953,14 @@ impl McpTool for XiaoShuActionRequestTool {
             message: message.as_deref(),
             requested_track: track.as_deref(),
             reason: reason.as_deref(),
-            confirm: if enqueue { false } else { confirm },
+            confirm,
             force,
             cooldown_secs,
             tts_voice: tts_voice.as_deref(),
             tts_rate,
             include_details: details,
         };
-        let result = if enqueue {
-            crate::avatar_cortex::xiao_shu_action_request_enqueue(&opts)
-        } else {
-            crate::avatar_cortex::xiao_shu_action_request(&opts)
-        };
+        let result = crate::avatar_cortex::xiao_shu_action_request(&opts);
         match result {
             Ok(payload) => Ok(ToolResult::json_text(&payload)),
             Err(e) => Ok(ToolResult::error(format!("xiao_shu_action_request: {e}"))),
