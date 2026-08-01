@@ -486,6 +486,16 @@ unrelated work. The future tool remains gated, Niche, and absent from all eager
 Codex extras. No module export, registry edit, deployment, or runtime action is
 performed. The isolated Rust story MCP adapter is the next gate.
 
+S5ZQ adds the isolated `mcp_tools/story.rs` transport and path-bound tests. Its
+configuration parser fails closed unless activation plus every root, byte
+limit, evidence path, and SHA-256 is present; strict arguments admit only
+source, chapter selector, and `dry_run=true`. A drop guard converts MCP future
+abort into native cancellation, while accepted output preserves the S5ZF
+digest and is returned through structured and text channels. The adapter file
+is still absent from the product module tree and registry, so no tool is
+exposed or callable. Coordinated module and registry wiring review is the next
+gate.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

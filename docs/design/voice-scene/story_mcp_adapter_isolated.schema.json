@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_mcp_adapter_isolated.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "evidence", "claims", "negative_controls", "scope", "runtime_effects", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_mcp_adapter_isolated.v1"},
+    "status": {"const": "isolated_rust_story_mcp_adapter_verified"},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_path", "adapter_sha256", "test_path", "test_sha256", "story_contract_sha256", "s5zp_review_sha256", "rust_tests", "s5zf_preflight_sha256"],
+      "properties": {
+        "adapter_path": {"const": "crates/bridge/src/mcp_tools/story.rs"},
+        "adapter_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "test_path": {"const": "crates/bridge/tests/story_mcp_adapter_isolated.rs"},
+        "test_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "story_contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "s5zp_review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "rust_tests": {"const": 7},
+        "s5zf_preflight_sha256": {"const": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb"}
+      }
+    },
+    "claims": {
+      "const": {"complete_configuration_gate": true, "strict_arguments": true, "future_drop_cancels_token": true, "structured_result": true, "read_only_annotations": true, "s5zf_parity_preserved": true}
+    },
+    "negative_controls": {
+      "const": {"disabled_requires_no_config": true, "missing_config_rejected": true, "invalid_hash_rejected": true, "invalid_byte_limit_rejected": true, "unknown_argument_rejected": true, "non_dry_run_rejected": true, "pre_cancelled_work_rejected": true}
+    },
+    "scope": {
+      "const": {"adapter_module_declared": false, "story_module_exported": false, "mcp_registered": false, "tool_exposed": false, "deployed": false, "client_refreshed": false, "execution_authorized": false}
+    },
+    "runtime_effects": {
+      "const": {"loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "wrote_cache": false, "wrote_memory": false}
+    },
+    "next_gate": {"const": "coordinated_story_module_and_registry_wiring_review"}
+  }
+}
