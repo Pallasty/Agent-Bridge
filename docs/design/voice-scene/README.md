@@ -62,6 +62,8 @@ express. A packet is S0-valid only when it passes both.
   source wiring and clean staged-tree verification receipt.
 - `story_mcp_deployment_adoption_review.schema.json`: S5ZU source, installed-
   binary, configuration, process, and live-client adoption decision.
+- `story_source_configuration_adoption.schema.json`: S5ZV hash-bound fixture-
+  pilot environment packet with source-origin adoption kept separate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

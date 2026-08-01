@@ -1,0 +1,31 @@
+{
+  "schema": "agent_bridge.story_source_configuration_adoption.v1",
+  "status": "story_fixture_configuration_ready_source_pending",
+  "decision": {"configuration_adoptable": true, "source_adopted": false, "deployment_dry_run_admitted": false},
+  "source": {"source_commit": "26334149d2fc685501289b16ca5552b59a72c56a", "origin_master_commit": "9b198da9571d8a6b2975161ce1e87b50ee6a35eb", "source_commit_in_origin_master": false},
+  "scope": {"fixture_pilot_only": true, "general_novel_library_admitted": false, "source_root": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/fixtures", "max_source_bytes": 1048576},
+  "environment": {
+    "AB_STORY_COMMAND_PREFLIGHT_ENABLE": "1",
+    "AB_STORY_SOURCE_ROOT": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/fixtures",
+    "AB_STORY_SOURCE_MAX_BYTES": "1048576",
+    "AB_STORY_EVIDENCE_ROOT": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene",
+    "AB_STORY_VOICE_PLAN_PATH": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5zc_source_grounded_utterance_plan_receipt.json",
+    "AB_STORY_VOICE_PLAN_SHA256": "b2cd6263bb8dba14b6e681be346f65424dad557b504ffde127e59a20dbb7984e",
+    "AB_STORY_MAPPING_PATH": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5x_story_voice_mapping_receipt.json",
+    "AB_STORY_MAPPING_SHA256": "0db9640b8509faeff9e13048b29c3769d9d450aa2eeb035270581040e247a86f",
+    "AB_STORY_ROLE_ACCEPTANCE_PATH": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5y_character_voice_audition_receipt.json",
+    "AB_STORY_ROLE_ACCEPTANCE_SHA256": "09c7eb584e7d925782d8b62c7f686f5b9ff01f907023e059e89f9a623393f72d",
+    "AB_STORY_CONTINUITY_PATH": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5ze_cross_chapter_continuity_receipt.json",
+    "AB_STORY_CONTINUITY_SHA256": "d3d4f41e1a851281a1420329e518399b43907bf6abc3b2493f36df597074b969"
+  },
+  "evidence_files": [
+    {"role": "voice_plan", "path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5zc_source_grounded_utterance_plan_receipt.json", "sha256": "b2cd6263bb8dba14b6e681be346f65424dad557b504ffde127e59a20dbb7984e", "sha256_verified": true},
+    {"role": "mapping", "path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5x_story_voice_mapping_receipt.json", "sha256": "0db9640b8509faeff9e13048b29c3769d9d450aa2eeb035270581040e247a86f", "sha256_verified": true},
+    {"role": "role_acceptance", "path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5y_character_voice_audition_receipt.json", "sha256": "09c7eb584e7d925782d8b62c7f686f5b9ff01f907023e059e89f9a623393f72d", "sha256_verified": true},
+    {"role": "continuity", "path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5ze_cross_chapter_continuity_receipt.json", "sha256": "d3d4f41e1a851281a1420329e518399b43907bf6abc3b2493f36df597074b969", "sha256_verified": true}
+  ],
+  "blockers": ["source_commit_not_in_origin_master"],
+  "execution_authorized": false,
+  "runtime_effects": {"pushed_source": false, "modified_machine_env": false, "built_release_binary": false, "deployed_binary": false, "restarted_mcp": false, "refreshed_client": false, "called_story_tool": false, "rendered_audio": false, "played_audio": false, "wrote_memory": false},
+  "next_gate": "story_source_origin_adoption"
+}
