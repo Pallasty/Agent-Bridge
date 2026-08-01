@@ -81,6 +81,9 @@ express. A packet is S0-valid only when it passes both.
 - `story_fixture_bounded_render.schema.json`: S603 authorized three-segment
   fixture render, machine audio evidence, owner acceptance, and retained
   non-actuating Story-command boundary.
+- `story_bounded_render_execution_contract.schema.json`: S604 hash-bound,
+  fail-closed render/playback authority separation and fixture-pilot limits,
+  with no runtime execution admitted.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_bounded_render_execution_contract.v1",
+  "type": "object",
+  "required": ["schema", "status", "evidence", "bounds", "authority", "state_machine", "execution_authorized", "runtime_effects", "contract_sha256", "claims", "next_gate"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_bounded_render_execution_contract.v1"},
+    "status": {"const": "story_bounded_render_execution_contract_reviewable"},
+    "evidence": {
+      "type": "object",
+      "required": ["contract_builder_path", "contract_builder_sha256", "preflight_receipt_path", "preflight_receipt_sha256", "accepted_render_receipt_path", "accepted_render_receipt_sha256", "trusted_runner_path", "trusted_runner_sha256", "preflight_sha256", "source_sha256", "model_inference_sha256", "chapter", "selected_segments", "accepted_assembly_sha256"],
+      "properties": {
+        "contract_builder_path": {"type": "string", "minLength": 1},
+        "contract_builder_sha256": {"pattern": "^[0-9a-f]{64}$"},
+        "preflight_receipt_path": {"type": "string", "minLength": 1},
+        "preflight_receipt_sha256": {"pattern": "^[0-9a-f]{64}$"},
+        "accepted_render_receipt_path": {"type": "string", "minLength": 1},
+        "accepted_render_receipt_sha256": {"pattern": "^[0-9a-f]{64}$"},
+        "trusted_runner_path": {"type": "string", "minLength": 1},
+        "trusted_runner_sha256": {"pattern": "^[0-9a-f]{64}$"},
+        "preflight_sha256": {"pattern": "^[0-9a-f]{64}$"},
+        "source_sha256": {"pattern": "^[0-9a-f]{64}$"},
+        "model_inference_sha256": {"pattern": "^[0-9a-f]{64}$"},
+        "chapter": {"const": 2},
+        "selected_segments": {"const": 3},
+        "accepted_assembly_sha256": {"pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "bounds": {"const": {"max_segments_per_grant": 3, "max_codec_frames_per_segment": 100, "max_assembled_duration_seconds": 30.0, "sample_rate_hz": 24000, "channels": 1, "allowed_speakers": ["Serena", "Vivian"], "output_root": "/Data/Models/agent-bridge/evidence/voice-scene/story-command-runtime", "existing_output_overwrite_allowed": false, "network_allowed": false, "gpu_allowed": false}},
+    "authority": {"const": {"render": {"grant_required": true, "grant_present": false, "single_use": true, "bound_fields": ["contract_sha256", "preflight_sha256", "output_directory"]}, "playback": {"grant_required": true, "grant_present": false, "single_use": true, "requires_machine_gate": true, "bound_fields": ["render_receipt_sha256", "audio_sha256"]}, "record": {"supported": false, "grant_present": false}, "memory_write": {"supported": false, "grant_present": false}}},
+    "state_machine": {"const": ["preflight_reviewed", "render_grant_required", "bounded_render", "machine_audio_gate", "playback_grant_required", "single_playback", "owner_feedback"]},
+    "execution_authorized": {"const": false},
+    "runtime_effects": {"const": {"created_output_directory": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_cache": false, "wrote_memory": false}},
+    "contract_sha256": {"pattern": "^[0-9a-f]{64}$"},
+    "claims": {"const": {"preflight_and_acceptance_hash_bound": true, "render_and_playback_authority_separated": true, "recording_unsupported": true, "memory_write_unsupported": true, "static_contract_ready": true, "executor_implemented": false, "runtime_execution_admitted": false}},
+    "next_gate": {"const": "story_bounded_render_executor_implementation_review"}
+  },
+  "additionalProperties": false
+}
