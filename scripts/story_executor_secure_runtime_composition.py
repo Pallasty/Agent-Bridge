@@ -13,7 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_CONTRACT_PATH = ROOT / "docs/design/voice-scene/s608_story_executor_authority_model_nonce_contract.json"
 VERIFIER_PATH = ROOT / "scripts/story_executor_runtime_verifiers.py"
-VERIFIER_SHA256 = "e6f844678c097e00920b4c03074408ddb6221ee7bab9690f6e3ff7e65c653996"
+VERIFIER_SHA256 = "f01520fbc1342a58b1c0c3d9731180dcd0d585c1fae508fd5fe1db922a542c37"
 EXECUTOR_AUTHORIZATION_FIELDS = (
     "authorization_id", "contract_sha256", "preflight_sha256",
     "output_directory", "action", "issued_at", "expires_at", "single_use_nonce",

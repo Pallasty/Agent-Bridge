@@ -18,7 +18,7 @@ SIGNED_AUTHORIZATION_FIELDS = EXECUTOR_AUTHORIZATION_FIELDS + (
     "issuer", "subject", "key_id",
 )
 FIXED_NONCE_STORE = Path(
-    "/Data/Models/agent-bridge/runtime/voice-scene/story-render-nonces.sqlite3"
+    "/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3"
 )
 FIXED_TTS_DIR = Path(
     "/4TNVMe2/aiot_weights/modelscope/models/"

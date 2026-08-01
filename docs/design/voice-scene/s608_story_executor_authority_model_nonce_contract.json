@@ -20,12 +20,12 @@
     ],
     "large_files_rehashed_now": false, "large_files_size_checked_now": true, "runtime_verifier_must_stream_sha256_before_nonce_consumption": true
   },
-  "nonce_store": {"path": "/Data/Models/agent-bridge/runtime/voice-scene/story-render-nonces.sqlite3", "backend": "sqlite3", "parent_mode": "0700", "database_mode": "0600", "reject_symlinks": true, "single_writer_transaction": "BEGIN IMMEDIATE", "unique_key": "single_use_nonce", "caller_configurable": false, "outside_render_output_root": true, "installed_now": false},
+  "nonce_store": {"path": "/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3", "backend": "sqlite3", "parent_mode": "0700", "database_mode": "0600", "reject_symlinks": true, "single_writer_transaction": "BEGIN IMMEDIATE", "unique_key": "single_use_nonce", "caller_configurable": false, "outside_render_output_root": true, "installed_now": false},
   "receipt_schema": {"path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/story_bounded_render_receipt.schema.json", "$schema": "https://json-schema.org/draft/2020-12/schema", "schema_id": "agent_bridge.story_bounded_render_receipt.v1", "sha256": "cb6752b0118da3b07a5a5d84252373c1baa6070641ed217e9622f9e78ae099db", "playback_authorized": false, "memory_authorized": false},
   "blockers": ["authority_and_model_verifiers_not_implemented", "secure_key_and_nonce_paths_not_installed", "executor_not_wired_to_fixed_contracts"],
   "execution_authorized": false,
   "runtime_effects": {"created_key": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false},
-  "contract_sha256": "032e02f8f158ed36e4ff8489231620f7924b1b6a42fd3661dfc77ae10e65607b",
+  "contract_sha256": "ff70faa056e95c45745ad463744979a369e6a7abf2ff3858a7ecdddd1a47130b",
   "claims": {"authority_proof_format_defined": true, "cpu_int4_bundle_bound": true, "nonce_custody_defined": true, "render_receipt_schema_defined": true, "verifiers_implemented": false, "real_model_executed": false},
   "next_gate": "story_executor_authority_model_nonce_verifier_implementation_review"
 }

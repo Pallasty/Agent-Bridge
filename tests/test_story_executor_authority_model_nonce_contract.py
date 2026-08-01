@@ -10,7 +10,7 @@ MODULE_PATH = ROOT / "scripts/story_executor_authority_model_nonce_contract.py"
 S607 = ROOT / "docs/design/voice-scene/s607_story_bounded_render_executor_source_review.json"
 S5G = ROOT / "docs/design/voice-scene/s5g_modelscope_snapshot_static_audit.json"
 SNAPSHOT = Path("/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master")
-NONCE = Path("/Data/Models/agent-bridge/runtime/voice-scene/story-render-nonces.sqlite3")
+NONCE = Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
 
 
 def _load():

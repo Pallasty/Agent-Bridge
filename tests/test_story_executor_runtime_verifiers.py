@@ -140,7 +140,7 @@ def test_fixed_nonce_path_is_contract_bound_without_creation(tmp_path):
     module = load_module()
     contract = json.loads(S608.read_text())
     nonce = module.fixed_nonce_store_path(contract)
-    assert nonce == Path("/Data/Models/agent-bridge/runtime/voice-scene/story-render-nonces.sqlite3")
+    assert nonce == Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
     assert not nonce.exists()
     changed = copy.deepcopy(contract)
     changed["nonce_store"]["path"] = str(tmp_path / "caller.sqlite3")

@@ -2,12 +2,12 @@
   "schema": "agent_bridge.story_executor_runtime_verifiers_review.v1",
   "status": "story_executor_runtime_verifiers_reviewable",
   "decision": "verifier_source_accepted_runtime_configuration_blocked",
-  "evidence": {"s608_contract_file_sha256": "46c261216f2984b2f79690063d215d3922237b7f5b6702abb7b0003dea3bc65c", "s608_contract_sha256": "032e02f8f158ed36e4ff8489231620f7924b1b6a42fd3661dfc77ae10e65607b", "verifier_path": "/Data/CascadeProjects/agent-bridge/scripts/story_executor_runtime_verifiers.py", "verifier_sha256": "e6f844678c097e00920b4c03074408ddb6221ee7bab9690f6e3ff7e65c653996", "verifier_test_path": "/Data/CascadeProjects/agent-bridge/tests/test_story_executor_runtime_verifiers.py", "verifier_test_sha256": "dc56023db98d8a7c5e005096e77914c6a3ac71ca0273b812160bfac7bd258183", "test_count": 7},
+  "evidence": {"s608_contract_file_sha256": "dcd2143dcc4944ac7911bc6c5a85f381db7bc1816ef844d1f80a5727acad150d", "s608_contract_sha256": "ff70faa056e95c45745ad463744979a369e6a7abf2ff3858a7ecdddd1a47130b", "verifier_path": "/Data/CascadeProjects/agent-bridge/scripts/story_executor_runtime_verifiers.py", "verifier_sha256": "f01520fbc1342a58b1c0c3d9731180dcd0d585c1fae508fd5fe1db922a542c37", "verifier_test_path": "/Data/CascadeProjects/agent-bridge/tests/test_story_executor_runtime_verifiers.py", "verifier_test_sha256": "8a193aba5c85c40565a27dd8caee1e0acdf7e69d9ea84ac83fe8cafdf14486d5", "test_count": 7},
   "boundaries": {"constant_time_mac_comparison": true, "domain_separated_canonical_message": true, "executor_view_exactly_bound": true, "all_model_files_stream_hashed": true, "model_symlinks_rejected": true, "nonce_path_fixed": true, "secret_loading_absent": true, "executor_import_absent": true, "model_runtime_import_absent": true, "nonce_database_creation_absent": true, "cli_entrypoint_absent": true},
   "blockers": ["secure_authority_key_not_installed", "nonce_store_parent_not_installed", "executor_composition_entrypoint_not_implemented"],
   "implementation_present": true, "configuration_installed": false, "execution_authorized": false,
   "runtime_effects": {"loaded_secret": false, "created_nonce_store": false, "imported_executor": false, "called_executor": false, "loaded_model": false, "executed_onnx": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "wrote_memory": false},
-  "review_sha256": "ab82061abf80aa7393954961deda97462e5a75b0dbc3575591b942cbbcae7890",
+  "review_sha256": "f7881e22c2f6f384a3ef69e88ea2502e077f07409708c7a6b202c0a00a8c7fac",
   "claims": {"authority_verifier_implemented": true, "model_bundle_verifier_implemented": true, "fixed_nonce_path_adapter_implemented": true, "secure_configuration_installed": false, "executor_composed": false, "real_model_executed": false},
   "next_gate": "story_executor_secure_runtime_composition_implementation_review"
 }

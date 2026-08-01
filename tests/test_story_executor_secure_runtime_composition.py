@@ -65,7 +65,7 @@ def test_prepare_composes_exact_executor_arguments_without_execution():
     assert prepared["contract"] == contract
     assert prepared["authorization"] == {name: envelope[name] for name in module.EXECUTOR_AUTHORIZATION_FIELDS}
     assert prepared["authority_verifier"](prepared["authorization"]) is True
-    assert prepared["nonce_store_path"] == Path("/Data/Models/agent-bridge/runtime/voice-scene/story-render-nonces.sqlite3")
+    assert prepared["nonce_store_path"] == Path("/home/pallasting/.agent-bridge-secure/story-render/story-render-nonces.sqlite3")
     assert not prepared["nonce_store_path"].exists()
 
 

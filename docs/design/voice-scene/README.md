@@ -104,6 +104,9 @@ express. A packet is S0-valid only when it passes both.
 - `story_executor_secure_runtime_configuration_contract.schema.json`: S611
   POSIX private key/nonce custody, atomic installation and rollback contract;
   the legacy FUSE path, installation, and executor invocation remain closed.
+- `story_executor_posix_runtime_binding_review.schema.json`: S612 active nonce
+  migration plus fd-based authority-key loader, with installation, installed-key
+  composition, and executor invocation still closed.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
