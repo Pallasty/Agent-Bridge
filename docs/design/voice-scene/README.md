@@ -477,6 +477,15 @@ not export the module, register or expose a tool, deploy a binary, or authorize
 execution. An owner-authorized Rust story registration implementation review is
 the next gate.
 
+S5ZP reviews the Rust MCP registration implementation against the live module
+tree, registry, and MCP cancellation path. It admits an isolated
+`mcp_tools/story.rs` adapter but rejects registry wiring: MCP cancellation
+aborts and drops the tool future, so the adapter still needs a drop-to-token
+cancellation guard, while both `lib.rs` and `mcp_tools.rs` contain active
+unrelated work. The future tool remains gated, Niche, and absent from all eager
+Codex extras. No module export, registry edit, deployment, or runtime action is
+performed. The isolated Rust story MCP adapter is the next gate.
+
 ## S4 realtime story interaction
 
 `scripts/story_realtime_interaction.py` provides a bounded push-to-talk turn

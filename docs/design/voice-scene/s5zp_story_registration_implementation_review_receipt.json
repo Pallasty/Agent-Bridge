@@ -1,0 +1,78 @@
+{
+  "schema": "agent_bridge.story_registration_implementation_review.v1",
+  "status": "story_registration_implementation_review_complete",
+  "decision": {
+    "selected": "isolated_adapter_before_registry_wiring",
+    "isolated_adapter_implementation_admitted": true,
+    "registry_wiring_admitted": false
+  },
+  "evidence": {
+    "s5zo_hardening_verified": true,
+    "current_registry_collision": false,
+    "story_module_exported": false,
+    "mcp_cancellation_aborts_tool_future": true,
+    "future_drop_cancel_guard_present": false,
+    "registry_worktree_overlap": true,
+    "lib_worktree_overlap": true,
+    "registry_path": "/Data/CascadeProjects/agent-bridge/crates/bridge/src/mcp_tools.rs",
+    "registry_sha256": "1bb52a8c1f9bc5f03a7203bc229dd4c034ab28a3e6cef113c77185e8cad47988",
+    "lib_path": "/Data/CascadeProjects/agent-bridge/crates/bridge/src/lib.rs",
+    "lib_sha256": "7fb33d55d9c91b74aec1dc288319f3ec2a3af95912764801df11ac22db6b0b81",
+    "story_module_path": "/Data/CascadeProjects/agent-bridge/crates/bridge/src/story_contract.rs",
+    "story_module_sha256": "ccfa045db403441cf06a2f88699dc773fe89b6a6ffddd42d89fc142d61e88598",
+    "mcp_server_path": "/Data/CascadeProjects/agent-bridge/crates/mcp/src/server.rs",
+    "mcp_server_sha256": "53002cc49dc7158dbb0107bb7a32c32720ed01ca796c1a46b8893f9e5701cfca",
+    "hardening_receipt_path": "/Data/CascadeProjects/agent-bridge/docs/design/voice-scene/s5zo_story_preflight_adapter_hardening_receipt.json",
+    "hardening_receipt_sha256": "ea53d67c45c3b0054818188969a03c69ae6480ac3e72eaff2559aaba9517b98a"
+  },
+  "blockers": [
+    "mcp_future_drop_cancellation_guard_missing",
+    "registry_worktree_overlap_active",
+    "lib_module_tree_overlap_active"
+  ],
+  "proposed_surface": {
+    "tool_name": "story_command_preflight",
+    "tier": "Niche",
+    "toolset_extras": [],
+    "activation_env": "AB_STORY_COMMAND_PREFLIGHT_ENABLE",
+    "activation_env_required_value": "1",
+    "default_exposed": false,
+    "codex_essential_exposed": false,
+    "codex_voice_exposed": false
+  },
+  "configuration_contract": {
+    "source_root_env": "AB_STORY_SOURCE_ROOT",
+    "source_max_bytes_env": "AB_STORY_SOURCE_MAX_BYTES",
+    "evidence_root_env": "AB_STORY_EVIDENCE_ROOT",
+    "voice_plan_path_env": "AB_STORY_VOICE_PLAN_PATH",
+    "voice_plan_sha256_env": "AB_STORY_VOICE_PLAN_SHA256",
+    "mapping_path_env": "AB_STORY_MAPPING_PATH",
+    "mapping_sha256_env": "AB_STORY_MAPPING_SHA256",
+    "role_acceptance_path_env": "AB_STORY_ROLE_ACCEPTANCE_PATH",
+    "role_acceptance_sha256_env": "AB_STORY_ROLE_ACCEPTANCE_SHA256",
+    "continuity_path_env": "AB_STORY_CONTINUITY_PATH",
+    "continuity_sha256_env": "AB_STORY_CONTINUITY_SHA256"
+  },
+  "adapter_contract": {
+    "isolated_path": "crates/bridge/src/mcp_tools/story.rs",
+    "future_drop_cancel_guard_required": true,
+    "complete_config_required_before_exposure": true,
+    "invalid_arguments_return_tool_error": true,
+    "runtime_flags_rejected": true,
+    "structured_success_result": true
+  },
+  "execution_authorized": false,
+  "runtime_effects": {
+    "modified_module_tree": false,
+    "modified_rust_registry": false,
+    "registered_story_command": false,
+    "deployed_binary": false,
+    "refreshed_client": false,
+    "loaded_model": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "next_gate": "isolated_rust_story_mcp_adapter"
+}
