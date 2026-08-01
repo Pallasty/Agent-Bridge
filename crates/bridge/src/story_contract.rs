@@ -155,6 +155,8 @@ pub enum StoryContractError {
     InvalidSource(String),
     #[error("story voice plan error: {0}")]
     InvalidVoicePlan(String),
+    #[error("story preflight error: {0}")]
+    InvalidPreflight(String),
     #[error("cannot read story source {path}: {source}")]
     SourceIo {
         path: String,
@@ -420,6 +422,292 @@ pub fn build_chapter_voice_plan(
         },
         "next_gate": if chapter_render_ready {"bounded_first_chapter_qwen_render"} else {"source_grounded_utterance_segmentation"},
     }))
+}
+
+/// Compose the accepted story evidence into S5ZF-compatible, non-actuating requests.
+pub fn build_story_command_preflight(
+    raw_command: &str,
+    request: &StoryRequest,
+    voice_plan: &Value,
+    mapping: &Value,
+    role_acceptance: &Value,
+    continuity_acceptance: &Value,
+) -> Result<Value, StoryContractError> {
+    request.validate()?;
+    for forbidden in [
+        "--play",
+        "--emit-voice",
+        "--record",
+        "--download-model",
+        "--write-memory",
+    ] {
+        if raw_command
+            .split_whitespace()
+            .any(|token| token == forbidden)
+        {
+            return preflight_error(&format!("runtime_option_forbidden:{forbidden}"));
+        }
+    }
+    let source_ingest = ingest_story_source(Path::new(&request.source_path), &request.start)?;
+    validate_preflight_evidence(
+        &source_ingest.source.sha256,
+        voice_plan,
+        mapping,
+        role_acceptance,
+        continuity_acceptance,
+    )?;
+    let chapter_number = match &request.start {
+        StoryStart::FromStart => source_ingest.chapters[0].ordinal,
+        StoryStart::Chapter { chapter } => *chapter,
+    };
+    let selected = bounded_chapter_requests(voice_plan, chapter_number)?;
+
+    let roles = mapping["roles"]
+        .as_array()
+        .ok_or_else(|| StoryContractError::InvalidPreflight("voice mapping invalid".into()))?;
+    let mut roles_by_voice = BTreeMap::new();
+    for role in roles {
+        let voice = required_preflight_str(&role["qwen_speaker"], "qwen_speaker")?;
+        if roles_by_voice.insert(voice, role).is_some() {
+            return preflight_error("Qwen speaker mapping must be unique");
+        }
+    }
+    let accepted_candidates = role_acceptance["candidates"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| candidate["qwen_speaker"].as_str())
+        .collect::<HashSet<_>>();
+    let model_hash = required_preflight_str(
+        &continuity_acceptance["model"]["inference_sha256"],
+        "model inference SHA-256",
+    )?;
+    if model_hash.len() != 64 {
+        return preflight_error("model inference SHA-256 missing");
+    }
+
+    let mut render_requests = Vec::new();
+    for request_value in selected["requests"].as_array().into_iter().flatten() {
+        let event_id = required_preflight_str(&request_value["event_id"], "event_id")?;
+        let voice = required_preflight_str(&request_value["qwen_speaker"], "qwen_speaker")?;
+        let role = roles_by_voice.get(voice).ok_or_else(|| {
+            StoryContractError::InvalidPreflight(format!("voice role unresolved:{event_id}"))
+        })?;
+        if role["audition_status"] != "owner_accepted" && !accepted_candidates.contains(voice) {
+            return preflight_error(&format!("voice role not accepted:{event_id}"));
+        }
+        let version = role["voice_profile_version"].as_u64().ok_or_else(|| {
+            StoryContractError::InvalidPreflight("voice profile version invalid".into())
+        })? as u32;
+        let cache_key = segment_cache_key(&SegmentCacheKeyInput {
+            source_sha256: source_ingest.source.sha256.clone(),
+            voice_plan_sha256: required_preflight_str(
+                &voice_plan["plan_sha256"],
+                "voice plan SHA-256",
+            )?
+            .into(),
+            event_id: event_id.into(),
+            text: required_preflight_str(&request_value["text"], "text")?.into(),
+            qwen_speaker: voice.into(),
+            style_instruction: required_preflight_str(
+                &request_value["style_instruction"],
+                "style instruction",
+            )?
+            .into(),
+            voice_profile_version: version,
+            model_inference_sha256: model_hash.into(),
+        })?;
+        let mut rendered = request_value.clone();
+        rendered["voice_profile_version"] = Value::from(version);
+        rendered["cache_key"] = Value::String(cache_key);
+        render_requests.push(rendered);
+    }
+
+    let bound = serde_json::json!({
+        "source_sha256": source_ingest.source.sha256,
+        "mapping_sha256": mapping["mapping_sha256"],
+        "voice_plan_sha256": voice_plan["plan_sha256"],
+        "model_inference_sha256": model_hash,
+        "chapter_number": chapter_number,
+        "render_requests": render_requests,
+        "assembly_gap_seconds": selected["assembly_gap_seconds"],
+        "preceding_scene_gap_seconds": selected["preceding_scene_gap_seconds"],
+    });
+    let preflight_sha256 = sha256_canonical_json(&bound)?;
+    Ok(serde_json::json!({
+        "schema": "agent_bridge.story_command_integration_preflight.v1",
+        "status": "story_command_integration_preflight_reviewable",
+        "command": {
+            "raw": raw_command,
+            "source_path": source_ingest.source.uri,
+            "start": serde_json::to_value(&request.start)?,
+            "chapter_number": chapter_number,
+            "dry_run": true,
+        },
+        "provenance": {
+            "source_sha256": bound["source_sha256"],
+            "mapping_sha256": bound["mapping_sha256"],
+            "voice_plan_sha256": bound["voice_plan_sha256"],
+            "model_inference_sha256": model_hash,
+            "continuity_receipt_status": continuity_acceptance["status"],
+        },
+        "selection": {
+            "selected_segments": bound["render_requests"].as_array().map_or(0, Vec::len),
+            "excluded_earlier_segments": selected["excluded_earlier_segments"],
+            "excluded_later_segments": selected["excluded_later_segments"],
+            "assembly_gap_seconds": selected["assembly_gap_seconds"],
+            "preceding_scene_gap_seconds": selected["preceding_scene_gap_seconds"],
+        },
+        "render_requests": bound["render_requests"],
+        "preflight_sha256": preflight_sha256,
+        "execution_authorized": false,
+        "runtime_effects": {
+            "registered_story_command": false,
+            "loaded_model": false,
+            "executed_onnx": false,
+            "rendered_audio": false,
+            "played_audio": false,
+            "wrote_memory": false,
+            "wrote_cache": false,
+        },
+        "next_gate": "story_command_static_registration_contract",
+    }))
+}
+
+fn validate_preflight_evidence(
+    source_sha256: &str,
+    voice_plan: &Value,
+    mapping: &Value,
+    role_acceptance: &Value,
+    continuity_acceptance: &Value,
+) -> Result<(), StoryContractError> {
+    if voice_plan["source_sha256"] != source_sha256 {
+        return preflight_error("story source SHA-256 mismatch");
+    }
+    if mapping["source_sha256"] != source_sha256 {
+        return preflight_error("voice mapping source SHA-256 mismatch");
+    }
+    if voice_plan["mapping_sha256"] != mapping["mapping_sha256"] {
+        return preflight_error("voice plan mapping SHA-256 mismatch");
+    }
+    if role_acceptance["mapping_sha256"] != mapping["mapping_sha256"] {
+        return preflight_error("role acceptance mapping SHA-256 mismatch");
+    }
+    for claim in [
+        "owner_accepted_both",
+        "voices_distinguishable",
+        "chapter_render_ready",
+    ] {
+        if role_acceptance["claims"][claim] != true {
+            return preflight_error("role voices not accepted");
+        }
+    }
+    let plan_bound = serde_json::json!({
+        "source_sha256": voice_plan["source_sha256"],
+        "mapping_sha256": voice_plan["mapping_sha256"],
+        "pause_policy": voice_plan["pause_policy"],
+        "segments": voice_plan["segments"],
+        "review_queue": voice_plan["review_queue"],
+        "chapter_render_ready": voice_plan["chapter_render_ready"],
+    });
+    if sha256_canonical_json(&plan_bound)? != voice_plan["plan_sha256"] {
+        return preflight_error("chapter voice plan digest invalid");
+    }
+    if continuity_acceptance["status"] != "owner_accepted"
+        || continuity_acceptance["voice_plan_sha256"] != voice_plan["plan_sha256"]
+        || continuity_acceptance["claims"]["owner_accepted"] != true
+        || continuity_acceptance["claims"]["cross_chapter_continuity_admitted"] != true
+    {
+        return preflight_error("cross-chapter continuity not accepted");
+    }
+    Ok(())
+}
+
+fn bounded_chapter_requests(
+    voice_plan: &Value,
+    chapter_number: u32,
+) -> Result<Value, StoryContractError> {
+    if voice_plan["status"] != "chapter_voice_plan_reviewable"
+        || voice_plan["chapter_render_ready"] != true
+    {
+        return preflight_error("chapter voice plan not render ready");
+    }
+    let all_segments = voice_plan["segments"]
+        .as_array()
+        .ok_or_else(|| StoryContractError::InvalidPreflight("chapter voice plan empty".into()))?;
+    if all_segments.is_empty() {
+        return preflight_error("chapter voice plan empty");
+    }
+    let mut chapters = Vec::<Vec<&Value>>::new();
+    let mut scene_gaps = vec![Value::Null];
+    let mut current = Vec::new();
+    for segment in all_segments {
+        current.push(segment);
+        if segment["transition_after"] == "scene_break" {
+            chapters.push(std::mem::take(&mut current));
+            scene_gaps.push(segment["pause_after_seconds"].clone());
+        }
+    }
+    if !current.is_empty() {
+        chapters.push(current);
+    }
+    let selected_index = chapter_number
+        .checked_sub(1)
+        .map(|value| value as usize)
+        .filter(|index| *index < chapters.len())
+        .ok_or_else(|| {
+            StoryContractError::InvalidPreflight("chapter number out of range".into())
+        })?;
+    let selected = &chapters[selected_index];
+    let earlier_count = chapters[..selected_index]
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>();
+    let later_count = chapters[selected_index + 1..]
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>();
+    let requests = selected
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            serde_json::json!({
+                "segment_index": index,
+                "event_id": segment["event_id"],
+                "voice_plan_sha256": voice_plan["plan_sha256"],
+                "text": segment["text"],
+                "qwen_speaker": segment["qwen_speaker"],
+                "style_instruction": segment["style_instruction"],
+                "language": "Chinese",
+                "frame_cap": 100,
+            })
+        })
+        .collect::<Vec<_>>();
+    let assembly_gaps = selected
+        .iter()
+        .take(selected.len().saturating_sub(1))
+        .map(|segment| segment["pause_after_seconds"].clone())
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "requests": requests,
+        "assembly_gap_seconds": assembly_gaps,
+        "preceding_scene_gap_seconds": scene_gaps[selected_index],
+        "excluded_earlier_segments": earlier_count,
+        "excluded_later_segments": later_count,
+    }))
+}
+
+fn required_preflight_str<'a>(
+    value: &'a Value,
+    field: &str,
+) -> Result<&'a str, StoryContractError> {
+    value
+        .as_str()
+        .ok_or_else(|| StoryContractError::InvalidPreflight(format!("{field} missing")))
+}
+
+fn preflight_error<T>(message: &str) -> Result<T, StoryContractError> {
+    Err(StoryContractError::InvalidPreflight(message.into()))
 }
 
 fn split_attributed_dialogue(

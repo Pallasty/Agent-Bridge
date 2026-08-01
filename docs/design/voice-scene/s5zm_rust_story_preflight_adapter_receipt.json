@@ -1,0 +1,51 @@
+{
+  "schema": "agent_bridge.story_rust_preflight_adapter.v1",
+  "status": "rust_story_preflight_adapter_parity_verified",
+  "evidence": {
+    "rust_module_path": "crates/bridge/src/story_contract.rs",
+    "rust_module_sha256": "ea152f000691443df63405dd51597be8ca7d706707a90c774f9dd3e707ab086f",
+    "rust_test_path": "crates/bridge/tests/story_contract_core.rs",
+    "rust_test_sha256": "90bf9c59ea1cef8d92a4f25e61c5b9ce9c3a28655c41f5942c73341dbee7535f",
+    "python_preflight_path": "scripts/story_command_integration_preflight.py",
+    "python_preflight_sha256": "cda6bfbf9b1dae56e52e21fb63ee742fe590a4dd5380c3ef8ef2c5933debef78",
+    "accepted_preflight_path": "docs/design/voice-scene/s5zf_story_command_integration_preflight_receipt.json",
+    "accepted_preflight_sha256": "feb0d58534481e788103d8f9d75aece186dabe3c1182b0739e21f63ba9206bbe"
+  },
+  "vectors": {
+    "chapter_2_segments": 3,
+    "from_start_segments": 4,
+    "preflight_sha256": "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb"
+  },
+  "parity": {
+    "typed_request_composition": true,
+    "source_ingest_composition": true,
+    "evidence_validation": true,
+    "bounded_chapter_selection": true,
+    "render_request_projection": true,
+    "complete_s5zf_output": true
+  },
+  "negative_controls": {
+    "runtime_flags_rejected": true,
+    "source_drift_rejected": true,
+    "unaccepted_continuity_rejected": true,
+    "unavailable_chapter_rejected": true
+  },
+  "scope": {
+    "module_exported": false,
+    "mcp_registered": false,
+    "python_embedded": false,
+    "execution_authorized": false
+  },
+  "runtime_effects": {
+    "modified_cargo_dependencies": false,
+    "modified_rust_registry": false,
+    "spawned_subprocess": false,
+    "loaded_model": false,
+    "executed_onnx": false,
+    "rendered_audio": false,
+    "played_audio": false,
+    "wrote_cache": false,
+    "wrote_memory": false
+  },
+  "next_gate": "owner_authorized_rust_story_registration_review"
+}

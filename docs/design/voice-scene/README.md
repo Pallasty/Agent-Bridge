@@ -52,6 +52,8 @@ express. A packet is S0-valid only when it passes both.
   span, and selection parity receipt.
 - `story_rust_voice_plan.schema.json`: S5ZL Rust role-voice, source-span,
   structural-transition, plan-hash, and cache-key parity receipt.
+- `story_rust_preflight_adapter.schema.json`: S5ZM complete Rust composition
+  and S5ZF output/negative-control parity receipt.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
@@ -444,6 +446,15 @@ five-segment vector reproduces both the Python plan digest and a
 model-provenance-bound segment cache key. The module remains unexported and
 does not execute a model or touch audio/cache/runtime state. Complete Rust
 preflight adapter parity is the next gate.
+
+S5ZM composes the four native migration stages into one pure Rust preflight.
+For the accepted chapter-two fixture its complete value equals the frozen S5ZF
+Python receipt, including three render requests and the preflight digest;
+from-start selects the four bounded first-chapter segments. Runtime flags and
+provenance/acceptance drift fail closed. This proves unexported preflight
+parity only: no Rust module export, MCP registration, embedded interpreter,
+model/audio action, or execution authorization is added. A separate
+owner-authorized Rust registration review is the next gate.
 
 ## S4 realtime story interaction
 

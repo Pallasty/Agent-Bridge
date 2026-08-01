@@ -4,8 +4,8 @@ mod story_contract;
 use serde_json::json;
 use std::path::Path;
 use story_contract::{
-    build_chapter_voice_plan, canonical_json, ingest_story_source, segment_cache_key,
-    sha256_canonical_json, SegmentCacheKeyInput, StoryRequest, StoryStart,
+    build_chapter_voice_plan, build_story_command_preflight, canonical_json, ingest_story_source,
+    segment_cache_key, sha256_canonical_json, SegmentCacheKeyInput, StoryRequest, StoryStart,
 };
 
 #[test]
@@ -257,4 +257,89 @@ fn voice_plan_fails_closed_on_unaccepted_pacing() {
     pacing["claims"]["owner_pacing_accepted"] = json!(false);
 
     assert!(build_chapter_voice_plan(&plan, &mapping, &role_acceptance, &pacing).is_err());
+}
+
+fn load_voice_scene_json(name: &str) -> serde_json::Value {
+    let path = Path::new("../../docs/design/voice-scene").join(name);
+    serde_json::from_slice(&std::fs::read(path).expect("fixture read")).expect("fixture json")
+}
+
+#[test]
+fn full_preflight_matches_s5zf_python_receipt() {
+    let request = StoryRequest {
+        source_path: "../../docs/design/voice-scene/fixtures/story_s1.md".into(),
+        start: StoryStart::Chapter { chapter: 2 },
+        dry_run: true,
+    };
+    let result = build_story_command_preflight(
+        "/story \"docs/design/voice-scene/fixtures/story_s1.md\" chapter 2",
+        &request,
+        &load_voice_scene_json("s5zc_source_grounded_utterance_plan_receipt.json"),
+        &load_voice_scene_json("s5x_story_voice_mapping_receipt.json"),
+        &load_voice_scene_json("s5y_character_voice_audition_receipt.json"),
+        &load_voice_scene_json("s5ze_cross_chapter_continuity_receipt.json"),
+    )
+    .expect("preflight");
+    let expected = load_voice_scene_json("s5zf_story_command_integration_preflight_receipt.json");
+
+    assert_eq!(result, expected);
+    assert_eq!(
+        result["preflight_sha256"],
+        "6553dcec1ad51e1b6352d0fc7fa2068b38713d1e37dedacbe45b00f3aca4a1bb"
+    );
+}
+
+#[test]
+fn full_preflight_from_start_selects_first_bounded_chapter() {
+    let request = StoryRequest {
+        source_path: "../../docs/design/voice-scene/fixtures/story_s1.md".into(),
+        start: StoryStart::FromStart,
+        dry_run: true,
+    };
+    let result = build_story_command_preflight(
+        "/story \"docs/design/voice-scene/fixtures/story_s1.md\" from-start",
+        &request,
+        &load_voice_scene_json("s5zc_source_grounded_utterance_plan_receipt.json"),
+        &load_voice_scene_json("s5x_story_voice_mapping_receipt.json"),
+        &load_voice_scene_json("s5y_character_voice_audition_receipt.json"),
+        &load_voice_scene_json("s5ze_cross_chapter_continuity_receipt.json"),
+    )
+    .expect("preflight");
+
+    assert_eq!(result["command"]["chapter_number"], 1);
+    assert_eq!(result["selection"]["selected_segments"], 4);
+    assert!(result["selection"]["preceding_scene_gap_seconds"].is_null());
+}
+
+#[test]
+fn full_preflight_fails_closed_on_runtime_flag_and_evidence_drift() {
+    let request = StoryRequest {
+        source_path: "../../docs/design/voice-scene/fixtures/story_s1.md".into(),
+        start: StoryStart::Chapter { chapter: 2 },
+        dry_run: true,
+    };
+    let voice_plan = load_voice_scene_json("s5zc_source_grounded_utterance_plan_receipt.json");
+    let mapping = load_voice_scene_json("s5x_story_voice_mapping_receipt.json");
+    let role = load_voice_scene_json("s5y_character_voice_audition_receipt.json");
+    let mut continuity = load_voice_scene_json("s5ze_cross_chapter_continuity_receipt.json");
+    assert!(build_story_command_preflight(
+        "/story book.md chapter 2 --play",
+        &request,
+        &voice_plan,
+        &mapping,
+        &role,
+        &continuity,
+    )
+    .is_err());
+
+    continuity["claims"]["owner_accepted"] = json!(false);
+    assert!(build_story_command_preflight(
+        "/story \"docs/design/voice-scene/fixtures/story_s1.md\" chapter 2",
+        &request,
+        &voice_plan,
+        &mapping,
+        &role,
+        &continuity,
+    )
+    .is_err());
 }
