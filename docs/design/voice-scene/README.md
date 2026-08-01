@@ -54,6 +54,8 @@ express. A packet is S0-valid only when it passes both.
   structural-transition, plan-hash, and cache-key parity receipt.
 - `story_rust_preflight_adapter.schema.json`: S5ZM complete Rust composition
   and S5ZF output/negative-control parity receipt.
+- `story_coordinated_wiring_review.schema.json`: S5ZR non-actuating shared-
+  surface overlap decision and frozen minimal MCP wiring contract.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
