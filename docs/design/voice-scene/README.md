@@ -147,6 +147,15 @@ express. A packet is S0-valid only when it passes both.
 - `S617_STORY_BOUNDED_RENDER_EXECUTION.md`: S617 runtime boundary, the two
   integration defects discovered by real execution, their regression fixes,
   FUSE output-mode semantics, and the separate playback/review next gate.
+- `story_bounded_render_acceptance_review.schema.json`: S618 strict read-only
+  acceptance contract that distinguishes WAV container bytes from decoded PCM
+  samples and keeps playback, memory, and Story runtime admission closed.
+- `s618_story_bounded_render_acceptance_review.json`: S618 live evidence that
+  all S617 segment files and the assembled PCM sample sequence match the
+  previously owner-accepted S603 audible content exactly.
+- `S618_STORY_BOUNDED_RENDER_ACCEPTANCE_REVIEW.md`: S618 acceptance provenance,
+  container-header explanation, inherited human-audition boundary, and the
+  separate Story render-runtime admission next gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
