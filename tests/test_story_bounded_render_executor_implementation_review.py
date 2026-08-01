@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -43,7 +44,20 @@ def build(**overrides):
         / "story_command_integration_preflight.py",
         "executor_target_path": EXECUTOR_TARGET,
     }
-    return module.build_implementation_review(**{**kwargs, **overrides})
+    values = {**kwargs, **overrides}
+    if values["executor_target_path"] != EXECUTOR_TARGET:
+        return module.build_implementation_review(**values)
+
+    original_exists = Path.exists
+
+    def historical_exists(path: Path) -> bool:
+        if path == EXECUTOR_TARGET:
+            return False
+        return original_exists(path)
+
+    # Reconstruct the S605 pre-implementation snapshot after S606 lands.
+    with patch.object(Path, "exists", historical_exists):
+        return module.build_implementation_review(**values)
 
 
 def write_json(tmp_path: Path, name: str, value: dict) -> Path:
