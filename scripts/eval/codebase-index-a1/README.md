@@ -1,7 +1,7 @@
 # AB codebase-index A1 evaluator
 
 This nested Rust workspace is an evaluation-only gate for the default-off A1
-`codebase_index` candidate. It compares the unchanged FullVec path with the
+`codebase_index` candidate. It compares the legacy FullVec algorithm/dispatch with the
 feature-gated staged-native path through production store seams. It never uses
 the live Agent Bridge database, changes production dispatch, or authorizes
 runtime adoption.
@@ -50,7 +50,15 @@ contract pins those services to logical CPU 39 while excluding SMT sibling 79,
 and records kernel, microcode, libc/allocator, systemd, load, and pressure
 context. Each service has a 1,800-second runtime cap, control-group kill mode,
 a 30-second stop timeout, and collection enabled; a timeout must also prove the
-unit is no longer active.
+unit reached an inactive/dead state (or was collected) and that any retained
+cgroup reports `populated=0` with no processes.
+
+After base preflight, canonical execution requires a fresh 30-second, 1 Hz
+host-quiet window on CPU 39. Overall idle must be at least 95%, every bucket at
+least 90%, CPU `some` PSI at most 1%, memory/I/O `full` PSI at most 0.1%, and
+no `cargo`, `rustc`, or `rustdoc` identity may appear. Every performance child
+then independently binds exclusive affinity to CPU 39, its effective cpuset,
+pressure counters, and external CPU39 activity no greater than 5%.
 
 ```bash
 mkdir -p /home/pallasting/.cache/ab-codebase-index-a1-eval
@@ -79,10 +87,14 @@ performance children and all eight fault children. Each child receives a new
 byte-for-byte copy; no measured child prepares the base fixture. This single
 preflight also establishes the frozen warm-cache policy before pair 0.
 
-Each run emits a raw evidence packet that includes:
+The retained canonical raw packet contains the complete assessor `SuiteInput`
+plus its assessment, so it can be deserialized and reassessed independently.
+Its run evidence includes:
 
 - child PID, sequence, start/finish time, observed AB/BA order, elapsed time,
   `/proc/self/io`, minor/major faults, VmHWM, and `getrusage` RSS;
+- host-quiet bucket deltas and per-child CPU39/process/PSI/affinity/cpuset and
+  competing-build-process identities;
 - transient-cgroup identity, process count, `memory.current`, `memory.peak`,
   `memory.max`, and `memory.stat` anon/file/shmem components;
 - database/WAL/SHM bytes, validated WAL layout and frames, checkpoint/reset
@@ -123,8 +135,14 @@ The canonical run executes the same staged-native binary through eight injected
 failure points: after staging batch 1, after each of the three deletes, after
 one symbol/import/call replay row, and immediately before commit. Every case
 starts from a fresh base copy and must observe the exact expected error marker,
-an identical raw rollback snapshot, stable PRAGMAs, a successful post-fault
-query on the same connection, and staging cleanup.
+an identical raw rollback snapshot across all codebase tables and
+`sqlite_sequence`, stable PRAGMAs, a successful post-fault query on the same
+connection, and staging cleanup. Fault children prove an empty WAL start. A
+rollback may leave physically valid uncommitted WAL frames; their byte layout
+is retained as evidence, after which a separate TRUNCATE cleanup must prove a
+zero-length WAL. That cleanup may change only the main-file physical SHA;
+logical rows, schema metadata, page/freelist state, integrity, and foreign-key
+evidence must remain identical.
 
 ## Exit and retention contract
 

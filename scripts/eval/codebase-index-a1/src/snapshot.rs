@@ -272,6 +272,9 @@ pub fn rollback_state(
 ) -> Result<RollbackStateEvidence, SnapshotError> {
     let connection = Connection::open(database_path)?;
     Ok(RollbackStateEvidence {
+        database_sha256: crate::provenance::sha256_file(database_path)?,
+        all_codebase_sha256: all_codebase_sha256(&connection)?,
+        sqlite_sequence_sha256: sqlite_sequence_sha256(&connection)?,
         target_raw_sha256: raw_target_sha256(&connection, target_root)?,
         other_root_sha256: other_root_sha256(&connection)?,
         non_codebase_sentinel_sha256: sentinel_sha256(&connection)?,
@@ -606,35 +609,107 @@ fn raw_target_sha256(connection: &Connection, source_root: &Path) -> Result<Stri
         let mut rows = statement.query([&root.as_ref()])?;
         let mut count = 0_u64;
         while let Some(row) = rows.next()? {
-            for index in 0..column_count {
-                use rusqlite::types::ValueRef;
-                match row.get_ref(index)? {
-                    ValueRef::Null => digest.update([0]),
-                    ValueRef::Integer(value) => {
-                        digest.update([1]);
-                        digest.update(value.to_be_bytes());
-                    }
-                    ValueRef::Real(value) => {
-                        digest.update([2]);
-                        digest.update(value.to_bits().to_be_bytes());
-                    }
-                    ValueRef::Text(value) => {
-                        digest.update([3]);
-                        frame_u64(&mut digest, value.len() as u64);
-                        digest.update(value);
-                    }
-                    ValueRef::Blob(value) => {
-                        digest.update([4]);
-                        frame_u64(&mut digest, value.len() as u64);
-                        digest.update(value);
-                    }
-                }
-            }
+            hash_typed_row(&mut digest, row, column_count)?;
             count = count.saturating_add(1);
         }
         frame_u64(&mut digest, count);
     }
     Ok(digest_hex(digest))
+}
+
+fn all_codebase_sha256(connection: &Connection) -> Result<String, SnapshotError> {
+    let mut digest = Sha256::new();
+    frame_str(
+        &mut digest,
+        "agent_bridge.authoritative_all_codebase_raw_rows.v0",
+    );
+    for (table, columns) in [
+        (
+            "codebase_symbols",
+            "id,file_path,line,col,kind,name,signature,language,root_path,indexed_at,embedding",
+        ),
+        (
+            "codebase_imports",
+            "id,file_path,line,language,raw,target,alias,root_path,indexed_at",
+        ),
+        (
+            "codebase_calls",
+            "id,file_path,line,language,caller,callee,root_path,indexed_at",
+        ),
+    ] {
+        frame_str(&mut digest, table);
+        let sql = format!("SELECT {columns} FROM {table} ORDER BY id");
+        let mut statement = connection.prepare(&sql)?;
+        let column_count = statement.column_count();
+        let mut rows = statement.query([])?;
+        let mut count = 0_u64;
+        while let Some(row) = rows.next()? {
+            hash_typed_row(&mut digest, row, column_count)?;
+            count = count.saturating_add(1);
+        }
+        frame_u64(&mut digest, count);
+    }
+    Ok(digest_hex(digest))
+}
+
+fn sqlite_sequence_sha256(connection: &Connection) -> Result<String, SnapshotError> {
+    let mut digest = Sha256::new();
+    frame_str(&mut digest, "agent_bridge.sqlite_sequence.v0");
+    let exists: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='sqlite_sequence'",
+        [],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        digest.update([0]);
+        return Ok(digest_hex(digest));
+    }
+    digest.update([1]);
+    let mut statement =
+        connection.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name")?;
+    let mut rows = statement.query([])?;
+    let mut count = 0_u64;
+    while let Some(row) = rows.next()? {
+        frame_str(&mut digest, &row.get::<_, String>(0)?);
+        let sequence: i64 = row.get(1)?;
+        frame_u64(&mut digest, nonnegative_u64("sqlite_sequence", sequence)?);
+        count = count.saturating_add(1);
+    }
+    frame_u64(&mut digest, count);
+    Ok(digest_hex(digest))
+}
+
+fn hash_typed_row(
+    digest: &mut Sha256,
+    row: &rusqlite::Row<'_>,
+    column_count: usize,
+) -> Result<(), rusqlite::Error> {
+    use rusqlite::types::ValueRef;
+
+    for index in 0..column_count {
+        match row.get_ref(index)? {
+            ValueRef::Null => digest.update([0]),
+            ValueRef::Integer(value) => {
+                digest.update([1]);
+                digest.update(value.to_be_bytes());
+            }
+            ValueRef::Real(value) => {
+                digest.update([2]);
+                digest.update(value.to_bits().to_be_bytes());
+            }
+            ValueRef::Text(value) => {
+                digest.update([3]);
+                frame_u64(digest, value.len() as u64);
+                digest.update(value);
+            }
+            ValueRef::Blob(value) => {
+                digest.update([4]);
+                frame_u64(digest, value.len() as u64);
+                digest.update(value);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn other_root_sha256(connection: &Connection) -> Result<String, SnapshotError> {

@@ -10,11 +10,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod provenance;
+pub mod quiet;
 pub mod snapshot;
 pub mod workload;
 
 pub const RUN_RECEIPT_SCHEMA: &str = "agent_bridge.codebase_index.a1.run_receipt.v0";
 pub const SUITE_RECEIPT_SCHEMA: &str = "agent_bridge.codebase_index.a1.suite_receipt.v0";
+pub const RAW_PACKET_SCHEMA: &str = "agent_bridge.codebase_index.a1.raw_packet.v0";
+pub const FAILURE_RECEIPT_SCHEMA: &str =
+    "agent_bridge.codebase_index.a1.failure_atomicity_receipt.v0";
 pub const CANONICAL_DOCUMENTS: u64 = 100_000;
 pub const CANONICAL_TOTAL_ROWS: u64 = 1_400_000;
 pub const CANONICAL_BATCH_ROWS: usize = 4_096;
@@ -305,6 +309,7 @@ pub struct BaseFixturePreflightReceipt {
     pub other_root_sha256: String,
     pub non_codebase_sentinel_sha256: String,
     pub database: DatabaseEvidence,
+    pub rollback_state: RollbackStateEvidence,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -401,6 +406,8 @@ pub struct RunReceipt {
     pub build_identity: BuildIdentity,
     pub workload: Workload,
     pub measurement: Measurement,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_interference: Option<quiet::ChildInterferenceEvidence>,
     pub database: DatabaseEvidence,
     pub fixture: FixtureEvidence,
     pub authoritative_pragmas_before: AuthoritativePragmaEvidence,
@@ -472,6 +479,9 @@ impl FailureCase {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RollbackStateEvidence {
+    pub database_sha256: String,
+    pub all_codebase_sha256: String,
+    pub sqlite_sequence_sha256: String,
     pub target_raw_sha256: String,
     pub other_root_sha256: String,
     pub non_codebase_sentinel_sha256: String,
@@ -494,8 +504,26 @@ pub struct PostFaultQueryEvidence {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FailureAtomicityReceipt {
+    pub schema: String,
     pub case: FailureCase,
+    pub workload: Workload,
+    pub execution: ChildExecutionEvidence,
     pub build_identity: BuildIdentity,
+    pub trial_root: PathBuf,
+    pub database_path: PathBuf,
+    pub expected_cgroup_unit: String,
+    pub cgroup_path: String,
+    pub cgroup_process_count: u64,
+    pub cgroup_isolated_for_trial: bool,
+    pub actual_process_affinity: String,
+    pub wal_reset: WalResetEvidence,
+    pub wal_cleanup: WalResetEvidence,
+    pub main_wal_bytes_before: u64,
+    pub main_wal_bytes_after: u64,
+    pub main_wal_bytes_after_cleanup: u64,
+    pub main_shm_bytes_before: u64,
+    pub main_shm_bytes_after: u64,
+    pub main_shm_bytes_after_cleanup: u64,
     pub expected_error_observed: bool,
     pub expected_error_marker: String,
     pub observed_error: String,
@@ -507,6 +535,7 @@ pub struct FailureAtomicityReceipt {
     pub non_codebase_sentinel_sha256_after: String,
     pub rollback_before: RollbackStateEvidence,
     pub rollback_after: RollbackStateEvidence,
+    pub rollback_after_cleanup: RollbackStateEvidence,
     pub authoritative_pragmas_before: AuthoritativePragmaEvidence,
     pub authoritative_pragmas_after: AuthoritativePragmaEvidence,
     pub connection_usable_after: bool,
@@ -522,12 +551,21 @@ pub struct SuiteInput {
     pub provenance: Provenance,
     pub runtime_environment: RuntimeEnvironmentEvidence,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_quiet_window: Option<quiet::HostQuietWindowEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trial_root: Option<PathBuf>,
     pub cache_policy: String,
     pub host_storage_context: HostStorageContext,
     pub base_fixture_preflight: BaseFixturePreflightReceipt,
     pub pairs: Vec<TrialPair>,
     pub failure_atomicity: Vec<FailureAtomicityReceipt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanonicalRawPacket {
+    pub schema: String,
+    pub input: SuiteInput,
+    pub assessment: Assessment,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -606,6 +644,7 @@ pub fn assess_suite(input: &SuiteInput) -> Assessment {
     if canonical {
         validate_provenance(&input.provenance, &mut reasons);
         validate_runtime_environment(&input.runtime_environment, &mut reasons);
+        validate_host_quiet_window(input, &mut reasons);
         validate_canonical_trial_root(input.trial_root.as_deref(), &mut reasons);
         validate_canonical_plan(&input.pairs, &mut reasons);
         validate_canonical_child_custody(input, &mut reasons);
@@ -924,6 +963,185 @@ fn parse_cpu_list(value: &str) -> Option<std::collections::BTreeSet<u32>> {
     (!cpus.is_empty()).then_some(cpus)
 }
 
+fn validate_host_quiet_window(input: &SuiteInput, reasons: &mut Vec<String>) {
+    let Some(window) = input.host_quiet_window.as_ref() else {
+        reasons.push("canonical host quiet-window evidence is missing".to_string());
+        return;
+    };
+    let duration_ns = window.finished_unix_ns.checked_sub(window.started_unix_ns);
+    let bucket_count = window.sample_count.saturating_sub(1);
+    let bucket_shape_valid = window.sample_count == 31
+        && window.bucket_total_delta_ticks.len() == bucket_count
+        && window.bucket_idle_delta_ticks.len() == bucket_count
+        && bucket_count == 30;
+    let bucket_total_sum = window
+        .bucket_total_delta_ticks
+        .iter()
+        .try_fold(0_u64, |sum, value| sum.checked_add(*value));
+    let bucket_idle_sum = window
+        .bucket_idle_delta_ticks
+        .iter()
+        .try_fold(0_u64, |sum, value| sum.checked_add(*value));
+    let bucket_totals_valid = bucket_shape_valid
+        && window
+            .bucket_total_delta_ticks
+            .iter()
+            .zip(&window.bucket_idle_delta_ticks)
+            .all(|(total, idle)| *total > 0 && idle <= total)
+        && bucket_total_sum == Some(window.cpu_total_delta_ticks)
+        && bucket_idle_sum == Some(window.cpu_idle_delta_ticks);
+    let computed_overall =
+        exact_ratio_bps(window.cpu_idle_delta_ticks, window.cpu_total_delta_ticks);
+    let computed_worst = bucket_totals_valid.then(|| {
+        window
+            .bucket_total_delta_ticks
+            .iter()
+            .zip(&window.bucket_idle_delta_ticks)
+            .filter_map(|(total, idle)| exact_ratio_bps(*idle, *total))
+            .min()
+    });
+    let pressure_duration_us = window.duration_us;
+    let computed_cpu_pressure = pressure_delta_bps(
+        window.pressure_start.cpu_some_us,
+        window.pressure_end.cpu_some_us,
+        pressure_duration_us,
+    );
+    let computed_memory_pressure = pressure_delta_bps(
+        window.pressure_start.memory_full_us,
+        window.pressure_end.memory_full_us,
+        pressure_duration_us,
+    );
+    let computed_io_pressure = pressure_delta_bps(
+        window.pressure_start.io_full_us,
+        window.pressure_end.io_full_us,
+        pressure_duration_us,
+    );
+    let affinity_contains_cpu =
+        parse_cpu_list(&window.actual_affinity).is_some_and(|cpus| cpus.contains(&39));
+    let cpuset_contains_cpu =
+        parse_cpu_list(&window.effective_cpuset).is_some_and(|cpus| cpus.contains(&39));
+    let earliest_child = input
+        .pairs
+        .iter()
+        .flat_map(|pair| [&pair.full_vec.execution, &pair.staged_native.execution])
+        .map(|execution| execution.started_unix_ns)
+        .min();
+    let recomputed_pass = computed_overall
+        .is_some_and(|value| value >= quiet::QUIET_OVERALL_IDLE_BPS)
+        && computed_worst
+            .flatten()
+            .is_some_and(|value| value >= quiet::QUIET_BUCKET_IDLE_BPS)
+        && computed_cpu_pressure.is_some_and(|value| value <= quiet::QUIET_CPU_SOME_PRESSURE_BPS)
+        && computed_memory_pressure
+            .is_some_and(|value| value <= quiet::QUIET_MEMORY_FULL_PRESSURE_BPS)
+        && computed_io_pressure.is_some_and(|value| value <= quiet::QUIET_IO_FULL_PRESSURE_BPS)
+        && window.competing_build_processes.is_empty();
+    let valid = window.started_unix_ns < window.finished_unix_ns
+        && duration_ns.is_some_and(|value| {
+            let measured_ns = u128::from(window.duration_us) * 1_000;
+            u128::from(value).abs_diff(measured_ns) <= (measured_ns / 100).max(5_000_000)
+        })
+        && (30_000_000..=31_000_000).contains(&window.duration_us)
+        && window.duration_ms == window.duration_us / 1_000
+        && bucket_totals_valid
+        && window.cpu_idle_delta_ticks <= window.cpu_total_delta_ticks
+        && computed_overall == Some(window.overall_idle_bps)
+        && computed_worst.flatten() == Some(window.worst_bucket_idle_bps)
+        && computed_cpu_pressure == Some(window.cpu_some_pressure_delta_bps)
+        && computed_memory_pressure == Some(window.memory_full_pressure_delta_bps)
+        && computed_io_pressure == Some(window.io_full_pressure_delta_bps)
+        && affinity_contains_cpu
+        && cpuset_contains_cpu
+        && earliest_child.is_some_and(|started| window.finished_unix_ns <= started)
+        && window.passed == recomputed_pass
+        && recomputed_pass;
+    if !valid {
+        reasons.push("canonical host quiet-window evidence is invalid or noisy".to_string());
+    }
+}
+
+fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair_index: usize) {
+    let Some(evidence) = run.child_interference.as_ref() else {
+        reasons.push(format!(
+            "pair {pair_index} {:?} child interference evidence is missing",
+            run.mode
+        ));
+        return;
+    };
+    let start = &evidence.start;
+    let end = &evidence.end;
+    let elapsed_us = end
+        .sampled_unix_ns
+        .checked_sub(start.sampled_unix_ns)
+        .map(|value| value / 1_000)
+        .filter(|value| *value > 0);
+    let total_delta = end.cpu_total_ticks.checked_sub(start.cpu_total_ticks);
+    let idle_delta = end.cpu_idle_ticks.checked_sub(start.cpu_idle_ticks);
+    let process_delta = end.process_ticks.checked_sub(start.process_ticks);
+    let computed_external =
+        total_delta
+            .zip(idle_delta)
+            .zip(process_delta)
+            .and_then(|((total, idle), process)| {
+                total
+                    .checked_sub(idle)?
+                    .checked_sub(process)
+                    .and_then(|external| exact_ratio_bps(external, total))
+            });
+    let cpu_pressure = elapsed_us.and_then(|duration| {
+        pressure_delta_bps(
+            start.pressure.cpu_some_us,
+            end.pressure.cpu_some_us,
+            duration,
+        )
+    });
+    let memory_pressure = elapsed_us.and_then(|duration| {
+        pressure_delta_bps(
+            start.pressure.memory_full_us,
+            end.pressure.memory_full_us,
+            duration,
+        )
+    });
+    let io_pressure = elapsed_us.and_then(|duration| {
+        pressure_delta_bps(start.pressure.io_full_us, end.pressure.io_full_us, duration)
+    });
+    let expected_affinity = [39_u32].into_iter().collect();
+    let valid = run.execution.started_unix_ns <= start.sampled_unix_ns
+        && start.sampled_unix_ns < end.sampled_unix_ns
+        && end.sampled_unix_ns <= run.execution.finished_unix_ns
+        && parse_cpu_list(&start.actual_affinity).as_ref() == Some(&expected_affinity)
+        && start.actual_affinity == end.actual_affinity
+        && start.effective_cpuset == end.effective_cpuset
+        && parse_cpu_list(&start.effective_cpuset).is_some_and(|cpus| cpus.contains(&39))
+        && start.competing_build_processes.is_empty()
+        && end.competing_build_processes.is_empty()
+        && computed_external == Some(evidence.external_cpu39_busy_bps)
+        && evidence.external_cpu39_busy_bps <= quiet::CHILD_EXTERNAL_CPU39_BUSY_BPS
+        && cpu_pressure.is_some_and(|value| value <= quiet::QUIET_CPU_SOME_PRESSURE_BPS)
+        && memory_pressure.is_some_and(|value| value <= quiet::QUIET_MEMORY_FULL_PRESSURE_BPS)
+        && io_pressure.is_some_and(|value| value <= quiet::QUIET_IO_FULL_PRESSURE_BPS);
+    if !valid {
+        reasons.push(format!(
+            "pair {pair_index} {:?} child interference evidence is invalid or noisy",
+            run.mode
+        ));
+    }
+}
+
+fn pressure_delta_bps(start: u64, end: u64, duration_us: u64) -> Option<u64> {
+    exact_ratio_bps(end.checked_sub(start)?, duration_us)
+}
+
+fn exact_ratio_bps(numerator: u64, denominator: u64) -> Option<u64> {
+    if denominator == 0 {
+        return None;
+    }
+    let value = u128::from(numerator)
+        .checked_mul(10_000)?
+        .checked_div(u128::from(denominator))?;
+    u64::try_from(value).ok()
+}
+
 fn validate_canonical_trial_root(root: Option<&Path>, reasons: &mut Vec<String>) {
     let Some(root) = root else {
         reasons.push("canonical trial root is missing".to_string());
@@ -990,7 +1208,8 @@ fn validate_canonical_child_custody(input: &SuiteInput, reasons: &mut Vec<String
     let Some(suite_root) = input.trial_root.as_deref() else {
         return;
     };
-    let mut executions = Vec::with_capacity(CANONICAL_PAIRS * 2);
+    let expected_children = CANONICAL_PAIRS * 2 + 8;
+    let mut executions = Vec::with_capacity(expected_children);
     let mut process_ids = std::collections::BTreeSet::new();
     let mut cgroups = std::collections::BTreeSet::new();
     let mut trial_roots = std::collections::BTreeSet::new();
@@ -1015,8 +1234,24 @@ fn validate_canonical_child_custody(input: &SuiteInput, reasons: &mut Vec<String
         }
     }
 
+    for receipt in &input.failure_atomicity {
+        executions.push(&receipt.execution);
+        valid &= process_ids.insert(receipt.execution.process_id);
+        valid &= cgroups.insert(receipt.cgroup_path.clone());
+        let expected_trial_root = suite_root.join(format!("fault-{:?}", receipt.case));
+        let expected_database = expected_trial_root.join("database/state.db");
+        valid &= receipt.trial_root == expected_trial_root
+            && trial_roots.insert(receipt.trial_root.clone())
+            && receipt.database_path == expected_database
+            && database_paths.insert(receipt.database_path.clone());
+    }
+
     executions.sort_by_key(|execution| execution.sequence);
-    valid &= executions.len() == CANONICAL_PAIRS * 2;
+    valid &= executions.len() == expected_children
+        && process_ids.len() == expected_children
+        && cgroups.len() == expected_children
+        && trial_roots.len() == expected_children
+        && database_paths.len() == expected_children;
     for (expected_sequence, execution) in executions.iter().enumerate() {
         valid &= execution.sequence == expected_sequence;
         if expected_sequence > 0 {
@@ -1285,6 +1520,7 @@ fn validate_run(run: &RunReceipt, canonical: bool, reasons: &mut Vec<String>, pa
     }
 
     if canonical {
+        validate_child_interference(run, reasons, pair_index);
         if run.measurement.authoritative_transaction_ns.is_none()
             || run
                 .measurement
@@ -1510,10 +1746,50 @@ fn validate_failure_atomicity(
     let mut observed = std::collections::BTreeSet::new();
     let valid = receipts.len() == expected.len()
         && receipts.iter().all(|receipt| {
+            let expected_trial_root =
+                suite_root.map(|root| root.join(format!("fault-{:?}", receipt.case)));
             let expected_database = suite_root
                 .map(|root| root.join(format!("fault-{:?}/database/state.db", receipt.case)));
-            observed.insert(receipt.case)
+            receipt.schema == FAILURE_RECEIPT_SCHEMA
+                && observed.insert(receipt.case)
+                && receipt.workload == base.workload
+                && receipt.execution.mode == Mode::StagedNative
+                && receipt.execution.process_id != 0
+                && receipt.execution.started_unix_ns < receipt.execution.finished_unix_ns
                 && &receipt.build_identity == expected_build
+                && expected_trial_root.as_ref() == Some(&receipt.trial_root)
+                && expected_database.as_ref() == Some(&receipt.database_path)
+                && fault_cgroup_unit_valid(&receipt.expected_cgroup_unit, receipt.case)
+                && receipt
+                    .cgroup_path
+                    .ends_with(&format!("/{}.service", receipt.expected_cgroup_unit))
+                && receipt.cgroup_process_count == 1
+                && receipt.cgroup_isolated_for_trial
+                && receipt.actual_process_affinity == "39"
+                && receipt.wal_reset
+                    == (WalResetEvidence {
+                        busy: 0,
+                        log_frames: 0,
+                        checkpointed_frames: 0,
+                        wal_bytes: 0,
+                        proven_empty: true,
+                    })
+                && receipt.wal_cleanup
+                    == (WalResetEvidence {
+                        busy: 0,
+                        log_frames: 0,
+                        checkpointed_frames: 0,
+                        wal_bytes: 0,
+                        proven_empty: true,
+                    })
+                && receipt.main_wal_bytes_before == 0
+                && base.database.page_size.is_some_and(|page_size| {
+                    wal_file_bytes_structurally_valid(receipt.main_wal_bytes_after, page_size)
+                })
+                && receipt.main_wal_bytes_after_cleanup == 0
+                && receipt.main_shm_bytes_before > 0
+                && receipt.main_shm_bytes_after == receipt.main_shm_bytes_before
+                && receipt.main_shm_bytes_after_cleanup == receipt.main_shm_bytes_before
                 && receipt.expected_error_observed
                 && receipt.expected_error_marker == receipt.case.expected_error_marker()
                 && receipt
@@ -1533,7 +1809,13 @@ fn validate_failure_atomicity(
                     == receipt.non_codebase_sentinel_sha256_after
                 && receipt.rollback_before == receipt.rollback_after
                 && rollback_state_valid(&receipt.rollback_before)
+                && rollback_state_valid(&receipt.rollback_after_cleanup)
+                && rollback_states_semantically_equal(
+                    &receipt.rollback_after,
+                    &receipt.rollback_after_cleanup,
+                )
                 && rollback_state_matches_base(&receipt.rollback_before, base)
+                && receipt.rollback_before == base.rollback_state
                 && receipt.other_root_sha256_before == receipt.rollback_before.other_root_sha256
                 && receipt.non_codebase_sentinel_sha256_before
                     == receipt.rollback_before.non_codebase_sentinel_sha256
@@ -1542,6 +1824,8 @@ fn validate_failure_atomicity(
                 && expected_database.as_ref().is_some_and(|expected| {
                     receipt.authoritative_pragmas_before.database_files.first() == Some(expected)
                 })
+                && receipt.authoritative_pragmas_after.database_files.first()
+                    == Some(&receipt.database_path)
                 && receipt.post_fault_query.query == "codebase_index_pragmas_a1"
                 && receipt.post_fault_query.succeeded
                 && serialized_sha256(&receipt.authoritative_pragmas_after).as_deref()
@@ -1555,11 +1839,30 @@ fn validate_failure_atomicity(
     }
 }
 
+fn fault_cgroup_unit_valid(unit: &str, case: FailureCase) -> bool {
+    let case_name = match case {
+        FailureCase::AfterStagingBatch => "after-staging-batch",
+        FailureCase::AfterDeleteSymbols => "after-delete-symbols",
+        FailureCase::AfterDeleteImports => "after-delete-imports",
+        FailureCase::AfterDeleteCalls => "after-delete-calls",
+        FailureCase::AfterSymbolRows => "after-symbol-rows",
+        FailureCase::AfterImportRows => "after-import-rows",
+        FailureCase::AfterCallRows => "after-call-rows",
+        FailureCase::BeforeCommit => "before-commit",
+    };
+    unit.strip_prefix("ab-codebase-index-a1-")
+        .and_then(|value| value.strip_suffix(&format!("-fault-{case_name}")))
+        .and_then(|value| value.parse::<u32>().ok())
+        .is_some_and(|pid| pid > 0)
+}
+
 fn rollback_state_matches_base(
     state: &RollbackStateEvidence,
     base: &BaseFixturePreflightReceipt,
 ) -> bool {
-    state.target_raw_sha256 == base.target_raw_sha256
+    state == &base.rollback_state
+        && state.database_sha256 == base.base_fixture_sha256
+        && state.target_raw_sha256 == base.target_raw_sha256
         && state.other_root_sha256 == base.other_root_sha256
         && state.non_codebase_sentinel_sha256 == base.non_codebase_sentinel_sha256
         && Some(state.schema_sha256.as_str()) == base.database.schema_sha256.as_deref()
@@ -1572,6 +1875,17 @@ fn rollback_state_matches_base(
         && Some(state.foreign_key_violations) == base.database.foreign_key_violations
 }
 
+fn rollback_states_semantically_equal(
+    left: &RollbackStateEvidence,
+    right: &RollbackStateEvidence,
+) -> bool {
+    let mut left = left.clone();
+    let mut right = right.clone();
+    left.database_sha256.clear();
+    right.database_sha256.clear();
+    left == right
+}
+
 fn serialized_sha256<T: Serialize>(value: &T) -> Option<String> {
     let bytes = serde_json::to_vec(value).ok()?;
     let mut digest = Sha256::new();
@@ -1580,7 +1894,10 @@ fn serialized_sha256<T: Serialize>(value: &T) -> Option<String> {
 }
 
 fn rollback_state_valid(state: &RollbackStateEvidence) -> bool {
-    is_lower_hex(&state.target_raw_sha256, 64)
+    is_lower_hex(&state.database_sha256, 64)
+        && is_lower_hex(&state.all_codebase_sha256, 64)
+        && is_lower_hex(&state.sqlite_sequence_sha256, 64)
+        && is_lower_hex(&state.target_raw_sha256, 64)
         && is_lower_hex(&state.other_root_sha256, 64)
         && is_lower_hex(&state.non_codebase_sentinel_sha256, 64)
         && is_lower_hex(&state.schema_sha256, 64)
@@ -1609,7 +1926,9 @@ fn validate_base_fixture_custody(input: &SuiteInput, reasons: &mut Vec<String>) 
         && base.database.null_embeddings == Some(0)
         && base.database.semantic_sha256.as_deref() == Some(base.workload.combined_sha256.as_str())
         && base.database.integrity_check.as_deref() == Some("ok")
-        && base.database.foreign_key_violations == Some(0);
+        && base.database.foreign_key_violations == Some(0)
+        && rollback_state_valid(&base.rollback_state)
+        && rollback_state_matches_base(&base.rollback_state, base);
     let all_perf_bound = input.pairs.iter().flat_map(|pair| {
         [&pair.full_vec, &pair.staged_native]
             .into_iter()
@@ -1627,10 +1946,12 @@ fn validate_base_fixture_custody(input: &SuiteInput, reasons: &mut Vec<String>) 
     let all_faults_bound = input.failure_atomicity.iter().map(|receipt| {
         receipt.base_fixture_sha256 == base.base_fixture_sha256
             && receipt.database_copy_sha256_before == base.base_fixture_sha256
-            && receipt.rollback_before.target_raw_sha256 == base.target_raw_sha256
-            && receipt.rollback_before.other_root_sha256 == base.other_root_sha256
-            && receipt.rollback_before.non_codebase_sentinel_sha256
-                == base.non_codebase_sentinel_sha256
+            && receipt.rollback_before == base.rollback_state
+            && receipt.rollback_after == base.rollback_state
+            && rollback_states_semantically_equal(
+                &receipt.rollback_after_cleanup,
+                &base.rollback_state,
+            )
     });
     if !base_valid || !all_perf_bound.chain(all_faults_bound).all(|bound| bound) {
         reasons.push(
@@ -1724,6 +2045,13 @@ fn wal_physical_layout_valid(database: &DatabaseEvidence) -> bool {
         .checked_mul(u128::from(page_size).saturating_add(24))
         .and_then(|value| value.checked_add(32));
     expected == Some(u128::from(bytes))
+}
+
+fn wal_file_bytes_structurally_valid(bytes: u64, page_size: u64) -> bool {
+    if bytes == 0 {
+        return true;
+    }
+    page_size > 0 && bytes >= 32 && (bytes - 32) % page_size.saturating_add(24) == 0
 }
 
 fn push_pair_metric(

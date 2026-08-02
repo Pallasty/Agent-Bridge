@@ -1,16 +1,22 @@
+use ab_codebase_index_a1::quiet::{
+    ChildInterferenceEvidence, CpuProcessSample, HostQuietWindowEvidence, PressureTotals,
+};
 use ab_codebase_index_a1::{
     assess_suite, canonical_workload, AuthoritativePragmaEvidence, AuthorityEvidence,
-    BaseFixturePreflightReceipt, BuildIdentity, ChildExecutionEvidence, DatabaseEvidence,
-    EvidenceClass, FailureAtomicityReceipt, FailureCase, FixtureEvidence, FullVecEvidence,
-    HostStorageContext, Measurement, Mode, PostFaultQueryEvidence, Provenance,
+    BaseFixturePreflightReceipt, BuildIdentity, CanonicalRawPacket, ChildExecutionEvidence,
+    DatabaseEvidence, EvidenceClass, FailureAtomicityReceipt, FailureCase, FixtureEvidence,
+    FullVecEvidence, HostStorageContext, Measurement, Mode, PostFaultQueryEvidence, Provenance,
     RollbackStateEvidence, RunReceipt, RuntimeEnvironmentEvidence, StorageEvidence, SuiteInput,
     TrialOrder, TrialPair, WalResetEvidence, Workload, CANONICAL_BATCH_ROWS, CANONICAL_PAIRS,
-    CANONICAL_TOTAL_ROWS,
+    CANONICAL_TOTAL_ROWS, FAILURE_RECEIPT_SCHEMA, RAW_PACKET_SCHEMA,
 };
 use sha2::{Digest, Sha256};
 
 const WAL_PAGE_SIZE: u64 = 4_096;
 const WAL_FRAMES: u64 = 2_400;
+const QUIET_STARTED_UNIX_NS: u64 = 1_000_000_000;
+const QUIET_FINISHED_UNIX_NS: u64 = 31_000_000_000;
+const CHILDREN_STARTED_UNIX_NS: u64 = 32_000_000_000;
 
 fn wal_bytes(frames: u64) -> u64 {
     32 + frames * (24 + WAL_PAGE_SIZE)
@@ -140,13 +146,71 @@ fn execution(mode: Mode, pair: usize) -> ChildExecutionEvidence {
     };
     let position = usize::from(mode != first);
     let sequence = pair * 2 + position;
-    let started_unix_ns = 10_000 + sequence as u64 * 10;
+    let started_unix_ns = CHILDREN_STARTED_UNIX_NS + sequence as u64 * 10_000_000;
     ChildExecutionEvidence {
         mode,
         sequence,
         process_id: 1_000 + sequence as u32,
         started_unix_ns,
-        finished_unix_ns: started_unix_ns + 5,
+        finished_unix_ns: started_unix_ns + 5_000_000,
+    }
+}
+
+fn process_sample(sampled_unix_ns: u64, end: bool) -> CpuProcessSample {
+    CpuProcessSample {
+        sampled_unix_ns,
+        cpu_total_ticks: if end { 1_100 } else { 1_000 },
+        cpu_idle_ticks: if end { 990 } else { 900 },
+        process_ticks: if end { 15 } else { 10 },
+        pressure: PressureTotals {
+            cpu_some_us: 0,
+            memory_full_us: 0,
+            io_full_us: 0,
+        },
+        actual_affinity: "39".into(),
+        effective_cpuset: "0-79".into(),
+        competing_build_processes: Vec::new(),
+    }
+}
+
+fn child_interference(execution: &ChildExecutionEvidence) -> ChildInterferenceEvidence {
+    ChildInterferenceEvidence {
+        start: process_sample(execution.started_unix_ns + 1_000_000, false),
+        end: process_sample(execution.started_unix_ns + 4_000_000, true),
+        external_cpu39_busy_bps: 500,
+    }
+}
+
+fn host_quiet_window() -> HostQuietWindowEvidence {
+    HostQuietWindowEvidence {
+        started_unix_ns: QUIET_STARTED_UNIX_NS,
+        finished_unix_ns: QUIET_FINISHED_UNIX_NS,
+        duration_ms: 30_000,
+        duration_us: 30_000_000,
+        sample_count: 31,
+        cpu_total_delta_ticks: 3_000,
+        cpu_idle_delta_ticks: 2_880,
+        overall_idle_bps: 9_600,
+        worst_bucket_idle_bps: 9_600,
+        bucket_total_delta_ticks: vec![100; 30],
+        bucket_idle_delta_ticks: vec![96; 30],
+        pressure_start: PressureTotals {
+            cpu_some_us: 0,
+            memory_full_us: 0,
+            io_full_us: 0,
+        },
+        pressure_end: PressureTotals {
+            cpu_some_us: 0,
+            memory_full_us: 0,
+            io_full_us: 0,
+        },
+        cpu_some_pressure_delta_bps: 0,
+        memory_full_pressure_delta_bps: 0,
+        io_full_pressure_delta_bps: 0,
+        competing_build_processes: Vec::new(),
+        actual_affinity: "0-79".into(),
+        effective_cpuset: "0-79".into(),
+        passed: true,
     }
 }
 
@@ -160,10 +224,11 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
     let trial_root =
         format!("/home/pallasting/eval/codebase-index-a1/trials/pair-{pair:02}-{mode_name}");
     let authoritative_pragmas = pragmas(&trial_root);
+    let execution = execution(mode, pair);
     RunReceipt {
         schema: "agent_bridge.codebase_index.a1.run_receipt.v0".into(),
         mode,
-        execution: execution(mode, pair),
+        execution: execution.clone(),
         build_identity: identity(true),
         workload: workload(),
         measurement: Measurement {
@@ -202,6 +267,7 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
             getrusage_max_rss_bytes: Some(if candidate { 69 } else { 100 }),
             parent_wait4_max_rss_bytes: Some(if candidate { 69 } else { 100 }),
         },
+        child_interference: Some(child_interference(&execution)),
         database: evidence(pair),
         fixture: FixtureEvidence {
             base_fixture_sha256: "4".repeat(64),
@@ -274,6 +340,9 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
 
 fn rollback_state() -> RollbackStateEvidence {
     RollbackStateEvidence {
+        database_sha256: "4".repeat(64),
+        all_codebase_sha256: "b".repeat(64),
+        sqlite_sequence_sha256: "c".repeat(64),
         target_raw_sha256: "a".repeat(64),
         other_root_sha256: "7".repeat(64),
         non_codebase_sentinel_sha256: "8".repeat(64),
@@ -307,6 +376,7 @@ fn base_fixture_preflight() -> BaseFixturePreflightReceipt {
         other_root_sha256: "7".repeat(64),
         non_codebase_sentinel_sha256: "8".repeat(64),
         database,
+        rollback_state: rollback_state(),
     }
 }
 
@@ -346,12 +416,66 @@ fn canonical_input() -> SuiteInput {
         FailureCase::BeforeCommit,
     ]
     .into_iter()
-    .map(|case| {
+    .enumerate()
+    .map(|(fault_index, case)| {
         let trial_root = format!("/home/pallasting/eval/codebase-index-a1/fault-{case:?}");
+        let database_path = format!("{trial_root}/database/state.db");
+        let sequence = CANONICAL_PAIRS * 2 + fault_index;
+        let process_id = 1_000 + sequence as u32;
+        let case_arg = match case {
+            FailureCase::AfterStagingBatch => "after-staging-batch",
+            FailureCase::AfterDeleteSymbols => "after-delete-symbols",
+            FailureCase::AfterDeleteImports => "after-delete-imports",
+            FailureCase::AfterDeleteCalls => "after-delete-calls",
+            FailureCase::AfterSymbolRows => "after-symbol-rows",
+            FailureCase::AfterImportRows => "after-import-rows",
+            FailureCase::AfterCallRows => "after-call-rows",
+            FailureCase::BeforeCommit => "before-commit",
+        };
+        let expected_cgroup_unit = format!("ab-codebase-index-a1-{process_id}-fault-{case_arg}");
+        let started_unix_ns = CHILDREN_STARTED_UNIX_NS + sequence as u64 * 10_000_000;
         let authoritative_pragmas = pragmas(&trial_root);
+        let mut rollback_after_cleanup = rollback_state();
+        rollback_after_cleanup.database_sha256 = "d".repeat(64);
         FailureAtomicityReceipt {
+            schema: FAILURE_RECEIPT_SCHEMA.into(),
             case,
+            workload: workload(),
+            execution: ChildExecutionEvidence {
+                mode: Mode::StagedNative,
+                sequence,
+                process_id,
+                started_unix_ns,
+                finished_unix_ns: started_unix_ns + 5_000_000,
+            },
             build_identity: identity(true),
+            trial_root: trial_root.clone().into(),
+            database_path: database_path.into(),
+            expected_cgroup_unit: expected_cgroup_unit.clone(),
+            cgroup_path: format!("/user.slice/{expected_cgroup_unit}.service"),
+            cgroup_process_count: 1,
+            cgroup_isolated_for_trial: true,
+            actual_process_affinity: "39".into(),
+            wal_reset: WalResetEvidence {
+                busy: 0,
+                log_frames: 0,
+                checkpointed_frames: 0,
+                wal_bytes: 0,
+                proven_empty: true,
+            },
+            wal_cleanup: WalResetEvidence {
+                busy: 0,
+                log_frames: 0,
+                checkpointed_frames: 0,
+                wal_bytes: 0,
+                proven_empty: true,
+            },
+            main_wal_bytes_before: 0,
+            main_wal_bytes_after: 4_152,
+            main_wal_bytes_after_cleanup: 0,
+            main_shm_bytes_before: 32_768,
+            main_shm_bytes_after: 32_768,
+            main_shm_bytes_after_cleanup: 32_768,
             expected_error_observed: true,
             expected_error_marker: case.expected_error_marker().into(),
             observed_error: format!("store failure: {}", case.expected_error_marker()),
@@ -363,6 +487,7 @@ fn canonical_input() -> SuiteInput {
             non_codebase_sentinel_sha256_after: "8".repeat(64),
             rollback_before: rollback_state(),
             rollback_after: rollback_state(),
+            rollback_after_cleanup,
             authoritative_pragmas_before: authoritative_pragmas.clone(),
             authoritative_pragmas_after: authoritative_pragmas.clone(),
             connection_usable_after: true,
@@ -381,6 +506,7 @@ fn canonical_input() -> SuiteInput {
         evidence_class: EvidenceClass::Canonical,
         provenance: provenance(true),
         runtime_environment: runtime_environment(),
+        host_quiet_window: Some(host_quiet_window()),
         trial_root: Some("/home/pallasting/eval/codebase-index-a1".into()),
         cache_policy: "warm_shared_corpus_after_single_base_fixture".into(),
         host_storage_context: HostStorageContext {
@@ -406,6 +532,45 @@ fn canonical_accepts_complete_balanced_threshold_passing_evidence() {
     assert!(assessment.eligible, "{:#?}", assessment.reasons);
     assert!(assessment.decision_pass);
     assert_eq!(assessment.passing_pairs, CANONICAL_PAIRS);
+}
+
+#[test]
+fn canonical_raw_packet_round_trips_complete_input_and_recomputes_assessment() {
+    let input = canonical_input();
+    let assessment = assess_suite(&input);
+    let packet = CanonicalRawPacket {
+        schema: RAW_PACKET_SCHEMA.into(),
+        input: input.clone(),
+        assessment: assessment.clone(),
+    };
+
+    let encoded = serde_json::to_vec(&packet).expect("canonical raw packet must serialize");
+    let decoded: CanonicalRawPacket =
+        serde_json::from_slice(&encoded).expect("canonical raw packet must deserialize");
+
+    assert_eq!(decoded.schema, RAW_PACKET_SCHEMA);
+    assert_eq!(decoded.input, input);
+    assert_eq!(decoded.assessment, assessment);
+    assert_eq!(assess_suite(&decoded.input), decoded.assessment);
+    assert_eq!(decoded.input.evidence_class, EvidenceClass::Canonical);
+    assert_eq!(
+        decoded.input.trial_root.as_deref(),
+        Some(std::path::Path::new(
+            "/home/pallasting/eval/codebase-index-a1"
+        ))
+    );
+    assert_eq!(
+        decoded.input.cache_policy,
+        "warm_shared_corpus_after_single_base_fixture"
+    );
+    assert_eq!(
+        decoded
+            .input
+            .host_storage_context
+            .filesystem_type
+            .as_deref(),
+        Some("fuseblk")
+    );
 }
 
 #[test]
@@ -851,4 +1016,76 @@ fn canonical_rejects_unbound_post_fault_query_digest() {
     let mut input = canonical_input();
     input.failure_atomicity[0].post_fault_query.result_sha256 = "e".repeat(64);
     assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_missing_or_internally_inconsistent_host_quiet_window() {
+    let mut missing = canonical_input();
+    missing.host_quiet_window = None;
+    assert_canonical_rejected(missing);
+
+    let mut forged_worst_bucket = canonical_input();
+    let quiet = forged_worst_bucket.host_quiet_window.as_mut().unwrap();
+    quiet.bucket_idle_delta_ticks[0] = 80;
+    quiet.cpu_idle_delta_ticks -= 16;
+    assert_canonical_rejected(forged_worst_bucket);
+}
+
+#[test]
+fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
+    let mut noisy = canonical_input();
+    noisy.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .external_cpu39_busy_bps = 501;
+    assert_canonical_rejected(noisy);
+
+    let mut wrong_affinity = canonical_input();
+    wrong_affinity.pairs[0]
+        .staged_native
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .end
+        .actual_affinity = "38-39".into();
+    assert_canonical_rejected(wrong_affinity);
+}
+
+#[test]
+fn canonical_rejects_fault_wal_reset_or_sidecar_drift() {
+    let mut nonempty_reset = canonical_input();
+    nonempty_reset.failure_atomicity[0].wal_reset.log_frames = 1;
+    nonempty_reset.failure_atomicity[0].wal_reset.wal_bytes = wal_bytes(1);
+    nonempty_reset.failure_atomicity[0].wal_reset.proven_empty = false;
+    assert_canonical_rejected(nonempty_reset);
+
+    let mut changed_wal_sidecar = canonical_input();
+    changed_wal_sidecar.failure_atomicity[1].main_wal_bytes_after = wal_bytes(1) + 1;
+    assert_canonical_rejected(changed_wal_sidecar);
+
+    let mut failed_cleanup = canonical_input();
+    failed_cleanup.failure_atomicity[1].wal_cleanup.proven_empty = false;
+    failed_cleanup.failure_atomicity[1].main_wal_bytes_after_cleanup = wal_bytes(1);
+    assert_canonical_rejected(failed_cleanup);
+
+    let mut changed_shm_sidecar = canonical_input();
+    changed_shm_sidecar.failure_atomicity[2].main_shm_bytes_after += 1;
+    assert_canonical_rejected(changed_shm_sidecar);
+}
+
+#[test]
+fn canonical_rejects_fault_complete_rollback_digest_drift() {
+    for digest_index in 0..3 {
+        let mut input = canonical_input();
+        let before = &mut input.failure_atomicity[0].rollback_before;
+        match digest_index {
+            0 => before.database_sha256 = "e".repeat(64),
+            1 => before.all_codebase_sha256 = "e".repeat(64),
+            _ => before.sqlite_sequence_sha256 = "e".repeat(64),
+        }
+        input.failure_atomicity[0].rollback_after = before.clone();
+        assert_canonical_rejected(input);
+    }
 }

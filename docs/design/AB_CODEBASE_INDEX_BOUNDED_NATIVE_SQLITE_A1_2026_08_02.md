@@ -34,6 +34,9 @@ would retain a write transaction for the complete filesystem walk.
 - The candidate and measured FullVec seam are Rust APIs only; there is no MCP,
   daemon, retrieval, deployment, or live-database caller.
 - Normal builds retain the FullVec `StateStore::codebase_index` behavior.
+  The legacy implementation was factored through a private timing seam for A1
+  evidence, so the defensible claim is unchanged algorithm and dispatch, not
+  byte-for-byte unchanged internal execution.
 - A successful benchmark is necessary but not sufficient for changing any
   dispatch path. A1 may only nominate a separately reviewed A2 candidate.
 - A1 grants no GPU, MI50, ROCm, Arrow Flight, DataFusion, C Data, or C Device
@@ -72,6 +75,16 @@ They do not simulate `xWrite`, `xSync`, torn writes, process kill, kernel crash,
 or power loss. No durability claim beyond normal SQLite behavior is made
 without a faulting VFS or equivalent owned laboratory.
 
+Each fault child is globally sequence/PID/cgroup/path bound to the same base
+preflight. It records the whole three-table typed digest, target/other-root and
+sentinel digests, `sqlite_sequence`, schema/page/freelist/integrity state, and
+the main-file SHA. An injected rollback can leave an uncommitted but physically
+valid WAL frame (observed as 4,152 bytes at 4 KiB page size); that is not a
+logical commit. The receipt therefore retains the post-fault WAL layout, then
+requires a separate `wal_checkpoint(TRUNCATE)` cleanup to prove zero WAL bytes.
+Cleanup may change only the physical main-file SHA; every logical and schema
+field must stay equal.
+
 Post-commit staging cleanup cannot truthfully turn the already committed index
 operation into an error. Cleanup failure is therefore a warning plus
 `staging_cleanup_succeeded=false`; it may leave a private staging directory and
@@ -99,6 +112,10 @@ Canonical trials therefore must:
 - record process `VmHWM`, `getrusage` max RSS, `/proc/self/io`, page faults,
   staging bytes, and main DB/WAL/SHM bytes;
 - keep staging I/O separate from authoritative WAL evidence.
+- after base preflight, pass a 30-second/1-Hz CPU39 quiet window (overall idle
+  at least 95%, every bucket at least 90%, bounded PSI, no cargo/rustc/rustdoc),
+  then bind each performance child's exclusive CPU39 affinity, effective
+  cpuset, PSI counters, and at most 5% external CPU39 activity.
 
 The explicit-parent boolean is only a routing fact; it is not disk-backed
 proof by itself. Shared login-session cgroup counters are diagnostic only and
@@ -116,6 +133,8 @@ The workload is frozen to the A0 generator and semantic contract:
   `c26dd0d5f2b3844113f1030128cbfad1506b81cec2d13b585649c5b4057a3099`;
 - batch size 4,096;
 - ten paired blocks and twenty fresh child processes;
+- eight additional fresh, isolated fault children, for 28 globally unique and
+  non-overlapping child identities;
 - exactly five FullVec-first and five staged-native-first blocks.
 
 Every pair starts from equivalent preseeded authoritative databases. Canonical

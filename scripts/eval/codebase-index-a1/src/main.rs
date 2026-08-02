@@ -9,6 +9,10 @@ use std::{
 use ab_codebase_index_a1::{
     assess_suite,
     provenance::{embedded_build_identity, executable_sha256, runtime_identity},
+    quiet::{
+        child_interference as compute_child_interference, cpu_process_sample,
+        observe_host_quiet_window,
+    },
     snapshot::{
         cgroup_memory_snapshot, database_evidence, fixture_state, peak_rss_bytes, proc_io_snapshot,
         reset_main_wal, rollback_state, rusage_snapshot, seed_base_fixture, sidecars_absent,
@@ -16,10 +20,11 @@ use ab_codebase_index_a1::{
     },
     workload::materialize,
     Assessment, AuthoritativePragmaEvidence, AuthorityEvidence, BaseFixturePreflightReceipt,
-    ChildExecutionEvidence, EvidenceClass, FailureAtomicityReceipt, FailureCase, FixtureEvidence,
-    FullVecEvidence, HostStorageContext, Measurement, Mode, PostFaultQueryEvidence, Provenance,
-    RunReceipt, RuntimeEnvironmentEvidence, StagedNativeEvidence, SuiteInput, TrialOrder,
-    TrialPair, Workload, CANONICAL_BATCH_ROWS, CANONICAL_DOCUMENTS, CANONICAL_PAIRS,
+    CanonicalRawPacket, ChildExecutionEvidence, EvidenceClass, FailureAtomicityReceipt,
+    FailureCase, FixtureEvidence, FullVecEvidence, HostStorageContext, Measurement, Mode,
+    PostFaultQueryEvidence, Provenance, RunReceipt, RuntimeEnvironmentEvidence,
+    StagedNativeEvidence, SuiteInput, TrialOrder, TrialPair, Workload, CANONICAL_BATCH_ROWS,
+    CANONICAL_DOCUMENTS, CANONICAL_PAIRS, FAILURE_RECEIPT_SCHEMA, RAW_PACKET_SCHEMA,
     RUN_RECEIPT_SCHEMA, SUITE_RECEIPT_SCHEMA,
 };
 use clap::{Parser, Subcommand, ValueEnum};
@@ -100,6 +105,12 @@ enum Commands {
         workload: PathBuf,
         #[arg(long)]
         base_fixture_sha256: String,
+        #[arg(long)]
+        expected_cgroup_unit: String,
+        #[arg(long)]
+        base_preflight: PathBuf,
+        #[arg(long)]
+        sequence: usize,
     },
 }
 
@@ -161,17 +172,6 @@ struct RawPacketCustody {
     sha256: String,
     retained: bool,
     synced_before_suite_cleanup: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct CanonicalRawPacket<'a> {
-    schema: &'static str,
-    provenance: &'a Provenance,
-    runtime_environment: &'a RuntimeEnvironmentEvidence,
-    workload: &'a Workload,
-    base_fixture_preflight: &'a BaseFixturePreflightReceipt,
-    pairs: &'a [TrialPair],
-    failure_atomicity: &'a [FailureAtomicityReceipt],
 }
 
 #[derive(Debug, Error)]
@@ -307,6 +307,9 @@ async fn async_main() -> Result<(), AppError> {
             trial_dir,
             workload,
             base_fixture_sha256,
+            expected_cgroup_unit,
+            base_preflight,
+            sequence,
         } => {
             let expected: Workload = serde_json::from_slice(&fs::read(workload)?)?;
             let receipt = run_fault_one(
@@ -315,6 +318,9 @@ async fn async_main() -> Result<(), AppError> {
                 &trial_dir,
                 expected,
                 base_fixture_sha256,
+                &expected_cgroup_unit,
+                &base_preflight,
+                sequence,
             )
             .await?;
             serde_json::to_writer(std::io::stdout().lock(), &receipt)?;
@@ -397,6 +403,26 @@ async fn run_suite(
     }
     let base_preflight_path = suite_path.join("base-preflight.json");
     emit_json(&base_preflight, Some(&base_preflight_path))?;
+    let host_quiet_window = if evidence_class == EvidenceClass::Canonical {
+        let evidence = observe_host_quiet_window(
+            39,
+            std::time::Duration::from_secs(30),
+            std::time::Duration::from_secs(1),
+        )
+        .map_err(|error| {
+            AppError::CanonicalPreflight(format!(
+                "host quiet-window evidence could not be collected: {error}"
+            ))
+        })?;
+        if !evidence.passed {
+            return Err(AppError::CanonicalPreflight(format!(
+                "host quiet-window gate rejected competing activity: {evidence:?}"
+            )));
+        }
+        Some(evidence)
+    } else {
+        None
+    };
     let mut raw = Vec::with_capacity(pairs);
     for pair_index in 0..pairs {
         let order = if pair_index % 2 == 0 {
@@ -465,7 +491,7 @@ async fn run_suite(
 
     let mut failure_atomicity = Vec::new();
     if evidence_class == EvidenceClass::Canonical {
-        for case in [
+        for (fault_index, case) in [
             FailureCase::AfterStagingBatch,
             FailureCase::AfterDeleteSymbols,
             FailureCase::AfterDeleteImports,
@@ -474,7 +500,10 @@ async fn run_suite(
             FailureCase::AfterImportRows,
             FailureCase::AfterCallRows,
             FailureCase::BeforeCommit,
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let trial_dir = suite_path.join(format!("fault-{case:?}"));
             let database_dir = trial_dir.join("database");
             fs::create_dir_all(&database_dir)?;
@@ -486,6 +515,8 @@ async fn run_suite(
                 &trial_dir,
                 &workload_path,
                 &base_fixture_sha256,
+                &base_preflight_path,
+                CANONICAL_PAIRS * 2 + fault_index,
             )?);
         }
     }
@@ -502,6 +533,7 @@ async fn run_suite(
         evidence_class,
         provenance,
         runtime_environment,
+        host_quiet_window,
         trial_root: Some(suite_path),
         cache_policy: "warm_shared_corpus_after_single_base_fixture".to_string(),
         host_storage_context: host_storage_context(),
@@ -516,13 +548,9 @@ async fn run_suite(
         })?;
         let path = PathBuf::from(format!("{}.raw.json", output.display()));
         let packet = CanonicalRawPacket {
-            schema: "agent_bridge.codebase_index.a1.raw_packet.v0",
-            provenance: &input.provenance,
-            runtime_environment: &input.runtime_environment,
-            workload: &workload,
-            base_fixture_preflight: &input.base_fixture_preflight,
-            pairs: &input.pairs,
-            failure_atomicity: &input.failure_atomicity,
+            schema: RAW_PACKET_SCHEMA.to_string(),
+            input: input.clone(),
+            assessment: assessment.clone(),
         };
         emit_json(&packet, Some(&path))?;
         let sha256 = ab_codebase_index_a1::provenance::sha256_file(&path)?;
@@ -608,6 +636,7 @@ fn base_fixture_preflight(
     }
     let fixture = fixture_state(&database_path, &source_root)?;
     let database = database_evidence(&database_path, &source_root)?;
+    let rollback_state = rollback_state(&database_path, &source_root)?;
     if fixture.target_rows != workload.total_rows
         || fixture.target_nonnull_embeddings != workload.symbols
         || database.root_rows != Some(workload.total_rows)
@@ -635,6 +664,7 @@ fn base_fixture_preflight(
         other_root_sha256: fixture.other_root_sha256,
         non_codebase_sentinel_sha256: fixture.non_codebase_sentinel_sha256,
         database,
+        rollback_state,
     })
 }
 
@@ -677,22 +707,34 @@ fn run_base_preflight_child(
     })
 }
 
+fn current_process_affinity() -> String {
+    fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|contents| {
+            contents
+                .lines()
+                .find_map(|line| line.strip_prefix("Cpus_allowed_list:").map(str::trim))
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "UNBOUND".to_string())
+}
+
+fn allocator_environment() -> String {
+    let values = [
+        "MALLOC_CONF",
+        "LD_PRELOAD",
+        "GLIBC_TUNABLES",
+        "MALLOC_ARENA_MAX",
+    ]
+    .map(|key| (key, std::env::var(key).ok()));
+    serde_json::to_string(&values).unwrap_or_else(|_| "UNBOUND".to_string())
+}
+
 fn runtime_environment() -> RuntimeEnvironmentEvidence {
     fn read(path: &str) -> String {
         fs::read_to_string(path)
             .map(|value| value.trim().to_string())
             .unwrap_or_else(|_| "UNBOUND".to_string())
-    }
-    fn status_value(key: &str) -> String {
-        fs::read_to_string("/proc/self/status")
-            .ok()
-            .and_then(|contents| {
-                contents
-                    .lines()
-                    .find_map(|line| line.strip_prefix(key).map(str::trim))
-                    .map(str::to_string)
-            })
-            .unwrap_or_else(|| "UNBOUND".to_string())
     }
     fn cpuinfo_value(key: &str) -> String {
         fs::read_to_string("/proc/cpuinfo")
@@ -720,14 +762,12 @@ fn runtime_environment() -> RuntimeEnvironmentEvidence {
         kernel_release: read("/proc/sys/kernel/osrelease"),
         cpu_model: cpuinfo_value("model name"),
         cpu_microcode: cpuinfo_value("microcode"),
-        process_affinity: status_value("Cpus_allowed_list:"),
+        process_affinity: current_process_affinity(),
         canonical_cpu: 39,
         excluded_smt_sibling: 79,
         canonical_cpu_siblings: read("/sys/devices/system/cpu/cpu39/topology/thread_siblings_list"),
         libc: command_first_line("getconf", &["GNU_LIBC_VERSION"]),
-        allocator: std::env::var("MALLOC_CONF")
-            .map(|value| format!("MALLOC_CONF={value}"))
-            .unwrap_or_else(|_| "system-libc-default".to_string()),
+        allocator: allocator_environment(),
         systemd_version: command_first_line("systemd", &["--version"]),
         loadavg: read("/proc/loadavg"),
         cpu_pressure: read("/proc/pressure/cpu"),
@@ -870,6 +910,8 @@ fn run_child(
     serde_json::from_slice(&output.stdout).map_err(|source| AppError::ChildJson { mode, source })
 }
 
+// Keep every fault-child custody identity explicit at the process boundary.
+#[allow(clippy::too_many_arguments)]
 fn run_fault_child(
     executable: &Path,
     case: FailureCase,
@@ -877,6 +919,8 @@ fn run_fault_child(
     trial_dir: &Path,
     workload_path: &Path,
     base_fixture_sha256: &str,
+    base_preflight: &Path,
+    sequence: usize,
 ) -> Result<FailureAtomicityReceipt, AppError> {
     let case_arg = match case {
         FailureCase::AfterStagingBatch => "after-staging-batch",
@@ -904,7 +948,13 @@ fn run_fault_child(
         .arg("--workload")
         .arg(workload_path)
         .arg("--base-fixture-sha256")
-        .arg(base_fixture_sha256);
+        .arg(base_fixture_sha256)
+        .arg("--expected-cgroup-unit")
+        .arg(&unit)
+        .arg("--base-preflight")
+        .arg(base_preflight)
+        .arg("--sequence")
+        .arg(sequence.to_string());
     let output = output_with_timeout(command, std::time::Duration::from_secs(1_800), Some(&unit))
         .map_err(|error| timed_child_error(error, Mode::StagedNative))?;
     if !output.success {
@@ -975,17 +1025,92 @@ fn stop_and_verify_transient_unit(unit: &str) -> Result<(), TimedOutputError> {
         .stderr(Stdio::null())
         .status()
         .map_err(TimedOutputError::Io)?;
-    let active = Command::new("systemctl")
-        .args(["--user", "is-active", "--quiet", unit])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(TimedOutputError::Io)?
-        .success();
-    if active {
-        return Err(TimedOutputError::OrphanedUnit(unit.to_string()));
+
+    let started = Instant::now();
+    while started.elapsed() < std::time::Duration::from_secs(30) {
+        let output = Command::new("systemctl")
+            .args([
+                "--user",
+                "show",
+                unit,
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=ControlGroup",
+                "--no-pager",
+            ])
+            .output()
+            .map_err(TimedOutputError::Io)?;
+        if output.status.success()
+            && String::from_utf8(output.stdout)
+                .ok()
+                .and_then(|value| parse_transient_unit_state(&value))
+                .is_some_and(|state| transient_unit_is_quiescent(&state))
+        {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    Ok(())
+    Err(TimedOutputError::OrphanedUnit(unit.to_string()))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct TransientUnitState {
+    load_state: String,
+    active_state: String,
+    sub_state: String,
+    control_group: String,
+}
+
+fn parse_transient_unit_state(value: &str) -> Option<TransientUnitState> {
+    fn property(value: &str, name: &str) -> Option<String> {
+        value
+            .lines()
+            .find_map(|line| line.strip_prefix(name))
+            .map(str::trim)
+            .map(str::to_string)
+    }
+    Some(TransientUnitState {
+        load_state: property(value, "LoadState=")?,
+        active_state: property(value, "ActiveState=")?,
+        sub_state: property(value, "SubState=")?,
+        control_group: property(value, "ControlGroup=")?,
+    })
+}
+
+fn transient_unit_is_quiescent(state: &TransientUnitState) -> bool {
+    if state.load_state == "not-found" {
+        return true;
+    }
+    matches!(state.active_state.as_str(), "inactive" | "failed")
+        && matches!(state.sub_state.as_str(), "dead" | "failed")
+        && cgroup_is_unpopulated(&state.control_group)
+}
+
+fn cgroup_is_unpopulated(relative: &str) -> bool {
+    if relative.is_empty() {
+        return true;
+    }
+    let relative = Path::new(relative.trim_start_matches('/'));
+    if relative
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return false;
+    }
+    let directory = Path::new("/sys/fs/cgroup").join(relative);
+    if !directory.exists() {
+        return true;
+    }
+    let processes_empty = fs::read_to_string(directory.join("cgroup.procs"))
+        .is_ok_and(|value| value.trim().is_empty());
+    let explicitly_unpopulated =
+        fs::read_to_string(directory.join("cgroup.events")).is_ok_and(|value| {
+            value
+                .lines()
+                .any(|line| line.split_whitespace().eq(["populated", "0"]))
+        });
+    processes_empty && explicitly_unpopulated
 }
 
 fn output_with_timeout(
@@ -1140,6 +1265,9 @@ async fn run_one(
         let cgroup_before = cgroup_memory_snapshot();
         let proc_io_before = proc_io_snapshot();
         let rusage_before = rusage_snapshot();
+        let interference_start = expected_cgroup_unit
+            .map(|_| cpu_process_sample(39))
+            .transpose()?;
         let started = Instant::now();
         let (stats, authoritative_transaction_ns, full_vec, staged_native) = match mode {
             Mode::FullVec => {
@@ -1205,6 +1333,14 @@ async fn run_one(
             }
         };
         let elapsed_ns = duration_ns(started.elapsed());
+        let interference_end = expected_cgroup_unit
+            .map(|_| cpu_process_sample(39))
+            .transpose()?;
+        let child_interference = interference_start
+            .as_ref()
+            .zip(interference_end.as_ref())
+            .map(|(start, end)| compute_child_interference(start, end))
+            .transpose()?;
         let vm_hwm = peak_rss_bytes();
         let cgroup_after = cgroup_memory_snapshot();
         let proc_io_after = proc_io_snapshot();
@@ -1310,6 +1446,7 @@ async fn run_one(
                 getrusage_max_rss_bytes: rusage_after.map(|value| value.max_rss_bytes),
                 parent_wait4_max_rss_bytes: None,
             },
+            child_interference,
             database,
             fixture: FixtureEvidence {
                 base_fixture_sha256,
@@ -1343,27 +1480,63 @@ async fn run_one(
 }
 
 #[cfg(feature = "staged-native")]
+// Mirrors the hidden CLI boundary so no path/sequence/cgroup authority is implicit.
+#[allow(clippy::too_many_arguments)]
 async fn run_fault_one(
     case: FailureCase,
     source_root: &Path,
     trial_dir: &Path,
     workload: Workload,
     base_fixture_sha256: String,
+    expected_cgroup_unit: &str,
+    base_preflight_path: &Path,
+    sequence: usize,
 ) -> Result<FailureAtomicityReceipt, AppError> {
+    let child_started_unix_ns = unix_time_ns()?;
     let source_root = source_root.canonicalize()?;
     let trial_dir = trial_dir.canonicalize()?;
-    let database_path = trial_dir.join("database/state.db");
+    let database_path = trial_dir.join("database/state.db").canonicalize()?;
     let staging_dir = trial_dir.join("staging");
     fs::create_dir_all(&staging_dir)?;
     let database_copy_sha256_before =
         ab_codebase_index_a1::provenance::sha256_file(&database_path)?;
+    let base_preflight: BaseFixturePreflightReceipt =
+        serde_json::from_slice(&fs::read(base_preflight_path)?)?;
+    if base_preflight.base_fixture_sha256 != base_fixture_sha256
+        || base_preflight.database_copy_sha256 != base_fixture_sha256
+        || base_preflight.workload != workload
+        || database_copy_sha256_before != base_fixture_sha256
+    {
+        return Err(AppError::BaseFixture(
+            "fault child is not bound to the preflight base/workload".to_string(),
+        ));
+    }
     let store = ab_store::SqliteStore::open(&database_path)
         .await
         .map_err(|error| AppError::Store(error.to_string()))?;
+    let authoritative_pragmas_before = authoritative_pragmas(&store).await?;
+    let wal_reset = reset_main_wal(&database_path)?;
+    if wal_reset.busy != 0
+        || wal_reset.log_frames != 0
+        || wal_reset.checkpointed_frames != 0
+        || wal_reset.wal_bytes != 0
+        || !wal_reset.proven_empty
+    {
+        return Err(AppError::BaseFixture(
+            "fault child WAL reset did not prove an empty WAL".to_string(),
+        ));
+    }
+    let main_wal_bytes_before = sqlite_sidecar_bytes(&database_path, "-wal")?;
+    let main_shm_bytes_before = sqlite_sidecar_bytes(&database_path, "-shm")?;
     let before = fixture_state(&database_path, &source_root)?;
     let rollback_before = rollback_state(&database_path, &source_root)?;
-    let authoritative_pragmas_before = authoritative_pragmas(&store).await?;
-    reset_main_wal(&database_path)?;
+    if rollback_before != base_preflight.rollback_state {
+        return Err(AppError::BaseFixture(
+            "fault child rollback baseline differs from preflight".to_string(),
+        ));
+    }
+    let cgroup_before = cgroup_memory_snapshot();
+    let actual_process_affinity = current_process_affinity();
     let failpoint = match case {
         FailureCase::AfterStagingBatch => ab_store::CodebaseIndexA1Failpoint::AfterStagingBatch(1),
         FailureCase::AfterDeleteSymbols => ab_store::CodebaseIndexA1Failpoint::AfterDeleteSymbols,
@@ -1407,11 +1580,68 @@ async fn run_fault_one(
     let authoritative_pragmas_after = post_fault_pragmas;
     let after = fixture_state(&database_path, &source_root)?;
     let rollback_after = rollback_state(&database_path, &source_root)?;
+    let main_wal_bytes_after = sqlite_sidecar_bytes(&database_path, "-wal")?;
+    let main_shm_bytes_after = sqlite_sidecar_bytes(&database_path, "-shm")?;
+    let wal_cleanup = reset_main_wal(&database_path)?;
+    if !wal_cleanup.proven_empty {
+        return Err(AppError::BaseFixture(
+            "fault child post-rollback WAL cleanup did not prove an empty WAL".to_string(),
+        ));
+    }
+    let main_wal_bytes_after_cleanup = sqlite_sidecar_bytes(&database_path, "-wal")?;
+    let main_shm_bytes_after_cleanup = sqlite_sidecar_bytes(&database_path, "-shm")?;
+    let rollback_after_cleanup = rollback_state(&database_path, &source_root)?;
+    if !rollback_semantics_equal(&rollback_after_cleanup, &rollback_after) {
+        return Err(AppError::BaseFixture(
+            format!(
+                "fault child post-rollback WAL cleanup changed authoritative state: before={rollback_after:?}, after={rollback_after_cleanup:?}"
+            ),
+        ));
+    }
+    let cgroup_after = cgroup_memory_snapshot();
+    let (cgroup_path, cgroup_process_count, cgroup_isolated_for_trial) =
+        match (cgroup_before, cgroup_after) {
+            (Some(before), Some(after)) if before.path == after.path => {
+                let isolated = before.process_count == 1
+                    && after.process_count == 1
+                    && after
+                        .path
+                        .ends_with(&format!("/{expected_cgroup_unit}.service"))
+                    && actual_process_affinity == "39";
+                (after.path, after.process_count, isolated)
+            }
+            _ => ("UNBOUND".to_string(), 0, false),
+        };
     let staging_cleanup_succeeded = fs::read_dir(&staging_dir)?.next().is_none();
     let executable_sha = executable_sha256()?;
+    let child_finished_unix_ns = unix_time_ns()?;
     Ok(FailureAtomicityReceipt {
+        schema: FAILURE_RECEIPT_SCHEMA.to_string(),
         case,
+        workload,
+        execution: ChildExecutionEvidence {
+            mode: Mode::StagedNative,
+            sequence,
+            process_id: std::process::id(),
+            started_unix_ns: child_started_unix_ns,
+            finished_unix_ns: child_finished_unix_ns,
+        },
         build_identity: embedded_build_identity(Some(executable_sha)),
+        trial_root: trial_dir,
+        database_path,
+        expected_cgroup_unit: expected_cgroup_unit.to_string(),
+        cgroup_path,
+        cgroup_process_count,
+        cgroup_isolated_for_trial,
+        actual_process_affinity,
+        wal_reset,
+        wal_cleanup,
+        main_wal_bytes_before,
+        main_wal_bytes_after,
+        main_wal_bytes_after_cleanup,
+        main_shm_bytes_before,
+        main_shm_bytes_after,
+        main_shm_bytes_after_cleanup,
         expected_error_observed: observed_error.contains(&expected_error_marker),
         expected_error_marker,
         observed_error,
@@ -1423,6 +1653,7 @@ async fn run_fault_one(
         non_codebase_sentinel_sha256_after: after.non_codebase_sentinel_sha256,
         rollback_before,
         rollback_after,
+        rollback_after_cleanup,
         authoritative_pragmas_before,
         authoritative_pragmas_after,
         connection_usable_after: post_fault_query.succeeded,
@@ -1440,6 +1671,9 @@ async fn run_fault_one(
     _trial_dir: &Path,
     _workload: Workload,
     _base_fixture_sha256: String,
+    _expected_cgroup_unit: &str,
+    _base_preflight_path: &Path,
+    _sequence: usize,
 ) -> Result<FailureAtomicityReceipt, AppError> {
     Err(AppError::FeatureMissing)
 }
@@ -1507,6 +1741,27 @@ fn signed_delta(before: Option<u64>, after: Option<u64>) -> Option<i64> {
     i64::try_from(delta).ok()
 }
 
+fn rollback_semantics_equal(
+    left: &ab_codebase_index_a1::RollbackStateEvidence,
+    right: &ab_codebase_index_a1::RollbackStateEvidence,
+) -> bool {
+    let mut left = left.clone();
+    let mut right = right.clone();
+    left.database_sha256.clear();
+    right.database_sha256.clear();
+    left == right
+}
+
+fn sqlite_sidecar_bytes(database_path: &Path, suffix: &str) -> Result<u64, AppError> {
+    let mut sidecar = database_path.as_os_str().to_os_string();
+    sidecar.push(suffix);
+    match fs::metadata(PathBuf::from(sidecar)) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(AppError::Io(error)),
+    }
+}
+
 fn sha256_bytes(bytes: &[u8]) -> String {
     let mut digest = Sha256::new();
     digest.update(bytes);
@@ -1548,9 +1803,14 @@ fn emit_json<T: Serialize>(value: &T, output: Option<&Path>) -> Result<(), AppEr
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsStr, path::Path};
+    use std::{ffi::OsStr, fs, path::Path};
 
-    use super::{transient_service_command, AppError};
+    use super::{
+        base_fixture_preflight, build_base_fixture, emit_json, parse_transient_unit_state,
+        rollback_semantics_equal, run_fault_one, transient_service_command,
+        transient_unit_is_quiescent, AppError,
+    };
+    use ab_codebase_index_a1::{workload::materialize, FailureCase};
 
     #[test]
     fn canonical_terminal_failures_have_distinct_nonzero_exit_codes() {
@@ -1586,5 +1846,73 @@ mod tests {
             args.last().copied(),
             Some(OsStr::new("/opt/ab-codebase-index-a1"))
         );
+    }
+
+    #[test]
+    fn transient_unit_state_requires_inactive_dead_or_collected() {
+        let active = parse_transient_unit_state(
+            "LoadState=loaded\nActiveState=deactivating\nSubState=stop-sigterm\nControlGroup=/user.slice/test.service\n",
+        )
+        .unwrap();
+        assert!(!transient_unit_is_quiescent(&active));
+
+        let collected = parse_transient_unit_state(
+            "LoadState=not-found\nActiveState=inactive\nSubState=dead\nControlGroup=\n",
+        )
+        .unwrap();
+        assert!(transient_unit_is_quiescent(&collected));
+    }
+
+    #[cfg(feature = "staged-native")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn real_fault_path_starts_and_finishes_with_empty_wal_and_exact_rollback() {
+        let root = tempfile::tempdir_in("/Data/CascadeProjects").unwrap();
+        let suite = root.path().join("suite");
+        let corpus = suite.join("corpus");
+        fs::create_dir_all(&corpus).unwrap();
+        let workload = materialize(&corpus, 1, 16).unwrap();
+        let (base_path, base_sha) = build_base_fixture(&suite, &corpus, &workload)
+            .await
+            .unwrap();
+        let preflight =
+            base_fixture_preflight(&corpus, &base_path, workload.clone(), base_sha.clone())
+                .unwrap();
+        let preflight_path = suite.join("base-preflight.json");
+        emit_json(&preflight, Some(&preflight_path)).unwrap();
+
+        let trial = suite.join("fault-smoke");
+        fs::create_dir_all(trial.join("database")).unwrap();
+        fs::copy(&base_path, trial.join("database/state.db")).unwrap();
+        let receipt = run_fault_one(
+            FailureCase::AfterSymbolRows,
+            &corpus,
+            &trial,
+            workload,
+            base_sha,
+            "ab-codebase-index-a1-test-fault-after-symbol-rows",
+            &preflight_path,
+            20,
+        )
+        .await
+        .unwrap();
+
+        assert!(receipt.expected_error_observed, "{receipt:#?}");
+        assert!(receipt.wal_reset.proven_empty);
+        assert_eq!(receipt.main_wal_bytes_before, 0);
+        assert_eq!(receipt.main_wal_bytes_after, 4_152);
+        assert!(receipt.wal_cleanup.proven_empty);
+        assert_eq!(receipt.main_wal_bytes_after_cleanup, 0);
+        assert_eq!(receipt.rollback_before, preflight.rollback_state);
+        assert_eq!(receipt.rollback_after, preflight.rollback_state);
+        assert!(rollback_semantics_equal(
+            &receipt.rollback_after_cleanup,
+            &preflight.rollback_state,
+        ));
+        assert_ne!(
+            receipt.rollback_after_cleanup.database_sha256,
+            preflight.rollback_state.database_sha256
+        );
+        assert!(receipt.connection_usable_after);
+        assert!(receipt.staging_cleanup_succeeded);
     }
 }
