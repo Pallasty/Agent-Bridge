@@ -54,6 +54,34 @@ def main() -> int:
         )
         publish(sys.argv[2], f"{os.getpid()} {child.pid}")
         time.sleep(300)
+    if mode == "exit_with_descendant":
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)",
+            ],
+            close_fds=True,
+        )
+        publish(sys.argv[2], f"{os.getpid()} {child.pid}")
+        sys.stdout.buffer.write(b'{"status":"must-not-be-accepted"}')
+        return 0
+    if mode == "kill_guardian":
+        os.kill(os.getppid(), signal.SIGKILL)
+        time.sleep(300)
+    if mode == "fd_audit":
+        leaked = []
+        for fd in range(190, 198):
+            try:
+                os.fstat(fd)
+            except OSError:
+                continue
+            leaked.append(fd)
+        if leaked:
+            sys.stderr.write(f"custody descriptors leaked: {leaked}\n")
+            return 71
+        sys.stdout.buffer.write(b'{"status":"synthetic-success"}')
+        return 0
     return 70
 
 

@@ -1,6 +1,15 @@
 #![cfg(target_os = "linux")]
 
 #[allow(dead_code)]
+#[path = "../src/story_render_guardian.rs"]
+mod story_render_guardian;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_protocol.rs"]
+mod story_render_guardian_protocol;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_supervision.rs"]
+mod story_render_guardian_supervision;
+#[allow(dead_code)]
 #[path = "../src/story_render_supervisor.rs"]
 mod story_render_supervisor;
 #[path = "../src/story_render_synthetic_admission.rs"]
@@ -282,6 +291,7 @@ async fn busy_host_rejects_before_any_provider_stage_or_second_spawn() {
         lifecycle_config(root.path(), "hang", &[&first_pid_file]),
         br#"{"synthetic":"s625-busy"}"#.to_vec(),
     )
+    .await
     .expect("start first Worker");
     wait_for_pid_file(&first_pid_file, 1).await;
     let config = codec_config(root.path(), "mark_success", &[&marker]);

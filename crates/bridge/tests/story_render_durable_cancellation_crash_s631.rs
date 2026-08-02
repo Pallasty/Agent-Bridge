@@ -12,6 +12,15 @@ mod story_render_durable_synthetic_composition;
 #[allow(dead_code)]
 #[path = "../src/story_render_fixed_synthetic_provider.rs"]
 mod story_render_fixed_synthetic_provider;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian.rs"]
+mod story_render_guardian;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_protocol.rs"]
+mod story_render_guardian_protocol;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_supervision.rs"]
+mod story_render_guardian_supervision;
 #[path = "../src/story_render_replay_continuity_file_synthetic.rs"]
 mod story_render_replay_continuity_file_synthetic;
 #[allow(dead_code)]

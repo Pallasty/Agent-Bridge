@@ -1,5 +1,15 @@
 #![cfg(target_os = "linux")]
 
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian.rs"]
+mod story_render_guardian;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_protocol.rs"]
+mod story_render_guardian_protocol;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_supervision.rs"]
+mod story_render_guardian_supervision;
+#[allow(dead_code)]
 #[path = "../src/story_render_supervisor.rs"]
 mod story_render_supervisor;
 
@@ -98,7 +108,7 @@ async fn wait_for_pid_file(path: &Path, count: usize) -> Vec<u32> {
 async fn retry_after_cleanup(config: StoryRenderSupervisorConfig) {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        match start_story_render_supervisor(config.clone(), REQUEST.to_vec()) {
+        match start_story_render_supervisor(config.clone(), REQUEST.to_vec()).await {
             Ok(run) => {
                 run.await.expect("retry after cleanup succeeds");
                 return;
@@ -148,10 +158,10 @@ fn start_outside_tokio_runtime_rejects_before_lock_or_spawn() {
     let marker = root.path().join("spawned");
     let config = synthetic_config(root.path(), "mark_success", &[&marker]);
 
-    let error = error_from_start(start_story_render_supervisor(
+    let error = error_from_start(futures::executor::block_on(start_story_render_supervisor(
         config.clone(),
         REQUEST.to_vec(),
-    ));
+    )));
 
     assert_eq!(error, StoryRenderSupervisorError::InvalidConfiguration);
     assert!(!config.lock_path.exists());
@@ -163,6 +173,7 @@ async fn success_drains_both_pipes_reaps_worker_and_releases_lock() {
     let root = TempDir::new().expect("temp root");
     let config = synthetic_config(root.path(), "success", &[]);
     let run = start_story_render_supervisor(config.clone(), REQUEST.to_vec())
+        .await
         .expect("start synthetic worker");
     let pid = run.worker_pid();
 
@@ -190,13 +201,17 @@ async fn busy_lock_rejects_without_queue_or_second_spawn() {
         synthetic_config(root.path(), "hang", &[&first_pid_file]),
         REQUEST.to_vec(),
     )
+    .await
     .expect("start first worker");
     wait_for_pid_file(&first_pid_file, 1).await;
 
-    let error = error_from_start(start_story_render_supervisor(
-        synthetic_config(root.path(), "mark_success", &[&marker]),
-        REQUEST.to_vec(),
-    ));
+    let error = error_from_start(
+        start_story_render_supervisor(
+            synthetic_config(root.path(), "mark_success", &[&marker]),
+            REQUEST.to_vec(),
+        )
+        .await,
+    );
 
     assert_eq!(error, StoryRenderSupervisorError::Busy);
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -212,10 +227,9 @@ async fn oversized_input_rejects_before_lock_creation_or_spawn() {
     let marker = root.path().join("spawned");
     let config = synthetic_config(root.path(), "mark_success", &[&marker]);
 
-    let error = error_from_start(start_story_render_supervisor(
-        config.clone(),
-        vec![b'x'; config.stdin_max_bytes + 1],
-    ));
+    let error = error_from_start(
+        start_story_render_supervisor(config.clone(), vec![b'x'; config.stdin_max_bytes + 1]).await,
+    );
 
     assert_eq!(error, StoryRenderSupervisorError::InputTooLarge);
     assert!(!config.lock_path.exists());
@@ -228,7 +242,7 @@ async fn spawn_failure_releases_lock_for_a_fresh_attempt() {
     let mut invalid = synthetic_config(root.path(), "success", &[]);
     invalid.executable = PathBuf::from("/s623/missing/python3");
 
-    let error = error_from_start(start_story_render_supervisor(invalid, REQUEST.to_vec()));
+    let error = error_from_start(start_story_render_supervisor(invalid, REQUEST.to_vec()).await);
 
     assert_eq!(error, StoryRenderSupervisorError::SpawnFailed);
     retry_after_cleanup(synthetic_config(root.path(), "success", &[])).await;
@@ -238,6 +252,7 @@ async fn assert_worker_failure(mode: &str, expected: StoryRenderSupervisorError)
     let root = TempDir::new().expect("temp root");
     let config = synthetic_config(root.path(), mode, &[]);
     let run = start_story_render_supervisor(config.clone(), REQUEST.to_vec())
+        .await
         .expect("start failure fixture");
     let pid = run.worker_pid();
 
@@ -287,6 +302,7 @@ async fn deadline_terminates_reaps_and_releases_lock() {
     let mut config = synthetic_config(root.path(), "hang", &[&pid_file]);
     config.deadline = Duration::from_millis(100);
     let run = start_story_render_supervisor(config.clone(), REQUEST.to_vec())
+        .await
         .expect("start hanging fixture");
     let pid = run.worker_pid();
     wait_for_pid_file(&pid_file, 1).await;
@@ -304,6 +320,7 @@ async fn dropping_future_kills_term_ignoring_process_group_and_recovers_lock() {
     let pid_file = root.path().join("descendants.pid");
     let config = synthetic_config(root.path(), "term_ignoring_descendant", &[&pid_file]);
     let run = start_story_render_supervisor(config.clone(), REQUEST.to_vec())
+        .await
         .expect("start descendant fixture");
     let reported = wait_for_pid_file(&pid_file, 2).await;
     assert_eq!(reported[0], run.worker_pid());

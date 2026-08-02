@@ -64,6 +64,7 @@ where
     admission.bind_response_validator(s622_response_validator(request_id.clone()));
     let output = admission
         .start(request)
+        .await
         .map_err(StoryRenderSyntheticAdmissionError::Supervisor)?
         .await
         .map_err(StoryRenderSyntheticAdmissionError::Supervisor)?;
