@@ -1257,6 +1257,13 @@ async fn avatar_linux_renderer_payload(
     s: &AppState,
     q: &AvatarSurfaceQuery,
 ) -> Result<Value, (StatusCode, String)> {
+    if q.aura_io.is_some() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "aura_io_file_access_disabled".to_string(),
+        ));
+    }
+
     let avatars = avatar_surface_entries(s, q).await?;
     let projected = avatars.first();
     let pet_id = avatar_renderer_pet_id_from_entry(projected);
@@ -7713,6 +7720,129 @@ mod tests {
         assert!(href.contains("aura_io=%2Ftmp%2Fa2_working_aura_io.json"));
         assert!(href.contains("include_stale=true"));
         assert!(href.contains("transparent=true"));
+    }
+
+    async fn isolated_avatar_renderer_state(temp: &tempfile::TempDir) -> AppState {
+        let store: std::sync::Arc<dyn StateStore> = std::sync::Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open temporary store"),
+        );
+        let capabilities = json!({
+            "avatar_state": {
+                "agent_avatar_protocol": 1,
+                "agent_id": "aura-p1-default-disabled-test",
+                "runtime": "codex",
+                "avatar_id": "aura-p1-no-ambient-pet-state",
+                "project": "aura-p1-default-disabled-test"
+            }
+        });
+        store
+            .agent_presence_announce(
+                "aura-p1-default-disabled-test",
+                ab_store::AgentPresenceUpsert {
+                    name: Some("Aura P1 default-disabled test"),
+                    node: Some("test"),
+                    project: Some("aura-p1-default-disabled-test"),
+                    role: Some("gate"),
+                    capabilities: Some(&capabilities),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("seed isolated avatar presence");
+
+        AppState {
+            store,
+            embed_backend: build_raw_embed_backend(),
+        }
+    }
+
+    fn isolated_avatar_renderer_query(aura_io: Option<std::path::PathBuf>) -> AvatarSurfaceQuery {
+        AvatarSurfaceQuery {
+            project: Some("aura-p1-default-disabled-test".into()),
+            role: Some("gate".into()),
+            aura_io,
+            max_idle_secs: 300,
+            include_stale: true,
+            limit: 1,
+            refresh_secs: 10,
+            stale_secs: 300,
+            include_raw_presence: false,
+            include_compat: false,
+            transparent: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn avatar_linux_renderer_rejects_successfully_parsed_aura_io_before_payload_acquisition()
+    {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let invalid_aura_io = temp.path().join("invalid-aura-io.json");
+        std::fs::write(&invalid_aura_io, b"not valid json").expect("write invalid aura fixture");
+        let state = isolated_avatar_renderer_state(&temp).await;
+
+        let result = avatar_linux_renderer_payload(
+            &state,
+            &isolated_avatar_renderer_query(Some(invalid_aura_io)),
+        )
+        .await;
+
+        assert_eq!(
+            result,
+            Err((
+                StatusCode::FORBIDDEN,
+                "aura_io_file_access_disabled".to_string()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn avatar_linux_renderer_without_aura_io_preserves_existing_payload() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let state = isolated_avatar_renderer_state(&temp).await;
+
+        let payload = avatar_linux_renderer_payload(&state, &isolated_avatar_renderer_query(None))
+            .await
+            .expect("a request without aura_io must preserve the renderer payload");
+
+        assert_eq!(payload["surface"], "linux_codex_avatar_renderer_state");
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["project"], "aura-p1-default-disabled-test");
+        assert_eq!(payload["input"]["presence_avatar_count"], 1);
+        assert_eq!(payload["input"]["pet_id"], "aura-p1-no-ambient-pet-state");
+        assert_eq!(payload["input"]["raw_pet_state_available"], false);
+        assert_eq!(
+            payload["input"]["presence_project"],
+            "aura-p1-default-disabled-test"
+        );
+        assert_eq!(payload["input"]["presence_role"], "gate");
+        assert!(payload["input"]["aura_io"].is_null());
+    }
+
+    #[test]
+    fn avatar_linux_renderer_aura_guard_precedes_payload_acquisition() {
+        let source = include_str!("daemon_http.rs");
+        let handler_start = source
+            .find("async fn avatar_linux_renderer_payload(")
+            .expect("renderer payload handler");
+        let handler_end = source[handler_start..]
+            .find("\nasync fn avatar_linux_renderer_state(")
+            .map(|offset| handler_start + offset)
+            .expect("renderer state handler boundary");
+        let handler = &source[handler_start..handler_end];
+        let aura_guard = handler
+            .find("if q.aura_io.is_some()")
+            .expect("unconditional aura_io guard");
+        let presence_read = handler
+            .find("avatar_surface_entries(s, q).await?")
+            .expect("presence payload acquisition");
+        let pet_state_read = handler
+            .find("read_pet_state(&pet_id)")
+            .expect("pet-state payload acquisition");
+
+        assert!(aura_guard < presence_read);
+        assert!(aura_guard < pet_state_read);
     }
 
     #[test]
