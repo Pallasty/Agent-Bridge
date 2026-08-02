@@ -34,9 +34,8 @@ would retain a write transaction for the complete filesystem walk.
 - The candidate and measured FullVec seam are Rust APIs only; there is no MCP,
   daemon, retrieval, deployment, or live-database caller.
 - Normal builds retain the FullVec `StateStore::codebase_index` behavior.
-- A successful benchmark is necessary but not sufficient for changing the
-  default. A final feature-path integration decision is made only after the
-  canonical receipt.
+- A successful benchmark is necessary but not sufficient for changing any
+  dispatch path. A1 may only nominate a separately reviewed A2 candidate.
 - A1 grants no GPU, MI50, ROCm, Arrow Flight, DataFusion, C Data, or C Device
   authority.
 
@@ -52,6 +51,7 @@ would retain a write transaction for the complete filesystem walk.
 | Isolation | a second root remains byte-exact, including IDs, timestamp and BLOB bytes |
 | Schema | normalized `sqlite_schema`, `schema_meta`, schema/user versions remain unchanged |
 | Database attachment | staging is a separate connection and never appears in authoritative `database_list` |
+| Connection policy | authoritative connection PRAGMAs are captured read-only before/after and remain exact |
 | Health | `integrity_check=ok` and `foreign_key_check` is empty |
 
 `batch_rows` must be in `1..=65,536`. The canonical batch size is 4,096.
@@ -79,19 +79,32 @@ is a residual operational risk.
 
 ## Filesystem and memory accounting
 
-The system temporary directory on the evaluation host is tmpfs. Moving rows
-from Rust vectors into `/tmp` would shift pressure into shmem/page cache and
-could create a misleading process-RSS win. Canonical trials therefore must:
+The system temporary directory on the evaluation host is tmpfs and `/Data` is
+NTFS/FUSE. The apparent default AB path under `$HOME/.local` also resolves
+through a symlink onto `/Media/...` fuseblk; `/home` ext4 is therefore a
+controlled causal medium, not a claim about the current live persistence
+stack. Moving rows into `/tmp` would shift pressure into shmem/page cache, and
+mixing filesystems inside a pair would confound the algorithm comparison.
+Canonical trials therefore must:
 
-- pass an explicit per-trial staging parent under `/Data`;
-- resolve and record the staging path and its mount/fstype;
-- reject tmpfs or unknown staging media;
-- record process `VmHWM`, cgroup memory where available, `/proc/self/io`, page
-  faults, staging bytes, and main DB/WAL/SHM bytes;
+- place authoritative and staging databases under an isolated `/home` ext4
+  directory on the same device;
+- pass an explicit per-trial staging parent;
+- capture the actual ephemeral staging file path, device, mount point, and
+  filesystem type before cleanup rather than inferring them from the requested
+  parent;
+- reject tmpfs, fuseblk, unknown media, or a device mismatch;
+- launch every measured child in a unique transient user-systemd cgroup and
+  record its `memory.peak` plus `memory.stat` anon/file/shmem values;
+- record process `VmHWM`, `getrusage` max RSS, `/proc/self/io`, page faults,
+  staging bytes, and main DB/WAL/SHM bytes;
 - keep staging I/O separate from authoritative WAL evidence.
 
 The explicit-parent boolean is only a routing fact; it is not disk-backed
-proof by itself.
+proof by itself. Shared login-session cgroup counters are diagnostic only and
+cannot admit a canonical result. A separately labelled fuseblk run may measure
+live-substrate external validity, but is non-gating and cannot be combined with
+the ext4 canonical estimates.
 
 ## Canonical comparison
 
@@ -110,9 +123,20 @@ admission is fail-closed on source/build/executable drift, missing measurements,
 non-release builds, dirty tracked source, non-disk staging, semantic/schema/page
 drift, or an invalid trial schedule.
 
+A separate preflight child validates the frozen base database so its full-row
+walk cannot contaminate a measured child's non-resettable high-water marks.
+The same clean executable also runs all eight deterministic failpoints from
+copies of that base. Every failure receipt must match its expected marker and
+prove an exact full-field rollback, stable schema/PRAGMAs/page state, connection
+usability, and staging cleanup. All preflight, performance, and fault receipts
+bind to one base SHA-256. Trials use an explicitly labelled warm-cache protocol;
+fresh process does not imply cold page cache.
+
 Candidate thresholds are:
 
 - median peak RSS reduction at least 30%;
+- median isolated-cgroup total peak regression no worse than 5%, with the
+  guardrail passing in at least 8 of 10 pairs;
 - median end-to-end elapsed regression no worse than 10%;
 - joint RSS and elapsed pass in at least 8 of 10 pairs;
 - median authoritative-transaction regression no worse than 10%, and no worse
@@ -132,6 +156,6 @@ measured FullVec timing seam. It also characterizes field-complete FullVec
 equivalence, root isolation, cleanup, schema, page/freelist, integrity, and
 foreign-key invariants.
 
-The final result, raw receipt identity, performance decision, and any feature
-integration outcome will be appended only after a clean release build and the
-frozen canonical suite.
+The final result, raw receipt identity, performance decision, and any A2
+nomination will be appended only after a clean release build and the frozen
+canonical suite.
