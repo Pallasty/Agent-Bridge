@@ -14,6 +14,12 @@ pub const LCC_AURA_UNIFORM_ENCODING: &str = "little_endian_f32";
 pub const LCC_AURA_VISIBLE_SIGNAL_SOURCE: &str = "curated_digest_only";
 pub const LCC_AURA_SHADOW_SIGNAL_POLICY: &str = "shadow_only_until_falsified";
 
+mod aura_io_capability;
+pub use aura_io_capability::{
+    AuraIoFailureReason, AuraIoReadCapability, AuraIoReadError, AuraIoRole, RelativeAuraPath,
+    SanitizedAuraIoReport,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RendererSource {
     ProjectedAvatar,

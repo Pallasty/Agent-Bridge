@@ -93,6 +93,7 @@ png = "0.17"
 tempfile = { version = "3", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1.1.4", features = ["fs", "process"] }
 smithay-client-toolkit = { version = "0.20", optional = true }
 wayland-client = { version = "0.31", optional = true }
 
