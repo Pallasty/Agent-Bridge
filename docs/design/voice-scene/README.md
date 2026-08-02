@@ -229,6 +229,15 @@ express. A packet is S0-valid only when it passes both.
 - `S636_STORY_RENDER_GUARDIAN_RUNTIME_ADOPTION_REVIEW.md`: S636 evidence-layer
   audit and ordered S637-S643 adoption path, beginning with a source-only real
   Worker protocol adapter.
+- `story_render_real_worker_adapter_implementation.schema.json`: S637 strict
+  one-request/one-response process, fixed-fixture construction, private receipt
+  projection, current custody rejection, authority, and nonadoption contract.
+- `s637_story_render_real_worker_adapter_implementation.json`: S637 hash-bound
+  evidence that closes the missing Worker entrypoint while retaining pre-key
+  `custody_rejected` for the incompatible current execution contract.
+- `S637_STORY_RENDER_REAL_WORKER_ADAPTER_IMPLEMENTATION.md`: S637 Worker
+  implementation, redaction, real subprocess, rollback, remaining blockers,
+  and S638 identity/package gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
