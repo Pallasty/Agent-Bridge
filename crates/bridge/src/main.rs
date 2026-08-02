@@ -59,8 +59,8 @@ use cli::workflow_feedback::{
     run_workflow_feedback_shadow_score,
 };
 use cli::{
-    drift_coverage_ratio, drift_tokens, run_biocortex_capability_ledger_report_packet,
-    run_biocortex_retrieval_approval_packet,
+    aggregate_skill_retro, drift_coverage_ratio, drift_tokens,
+    run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
     run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
     run_biocortex_retrieval_opt_in_authorization_decision_packet,
     run_biocortex_retrieval_opt_in_controlled_order_fixture_result,
@@ -17445,74 +17445,6 @@ async fn run_dream_agent_md_drift(
 }
 
 // ─── L7 P3 — Weekly skill-rating retro ──────────────────────────────
-
-#[derive(Debug, serde::Serialize)]
-struct SkillRetroLessonRow {
-    key: String,
-    created_at: i64,
-    last_accessed_at: i64,
-    access_count: u64,
-    importance: f64,
-    consulted: bool,
-}
-
-#[derive(Debug, serde::Serialize)]
-struct SkillRetroReport {
-    window_days: u32,
-    cutoff_unix: i64,
-    now_unix: i64,
-    lessons_total: usize,
-    lessons_consulted: usize,
-    consulted_ratio: f64,
-    mean_access_count: f64,
-    rows: Vec<SkillRetroLessonRow>,
-}
-
-/// Pure aggregator for [`run_dream_skill_retro`]. `now` and `cutoff`
-/// are caller-injected for deterministic testing.
-fn aggregate_skill_retro(
-    lessons: Vec<ab_store::MemoryRecord>,
-    window_days: u32,
-    now: i64,
-    cutoff: i64,
-) -> SkillRetroReport {
-    let mut rows: Vec<SkillRetroLessonRow> = lessons
-        .into_iter()
-        .map(|m| SkillRetroLessonRow {
-            consulted: m.access_count > 0,
-            key: m.key,
-            created_at: m.created_at,
-            last_accessed_at: m.last_accessed_at,
-            access_count: m.access_count,
-            importance: m.importance,
-        })
-        .collect();
-    // Order by access_count DESC (most-consulted first) for readable
-    // text output; JSON consumers can re-sort.
-    rows.sort_by(|a, b| b.access_count.cmp(&a.access_count));
-    let total = rows.len();
-    let consulted = rows.iter().filter(|r| r.consulted).count();
-    let mean_access = if total == 0 {
-        0.0
-    } else {
-        rows.iter().map(|r| r.access_count as f64).sum::<f64>() / total as f64
-    };
-    let consulted_ratio = if total == 0 {
-        0.0
-    } else {
-        consulted as f64 / total as f64
-    };
-    SkillRetroReport {
-        window_days,
-        cutoff_unix: cutoff,
-        now_unix: now,
-        lessons_total: total,
-        lessons_consulted: consulted,
-        consulted_ratio,
-        mean_access_count: mean_access,
-        rows,
-    }
-}
 
 async fn run_dream_skill_retro(days: u32, as_json: bool) -> Result<()> {
     use ab_store::{default_db_path, MemoryListSort, MemoryRecord, SqliteStore, StateStore};

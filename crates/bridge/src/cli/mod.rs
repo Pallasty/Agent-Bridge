@@ -4,6 +4,7 @@ mod browser_lite;
 mod dream;
 mod local_control;
 mod shell_init;
+mod skill_retro;
 mod substrate;
 mod walkthrough;
 pub(super) mod workflow_feedback;
@@ -38,6 +39,7 @@ pub(super) use dream::{
 };
 pub(super) use local_control::{run_a2ui, run_operator_request, A2uiOp, OperatorRequestOp};
 pub(super) use shell_init::shell_init_snippet;
+pub(super) use skill_retro::aggregate_skill_retro;
 pub(super) use substrate::{run_substrate, SubstrateOp};
 pub(super) use walkthrough::walkthrough_region_has_content;
 
