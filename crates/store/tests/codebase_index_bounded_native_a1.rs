@@ -557,6 +557,23 @@ async fn bounded_native_a1_uses_and_cleans_explicit_staging_parent() {
 
     assert!(outcome.telemetry.staging_parent_was_explicit);
     assert!(outcome.telemetry.staging_cleanup_succeeded);
+    assert!(
+        outcome
+            .telemetry
+            .staging_file_path
+            .starts_with(staging_parent.canonicalize().expect("canonical staging parent"))
+    );
+    assert!(
+        !outcome.telemetry.staging_file_path.exists(),
+        "telemetry must name the actual staging file removed after commit"
+    );
+    #[cfg(unix)]
+    assert!(outcome.telemetry.staging_file_device > 0);
+    #[cfg(target_os = "linux")]
+    {
+        assert!(outcome.telemetry.staging_file_mount_point.is_absolute());
+        assert!(!outcome.telemetry.staging_file_filesystem_type.is_empty());
+    }
     assert_eq!(
         std::fs::read_dir(&staging_parent)
             .expect("read explicit staging parent")

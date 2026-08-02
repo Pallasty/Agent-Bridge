@@ -3089,6 +3089,92 @@ struct CodebaseIndexA1StagingReceipt {
     max_extractor_output_rows: usize,
 }
 
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+struct CodebaseIndexA1StagingStorageEvidence {
+    file_bytes: u64,
+    file_path: PathBuf,
+    device: u64,
+    mount_point: PathBuf,
+    filesystem_type: String,
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_a1_staging_storage_evidence(
+    staging_path: &Path,
+) -> Result<CodebaseIndexA1StagingStorageEvidence> {
+    let file_path = std::fs::canonicalize(staging_path).map_err(|error| {
+        Error::Backend(format!(
+            "codebase_index A1 staging canonical path {staging_path:?}: {error}"
+        ))
+    })?;
+    let metadata = std::fs::metadata(&file_path).map_err(|error| {
+        Error::Backend(format!(
+            "codebase_index A1 staging metadata {file_path:?}: {error}"
+        ))
+    })?;
+    #[cfg(unix)]
+    let device = {
+        use std::os::unix::fs::MetadataExt;
+        metadata.dev()
+    };
+    #[cfg(not(unix))]
+    let device = 0;
+    #[cfg(target_os = "linux")]
+    let (mount_point, filesystem_type) = codebase_index_a1_linux_mount_identity(&file_path)?;
+    #[cfg(not(target_os = "linux"))]
+    let (mount_point, filesystem_type) = (PathBuf::new(), "unsupported_non_linux".to_string());
+
+    Ok(CodebaseIndexA1StagingStorageEvidence {
+        file_bytes: metadata.len(),
+        file_path,
+        device,
+        mount_point,
+        filesystem_type,
+    })
+}
+
+#[cfg(all(feature = "codebase-index-bounded-native-a1", target_os = "linux"))]
+fn codebase_index_a1_linux_mount_identity(path: &Path) -> Result<(PathBuf, String)> {
+    let mountinfo = std::fs::read_to_string("/proc/self/mountinfo")
+        .map_err(|error| Error::Backend(format!("codebase_index A1 read mountinfo: {error}")))?;
+    let mut best: Option<(PathBuf, String)> = None;
+
+    for line in mountinfo.lines() {
+        let Some((mount_fields, filesystem_fields)) = line.split_once(" - ") else {
+            continue;
+        };
+        let mut fields = mount_fields.split_whitespace();
+        let Some(encoded_mount_point) = fields.nth(4) else {
+            continue;
+        };
+        let Some(filesystem_type) = filesystem_fields.split_whitespace().next() else {
+            continue;
+        };
+        let mount_point = PathBuf::from(
+            encoded_mount_point
+                .replace("\\040", " ")
+                .replace("\\011", "\t")
+                .replace("\\012", "\n")
+                .replace("\\134", "\\"),
+        );
+        if !path.starts_with(&mount_point) {
+            continue;
+        }
+        let replace = best.as_ref().map_or(true, |(current, _)| {
+            mount_point.components().count() > current.components().count()
+        });
+        if replace {
+            best = Some((mount_point, filesystem_type.to_string()));
+        }
+    }
+
+    best.ok_or_else(|| {
+        Error::Backend(format!(
+            "codebase_index A1 no mountinfo entry for staging path {path:?}"
+        ))
+    })
+}
+
 struct CodebaseIndexTransactionReceipt {
     autocommit_before: bool,
     autocommit_during: bool,
@@ -3394,9 +3480,7 @@ impl SqliteStore {
         .await
         .map_err(|error| Error::Backend(format!("codebase_index A1 blocking: {error}")))??;
         let extraction_and_staging_ns = duration_ns(staging_started.elapsed());
-        let staging_file_bytes = std::fs::metadata(&staging_path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
+        let staging_storage = codebase_index_a1_staging_storage_evidence(&staging_path)?;
 
         // Match the legacy sampling point: extraction has fully completed
         // before the single indexed_at value is generated.
@@ -3456,7 +3540,11 @@ impl SqliteStore {
                 max_extractor_output_rows: staging.max_extractor_output_rows,
                 declared_live_row_bound,
                 staging_rows: total_rows,
-                staging_file_bytes,
+                staging_file_bytes: staging_storage.file_bytes,
+                staging_file_path: staging_storage.file_path,
+                staging_file_device: staging_storage.device,
+                staging_file_mount_point: staging_storage.mount_point,
+                staging_file_filesystem_type: staging_storage.filesystem_type,
                 staging_parent_was_explicit,
                 staging_cleanup_succeeded,
                 staging_transaction_committed: true,

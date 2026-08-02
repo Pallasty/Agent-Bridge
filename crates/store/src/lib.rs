@@ -2015,6 +2015,15 @@ pub struct CodebaseIndexA1Telemetry {
     pub declared_live_row_bound: usize,
     pub staging_rows: u64,
     pub staging_file_bytes: u64,
+    /// Canonical path of the actual ephemeral SQLite file, captured before
+    /// cleanup. The path is expected not to exist after a successful call.
+    pub staging_file_path: std::path::PathBuf,
+    /// Filesystem device identity captured from the actual staging file.
+    pub staging_file_device: u64,
+    /// Longest matching mount point for the actual staging file.
+    pub staging_file_mount_point: std::path::PathBuf,
+    /// Filesystem type reported for the actual staging file's mount.
+    pub staging_file_filesystem_type: String,
     pub staging_parent_was_explicit: bool,
     pub staging_cleanup_succeeded: bool,
     pub staging_transaction_committed: bool,
