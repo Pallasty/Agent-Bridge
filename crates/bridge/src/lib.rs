@@ -128,6 +128,10 @@ pub(crate) mod story_contract;
 #[cfg(target_os = "linux")]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod story_render_fixed_synthetic_provider;
+/// Dormant S629 file-backed replay continuity; isolated tests only.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_replay_continuity_file_synthetic;
 /// Dormant S628 persistence seam and synthetic reopened-handle state machine.
 #[cfg(target_os = "linux")]
 #[cfg_attr(not(test), allow(dead_code))]
