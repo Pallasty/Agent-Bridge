@@ -156,6 +156,15 @@ express. A packet is S0-valid only when it passes both.
 - `S618_STORY_BOUNDED_RENDER_ACCEPTANCE_REVIEW.md`: S618 acceptance provenance,
   container-header explanation, inherited human-audition boundary, and the
   separate Story render-runtime admission next gate.
+- `story_render_runtime_admission_review.schema.json`: S619 strict source,
+  installed-binary, live-manifest, authorization, cancellation, concurrency,
+  output-custody, redaction, and deployment-freshness admission contract.
+- `s619_story_render_runtime_admission_review.json`: S619 current-state decision
+  blocking direct runtime wiring while selecting a one-shot supervised Python
+  worker for the next bounded fixture-pilot contract.
+- `S619_STORY_RENDER_RUNTIME_ADMISSION_REVIEW.md`: S619 architecture decision,
+  rejected/deferred alternatives, accepted trade-offs, seven blockers, and the
+  explicit S620 worker-protocol next gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

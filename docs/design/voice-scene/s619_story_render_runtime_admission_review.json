@@ -1,0 +1,81 @@
+{
+  "schema": "agent_bridge.story_render_runtime_admission_review.v1",
+  "status": "story_render_runtime_admission_review_complete",
+  "decision": {"selected": "block_current_wiring_define_one_shot_worker_contract", "runtime_admitted": false, "deployment_admitted": false},
+  "observed_at": "2026-08-02T07:02:39+00:00",
+  "evidence": {
+    "source": {
+      "head": "a5744e82b12301abc589353123a1887c01558bab",
+      "origin_master": "a5744e82b12301abc589353123a1887c01558bab",
+      "github_master": "a5744e82b12301abc589353123a1887c01558bab",
+      "dual_remote_parity": true,
+      "files": {
+        "story_mcp_adapter": {"path": "crates/bridge/src/mcp_tools/story.rs", "sha256": "7fdd0e1534b1ebddf07289188d7769b01aa5d2363ec4b7f88e006abc241ceedd"},
+        "story_registry": {"path": "crates/bridge/src/mcp_tools.rs", "sha256": "33d966049e1e29c188db60c0f6263bbc0465dff120f9d2be3568ba49cdffaccd"},
+        "story_contract": {"path": "crates/bridge/src/story_contract.rs", "sha256": "ccfa045db403441cf06a2f88699dc773fe89b6a6ffddd42d89fc142d61e88598"},
+        "mcp_server": {"path": "crates/mcp/src/server.rs", "sha256": "53002cc49dc7158dbb0107bb7a32c32720ed01ca796c1a46b8893f9e5701cfca"},
+        "render_executor": {"path": "scripts/story_bounded_render_executor.py", "sha256": "e469e51f109f5e5427175d824eb84d14155e257879c7e438279065d27dbc9e46"},
+        "installed_key_composition": {"path": "scripts/story_executor_installed_key_composition.py", "sha256": "56e27a1c02926addbd0b23f969e12107c0e1a7154d28d676733496b2aa760c53"}
+      }
+    },
+    "accepted_render": {"path": "docs/design/voice-scene/s618_story_bounded_render_acceptance_review.json", "sha256": "432a5c7330f2854f63f00a7fb003a2e8c5c9f74de8c31c5a910e0f6c6c5a0547", "status": "story_bounded_render_acceptance_verified"},
+    "installed_binary": {"path": "/home/pallasting/.local/bin/agent-bridge.real", "sha256": "5bd92a9d27629a16ef338ecbf4eb5e157ce1f86d8035f6a9c20d24cb52d921b5", "version": "agent-bridge 0.14.0 (v0.14.0-1281-g82fc5f16; 82fc5f169438)", "source_commit": "82fc5f1694385eb58bf1b31a98074be9a03de58b", "commits_behind_source": 25, "current_source": false},
+    "live_surface": {"doctor_ok": true, "doctor_mcp_servers_current_binary": true, "direct_manifest_tool_count": 103, "story_preflight_count": 1, "other_story_tools": [], "active_codex_voice_preflight_env_observed": true, "active_preflight_env_variable_count": 12, "wrapper_has_story_activation": false}
+  },
+  "source_findings": {
+    "preflight_registered": true,
+    "preflight_read_only": true,
+    "preflight_dry_run_only": true,
+    "preflight_cancel_on_drop": true,
+    "mcp_server_aborts_tool_future": true,
+    "render_mcp_surface_present": false,
+    "python_executor_present": true,
+    "executor_kwonly_arguments": ["contract", "authorization", "request", "now", "authority_verifier", "model_verifier", "nonce_store_path"],
+    "executor_cancellation_parameter_present": false,
+    "synchronous_runner_call_present": true,
+    "installed_key_composition_present": true,
+    "render_authorization_broker_present": false,
+    "render_concurrency_gate_present": false,
+    "render_receipt_redaction_adapter_present": false
+  },
+  "requirements": [
+    {"id": "accepted_bounded_audio", "status": "pass", "evidence": "S618 exact PCM and owner acceptance continuity"},
+    {"id": "registered_non_actuating_preflight", "status": "pass", "evidence": "read-only dry-run MCP surface with drop cancellation"},
+    {"id": "render_execution_surface", "status": "fail", "evidence": "no Story render MCP tool or worker protocol"},
+    {"id": "explicit_owner_authorization_ingress", "status": "fail", "evidence": "installed-key composition is not an owner approval broker"},
+    {"id": "render_cancellation_and_reaping", "status": "fail", "evidence": "Python runner call is synchronous and has no cancellation input"},
+    {"id": "single_job_resource_admission", "status": "fail", "evidence": "no render semaphore, reject-busy rule, or owned worker"},
+    {"id": "private_audio_output_custody", "status": "fail", "evidence": "S617 output root is fuseblk with observed 0777 semantics"},
+    {"id": "redacted_mcp_result_projection", "status": "fail", "evidence": "executor receipt contains an authorization identifier"},
+    {"id": "deployed_current_source", "status": "fail", "evidence": "installed binary trails reviewed source by 25 commits"}
+  ],
+  "blockers": ["render_mcp_surface_absent", "owner_authorization_broker_absent", "cooperative_render_cancellation_absent", "render_concurrency_admission_absent", "private_output_custody_absent", "redacted_render_result_projection_absent", "installed_binary_not_current_source"],
+  "architecture_options": [
+    {"id": "direct_rust_inprocess_port", "decision": "defer", "complexity": "high", "benefit": "single runtime and native cancellation ownership", "cost": "requires a new tokenizer and Qwen ONNX inference port"},
+    {"id": "long_lived_python_worker", "decision": "defer", "complexity": "medium_high", "benefit": "warm model reuse and lower repeated latency", "cost": "adds durable state, restart, secret lifetime, and multiplexing risk"},
+    {"id": "one_shot_supervised_python_worker", "decision": "select_for_next_contract", "complexity": "medium", "benefit": "strong kill-reap isolation and simplest bounded pilot rollback", "cost": "reloads the model for every authorized render"}
+  ],
+  "selected_architecture": {
+    "pattern": "one_shot_supervised_python_worker",
+    "tool_name": "story_command_render",
+    "tier": "Niche",
+    "toolset": "codex-voice",
+    "default_exposed": false,
+    "enable_env": "AB_STORY_COMMAND_RENDER_ENABLE",
+    "enable_required_value": "1",
+    "worker_lifecycle": "one_process_per_authorized_bounded_render",
+    "transport": "length_bounded_json_stdin_stdout_no_shell",
+    "environment": "fixed_allowlist_no_inherited_secrets",
+    "concurrency": {"max_active": 1, "when_busy": "reject_without_queue"},
+    "cancellation": {"mcp_abort": "drop_guard_signals_owned_supervisor", "supervisor": "kill_and_reap_worker_process_group", "hard_deadline_seconds": 300},
+    "authorization": {"source": "separate_explicit_owner_approval_broker", "key_material_enters_mcp_process": false, "worker_reads_installed_key": true, "single_use_nonce_required": true},
+    "output": {"root": "/home/pallasting/.agent-bridge-secure/story-render/outputs", "root_mode": "0700", "existing_target_rejected": true},
+    "response": {"redacted_projection_only": true, "authorization_id_in_response": false, "mac_or_nonce_in_response": false},
+    "pilot_scope": {"accepted_preflight": "fixed_s602_fixture_only", "arbitrary_novel_paths": false, "playback": false, "recording": false, "memory_write": false}
+  },
+  "execution_authorized": false,
+  "deployment_authorized": false,
+  "runtime_effects": {"fetched_remote_heads": true, "inspected_source": true, "inspected_installed_binary": true, "inspected_process_environment_story_keys": true, "spawned_read_only_manifest_probe": true, "called_story_tool": false, "read_authority_key": false, "consumed_nonce": false, "loaded_model": false, "rendered_audio": false, "played_audio": false, "recorded_audio": false, "modified_configuration": false, "deployed_binary": false, "restarted_client": false, "wrote_memory": false},
+  "claims": {"preflight_is_live_and_non_actuating": true, "bounded_render_quality_previously_accepted": true, "current_render_runtime_ready": false, "current_render_runtime_enabled": false, "one_shot_worker_is_design_selection_only": true, "arbitrary_novel_runtime_admitted": false, "playback_or_memory_admitted": false},
+  "next_gate": "story_render_one_shot_worker_protocol_contract"
+}
