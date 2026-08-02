@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_worker_response.v1",
+  "title": "Agent-Bridge fixed-fixture Story render Worker response",
+  "oneOf": [
+    {"$ref": "#/$defs/success"},
+    {"$ref": "#/$defs/error"}
+  ],
+  "$defs": {
+    "request_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "assembly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "sample_rate_hz", "channels", "frames", "duration_seconds"],
+      "properties": {
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "sample_rate_hz": {"type": "integer", "minimum": 1},
+        "channels": {"type": "integer", "minimum": 1},
+        "frames": {"type": "integer", "minimum": 1},
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "status", "render_id", "segment_count", "assembly", "playback_authorized", "memory_authorized"],
+      "properties": {
+        "protocol": {"const": "agent_bridge.story-render-worker.v1"},
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "status": {"const": "success"},
+        "render_id": {"$ref": "#/$defs/request_id"},
+        "segment_count": {"type": "integer", "minimum": 1},
+        "assembly": {"$ref": "#/$defs/assembly"},
+        "playback_authorized": {"const": false},
+        "memory_authorized": {"const": false}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "status", "code", "retryable"],
+      "properties": {
+        "protocol": {"const": "agent_bridge.story-render-worker.v1"},
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "status": {"const": "error"},
+        "code": {"enum": ["invalid_request", "authority_rejected", "nonce_reused", "custody_rejected", "model_rejected", "render_failed", "internal_failure"]},
+        "retryable": {"type": "boolean"}
+      }
+    }
+  }
+}
