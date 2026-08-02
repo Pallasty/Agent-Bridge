@@ -2,6 +2,7 @@ mod avatar;
 mod biocortex;
 mod browser_lite;
 mod local_control;
+mod shell_init;
 mod substrate;
 pub(super) mod workflow_feedback;
 
@@ -29,6 +30,7 @@ pub(super) use biocortex::{
 };
 pub(super) use browser_lite::{run_browser_lite, BrowserLiteOp};
 pub(super) use local_control::{run_a2ui, run_operator_request, A2uiOp, OperatorRequestOp};
+pub(super) use shell_init::shell_init_snippet;
 pub(super) use substrate::{run_substrate, SubstrateOp};
 
 #[cfg(test)]
