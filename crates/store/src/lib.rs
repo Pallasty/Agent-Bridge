@@ -2055,6 +2055,23 @@ pub struct CodebaseIndexA1FullVecOutcome {
     pub telemetry: CodebaseIndexA1FullVecTelemetry,
 }
 
+/// Read-only PRAGMA evidence captured from the authoritative store connection.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1PragmaEvidence {
+    pub journal_mode: String,
+    pub synchronous: i64,
+    pub wal_autocheckpoint: i64,
+    pub cache_size: i64,
+    pub cache_spill: i64,
+    pub temp_store: i64,
+    pub mmap_size: i64,
+    pub foreign_keys: i64,
+    pub busy_timeout_ms: i64,
+    pub locking_mode: String,
+    pub autocommit: bool,
+}
+
 /// Read-only exact-root inventory for an existing codebase index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodebaseIndexStatus {

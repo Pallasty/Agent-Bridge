@@ -608,3 +608,53 @@ async fn full_vec_a1_timing_seam_matches_default_path() {
     assert!(!measured.telemetry.autocommit_during);
     assert!(measured.telemetry.autocommit_after);
 }
+
+#[tokio::test]
+async fn a1_pragma_evidence_is_authoritative_read_only_and_stable() {
+    let temp_dir = tempfile::tempdir().expect("temporary A1 PRAGMA fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let staging_parent = temp_dir.path().join("staging");
+    std::fs::create_dir_all(&staging_parent).expect("create staging parent");
+    let store = SqliteStore::open(&temp_dir.path().join("state.db"))
+        .await
+        .expect("open temporary store");
+
+    let before = store
+        .codebase_index_pragmas_a1()
+        .await
+        .expect("read authoritative PRAGMAs before indexing");
+    assert_eq!(before.journal_mode, "wal");
+    assert_eq!(before.foreign_keys, 1);
+    assert_eq!(before.busy_timeout_ms, 5_000);
+    assert!(before.autocommit);
+
+    store
+        .codebase_index_full_vec_a1(target_root, &["rust".to_string()])
+        .await
+        .expect("run measured FullVec path");
+    let after_full_vec = store
+        .codebase_index_pragmas_a1()
+        .await
+        .expect("read authoritative PRAGMAs after FullVec");
+    assert_eq!(after_full_vec, before);
+
+    store
+        .codebase_index_bounded_native_a1(
+            target_root,
+            &["rust".to_string()],
+            CodebaseIndexA1Options {
+                batch_rows: 2,
+                failpoint: None,
+                staging_parent: Some(staging_parent),
+            },
+        )
+        .await
+        .expect("run bounded native path");
+    let after_bounded_native = store
+        .codebase_index_pragmas_a1()
+        .await
+        .expect("read authoritative PRAGMAs after bounded native");
+    assert_eq!(after_bounded_native, before);
+}

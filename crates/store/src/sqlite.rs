@@ -3274,6 +3274,42 @@ impl SqliteStore {
 
 #[cfg(feature = "codebase-index-bounded-native-a1")]
 impl SqliteStore {
+    /// Read evaluation PRAGMAs from the exact connection that owns indexing.
+    ///
+    /// This seam deliberately issues no PRAGMA assignments: it lets the A1
+    /// evaluator compare authoritative connection state before and after each
+    /// algorithm without repairing drift on an observer connection.
+    pub async fn codebase_index_pragmas_a1(&self) -> Result<crate::CodebaseIndexA1PragmaEvidence> {
+        self.conn
+            .call(|connection| -> RusqliteResult<_> {
+                Ok(crate::CodebaseIndexA1PragmaEvidence {
+                    journal_mode: connection
+                        .query_row("PRAGMA journal_mode", [], |row| row.get(0))?,
+                    synchronous: connection
+                        .query_row("PRAGMA synchronous", [], |row| row.get(0))?,
+                    wal_autocheckpoint: connection.query_row(
+                        "PRAGMA wal_autocheckpoint",
+                        [],
+                        |row| row.get(0),
+                    )?,
+                    cache_size: connection.query_row("PRAGMA cache_size", [], |row| row.get(0))?,
+                    cache_spill: connection
+                        .query_row("PRAGMA cache_spill", [], |row| row.get(0))?,
+                    temp_store: connection.query_row("PRAGMA temp_store", [], |row| row.get(0))?,
+                    mmap_size: connection.query_row("PRAGMA mmap_size", [], |row| row.get(0))?,
+                    foreign_keys: connection
+                        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))?,
+                    busy_timeout_ms: connection
+                        .query_row("PRAGMA busy_timeout", [], |row| row.get(0))?,
+                    locking_mode: connection
+                        .query_row("PRAGMA locking_mode", [], |row| row.get(0))?,
+                    autocommit: connection.is_autocommit(),
+                })
+            })
+            .await
+            .map_err(|error| Error::Backend(format!("codebase_index A1 PRAGMA read: {error}")))
+    }
+
     /// Evaluation-only timing seam over the exact FullVec implementation used
     /// by [`StateStore::codebase_index`].
     pub async fn codebase_index_full_vec_a1(
