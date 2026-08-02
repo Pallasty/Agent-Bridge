@@ -193,6 +193,16 @@ express. A packet is S0-valid only when it passes both.
 - `S632_STORY_RENDER_DESCENDANT_CUSTODY_REVIEW.md`: S632 architecture decision
   coupling descendant cleanup to shared `flock` custody and defining the
   single-failure boundary and S633 acceptance gate.
+- `story_render_guardian_synthetic_prototype.schema.json`: S633 strict
+  protocol, startup-gate, shared-lock-custody, single-failure proof, synthetic
+  test-effect, authority, and runtime-nonadoption contract.
+- `s633_story_render_guardian_synthetic_prototype.json`: S633 hash-bound
+  evidence for eight real Linux synthetic tests, with Supervisor integration,
+  real Worker execution, MCP, configuration, and deployment closed.
+- `S633_STORY_RENDER_GUARDIAN_SYNTHETIC_PROTOTYPE.md`: S633 implementation and
+  test evidence for Host EOF cleanup, Guardian-loss fallback, payload FD
+  isolation, residual-descendant rejection, and the S634 integration-review
+  gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
