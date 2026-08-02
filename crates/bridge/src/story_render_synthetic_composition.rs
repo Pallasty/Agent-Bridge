@@ -14,7 +14,8 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::story_render_supervisor::{
-    start_story_render_supervisor, StoryRenderSupervisorConfig, StoryRenderSupervisorError,
+    start_story_render_supervisor, ResponseValidator, StoryRenderSupervisorConfig,
+    StoryRenderSupervisorError,
 };
 
 const S622_PROTOCOL: &str = "agent_bridge.story-render-worker.v1";
@@ -111,13 +112,11 @@ pub async fn run_s622_synthetic_composition(
     request_id: String,
     request: Vec<u8>,
 ) -> Result<StoryRenderSyntheticResult, StoryRenderSyntheticCompositionError> {
-    if !is_lower_hex(&request_id, 32) {
+    if !is_s622_request_id(&request_id) {
         return Err(StoryRenderSyntheticCompositionError::InvalidRequestId);
     }
 
-    let response_request_id = request_id.clone();
-    config.response_validator =
-        Arc::new(move |raw| decode_s622_response(raw, &response_request_id).is_some());
+    config.response_validator = s622_response_validator(request_id.clone());
     let output = start_story_render_supervisor(config, request)
         .map_err(StoryRenderSyntheticCompositionError::Supervisor)?
         .await
@@ -131,7 +130,11 @@ pub async fn run_s622_synthetic_composition(
     })
 }
 
-fn decode_s622_response(
+pub(crate) fn s622_response_validator(request_id: String) -> ResponseValidator {
+    Arc::new(move |raw| decode_s622_response(raw, &request_id).is_some())
+}
+
+pub(crate) fn decode_s622_response(
     raw: &[u8],
     expected_request_id: &str,
 ) -> Option<StoryRenderSyntheticResponse> {
@@ -209,4 +212,8 @@ fn is_lower_hex(value: &str, length: usize) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+pub(crate) fn is_s622_request_id(value: &str) -> bool {
+    is_lower_hex(value, 32)
 }

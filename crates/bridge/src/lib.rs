@@ -128,6 +128,9 @@ pub(crate) mod story_contract;
 #[cfg(target_os = "linux")]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod story_render_synthetic_composition;
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_synthetic_admission;
 /// Dormant S623 synthetic Supervisor; no Worker, MCP, or deployment caller.
 #[cfg(target_os = "linux")]
 #[cfg_attr(not(test), allow(dead_code))]

@@ -127,6 +127,24 @@ pub struct StoryRenderRun {
     result: oneshot::Receiver<Result<StoryRenderOutput, StoryRenderSupervisorError>>,
 }
 
+pub struct StoryRenderAdmission {
+    config: StoryRenderSupervisorConfig,
+    lock: HostLock,
+}
+
+impl StoryRenderAdmission {
+    pub fn bind_response_validator(&mut self, response_validator: ResponseValidator) {
+        self.config.response_validator = response_validator;
+    }
+
+    pub fn start(self, request: Vec<u8>) -> Result<StoryRenderRun, StoryRenderSupervisorError> {
+        if request.len() > self.config.stdin_max_bytes {
+            return Err(StoryRenderSupervisorError::InputTooLarge);
+        }
+        start_with_lock(self.config, request, self.lock)
+    }
+}
+
 impl StoryRenderRun {
     pub fn worker_pid(&self) -> u32 {
         self.worker_pid
@@ -163,13 +181,35 @@ pub fn start_story_render_supervisor(
     config: StoryRenderSupervisorConfig,
     request: Vec<u8>,
 ) -> Result<StoryRenderRun, StoryRenderSupervisorError> {
-    tokio::runtime::Handle::try_current()
-        .map_err(|_| StoryRenderSupervisorError::InvalidConfiguration)?;
+    require_runtime()?;
     validate_config(&config)?;
     if request.len() > config.stdin_max_bytes {
         return Err(StoryRenderSupervisorError::InputTooLarge);
     }
     let lock = acquire_lock(&config.lock_path)?;
+    start_with_lock(config, request, lock)
+}
+
+pub fn begin_story_render_admission(
+    config: StoryRenderSupervisorConfig,
+) -> Result<StoryRenderAdmission, StoryRenderSupervisorError> {
+    require_runtime()?;
+    validate_config(&config)?;
+    let lock = acquire_lock(&config.lock_path)?;
+    Ok(StoryRenderAdmission { config, lock })
+}
+
+fn require_runtime() -> Result<(), StoryRenderSupervisorError> {
+    tokio::runtime::Handle::try_current()
+        .map(|_| ())
+        .map_err(|_| StoryRenderSupervisorError::InvalidConfiguration)
+}
+
+fn start_with_lock(
+    config: StoryRenderSupervisorConfig,
+    request: Vec<u8>,
+    lock: HostLock,
+) -> Result<StoryRenderRun, StoryRenderSupervisorError> {
     let mut child = spawn_worker(&config).map_err(|_| StoryRenderSupervisorError::SpawnFailed)?;
     let worker_pid = child.id().ok_or(StoryRenderSupervisorError::SpawnFailed)?;
     let stdin = child
@@ -222,7 +262,17 @@ fn validate_config(config: &StoryRenderSupervisorConfig) -> Result<(), StoryRend
     Ok(())
 }
 
-fn acquire_lock(path: &Path) -> Result<File, StoryRenderSupervisorError> {
+struct HostLock(File);
+
+impl Drop for HostLock {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+fn acquire_lock(path: &Path) -> Result<HostLock, StoryRenderSupervisorError> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -239,7 +289,7 @@ fn acquire_lock(path: &Path) -> Result<File, StoryRenderSupervisorError> {
     }
     let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if result == 0 {
-        return Ok(file);
+        return Ok(HostLock(file));
     }
     let error = io::Error::last_os_error();
     if matches!(error.raw_os_error(), Some(code) if code == libc::EAGAIN || code == libc::EWOULDBLOCK)
