@@ -1,0 +1,377 @@
+{
+  "schema": "agent_bridge.story_render_guardian_supervisor_integration_review.v1",
+  "status": "story_render_guardian_supervisor_integration_reviewed",
+  "decision": "default_off_synthetic_integration_contract_ready_implementation_blocked",
+  "reviewed_at": "2026-08-02",
+  "evidence": {
+    "reviewed_tree": "76aaaae3e4944c6faf5a967e396f418bfc4cf346",
+    "s633_prototype": {
+      "path": "docs/design/voice-scene/s633_story_render_guardian_synthetic_prototype.json",
+      "sha256": "dd69924dbe91266c196167a6696efc47d35014d636aafe0842423bf50976f90d",
+      "receipt_sha256": "fc1488bf4194d32f7c45aef2b50a02c0318f631721fbfe542490e28aa9154dc1"
+    },
+    "source_snapshot": [
+      {
+        "path": "crates/bridge/src/story_render_supervisor.rs",
+        "sha256": "1db1d70cc705a1d6e958db75d8619e019b232bcecdaeaa461998dccbebd5550c"
+      },
+      {
+        "path": "crates/bridge/src/story_render_guardian_synthetic.rs",
+        "sha256": "33d778a44a7e5906406567a92ca1ed0e41662f8b955b24c2c53d4239e359e724"
+      },
+      {
+        "path": "crates/bridge/src/story_render_synthetic_admission.rs",
+        "sha256": "87a8ba33737eca0e80094298ec4ae2636fef7f56304edfa5507cf9e1e21ca368"
+      },
+      {
+        "path": "crates/bridge/src/story_render_durable_synthetic_composition.rs",
+        "sha256": "16ba5f833db4e6092233c038e4c062dead8b1446ce119286cb53d51d416ee29a"
+      },
+      {
+        "path": "crates/bridge/src/story_render_replay_continuity_file_synthetic.rs",
+        "sha256": "dd5cf675191b13168a10b47796c946aa25700cc7641f268f903dc7fc54852a8d"
+      },
+      {
+        "path": "crates/bridge/tests/story_render_durable_cancellation_crash_s631.rs",
+        "sha256": "ed511093d8e367ff2423eedbdcfdabe75314a5e8708d8ff350279a35a3b132c0"
+      },
+      {
+        "path": "crates/bridge/tests/story_render_guardian_synthetic_s633.rs",
+        "sha256": "d101acbcaf5a347b7e355dd289823df6b2e7e9aba399069c2f7d2853953bf9f8"
+      },
+      {
+        "path": "crates/bridge/src/lib.rs",
+        "sha256": "1b0ac0e36b94ab26be41032be328d5e529cb0a3e5c0c0f52bd73ab3cd524f3f1"
+      }
+    ],
+    "verification": {
+      "command": "pytest -q -p no:cacheprovider tests/test_story_render_guardian_supervisor_integration_review_contract.py",
+      "passed": 7,
+      "failed": 0
+    }
+  },
+  "impact": {
+    "architecture": "high",
+    "source_change_in_s634": "review_artifacts_only",
+    "runtime": "none",
+    "migration": "internal_async_api_break_in_s635",
+    "operational_privilege": "unchanged"
+  },
+  "current_findings": {
+    "host_lock_explicit_unlock_on_drop": true,
+    "supervisor_spawns_worker_directly": true,
+    "supervisor_owns_child_wait": true,
+    "start_api_is_synchronous": true,
+    "worker_pid_immediately_available": true,
+    "guardian_v1_carries_worker_exit_status": false,
+    "guardian_v1_carries_real_exec_plan": false,
+    "guardian_v1_exposes_host_async_stdio": false,
+    "guardian_host_control_is_tokio_async": false,
+    "guardian_registered_in_bridge_library": false,
+    "runtime_callers_present": false
+  },
+  "selected_integration": {
+    "custody_mode_gate": "StoryRenderCustodyMode",
+    "default_mode": "direct_v1",
+    "guardian_mode": "guardian_v2_default_off",
+    "lock_type": "last_close_shared_custody_without_explicit_unlock",
+    "start_api": "async_bound_handshake_before_run_return",
+    "worker_binding_available_on_run_return": true,
+    "deadline_scope": "one_absolute_deadline_includes_handshake_io_and_cleanup",
+    "host_control": "tokio_async_owned_cleanup_task",
+    "guardian_control": "blocking_isolated_subprocess",
+    "control_protocol": {
+      "magic": "ABG2",
+      "version": 2,
+      "maximum_body_bytes": 64,
+      "length_prefix": "u32_big_endian",
+      "unknown_or_trailing_fields": "reject"
+    },
+    "exec_plan_transport": {
+      "carrier": "sealed_memfd",
+      "canonical_encoding": "length_prefixed_binary_v1",
+      "maximum_bytes": 65536,
+      "digest": "sha256_echoed_in_bound_frame",
+      "unknown_or_trailing_fields": "reject"
+    },
+    "stdio_transport": {
+      "carrier": "host_created_unix_socketpairs",
+      "worker_ends": "fixed_fds_via_guardian",
+      "host_io": "tokio_async_bounded",
+      "guardian_relays_payload_bytes": false,
+      "guardian_closes_worker_ends_after_spawn": true
+    },
+    "result_transport": {
+      "control_protocol": "ABG2",
+      "terminal_carries": [
+        "worker_pid",
+        "worker_pgid",
+        "exit_kind",
+        "exit_value"
+      ],
+      "terminal_requires_group_absence": true,
+      "stdout_stderr_use_control_protocol": false
+    },
+    "descriptor_allowlist": [
+      "guardian_lock",
+      "guardian_control",
+      "sealed_exec_plan",
+      "worker_stdin",
+      "worker_stdout",
+      "worker_stderr"
+    ]
+  },
+  "state_machine": {
+    "states": [
+      "admitted",
+      "guardian_spawned",
+      "bound",
+      "running",
+      "cancelling",
+      "terminal_clean",
+      "fallback_cleaning",
+      "manual_recovery_required",
+      "released"
+    ],
+    "release_condition": "last_descriptor_close_after_group_absence_and_result_capture",
+    "cleanup_unproven": "quarantine_host_descriptor_or_guardian_hold",
+    "transitions": [
+      {
+        "from": "admitted",
+        "event": "guardian_exec_succeeds",
+        "to": "guardian_spawned"
+      },
+      {
+        "from": "guardian_spawned",
+        "event": "exact_bound_with_plan_digest",
+        "to": "bound"
+      },
+      {
+        "from": "bound",
+        "event": "host_records_binding_and_sends_exact_start",
+        "to": "running"
+      },
+      {
+        "from": "running",
+        "event": "run_drop_or_cancel_or_deadline",
+        "to": "cancelling"
+      },
+      {
+        "from": "running",
+        "event": "terminal_status_and_group_absence",
+        "to": "terminal_clean"
+      },
+      {
+        "from": [
+          "guardian_spawned",
+          "bound",
+          "running",
+          "cancelling"
+        ],
+        "event": "guardian_reaped_without_clean_terminal",
+        "to": "fallback_cleaning"
+      },
+      {
+        "from": "fallback_cleaning",
+        "event": "group_absence_proven",
+        "to": "released"
+      },
+      {
+        "from": "terminal_clean",
+        "event": "result_captured_and_host_descriptor_closed",
+        "to": "released"
+      },
+      {
+        "from": "fallback_cleaning",
+        "event": "group_absence_unproven",
+        "to": "manual_recovery_required"
+      }
+    ],
+    "invariants": [
+      "payload_start_requires_exact_recorded_binding_acknowledgement",
+      "guardian_eof_is_not_terminal_success",
+      "terminal_success_requires_worker_exit_status_and_group_absence",
+      "guardian_loss_fallback_begins_only_after_guardian_is_reaped",
+      "cleanup_failure_cannot_release_the_render_lock",
+      "in_flight_custody_mode_is_immutable"
+    ]
+  },
+  "replay_continuity": {
+    "order": [
+      "acquire_render_lock",
+      "generate_request_identity",
+      "reserve_sequence",
+      "spawn_guardian",
+      "record_worker_binding",
+      "acknowledge_start",
+      "bounded_worker_io",
+      "prove_worker_group_absent",
+      "validate_terminal_and_response",
+      "release_host_custody",
+      "commit_or_abort_sequence"
+    ],
+    "busy_before_identity_and_reservation": true,
+    "reservation_before_payload_start": true,
+    "post_reservation_failure_consumes_sequence": true,
+    "finalize_failure_hides_worker_success": true,
+    "lock_release_before_continuity_finalize": true,
+    "independent_namespaces_preserved": true
+  },
+  "error_mapping": {
+    "invalid_or_unsealed_exec_plan": "InvalidConfiguration",
+    "guardian_spawn_failure": "GuardianSpawnFailed",
+    "bound_timeout_or_mismatch": "GuardianProtocolRejected",
+    "guardian_reported_worker_spawn_failure": "SpawnFailed",
+    "stdin_write_failure": "StdinWriteFailed",
+    "stdout_overflow": "StdoutLimitExceeded",
+    "stderr_overflow": "StderrLimitExceeded",
+    "worker_nonzero_or_signaled": "WorkerFailed",
+    "worker_zero_without_stdout": "WorkerExitWithoutResponse",
+    "response_validator_rejects": "ResponseRejected",
+    "cancel_after_cleanup_proof": "Cancelled",
+    "deadline_after_cleanup_proof": "DeadlineExceeded",
+    "guardian_loss_after_fallback_cleanup": "GuardianLost",
+    "group_absence_unproven": "CleanupUnproven"
+  },
+  "required_changes": [
+    {
+      "path": "crates/bridge/src/story_render_supervisor.rs",
+      "symbols": [
+        "StoryRenderSupervisorConfig",
+        "StoryRenderAdmission::start",
+        "start_story_render_supervisor",
+        "HostLock",
+        "SupervisedWorker"
+      ],
+      "change": "add_default_off_custody_mode_make_start_async_replace_explicit_unlock_and_route_guardian_v2",
+      "risk": "high",
+      "acceptance": "direct_v1_parity_and_guardian_v2_fault_matrix"
+    },
+    {
+      "path": "crates/bridge/src/story_render_guardian_protocol.rs",
+      "symbols": [
+        "GuardianFrameV2",
+        "WorkerExecPlanV1",
+        "WorkerExit"
+      ],
+      "change": "extract_strict_bounded_protocol_and_canonical_exec_plan_from_fixture_specific_code",
+      "risk": "high",
+      "acceptance": "roundtrip_malformed_oversize_digest_and_exit_status_tests"
+    },
+    {
+      "path": "crates/bridge/src/story_render_guardian.rs",
+      "symbols": [
+        "run_guardian_entrypoint",
+        "GuardianCustody"
+      ],
+      "change": "implement_generic_guardian_entrypoint_around_inherited_fds_without_runtime_registration",
+      "risk": "high",
+      "acceptance": "host_eof_guardian_loss_residual_descendant_and_descriptor_tests"
+    },
+    {
+      "path": "crates/bridge/src/story_render_synthetic_admission.rs",
+      "symbols": [
+        "run_s625_synthetic_admission"
+      ],
+      "change": "await_async_admission_start_without_moving_reservation_before_lock",
+      "risk": "medium",
+      "acceptance": "busy_identity_grant_and_request_ordering_parity"
+    },
+    {
+      "path": "crates/bridge/src/story_render_synthetic_composition.rs",
+      "symbols": [
+        "run_s622_synthetic_composition"
+      ],
+      "change": "await_async_supervisor_start_and_preserve_response_decode_contract",
+      "risk": "medium",
+      "acceptance": "S624_response_and_error_parity"
+    },
+    {
+      "path": "crates/bridge/src/story_render_durable_synthetic_composition.rs",
+      "symbols": [
+        "run_s630_durable_synthetic_composition"
+      ],
+      "change": "preserve_lock_then_reserve_then_start_and_finalize_after_custody_release",
+      "risk": "high",
+      "acceptance": "S629_S630_S631_continuity_and_crash_regression"
+    },
+    {
+      "path": "crates/bridge/src/lib.rs",
+      "symbols": [
+        "story_render_guardian_protocol",
+        "story_render_guardian"
+      ],
+      "change": "register_crate_private_modules_only",
+      "risk": "low",
+      "acceptance": "no_main_mcp_cli_or_runtime_caller"
+    },
+    {
+      "path": "crates/bridge/tests/story_render_guardian_supervisor_s635.rs",
+      "symbols": [
+        "synthetic_guardian_integration_matrix"
+      ],
+      "change": "add_default_off_integration_parity_and_single_failure_tests",
+      "risk": "medium",
+      "acceptance": "serial_fixture_processes_reaped_and_lock_release_order_proven"
+    }
+  ],
+  "rollout_and_rollback": {
+    "default_off": true,
+    "activation_scope": "synthetic_config_per_admission",
+    "lock_namespace_shared_across_modes": true,
+    "rollback_scope": "future_admissions_only",
+    "in_flight_mode_switch_allowed": false,
+    "guardian_loss_downgrades_in_flight_to_direct": false,
+    "parity_gate_required": true,
+    "single_failure_fault_matrix_required": true,
+    "real_worker_gate_open": false,
+    "runtime_gate_open": false
+  },
+  "authority": {
+    "owner_authorization_read": false,
+    "execution_grant_issued": false,
+    "model_authorized": false,
+    "audio_output_authorized": false,
+    "memory_write_authorized": false,
+    "mcp_invocation_authorized": false,
+    "deployment_authorized": false
+  },
+  "runtime_effects": {
+    "supervisor_modified": false,
+    "guardian_v2_implemented": false,
+    "guardian_spawned": false,
+    "worker_spawned": false,
+    "real_worker_invoked": false,
+    "model_loaded": false,
+    "audio_rendered": false,
+    "audio_played": false,
+    "memory_written": false,
+    "configuration_changed": false,
+    "mcp_registered": false,
+    "binary_built": false,
+    "binary_deployed": false,
+    "client_refreshed": false
+  },
+  "claims": {
+    "integration_review_complete": true,
+    "supervisor_modified": false,
+    "guardian_v2_implemented": false,
+    "real_worker_executed": false,
+    "runtime_integrated": false,
+    "mcp_registered": false,
+    "deployed": false
+  },
+  "nonclaims": [
+    "guardian_v2_protocol_implementation",
+    "supervisor_guardian_wiring",
+    "direct_v1_and_guardian_v2_behavioral_parity",
+    "real_story_worker_compatibility",
+    "simultaneous_host_and_guardian_loss_safety",
+    "process_group_escape_safety",
+    "cgroup_or_systemd_custody",
+    "runtime_or_mcp_adoption",
+    "binary_build_or_deployment"
+  ],
+  "receipt_sha256": "89a0c79abc825fa8f28f31b113b71773cc54a6b651a6346fc6755579fd3d3a01",
+  "next_gate": "story_render_guardian_supervisor_synthetic_integration"
+}

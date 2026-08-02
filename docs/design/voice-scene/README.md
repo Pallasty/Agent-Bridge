@@ -203,6 +203,16 @@ express. A packet is S0-valid only when it passes both.
   test evidence for Host EOF cleanup, Guardian-loss fallback, payload FD
   isolation, residual-descendant rejection, and the S634 integration-review
   gate.
+- `story_render_guardian_supervisor_integration_review.schema.json`: S634
+  strict current-source, ABG2 transport, custody state-machine, replay-order,
+  rollout, rollback, authority, and runtime-nonadoption review contract.
+- `s634_story_render_guardian_supervisor_integration_review.json`: S634
+  hash-bound selection of a default-off GuardianV2 synthetic integration, with
+  exact source changes and all real Worker/runtime effects still closed.
+- `S634_STORY_RENDER_GUARDIAN_SUPERVISOR_INTEGRATION_REVIEW.md`: S634
+  architecture decision for sealed execution-plan transport, Host-owned
+  bounded stdio, async binding, last-close custody, replay continuity, and the
+  S635 synthetic-integration gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
