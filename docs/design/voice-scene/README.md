@@ -183,6 +183,16 @@ express. A packet is S0-valid only when it passes both.
 - `S621_STORY_RENDER_ONE_SHOT_WORKER_IMPLEMENTATION_REVIEW.md`: S621 staged
   implementation ADR and the separation between MCP invocation and independent
   owner grant authority.
+- `story_render_descendant_custody_review.schema.json`: S632 strict source,
+  host-capability, threat-boundary, mechanism-selection, lock-custody, and
+  failure-matrix review contract.
+- `s632_story_render_descendant_custody_review.json`: S632 hash-bound selection
+  of a repository-owned Guardian for a dormant S633 prototype, while keeping
+  cgroup/systemd hardening, Supervisor integration, execution, and deployment
+  closed.
+- `S632_STORY_RENDER_DESCENDANT_CUSTODY_REVIEW.md`: S632 architecture decision
+  coupling descendant cleanup to shared `flock` custody and defining the
+  single-failure boundary and S633 acceptance gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
