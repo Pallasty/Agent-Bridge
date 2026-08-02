@@ -3161,7 +3161,15 @@ fn codebase_index_a1_linux_mount_identity_from(
     expected_major: u64,
     expected_minor: u64,
 ) -> Option<(PathBuf, String)> {
-    let mut best: Option<(usize, u64, PathBuf, String)> = None;
+    struct MountCandidate {
+        depth: usize,
+        mount_id: u64,
+        parent_id: u64,
+        mount_point: PathBuf,
+        filesystem_type: String,
+    }
+
+    let mut candidates = Vec::new();
 
     for line in mountinfo.lines() {
         let Some((mount_fields, filesystem_fields)) = line.split_once(" - ") else {
@@ -3171,7 +3179,10 @@ fn codebase_index_a1_linux_mount_identity_from(
         let Some(mount_id) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
             continue;
         };
-        let Some(device_field) = fields.nth(1) else {
+        let Some(parent_id) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
+            continue;
+        };
+        let Some(device_field) = fields.next() else {
             continue;
         };
         let Some((major, minor)) = device_field.split_once(':').and_then(|(major, minor)| {
@@ -3199,17 +3210,31 @@ fn codebase_index_a1_linux_mount_identity_from(
             continue;
         }
         let depth = mount_point.components().count();
-        let replace = best
-            .as_ref()
-            .map_or(true, |(current_depth, current_id, _, _)| {
-                depth > *current_depth || (depth == *current_depth && mount_id > *current_id)
-            });
-        if replace {
-            best = Some((depth, mount_id, mount_point, filesystem_type.to_string()));
-        }
+        candidates.push(MountCandidate {
+            depth,
+            mount_id,
+            parent_id,
+            mount_point,
+            filesystem_type: filesystem_type.to_string(),
+        });
     }
 
-    best.map(|(_, _, mount_point, filesystem_type)| (mount_point, filesystem_type))
+    let deepest = candidates.iter().map(|candidate| candidate.depth).max()?;
+    let mut leaves = candidates.iter().filter(|candidate| {
+        candidate.depth == deepest
+            && !candidates.iter().any(|other| {
+                other.depth == deepest
+                    && other.mount_point == candidate.mount_point
+                    && other.parent_id == candidate.mount_id
+            })
+    });
+    let active = leaves.next()?;
+    // A single namespace should expose one active leaf for a concrete path.
+    // Ambiguity is not canonical evidence, so fail closed instead of guessing.
+    if leaves.next().is_some() {
+        return None;
+    }
+    Some((active.mount_point.clone(), active.filesystem_type.clone()))
 }
 
 #[cfg(all(
@@ -3222,9 +3247,14 @@ mod codebase_index_a1_mount_tests {
 
     #[test]
     fn mount_identity_rejects_wrong_device_and_prefers_active_overmount() {
-        let mountinfo = "100 1 0:39 / /4TNVMe1 rw - autofs systemd-1 rw\n\
-                         101 1 259:4 / /4TNVMe1 rw - f2fs /dev/nvme0n1 rw\n\
-                         102 1 259:4 / /4TNVMe1 rw - f2fs /dev/nvme0n1 rw\n";
+        // Mount IDs are identifiers, not stack-order sequence numbers: an ID
+        // can be reused after unmount.  The active overmount is the same-path
+        // leaf (100, whose parent is 900), even though its ID is smaller.  The
+        // wrong-device row is deliberately numerically greatest so the test
+        // also proves that st_dev filtering is authoritative.
+        let mountinfo = "9999 1 0:39 / /4TNVMe1 rw - autofs-wrong systemd-1 rw\n\
+                         900 1 259:4 / /4TNVMe1 rw - f2fs-lower /dev/nvme0n1 rw\n\
+                         100 900 259:4 / /4TNVMe1 rw - f2fs-active /dev/nvme0n1 rw\n";
 
         let identity = codebase_index_a1_linux_mount_identity_from(
             mountinfo,
@@ -3234,7 +3264,10 @@ mod codebase_index_a1_mount_tests {
         )
         .expect("match the actual file device");
 
-        assert_eq!(identity, (PathBuf::from("/4TNVMe1"), "f2fs".to_string()));
+        assert_eq!(
+            identity,
+            (PathBuf::from("/4TNVMe1"), "f2fs-active".to_string())
+        );
         assert_eq!(codebase_index_a1_linux_device_major_minor(64_514), (252, 2));
         assert_eq!(codebase_index_a1_linux_device_major_minor(2_054), (8, 6));
     }
