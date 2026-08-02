@@ -1,9 +1,11 @@
 # AB Arrow Data Plane Feasibility V0 — implementation contract
 
 Date: 2026-08-02
-State: A0 evaluation implementation; no runtime adoption authority
+State: A0 complete; NativeChunk selected; no runtime adoption authority
 Durable memory: `decision_ab_arrow_data_plane_a0_goal_20260802`
 Design forum: thread `#331`, start post `#5901`
+
+Canonical result: [AB_ARROW_DATA_PLANE_A0_RESULT_2026_08_02.md](AB_ARROW_DATA_PLANE_A0_RESULT_2026_08_02.md)
 
 ## Decision being tested
 

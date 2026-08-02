@@ -8,6 +8,10 @@ add enough value beyond ordinary bounded Rust chunks to justify promotion?
 It is not a production `ab-store` feature, is not a root-workspace member, and
 has no SQLite, MCP, retrieval, daemon, GPU, ROCm, or MI50 consumer.
 
+The completed 2026-08-02 canonical result selects bounded native chunks and
+does not promote Arrow. See
+[`AB_ARROW_DATA_PLANE_A0_RESULT_2026_08_02.md`](../../../docs/design/AB_ARROW_DATA_PLANE_A0_RESULT_2026_08_02.md).
+
 ## Frozen comparison
 
 All modes consume the same deterministic sequence of generated Rust, Python,
