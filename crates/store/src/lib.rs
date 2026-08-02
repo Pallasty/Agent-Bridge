@@ -2079,6 +2079,8 @@ pub struct CodebaseIndexA1PragmaEvidence {
     pub busy_timeout_ms: i64,
     pub locking_mode: String,
     pub autocommit: bool,
+    pub database_names: Vec<String>,
+    pub database_files: Vec<std::path::PathBuf>,
 }
 
 /// Read-only exact-root inventory for an existing codebase index.

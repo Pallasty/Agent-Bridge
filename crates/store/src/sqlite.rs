@@ -3120,7 +3120,8 @@ fn codebase_index_a1_staging_storage_evidence(
     #[cfg(not(unix))]
     let device = 0;
     #[cfg(target_os = "linux")]
-    let (mount_point, filesystem_type) = codebase_index_a1_linux_mount_identity(&file_path)?;
+    let (mount_point, filesystem_type) =
+        codebase_index_a1_linux_mount_identity(&file_path, device)?;
     #[cfg(not(target_os = "linux"))]
     let (mount_point, filesystem_type) = (PathBuf::new(), "unsupported_non_linux".to_string());
 
@@ -3134,17 +3135,54 @@ fn codebase_index_a1_staging_storage_evidence(
 }
 
 #[cfg(all(feature = "codebase-index-bounded-native-a1", target_os = "linux"))]
-fn codebase_index_a1_linux_mount_identity(path: &Path) -> Result<(PathBuf, String)> {
+fn codebase_index_a1_linux_mount_identity(path: &Path, device: u64) -> Result<(PathBuf, String)> {
     let mountinfo = std::fs::read_to_string("/proc/self/mountinfo")
         .map_err(|error| Error::Backend(format!("codebase_index A1 read mountinfo: {error}")))?;
-    let mut best: Option<(PathBuf, String)> = None;
+    let (major, minor) = codebase_index_a1_linux_device_major_minor(device);
+    codebase_index_a1_linux_mount_identity_from(&mountinfo, path, major, minor).ok_or_else(|| {
+        Error::Backend(format!(
+            "codebase_index A1 no mountinfo entry for staging path {path:?} on device {major}:{minor}"
+        ))
+    })
+}
+
+#[cfg(all(feature = "codebase-index-bounded-native-a1", target_os = "linux"))]
+fn codebase_index_a1_linux_device_major_minor(device: u64) -> (u64, u64) {
+    // Linux userspace `major()` / `minor()` encoding from sys/sysmacros.h.
+    let major = ((device >> 8) & 0x0000_0fff) | ((device >> 32) & 0xffff_f000);
+    let minor = (device & 0x0000_00ff) | ((device >> 12) & 0xffff_ff00);
+    (major, minor)
+}
+
+#[cfg(all(feature = "codebase-index-bounded-native-a1", target_os = "linux"))]
+fn codebase_index_a1_linux_mount_identity_from(
+    mountinfo: &str,
+    path: &Path,
+    expected_major: u64,
+    expected_minor: u64,
+) -> Option<(PathBuf, String)> {
+    let mut best: Option<(usize, u64, PathBuf, String)> = None;
 
     for line in mountinfo.lines() {
         let Some((mount_fields, filesystem_fields)) = line.split_once(" - ") else {
             continue;
         };
         let mut fields = mount_fields.split_whitespace();
-        let Some(encoded_mount_point) = fields.nth(4) else {
+        let Some(mount_id) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
+            continue;
+        };
+        let Some(device_field) = fields.nth(1) else {
+            continue;
+        };
+        let Some((major, minor)) = device_field.split_once(':').and_then(|(major, minor)| {
+            Some((major.parse::<u64>().ok()?, minor.parse::<u64>().ok()?))
+        }) else {
+            continue;
+        };
+        if (major, minor) != (expected_major, expected_minor) {
+            continue;
+        }
+        let Some(encoded_mount_point) = fields.nth(1) else {
             continue;
         };
         let Some(filesystem_type) = filesystem_fields.split_whitespace().next() else {
@@ -3160,19 +3198,46 @@ fn codebase_index_a1_linux_mount_identity(path: &Path) -> Result<(PathBuf, Strin
         if !path.starts_with(&mount_point) {
             continue;
         }
-        let replace = best.as_ref().map_or(true, |(current, _)| {
-            mount_point.components().count() > current.components().count()
-        });
+        let depth = mount_point.components().count();
+        let replace = best
+            .as_ref()
+            .map_or(true, |(current_depth, current_id, _, _)| {
+                depth > *current_depth || (depth == *current_depth && mount_id > *current_id)
+            });
         if replace {
-            best = Some((mount_point, filesystem_type.to_string()));
+            best = Some((depth, mount_id, mount_point, filesystem_type.to_string()));
         }
     }
 
-    best.ok_or_else(|| {
-        Error::Backend(format!(
-            "codebase_index A1 no mountinfo entry for staging path {path:?}"
-        ))
-    })
+    best.map(|(_, _, mount_point, filesystem_type)| (mount_point, filesystem_type))
+}
+
+#[cfg(all(
+    test,
+    feature = "codebase-index-bounded-native-a1",
+    target_os = "linux"
+))]
+mod codebase_index_a1_mount_tests {
+    use super::*;
+
+    #[test]
+    fn mount_identity_rejects_wrong_device_and_prefers_active_overmount() {
+        let mountinfo = "100 1 0:39 / /4TNVMe1 rw - autofs systemd-1 rw\n\
+                         101 1 259:4 / /4TNVMe1 rw - f2fs /dev/nvme0n1 rw\n\
+                         102 1 259:4 / /4TNVMe1 rw - f2fs /dev/nvme0n1 rw\n";
+
+        let identity = codebase_index_a1_linux_mount_identity_from(
+            mountinfo,
+            Path::new("/4TNVMe1/eval/rows.sqlite3"),
+            259,
+            4,
+        )
+        .expect("match the actual file device");
+
+        assert_eq!(identity, (PathBuf::from("/4TNVMe1"), "f2fs".to_string()));
+        assert_eq!(codebase_index_a1_linux_device_major_minor(64_514), (252, 2));
+        assert_eq!(codebase_index_a1_linux_device_major_minor(2_054), (8, 6));
+    }
 }
 
 struct CodebaseIndexTransactionReceipt {
@@ -3368,6 +3433,16 @@ impl SqliteStore {
     pub async fn codebase_index_pragmas_a1(&self) -> Result<crate::CodebaseIndexA1PragmaEvidence> {
         self.conn
             .call(|connection| -> RusqliteResult<_> {
+                let databases = connection
+                    .prepare("PRAGMA database_list")?
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(1)?,
+                            PathBuf::from(row.get::<_, String>(2)?),
+                        ))
+                    })?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                let (database_names, database_files) = databases.into_iter().unzip();
                 Ok(crate::CodebaseIndexA1PragmaEvidence {
                     journal_mode: connection
                         .query_row("PRAGMA journal_mode", [], |row| row.get(0))?,
@@ -3390,6 +3465,8 @@ impl SqliteStore {
                     locking_mode: connection
                         .query_row("PRAGMA locking_mode", [], |row| row.get(0))?,
                     autocommit: connection.is_autocommit(),
+                    database_names,
+                    database_files,
                 })
             })
             .await

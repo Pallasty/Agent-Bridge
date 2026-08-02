@@ -313,7 +313,8 @@ async fn bounded_native_a1_persists_multiple_batches_in_one_index() {
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
 
-    let store = SqliteStore::open(&temp_dir.path().join("state.db"))
+    let db_path = temp_dir.path().join("state.db");
+    let store = SqliteStore::open(&db_path)
         .await
         .expect("open temporary store");
     let outcome = store
@@ -557,12 +558,11 @@ async fn bounded_native_a1_uses_and_cleans_explicit_staging_parent() {
 
     assert!(outcome.telemetry.staging_parent_was_explicit);
     assert!(outcome.telemetry.staging_cleanup_succeeded);
-    assert!(
-        outcome
-            .telemetry
-            .staging_file_path
-            .starts_with(staging_parent.canonicalize().expect("canonical staging parent"))
-    );
+    assert!(outcome.telemetry.staging_file_path.starts_with(
+        staging_parent
+            .canonicalize()
+            .expect("canonical staging parent")
+    ));
     assert!(
         !outcome.telemetry.staging_file_path.exists(),
         "telemetry must name the actual staging file removed after commit"
@@ -634,7 +634,8 @@ async fn a1_pragma_evidence_is_authoritative_read_only_and_stable() {
     let target_root = source_root.to_str().expect("UTF-8 fixture path");
     let staging_parent = temp_dir.path().join("staging");
     std::fs::create_dir_all(&staging_parent).expect("create staging parent");
-    let store = SqliteStore::open(&temp_dir.path().join("state.db"))
+    let db_path = temp_dir.path().join("state.db");
+    let store = SqliteStore::open(&db_path)
         .await
         .expect("open temporary store");
 
@@ -646,6 +647,17 @@ async fn a1_pragma_evidence_is_authoritative_read_only_and_stable() {
     assert_eq!(before.foreign_keys, 1);
     assert_eq!(before.busy_timeout_ms, 5_000);
     assert!(before.autocommit);
+    assert_eq!(before.database_names, ["main", "temp"]);
+    assert_eq!(before.database_files.len(), 2);
+    assert_eq!(
+        before.database_files[0]
+            .canonicalize()
+            .expect("canonical authoritative database path"),
+        db_path
+            .canonicalize()
+            .expect("canonical fixture database path")
+    );
+    assert!(before.database_files[1].as_os_str().is_empty());
 
     store
         .codebase_index_full_vec_a1(target_root, &["rust".to_string()])
