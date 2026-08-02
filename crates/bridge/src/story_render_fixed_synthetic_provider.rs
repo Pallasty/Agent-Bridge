@@ -7,6 +7,8 @@
 
 #![deny(clippy::all)]
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -24,8 +26,13 @@ const WIRE_OUTPUT_ROOT: &str = "/home/pallasting/.agent-bridge-secure/story-rend
 const ISSUED_AT: &str = "2026-08-02T12:00:00Z";
 const EXPIRES_AT: &str = "2026-08-02T12:05:00Z";
 const SYNTHETIC_KEY_ID: &str = "story-render-synthetic-structure-only-no-key-v1";
+pub const SYNTHETIC_REPLAY_LEDGER_CAPACITY: usize = 4_096;
+const SYNTHETIC_REPLAY_LEDGER_WORDS: usize = SYNTHETIC_REPLAY_LEDGER_CAPACITY / u64::BITS as usize;
+static SYNTHETIC_REPLAY_LEDGER: [AtomicU64; SYNTHETIC_REPLAY_LEDGER_WORDS] =
+    [const { AtomicU64::new(0) }; SYNTHETIC_REPLAY_LEDGER_WORDS];
 
 pub struct StoryRenderFixedSyntheticProvider {
+    sequence: u64,
     request_id: String,
     nonce: Option<String>,
     placeholder_sha256: String,
@@ -42,6 +49,7 @@ impl StoryRenderFixedSyntheticProvider {
     pub fn new(sequence: u64) -> Self {
         let request_digest = domain_digest(REQUEST_DOMAIN, sequence);
         Self {
+            sequence,
             request_id: request_digest[..32].to_owned(),
             nonce: Some(domain_digest(NONCE_DOMAIN, sequence)),
             placeholder_sha256: domain_digest(PLACEHOLDER_DOMAIN, sequence),
@@ -62,6 +70,9 @@ impl StoryRenderSyntheticAdmissionProvider for StoryRenderFixedSyntheticProvider
             return None;
         }
         let nonce = self.nonce.take()?;
+        if !reserve_sequence(self.sequence) {
+            return None;
+        }
         self.request_pending = true;
         Some(StoryRenderFixedSyntheticGrant {
             request_id: self.request_id.clone(),
@@ -104,6 +115,18 @@ impl StoryRenderSyntheticAdmissionProvider for StoryRenderFixedSyntheticProvider
         }))
         .ok()
     }
+}
+
+fn reserve_sequence(sequence: u64) -> bool {
+    let Ok(index) = usize::try_from(sequence) else {
+        return false;
+    };
+    if index >= SYNTHETIC_REPLAY_LEDGER_CAPACITY {
+        return false;
+    }
+    let word = index / u64::BITS as usize;
+    let mask = 1_u64 << (index % u64::BITS as usize);
+    SYNTHETIC_REPLAY_LEDGER[word].fetch_or(mask, Ordering::Relaxed) & mask == 0
 }
 
 fn domain_digest(domain: &str, sequence: u64) -> String {
