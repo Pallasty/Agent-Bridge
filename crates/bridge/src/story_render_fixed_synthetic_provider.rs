@@ -37,6 +37,7 @@ pub struct StoryRenderFixedSyntheticProvider {
     nonce: Option<String>,
     placeholder_sha256: String,
     request_pending: bool,
+    replay_mode: StoryRenderFixedSyntheticReplayMode,
 }
 
 pub struct StoryRenderFixedSyntheticGrant {
@@ -45,8 +46,22 @@ pub struct StoryRenderFixedSyntheticGrant {
     placeholder_sha256: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StoryRenderFixedSyntheticReplayMode {
+    ProcessLocal,
+    ExternalGate,
+}
+
 impl StoryRenderFixedSyntheticProvider {
     pub fn new(sequence: u64) -> Self {
+        Self::with_replay_mode(sequence, StoryRenderFixedSyntheticReplayMode::ProcessLocal)
+    }
+
+    pub(crate) fn new_with_external_replay_gate(sequence: u64) -> Self {
+        Self::with_replay_mode(sequence, StoryRenderFixedSyntheticReplayMode::ExternalGate)
+    }
+
+    fn with_replay_mode(sequence: u64, replay_mode: StoryRenderFixedSyntheticReplayMode) -> Self {
         let request_digest = domain_digest(REQUEST_DOMAIN, sequence);
         Self {
             sequence,
@@ -54,6 +69,7 @@ impl StoryRenderFixedSyntheticProvider {
             nonce: Some(domain_digest(NONCE_DOMAIN, sequence)),
             placeholder_sha256: domain_digest(PLACEHOLDER_DOMAIN, sequence),
             request_pending: false,
+            replay_mode,
         }
     }
 }
@@ -70,7 +86,9 @@ impl StoryRenderSyntheticAdmissionProvider for StoryRenderFixedSyntheticProvider
             return None;
         }
         let nonce = self.nonce.take()?;
-        if !reserve_sequence(self.sequence) {
+        if self.replay_mode == StoryRenderFixedSyntheticReplayMode::ProcessLocal
+            && !reserve_sequence(self.sequence)
+        {
             return None;
         }
         self.request_pending = true;

@@ -261,7 +261,9 @@ pub async fn heartbeat_alert(
         }
     });
 
-    append_jsonl(&events_path, &event)?;
+    if !opts.preview {
+        append_jsonl(&events_path, &event)?;
+    }
     let next_state = json!({
         "label": label,
         "updated_at": now,
@@ -272,7 +274,9 @@ pub async fn heartbeat_alert(
         "last_reason": reason,
         "events_path": events_path.to_string_lossy(),
     });
-    write_json(&state_path, &next_state)?;
+    if !opts.preview {
+        write_json(&state_path, &next_state)?;
+    }
 
     Ok(json!({
         "surface": "avatar_heartbeat_alert",

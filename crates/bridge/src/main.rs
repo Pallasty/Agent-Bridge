@@ -1180,7 +1180,7 @@ enum AvatarOp {
         /// Force an alert even if the event key is unchanged.
         #[arg(long)]
         force: bool,
-        /// Compute and record the event but do not emit notification or TTS.
+        /// Compute the alert without writing alert state/events or emitting notification/TTS.
         #[arg(long)]
         preview: bool,
         /// Suppress desktop notification emission.
