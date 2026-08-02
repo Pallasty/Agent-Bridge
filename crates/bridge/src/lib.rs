@@ -124,6 +124,10 @@ pub mod shadow_cortex;
 pub mod skills;
 pub mod socket_path;
 pub(crate) mod story_contract;
+/// Dormant S623 synthetic Supervisor; no Worker, MCP, or deployment caller.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_supervisor;
 pub mod sync;
 pub mod tailscale_api;
 pub mod tool_atlas;
