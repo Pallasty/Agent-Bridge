@@ -213,6 +213,22 @@ express. A packet is S0-valid only when it passes both.
   architecture decision for sealed execution-plan transport, Host-owned
   bounded stdio, async binding, last-close custody, replay continuity, and the
   S635 synthetic-integration gate.
+- `s635_story_render_guardian_supervisor_synthetic_integration.json`: S635
+  hash-bound default-off GuardianV2 implementation and synthetic verification
+  receipt, with real Worker, runtime configuration, MCP, and deployment closed.
+- `S635_STORY_RENDER_GUARDIAN_SUPERVISOR_SYNTHETIC_INTEGRATION.md`: S635 ABG2,
+  sealed-plan, asynchronous binding, shared lock custody, cleanup, rollback,
+  and runtime-nonadoption evidence.
+- `story_render_guardian_runtime_adoption_review.schema.json`: S636 strict
+  source, installed-binary, live-process, current-client, model/Python,
+  packaging, authority, rollback, and implementation-ladder review contract.
+- `s636_story_render_guardian_runtime_adoption_review.json`: S636 hash-bound
+  decision that the model bundle is ready while eight Worker, identity,
+  packaging, authority, MCP, and deployment blockers keep runtime adoption
+  closed.
+- `S636_STORY_RENDER_GUARDIAN_RUNTIME_ADOPTION_REVIEW.md`: S636 evidence-layer
+  audit and ordered S637-S643 adoption path, beginning with a source-only real
+  Worker protocol adapter.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

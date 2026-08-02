@@ -1,0 +1,381 @@
+{
+  "schema": "agent_bridge.story_render_guardian_runtime_adoption_review.v1",
+  "status": "story_render_guardian_runtime_adoption_reviewed",
+  "decision": "runtime_adoption_blocked_model_ready_worker_identity_packaging_authority_and_deployment_not_ready",
+  "reviewed_at": "2026-08-02",
+  "baseline": {
+    "reviewed_tree": "d3e22778aa21146ca734520ea15c0a0a8fed958d",
+    "s635_receipt": {
+      "path": "docs/design/voice-scene/s635_story_render_guardian_supervisor_synthetic_integration.json",
+      "sha256": "210f68bf9e0779cca1acfb3408c6c58132b22d5df27ffff354f74f76b92a352a"
+    }
+  },
+  "impact": {
+    "architecture": "high",
+    "source_change_in_s636": "review_artifacts_and_contract_test_only",
+    "runtime": "none",
+    "model": "files_hash_verified_without_loading",
+    "operational_privilege": "unchanged"
+  },
+  "source_evidence": [
+    {
+      "path": "crates/bridge/src/story_render_guardian_protocol.rs",
+      "sha256": "620814d8012ffb424eee5f1cafac71335d428da287381c18727df3f8be70c28f"
+    },
+    {
+      "path": "crates/bridge/src/story_render_guardian.rs",
+      "sha256": "454ec0b934aec110470a7eb968bfe7eaa36e92d010f2b99af055aec686cf2cf4"
+    },
+    {
+      "path": "crates/bridge/src/story_render_guardian_supervision.rs",
+      "sha256": "f2b01983df9e4e4c06a08381523c06d3150d2232413b9794e46939f32ea0b864"
+    },
+    {
+      "path": "crates/bridge/src/story_render_supervisor.rs",
+      "sha256": "928174a05da6fe5cab31b2e5bde2e84b874aadc9545f85ba91f48f8cfeb6b158"
+    },
+    {
+      "path": "scripts/story_render_worker_protocol.py",
+      "sha256": "23cb69b10e2a11042fdfd4061b17549c22419581f08a00dc0da594257053358d"
+    },
+    {
+      "path": "scripts/story_bounded_render_executor.py",
+      "sha256": "e469e51f109f5e5427175d824eb84d14155e257879c7e438279065d27dbc9e46"
+    },
+    {
+      "path": "scripts/story_executor_secure_runtime_composition.py",
+      "sha256": "d7ae11a44fe1e121b3c0e7c101a4d145f513432b5740f87d79eabb314bf551e0"
+    },
+    {
+      "path": "scripts/story_executor_posix_runtime_binding.py",
+      "sha256": "e2fd3d719a9b0996500c7447f1df3d4726db0bca6f3edb9336200aa8aa481208"
+    },
+    {
+      "path": "scripts/story_executor_runtime_verifiers.py",
+      "sha256": "f01520fbc1342a58b1c0c3d9731180dcd0d585c1fae508fd5fe1db922a542c37"
+    },
+    {
+      "path": "crates/bridge/src/mcp_tools/story.rs",
+      "sha256": "7fdd0e1534b1ebddf07289188d7769b01aa5d2363ec4b7f88e006abc241ceedd"
+    },
+    {
+      "path": "crates/bridge/src/mcp_tools.rs",
+      "sha256": "33d966049e1e29c188db60c0f6263bbc0465dff120f9d2be3568ba49cdffaccd"
+    },
+    {
+      "path": "scripts/deploy_from_master.sh",
+      "sha256": "c5084db4368f338477a44532c7f9407c6b02cf1fde5c5d1df2c90277ec197fae"
+    },
+    {
+      "path": "docs/design/voice-scene/s620_story_render_one_shot_worker_protocol_contract.json",
+      "sha256": "c044017a2015fae0b279b648f6fc415dcf6e516d214cc6ed2965b4efa0a38dd1"
+    },
+    {
+      "path": "docs/design/voice-scene/s635_story_render_guardian_supervisor_synthetic_integration.json",
+      "sha256": "210f68bf9e0779cca1acfb3408c6c58132b22d5df27ffff354f74f76b92a352a"
+    }
+  ],
+  "source_findings": {
+    "guardian_v2_implemented": true,
+    "guardian_v2_default": false,
+    "guardian_entrypoint_has_product_caller": false,
+    "guardian_product_binary_present": false,
+    "real_one_shot_worker_present": false,
+    "render_mcp_module_present": false,
+    "render_mcp_registered": false,
+    "preflight_mcp_registered": true,
+    "preflight_is_read_only_dry_run": true,
+    "deployment_packages_guardian_or_worker": false,
+    "sealed_plan_binds_file_content_identity": false
+  },
+  "installed_findings": {
+    "observed_at": "2026-08-02",
+    "source_head": "d3e22778aa21146ca734520ea15c0a0a8fed958d",
+    "installed_version": "agent-bridge 0.14.0 (v0.14.0-1324-g78301b1d; 78301b1d72c4)",
+    "installed_commit": "78301b1d72c4",
+    "installed_commits_behind_source": 14,
+    "installed_sha256": "0643f96f9e60b70742a03336e3fc009a07b6177d6f1b573715528951ca6ff32d",
+    "installed_binary_contains_s635": false,
+    "installed_binary_registers_preflight_only": true,
+    "installed_mcp_processes": 13,
+    "installed_mcp_current_inode": 11,
+    "installed_mcp_stale_inode": 2,
+    "doctor_ok": true,
+    "doctor_proves_story_render_adoption": false,
+    "current_client_tools": [
+      "present_voice",
+      "present_voice_confirm_audibility",
+      "story_command_preflight"
+    ],
+    "current_client_preflight_direct_invocation_verified": true,
+    "current_client_render_tool_present": false,
+    "preflight_runtime_enabled": true,
+    "render_runtime_enabled": false,
+    "installed_binary_filesystem": "fuseblk",
+    "installed_binary_observed_mode": "0777",
+    "installed_binary_observed_owner": "root:root",
+    "installed_wrapper_injects_broad_credentials": true,
+    "secure_runtime_filesystem": "ext4",
+    "secure_runtime_observed_mode": "0700",
+    "secure_runtime_observed_owner": "1000:1000",
+    "secure_output_root_present": false,
+    "installed_one_shot_worker_present": false
+  },
+  "model_and_python_compatibility": {
+    "original_model_snapshot_present": true,
+    "original_model_snapshot": "/4TNVMe2/aiot_weights/modelscope/models/Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master",
+    "community_cpu_int4_snapshot_present": true,
+    "community_cpu_int4_snapshot": "/4TNVMe2/aiot_weights/modelscope/models/onnx-community--Qwen3-TTS-12Hz-1.7B-CustomVoice/snapshots/master/cpu_int4",
+    "s608_full_bundle_hash_verified": true,
+    "s608_verification_elapsed_seconds": 9.909,
+    "model_redownload_required": false,
+    "synthetic_python_executable": "/usr/bin/python3",
+    "synthetic_python_has_required_tts_modules": false,
+    "missing_from_synthetic_python": [
+      "numpy",
+      "onnxruntime",
+      "soundfile",
+      "transformers",
+      "torch"
+    ],
+    "fixed_real_worker_python_environment_present": false,
+    "real_model_loaded_in_s636": false
+  },
+  "runtime_compatibility": {
+    "worker_protocol_codec": "implemented_and_unit_testable",
+    "bounded_executor": "implemented_as_in_process_callable",
+    "installed_key_composition": "implemented_but_not_worker_wrapped",
+    "guardian_transport": "synthetic_verified_only",
+    "real_worker_protocol_entrypoint": "absent",
+    "immutable_worker_package": "absent",
+    "fixed_python_environment": "absent",
+    "secure_output_contract": "incompatible_roots",
+    "owner_authorization_broker": "absent",
+    "mcp_render_adapter": "absent",
+    "current_client_render_tool": "absent",
+    "runtime_adoption_ready": false
+  },
+  "blockers": [
+    {
+      "id": "B1_REAL_WORKER_ENTRYPOINT",
+      "severity": "high",
+      "evidence": "S620-selected one-shot Worker file is absent; the executor is only an in-process callable",
+      "resolution": "implement a strict one-request one-response adapter with injected synthetic seams and redacted failures",
+      "closed": false
+    },
+    {
+      "id": "B2_GUARDIAN_PRODUCT_ENTRYPOINT",
+      "severity": "high",
+      "evidence": "run_guardian_entrypoint has no product caller and no dedicated Guardian binary is packaged",
+      "resolution": "add a minimal dedicated entrypoint that dispatches Guardian and bootstrap roles before normal product initialization",
+      "closed": false
+    },
+    {
+      "id": "B3_EXECUTABLE_IDENTITY_TOCTOU",
+      "severity": "critical",
+      "evidence": "the sealed plan authenticates paths and arguments but not executable or script bytes, identity, mode, owner, or parent custody",
+      "resolution": "bind an immutable artifact manifest and descriptor-stable identity checks before any authority-bearing launch",
+      "closed": false
+    },
+    {
+      "id": "B4_IMMUTABLE_PACKAGE_AND_PYTHON",
+      "severity": "critical",
+      "evidence": "deployment omits Worker support files and the synthetic Python lacks all required TTS modules",
+      "resolution": "package hash-bound scripts and a fixed offline Python environment under owner-controlled POSIX custody",
+      "closed": false
+    },
+    {
+      "id": "B5_SECURE_OUTPUT_ROOT",
+      "severity": "high",
+      "evidence": "S604 binds a legacy fuseblk output root while S620 requires a private ext4 output root that does not yet exist",
+      "resolution": "define and install a 0700 secure output root and regenerate the execution contract against it",
+      "closed": false
+    },
+    {
+      "id": "B6_OWNER_AUTHORIZATION_BROKER",
+      "severity": "high",
+      "evidence": "one prior owner-signed render exists but no runtime broker can deliver a single bounded envelope without exposing the installed key to MCP",
+      "resolution": "implement a separate explicit owner-confirmation ingress with single-use short-lived envelopes",
+      "closed": false
+    },
+    {
+      "id": "B7_RENDER_MCP_SURFACE",
+      "severity": "high",
+      "evidence": "only read-only story_command_preflight is registered and visible to the current client",
+      "resolution": "add a default-off render adapter only after Worker, identity, output, and authority gates pass",
+      "closed": false
+    },
+    {
+      "id": "B8_DEPLOYED_BINARY_AND_INSTALL_TRUST",
+      "severity": "critical",
+      "evidence": "the installed binary is 14 commits behind, lacks S635, and resides in an observed 0777 root-owned fuseblk location behind a credential-injecting wrapper",
+      "resolution": "install Guardian and Worker artifacts into owner-controlled POSIX custody, then separately review deployment and current-client adoption",
+      "closed": false
+    }
+  ],
+  "implementation_ladder": [
+    {
+      "id": "S637",
+      "name": "story_render_real_worker_adapter_implementation",
+      "authority": "source_only_synthetic_tests",
+      "closes": [
+        "B1_REAL_WORKER_ENTRYPOINT"
+      ],
+      "forbids": [
+        "installed_key_read",
+        "model_load",
+        "audio_write_or_playback",
+        "mcp_registration",
+        "deployment"
+      ]
+    },
+    {
+      "id": "S638",
+      "name": "story_render_artifact_identity_and_python_package",
+      "authority": "source_and_isolated_package_tests",
+      "closes": [
+        "B3_EXECUTABLE_IDENTITY_TOCTOU",
+        "B4_IMMUTABLE_PACKAGE_AND_PYTHON"
+      ],
+      "forbids": [
+        "installed_key_read",
+        "model_load",
+        "runtime_enablement",
+        "deployment"
+      ]
+    },
+    {
+      "id": "S639",
+      "name": "story_render_guardian_product_entrypoint",
+      "authority": "source_only_synthetic_tests",
+      "closes": [
+        "B2_GUARDIAN_PRODUCT_ENTRYPOINT"
+      ],
+      "forbids": [
+        "real_worker_execution",
+        "mcp_registration",
+        "deployment"
+      ]
+    },
+    {
+      "id": "S640",
+      "name": "story_render_secure_output_and_owner_broker",
+      "authority": "configuration_and_synthetic_authority_tests",
+      "closes": [
+        "B5_SECURE_OUTPUT_ROOT",
+        "B6_OWNER_AUTHORIZATION_BROKER"
+      ],
+      "forbids": [
+        "model_load",
+        "audio_write_or_playback",
+        "mcp_registration"
+      ]
+    },
+    {
+      "id": "S641",
+      "name": "story_command_render_default_off_registration",
+      "authority": "source_and_fresh_client_dry_run",
+      "closes": [
+        "B7_RENDER_MCP_SURFACE"
+      ],
+      "forbids": [
+        "real_worker_execution",
+        "model_load",
+        "audio_write_or_playback"
+      ]
+    },
+    {
+      "id": "S642",
+      "name": "story_render_deployment_adoption_review",
+      "authority": "review_only",
+      "closes": [
+        "B8_DEPLOYED_BINARY_AND_INSTALL_TRUST"
+      ],
+      "forbids": [
+        "runtime_enablement_without_separate_gate",
+        "real_worker_execution"
+      ]
+    },
+    {
+      "id": "S643",
+      "name": "story_render_single_authorized_fixture_pilot",
+      "authority": "explicit_owner_envelope_for_one_fixed_fixture",
+      "closes": [],
+      "forbids": [
+        "playback_without_separate_audibility_gate",
+        "memory_write",
+        "unbounded_text_or_path",
+        "persistent_runtime_enablement"
+      ]
+    }
+  ],
+  "rollback": {
+    "runtime_action_required": false,
+    "current_runtime_changed": false,
+    "guardian_v2_remains_default_off": true,
+    "direct_v1_remains_source_default": true,
+    "future_implementation_units_reversible": true,
+    "runtime_rollback_deferred_until_runtime_exists": true
+  },
+  "authority": {
+    "installed_key_read": false,
+    "authorization_envelope_issued": false,
+    "real_worker_execution": false,
+    "model_load": false,
+    "audio_write": false,
+    "audio_playback": false,
+    "configuration_enablement": false,
+    "mcp_registration": false,
+    "binary_deployment": false,
+    "secret_or_credential_read": false
+  },
+  "runtime_effects": {
+    "guardian_process_spawned": false,
+    "worker_process_spawned": false,
+    "model_session_created": false,
+    "model_graph_executed": false,
+    "nonce_consumed": false,
+    "key_material_read": false,
+    "output_directory_created": false,
+    "audio_file_written": false,
+    "audio_played": false,
+    "memory_written": false,
+    "runtime_config_changed": false,
+    "mcp_process_restarted": false,
+    "binary_installed": false,
+    "story_render_runtime_network_accessed": false
+  },
+  "claims": {
+    "runtime_adoption_review_complete": true,
+    "model_bundle_present_and_hash_verified": true,
+    "guardian_real_worker_compatible": false,
+    "runtime_configuration_ready": false,
+    "mcp_render_registered": false,
+    "current_client_render_visible": false,
+    "deployed": false
+  },
+  "nonclaims": [
+    "real_story_worker_execution",
+    "qwen3_tts_session_or_graph_execution",
+    "audio_generation_quality_or_audibility",
+    "installed_key_or_authorization_envelope_access",
+    "guardian_and_real_worker_protocol_compatibility",
+    "immutable_python_dependency_closure",
+    "executable_identity_or_path_race_closure",
+    "secure_output_custody",
+    "owner_authorization_broker",
+    "story_command_render_registration",
+    "deployed_binary_adoption",
+    "current_client_render_visibility",
+    "simultaneous_host_and_guardian_loss",
+    "cgroup_or_systemd_custody",
+    "human_audibility"
+  ],
+  "receipt_sha256": "e2494be4395389973423d855d55fc7607f659f2360053ecd93cb86211acb5d0e",
+  "next_gate": {
+    "id": "S637",
+    "name": "story_render_real_worker_adapter_implementation",
+    "authority": "source_only_synthetic_tests",
+    "runtime_enablement": "not_authorized"
+  }
+}
