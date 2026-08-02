@@ -67,9 +67,21 @@ fn diagnostic_runs_real_full_vec_and_staged_native_in_fresh_children() {
             &pair["full_vec"]["fixture"]["target_raw_sha256_before"],
             base_raw
         );
+        // Raw custody deliberately includes the real indexed_at value, so two
+        // fresh children need not produce the same raw digest.  Cross-mode
+        // equivalence is carried by the semantic and normalized generation
+        // digests; each raw result must still prove it replaced the base rows.
+        assert_ne!(
+            &pair["full_vec"]["fixture"]["target_raw_sha256_after"],
+            base_raw
+        );
+        assert_ne!(
+            &pair["staged_native"]["fixture"]["target_raw_sha256_after"],
+            base_raw
+        );
         assert_eq!(
-            pair["full_vec"]["fixture"]["target_raw_sha256_after"],
-            pair["staged_native"]["fixture"]["target_raw_sha256_after"]
+            pair["full_vec"]["fixture"]["target_generation_sha256_after"],
+            pair["staged_native"]["fixture"]["target_generation_sha256_after"]
         );
     }
 }
