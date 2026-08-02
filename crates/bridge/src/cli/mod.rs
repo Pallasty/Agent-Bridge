@@ -1,9 +1,11 @@
+mod avatar;
 mod biocortex;
 mod browser_lite;
 mod local_control;
 mod substrate;
 pub(super) mod workflow_feedback;
 
+pub(super) use avatar::render_avatar_backend_probe_result;
 pub(super) use biocortex::{
     run_biocortex_capability_ledger_report_packet, run_biocortex_retrieval_approval_packet,
     run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
