@@ -174,6 +174,15 @@ express. A packet is S0-valid only when it passes both.
 - `S620_STORY_RENDER_ONE_SHOT_WORKER_PROTOCOL.md`: S620 protocol ADR, including
   the host-wide `flock` decision, owned kill/reap sequence, failure semantics,
   explicit nonclaims, and the S621 implementation-review gate.
+- `story_render_one_shot_worker_implementation_review.schema.json`: S621 strict
+  staged-implementation, source-state, pure-codec, synthetic-supervisor,
+  owner-authority, registration, and fault-matrix review contract.
+- `s621_story_render_one_shot_worker_implementation_review.json`: S621
+  hash-bound selection of a four-file pure protocol codec as the next patch,
+  while preserving six explicit runtime blockers.
+- `S621_STORY_RENDER_ONE_SHOT_WORKER_IMPLEMENTATION_REVIEW.md`: S621 staged
+  implementation ADR and the separation between MCP invocation and independent
+  owner grant authority.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
