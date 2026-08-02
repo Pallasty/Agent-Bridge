@@ -8345,22 +8345,6 @@ async fn run_continuity_report(as_json: bool) -> Result<()> {
 /// this surfaces "you handed me an empty walkthrough" as a hard failure rather
 /// than silently writing a useless artifact). NO new MCP tool; the `/walkthrough`
 /// skill assembles the doc from session evidence and shells out to this.
-/// True iff a rendered walkthrough artifact's `#ab-render` region carries actual
-/// content (a summary, or >=1 step with a heading / narrative / evidence) — not just
-/// the always-present `<section>` wrapper and the per-step `wt-step` shells. This is
-/// the honesty falsifier behind `walkthrough`'s self-check, factored out so the
-/// marker contract against `present::render_walkthrough_body` is unit-tested.
-fn walkthrough_region_has_content(html: &str) -> bool {
-    ab_bridge::present::render_region(html)
-        .map(|r| {
-            r.contains("wt-summary")
-                || r.contains("wt-heading")
-                || r.contains("wt-narrative")
-                || r.contains("wt-ev")
-        })
-        .unwrap_or(false)
-}
-
 fn run_walkthrough(doc_arg: &str, title: Option<&str>, as_json: bool) -> Result<()> {
     use ab_bridge::present::{extract_ab_payload, presentations_dir, write_walkthrough_artifact};
     use std::io::Read as _;
@@ -8392,7 +8376,7 @@ fn run_walkthrough(doc_arg: &str, title: Option<&str>, as_json: bool) -> Result<
     // (`wt-summary` / `wt-heading` / `wt-narrative` / `wt-ev`), each emitted only when
     // its field is actually present. A content-less doc must FAIL — we never silently
     // write a blank "walkthrough".
-    let region_has_content = walkthrough_region_has_content(&html);
+    let region_has_content = cli::walkthrough_region_has_content(&html);
     let self_check = payload_ok && region_has_content;
 
     if as_json {
@@ -18820,7 +18804,7 @@ mod tests {
         ] {
             let html = build_walkthrough_html(&doc, None, None);
             assert!(
-                !walkthrough_region_has_content(&html),
+                !cli::walkthrough_region_has_content(&html),
                 "empty/degenerate doc must be content-less: {doc}"
             );
         }
@@ -18835,7 +18819,7 @@ mod tests {
         for doc in cases {
             let html = build_walkthrough_html(&doc, None, None);
             assert!(
-                walkthrough_region_has_content(&html),
+                cli::walkthrough_region_has_content(&html),
                 "doc with real content must pass: {doc}"
             );
         }
