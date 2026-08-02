@@ -155,15 +155,17 @@ async fn wait_until_lock_available(config: StoryRenderSupervisorConfig) {
 }
 
 #[test]
-fn fresh_equal_sequences_build_identical_closed_requests() {
+fn equal_sequences_keep_identity_deterministic_but_replay_is_denied() {
     let mut first = StoryRenderFixedSyntheticProvider::new(7);
     let mut second = StoryRenderFixedSyntheticProvider::new(7);
 
     let (first_id, first_request) = close_request(&mut first);
-    let (second_id, second_request) = close_request(&mut second);
+    let second_id = second
+        .generate_request_id()
+        .expect("second deterministic identity");
 
     assert_eq!(first_id, second_id);
-    assert_eq!(first_request, second_request);
+    assert!(second.issue_grant(&second_id).is_none());
     assert!(is_lower_hex(&first_id, 32));
     let value = request_value(&first_request);
     assert_eq!(value["request_id"], first_id);

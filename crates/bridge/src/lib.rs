@@ -124,7 +124,7 @@ pub mod shadow_cortex;
 pub mod skills;
 pub mod socket_path;
 pub(crate) mod story_contract;
-/// Dormant S626 fixed synthetic provider; no real key, I/O, or runtime caller.
+/// Dormant S626/S627 fixed provider and replay ledger; no real authority or I/O.
 #[cfg(target_os = "linux")]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod story_render_fixed_synthetic_provider;
