@@ -4347,6 +4347,28 @@ fn which_in_path(bin: &str) -> bool {
     std::env::split_paths(&path).any(|p| p.join(bin).is_file())
 }
 
+const AVATAR_AURA_IO_STARTUP_ENV_KEYS: [&str; 4] = [
+    "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE",
+    "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT",
+    "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY",
+    "HOME",
+];
+
+fn avatar_aura_io_startup_values_from_lookup<F>(
+    mut lookup: F,
+) -> Result<std::collections::BTreeMap<String, String>>
+where
+    F: FnMut(&str) -> Result<Option<String>>,
+{
+    let mut values = std::collections::BTreeMap::new();
+    for key in AVATAR_AURA_IO_STARTUP_ENV_KEYS {
+        if let Some(value) = lookup(key)? {
+            values.insert(key.to_string(), value);
+        }
+    }
+    Ok(values)
+}
+
 #[cfg(unix)]
 fn restore_sigpipe_default() {
     // Rust ignores SIGPIPE by default, which converts a closed downstream pipe
@@ -8241,6 +8263,17 @@ async fn real_main() -> Result<()> {
                 )
             })?;
             let listen = listen.unwrap_or_else(|| "0.0.0.0:7878".to_string());
+            let aura_values =
+                avatar_aura_io_startup_values_from_lookup(|key| match std::env::var(key) {
+                    Ok(value) => Ok(Some(value)),
+                    Err(std::env::VarError::NotPresent) => Ok(None),
+                    Err(std::env::VarError::NotUnicode(_)) => {
+                        bail!("avatar_aura_io_environment_not_unicode:{key}")
+                    }
+                })?;
+            let aura_config =
+                ab_bridge::daemon_http::AvatarAuraIoStartupConfig::from_values(&aura_values)
+                    .context("Avatar Aura I/O startup configuration rejected")?;
             tracing::info!(
                 listen = %listen,
                 "starting agent-bridge daemon-http (v20 read-only Stage 1)"
@@ -8253,7 +8286,7 @@ async fn real_main() -> Result<()> {
             // warn-only for the other classes.
             dim_guard_strict_preflight(&store).await;
             ab_bridge::embedding_dim_guard::spawn(store.clone());
-            ab_bridge::daemon_http::run(store, &listen).await
+            ab_bridge::daemon_http::run_with_config(store, &listen, aura_config).await
         }
         #[cfg(feature = "g14-wasi-component-runtime")]
         Cmd::G14WasiComponent { .. } | Cmd::G14WasiBusinessComponent { .. } => unreachable!(),
@@ -18826,6 +18859,57 @@ async fn build_hub(explicit_episode_observation: bool) -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn avatar_aura_daemon_http_composition_reads_bounded_env_once() {
+        let mut calls = Vec::new();
+        let values = avatar_aura_io_startup_values_from_lookup(|key| {
+            calls.push(key.to_string());
+            Ok(match key {
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE" => Some("1".to_string()),
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT" => Some("/srv/avatar-aura".to_string()),
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY" => Some("aura.json".to_string()),
+                "HOME" => Some("/home/operator".to_string()),
+                _ => panic!("unexpected ambient key: {key}"),
+            })
+        })
+        .expect("bounded environment lookup should succeed");
+
+        assert_eq!(
+            calls,
+            [
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENABLE",
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ROOT",
+                "AGENT_BRIDGE_AVATAR_AURA_IO_ENTRY",
+                "HOME",
+            ]
+        );
+        let config = ab_bridge::daemon_http::AvatarAuraIoStartupConfig::from_values(&values)
+            .expect("bounded values should parse");
+        assert!(matches!(
+            config,
+            ab_bridge::daemon_http::AvatarAuraIoStartupConfig::Enabled { .. }
+        ));
+    }
+
+    #[test]
+    fn avatar_aura_adds_no_cli_or_mcp_path_surface() {
+        let main_source = include_str!("main.rs");
+        let daemon_start = main_source
+            .find("    DaemonHttp {")
+            .expect("DaemonHttp clap schema start");
+        let daemon_end = main_source[daemon_start..]
+            .find("\n    /// Run the explicitly hash-pinned G1.4")
+            .map(|offset| daemon_start + offset)
+            .expect("DaemonHttp clap schema boundary");
+        let daemon_schema = &main_source[daemon_start..daemon_end];
+        assert!(!daemon_schema.contains("aura_io"));
+        assert!(!daemon_schema.contains("aura-io"));
+
+        let mcp_tools = include_str!("mcp_tools.rs");
+        assert!(!mcp_tools.contains("aura_io"));
+        assert!(!mcp_tools.contains("aura-io"));
+    }
 
     // ── `walkthrough` CLI self-check: the honesty falsifier behind the daily-wire ──
     #[test]

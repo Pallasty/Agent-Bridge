@@ -457,6 +457,20 @@ fn renderer_payload_from_sources_with_aura_io_report(
     })
 }
 
+pub fn renderer_payload_from_sources_with_sanitized_aura_io_report(
+    scope: &RendererScope,
+    projected_avatar: Option<&Value>,
+    raw_pet: Option<&Value>,
+    aura_io_report: Option<&SanitizedAuraIoReport>,
+) -> Value {
+    renderer_payload_from_sources_with_aura_io_report(
+        scope,
+        projected_avatar,
+        raw_pet,
+        aura_io_report.map(SanitizedAuraIoReport::to_json_value),
+    )
+}
+
 pub fn renderer_payload_from_sources_with_aura_io_path(
     scope: &RendererScope,
     projected_avatar: Option<&Value>,
