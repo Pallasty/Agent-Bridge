@@ -1964,6 +1964,97 @@ pub struct CodebaseIndexStats {
     pub root_path: String,
 }
 
+/// Evaluation-only options for the default-off staged native A1 path.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1Options {
+    /// Maximum combined symbol/import/call rows retained in the owned batch.
+    pub batch_rows: usize,
+    /// Deterministic evaluation fault. Production callers do not expose A1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failpoint: Option<CodebaseIndexA1Failpoint>,
+    /// Optional explicit parent for the private staging database. Canonical
+    /// evaluation uses a disk-backed trial directory rather than `/tmp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staging_parent: Option<std::path::PathBuf>,
+}
+
+/// Deterministic faults used to prove that staging cannot partially replace
+/// the authoritative index.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CodebaseIndexA1Failpoint {
+    /// Abort the private staging transaction after this many flushed batches.
+    AfterStagingBatch(u64),
+    /// Abort after deleting the target root's symbols.
+    AfterDeleteSymbols,
+    /// Abort after deleting the target root's imports.
+    AfterDeleteImports,
+    /// Abort after deleting the target root's calls.
+    AfterDeleteCalls,
+    /// Abort after replaying this many symbol rows.
+    AfterSymbolRows(u64),
+    /// Abort after replaying this many import rows.
+    AfterImportRows(u64),
+    /// Abort after replaying this many call rows.
+    AfterCallRows(u64),
+    /// Abort after all rows are replayed but before commit.
+    BeforeCommit,
+}
+
+/// Structural evidence emitted by the staged native A1 path.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1Telemetry {
+    pub strategy: String,
+    pub batch_rows: usize,
+    pub emitted_batches: u64,
+    pub max_accumulator_rows: usize,
+    pub max_extractor_output_rows: usize,
+    pub declared_live_row_bound: usize,
+    pub staging_rows: u64,
+    pub staging_file_bytes: u64,
+    pub staging_parent_was_explicit: bool,
+    pub staging_cleanup_succeeded: bool,
+    pub staging_transaction_committed: bool,
+    pub authoritative_transaction_committed: bool,
+    pub autocommit_before: bool,
+    pub autocommit_during: bool,
+    pub autocommit_after: bool,
+    pub extraction_and_staging_ns: u64,
+    pub authoritative_transaction_ns: u64,
+    pub indexed_at: i64,
+}
+
+/// Result of one evaluation-only staged native index operation.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexA1Outcome {
+    pub stats: CodebaseIndexStats,
+    pub telemetry: CodebaseIndexA1Telemetry,
+}
+
+/// Evaluation-only timing evidence for the unchanged FullVec algorithm.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1FullVecTelemetry {
+    pub strategy: String,
+    pub extraction_and_accumulation_ns: u64,
+    pub authoritative_transaction_ns: u64,
+    pub autocommit_before: bool,
+    pub autocommit_during: bool,
+    pub autocommit_after: bool,
+}
+
+/// Result of the measured FullVec seam used only by the A1 evaluator.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexA1FullVecOutcome {
+    pub stats: CodebaseIndexStats,
+    pub telemetry: CodebaseIndexA1FullVecTelemetry,
+}
+
 /// Read-only exact-root inventory for an existing codebase index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodebaseIndexStatus {
