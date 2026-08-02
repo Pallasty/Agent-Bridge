@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub mod provenance;
 pub mod snapshot;
@@ -607,6 +608,7 @@ pub fn assess_suite(input: &SuiteInput) -> Assessment {
         validate_runtime_environment(&input.runtime_environment, &mut reasons);
         validate_canonical_trial_root(input.trial_root.as_deref(), &mut reasons);
         validate_canonical_plan(&input.pairs, &mut reasons);
+        validate_canonical_child_custody(input, &mut reasons);
         if input.cache_policy != "warm_shared_corpus_after_single_base_fixture" {
             reasons.push("canonical warm-cache policy is not frozen".to_string());
         }
@@ -626,6 +628,8 @@ pub fn assess_suite(input: &SuiteInput) -> Assessment {
         validate_failure_atomicity(
             &input.failure_atomicity,
             &input.provenance.build,
+            &input.base_fixture_preflight,
+            input.trial_root.as_deref(),
             &mut reasons,
         );
         validate_base_fixture_custody(input, &mut reasons);
@@ -761,28 +765,42 @@ pub fn assess_suite(input: &SuiteInput) -> Assessment {
         .iter()
         .filter(|pair| pair.wal_bytes_pass && pair.wal_frames_pass)
         .count();
-    let median_rss_pass = median_gate(&full_rss, &staged_rss, 10_000 - RSS_REDUCTION_BPS);
+    let expected_metrics = input.pairs.len();
+    let median_rss_pass = median_gate(
+        &full_rss,
+        &staged_rss,
+        expected_metrics,
+        10_000 - RSS_REDUCTION_BPS,
+    );
     let median_elapsed_pass = median_gate(
         &full_elapsed,
         &staged_elapsed,
+        expected_metrics,
         10_000 + ELAPSED_REGRESSION_BPS,
     );
     let median_cgroup_peak_pass = median_gate(
         &full_cgroup_peak,
         &staged_cgroup_peak,
+        expected_metrics,
         10_000 + CGROUP_PEAK_REGRESSION_BPS,
     );
     let median_cache_shift_guard_pass = cache_guard_passing_pairs == input.pairs.len();
-    let median_transaction_pass =
-        median_gate(&full_tx, &staged_tx, 10_000 + TX_MEDIAN_REGRESSION_BPS);
+    let median_transaction_pass = median_gate(
+        &full_tx,
+        &staged_tx,
+        expected_metrics,
+        10_000 + TX_MEDIAN_REGRESSION_BPS,
+    );
     let median_wal_bytes_pass = median_gate(
         &full_wal_bytes,
         &staged_wal_bytes,
+        expected_metrics,
         10_000 + WAL_REGRESSION_BPS,
     );
     let median_wal_frames_pass = median_gate(
         &full_wal_frames,
         &staged_wal_frames,
+        expected_metrics,
         10_000 + WAL_REGRESSION_BPS,
     );
 
@@ -858,26 +876,52 @@ fn validate_runtime_environment(
     environment: &RuntimeEnvironmentEvidence,
     reasons: &mut Vec<String>,
 ) {
-    if environment.kernel_release.is_empty()
-        || environment.cpu_model.is_empty()
-        || environment.cpu_microcode.is_empty()
+    let expected_siblings = [39_u32, 79_u32].into_iter().collect();
+    if !is_bound_text(&environment.kernel_release)
+        || !is_bound_text(&environment.cpu_model)
+        || !is_bound_text(&environment.cpu_microcode)
         || environment.process_affinity != "39"
         || environment.canonical_cpu != 39
         || environment.excluded_smt_sibling != 79
-        || !environment.canonical_cpu_siblings.contains("39")
-        || !environment.canonical_cpu_siblings.contains("79")
-        || environment.libc.is_empty()
-        || environment.allocator.is_empty()
-        || environment.systemd_version.is_empty()
-        || environment.loadavg.is_empty()
-        || environment.cpu_pressure.is_empty()
-        || environment.memory_pressure.is_empty()
-        || environment.io_pressure.is_empty()
+        || parse_cpu_list(&environment.canonical_cpu_siblings).as_ref() != Some(&expected_siblings)
+        || !is_bound_text(&environment.libc)
+        || !is_bound_text(&environment.allocator)
+        || !is_bound_text(&environment.systemd_version)
+        || !is_bound_text(&environment.loadavg)
+        || !is_bound_text(&environment.cpu_pressure)
+        || !is_bound_text(&environment.memory_pressure)
+        || !is_bound_text(&environment.io_pressure)
     {
         reasons.push(
             "canonical kernel/CPU/affinity/libc/systemd/load environment is incomplete".to_string(),
         );
     }
+}
+
+fn is_bound_text(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty() && value != "UNBOUND"
+}
+
+fn parse_cpu_list(value: &str) -> Option<std::collections::BTreeSet<u32>> {
+    let mut cpus = std::collections::BTreeSet::new();
+    for part in value.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            return None;
+        }
+        if let Some((start, end)) = part.split_once('-') {
+            let start = start.parse::<u32>().ok()?;
+            let end = end.parse::<u32>().ok()?;
+            if start > end || end.saturating_sub(start) > 4_096 {
+                return None;
+            }
+            cpus.extend(start..=end);
+        } else {
+            cpus.insert(part.parse::<u32>().ok()?);
+        }
+    }
+    (!cpus.is_empty()).then_some(cpus)
 }
 
 fn validate_canonical_trial_root(root: Option<&Path>, reasons: &mut Vec<String>) {
@@ -939,6 +983,53 @@ fn validate_canonical_plan(pairs: &[TrialPair], reasons: &mut Vec<String>) {
     }
     if ab != 5 || ba != 5 {
         reasons.push("canonical AB/BA first-position balance must be 5/5".to_string());
+    }
+}
+
+fn validate_canonical_child_custody(input: &SuiteInput, reasons: &mut Vec<String>) {
+    let Some(suite_root) = input.trial_root.as_deref() else {
+        return;
+    };
+    let mut executions = Vec::with_capacity(CANONICAL_PAIRS * 2);
+    let mut process_ids = std::collections::BTreeSet::new();
+    let mut cgroups = std::collections::BTreeSet::new();
+    let mut trial_roots = std::collections::BTreeSet::new();
+    let mut database_paths = std::collections::BTreeSet::new();
+    let mut valid = true;
+
+    for pair in &input.pairs {
+        for run in [&pair.full_vec, &pair.staged_native] {
+            executions.push(&run.execution);
+            valid &= process_ids.insert(run.execution.process_id);
+            valid &= run
+                .measurement
+                .cgroup_path
+                .as_ref()
+                .is_some_and(|path| cgroups.insert(path.clone()));
+            valid &= run.storage.trial_root.starts_with(suite_root)
+                && trial_roots.insert(run.storage.trial_root.clone());
+            let expected_database = run.storage.trial_root.join("database/state.db");
+            valid &= run.authoritative_pragmas_before.database_files.first()
+                == Some(&expected_database)
+                && database_paths.insert(expected_database);
+        }
+    }
+
+    executions.sort_by_key(|execution| execution.sequence);
+    valid &= executions.len() == CANONICAL_PAIRS * 2;
+    for (expected_sequence, execution) in executions.iter().enumerate() {
+        valid &= execution.sequence == expected_sequence;
+        if expected_sequence > 0 {
+            valid &=
+                executions[expected_sequence - 1].finished_unix_ns <= execution.started_unix_ns;
+        }
+    }
+
+    if !valid {
+        reasons.push(
+            "canonical child PID/cgroup/trial/database identities or global timeline are not unique"
+                .to_string(),
+        );
     }
 }
 
@@ -1097,6 +1188,7 @@ fn validate_run(run: &RunReceipt, canonical: bool, reasons: &mut Vec<String>, pa
         || run.database.wal_layout_valid != Some(true)
         || run.database.wal_checkpointed_frames != run.database.wal_checkpoint_log_frames
         || run.database.wal_checkpointed_frames != run.database.wal_frames
+        || !wal_physical_layout_valid(&run.database)
         || !run.wal_reset.proven_empty
         || run.wal_reset.busy != 0
         || run.wal_reset.log_frames != 0
@@ -1236,6 +1328,19 @@ fn validate_run(run: &RunReceipt, canonical: bool, reasons: &mut Vec<String>, pa
                 run.mode
             ));
         }
+        if [
+            run.measurement.authoritative_transaction_ns,
+            run.measurement.cgroup_memory_current_after_bytes,
+            run.measurement.cgroup_memory_peak_after_bytes,
+        ]
+        .into_iter()
+        .any(|value| value.is_none_or(|value| value == 0))
+        {
+            reasons.push(format!(
+                "pair {pair_index} {:?} has a zero canonical transaction or cgroup metric",
+                run.mode
+            ));
+        }
         if !memory_component_deltas_valid(&run.measurement) {
             reasons.push(format!(
                 "pair {pair_index} {:?} cgroup memory.stat deltas are inconsistent",
@@ -1263,6 +1368,29 @@ fn validate_run(run: &RunReceipt, canonical: bool, reasons: &mut Vec<String>, pa
         ) {
             reasons.push(format!(
                 "pair {pair_index} {:?} cgroup memory peak regressed monotonically",
+                run.mode
+            ));
+        }
+        if matches!(
+            (
+                run.measurement.cgroup_memory_current_before_bytes,
+                run.measurement.cgroup_memory_peak_before_bytes,
+                run.measurement.cgroup_memory_current_after_bytes,
+                run.measurement.cgroup_memory_peak_after_bytes,
+                run.measurement.peak_rss_bytes,
+            ),
+            (
+                Some(current_before),
+                Some(peak_before),
+                Some(current_after),
+                Some(peak_after),
+                Some(process_peak),
+            ) if peak_before < current_before
+                || peak_after < current_after
+                || peak_after < process_peak
+        ) {
+            reasons.push(format!(
+                "pair {pair_index} {:?} cgroup peak is below observed current/process memory",
                 run.mode
             ));
         }
@@ -1365,6 +1493,8 @@ fn pragma_contract_valid(value: &AuthoritativePragmaEvidence) -> bool {
 fn validate_failure_atomicity(
     receipts: &[FailureAtomicityReceipt],
     expected_build: &BuildIdentity,
+    base: &BaseFixturePreflightReceipt,
+    suite_root: Option<&Path>,
     reasons: &mut Vec<String>,
 ) {
     let expected = [
@@ -1380,6 +1510,8 @@ fn validate_failure_atomicity(
     let mut observed = std::collections::BTreeSet::new();
     let valid = receipts.len() == expected.len()
         && receipts.iter().all(|receipt| {
+            let expected_database = suite_root
+                .map(|root| root.join(format!("fault-{:?}/database/state.db", receipt.case)));
             observed.insert(receipt.case)
                 && &receipt.build_identity == expected_build
                 && receipt.expected_error_observed
@@ -1389,17 +1521,31 @@ fn validate_failure_atomicity(
                     .contains(receipt.case.expected_error_marker())
                 && is_lower_hex(&receipt.base_fixture_sha256, 64)
                 && receipt.database_copy_sha256_before == receipt.base_fixture_sha256
+                && receipt.target_generation_sha256_before == base.target_generation_sha256
+                && receipt.target_generation_sha256_after == base.target_generation_sha256
+                && receipt.other_root_sha256_before == base.other_root_sha256
+                && receipt.other_root_sha256_after == base.other_root_sha256
+                && receipt.non_codebase_sentinel_sha256_before == base.non_codebase_sentinel_sha256
+                && receipt.non_codebase_sentinel_sha256_after == base.non_codebase_sentinel_sha256
                 && receipt.target_generation_sha256_before == receipt.target_generation_sha256_after
                 && receipt.other_root_sha256_before == receipt.other_root_sha256_after
                 && receipt.non_codebase_sentinel_sha256_before
                     == receipt.non_codebase_sentinel_sha256_after
                 && receipt.rollback_before == receipt.rollback_after
                 && rollback_state_valid(&receipt.rollback_before)
+                && rollback_state_matches_base(&receipt.rollback_before, base)
+                && receipt.other_root_sha256_before == receipt.rollback_before.other_root_sha256
+                && receipt.non_codebase_sentinel_sha256_before
+                    == receipt.rollback_before.non_codebase_sentinel_sha256
                 && receipt.authoritative_pragmas_before == receipt.authoritative_pragmas_after
                 && pragma_contract_valid(&receipt.authoritative_pragmas_before)
+                && expected_database.as_ref().is_some_and(|expected| {
+                    receipt.authoritative_pragmas_before.database_files.first() == Some(expected)
+                })
                 && receipt.post_fault_query.query == "codebase_index_pragmas_a1"
                 && receipt.post_fault_query.succeeded
-                && is_lower_hex(&receipt.post_fault_query.result_sha256, 64)
+                && serialized_sha256(&receipt.authoritative_pragmas_after).as_deref()
+                    == Some(receipt.post_fault_query.result_sha256.as_str())
                 && receipt.connection_usable_after == receipt.post_fault_query.succeeded
                 && receipt.staging_cleanup_succeeded
         })
@@ -1407,6 +1553,30 @@ fn validate_failure_atomicity(
     if !valid {
         reasons.push("canonical failure-atomicity matrix is missing or invalid".to_string());
     }
+}
+
+fn rollback_state_matches_base(
+    state: &RollbackStateEvidence,
+    base: &BaseFixturePreflightReceipt,
+) -> bool {
+    state.target_raw_sha256 == base.target_raw_sha256
+        && state.other_root_sha256 == base.other_root_sha256
+        && state.non_codebase_sentinel_sha256 == base.non_codebase_sentinel_sha256
+        && Some(state.schema_sha256.as_str()) == base.database.schema_sha256.as_deref()
+        && Some(state.schema_meta_sha256.as_str()) == base.database.schema_meta_sha256.as_deref()
+        && Some(state.schema_version) == base.database.schema_version
+        && Some(state.user_version) == base.database.user_version
+        && Some(state.page_count) == base.database.page_count
+        && Some(state.freelist_count) == base.database.freelist_count
+        && Some(state.integrity_check.as_str()) == base.database.integrity_check.as_deref()
+        && Some(state.foreign_key_violations) == base.database.foreign_key_violations
+}
+
+fn serialized_sha256<T: Serialize>(value: &T) -> Option<String> {
+    let bytes = serde_json::to_vec(value).ok()?;
+    let mut digest = Sha256::new();
+    digest.update(bytes);
+    Some(format!("{:x}", digest.finalize()))
 }
 
 fn rollback_state_valid(state: &RollbackStateEvidence) -> bool {
@@ -1541,6 +1711,21 @@ fn pragma_settings_equivalent(
     left == right
 }
 
+fn wal_physical_layout_valid(database: &DatabaseEvidence) -> bool {
+    let (Some(bytes), Some(frames), Some(page_size)) =
+        (database.wal_bytes, database.wal_frames, database.page_size)
+    else {
+        return false;
+    };
+    if frames == 0 || page_size == 0 {
+        return bytes == 0 && frames == 0;
+    }
+    let expected = u128::from(frames)
+        .checked_mul(u128::from(page_size).saturating_add(24))
+        .and_then(|value| value.checked_add(32));
+    expected == Some(u128::from(bytes))
+}
+
 fn push_pair_metric(
     baselines: &mut Vec<u64>,
     candidates: &mut Vec<u64>,
@@ -1564,8 +1749,8 @@ fn metric_gate(baseline: Option<u64>, candidate: Option<u64>, ratio_bps: u64) ->
         && u128::from(candidate) * 10_000 <= u128::from(baseline) * u128::from(ratio_bps)
 }
 
-fn median_gate(baselines: &[u64], candidates: &[u64], ratio_bps: u64) -> bool {
-    if baselines.len() != candidates.len() || baselines.is_empty() {
+fn median_gate(baselines: &[u64], candidates: &[u64], expected_len: usize, ratio_bps: u64) -> bool {
+    if baselines.len() != expected_len || candidates.len() != expected_len || baselines.is_empty() {
         return false;
     }
     let mut paired_log_ratios = baselines

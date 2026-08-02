@@ -7,6 +7,19 @@ use ab_codebase_index_a1::{
     TrialOrder, TrialPair, WalResetEvidence, Workload, CANONICAL_BATCH_ROWS, CANONICAL_PAIRS,
     CANONICAL_TOTAL_ROWS,
 };
+use sha2::{Digest, Sha256};
+
+const WAL_PAGE_SIZE: u64 = 4_096;
+const WAL_FRAMES: u64 = 2_400;
+
+fn wal_bytes(frames: u64) -> u64 {
+    32 + frames * (24 + WAL_PAGE_SIZE)
+}
+
+fn sha256_json<T: serde::Serialize>(value: &T) -> String {
+    let bytes = serde_json::to_vec(value).expect("test evidence must serialize");
+    format!("{:x}", Sha256::digest(bytes))
+}
 
 fn identity(clean: bool) -> BuildIdentity {
     BuildIdentity {
@@ -67,15 +80,15 @@ fn evidence(seed: usize) -> DatabaseEvidence {
         ),
         page_count: Some(50_000 + seed as u64),
         freelist_count: Some(0),
-        wal_bytes: Some(10_000_000),
+        wal_bytes: Some(wal_bytes(WAL_FRAMES)),
         database_bytes: Some(20_000_000),
         shm_bytes: Some(32_768),
-        wal_frames: Some(2_400),
-        wal_checkpoint_log_frames: Some(2_400),
-        wal_checkpointed_frames: Some(2_400),
+        wal_frames: Some(WAL_FRAMES),
+        wal_checkpoint_log_frames: Some(WAL_FRAMES),
+        wal_checkpointed_frames: Some(WAL_FRAMES),
         wal_checkpoint_busy: Some(0),
         wal_layout_valid: Some(true),
-        page_size: Some(4_096),
+        page_size: Some(WAL_PAGE_SIZE),
         journal_mode: Some("wal".into()),
         root_rows: Some(CANONICAL_TOTAL_ROWS),
         null_embeddings: Some(500_000),
@@ -101,7 +114,7 @@ fn evidence(seed: usize) -> DatabaseEvidence {
     }
 }
 
-fn pragmas() -> AuthoritativePragmaEvidence {
+fn pragmas(trial_root: &str) -> AuthoritativePragmaEvidence {
     AuthoritativePragmaEvidence {
         journal_mode: "wal".into(),
         synchronous: 2,
@@ -115,10 +128,7 @@ fn pragmas() -> AuthoritativePragmaEvidence {
         locking_mode: "normal".into(),
         autocommit: true,
         database_names: vec!["main".into(), "temp".into()],
-        database_files: vec![
-            "/home/pallasting/eval/codebase-index-a1/database/state.db".into(),
-            "".into(),
-        ],
+        database_files: vec![format!("{trial_root}/database/state.db").into(), "".into()],
     }
 }
 
@@ -142,6 +152,14 @@ fn execution(mode: Mode, pair: usize) -> ChildExecutionEvidence {
 
 fn run(mode: Mode, pair: usize) -> RunReceipt {
     let candidate = mode == Mode::StagedNative;
+    let mode_name = if candidate {
+        "staged-native"
+    } else {
+        "full-vec"
+    };
+    let trial_root =
+        format!("/home/pallasting/eval/codebase-index-a1/trials/pair-{pair:02}-{mode_name}");
+    let authoritative_pragmas = pragmas(&trial_root);
     RunReceipt {
         schema: "agent_bridge.codebase_index.a1.run_receipt.v0".into(),
         mode,
@@ -153,7 +171,9 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
             peak_rss_bytes: Some(if candidate { 69 } else { 100 }),
             vm_hwm_bytes: Some(if candidate { 68 } else { 99 }),
             authoritative_transaction_ns: Some(if candidate { 105 } else { 100 }),
-            cgroup_path: Some("/user.slice/test.scope".into()),
+            cgroup_path: Some(format!(
+                "/user.slice/ab-codebase-index-a1-pair-{pair:02}-{mode_name}.service"
+            )),
             cgroup_memory_current_before_bytes: Some(0),
             cgroup_memory_current_after_bytes: Some(if candidate { 67 } else { 100 }),
             cgroup_memory_peak_before_bytes: Some(0),
@@ -198,8 +218,8 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
             non_codebase_sentinel_sha256_before: "8".repeat(64),
             non_codebase_sentinel_sha256_after: "8".repeat(64),
         },
-        authoritative_pragmas_before: pragmas(),
-        authoritative_pragmas_after: pragmas(),
+        authoritative_pragmas_before: authoritative_pragmas.clone(),
+        authoritative_pragmas_after: authoritative_pragmas,
         wal_reset: WalResetEvidence {
             busy: 0,
             log_frames: 0,
@@ -208,7 +228,7 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
             proven_empty: true,
         },
         storage: StorageEvidence {
-            trial_root: "/home/pallasting/eval/codebase-index-a1".into(),
+            trial_root: trial_root.clone().into(),
             mount_point: Some("/home".into()),
             filesystem_type: Some("ext4".into()),
             trial_device: Some(1),
@@ -233,8 +253,7 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
             batch_rows: CANONICAL_BATCH_ROWS,
             emitted_batches: 342,
             staging_file_bytes: 1,
-            staging_file_path: "/home/pallasting/eval/codebase-index-a1/staging/rows.sqlite3"
-                .into(),
+            staging_file_path: format!("{trial_root}/staging/rows.sqlite3").into(),
             staging_file_device: 1,
             staging_file_mount_point: "/home".into(),
             staging_file_filesystem_type: "ext4".into(),
@@ -327,31 +346,35 @@ fn canonical_input() -> SuiteInput {
         FailureCase::BeforeCommit,
     ]
     .into_iter()
-    .map(|case| FailureAtomicityReceipt {
-        case,
-        build_identity: identity(true),
-        expected_error_observed: true,
-        expected_error_marker: case.expected_error_marker().into(),
-        observed_error: format!("store failure: {}", case.expected_error_marker()),
-        target_generation_sha256_before: "5".repeat(64),
-        target_generation_sha256_after: "5".repeat(64),
-        other_root_sha256_before: "7".repeat(64),
-        other_root_sha256_after: "7".repeat(64),
-        non_codebase_sentinel_sha256_before: "8".repeat(64),
-        non_codebase_sentinel_sha256_after: "8".repeat(64),
-        rollback_before: rollback_state(),
-        rollback_after: rollback_state(),
-        authoritative_pragmas_before: pragmas(),
-        authoritative_pragmas_after: pragmas(),
-        connection_usable_after: true,
-        post_fault_query: PostFaultQueryEvidence {
-            query: "codebase_index_pragmas_a1".into(),
-            succeeded: true,
-            result_sha256: "d".repeat(64),
-        },
-        staging_cleanup_succeeded: true,
-        base_fixture_sha256: "4".repeat(64),
-        database_copy_sha256_before: "4".repeat(64),
+    .map(|case| {
+        let trial_root = format!("/home/pallasting/eval/codebase-index-a1/fault-{case:?}");
+        let authoritative_pragmas = pragmas(&trial_root);
+        FailureAtomicityReceipt {
+            case,
+            build_identity: identity(true),
+            expected_error_observed: true,
+            expected_error_marker: case.expected_error_marker().into(),
+            observed_error: format!("store failure: {}", case.expected_error_marker()),
+            target_generation_sha256_before: "5".repeat(64),
+            target_generation_sha256_after: "5".repeat(64),
+            other_root_sha256_before: "7".repeat(64),
+            other_root_sha256_after: "7".repeat(64),
+            non_codebase_sentinel_sha256_before: "8".repeat(64),
+            non_codebase_sentinel_sha256_after: "8".repeat(64),
+            rollback_before: rollback_state(),
+            rollback_after: rollback_state(),
+            authoritative_pragmas_before: authoritative_pragmas.clone(),
+            authoritative_pragmas_after: authoritative_pragmas.clone(),
+            connection_usable_after: true,
+            post_fault_query: PostFaultQueryEvidence {
+                query: "codebase_index_pragmas_a1".into(),
+                succeeded: true,
+                result_sha256: sha256_json(&authoritative_pragmas),
+            },
+            staging_cleanup_succeeded: true,
+            base_fixture_sha256: "4".repeat(64),
+            database_copy_sha256_before: "4".repeat(64),
+        }
     })
     .collect();
     SuiteInput {
@@ -459,6 +482,9 @@ fn decision_uses_338_thresholds_and_requires_eight_passing_pairs() {
     for pair in &mut input.pairs[0..3] {
         pair.staged_native.measurement.peak_rss_bytes = Some(71);
         pair.staged_native.measurement.getrusage_max_rss_bytes = Some(71);
+        pair.staged_native
+            .measurement
+            .cgroup_memory_peak_after_bytes = Some(71);
     }
     let assessment = assess_suite(&input);
     assert!(assessment.eligible);
@@ -471,12 +497,22 @@ fn decision_uses_338_thresholds_and_requires_eight_passing_pairs() {
         .staged_native
         .measurement
         .getrusage_max_rss_bytes = Some(70);
+    edge.pairs[0]
+        .staged_native
+        .measurement
+        .cgroup_memory_peak_after_bytes = Some(70);
     edge.pairs[0].staged_native.measurement.elapsed_ns = Some(110);
     edge.pairs[0]
         .staged_native
         .measurement
         .authoritative_transaction_ns = Some(110);
-    edge.pairs[0].staged_native.database.wal_bytes = Some(10_500_000);
+    edge.pairs[0].staged_native.database.wal_frames = Some(2_520);
+    edge.pairs[0]
+        .staged_native
+        .database
+        .wal_checkpoint_log_frames = Some(2_520);
+    edge.pairs[0].staged_native.database.wal_checkpointed_frames = Some(2_520);
+    edge.pairs[0].staged_native.database.wal_bytes = Some(wal_bytes(2_520));
     assert!(assess_suite(&edge).decision_pass);
 
     let mut transaction_pairs = canonical_input();
@@ -493,6 +529,7 @@ fn decision_uses_338_thresholds_and_requires_eight_passing_pairs() {
         pair.staged_native.database.wal_frames = Some(2_521);
         pair.staged_native.database.wal_checkpoint_log_frames = Some(2_521);
         pair.staged_native.database.wal_checkpointed_frames = Some(2_521);
+        pair.staged_native.database.wal_bytes = Some(wal_bytes(2_521));
     }
     let assessment = assess_suite(&wal_pairs);
     assert!(assessment.eligible);
@@ -656,4 +693,162 @@ fn canonical_rejects_fault_marker_raw_snapshot_and_global_base_sha_drift() {
     let mut missing_case = canonical_input();
     missing_case.failure_atomicity.pop();
     assert!(!assess_suite(&missing_case).eligible);
+}
+
+fn assert_canonical_rejected(input: SuiteInput) {
+    let assessment = assess_suite(&input);
+    assert!(
+        !assessment.eligible,
+        "canonical counterexample was unexpectedly eligible: {:#?}",
+        assessment
+    );
+    assert!(
+        !assessment.decision_pass,
+        "canonical counterexample unexpectedly passed: {:#?}",
+        assessment
+    );
+}
+
+#[test]
+fn canonical_rejects_zero_authoritative_transaction_measurement() {
+    let mut input = canonical_input();
+    input.pairs[0]
+        .full_vec
+        .measurement
+        .authoritative_transaction_ns = Some(0);
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_zero_cgroup_peak_measurement() {
+    let mut input = canonical_input();
+    input.pairs[0]
+        .full_vec
+        .measurement
+        .cgroup_memory_peak_before_bytes = Some(0);
+    input.pairs[0]
+        .full_vec
+        .measurement
+        .cgroup_memory_peak_after_bytes = Some(0);
+    input.pairs[0]
+        .full_vec
+        .measurement
+        .cgroup_memory_current_before_bytes = Some(0);
+    input.pairs[0]
+        .full_vec
+        .measurement
+        .cgroup_memory_current_after_bytes = Some(0);
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_cgroup_peak_below_current_usage() {
+    let mut input = canonical_input();
+    input.pairs[0]
+        .staged_native
+        .measurement
+        .cgroup_memory_peak_after_bytes = Some(66);
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_wal_bytes_that_violate_the_physical_frame_formula() {
+    let mut input = canonical_input();
+    input.pairs[0].staged_native.database.wal_bytes = Some(wal_bytes(WAL_FRAMES) + 1);
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_unbound_runtime_environment_values() {
+    let mut input = canonical_input();
+    input.runtime_environment.kernel_release = "UNBOUND".into();
+    input.base_fixture_preflight.runtime_environment = input.runtime_environment.clone();
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_reused_child_cgroup_path() {
+    let mut input = canonical_input();
+    input.pairs[1].full_vec.measurement.cgroup_path =
+        input.pairs[0].full_vec.measurement.cgroup_path.clone();
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_reused_child_trial_root_and_database_path() {
+    let mut input = canonical_input();
+    let duplicate_root = input.pairs[0].full_vec.storage.trial_root.clone();
+    let duplicate_database = duplicate_root.join("database/state.db");
+    let duplicate = &mut input.pairs[1].full_vec;
+    duplicate.storage.trial_root = duplicate_root;
+    duplicate.authoritative_pragmas_before.database_files[0] = duplicate_database.clone();
+    duplicate.authoritative_pragmas_after.database_files[0] = duplicate_database;
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_reused_child_process_id_across_pairs() {
+    let mut input = canonical_input();
+    let duplicate_pid = input.pairs[0].full_vec.execution.process_id;
+    let duplicate = &mut input.pairs[1];
+    duplicate.full_vec.execution.process_id = duplicate_pid;
+    for observed in &mut duplicate.observed_execution {
+        if observed.mode == Mode::FullVec {
+            observed.process_id = duplicate_pid;
+        }
+    }
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_child_execution_overlap_across_pair_boundaries() {
+    let mut input = canonical_input();
+    let previous_finished = input.pairs[0].observed_execution[1].finished_unix_ns;
+    let pair = &mut input.pairs[1];
+    pair.observed_execution[0].started_unix_ns = previous_finished - 1;
+    pair.observed_execution[0].finished_unix_ns = previous_finished + 4;
+    pair.observed_execution[1].started_unix_ns = previous_finished + 5;
+    pair.observed_execution[1].finished_unix_ns = previous_finished + 10;
+    for observed in &pair.observed_execution {
+        match observed.mode {
+            Mode::FullVec => pair.full_vec.execution = observed.clone(),
+            Mode::StagedNative => pair.staged_native.execution = observed.clone(),
+        }
+    }
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_fault_generation_not_bound_to_the_base() {
+    let mut input = canonical_input();
+    input.failure_atomicity[0].target_generation_sha256_before = "e".repeat(64);
+    input.failure_atomicity[0].target_generation_sha256_after = "e".repeat(64);
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_fault_rollback_schema_not_bound_to_the_base() {
+    let mut input = canonical_input();
+    input.failure_atomicity[0].rollback_before.schema_sha256 = "e".repeat(64);
+    input.failure_atomicity[0].rollback_after.schema_sha256 = "e".repeat(64);
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_fault_database_path_not_bound_to_its_case() {
+    let mut input = canonical_input();
+    let fault = &mut input.failure_atomicity[0];
+    let wrong_database =
+        "/home/pallasting/eval/codebase-index-a1/fault-wrong/database/state.db".into();
+    fault.authoritative_pragmas_before.database_files[0] = wrong_database;
+    fault.authoritative_pragmas_after = fault.authoritative_pragmas_before.clone();
+    fault.post_fault_query.result_sha256 = sha256_json(&fault.authoritative_pragmas_after);
+    assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_unbound_post_fault_query_digest() {
+    let mut input = canonical_input();
+    input.failure_atomicity[0].post_fault_query.result_sha256 = "e".repeat(64);
+    assert_canonical_rejected(input);
 }
