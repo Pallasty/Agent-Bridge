@@ -32,8 +32,9 @@ pub(super) use biocortex::{
 };
 pub(super) use browser_lite::{run_browser_lite, BrowserLiteOp};
 pub(super) use dream::{
-    render_codebase_report_html, render_promote_html, short_key, truncate_chars, PromoteDecision,
-    PromoteStatus,
+    drift_coverage_ratio, drift_tokens, render_codebase_report_html, render_promote_html,
+    short_key, triage_agent_md_drift_candidate, truncate_chars, PromoteDecision, PromoteStatus,
+    AGENT_MD_DRIFT_COVERAGE_THRESHOLD,
 };
 pub(super) use local_control::{run_a2ui, run_operator_request, A2uiOp, OperatorRequestOp};
 pub(super) use shell_init::shell_init_snippet;

@@ -1,5 +1,217 @@
 use std::path::Path;
 
+/// L7 P2 — coverage threshold below which a lesson is considered NOT
+/// represented in AGENT.md. 0.30 means: if fewer than 30% of the
+/// lesson's distinctive tokens appear in AGENT.md, propose an update.
+pub(crate) const AGENT_MD_DRIFT_COVERAGE_THRESHOLD: f64 = 0.30;
+
+/// Tokenise text into lowercase alphanumeric tokens of length >= 4.
+/// Pure, no allocation beyond the returned set.
+pub(crate) fn drift_tokens(text: &str) -> std::collections::HashSet<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.chars().count() >= 4)
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+/// Fraction of `lesson_tokens` that also appear in `preamble_tokens`.
+/// Returns 0.0 when `lesson_tokens` is empty (no signal to compare).
+pub(crate) fn drift_coverage_ratio(
+    lesson_tokens: &std::collections::HashSet<String>,
+    preamble_tokens: &std::collections::HashSet<String>,
+) -> f64 {
+    if lesson_tokens.is_empty() {
+        return 0.0;
+    }
+    let covered = lesson_tokens
+        .iter()
+        .filter(|t| preamble_tokens.contains(*t))
+        .count();
+    covered as f64 / lesson_tokens.len() as f64
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AgentMdTriageDecision {
+    pub(crate) accept: bool,
+    pub(crate) kind: &'static str,
+    pub(crate) reason: &'static str,
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+/// Deterministic v1 gate for AGENT.md drift proposals.
+///
+/// The coverage detector compares long lesson bodies against a deliberately
+/// short self-profile, so low overlap is only candidate pressure. This gate
+/// keeps stable behavior/posture candidates and rejects transient operational
+/// facts before `l7_proposed_update` memories are written.
+pub(crate) fn triage_agent_md_drift_candidate(
+    lesson_key: &str,
+    tags: &[String],
+    content: &str,
+) -> AgentMdTriageDecision {
+    let lower = content.to_lowercase();
+    let key_lower = lesson_key.to_lowercase();
+    let tag_blob = tags.join(" ").to_lowercase();
+    let all = format!("{key_lower}\n{tag_blob}\n{lower}");
+
+    let token_count = drift_tokens(content).len();
+    if token_count < 8 {
+        return AgentMdTriageDecision {
+            accept: false,
+            kind: "low_signal",
+            reason: "too few distinctive tokens",
+        };
+    }
+
+    let transient_markers = [
+        "commit ",
+        "origin/master",
+        "github/master",
+        "gitlab",
+        "branch ",
+        "worktree",
+        "pushed",
+        "deployed",
+        ".real",
+        "pid ",
+        "http://",
+        "https://",
+        "post `#",
+        "pr ",
+        "mr ",
+        "next step",
+        "current ",
+        "status:",
+        "cwd:",
+        "当前",
+        "已经",
+        "刚",
+        "正在",
+        "接下来",
+        "下一步",
+        "看板已更新",
+        "远端",
+        "重启",
+        "重连",
+        "提交",
+        "推送",
+    ];
+    if contains_any(&all, &transient_markers) {
+        return AgentMdTriageDecision {
+            accept: false,
+            kind: "transient_operational",
+            reason: "contains branch/commit/deploy/current-state markers",
+        };
+    }
+
+    let domain_markers = [
+        "godot",
+        "onsen",
+        "nexus",
+        "wuxing",
+        "palace graph",
+        "sprite",
+        "atlas",
+        "facility",
+        "lantern",
+        "bath",
+        "biocortex",
+        "五行",
+        "温泉",
+        "灯笼",
+        "浴池",
+        "贴图",
+    ];
+    if contains_any(&all, &domain_markers) {
+        return AgentMdTriageDecision {
+            accept: false,
+            kind: "domain_specific",
+            reason: "domain lesson belongs in memory, not global agent profile",
+        };
+    }
+
+    let implementation_markers = [
+        "candidate reviewed",
+        "from_key",
+        "writes_memory",
+        "state.db",
+        "memory_search",
+        "store api",
+        "route ",
+        "packet",
+        "artifact",
+        "mcp surface",
+        "t5/t6",
+        "s76",
+        "s32",
+        "s33",
+        "db ",
+    ];
+    if contains_any(&all, &implementation_markers) {
+        return AgentMdTriageDecision {
+            accept: false,
+            kind: "implementation_specific",
+            reason: "implementation fact belongs in memory, not global agent profile",
+        };
+    }
+
+    let stable_markers = [
+        "always ",
+        "never ",
+        "should ",
+        "must ",
+        "avoid ",
+        "prefer ",
+        "before ",
+        "separate ",
+        "split ",
+        "verify ",
+        "evidence",
+        "boundary",
+        "stable",
+        "posture",
+        "preference",
+        "principle",
+        "self-evaluation",
+        "do not ",
+        "don't ",
+        "不要",
+        "必须",
+        "应该",
+        "避免",
+        "先验证",
+        "再规划",
+        "再落地",
+        "保持",
+        "区分",
+        "验证",
+        "边界",
+        "原则",
+        "姿态",
+        "偏好",
+    ];
+    let stable_hits = stable_markers
+        .iter()
+        .filter(|marker| all.contains(**marker))
+        .count();
+    if stable_hits >= 2 {
+        return AgentMdTriageDecision {
+            accept: true,
+            kind: "stable_posture_candidate",
+            reason: "contains reusable behavior/posture markers",
+        };
+    }
+
+    AgentMdTriageDecision {
+        accept: false,
+        kind: "no_stable_posture_signal",
+        reason: "does not contain enough reusable behavior markers",
+    }
+}
+
 /// Immutable audit row produced by the authority-bearing promote executor.
 #[derive(Debug, Clone)]
 pub(crate) struct PromoteDecision {
