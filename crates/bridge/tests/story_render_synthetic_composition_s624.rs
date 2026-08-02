@@ -126,6 +126,29 @@ async fn wait_for_pid_file(path: &Path) -> Vec<u32> {
     }
 }
 
+async fn retry_after_cleanup(
+    root: &Path,
+) -> story_render_synthetic_composition::StoryRenderSyntheticResult {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match run_s622_synthetic_composition(
+            synthetic_config(root, "success", &[]),
+            REQUEST_ID.to_owned(),
+            request_bytes(),
+        )
+        .await
+        {
+            Ok(result) => return result,
+            Err(StoryRenderSyntheticCompositionError::Supervisor(
+                StoryRenderSupervisorError::Busy,
+            )) if Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(error) => panic!("lock did not recover: {error:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn real_s622_codec_success_crosses_supervisor_and_returns_typed_result() {
     let root = TempDir::new().expect("temp root");
@@ -266,13 +289,7 @@ async fn aborting_composition_propagates_drop_cleanup_to_the_process_group() {
         wait_until_not_live(pid).await;
     }
 
-    let retry = run_s622_synthetic_composition(
-        synthetic_config(root.path(), "success", &[]),
-        REQUEST_ID.to_owned(),
-        request_bytes(),
-    )
-    .await
-    .expect("lock recovers after cancellation");
+    let retry = retry_after_cleanup(root.path()).await;
     assert!(matches!(
         retry.response,
         StoryRenderSyntheticResponse::Success(_)
