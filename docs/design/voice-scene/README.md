@@ -165,6 +165,15 @@ express. A packet is S0-valid only when it passes both.
 - `S619_STORY_RENDER_RUNTIME_ADMISSION_REVIEW.md`: S619 architecture decision,
   rejected/deferred alternatives, accepted trade-offs, seven blockers, and the
   explicit S620 worker-protocol next gate.
+- `story_render_one_shot_worker_protocol_contract.schema.json`: S620 strict
+  one-request/one-response, host-wide admission, worker supervision, private
+  custody, authority, and redacted-projection contract.
+- `s620_story_render_one_shot_worker_protocol_contract.json`: S620 hash-bound
+  static contract retaining only S602/S604 fixture provenance while rejecting
+  the historical shared output root.
+- `S620_STORY_RENDER_ONE_SHOT_WORKER_PROTOCOL.md`: S620 protocol ADR, including
+  the host-wide `flock` decision, owned kill/reap sequence, failure semantics,
+  explicit nonclaims, and the S621 implementation-review gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
