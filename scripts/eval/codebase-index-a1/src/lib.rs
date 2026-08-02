@@ -157,6 +157,10 @@ pub struct Measurement {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cgroup_process_count: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgroup_process_ids_before: Option<Vec<u32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgroup_process_ids_after: Option<Vec<u32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cgroup_is_shared: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cgroup_isolated_for_trial: Option<bool>,
@@ -226,6 +230,8 @@ pub struct DatabaseEvidence {
     pub wal_checkpoint_busy: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wal_layout_valid: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wal_header_layout: Option<WalHeaderLayoutEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -403,6 +409,8 @@ pub struct RunReceipt {
     pub schema: String,
     pub mode: Mode,
     pub execution: ChildExecutionEvidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_cgroup_unit: Option<String>,
     pub build_identity: BuildIdentity,
     pub workload: Workload,
     pub measurement: Measurement,
@@ -439,6 +447,20 @@ pub struct WalResetEvidence {
     pub proven_empty: bool,
 }
 
+/// Raw-header-bound WAL evidence. This proves SQLite WAL header identity and
+/// frame-length layout; it intentionally does not claim frame checksum or
+/// commit-frame validity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalHeaderLayoutEvidence {
+    pub bytes: u64,
+    pub header_hex: Option<String>,
+    pub magic: Option<u32>,
+    pub format_version: Option<u32>,
+    pub encoded_page_size: Option<u64>,
+    pub frame_count: u64,
+    pub header_layout_valid: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrialPair {
     pub pair_index: usize,
@@ -473,6 +495,19 @@ impl FailureCase {
             Self::AfterImportRows => "A1 injected failpoint: after_import_rows",
             Self::AfterCallRows => "A1 injected failpoint: after_call_rows",
             Self::BeforeCommit => "A1 injected failpoint: before_commit",
+        }
+    }
+
+    pub const fn canonical_ordinal(self) -> usize {
+        match self {
+            Self::AfterStagingBatch => 0,
+            Self::AfterDeleteSymbols => 1,
+            Self::AfterDeleteImports => 2,
+            Self::AfterDeleteCalls => 3,
+            Self::AfterSymbolRows => 4,
+            Self::AfterImportRows => 5,
+            Self::AfterCallRows => 6,
+            Self::BeforeCommit => 7,
         }
     }
 }
@@ -514,10 +549,13 @@ pub struct FailureAtomicityReceipt {
     pub expected_cgroup_unit: String,
     pub cgroup_path: String,
     pub cgroup_process_count: u64,
+    pub cgroup_process_ids_before: Vec<u32>,
+    pub cgroup_process_ids_after: Vec<u32>,
     pub cgroup_isolated_for_trial: bool,
     pub actual_process_affinity: String,
     pub wal_reset: WalResetEvidence,
     pub wal_cleanup: WalResetEvidence,
+    pub post_fault_wal_header_layout: WalHeaderLayoutEvidence,
     pub main_wal_bytes_before: u64,
     pub main_wal_bytes_after: u64,
     pub main_wal_bytes_after_cleanup: u64,
@@ -973,6 +1011,8 @@ fn validate_host_quiet_window(input: &SuiteInput, reasons: &mut Vec<String>) {
     let bucket_shape_valid = window.sample_count == 31
         && window.bucket_total_delta_ticks.len() == bucket_count
         && window.bucket_idle_delta_ticks.len() == bucket_count
+        && window.excluded_smt_bucket_total_delta_ticks.len() == bucket_count
+        && window.excluded_smt_bucket_idle_delta_ticks.len() == bucket_count
         && bucket_count == 30;
     let bucket_total_sum = window
         .bucket_total_delta_ticks
@@ -982,6 +1022,14 @@ fn validate_host_quiet_window(input: &SuiteInput, reasons: &mut Vec<String>) {
         .bucket_idle_delta_ticks
         .iter()
         .try_fold(0_u64, |sum, value| sum.checked_add(*value));
+    let sibling_bucket_total_sum = window
+        .excluded_smt_bucket_total_delta_ticks
+        .iter()
+        .try_fold(0_u64, |sum, value| sum.checked_add(*value));
+    let sibling_bucket_idle_sum = window
+        .excluded_smt_bucket_idle_delta_ticks
+        .iter()
+        .try_fold(0_u64, |sum, value| sum.checked_add(*value));
     let bucket_totals_valid = bucket_shape_valid
         && window
             .bucket_total_delta_ticks
@@ -989,7 +1037,14 @@ fn validate_host_quiet_window(input: &SuiteInput, reasons: &mut Vec<String>) {
             .zip(&window.bucket_idle_delta_ticks)
             .all(|(total, idle)| *total > 0 && idle <= total)
         && bucket_total_sum == Some(window.cpu_total_delta_ticks)
-        && bucket_idle_sum == Some(window.cpu_idle_delta_ticks);
+        && bucket_idle_sum == Some(window.cpu_idle_delta_ticks)
+        && window
+            .excluded_smt_bucket_total_delta_ticks
+            .iter()
+            .zip(&window.excluded_smt_bucket_idle_delta_ticks)
+            .all(|(total, idle)| *total > 0 && idle <= total)
+        && sibling_bucket_total_sum == Some(window.excluded_smt_total_delta_ticks)
+        && sibling_bucket_idle_sum == Some(window.excluded_smt_idle_delta_ticks);
     let computed_overall =
         exact_ratio_bps(window.cpu_idle_delta_ticks, window.cpu_total_delta_ticks);
     let computed_worst = bucket_totals_valid.then(|| {
@@ -1000,18 +1055,40 @@ fn validate_host_quiet_window(input: &SuiteInput, reasons: &mut Vec<String>) {
             .filter_map(|(total, idle)| exact_ratio_bps(*idle, *total))
             .min()
     });
+    let computed_sibling_overall = exact_ratio_bps(
+        window.excluded_smt_idle_delta_ticks,
+        window.excluded_smt_total_delta_ticks,
+    );
+    let computed_sibling_worst = bucket_totals_valid.then(|| {
+        window
+            .excluded_smt_bucket_total_delta_ticks
+            .iter()
+            .zip(&window.excluded_smt_bucket_idle_delta_ticks)
+            .filter_map(|(total, idle)| exact_ratio_bps(*idle, *total))
+            .min()
+    });
     let pressure_duration_us = window.duration_us;
     let computed_cpu_pressure = pressure_delta_bps(
         window.pressure_start.cpu_some_us,
         window.pressure_end.cpu_some_us,
         pressure_duration_us,
     );
-    let computed_memory_pressure = pressure_delta_bps(
+    let computed_memory_some_pressure = pressure_delta_bps(
+        window.pressure_start.memory_some_us,
+        window.pressure_end.memory_some_us,
+        pressure_duration_us,
+    );
+    let computed_memory_full_pressure = pressure_delta_bps(
         window.pressure_start.memory_full_us,
         window.pressure_end.memory_full_us,
         pressure_duration_us,
     );
-    let computed_io_pressure = pressure_delta_bps(
+    let computed_io_some_pressure = pressure_delta_bps(
+        window.pressure_start.io_some_us,
+        window.pressure_end.io_some_us,
+        pressure_duration_us,
+    );
+    let computed_io_full_pressure = pressure_delta_bps(
         window.pressure_start.io_full_us,
         window.pressure_end.io_full_us,
         pressure_duration_us,
@@ -1031,10 +1108,19 @@ fn validate_host_quiet_window(input: &SuiteInput, reasons: &mut Vec<String>) {
         && computed_worst
             .flatten()
             .is_some_and(|value| value >= quiet::QUIET_BUCKET_IDLE_BPS)
+        && computed_sibling_overall.is_some_and(|value| value >= quiet::QUIET_SMT_OVERALL_IDLE_BPS)
+        && computed_sibling_worst
+            .flatten()
+            .is_some_and(|value| value >= quiet::QUIET_SMT_BUCKET_IDLE_BPS)
         && computed_cpu_pressure.is_some_and(|value| value <= quiet::QUIET_CPU_SOME_PRESSURE_BPS)
-        && computed_memory_pressure
+        && computed_memory_some_pressure
+            .is_some_and(|value| value <= quiet::QUIET_MEMORY_SOME_PRESSURE_BPS)
+        && computed_memory_full_pressure
             .is_some_and(|value| value <= quiet::QUIET_MEMORY_FULL_PRESSURE_BPS)
-        && computed_io_pressure.is_some_and(|value| value <= quiet::QUIET_IO_FULL_PRESSURE_BPS)
+        && computed_io_some_pressure
+            .is_some_and(|value| value <= quiet::QUIET_IO_SOME_PRESSURE_BPS)
+        && computed_io_full_pressure
+            .is_some_and(|value| value <= quiet::QUIET_IO_FULL_PRESSURE_BPS)
         && window.competing_build_processes.is_empty();
     let valid = window.started_unix_ns < window.finished_unix_ns
         && duration_ns.is_some_and(|value| {
@@ -1043,13 +1129,20 @@ fn validate_host_quiet_window(input: &SuiteInput, reasons: &mut Vec<String>) {
         })
         && (30_000_000..=31_000_000).contains(&window.duration_us)
         && window.duration_ms == window.duration_us / 1_000
+        && window.cpu == 39
+        && window.excluded_smt_sibling == 79
         && bucket_totals_valid
         && window.cpu_idle_delta_ticks <= window.cpu_total_delta_ticks
+        && window.excluded_smt_idle_delta_ticks <= window.excluded_smt_total_delta_ticks
         && computed_overall == Some(window.overall_idle_bps)
         && computed_worst.flatten() == Some(window.worst_bucket_idle_bps)
+        && computed_sibling_overall == Some(window.excluded_smt_overall_idle_bps)
+        && computed_sibling_worst.flatten() == Some(window.excluded_smt_worst_bucket_idle_bps)
         && computed_cpu_pressure == Some(window.cpu_some_pressure_delta_bps)
-        && computed_memory_pressure == Some(window.memory_full_pressure_delta_bps)
-        && computed_io_pressure == Some(window.io_full_pressure_delta_bps)
+        && computed_memory_some_pressure == Some(window.memory_some_pressure_delta_bps)
+        && computed_memory_full_pressure == Some(window.memory_full_pressure_delta_bps)
+        && computed_io_some_pressure == Some(window.io_some_pressure_delta_bps)
+        && computed_io_full_pressure == Some(window.io_full_pressure_delta_bps)
         && affinity_contains_cpu
         && cpuset_contains_cpu
         && earliest_child.is_some_and(|started| window.finished_unix_ns <= started)
@@ -1088,6 +1181,20 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
                     .checked_sub(process)
                     .and_then(|external| exact_ratio_bps(external, total))
             });
+    let sibling_total_delta = end
+        .excluded_smt_total_ticks
+        .checked_sub(start.excluded_smt_total_ticks);
+    let sibling_idle_delta = end
+        .excluded_smt_idle_ticks
+        .checked_sub(start.excluded_smt_idle_ticks);
+    let computed_sibling_busy =
+        sibling_total_delta
+            .zip(sibling_idle_delta)
+            .and_then(|(total, idle)| {
+                total
+                    .checked_sub(idle)
+                    .and_then(|busy| exact_ratio_bps(busy, total))
+            });
     let cpu_pressure = elapsed_us.and_then(|duration| {
         pressure_delta_bps(
             start.pressure.cpu_some_us,
@@ -1095,20 +1202,34 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
             duration,
         )
     });
-    let memory_pressure = elapsed_us.and_then(|duration| {
+    let memory_some_pressure = elapsed_us.and_then(|duration| {
+        pressure_delta_bps(
+            start.pressure.memory_some_us,
+            end.pressure.memory_some_us,
+            duration,
+        )
+    });
+    let memory_full_pressure = elapsed_us.and_then(|duration| {
         pressure_delta_bps(
             start.pressure.memory_full_us,
             end.pressure.memory_full_us,
             duration,
         )
     });
-    let io_pressure = elapsed_us.and_then(|duration| {
+    let io_some_pressure = elapsed_us.and_then(|duration| {
+        pressure_delta_bps(start.pressure.io_some_us, end.pressure.io_some_us, duration)
+    });
+    let io_full_pressure = elapsed_us.and_then(|duration| {
         pressure_delta_bps(start.pressure.io_full_us, end.pressure.io_full_us, duration)
     });
     let expected_affinity = [39_u32].into_iter().collect();
     let valid = run.execution.started_unix_ns <= start.sampled_unix_ns
         && start.sampled_unix_ns < end.sampled_unix_ns
         && end.sampled_unix_ns <= run.execution.finished_unix_ns
+        && start.cpu == 39
+        && end.cpu == 39
+        && start.excluded_smt_sibling == 79
+        && end.excluded_smt_sibling == 79
         && parse_cpu_list(&start.actual_affinity).as_ref() == Some(&expected_affinity)
         && start.actual_affinity == end.actual_affinity
         && start.effective_cpuset == end.effective_cpuset
@@ -1117,9 +1238,13 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
         && end.competing_build_processes.is_empty()
         && computed_external == Some(evidence.external_cpu39_busy_bps)
         && evidence.external_cpu39_busy_bps <= quiet::CHILD_EXTERNAL_CPU39_BUSY_BPS
+        && computed_sibling_busy == Some(evidence.excluded_smt_sibling_busy_bps)
+        && evidence.excluded_smt_sibling_busy_bps <= quiet::CHILD_SMT_SIBLING_BUSY_BPS
         && cpu_pressure.is_some_and(|value| value <= quiet::QUIET_CPU_SOME_PRESSURE_BPS)
-        && memory_pressure.is_some_and(|value| value <= quiet::QUIET_MEMORY_FULL_PRESSURE_BPS)
-        && io_pressure.is_some_and(|value| value <= quiet::QUIET_IO_FULL_PRESSURE_BPS);
+        && memory_some_pressure.is_some_and(|value| value <= quiet::QUIET_MEMORY_SOME_PRESSURE_BPS)
+        && memory_full_pressure.is_some_and(|value| value <= quiet::QUIET_MEMORY_FULL_PRESSURE_BPS)
+        && io_some_pressure.is_some_and(|value| value <= quiet::QUIET_IO_SOME_PRESSURE_BPS)
+        && io_full_pressure.is_some_and(|value| value <= quiet::QUIET_IO_FULL_PRESSURE_BPS);
     if !valid {
         reasons.push(format!(
             "pair {pair_index} {:?} child interference evidence is invalid or noisy",
@@ -1212,6 +1337,7 @@ fn validate_canonical_child_custody(input: &SuiteInput, reasons: &mut Vec<String
     let mut executions = Vec::with_capacity(expected_children);
     let mut process_ids = std::collections::BTreeSet::new();
     let mut cgroups = std::collections::BTreeSet::new();
+    let mut cgroup_owner_pids = std::collections::BTreeSet::new();
     let mut trial_roots = std::collections::BTreeSet::new();
     let mut database_paths = std::collections::BTreeSet::new();
     let mut valid = true;
@@ -1225,6 +1351,12 @@ fn validate_canonical_child_custody(input: &SuiteInput, reasons: &mut Vec<String
                 .cgroup_path
                 .as_ref()
                 .is_some_and(|path| cgroups.insert(path.clone()));
+            valid &= run.expected_cgroup_unit.as_deref().is_some_and(|unit| {
+                performance_cgroup_unit_owner_pid(unit, pair.pair_index, run).is_some_and(|pid| {
+                    cgroup_owner_pids.insert(pid);
+                    true
+                })
+            });
             valid &= run.storage.trial_root.starts_with(suite_root)
                 && trial_roots.insert(run.storage.trial_root.clone());
             let expected_database = run.storage.trial_root.join("database/state.db");
@@ -1238,6 +1370,11 @@ fn validate_canonical_child_custody(input: &SuiteInput, reasons: &mut Vec<String
         executions.push(&receipt.execution);
         valid &= process_ids.insert(receipt.execution.process_id);
         valid &= cgroups.insert(receipt.cgroup_path.clone());
+        valid &= fault_cgroup_unit_owner_pid(&receipt.expected_cgroup_unit, receipt.case)
+            .is_some_and(|pid| {
+                cgroup_owner_pids.insert(pid);
+                true
+            });
         let expected_trial_root = suite_root.join(format!("fault-{:?}", receipt.case));
         let expected_database = expected_trial_root.join("database/state.db");
         valid &= receipt.trial_root == expected_trial_root
@@ -1250,6 +1387,7 @@ fn validate_canonical_child_custody(input: &SuiteInput, reasons: &mut Vec<String
     valid &= executions.len() == expected_children
         && process_ids.len() == expected_children
         && cgroups.len() == expected_children
+        && cgroup_owner_pids.len() == 1
         && trial_roots.len() == expected_children
         && database_paths.len() == expected_children;
     for (expected_sequence, execution) in executions.iter().enumerate() {
@@ -1421,6 +1559,16 @@ fn validate_run(run: &RunReceipt, canonical: bool, reasons: &mut Vec<String>, pa
     }
     if run.database.wal_checkpoint_busy != Some(0)
         || run.database.wal_layout_valid != Some(true)
+        || run.database.page_size.is_none_or(|page_size| {
+            run.database
+                .wal_header_layout
+                .as_ref()
+                .is_none_or(|evidence| {
+                    !wal_header_layout_evidence_valid(evidence, page_size)
+                        || Some(evidence.bytes) != run.database.wal_bytes
+                        || Some(evidence.frame_count) != run.database.wal_frames
+                })
+        })
         || run.database.wal_checkpointed_frames != run.database.wal_checkpoint_log_frames
         || run.database.wal_checkpointed_frames != run.database.wal_frames
         || !wal_physical_layout_valid(&run.database)
@@ -1523,6 +1671,10 @@ fn validate_run(run: &RunReceipt, canonical: bool, reasons: &mut Vec<String>, pa
         validate_child_interference(run, reasons, pair_index);
         if run.measurement.authoritative_transaction_ns.is_none()
             || run
+                .expected_cgroup_unit
+                .as_deref()
+                .is_none_or(str::is_empty)
+            || run
                 .measurement
                 .cgroup_path
                 .as_deref()
@@ -1537,6 +1689,8 @@ fn validate_run(run: &RunReceipt, canonical: bool, reasons: &mut Vec<String>, pa
                 .as_deref()
                 .is_none_or(str::is_empty)
             || run.measurement.cgroup_process_count.is_none()
+            || run.measurement.cgroup_process_ids_before.is_none()
+            || run.measurement.cgroup_process_ids_after.is_none()
             || run.measurement.cgroup_is_shared.is_none()
             || run.measurement.cgroup_isolated_for_trial != Some(true)
             || run.measurement.cgroup_memory_anon_before_bytes.is_none()
@@ -1659,6 +1813,30 @@ fn validate_run(run: &RunReceipt, canonical: bool, reasons: &mut Vec<String>, pa
             || run.measurement.cgroup_is_shared
                 != run.measurement.cgroup_process_count.map(|count| count > 1)
             || run.measurement.cgroup_is_shared != Some(false)
+            || run
+                .measurement
+                .cgroup_process_ids_before
+                .as_deref()
+                .is_none_or(|ids| ids != [run.execution.process_id])
+            || run
+                .measurement
+                .cgroup_process_ids_after
+                .as_deref()
+                .is_none_or(|ids| ids != [run.execution.process_id])
+            || run.measurement.cgroup_process_count
+                != run
+                    .measurement
+                    .cgroup_process_ids_after
+                    .as_ref()
+                    .map(|ids| ids.len() as u64)
+            || run.expected_cgroup_unit.as_deref().is_none_or(|unit| {
+                performance_cgroup_unit_owner_pid(unit, pair_index, run).is_none()
+                    || run
+                        .measurement
+                        .cgroup_path
+                        .as_deref()
+                        .is_none_or(|path| !path.ends_with(&format!("/{unit}.service")))
+            })
         {
             reasons.push(format!(
                 "pair {pair_index} {:?} cgroup sharing evidence is invalid",
@@ -1754,6 +1932,8 @@ fn validate_failure_atomicity(
                 && observed.insert(receipt.case)
                 && receipt.workload == base.workload
                 && receipt.execution.mode == Mode::StagedNative
+                && receipt.execution.sequence
+                    == CANONICAL_PAIRS * 2 + receipt.case.canonical_ordinal()
                 && receipt.execution.process_id != 0
                 && receipt.execution.started_unix_ns < receipt.execution.finished_unix_ns
                 && &receipt.build_identity == expected_build
@@ -1764,6 +1944,8 @@ fn validate_failure_atomicity(
                     .cgroup_path
                     .ends_with(&format!("/{}.service", receipt.expected_cgroup_unit))
                 && receipt.cgroup_process_count == 1
+                && receipt.cgroup_process_ids_before == [receipt.execution.process_id]
+                && receipt.cgroup_process_ids_after == [receipt.execution.process_id]
                 && receipt.cgroup_isolated_for_trial
                 && receipt.actual_process_affinity == "39"
                 && receipt.wal_reset
@@ -1784,8 +1966,14 @@ fn validate_failure_atomicity(
                     })
                 && receipt.main_wal_bytes_before == 0
                 && base.database.page_size.is_some_and(|page_size| {
-                    wal_file_bytes_structurally_valid(receipt.main_wal_bytes_after, page_size)
+                    wal_header_layout_evidence_valid(
+                        &receipt.post_fault_wal_header_layout,
+                        page_size,
+                    )
                 })
+                && receipt.post_fault_wal_header_layout.bytes == receipt.main_wal_bytes_after
+                && (receipt.case == FailureCase::AfterStagingBatch
+                    || receipt.post_fault_wal_header_layout.bytes > 0)
                 && receipt.main_wal_bytes_after_cleanup == 0
                 && receipt.main_shm_bytes_before > 0
                 && receipt.main_shm_bytes_after == receipt.main_shm_bytes_before
@@ -1840,6 +2028,10 @@ fn validate_failure_atomicity(
 }
 
 fn fault_cgroup_unit_valid(unit: &str, case: FailureCase) -> bool {
+    fault_cgroup_unit_owner_pid(unit, case).is_some()
+}
+
+fn fault_cgroup_unit_owner_pid(unit: &str, case: FailureCase) -> Option<u32> {
     let case_name = match case {
         FailureCase::AfterStagingBatch => "after-staging-batch",
         FailureCase::AfterDeleteSymbols => "after-delete-symbols",
@@ -1850,10 +2042,29 @@ fn fault_cgroup_unit_valid(unit: &str, case: FailureCase) -> bool {
         FailureCase::AfterCallRows => "after-call-rows",
         FailureCase::BeforeCommit => "before-commit",
     };
+    cgroup_unit_owner_pid(unit, &format!("-fault-{case_name}"))
+}
+
+fn performance_cgroup_unit_owner_pid(
+    unit: &str,
+    pair_index: usize,
+    run: &RunReceipt,
+) -> Option<u32> {
+    let mode = match run.mode {
+        Mode::FullVec => "full",
+        Mode::StagedNative => "staged",
+    };
+    cgroup_unit_owner_pid(
+        unit,
+        &format!("-{pair_index}-{}-{mode}", run.execution.sequence % 2),
+    )
+}
+
+fn cgroup_unit_owner_pid(unit: &str, suffix: &str) -> Option<u32> {
     unit.strip_prefix("ab-codebase-index-a1-")
-        .and_then(|value| value.strip_suffix(&format!("-fault-{case_name}")))
+        .and_then(|value| value.strip_suffix(suffix))
         .and_then(|value| value.parse::<u32>().ok())
-        .is_some_and(|pid| pid > 0)
+        .filter(|pid| *pid > 0)
 }
 
 fn rollback_state_matches_base(
@@ -1927,6 +2138,16 @@ fn validate_base_fixture_custody(input: &SuiteInput, reasons: &mut Vec<String>) 
         && base.database.semantic_sha256.as_deref() == Some(base.workload.combined_sha256.as_str())
         && base.database.integrity_check.as_deref() == Some("ok")
         && base.database.foreign_key_violations == Some(0)
+        && base.database.page_size.is_some_and(|page_size| {
+            base.database
+                .wal_header_layout
+                .as_ref()
+                .is_some_and(|evidence| {
+                    wal_header_layout_evidence_valid(evidence, page_size)
+                        && evidence.bytes == 0
+                        && evidence.frame_count == 0
+                })
+        })
         && rollback_state_valid(&base.rollback_state)
         && rollback_state_matches_base(&base.rollback_state, base);
     let all_perf_bound = input.pairs.iter().flat_map(|pair| {
@@ -2047,11 +2268,68 @@ fn wal_physical_layout_valid(database: &DatabaseEvidence) -> bool {
     expected == Some(u128::from(bytes))
 }
 
-fn wal_file_bytes_structurally_valid(bytes: u64, page_size: u64) -> bool {
-    if bytes == 0 {
-        return true;
+fn wal_header_layout_evidence_valid(
+    evidence: &WalHeaderLayoutEvidence,
+    expected_page_size: u64,
+) -> bool {
+    if evidence.bytes == 0 {
+        return evidence.header_hex.is_none()
+            && evidence.magic.is_none()
+            && evidence.format_version.is_none()
+            && evidence.encoded_page_size.is_none()
+            && evidence.frame_count == 0
+            && evidence.header_layout_valid;
     }
-    page_size > 0 && bytes >= 32 && (bytes - 32) % page_size.saturating_add(24) == 0
+    let Some(header) = evidence.header_hex.as_deref().and_then(decode_hex_32) else {
+        return false;
+    };
+    let magic = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+    let format_version = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
+    let encoded_page_size = u32::from_be_bytes([header[8], header[9], header[10], header[11]]);
+    let encoded_page_size = if encoded_page_size == 1 {
+        65_536
+    } else {
+        u64::from(encoded_page_size)
+    };
+    let Some(frame_size) = expected_page_size.checked_add(24) else {
+        return false;
+    };
+    let Some(payload) = evidence.bytes.checked_sub(32) else {
+        return false;
+    };
+    evidence.header_layout_valid
+        && matches!(magic, 0x377f_0682 | 0x377f_0683)
+        && format_version == 3_007_000
+        && encoded_page_size == expected_page_size
+        && evidence.magic == Some(magic)
+        && evidence.format_version == Some(format_version)
+        && evidence.encoded_page_size == Some(encoded_page_size)
+        && frame_size > 24
+        && payload % frame_size == 0
+        && evidence.frame_count == payload / frame_size
+        && evidence.frame_count > 0
+}
+
+fn decode_hex_32(value: &str) -> Option<[u8; 32]> {
+    if !is_lower_hex(value, 64) {
+        return None;
+    }
+    let bytes = value.as_bytes();
+    let mut decoded = [0_u8; 32];
+    for (index, slot) in decoded.iter_mut().enumerate() {
+        let high = hex_nibble(bytes[index * 2])?;
+        let low = hex_nibble(bytes[index * 2 + 1])?;
+        *slot = high.checked_mul(16)?.checked_add(low)?;
+    }
+    Some(decoded)
+}
+
+fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        _ => None,
+    }
 }
 
 fn push_pair_metric(

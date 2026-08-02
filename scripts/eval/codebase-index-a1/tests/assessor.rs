@@ -7,8 +7,9 @@ use ab_codebase_index_a1::{
     DatabaseEvidence, EvidenceClass, FailureAtomicityReceipt, FailureCase, FixtureEvidence,
     FullVecEvidence, HostStorageContext, Measurement, Mode, PostFaultQueryEvidence, Provenance,
     RollbackStateEvidence, RunReceipt, RuntimeEnvironmentEvidence, StorageEvidence, SuiteInput,
-    TrialOrder, TrialPair, WalResetEvidence, Workload, CANONICAL_BATCH_ROWS, CANONICAL_PAIRS,
-    CANONICAL_TOTAL_ROWS, FAILURE_RECEIPT_SCHEMA, RAW_PACKET_SCHEMA,
+    TrialOrder, TrialPair, WalHeaderLayoutEvidence, WalResetEvidence, Workload,
+    CANONICAL_BATCH_ROWS, CANONICAL_PAIRS, CANONICAL_TOTAL_ROWS, FAILURE_RECEIPT_SCHEMA,
+    RAW_PACKET_SCHEMA,
 };
 use sha2::{Digest, Sha256};
 
@@ -17,9 +18,51 @@ const WAL_FRAMES: u64 = 2_400;
 const QUIET_STARTED_UNIX_NS: u64 = 1_000_000_000;
 const QUIET_FINISHED_UNIX_NS: u64 = 31_000_000_000;
 const CHILDREN_STARTED_UNIX_NS: u64 = 32_000_000_000;
+const ORCHESTRATOR_PID: u32 = 777;
 
 fn wal_bytes(frames: u64) -> u64 {
     32 + frames * (24 + WAL_PAGE_SIZE)
+}
+
+fn wal_header_layout(frames: u64) -> WalHeaderLayoutEvidence {
+    if frames == 0 {
+        return WalHeaderLayoutEvidence {
+            bytes: 0,
+            header_hex: None,
+            magic: None,
+            format_version: None,
+            encoded_page_size: None,
+            frame_count: 0,
+            header_layout_valid: true,
+        };
+    }
+    let mut header = [0_u8; 32];
+    header[0..4].copy_from_slice(&0x377f_0682_u32.to_be_bytes());
+    header[4..8].copy_from_slice(&3_007_000_u32.to_be_bytes());
+    header[8..12].copy_from_slice(&(WAL_PAGE_SIZE as u32).to_be_bytes());
+    WalHeaderLayoutEvidence {
+        bytes: wal_bytes(frames),
+        header_hex: Some(
+            header
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(""),
+        ),
+        magic: Some(0x377f_0682),
+        format_version: Some(3_007_000),
+        encoded_page_size: Some(WAL_PAGE_SIZE),
+        frame_count: frames,
+        header_layout_valid: true,
+    }
+}
+
+fn set_database_wal_frames(database: &mut DatabaseEvidence, frames: u64) {
+    database.wal_bytes = Some(if frames == 0 { 0 } else { wal_bytes(frames) });
+    database.wal_frames = Some(frames);
+    database.wal_checkpoint_log_frames = Some(frames);
+    database.wal_checkpointed_frames = Some(frames);
+    database.wal_header_layout = Some(wal_header_layout(frames));
 }
 
 fn sha256_json<T: serde::Serialize>(value: &T) -> String {
@@ -94,6 +137,7 @@ fn evidence(seed: usize) -> DatabaseEvidence {
         wal_checkpointed_frames: Some(WAL_FRAMES),
         wal_checkpoint_busy: Some(0),
         wal_layout_valid: Some(true),
+        wal_header_layout: Some(wal_header_layout(WAL_FRAMES)),
         page_size: Some(WAL_PAGE_SIZE),
         journal_mode: Some("wal".into()),
         root_rows: Some(CANONICAL_TOTAL_ROWS),
@@ -159,12 +203,18 @@ fn execution(mode: Mode, pair: usize) -> ChildExecutionEvidence {
 fn process_sample(sampled_unix_ns: u64, end: bool) -> CpuProcessSample {
     CpuProcessSample {
         sampled_unix_ns,
+        cpu: 39,
+        excluded_smt_sibling: 79,
         cpu_total_ticks: if end { 1_100 } else { 1_000 },
         cpu_idle_ticks: if end { 990 } else { 900 },
+        excluded_smt_total_ticks: if end { 2_100 } else { 2_000 },
+        excluded_smt_idle_ticks: if end { 1_995 } else { 1_900 },
         process_ticks: if end { 15 } else { 10 },
         pressure: PressureTotals {
             cpu_some_us: 0,
+            memory_some_us: 0,
             memory_full_us: 0,
+            io_some_us: 0,
             io_full_us: 0,
         },
         actual_affinity: "39".into(),
@@ -178,11 +228,14 @@ fn child_interference(execution: &ChildExecutionEvidence) -> ChildInterferenceEv
         start: process_sample(execution.started_unix_ns + 1_000_000, false),
         end: process_sample(execution.started_unix_ns + 4_000_000, true),
         external_cpu39_busy_bps: 500,
+        excluded_smt_sibling_busy_bps: 500,
     }
 }
 
 fn host_quiet_window() -> HostQuietWindowEvidence {
     HostQuietWindowEvidence {
+        cpu: 39,
+        excluded_smt_sibling: 79,
         started_unix_ns: QUIET_STARTED_UNIX_NS,
         finished_unix_ns: QUIET_FINISHED_UNIX_NS,
         duration_ms: 30_000,
@@ -194,18 +247,30 @@ fn host_quiet_window() -> HostQuietWindowEvidence {
         worst_bucket_idle_bps: 9_600,
         bucket_total_delta_ticks: vec![100; 30],
         bucket_idle_delta_ticks: vec![96; 30],
+        excluded_smt_total_delta_ticks: 3_000,
+        excluded_smt_idle_delta_ticks: 2_880,
+        excluded_smt_overall_idle_bps: 9_600,
+        excluded_smt_worst_bucket_idle_bps: 9_600,
+        excluded_smt_bucket_total_delta_ticks: vec![100; 30],
+        excluded_smt_bucket_idle_delta_ticks: vec![96; 30],
         pressure_start: PressureTotals {
             cpu_some_us: 0,
+            memory_some_us: 0,
             memory_full_us: 0,
+            io_some_us: 0,
             io_full_us: 0,
         },
         pressure_end: PressureTotals {
             cpu_some_us: 0,
+            memory_some_us: 0,
             memory_full_us: 0,
+            io_some_us: 0,
             io_full_us: 0,
         },
         cpu_some_pressure_delta_bps: 0,
+        memory_some_pressure_delta_bps: 0,
         memory_full_pressure_delta_bps: 0,
+        io_some_pressure_delta_bps: 0,
         io_full_pressure_delta_bps: 0,
         competing_build_processes: Vec::new(),
         actual_affinity: "0-79".into(),
@@ -225,10 +290,16 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
         format!("/home/pallasting/eval/codebase-index-a1/trials/pair-{pair:02}-{mode_name}");
     let authoritative_pragmas = pragmas(&trial_root);
     let execution = execution(mode, pair);
+    let position = execution.sequence % 2;
+    let expected_cgroup_unit = format!(
+        "ab-codebase-index-a1-{ORCHESTRATOR_PID}-{pair}-{position}-{}",
+        if candidate { "staged" } else { "full" }
+    );
     RunReceipt {
         schema: "agent_bridge.codebase_index.a1.run_receipt.v0".into(),
         mode,
         execution: execution.clone(),
+        expected_cgroup_unit: Some(expected_cgroup_unit.clone()),
         build_identity: identity(true),
         workload: workload(),
         measurement: Measurement {
@@ -236,15 +307,15 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
             peak_rss_bytes: Some(if candidate { 69 } else { 100 }),
             vm_hwm_bytes: Some(if candidate { 68 } else { 99 }),
             authoritative_transaction_ns: Some(if candidate { 105 } else { 100 }),
-            cgroup_path: Some(format!(
-                "/user.slice/ab-codebase-index-a1-pair-{pair:02}-{mode_name}.service"
-            )),
+            cgroup_path: Some(format!("/user.slice/{expected_cgroup_unit}.service")),
             cgroup_memory_current_before_bytes: Some(0),
             cgroup_memory_current_after_bytes: Some(if candidate { 67 } else { 100 }),
             cgroup_memory_peak_before_bytes: Some(0),
             cgroup_memory_peak_after_bytes: Some(if candidate { 69 } else { 100 }),
             cgroup_memory_max: Some("max".into()),
             cgroup_process_count: Some(1),
+            cgroup_process_ids_before: Some(vec![execution.process_id]),
+            cgroup_process_ids_after: Some(vec![execution.process_id]),
             cgroup_is_shared: Some(false),
             cgroup_isolated_for_trial: Some(true),
             cgroup_memory_anon_before_bytes: Some(0),
@@ -361,6 +432,7 @@ fn base_fixture_preflight() -> BaseFixturePreflightReceipt {
     let mut database = evidence(0);
     database.null_embeddings = Some(0);
     database.generation_sha256 = Some("5".repeat(64));
+    set_database_wal_frames(&mut database, 0);
     BaseFixturePreflightReceipt {
         schema: "agent_bridge.codebase_index.a1.base_preflight.v0".into(),
         build_identity: identity(true),
@@ -432,7 +504,8 @@ fn canonical_input() -> SuiteInput {
             FailureCase::AfterCallRows => "after-call-rows",
             FailureCase::BeforeCommit => "before-commit",
         };
-        let expected_cgroup_unit = format!("ab-codebase-index-a1-{process_id}-fault-{case_arg}");
+        let expected_cgroup_unit =
+            format!("ab-codebase-index-a1-{ORCHESTRATOR_PID}-fault-{case_arg}");
         let started_unix_ns = CHILDREN_STARTED_UNIX_NS + sequence as u64 * 10_000_000;
         let authoritative_pragmas = pragmas(&trial_root);
         let mut rollback_after_cleanup = rollback_state();
@@ -454,6 +527,8 @@ fn canonical_input() -> SuiteInput {
             expected_cgroup_unit: expected_cgroup_unit.clone(),
             cgroup_path: format!("/user.slice/{expected_cgroup_unit}.service"),
             cgroup_process_count: 1,
+            cgroup_process_ids_before: vec![process_id],
+            cgroup_process_ids_after: vec![process_id],
             cgroup_isolated_for_trial: true,
             actual_process_affinity: "39".into(),
             wal_reset: WalResetEvidence {
@@ -470,6 +545,7 @@ fn canonical_input() -> SuiteInput {
                 wal_bytes: 0,
                 proven_empty: true,
             },
+            post_fault_wal_header_layout: wal_header_layout(1),
             main_wal_bytes_before: 0,
             main_wal_bytes_after: 4_152,
             main_wal_bytes_after_cleanup: 0,
@@ -613,6 +689,13 @@ fn canonical_rejects_missing_required_measurement_or_database_field() {
     missing_wal.pairs[0].staged_native.database.wal_bytes = None;
     assert!(!assess_suite(&missing_wal).eligible);
 
+    let mut missing_wal_header = canonical_input();
+    missing_wal_header.pairs[0]
+        .staged_native
+        .database
+        .wal_header_layout = None;
+    assert!(!assess_suite(&missing_wal_header).eligible);
+
     let mut missing_txn = canonical_input();
     missing_txn.pairs[0]
         .full_vec
@@ -671,13 +754,7 @@ fn decision_uses_338_thresholds_and_requires_eight_passing_pairs() {
         .staged_native
         .measurement
         .authoritative_transaction_ns = Some(110);
-    edge.pairs[0].staged_native.database.wal_frames = Some(2_520);
-    edge.pairs[0]
-        .staged_native
-        .database
-        .wal_checkpoint_log_frames = Some(2_520);
-    edge.pairs[0].staged_native.database.wal_checkpointed_frames = Some(2_520);
-    edge.pairs[0].staged_native.database.wal_bytes = Some(wal_bytes(2_520));
+    set_database_wal_frames(&mut edge.pairs[0].staged_native.database, 2_520);
     assert!(assess_suite(&edge).decision_pass);
 
     let mut transaction_pairs = canonical_input();
@@ -691,10 +768,7 @@ fn decision_uses_338_thresholds_and_requires_eight_passing_pairs() {
 
     let mut wal_pairs = canonical_input();
     for pair in &mut wal_pairs.pairs[0..3] {
-        pair.staged_native.database.wal_frames = Some(2_521);
-        pair.staged_native.database.wal_checkpoint_log_frames = Some(2_521);
-        pair.staged_native.database.wal_checkpointed_frames = Some(2_521);
-        pair.staged_native.database.wal_bytes = Some(wal_bytes(2_521));
+        set_database_wal_frames(&mut pair.staged_native.database, 2_521);
     }
     let assessment = assess_suite(&wal_pairs);
     assert!(assessment.eligible);
@@ -921,6 +995,16 @@ fn canonical_rejects_wal_bytes_that_violate_the_physical_frame_formula() {
     let mut input = canonical_input();
     input.pairs[0].staged_native.database.wal_bytes = Some(wal_bytes(WAL_FRAMES) + 1);
     assert_canonical_rejected(input);
+
+    let mut forged_header = canonical_input();
+    forged_header.pairs[0]
+        .staged_native
+        .database
+        .wal_header_layout
+        .as_mut()
+        .unwrap()
+        .header_hex = Some("0".repeat(64));
+    assert_canonical_rejected(forged_header);
 }
 
 #[test]
@@ -937,6 +1021,30 @@ fn canonical_rejects_reused_child_cgroup_path() {
     input.pairs[1].full_vec.measurement.cgroup_path =
         input.pairs[0].full_vec.measurement.cgroup_path.clone();
     assert_canonical_rejected(input);
+}
+
+#[test]
+fn canonical_rejects_self_attested_cgroup_unit_or_process_membership() {
+    let mut wrong_unit = canonical_input();
+    wrong_unit.pairs[0].full_vec.expected_cgroup_unit = Some("forged-unit".into());
+    assert_canonical_rejected(wrong_unit);
+
+    let mut extra_process = canonical_input();
+    extra_process.pairs[0]
+        .staged_native
+        .measurement
+        .cgroup_process_ids_before
+        .as_mut()
+        .unwrap()
+        .push(99_999);
+    assert_canonical_rejected(extra_process);
+
+    let mut fault_owner_drift = canonical_input();
+    fault_owner_drift.failure_atomicity[0].expected_cgroup_unit =
+        "ab-codebase-index-a1-778-fault-after-staging-batch".into();
+    fault_owner_drift.failure_atomicity[0].cgroup_path =
+        "/user.slice/ab-codebase-index-a1-778-fault-after-staging-batch.service".into();
+    assert_canonical_rejected(fault_owner_drift);
 }
 
 #[test]
@@ -1029,6 +1137,34 @@ fn canonical_rejects_missing_or_internally_inconsistent_host_quiet_window() {
     quiet.bucket_idle_delta_ticks[0] = 80;
     quiet.cpu_idle_delta_ticks -= 16;
     assert_canonical_rejected(forged_worst_bucket);
+
+    let mut forged_smt_bucket = canonical_input();
+    let quiet = forged_smt_bucket.host_quiet_window.as_mut().unwrap();
+    quiet.excluded_smt_bucket_idle_delta_ticks[0] = 80;
+    quiet.excluded_smt_idle_delta_ticks -= 16;
+    assert_canonical_rejected(forged_smt_bucket);
+
+    let mut wrong_smt_identity = canonical_input();
+    wrong_smt_identity
+        .host_quiet_window
+        .as_mut()
+        .unwrap()
+        .excluded_smt_sibling = 78;
+    assert_canonical_rejected(wrong_smt_identity);
+
+    let mut forged_memory_some_rate = canonical_input();
+    forged_memory_some_rate
+        .host_quiet_window
+        .as_mut()
+        .unwrap()
+        .memory_some_pressure_delta_bps = 1;
+    assert_canonical_rejected(forged_memory_some_rate);
+
+    let mut noisy_io_some = canonical_input();
+    let quiet = noisy_io_some.host_quiet_window.as_mut().unwrap();
+    quiet.pressure_end.io_some_us = 303_000;
+    quiet.io_some_pressure_delta_bps = 101;
+    assert_canonical_rejected(noisy_io_some);
 }
 
 #[test]
@@ -1051,6 +1187,47 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .end
         .actual_affinity = "38-39".into();
     assert_canonical_rejected(wrong_affinity);
+
+    let mut forged_smt_busy = canonical_input();
+    forged_smt_busy.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .excluded_smt_sibling_busy_bps = 499;
+    assert_canonical_rejected(forged_smt_busy);
+
+    let mut noisy_smt_sibling = canonical_input();
+    let sibling = noisy_smt_sibling.pairs[0]
+        .staged_native
+        .child_interference
+        .as_mut()
+        .unwrap();
+    sibling.end.excluded_smt_idle_ticks = 1_990;
+    sibling.excluded_smt_sibling_busy_bps = 1_000;
+    assert_canonical_rejected(noisy_smt_sibling);
+
+    let mut noisy_memory_some = canonical_input();
+    noisy_memory_some.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .end
+        .pressure
+        .memory_some_us = 31;
+    assert_canonical_rejected(noisy_memory_some);
+
+    let mut noisy_io_some = canonical_input();
+    noisy_io_some.pairs[0]
+        .staged_native
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .end
+        .pressure
+        .io_some_us = 31;
+    assert_canonical_rejected(noisy_io_some);
 }
 
 #[test]
@@ -1065,6 +1242,21 @@ fn canonical_rejects_fault_wal_reset_or_sidecar_drift() {
     changed_wal_sidecar.failure_atomicity[1].main_wal_bytes_after = wal_bytes(1) + 1;
     assert_canonical_rejected(changed_wal_sidecar);
 
+    let mut forged_header_binding = canonical_input();
+    forged_header_binding.failure_atomicity[1]
+        .post_fault_wal_header_layout
+        .header_hex = Some(format!("00000000{}", "0".repeat(56)));
+    forged_header_binding.failure_atomicity[1]
+        .post_fault_wal_header_layout
+        .magic = Some(0);
+    assert_canonical_rejected(forged_header_binding);
+
+    let mut forged_page_size = canonical_input();
+    forged_page_size.failure_atomicity[1]
+        .post_fault_wal_header_layout
+        .encoded_page_size = Some(8_192);
+    assert_canonical_rejected(forged_page_size);
+
     let mut failed_cleanup = canonical_input();
     failed_cleanup.failure_atomicity[1].wal_cleanup.proven_empty = false;
     failed_cleanup.failure_atomicity[1].main_wal_bytes_after_cleanup = wal_bytes(1);
@@ -1073,6 +1265,20 @@ fn canonical_rejects_fault_wal_reset_or_sidecar_drift() {
     let mut changed_shm_sidecar = canonical_input();
     changed_shm_sidecar.failure_atomicity[2].main_shm_bytes_after += 1;
     assert_canonical_rejected(changed_shm_sidecar);
+}
+
+#[test]
+fn canonical_binds_each_fault_case_to_its_frozen_sequence() {
+    let mut swapped = canonical_input();
+    let first = swapped.failure_atomicity[0].execution.clone();
+    let second = swapped.failure_atomicity[1].execution.clone();
+    swapped.failure_atomicity[0].execution = second;
+    swapped.failure_atomicity[1].execution = first;
+    for receipt in &mut swapped.failure_atomicity[0..2] {
+        receipt.cgroup_process_ids_before = vec![receipt.execution.process_id];
+        receipt.cgroup_process_ids_after = vec![receipt.execution.process_id];
+    }
+    assert_canonical_rejected(swapped);
 }
 
 #[test]

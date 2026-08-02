@@ -46,19 +46,22 @@ whose Git revision, tracked-source digest, lockfile digest, executable digest,
 target/profile, empty encoded rustflags, and runtime identities all agree. A
 working per-user systemd manager is required because every measured child and
 fault child runs in a uniquely named transient user service. The frozen host
-contract pins those services to logical CPU 39 while excluding SMT sibling 79,
-and records kernel, microcode, libc/allocator, systemd, load, and pressure
-context. Each service has a 1,800-second runtime cap, control-group kill mode,
-a 30-second stop timeout, and collection enabled; a timeout must also prove the
-unit reached an inactive/dead state (or was collected) and that any retained
-cgroup reports `populated=0` with no processes.
+contract pins the service process to logical CPU 39 and separately observes its
+non-allocated SMT sibling 79. It records kernel, microcode, libc/allocator,
+systemd, load, and pressure context. Each service has a 1,800-second runtime
+cap, control-group kill mode, a 30-second stop timeout, and collection enabled.
+Every stop/show client is itself bounded; success or timeout must prove the unit
+reached an inactive/dead state (or was collected) and that any retained cgroup
+reports `populated=0` with no processes.
 
 After base preflight, canonical execution requires a fresh 30-second, 1 Hz
-host-quiet window on CPU 39. Overall idle must be at least 95%, every bucket at
-least 90%, CPU `some` PSI at most 1%, memory/I/O `full` PSI at most 0.1%, and
-no `cargo`, `rustc`, or `rustdoc` identity may appear. Every performance child
-then independently binds exclusive affinity to CPU 39, its effective cpuset,
-pressure counters, and external CPU39 activity no greater than 5%.
+host-quiet window on CPU 39 and sibling 79. Both CPUs require at least 95%
+overall idle and 90% idle in every bucket. CPU/memory/I/O `some` PSI must be at
+most 1%, memory/I/O `full` PSI at most 0.1%, and no `cargo`, `rustc`, or
+`rustdoc` identity may appear. Every performance child then binds its sole
+cgroup PID to CPU 39, records the effective cpuset and pressure counters, and
+requires both external CPU39 activity and sibling-79 activity to stay at or
+below 5%. This is measured interference control, not host-wide CPU isolation.
 
 ```bash
 mkdir -p /home/pallasting/.cache/ab-codebase-index-a1-eval
@@ -68,8 +71,11 @@ mkdir -p /home/pallasting/.cache/ab-codebase-index-a1-eval
   --output /home/pallasting/.cache/ab-codebase-index-a1-canonical.json
 ```
 
-The output path must not already exist. Canonical JSON is written with
-create-new semantics and `sync_all` before the terminal decision is returned.
+The output must be an absolute, already-canonical `/home` ext4 path whose parent
+already exists, outside both the source tree and trial root. Neither terminal
+nor `.raw.json` path may already exist. Both use create-new semantics plus file
+and parent-directory `sync_all`; raw evidence is written before suite cleanup,
+and the terminal receipt only afterward.
 
 ## Frozen plan and custody
 
@@ -83,9 +89,11 @@ then seeds prior target rows with non-NULL embeddings, rows from another root,
 and a non-codebase sentinel. It checkpoints and closes the database, requires
 the WAL/SHM sidecars to be absent, and obtains a separate base-preflight
 receipt. The same frozen base-file SHA and raw-state SHA must bind all 20
-performance children and all eight fault children. Each child receives a new
-byte-for-byte copy; no measured child prepares the base fixture. This single
-preflight also establishes the frozen warm-cache policy before pair 0.
+performance children and all eight fault children. Each child makes its own
+byte-for-byte copy before opening the store, so trial-local database page-cache
+charges contribute to that child's `memory.peak`; no measured child builds or
+queries the shared base fixture. This single preflight also establishes the
+frozen warm-corpus policy before pair 0.
 
 The retained canonical raw packet contains the complete assessor `SuiteInput`
 plus its assessment, so it can be deserialized and reassessed independently.
@@ -93,9 +101,9 @@ Its run evidence includes:
 
 - child PID, sequence, start/finish time, observed AB/BA order, elapsed time,
   `/proc/self/io`, minor/major faults, VmHWM, and `getrusage` RSS;
-- host-quiet bucket deltas and per-child CPU39/process/PSI/affinity/cpuset and
-  competing-build-process identities;
-- transient-cgroup identity, process count, `memory.current`, `memory.peak`,
+- host-quiet bucket deltas for CPU39 and sibling79, plus per-child CPU/process,
+  sibling, PSI, affinity/cpuset, and competing-build-process identities;
+- transient-cgroup identity, exact process-ID set, `memory.current`, `memory.peak`,
   `memory.max`, and `memory.stat` anon/file/shmem components;
 - database/WAL/SHM bytes, validated WAL layout and frames, checkpoint/reset
   state, page/freelist counts, schema and semantic digests, schema metadata,
@@ -108,9 +116,13 @@ Its run evidence includes:
 
 Canonical children must be alone in their transient cgroup. Primary process
 RSS is accepted only when it equals `max(VmHWM, getrusage)`. The cgroup peak is
-an independent resource guard, while exact before/after/delta reconciliation of
-anon/file/shmem rejects an apparent RSS win built from inconsistent cache
-accounting.
+an independent resource guard and includes child-local database-copy plus
+staging/database work. Exact before/after/delta reconciliation of
+anon/file/shmem rejects internally inconsistent evidence. The generated corpus
+is intentionally warm and shared; pages first charged to the orchestrator are
+common to both arms and are not claimed as child-private page-cache evidence.
+Process RSS remains the primary memory decision metric, and this gate does not
+claim complete host page-cache attribution.
 
 ## Decision and failure atomicity
 
@@ -122,7 +134,7 @@ candidate requires:
   regression, no more than 5% median cgroup-peak regression, and at least 8/10
   pairs passing all three;
 - exact anon/file/shmem before/after/delta reconciliation for every canonical
-  measurement, preventing unaccounted cache shifting;
+  measurement, preventing arithmetic or self-inconsistent cache false-greens;
 - authoritative transaction median regression no more than 10%, with at least
   8/10 pairs no worse than 20%; and
 - WAL byte and frame median regressions no more than 5%, with at least 8/10
@@ -138,11 +150,13 @@ starts from a fresh base copy and must observe the exact expected error marker,
 an identical raw rollback snapshot across all codebase tables and
 `sqlite_sequence`, stable PRAGMAs, a successful post-fault query on the same
 connection, and staging cleanup. Fault children prove an empty WAL start. A
-rollback may leave physically valid uncommitted WAL frames; their byte layout
-is retained as evidence, after which a separate TRUNCATE cleanup must prove a
-zero-length WAL. That cleanup may change only the main-file physical SHA;
-logical rows, schema metadata, page/freelist state, integrity, and foreign-key
-evidence must remain identical.
+rollback may leave an uncommitted WAL. The receipt retains its raw 32-byte
+header and independently checks SQLite magic, format version, encoded page
+size, and frame-length layout before a separate TRUNCATE cleanup proves a
+zero-length WAL. This is header/layout evidence, not frame-checksum,
+commit-frame, torn-write, or crash-durability proof. Cleanup may change only the
+main-file physical SHA; logical rows, schema metadata, page/freelist state,
+integrity, and foreign-key evidence must remain identical.
 
 ## Exit and retention contract
 
@@ -155,4 +169,8 @@ evidence must remain identical.
 Canonical raw evidence is retained outside the temporary suite directory and
 SHA-bound into the terminal receipt. The suite directory must close
 successfully before the terminal receipt can claim cleanup; cleanup failure is
-fail-closed rather than relabeled as a result.
+fail-closed rather than relabeled as a result. The suite body and explicit close
+are both observed even on error. If raw evidence was already synced but cleanup
+or terminal write then fails, the `.raw.json` file is deliberately recognizable
+as raw-only/nonterminal evidence while the requested terminal path remains
+absent.

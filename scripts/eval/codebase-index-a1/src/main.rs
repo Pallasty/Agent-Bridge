@@ -16,7 +16,7 @@ use ab_codebase_index_a1::{
     snapshot::{
         cgroup_memory_snapshot, database_evidence, fixture_state, peak_rss_bytes, proc_io_snapshot,
         reset_main_wal, rollback_state, rusage_snapshot, seed_base_fixture, sidecars_absent,
-        storage_evidence,
+        storage_evidence, wal_header_layout_evidence,
     },
     workload::materialize,
     Assessment, AuthoritativePragmaEvidence, AuthorityEvidence, BaseFixturePreflightReceipt,
@@ -76,6 +76,8 @@ enum Commands {
         #[arg(long)]
         base_fixture_sha256: String,
         #[arg(long)]
+        base_fixture: PathBuf,
+        #[arg(long)]
         expected_cgroup_unit: Option<String>,
         #[arg(long)]
         base_preflight: PathBuf,
@@ -105,6 +107,8 @@ enum Commands {
         workload: PathBuf,
         #[arg(long)]
         base_fixture_sha256: String,
+        #[arg(long)]
+        base_fixture: PathBuf,
         #[arg(long)]
         expected_cgroup_unit: String,
         #[arg(long)]
@@ -205,6 +209,11 @@ enum AppError {
     DecisionFailed,
     #[error("refusing to overwrite existing output: {0}")]
     OutputExists(String),
+    #[error("suite failed ({operation}) and explicit suite cleanup also failed: {cleanup}")]
+    SuiteCleanup {
+        operation: String,
+        cleanup: std::io::Error,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -272,6 +281,7 @@ async fn async_main() -> Result<(), AppError> {
             trial_dir,
             workload,
             base_fixture_sha256,
+            base_fixture,
             expected_cgroup_unit,
             base_preflight,
             sequence,
@@ -283,6 +293,7 @@ async fn async_main() -> Result<(), AppError> {
                 &trial_dir,
                 expected,
                 base_fixture_sha256,
+                &base_fixture,
                 expected_cgroup_unit.as_deref(),
                 &base_preflight,
                 sequence,
@@ -307,6 +318,7 @@ async fn async_main() -> Result<(), AppError> {
             trial_dir,
             workload,
             base_fixture_sha256,
+            base_fixture,
             expected_cgroup_unit,
             base_preflight,
             sequence,
@@ -318,6 +330,7 @@ async fn async_main() -> Result<(), AppError> {
                 &trial_dir,
                 expected,
                 base_fixture_sha256,
+                &base_fixture,
                 &expected_cgroup_unit,
                 &base_preflight,
                 sequence,
@@ -356,15 +369,14 @@ async fn run_suite(
     if !trial_root.is_dir() {
         return Err(AppError::TrialRoot(trial_root.display().to_string()));
     }
-    if evidence_class == EvidenceClass::Canonical {
+    let canonical_output_paths = if evidence_class == EvidenceClass::Canonical {
         let output = canonical_output.ok_or_else(|| {
             AppError::CanonicalPreflight("canonical output path is missing".to_string())
         })?;
-        let raw_path = PathBuf::from(format!("{}.raw.json", output.display()));
-        if output.exists() || raw_path.exists() {
-            return Err(AppError::OutputExists(output.display().to_string()));
-        }
-    }
+        Some(canonical_output_preflight(output, trial_root)?)
+    } else {
+        None
+    };
 
     let executable_sha_before = executable_sha256()?;
     let build = embedded_build_identity(Some(executable_sha_before.clone()));
@@ -373,206 +385,293 @@ async fn run_suite(
         canonical_preflight(&build, &runtime_before, trial_root)?;
     }
 
+    let canonical_trial_root = trial_root.canonicalize()?;
     let suite_dir = tempfile::Builder::new()
         .prefix("ab-codebase-index-a1-suite-")
-        .tempdir_in(trial_root)?;
-    let suite_path = suite_dir.path().canonicalize()?;
-    let corpus_path = suite_path.join("corpus");
-    fs::create_dir(&corpus_path)?;
-    let workload = materialize(&corpus_path, documents, batch_rows)?;
-    let workload_path = suite_path.join("workload.json");
-    fs::write(&workload_path, serde_json::to_vec(&workload)?)?;
-    let (base_fixture_path, base_fixture_sha256) =
-        build_base_fixture(&suite_path, &corpus_path, &workload).await?;
+        .tempdir_in(&canonical_trial_root)?;
+    let suite_path = suite_dir.path().to_path_buf();
+    let execution_result = async {
+        let corpus_path = suite_path.join("corpus");
+        fs::create_dir(&corpus_path)?;
+        let workload = materialize(&corpus_path, documents, batch_rows)?;
+        let workload_path = suite_path.join("workload.json");
+        fs::write(&workload_path, serde_json::to_vec(&workload)?)?;
+        let (base_fixture_path, base_fixture_sha256) =
+            build_base_fixture(&suite_path, &corpus_path, &workload).await?;
 
-    let current_exe = std::env::current_exe()?;
-    let base_preflight = run_base_preflight_child(
-        &current_exe,
-        &corpus_path,
-        &base_fixture_path,
-        &workload_path,
-        &base_fixture_sha256,
-        evidence_class,
-    )?;
-    if !sidecars_absent(&base_fixture_path)
-        || ab_codebase_index_a1::provenance::sha256_file(&base_fixture_path)? != base_fixture_sha256
-    {
-        return Err(AppError::BaseFixture(
-            "base changed or retained sidecars after preflight child".to_string(),
-        ));
-    }
-    let base_preflight_path = suite_path.join("base-preflight.json");
-    emit_json(&base_preflight, Some(&base_preflight_path))?;
-    let host_quiet_window = if evidence_class == EvidenceClass::Canonical {
-        let evidence = observe_host_quiet_window(
-            39,
-            std::time::Duration::from_secs(30),
-            std::time::Duration::from_secs(1),
-        )
-        .map_err(|error| {
-            AppError::CanonicalPreflight(format!(
-                "host quiet-window evidence could not be collected: {error}"
-            ))
-        })?;
-        if !evidence.passed {
-            return Err(AppError::CanonicalPreflight(format!(
-                "host quiet-window gate rejected competing activity: {evidence:?}"
-            )));
-        }
-        Some(evidence)
-    } else {
-        None
-    };
-    let mut raw = Vec::with_capacity(pairs);
-    for pair_index in 0..pairs {
-        let order = if pair_index % 2 == 0 {
-            TrialOrder::Ab
-        } else {
-            TrialOrder::Ba
-        };
-        let mut full_vec = None;
-        let mut staged_native = None;
-        for (position, mode) in order.modes().into_iter().enumerate() {
-            let trial_dir = suite_path.join(format!(
-                "pair-{pair_index:02}-position-{position}-{}",
-                match mode {
-                    Mode::FullVec => "full-vec",
-                    Mode::StagedNative => "staged-native",
-                }
+        let current_exe = std::env::current_exe()?;
+        let base_preflight = run_base_preflight_child(
+            &current_exe,
+            &corpus_path,
+            &base_fixture_path,
+            &workload_path,
+            &base_fixture_sha256,
+            evidence_class,
+        )?;
+        if !sidecars_absent(&base_fixture_path)?
+            || ab_codebase_index_a1::provenance::sha256_file(&base_fixture_path)?
+                != base_fixture_sha256
+        {
+            return Err(AppError::BaseFixture(
+                "base changed or retained sidecars after preflight child".to_string(),
             ));
-            fs::create_dir(&trial_dir)?;
-            let database_dir = trial_dir.join("database");
-            fs::create_dir(&database_dir)?;
-            fs::copy(&base_fixture_path, database_dir.join("state.db"))?;
-            let receipt = run_child(
-                &current_exe,
-                mode,
-                &corpus_path,
-                &trial_dir,
-                &workload_path,
-                &base_fixture_sha256,
-                evidence_class,
+        }
+        let base_preflight_path = suite_path.join("base-preflight.json");
+        emit_json(&base_preflight, Some(&base_preflight_path))?;
+        let host_quiet_window = if evidence_class == EvidenceClass::Canonical {
+            let evidence = observe_host_quiet_window(
+                39,
+                std::time::Duration::from_secs(30),
+                std::time::Duration::from_secs(1),
+            )
+            .map_err(|error| {
+                AppError::CanonicalPreflight(format!(
+                    "host quiet-window evidence could not be collected: {error}"
+                ))
+            })?;
+            if !evidence.passed {
+                return Err(AppError::CanonicalPreflight(format!(
+                    "host quiet-window gate rejected competing activity: {evidence:?}"
+                )));
+            }
+            Some(evidence)
+        } else {
+            None
+        };
+        let mut raw = Vec::with_capacity(pairs);
+        for pair_index in 0..pairs {
+            let order = if pair_index % 2 == 0 {
+                TrialOrder::Ab
+            } else {
+                TrialOrder::Ba
+            };
+            let mut full_vec = None;
+            let mut staged_native = None;
+            for (position, mode) in order.modes().into_iter().enumerate() {
+                let trial_dir = suite_path.join(format!(
+                    "pair-{pair_index:02}-position-{position}-{}",
+                    match mode {
+                        Mode::FullVec => "full-vec",
+                        Mode::StagedNative => "staged-native",
+                    }
+                ));
+                fs::create_dir(&trial_dir)?;
+                let database_dir = trial_dir.join("database");
+                fs::create_dir(&database_dir)?;
+                let receipt = run_child(
+                    &current_exe,
+                    mode,
+                    &corpus_path,
+                    &trial_dir,
+                    &workload_path,
+                    &base_fixture_path,
+                    &base_fixture_sha256,
+                    evidence_class,
+                    pair_index,
+                    position,
+                    &base_preflight_path,
+                    pair_index * 2 + position,
+                )?;
+                validate_child(
+                    &receipt,
+                    mode,
+                    &workload,
+                    &build,
+                    &trial_dir,
+                    pair_index * 2 + position,
+                )?;
+                match mode {
+                    Mode::FullVec => full_vec = Some(receipt),
+                    Mode::StagedNative => staged_native = Some(receipt),
+                }
+            }
+            let full_vec = full_vec.ok_or_else(|| {
+                AppError::ChildContract(format!("pair {pair_index} lacks FullVec"))
+            })?;
+            let staged_native = staged_native.ok_or_else(|| {
+                AppError::ChildContract(format!("pair {pair_index} lacks staged-native"))
+            })?;
+            let observed_execution = match order {
+                TrialOrder::Ab => [full_vec.execution.clone(), staged_native.execution.clone()],
+                TrialOrder::Ba => [staged_native.execution.clone(), full_vec.execution.clone()],
+            };
+            raw.push(TrialPair {
                 pair_index,
-                position,
-                &base_preflight_path,
-                pair_index * 2 + position,
-            )?;
-            validate_child(
-                &receipt,
-                mode,
-                &workload,
-                &build,
-                &trial_dir,
-                pair_index * 2 + position,
-            )?;
-            match mode {
-                Mode::FullVec => full_vec = Some(receipt),
-                Mode::StagedNative => staged_native = Some(receipt),
+                order,
+                observed_order: order.modes(),
+                observed_execution,
+                full_vec,
+                staged_native,
+            });
+        }
+
+        let mut failure_atomicity = Vec::new();
+        if evidence_class == EvidenceClass::Canonical {
+            for (fault_index, case) in [
+                FailureCase::AfterStagingBatch,
+                FailureCase::AfterDeleteSymbols,
+                FailureCase::AfterDeleteImports,
+                FailureCase::AfterDeleteCalls,
+                FailureCase::AfterSymbolRows,
+                FailureCase::AfterImportRows,
+                FailureCase::AfterCallRows,
+                FailureCase::BeforeCommit,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let trial_dir = suite_path.join(format!("fault-{case:?}"));
+                let database_dir = trial_dir.join("database");
+                fs::create_dir_all(&database_dir)?;
+                failure_atomicity.push(run_fault_child(
+                    &current_exe,
+                    case,
+                    &corpus_path,
+                    &trial_dir,
+                    &workload_path,
+                    &base_fixture_path,
+                    &base_fixture_sha256,
+                    &base_preflight_path,
+                    CANONICAL_PAIRS * 2 + fault_index,
+                )?);
             }
         }
-        let full_vec = full_vec
-            .ok_or_else(|| AppError::ChildContract(format!("pair {pair_index} lacks FullVec")))?;
-        let staged_native = staged_native.ok_or_else(|| {
-            AppError::ChildContract(format!("pair {pair_index} lacks staged-native"))
-        })?;
-        let observed_execution = match order {
-            TrialOrder::Ab => [full_vec.execution.clone(), staged_native.execution.clone()],
-            TrialOrder::Ba => [staged_native.execution.clone(), full_vec.execution.clone()],
-        };
-        raw.push(TrialPair {
-            pair_index,
-            order,
-            observed_order: order.modes(),
-            observed_execution,
-            full_vec,
-            staged_native,
-        });
-    }
 
-    let mut failure_atomicity = Vec::new();
-    if evidence_class == EvidenceClass::Canonical {
-        for (fault_index, case) in [
-            FailureCase::AfterStagingBatch,
-            FailureCase::AfterDeleteSymbols,
-            FailureCase::AfterDeleteImports,
-            FailureCase::AfterDeleteCalls,
-            FailureCase::AfterSymbolRows,
-            FailureCase::AfterImportRows,
-            FailureCase::AfterCallRows,
-            FailureCase::BeforeCommit,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let trial_dir = suite_path.join(format!("fault-{case:?}"));
-            let database_dir = trial_dir.join("database");
-            fs::create_dir_all(&database_dir)?;
-            fs::copy(&base_fixture_path, database_dir.join("state.db"))?;
-            failure_atomicity.push(run_fault_child(
-                &current_exe,
-                case,
-                &corpus_path,
-                &trial_dir,
-                &workload_path,
-                &base_fixture_sha256,
-                &base_preflight_path,
-                CANONICAL_PAIRS * 2 + fault_index,
-            )?);
+        let executable_sha_after = executable_sha256()?;
+        let runtime_after = runtime_identity(executable_sha_after);
+        let runtime_environment = base_preflight.runtime_environment.clone();
+        let provenance = Provenance {
+            build,
+            runtime_before,
+            runtime_after,
+        };
+        let input = SuiteInput {
+            evidence_class,
+            provenance,
+            runtime_environment,
+            host_quiet_window,
+            trial_root: Some(suite_path),
+            cache_policy: "warm_shared_corpus_after_single_base_fixture".to_string(),
+            host_storage_context: host_storage_context(),
+            base_fixture_preflight: base_preflight,
+            pairs: raw,
+            failure_atomicity,
+        };
+        let assessment = assess_suite(&input);
+        let raw_packet = if evidence_class == EvidenceClass::Canonical {
+            let output_paths = canonical_output_paths.as_ref().ok_or_else(|| {
+                AppError::CanonicalPreflight("canonical output custody path is missing".to_string())
+            })?;
+            if canonical_output != Some(output_paths.terminal.as_path()) {
+                return Err(AppError::CanonicalPreflight(
+                    "canonical output custody changed after preflight".to_string(),
+                ));
+            }
+            let path = output_paths.raw.clone();
+            let packet = CanonicalRawPacket {
+                schema: RAW_PACKET_SCHEMA.to_string(),
+                input: input.clone(),
+                assessment: assessment.clone(),
+            };
+            emit_json(&packet, Some(&path))?;
+            let sha256 = ab_codebase_index_a1::provenance::sha256_file(&path)?;
+            Some(RawPacketCustody {
+                path,
+                sha256,
+                retained: true,
+                synced_before_suite_cleanup: true,
+            })
+        } else {
+            None
+        };
+        Ok::<SuiteReceipt, AppError>(SuiteReceipt {
+            schema: SUITE_RECEIPT_SCHEMA.to_string(),
+            input,
+            assessment,
+            suite_cleanup_succeeded: false,
+            suite_artifacts_retained: true,
+            raw_packet,
+        })
+    }
+    .await;
+    match (execution_result, suite_dir.close()) {
+        (Ok(mut receipt), Ok(())) => {
+            receipt.suite_cleanup_succeeded = true;
+            receipt.suite_artifacts_retained = false;
+            Ok(receipt)
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(cleanup)) => Err(AppError::Io(cleanup)),
+        (Err(error), Err(cleanup)) => Err(AppError::SuiteCleanup {
+            operation: error.to_string(),
+            cleanup,
+        }),
+    }
+}
+
+#[derive(Debug)]
+struct CanonicalOutputPaths {
+    terminal: PathBuf,
+    raw: PathBuf,
+}
+
+fn canonical_output_preflight(
+    output: &Path,
+    trial_root: &Path,
+) -> Result<CanonicalOutputPaths, AppError> {
+    if !output.is_absolute() {
+        return Err(AppError::CanonicalPreflight(
+            "canonical output must be an absolute path".to_string(),
+        ));
+    }
+    let file_name = output.file_name().ok_or_else(|| {
+        AppError::CanonicalPreflight("canonical output must name a file".to_string())
+    })?;
+    let parent = output.parent().ok_or_else(|| {
+        AppError::CanonicalPreflight("canonical output parent is missing".to_string())
+    })?;
+    if !parent.is_dir() {
+        return Err(AppError::CanonicalPreflight(
+            "canonical output parent must already exist".to_string(),
+        ));
+    }
+    let parent = parent.canonicalize()?;
+    let terminal = parent.join(file_name);
+    if terminal != output {
+        return Err(AppError::CanonicalPreflight(
+            "canonical output parent must already be canonical (no symlink or '..')".to_string(),
+        ));
+    }
+    let canonical_trial_root = trial_root.canonicalize()?;
+    let repository = ab_codebase_index_a1::provenance::repository_dir().canonicalize()?;
+    if !terminal.starts_with("/home") {
+        return Err(AppError::CanonicalPreflight(
+            "canonical output must be retained on an absolute /home path".to_string(),
+        ));
+    }
+    if terminal.starts_with(&repository) || terminal.starts_with(&canonical_trial_root) {
+        return Err(AppError::CanonicalPreflight(
+            "canonical output must be outside both the source tree and trial root".to_string(),
+        ));
+    }
+    let storage = storage_evidence(&parent, &terminal, &parent, Mode::FullVec);
+    if storage.mount_point.is_none() || storage.filesystem_type.as_deref() != Some("ext4") {
+        return Err(AppError::CanonicalPreflight(
+            "canonical output parent is not on the frozen persistent ext4 filesystem class"
+                .to_string(),
+        ));
+    }
+    let mut raw = terminal.as_os_str().to_os_string();
+    raw.push(".raw.json");
+    let raw = PathBuf::from(raw);
+    for path in [&terminal, &raw] {
+        match path.try_exists() {
+            Ok(false) => {}
+            Ok(true) => return Err(AppError::OutputExists(path.display().to_string())),
+            Err(error) => return Err(AppError::Io(error)),
         }
     }
-
-    let executable_sha_after = executable_sha256()?;
-    let runtime_after = runtime_identity(executable_sha_after);
-    let runtime_environment = base_preflight.runtime_environment.clone();
-    let provenance = Provenance {
-        build,
-        runtime_before,
-        runtime_after,
-    };
-    let input = SuiteInput {
-        evidence_class,
-        provenance,
-        runtime_environment,
-        host_quiet_window,
-        trial_root: Some(suite_path),
-        cache_policy: "warm_shared_corpus_after_single_base_fixture".to_string(),
-        host_storage_context: host_storage_context(),
-        base_fixture_preflight: base_preflight,
-        pairs: raw,
-        failure_atomicity,
-    };
-    let assessment = assess_suite(&input);
-    let raw_packet = if evidence_class == EvidenceClass::Canonical {
-        let output = canonical_output.ok_or_else(|| {
-            AppError::CanonicalPreflight("canonical output custody path is missing".to_string())
-        })?;
-        let path = PathBuf::from(format!("{}.raw.json", output.display()));
-        let packet = CanonicalRawPacket {
-            schema: RAW_PACKET_SCHEMA.to_string(),
-            input: input.clone(),
-            assessment: assessment.clone(),
-        };
-        emit_json(&packet, Some(&path))?;
-        let sha256 = ab_codebase_index_a1::provenance::sha256_file(&path)?;
-        Some(RawPacketCustody {
-            path,
-            sha256,
-            retained: true,
-            synced_before_suite_cleanup: true,
-        })
-    } else {
-        None
-    };
-    suite_dir.close()?;
-    let receipt = SuiteReceipt {
-        schema: SUITE_RECEIPT_SCHEMA.to_string(),
-        input,
-        assessment,
-        suite_cleanup_succeeded: true,
-        suite_artifacts_retained: false,
-        raw_packet,
-    };
-    Ok(receipt)
+    Ok(CanonicalOutputPaths { terminal, raw })
 }
 
 #[cfg(feature = "staged-native")]
@@ -602,12 +701,12 @@ async fn build_base_fixture(
     std::thread::sleep(std::time::Duration::from_millis(50));
     seed_base_fixture(&database_path, corpus_path)?;
     for _ in 0..20 {
-        if sidecars_absent(&database_path) {
+        if sidecars_absent(&database_path)? {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
-    if !sidecars_absent(&database_path) {
+    if !sidecars_absent(&database_path)? {
         return Err(AppError::BaseFixture(
             "closed/checkpointed base retained WAL or SHM sidecars".to_string(),
         ));
@@ -625,7 +724,7 @@ fn base_fixture_preflight(
     let source_root = source_root.canonicalize()?;
     let database_path = database_path.canonicalize()?;
     let database_copy_sha256 = ab_codebase_index_a1::provenance::sha256_file(&database_path)?;
-    let sidecars_absent = sidecars_absent(&database_path);
+    let sidecars_absent = sidecars_absent(&database_path)?;
     if database_copy_sha256 != base_fixture_sha256
         || ab_codebase_index_a1::workload::actual_corpus_sha256(&source_root, workload.documents)?
             != workload.corpus_sha256
@@ -855,6 +954,7 @@ fn run_child(
     source_root: &Path,
     trial_dir: &Path,
     workload_path: &Path,
+    base_fixture_path: &Path,
     base_fixture_sha256: &str,
     evidence_class: EvidenceClass,
     pair_index: usize,
@@ -889,6 +989,8 @@ fn run_child(
         .arg(trial_dir)
         .arg("--workload")
         .arg(workload_path)
+        .arg("--base-fixture")
+        .arg(base_fixture_path)
         .arg("--base-fixture-sha256")
         .arg(base_fixture_sha256)
         .arg("--base-preflight")
@@ -918,6 +1020,7 @@ fn run_fault_child(
     source_root: &Path,
     trial_dir: &Path,
     workload_path: &Path,
+    base_fixture_path: &Path,
     base_fixture_sha256: &str,
     base_preflight: &Path,
     sequence: usize,
@@ -947,6 +1050,8 @@ fn run_fault_child(
         .arg(trial_dir)
         .arg("--workload")
         .arg(workload_path)
+        .arg("--base-fixture")
+        .arg(base_fixture_path)
         .arg("--base-fixture-sha256")
         .arg(base_fixture_sha256)
         .arg("--expected-cgroup-unit")
@@ -982,6 +1087,7 @@ struct CapturedOutput {
     stderr: Vec<u8>,
 }
 
+#[derive(Debug)]
 enum TimedOutputError {
     Timeout,
     OrphanedUnit(String),
@@ -999,6 +1105,14 @@ fn timed_child_error(error: TimedOutputError, mode: Mode) -> AppError {
 }
 
 fn transient_service_command(unit: &str, executable: &Path) -> Command {
+    transient_service_command_with_env(unit, executable, &[])
+}
+
+fn transient_service_command_with_env(
+    unit: &str,
+    executable: &Path,
+    environment: &[(&str, &str)],
+) -> Command {
     let mut command = Command::new("systemd-run");
     command.args([
         "--user",
@@ -1014,44 +1128,61 @@ fn transient_service_command(unit: &str, executable: &Path) -> Command {
         "--unit",
         unit,
     ]);
+    for (key, value) in environment {
+        command.arg(format!("--setenv={key}={value}"));
+    }
     command.arg(executable);
     command
 }
 
 fn stop_and_verify_transient_unit(unit: &str) -> Result<(), TimedOutputError> {
-    let _ = Command::new("systemctl")
-        .args(["--user", "stop", unit])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(TimedOutputError::Io)?;
+    // Every systemctl client is independently bounded. A failed stop request is
+    // not an early return: the verifier still attempts a control-group kill and
+    // proves the unit collected/unpopulated before releasing custody.
+    let _ = bounded_systemctl_output(&["--user", "stop", "--no-block", unit]);
 
     let started = Instant::now();
+    let mut kill_requested = false;
     while started.elapsed() < std::time::Duration::from_secs(30) {
-        let output = Command::new("systemctl")
-            .args([
+        if !kill_requested && started.elapsed() >= std::time::Duration::from_secs(5) {
+            let _ = bounded_systemctl_output(&[
                 "--user",
-                "show",
+                "kill",
+                "--kill-whom=all",
+                "--signal=KILL",
                 unit,
-                "--property=LoadState",
-                "--property=ActiveState",
-                "--property=SubState",
-                "--property=ControlGroup",
-                "--no-pager",
-            ])
-            .output()
-            .map_err(TimedOutputError::Io)?;
-        if output.status.success()
-            && String::from_utf8(output.stdout)
+            ]);
+            kill_requested = true;
+        }
+        if let Ok(output) = bounded_systemctl_output(&[
+            "--user",
+            "show",
+            unit,
+            "--property=LoadState",
+            "--property=ActiveState",
+            "--property=SubState",
+            "--property=ControlGroup",
+            "--no-pager",
+        ]) {
+            if String::from_utf8(output.stdout)
                 .ok()
                 .and_then(|value| parse_transient_unit_state(&value))
                 .is_some_and(|state| transient_unit_is_quiescent(&state))
-        {
-            return Ok(());
+            {
+                return Ok(());
+            }
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     Err(TimedOutputError::OrphanedUnit(unit.to_string()))
+}
+
+fn bounded_systemctl_output(args: &[&str]) -> Result<std::process::Output, TimedOutputError> {
+    Command::new("/usr/bin/timeout")
+        .args(["--kill-after=1s", "2s", "systemctl"])
+        .args(args)
+        .output()
+        .map_err(TimedOutputError::Io)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1099,8 +1230,10 @@ fn cgroup_is_unpopulated(relative: &str) -> bool {
         return false;
     }
     let directory = Path::new("/sys/fs/cgroup").join(relative);
-    if !directory.exists() {
-        return true;
+    match directory.try_exists() {
+        Ok(false) => return true,
+        Ok(true) => {}
+        Err(_) => return false,
     }
     let processes_empty = fs::read_to_string(directory.join("cgroup.procs"))
         .is_ok_and(|value| value.trim().is_empty());
@@ -1120,14 +1253,28 @@ fn output_with_timeout(
 ) -> Result<CapturedOutput, TimedOutputError> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().map_err(TimedOutputError::Io)?;
-    let mut stdout_pipe = child
-        .stdout
-        .take()
-        .ok_or_else(|| TimedOutputError::Io(std::io::Error::other("child stdout pipe missing")))?;
-    let mut stderr_pipe = child
-        .stderr
-        .take()
-        .ok_or_else(|| TimedOutputError::Io(std::io::Error::other("child stderr pipe missing")))?;
+    let Some(mut stdout_pipe) = child.stdout.take() else {
+        let cleanup = transient_unit
+            .map(stop_and_verify_transient_unit)
+            .transpose();
+        let _ = child.kill();
+        let _ = child.wait();
+        cleanup?;
+        return Err(TimedOutputError::Io(std::io::Error::other(
+            "child stdout pipe missing",
+        )));
+    };
+    let Some(mut stderr_pipe) = child.stderr.take() else {
+        let cleanup = transient_unit
+            .map(stop_and_verify_transient_unit)
+            .transpose();
+        let _ = child.kill();
+        let _ = child.wait();
+        cleanup?;
+        return Err(TimedOutputError::Io(std::io::Error::other(
+            "child stderr pipe missing",
+        )));
+    };
     let stdout_reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
         stdout_pipe.read_to_end(&mut bytes).map(|_| bytes)
@@ -1138,18 +1285,28 @@ fn output_with_timeout(
     });
     let started = Instant::now();
     loop {
-        if let Some(status) = child.try_wait().map_err(TimedOutputError::Io)? {
-            if let Some(unit) = transient_unit {
-                stop_and_verify_transient_unit(unit)?;
+        let status = match child.try_wait() {
+            Ok(status) => status,
+            Err(error) => {
+                let cleanup = transient_unit
+                    .map(stop_and_verify_transient_unit)
+                    .transpose();
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return cleanup.and(Err(TimedOutputError::Io(error)));
             }
-            let stdout = stdout_reader
-                .join()
-                .map_err(|_| TimedOutputError::Io(std::io::Error::other("stdout reader panicked")))?
-                .map_err(TimedOutputError::Io)?;
-            let stderr = stderr_reader
-                .join()
-                .map_err(|_| TimedOutputError::Io(std::io::Error::other("stderr reader panicked")))?
-                .map_err(TimedOutputError::Io)?;
+        };
+        if let Some(status) = status {
+            let cleanup = transient_unit
+                .map(stop_and_verify_transient_unit)
+                .transpose();
+            let stdout = join_output_reader(stdout_reader, "stdout");
+            let stderr = join_output_reader(stderr_reader, "stderr");
+            cleanup?;
+            let stdout = stdout?;
+            let stderr = stderr?;
             return Ok(CapturedOutput {
                 success: status.success(),
                 stdout,
@@ -1157,17 +1314,30 @@ fn output_with_timeout(
             });
         }
         if started.elapsed() >= timeout {
-            if let Some(unit) = transient_unit {
-                stop_and_verify_transient_unit(unit)?;
-            }
+            let cleanup = transient_unit
+                .map(stop_and_verify_transient_unit)
+                .transpose();
             let _ = child.kill();
             let _ = child.wait();
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
+            cleanup?;
             return Err(TimedOutputError::Timeout);
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+}
+
+fn join_output_reader(
+    reader: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
+    name: &str,
+) -> Result<Vec<u8>, TimedOutputError> {
+    reader
+        .join()
+        .map_err(|_| {
+            TimedOutputError::Io(std::io::Error::other(format!("{name} reader panicked")))
+        })?
+        .map_err(TimedOutputError::Io)
 }
 
 fn validate_child(
@@ -1203,6 +1373,7 @@ async fn run_one(
     trial_dir: &Path,
     workload: Workload,
     base_fixture_sha256: String,
+    base_fixture_path: &Path,
     expected_cgroup_unit: Option<&str>,
     base_preflight_path: &Path,
     sequence: usize,
@@ -1215,6 +1386,7 @@ async fn run_one(
             trial_dir,
             workload,
             base_fixture_sha256,
+            base_fixture_path,
             expected_cgroup_unit,
             base_preflight_path,
             sequence,
@@ -1227,14 +1399,22 @@ async fn run_one(
         let child_started_unix_ns = unix_time_ns()?;
         let source_root = source_root.canonicalize()?;
         let trial_dir = trial_dir.canonicalize()?;
+        let base_fixture_path = base_fixture_path.canonicalize()?;
         let database_dir = trial_dir.join("database");
         let staging_dir = trial_dir.join("staging");
         fs::create_dir_all(&database_dir)?;
         fs::create_dir_all(&staging_dir)?;
         let database_path = database_dir.join("state.db");
+        if database_path.try_exists()? {
+            return Err(AppError::BaseFixture(
+                "measured child target database already exists before child-local copy".to_string(),
+            ));
+        }
+        fs::copy(&base_fixture_path, &database_path)?;
+        let database_path = database_path.canonicalize()?;
         let database_copy_sha256_before =
             ab_codebase_index_a1::provenance::sha256_file(&database_path)?;
-        let base_sidecars_absent_before = sidecars_absent(&database_path);
+        let base_sidecars_absent_before = sidecars_absent(&database_path)?;
         let base_preflight: BaseFixturePreflightReceipt =
             serde_json::from_slice(&fs::read(base_preflight_path)?)?;
         if base_preflight.base_fixture_sha256 != base_fixture_sha256
@@ -1363,6 +1543,8 @@ async fn run_one(
             peak_after,
             memory_max,
             process_count,
+            process_ids_before,
+            process_ids_after,
             cgroup_is_shared,
             cgroup_isolated_for_trial,
             anon_after,
@@ -1380,10 +1562,14 @@ async fn run_one(
                 Some(after.peak_bytes),
                 Some(after.max),
                 Some(after.process_count),
+                Some(before.process_ids.clone()),
+                Some(after.process_ids.clone()),
                 Some(after.process_count > 1),
                 Some(
                     expected_cgroup_unit
-                        .is_some_and(|unit| after.path.ends_with(&format!("/{unit}.service"))),
+                        .is_some_and(|unit| after.path.ends_with(&format!("/{unit}.service")))
+                        && before.process_ids == [std::process::id()]
+                        && after.process_ids == [std::process::id()],
                 ),
                 Some(after.anon_bytes),
                 Some(before.anon_bytes),
@@ -1394,7 +1580,7 @@ async fn run_one(
             ),
             _ => (
                 None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-                None,
+                None, None, None,
             ),
         };
 
@@ -1410,6 +1596,7 @@ async fn run_one(
                 started_unix_ns: child_started_unix_ns,
                 finished_unix_ns: child_finished_unix_ns,
             },
+            expected_cgroup_unit: expected_cgroup_unit.map(str::to_string),
             build_identity,
             workload,
             measurement: Measurement {
@@ -1424,6 +1611,8 @@ async fn run_one(
                 cgroup_memory_peak_after_bytes: peak_after,
                 cgroup_memory_max: memory_max,
                 cgroup_process_count: process_count,
+                cgroup_process_ids_before: process_ids_before,
+                cgroup_process_ids_after: process_ids_after,
                 cgroup_is_shared,
                 cgroup_isolated_for_trial,
                 cgroup_memory_anon_before_bytes: anon_before,
@@ -1488,6 +1677,7 @@ async fn run_fault_one(
     trial_dir: &Path,
     workload: Workload,
     base_fixture_sha256: String,
+    base_fixture_path: &Path,
     expected_cgroup_unit: &str,
     base_preflight_path: &Path,
     sequence: usize,
@@ -1495,7 +1685,15 @@ async fn run_fault_one(
     let child_started_unix_ns = unix_time_ns()?;
     let source_root = source_root.canonicalize()?;
     let trial_dir = trial_dir.canonicalize()?;
-    let database_path = trial_dir.join("database/state.db").canonicalize()?;
+    let base_fixture_path = base_fixture_path.canonicalize()?;
+    let database_path = trial_dir.join("database/state.db");
+    if database_path.try_exists()? {
+        return Err(AppError::BaseFixture(
+            "fault child target database already exists before child-local copy".to_string(),
+        ));
+    }
+    fs::copy(&base_fixture_path, &database_path)?;
+    let database_path = database_path.canonicalize()?;
     let staging_dir = trial_dir.join("staging");
     fs::create_dir_all(&staging_dir)?;
     let database_copy_sha256_before =
@@ -1581,6 +1779,12 @@ async fn run_fault_one(
     let after = fixture_state(&database_path, &source_root)?;
     let rollback_after = rollback_state(&database_path, &source_root)?;
     let main_wal_bytes_after = sqlite_sidecar_bytes(&database_path, "-wal")?;
+    let post_fault_wal_header_layout = wal_header_layout_evidence(
+        &database_path,
+        base_preflight.database.page_size.ok_or_else(|| {
+            AppError::BaseFixture("base preflight lacks SQLite page size".to_string())
+        })?,
+    )?;
     let main_shm_bytes_after = sqlite_sidecar_bytes(&database_path, "-shm")?;
     let wal_cleanup = reset_main_wal(&database_path)?;
     if !wal_cleanup.proven_empty {
@@ -1599,19 +1803,32 @@ async fn run_fault_one(
         ));
     }
     let cgroup_after = cgroup_memory_snapshot();
-    let (cgroup_path, cgroup_process_count, cgroup_isolated_for_trial) =
-        match (cgroup_before, cgroup_after) {
-            (Some(before), Some(after)) if before.path == after.path => {
-                let isolated = before.process_count == 1
-                    && after.process_count == 1
-                    && after
-                        .path
-                        .ends_with(&format!("/{expected_cgroup_unit}.service"))
-                    && actual_process_affinity == "39";
-                (after.path, after.process_count, isolated)
-            }
-            _ => ("UNBOUND".to_string(), 0, false),
-        };
+    let (
+        cgroup_path,
+        cgroup_process_count,
+        cgroup_process_ids_before,
+        cgroup_process_ids_after,
+        cgroup_isolated_for_trial,
+    ) = match (cgroup_before, cgroup_after) {
+        (Some(before), Some(after)) if before.path == after.path => {
+            let isolated = before.process_count == 1
+                && after.process_count == 1
+                && before.process_ids == [std::process::id()]
+                && after.process_ids == [std::process::id()]
+                && after
+                    .path
+                    .ends_with(&format!("/{expected_cgroup_unit}.service"))
+                && actual_process_affinity == "39";
+            (
+                after.path,
+                after.process_count,
+                before.process_ids,
+                after.process_ids,
+                isolated,
+            )
+        }
+        _ => ("UNBOUND".to_string(), 0, Vec::new(), Vec::new(), false),
+    };
     let staging_cleanup_succeeded = fs::read_dir(&staging_dir)?.next().is_none();
     let executable_sha = executable_sha256()?;
     let child_finished_unix_ns = unix_time_ns()?;
@@ -1632,10 +1849,13 @@ async fn run_fault_one(
         expected_cgroup_unit: expected_cgroup_unit.to_string(),
         cgroup_path,
         cgroup_process_count,
+        cgroup_process_ids_before,
+        cgroup_process_ids_after,
         cgroup_isolated_for_trial,
         actual_process_affinity,
         wal_reset,
         wal_cleanup,
+        post_fault_wal_header_layout,
         main_wal_bytes_before,
         main_wal_bytes_after,
         main_wal_bytes_after_cleanup,
@@ -1671,6 +1891,7 @@ async fn run_fault_one(
     _trial_dir: &Path,
     _workload: Workload,
     _base_fixture_sha256: String,
+    _base_fixture_path: &Path,
     _expected_cgroup_unit: &str,
     _base_preflight_path: &Path,
     _sequence: usize,
@@ -1806,11 +2027,15 @@ mod tests {
     use std::{ffi::OsStr, fs, path::Path};
 
     use super::{
-        base_fixture_preflight, build_base_fixture, emit_json, parse_transient_unit_state,
-        rollback_semantics_equal, run_fault_one, transient_service_command,
-        transient_unit_is_quiescent, AppError,
+        base_fixture_preflight, build_base_fixture, canonical_output_preflight, emit_json,
+        output_with_timeout, parse_transient_unit_state, rollback_semantics_equal, run_fault_one,
+        transient_service_command, transient_service_command_with_env, transient_unit_is_quiescent,
+        AppError,
     };
-    use ab_codebase_index_a1::{workload::materialize, FailureCase};
+    use ab_codebase_index_a1::{
+        quiet::cpu_process_sample, snapshot::cgroup_memory_snapshot, workload::materialize,
+        FailureCase,
+    };
 
     #[test]
     fn canonical_terminal_failures_have_distinct_nonzero_exit_codes() {
@@ -1820,6 +2045,16 @@ mod tests {
             AppError::EvidenceInvalid.exit_code(),
             AppError::DecisionFailed.exit_code()
         );
+    }
+
+    #[test]
+    fn canonical_output_custody_rejects_relative_paths_before_touching_storage() {
+        let error = canonical_output_preflight(
+            Path::new("relative-result.json"),
+            Path::new("relative-trials"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("absolute path"));
     }
 
     #[test]
@@ -1849,6 +2084,28 @@ mod tests {
     }
 
     #[test]
+    fn transient_service_environment_is_propagated_before_the_executable() {
+        let executable = Path::new("/opt/ab-codebase-index-a1");
+        let command = transient_service_command_with_env(
+            "ab-a1-test",
+            executable,
+            &[("AB_A1_CHILD", "1"), ("AB_A1_UNIT", "ab-a1-test")],
+        );
+        let args = command.get_args().collect::<Vec<_>>();
+        let executable_index = args
+            .iter()
+            .position(|arg| *arg == OsStr::new("/opt/ab-codebase-index-a1"))
+            .unwrap();
+        for required in ["--setenv=AB_A1_CHILD=1", "--setenv=AB_A1_UNIT=ab-a1-test"] {
+            let index = args
+                .iter()
+                .position(|arg| *arg == OsStr::new(required))
+                .unwrap();
+            assert!(index < executable_index);
+        }
+    }
+
+    #[test]
     fn transient_unit_state_requires_inactive_dead_or_collected() {
         let active = parse_transient_unit_state(
             "LoadState=loaded\nActiveState=deactivating\nSubState=stop-sigterm\nControlGroup=/user.slice/test.service\n",
@@ -1861,6 +2118,54 @@ mod tests {
         )
         .unwrap();
         assert!(transient_unit_is_quiescent(&collected));
+    }
+
+    #[test]
+    fn real_transient_child_binds_cpu39_and_exact_cgroup_membership() {
+        const CHILD_ENV: &str = "AB_A1_TRANSIENT_CGROUP_SMOKE_CHILD";
+        const UNIT_ENV: &str = "AB_A1_TRANSIENT_CGROUP_SMOKE_UNIT";
+        if std::env::var(CHILD_ENV).as_deref() == Ok("1") {
+            let expected_unit = std::env::var(UNIT_ENV).unwrap();
+            let snapshot = cgroup_memory_snapshot().unwrap();
+            assert!(snapshot
+                .path
+                .ends_with(&format!("/{expected_unit}.service")));
+            assert_eq!(snapshot.process_ids, [std::process::id()]);
+            let sample = cpu_process_sample(39).unwrap();
+            assert_eq!(sample.actual_affinity, "39");
+            return;
+        }
+
+        let unit = format!("ab-codebase-index-a1-{}-cgroup-smoke", std::process::id());
+        let executable = std::env::current_exe().unwrap();
+        let mut command = transient_service_command_with_env(
+            &unit,
+            &executable,
+            &[(CHILD_ENV, "1"), (UNIT_ENV, unit.as_str())],
+        );
+        command.args([
+            "--exact",
+            "tests::real_transient_child_binds_cpu39_and_exact_cgroup_membership",
+            "--nocapture",
+        ]);
+        let output =
+            output_with_timeout(command, std::time::Duration::from_secs(30), Some(&unit)).unwrap();
+        assert!(
+            output.success,
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    #[test]
+    fn real_transient_timeout_collects_the_service_before_returning() {
+        let unit = format!("ab-codebase-index-a1-{}-timeout-smoke", std::process::id());
+        let mut command = transient_service_command(&unit, Path::new("/bin/sleep"));
+        command.arg("60");
+        let result =
+            output_with_timeout(command, std::time::Duration::from_millis(150), Some(&unit));
+        assert!(matches!(result, Err(super::TimedOutputError::Timeout)));
     }
 
     #[cfg(feature = "staged-native")]
@@ -1882,13 +2187,13 @@ mod tests {
 
         let trial = suite.join("fault-smoke");
         fs::create_dir_all(trial.join("database")).unwrap();
-        fs::copy(&base_path, trial.join("database/state.db")).unwrap();
         let receipt = run_fault_one(
             FailureCase::AfterSymbolRows,
             &corpus,
             &trial,
             workload,
             base_sha,
+            &base_path,
             "ab-codebase-index-a1-test-fault-after-symbol-rows",
             &preflight_path,
             20,
@@ -1900,6 +2205,21 @@ mod tests {
         assert!(receipt.wal_reset.proven_empty);
         assert_eq!(receipt.main_wal_bytes_before, 0);
         assert_eq!(receipt.main_wal_bytes_after, 4_152);
+        assert_eq!(receipt.post_fault_wal_header_layout.bytes, 4_152);
+        assert!(matches!(
+            receipt.post_fault_wal_header_layout.magic,
+            Some(0x377f_0682) | Some(0x377f_0683)
+        ));
+        assert_eq!(
+            receipt.post_fault_wal_header_layout.format_version,
+            Some(3_007_000)
+        );
+        assert_eq!(
+            receipt.post_fault_wal_header_layout.encoded_page_size,
+            Some(4_096)
+        );
+        assert_eq!(receipt.post_fault_wal_header_layout.frame_count, 1);
+        assert!(receipt.post_fault_wal_header_layout.header_layout_valid);
         assert!(receipt.wal_cleanup.proven_empty);
         assert_eq!(receipt.main_wal_bytes_after_cleanup, 0);
         assert_eq!(receipt.rollback_before, preflight.rollback_state);

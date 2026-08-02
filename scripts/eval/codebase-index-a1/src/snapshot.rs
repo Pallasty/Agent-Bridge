@@ -10,8 +10,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    workload::{digest_hex, frame_str, frame_u64, SemanticAccumulator, WorkloadError},
-    DatabaseEvidence, Mode, RollbackStateEvidence, StorageEvidence, WalResetEvidence,
+    workload::{bytes_hex, digest_hex, frame_str, frame_u64, SemanticAccumulator, WorkloadError},
+    DatabaseEvidence, Mode, RollbackStateEvidence, StorageEvidence, WalHeaderLayoutEvidence,
+    WalResetEvidence,
 };
 
 #[derive(Debug, Error)]
@@ -39,6 +40,7 @@ pub struct CgroupMemorySnapshot {
     pub peak_bytes: u64,
     pub max: String,
     pub process_count: u64,
+    pub process_ids: Vec<u32>,
     pub anon_bytes: u64,
     pub file_bytes: u64,
     pub shmem_bytes: u64,
@@ -79,16 +81,12 @@ pub fn database_evidence(
     let page_count = pragma_u64(&connection, "page_count")?;
     let freelist_count = pragma_u64(&connection, "freelist_count")?;
     let journal_mode: String = connection.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
-    let wal_path = PathBuf::from(format!("{}-wal", database_path.display()));
-    let shm_path = PathBuf::from(format!("{}-shm", database_path.display()));
+    let wal_path = sqlite_sidecar_path(database_path, "-wal");
+    let shm_path = sqlite_sidecar_path(database_path, "-shm");
     let database_bytes = fs::metadata(database_path)?.len();
-    let wal_bytes = fs::metadata(&wal_path)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
-    let shm_bytes = fs::metadata(&shm_path)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
-    let (wal_frames, wal_layout_valid) = physical_wal_frames(&wal_path, wal_bytes, page_size)?;
+    let wal_bytes = sqlite_sidecar_bytes(&wal_path)?;
+    let shm_bytes = sqlite_sidecar_bytes(&shm_path)?;
+    let wal_header_layout = wal_header_layout_evidence_for_path(&wal_path, wal_bytes, page_size)?;
     let (busy, checkpoint_log, checkpointed): (i64, i64, i64) =
         connection.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -126,11 +124,12 @@ pub fn database_evidence(
         wal_bytes: Some(wal_bytes),
         database_bytes: Some(database_bytes),
         shm_bytes: Some(shm_bytes),
-        wal_frames: Some(wal_frames),
+        wal_frames: Some(wal_header_layout.frame_count),
         wal_checkpoint_log_frames: Some(nonnegative_u64("wal checkpoint log", checkpoint_log)?),
         wal_checkpointed_frames: Some(nonnegative_u64("wal checkpointed", checkpointed)?),
         wal_checkpoint_busy: Some(nonnegative_u64("wal checkpoint busy", busy)?),
-        wal_layout_valid: Some(wal_layout_valid),
+        wal_layout_valid: Some(wal_header_layout.header_layout_valid),
+        wal_header_layout: Some(wal_header_layout),
         page_size: Some(page_size),
         journal_mode: Some(journal_mode.to_ascii_lowercase()),
         root_rows,
@@ -176,8 +175,8 @@ pub fn reset_main_wal(database_path: &Path) -> Result<WalResetEvidence, Snapshot
     if busy != 0 {
         return Err(SnapshotError::WalResetBusy);
     }
-    let wal_path = PathBuf::from(format!("{}-wal", database_path.display()));
-    let wal_bytes = fs::metadata(wal_path).map(|value| value.len()).unwrap_or(0);
+    let wal_path = sqlite_sidecar_path(database_path, "-wal");
+    let wal_bytes = sqlite_sidecar_bytes(&wal_path)?;
     let busy = nonnegative_u64("wal reset busy", busy)?;
     let log_frames = nonnegative_u64("wal reset log", log)?;
     let checkpointed_frames = nonnegative_u64("wal reset checkpointed", checkpointed)?;
@@ -289,9 +288,33 @@ pub fn rollback_state(
     })
 }
 
-pub fn sidecars_absent(database_path: &Path) -> bool {
-    !PathBuf::from(format!("{}-wal", database_path.display())).exists()
-        && !PathBuf::from(format!("{}-shm", database_path.display())).exists()
+pub fn sidecars_absent(database_path: &Path) -> Result<bool, SnapshotError> {
+    Ok(
+        sqlite_sidecar_absent(&sqlite_sidecar_path(database_path, "-wal"))?
+            && sqlite_sidecar_absent(&sqlite_sidecar_path(database_path, "-shm"))?,
+    )
+}
+
+fn sqlite_sidecar_path(database_path: &Path, suffix: &str) -> PathBuf {
+    let mut sidecar = database_path.as_os_str().to_os_string();
+    sidecar.push(suffix);
+    PathBuf::from(sidecar)
+}
+
+fn sqlite_sidecar_bytes(sidecar_path: &Path) -> Result<u64, SnapshotError> {
+    match fs::metadata(sidecar_path) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(SnapshotError::Io(error)),
+    }
+}
+
+fn sqlite_sidecar_absent(sidecar_path: &Path) -> Result<bool, SnapshotError> {
+    match fs::metadata(sidecar_path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(SnapshotError::Io(error)),
+    }
 }
 
 pub fn storage_evidence(
@@ -335,6 +358,12 @@ pub fn cgroup_memory_snapshot() -> Option<CgroupMemorySnapshot> {
     let relative = relative.strip_prefix('/').unwrap_or(relative);
     let directory = Path::new("/sys/fs/cgroup").join(relative);
     let memory_stat = fs::read_to_string(directory.join("memory.stat")).ok()?;
+    let process_ids = fs::read_to_string(directory.join("cgroup.procs"))
+        .ok()?
+        .lines()
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
     Some(CgroupMemorySnapshot {
         path: format!("/{relative}"),
         current_bytes: read_u64_file(&directory.join("memory.current"))?,
@@ -343,10 +372,8 @@ pub fn cgroup_memory_snapshot() -> Option<CgroupMemorySnapshot> {
             .ok()?
             .trim()
             .to_string(),
-        process_count: fs::read_to_string(directory.join("cgroup.procs"))
-            .ok()?
-            .lines()
-            .count() as u64,
+        process_count: process_ids.len() as u64,
+        process_ids,
         anon_bytes: keyed_u64(&memory_stat, "anon")?,
         file_bytes: keyed_u64(&memory_stat, "file")?,
         shmem_bytes: keyed_u64(&memory_stat, "shmem")?,
@@ -438,16 +465,41 @@ fn pragma_i64(connection: &Connection, name: &'static str) -> Result<i64, Snapsh
     Ok(connection.query_row(&format!("PRAGMA {name}"), [], |row| row.get(0))?)
 }
 
-fn physical_wal_frames(
+pub fn wal_header_layout_evidence(
+    database_path: &Path,
+    page_size: u64,
+) -> Result<WalHeaderLayoutEvidence, SnapshotError> {
+    let wal_path = sqlite_sidecar_path(database_path, "-wal");
+    let wal_bytes = sqlite_sidecar_bytes(&wal_path)?;
+    wal_header_layout_evidence_for_path(&wal_path, wal_bytes, page_size)
+}
+
+fn wal_header_layout_evidence_for_path(
     wal_path: &Path,
     wal_bytes: u64,
     page_size: u64,
-) -> Result<(u64, bool), SnapshotError> {
+) -> Result<WalHeaderLayoutEvidence, SnapshotError> {
     if wal_bytes == 0 {
-        return Ok((0, true));
+        return Ok(WalHeaderLayoutEvidence {
+            bytes: 0,
+            header_hex: None,
+            magic: None,
+            format_version: None,
+            encoded_page_size: None,
+            frame_count: 0,
+            header_layout_valid: true,
+        });
     }
     if wal_bytes < 32 || page_size == 0 {
-        return Ok((0, false));
+        return Ok(WalHeaderLayoutEvidence {
+            bytes: wal_bytes,
+            header_hex: None,
+            magic: None,
+            format_version: None,
+            encoded_page_size: None,
+            frame_count: 0,
+            header_layout_valid: false,
+        });
     }
     let mut header = [0_u8; 32];
     fs::File::open(wal_path)?.read_exact(&mut header)?;
@@ -466,7 +518,15 @@ fn physical_wal_frames(
         && encoded_page_size == page_size
         && frame_size > 24
         && payload % frame_size == 0;
-    Ok((payload / frame_size, layout_valid))
+    Ok(WalHeaderLayoutEvidence {
+        bytes: wal_bytes,
+        header_hex: Some(bytes_hex(&header)),
+        magic: Some(magic),
+        format_version: Some(format_version),
+        encoded_page_size: Some(encoded_page_size),
+        frame_count: payload / frame_size,
+        header_layout_valid: layout_valid,
+    })
 }
 
 fn count_root_rows(
@@ -855,4 +915,61 @@ fn virtual_path(source_root: &Path, database_path: &str) -> Result<String, Snaps
 
 fn checked_u32(field: &'static str, value: i64) -> Result<u32, SnapshotError> {
     u32::try_from(value).map_err(|_| SnapshotError::NumericRange { field, value })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        ffi::OsString,
+        os::unix::{ffi::OsStringExt, fs::symlink},
+    };
+
+    use super::*;
+
+    #[test]
+    fn sidecars_absent_preserves_non_utf8_database_path() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let database_path = directory
+            .path()
+            .join(OsString::from_vec(b"state-\xff.db".to_vec()));
+        let mut wal_path = database_path.as_os_str().to_os_string();
+        wal_path.push("-wal");
+        fs::write(PathBuf::from(wal_path), b"wal")?;
+
+        assert!(!sidecars_absent(&database_path)?);
+        Ok(())
+    }
+
+    #[test]
+    fn sidecars_absent_propagates_metadata_errors() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let blocking_file = directory.path().join("blocking-file");
+        fs::write(&blocking_file, b"not a directory")?;
+        let database_path = blocking_file.join("state.db");
+
+        match sidecars_absent(&database_path) {
+            Err(SnapshotError::Io(error)) if error.kind() == std::io::ErrorKind::NotADirectory => {
+                Ok(())
+            }
+            outcome => panic!("expected ENOTDIR metadata error, got {outcome:?}"),
+        }
+    }
+
+    #[test]
+    fn reset_main_wal_propagates_sidecar_metadata_errors() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let database_path = directory.path().join("state.db");
+        let connection = Connection::open(&database_path)?;
+        connection.execute_batch("CREATE TABLE witness (value INTEGER);")?;
+        drop(connection);
+        let wal_path = sqlite_sidecar_path(&database_path, "-wal");
+        symlink(&wal_path, &wal_path)?;
+
+        match reset_main_wal(&database_path) {
+            Err(SnapshotError::Io(error)) if error.raw_os_error() == Some(libc::ELOOP) => Ok(()),
+            outcome => panic!("expected ELOOP metadata error, got {outcome:?}"),
+        }
+    }
 }

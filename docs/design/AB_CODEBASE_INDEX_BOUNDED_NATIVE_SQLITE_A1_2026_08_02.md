@@ -78,12 +78,14 @@ without a faulting VFS or equivalent owned laboratory.
 Each fault child is globally sequence/PID/cgroup/path bound to the same base
 preflight. It records the whole three-table typed digest, target/other-root and
 sentinel digests, `sqlite_sequence`, schema/page/freelist/integrity state, and
-the main-file SHA. An injected rollback can leave an uncommitted but physically
-valid WAL frame (observed as 4,152 bytes at 4 KiB page size); that is not a
-logical commit. The receipt therefore retains the post-fault WAL layout, then
-requires a separate `wal_checkpoint(TRUNCATE)` cleanup to prove zero WAL bytes.
-Cleanup may change only the physical main-file SHA; every logical and schema
-field must stay equal.
+the main-file SHA. An injected rollback can leave an uncommitted WAL frame
+(observed as 4,152 bytes at 4 KiB page size); that is not a logical commit. The
+receipt retains the raw 32-byte header and validates SQLite magic, format
+version, encoded page size, and frame-length layout before requiring a separate
+`wal_checkpoint(TRUNCATE)` cleanup to prove zero WAL bytes. This deliberately
+does not claim frame-checksum, commit-frame, torn-write, or crash-durability
+validity. Cleanup may change only the physical main-file SHA; every logical and
+schema field must stay equal.
 
 Post-commit staging cleanup cannot truthfully turn the already committed index
 operation into an error. Cleanup failure is therefore a warning plus
@@ -108,20 +110,28 @@ Canonical trials therefore must:
   parent;
 - reject tmpfs, fuseblk, unknown media, or a device mismatch;
 - launch every measured child in a unique transient user-systemd cgroup and
-  record its `memory.peak` plus `memory.stat` anon/file/shmem values;
+  record its exact PID set, `memory.peak`, and `memory.stat` anon/file/shmem
+  values;
+- copy each trial database inside its transient child before opening SQLite, so
+  trial-local database cache/setup contributes to that child's high-water mark;
 - record process `VmHWM`, `getrusage` max RSS, `/proc/self/io`, page faults,
   staging bytes, and main DB/WAL/SHM bytes;
-- keep staging I/O separate from authoritative WAL evidence.
-- after base preflight, pass a 30-second/1-Hz CPU39 quiet window (overall idle
-  at least 95%, every bucket at least 90%, bounded PSI, no cargo/rustc/rustdoc),
-  then bind each performance child's exclusive CPU39 affinity, effective
-  cpuset, PSI counters, and at most 5% external CPU39 activity.
+- keep staging I/O separate from authoritative WAL evidence;
+- after base preflight, pass a 30-second/1-Hz quiet window for CPU39 and SMT
+  sibling79 (both at least 95% overall idle and 90% in every bucket, CPU/memory/
+  I/O `some` plus memory/I/O `full` PSI bounded, no cargo/rustc/rustdoc), then
+  bind the sole cgroup PID to CPU39 and require at most 5% external activity on
+  CPU39 and sibling79.
 
 The explicit-parent boolean is only a routing fact; it is not disk-backed
 proof by itself. Shared login-session cgroup counters are diagnostic only and
 cannot admit a canonical result. A separately labelled fuseblk run may measure
 live-substrate external validity, but is non-gating and cannot be combined with
-the ext4 canonical estimates.
+the ext4 canonical estimates. The warm generated corpus is deliberately shared
+between arms and may remain charged to the orchestrator cgroup; canonical
+`memory.peak` custody covers each child's local database copy/staging work, and
+process RSS is the primary decision metric. No total-host page-cache claim is
+made.
 
 ## Canonical comparison
 
@@ -142,10 +152,18 @@ admission is fail-closed on source/build/executable drift, missing measurements,
 non-release builds, dirty tracked source, non-disk staging, semantic/schema/page
 drift, or an invalid trial schedule.
 
+Canonical output is also fail-closed: terminal and raw paths must be
+create-new, absolute, already canonical `/home` ext4 paths outside both source
+and trial roots. Raw evidence is file- and directory-synced before explicit
+suite cleanup; only a successful cleanup permits the terminal receipt. A
+retained `.raw.json` without the requested terminal file is therefore
+nonterminal forensic evidence, not a canonical result.
+
 A separate preflight child validates the frozen base database so its full-row
 walk cannot contaminate a measured child's non-resettable high-water marks.
 The same clean executable also runs all eight deterministic failpoints from
-copies of that base. Every failure receipt must match its expected marker and
+child-local copies of that base. Every failure receipt is bound to its frozen
+case ordinal and must match its expected marker and
 prove an exact full-field rollback, stable schema/PRAGMAs/page state, connection
 usability, and staging cleanup. All preflight, performance, and fault receipts
 bind to one base SHA-256. Trials use an explicitly labelled warm-cache protocol;

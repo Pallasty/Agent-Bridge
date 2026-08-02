@@ -11,10 +11,15 @@ use serde::{Deserialize, Serialize};
 
 pub const QUIET_OVERALL_IDLE_BPS: u64 = 9_500;
 pub const QUIET_BUCKET_IDLE_BPS: u64 = 9_000;
+pub const QUIET_SMT_OVERALL_IDLE_BPS: u64 = 9_500;
+pub const QUIET_SMT_BUCKET_IDLE_BPS: u64 = 9_000;
 pub const QUIET_CPU_SOME_PRESSURE_BPS: u64 = 100;
+pub const QUIET_MEMORY_SOME_PRESSURE_BPS: u64 = 100;
 pub const QUIET_MEMORY_FULL_PRESSURE_BPS: u64 = 10;
+pub const QUIET_IO_SOME_PRESSURE_BPS: u64 = 100;
 pub const QUIET_IO_FULL_PRESSURE_BPS: u64 = 10;
 pub const CHILD_EXTERNAL_CPU39_BUSY_BPS: u64 = 500;
+pub const CHILD_SMT_SIBLING_BUSY_BPS: u64 = 500;
 
 const BPS_SCALE: u64 = 10_000;
 const MAX_PLAUSIBLE_CPU_ID: u32 = 1_048_575;
@@ -29,15 +34,21 @@ pub struct CompetingProcessEvidence {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PressureTotals {
     pub cpu_some_us: u64,
+    pub memory_some_us: u64,
     pub memory_full_us: u64,
+    pub io_some_us: u64,
     pub io_full_us: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CpuProcessSample {
     pub sampled_unix_ns: u64,
+    pub cpu: u32,
+    pub excluded_smt_sibling: u32,
     pub cpu_total_ticks: u64,
     pub cpu_idle_ticks: u64,
+    pub excluded_smt_total_ticks: u64,
+    pub excluded_smt_idle_ticks: u64,
     pub process_ticks: u64,
     pub pressure: PressureTotals,
     pub actual_affinity: String,
@@ -47,6 +58,8 @@ pub struct CpuProcessSample {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HostQuietWindowEvidence {
+    pub cpu: u32,
+    pub excluded_smt_sibling: u32,
     pub started_unix_ns: u64,
     pub finished_unix_ns: u64,
     pub duration_ms: u64,
@@ -58,10 +71,18 @@ pub struct HostQuietWindowEvidence {
     pub worst_bucket_idle_bps: u64,
     pub bucket_total_delta_ticks: Vec<u64>,
     pub bucket_idle_delta_ticks: Vec<u64>,
+    pub excluded_smt_total_delta_ticks: u64,
+    pub excluded_smt_idle_delta_ticks: u64,
+    pub excluded_smt_overall_idle_bps: u64,
+    pub excluded_smt_worst_bucket_idle_bps: u64,
+    pub excluded_smt_bucket_total_delta_ticks: Vec<u64>,
+    pub excluded_smt_bucket_idle_delta_ticks: Vec<u64>,
     pub pressure_start: PressureTotals,
     pub pressure_end: PressureTotals,
     pub cpu_some_pressure_delta_bps: u64,
+    pub memory_some_pressure_delta_bps: u64,
     pub memory_full_pressure_delta_bps: u64,
+    pub io_some_pressure_delta_bps: u64,
     pub io_full_pressure_delta_bps: u64,
     pub competing_build_processes: Vec<CompetingProcessEvidence>,
     pub actual_affinity: String,
@@ -74,13 +95,17 @@ pub struct ChildInterferenceEvidence {
     pub start: CpuProcessSample,
     pub end: CpuProcessSample,
     pub external_cpu39_busy_bps: u64,
+    pub excluded_smt_sibling_busy_bps: u64,
 }
 
 /// Observe one fail-closed sample of CPU, process, pressure, affinity, cpuset,
 /// and competing Rust build activity from Linux procfs/cgroupfs.
 pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
-    let (cpu_total_ticks, cpu_idle_ticks) =
-        parse_cpu_stat(&fs::read_to_string("/proc/stat")?, cpu)?;
+    let cpu_stat = fs::read_to_string("/proc/stat")?;
+    let (cpu_total_ticks, cpu_idle_ticks) = parse_cpu_stat(&cpu_stat, cpu)?;
+    let excluded_smt_sibling = read_excluded_smt_sibling(cpu)?;
+    let (excluded_smt_total_ticks, excluded_smt_idle_ticks) =
+        parse_cpu_stat(&cpu_stat, excluded_smt_sibling)?;
     let (process_ticks, _) = parse_process_stat_ticks(&fs::read_to_string("/proc/self/stat")?)?;
     let pressure = parse_pressure_totals(
         &fs::read_to_string("/proc/pressure/cpu")?,
@@ -110,8 +135,12 @@ pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
 
     Ok(CpuProcessSample {
         sampled_unix_ns: unix_time_ns()?,
+        cpu,
+        excluded_smt_sibling,
         cpu_total_ticks,
         cpu_idle_ticks,
+        excluded_smt_total_ticks,
+        excluded_smt_idle_ticks,
         process_ticks,
         pressure,
         actual_affinity,
@@ -175,6 +204,7 @@ pub fn child_interference(
         start.sampled_unix_ns,
         "child sample unix time",
     )?;
+    validate_pressure_monotonic(start.pressure, end.pressure)?;
     let start_affinity = parse_cpu_list(&start.actual_affinity)?;
     let end_affinity = parse_cpu_list(&end.actual_affinity)?;
     let expected_affinity = BTreeSet::from([39]);
@@ -185,6 +215,10 @@ pub fn child_interference(
     }
     if start.actual_affinity != end.actual_affinity
         || start.effective_cpuset != end.effective_cpuset
+        || start.cpu != 39
+        || end.cpu != 39
+        || start.excluded_smt_sibling != 79
+        || end.excluded_smt_sibling != 79
     {
         return Err(invalid_data(
             "affinity or effective cpuset changed during child measurement",
@@ -212,11 +246,26 @@ pub fn child_interference(
         .checked_sub(process_delta)
         .ok_or_else(|| invalid_data("process tick delta exceeds cpu39 non-idle tick delta"))?;
     let external_cpu39_busy_bps = ratio_bps(external_delta, total_delta)?;
+    let sibling_total_delta = checked_delta(
+        end.excluded_smt_total_ticks,
+        start.excluded_smt_total_ticks,
+        "excluded SMT sibling total ticks",
+    )?;
+    let sibling_idle_delta = checked_delta(
+        end.excluded_smt_idle_ticks,
+        start.excluded_smt_idle_ticks,
+        "excluded SMT sibling idle ticks",
+    )?;
+    let sibling_busy_delta = sibling_total_delta
+        .checked_sub(sibling_idle_delta)
+        .ok_or_else(|| invalid_data("excluded SMT sibling idle exceeds total ticks"))?;
+    let excluded_smt_sibling_busy_bps = ratio_bps(sibling_busy_delta, sibling_total_delta)?;
 
     Ok(ChildInterferenceEvidence {
         start: start.clone(),
         end: end.clone(),
         external_cpu39_busy_bps,
+        excluded_smt_sibling_busy_bps,
     })
 }
 
@@ -266,14 +315,38 @@ fn quiet_window_from_samples(
         return Err(invalid_data("cpu idle delta exceeds cpu total delta"));
     }
     let overall_idle_bps = ratio_bps(cpu_idle_delta_ticks, cpu_total_delta_ticks)?;
+    let excluded_smt_total_delta_ticks = checked_delta(
+        last.excluded_smt_total_ticks,
+        first.excluded_smt_total_ticks,
+        "excluded SMT total ticks",
+    )?;
+    let excluded_smt_idle_delta_ticks = checked_delta(
+        last.excluded_smt_idle_ticks,
+        first.excluded_smt_idle_ticks,
+        "excluded SMT idle ticks",
+    )?;
+    if excluded_smt_idle_delta_ticks > excluded_smt_total_delta_ticks {
+        return Err(invalid_data("excluded SMT idle delta exceeds total delta"));
+    }
+    let excluded_smt_overall_idle_bps = ratio_bps(
+        excluded_smt_idle_delta_ticks,
+        excluded_smt_total_delta_ticks,
+    )?;
 
     let mut worst_bucket_idle_bps = BPS_SCALE;
+    let mut excluded_smt_worst_bucket_idle_bps = BPS_SCALE;
     let mut bucket_total_delta_ticks = Vec::with_capacity(samples.len().saturating_sub(1));
     let mut bucket_idle_delta_ticks = Vec::with_capacity(samples.len().saturating_sub(1));
+    let mut excluded_smt_bucket_total_delta_ticks =
+        Vec::with_capacity(samples.len().saturating_sub(1));
+    let mut excluded_smt_bucket_idle_delta_ticks =
+        Vec::with_capacity(samples.len().saturating_sub(1));
     let mut competing_build_processes = BTreeSet::new();
     for sample in &samples {
         if sample.actual_affinity != first.actual_affinity
             || sample.effective_cpuset != first.effective_cpuset
+            || sample.cpu != first.cpu
+            || sample.excluded_smt_sibling != first.excluded_smt_sibling
         {
             return Err(invalid_data(
                 "affinity or effective cpuset changed during quiet window",
@@ -302,6 +375,25 @@ fn quiet_window_from_samples(
         bucket_total_delta_ticks.push(total_delta);
         bucket_idle_delta_ticks.push(idle_delta);
         worst_bucket_idle_bps = worst_bucket_idle_bps.min(ratio_bps(idle_delta, total_delta)?);
+        let sibling_total_delta = checked_delta(
+            pair[1].excluded_smt_total_ticks,
+            pair[0].excluded_smt_total_ticks,
+            "bucket excluded SMT total ticks",
+        )?;
+        let sibling_idle_delta = checked_delta(
+            pair[1].excluded_smt_idle_ticks,
+            pair[0].excluded_smt_idle_ticks,
+            "bucket excluded SMT idle ticks",
+        )?;
+        if sibling_idle_delta > sibling_total_delta {
+            return Err(invalid_data(
+                "bucket excluded SMT idle delta exceeds total delta",
+            ));
+        }
+        excluded_smt_bucket_total_delta_ticks.push(sibling_total_delta);
+        excluded_smt_bucket_idle_delta_ticks.push(sibling_idle_delta);
+        excluded_smt_worst_bucket_idle_bps = excluded_smt_worst_bucket_idle_bps
+            .min(ratio_bps(sibling_idle_delta, sibling_total_delta)?);
         validate_pressure_monotonic(pair[0].pressure, pair[1].pressure)?;
     }
 
@@ -319,6 +411,18 @@ fn quiet_window_from_samples(
         duration_us,
         "memory full pressure",
     )?;
+    let memory_some_pressure_delta_bps = pressure_rate_bps(
+        pressure_start.memory_some_us,
+        pressure_end.memory_some_us,
+        duration_us,
+        "memory some pressure",
+    )?;
+    let io_some_pressure_delta_bps = pressure_rate_bps(
+        pressure_start.io_some_us,
+        pressure_end.io_some_us,
+        duration_us,
+        "io some pressure",
+    )?;
     let io_full_pressure_delta_bps = pressure_rate_bps(
         pressure_start.io_full_us,
         pressure_end.io_full_us,
@@ -328,12 +432,18 @@ fn quiet_window_from_samples(
     let competing_build_processes = competing_build_processes.into_iter().collect::<Vec<_>>();
     let passed = overall_idle_bps >= QUIET_OVERALL_IDLE_BPS
         && worst_bucket_idle_bps >= QUIET_BUCKET_IDLE_BPS
+        && excluded_smt_overall_idle_bps >= QUIET_SMT_OVERALL_IDLE_BPS
+        && excluded_smt_worst_bucket_idle_bps >= QUIET_SMT_BUCKET_IDLE_BPS
         && cpu_some_pressure_delta_bps <= QUIET_CPU_SOME_PRESSURE_BPS
+        && memory_some_pressure_delta_bps <= QUIET_MEMORY_SOME_PRESSURE_BPS
         && memory_full_pressure_delta_bps <= QUIET_MEMORY_FULL_PRESSURE_BPS
+        && io_some_pressure_delta_bps <= QUIET_IO_SOME_PRESSURE_BPS
         && io_full_pressure_delta_bps <= QUIET_IO_FULL_PRESSURE_BPS
         && competing_build_processes.is_empty();
 
     Ok(HostQuietWindowEvidence {
+        cpu: first.cpu,
+        excluded_smt_sibling: first.excluded_smt_sibling,
         started_unix_ns,
         finished_unix_ns,
         duration_ms: duration_ns / 1_000_000,
@@ -345,10 +455,18 @@ fn quiet_window_from_samples(
         worst_bucket_idle_bps,
         bucket_total_delta_ticks,
         bucket_idle_delta_ticks,
+        excluded_smt_total_delta_ticks,
+        excluded_smt_idle_delta_ticks,
+        excluded_smt_overall_idle_bps,
+        excluded_smt_worst_bucket_idle_bps,
+        excluded_smt_bucket_total_delta_ticks,
+        excluded_smt_bucket_idle_delta_ticks,
         pressure_start,
         pressure_end,
         cpu_some_pressure_delta_bps,
+        memory_some_pressure_delta_bps,
         memory_full_pressure_delta_bps,
+        io_some_pressure_delta_bps,
         io_full_pressure_delta_bps,
         competing_build_processes,
         actual_affinity: first.actual_affinity.clone(),
@@ -392,6 +510,20 @@ fn parse_cpu_stat(contents: &str, cpu: u32) -> io::Result<(u64, u64)> {
         match_value = Some((total, idle));
     }
     match_value.ok_or_else(|| invalid_data(format!("missing {label} line in /proc/stat")))
+}
+
+fn read_excluded_smt_sibling(cpu: u32) -> io::Result<u32> {
+    let path = format!("/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list");
+    let mut siblings = parse_cpu_list(&fs::read_to_string(&path)?)?;
+    if siblings.len() != 2 || !siblings.remove(&cpu) {
+        return Err(invalid_data(format!(
+            "{path} must contain exactly cpu{cpu} and one SMT sibling"
+        )));
+    }
+    siblings
+        .into_iter()
+        .next()
+        .ok_or_else(|| invalid_data(format!("{path} lacks an excluded SMT sibling")))
 }
 
 fn parse_process_stat_ticks(contents: &str) -> io::Result<(u64, u64)> {
@@ -443,7 +575,9 @@ fn parse_stat_field(value: &str, name: &str) -> io::Result<u64> {
 fn parse_pressure_totals(cpu: &str, memory: &str, io_pressure: &str) -> io::Result<PressureTotals> {
     Ok(PressureTotals {
         cpu_some_us: parse_psi_total(cpu, "some", "cpu")?,
+        memory_some_us: parse_psi_total(memory, "some", "memory")?,
         memory_full_us: parse_psi_total(memory, "full", "memory")?,
+        io_some_us: parse_psi_total(io_pressure, "some", "io")?,
         io_full_us: parse_psi_total(io_pressure, "full", "io")?,
     })
 }
@@ -658,10 +792,16 @@ fn read_effective_cpuset(cgroup_path: &str) -> io::Result<(String, PathBuf)> {
 fn validate_pressure_monotonic(start: PressureTotals, end: PressureTotals) -> io::Result<()> {
     checked_delta(end.cpu_some_us, start.cpu_some_us, "cpu some pressure")?;
     checked_delta(
+        end.memory_some_us,
+        start.memory_some_us,
+        "memory some pressure",
+    )?;
+    checked_delta(
         end.memory_full_us,
         start.memory_full_us,
         "memory full pressure",
     )?;
+    checked_delta(end.io_some_us, start.io_some_us, "io some pressure")?;
     checked_delta(end.io_full_us, start.io_full_us, "io full pressure")?;
     Ok(())
 }
@@ -715,12 +855,18 @@ mod tests {
     fn sample(total: u64, idle: u64, process: u64) -> CpuProcessSample {
         CpuProcessSample {
             sampled_unix_ns: total.saturating_mul(1_000_000),
+            cpu: 39,
+            excluded_smt_sibling: 79,
             cpu_total_ticks: total,
             cpu_idle_ticks: idle,
+            excluded_smt_total_ticks: total,
+            excluded_smt_idle_ticks: idle,
             process_ticks: process,
             pressure: PressureTotals {
                 cpu_some_us: 0,
+                memory_some_us: 0,
                 memory_full_us: 0,
+                io_some_us: 0,
                 io_full_us: 0,
             },
             actual_affinity: "39".to_string(),
@@ -766,11 +912,25 @@ mod tests {
             parse_pressure_totals(cpu, memory, io).ok(),
             Some(PressureTotals {
                 cpu_some_us: 12_345,
+                memory_some_us: 30,
                 memory_full_us: 23,
+                io_some_us: 50,
                 io_full_us: 34,
             })
         );
         assert!(parse_pressure_totals(cpu, "some total=30\n", io).is_err());
+        assert!(parse_pressure_totals(
+            cpu,
+            "full avg10=0.00 avg60=0.00 avg300=0.00 total=23\n",
+            io,
+        )
+        .is_err());
+        assert!(parse_pressure_totals(
+            cpu,
+            memory,
+            "full avg10=0.00 avg60=0.00 avg300=0.00 total=34\n",
+        )
+        .is_err());
     }
 
     #[test]
@@ -804,7 +964,9 @@ mod tests {
     fn quiet_thresholds_are_conjunctive_and_use_worst_bucket() {
         let pressure = PressureTotals {
             cpu_some_us: 0,
+            memory_some_us: 0,
             memory_full_us: 0,
+            io_some_us: 0,
             io_full_us: 0,
         };
         let start = sample(1_000, 900, 10);
@@ -847,6 +1009,38 @@ mod tests {
     }
 
     #[test]
+    fn quiet_thresholds_include_memory_and_io_some_pressure() {
+        let start = sample(1_000, 900, 10);
+        let middle = sample(1_100, 995, 12);
+        let mut end = sample(1_200, 1_090, 14);
+        end.pressure.memory_some_us = 2_020;
+        end.pressure.io_some_us = 2_020;
+
+        let evidence = quiet_window_from_samples(
+            10,
+            200_000_010,
+            Duration::from_millis(200),
+            vec![start, middle, end],
+        );
+
+        assert_eq!(
+            evidence
+                .as_ref()
+                .ok()
+                .map(|item| item.memory_some_pressure_delta_bps),
+            Some(101)
+        );
+        assert_eq!(
+            evidence
+                .as_ref()
+                .ok()
+                .map(|item| item.io_some_pressure_delta_bps),
+            Some(101)
+        );
+        assert_eq!(evidence.ok().map(|item| item.passed), Some(false));
+    }
+
+    #[test]
     fn child_interference_subtracts_only_the_measured_process_ticks() {
         let start = sample(1_000, 900, 50);
         let end = sample(1_200, 1_080, 60);
@@ -855,6 +1049,12 @@ mod tests {
         assert_eq!(
             evidence.ok().map(|item| item.external_cpu39_busy_bps),
             Some(500)
+        );
+        assert_eq!(
+            child_interference(&start, &end)
+                .ok()
+                .map(|item| item.excluded_smt_sibling_busy_bps),
+            Some(1_000)
         );
         assert!(child_interference(&start, &sample(1_200, 1_080, 80)).is_err());
     }
