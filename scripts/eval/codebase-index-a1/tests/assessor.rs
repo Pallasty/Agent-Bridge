@@ -209,7 +209,8 @@ fn process_sample(sampled_unix_ns: u64, end: bool) -> CpuProcessSample {
         cpu_idle_ticks: if end { 990 } else { 900 },
         excluded_smt_total_ticks: if end { 2_100 } else { 2_000 },
         excluded_smt_idle_ticks: if end { 1_995 } else { 1_900 },
-        process_ticks: if end { 15 } else { 10 },
+        process_ticks_before_cpu_sample: if end { 15 } else { 10 },
+        process_ticks_after_cpu_sample: if end { 15 } else { 10 },
         pressure: PressureTotals {
             cpu_some_us: 0,
             memory_some_us: 0,
@@ -1228,6 +1229,17 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .pressure
         .io_some_us = 31;
     assert_canonical_rejected(noisy_io_some);
+
+    let mut reversed_process_bracket = canonical_input();
+    let start = &mut reversed_process_bracket.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .start;
+    start.process_ticks_before_cpu_sample = 11;
+    start.process_ticks_after_cpu_sample = 10;
+    assert_canonical_rejected(reversed_process_bracket);
 }
 
 #[test]

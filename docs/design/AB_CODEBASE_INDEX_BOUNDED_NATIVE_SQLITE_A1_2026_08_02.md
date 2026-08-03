@@ -121,7 +121,9 @@ Canonical trials therefore must:
   sibling79 (both at least 95% overall idle and 90% in every bucket, CPU/memory/
   I/O `some` plus memory/I/O `full` PSI bounded, no cargo/rustc/rustdoc), then
   bind the sole cgroup PID to CPU39 and require at most 5% external activity on
-  CPU39 and sibling79.
+  CPU39 and sibling79. Each per-child CPU snapshot is bracketed by process-tick
+  reads; only the process interval strictly inside the two CPU snapshots is
+  subtracted, so boundary ambiguity remains charged to external activity.
 
 The explicit-parent boolean is only a routing fact; it is not disk-backed
 proof by itself. Shared login-session cgroup counters are diagnostic only and
@@ -191,7 +193,10 @@ The implementation test ladder contains genuine RED-to-GREEN gates for the
 candidate API, authoritative failpoints, explicit staging placement, and the
 measured FullVec timing seam. It also characterizes field-complete FullVec
 equivalence, root isolation, cleanup, schema, page/freelist, integrity, and
-foreign-key invariants.
+foreign-key invariants. A live canonical attempt additionally exposed the
+non-atomic ordering of `/proc/stat` and `/proc/self/stat`; a dedicated RED now
+guards the conservative bracketed-tick fix and the assessor rejects reversed
+or forged brackets.
 
 The final result, raw receipt identity, performance decision, and any A2
 nomination will be appended only after a clean release build and the frozen

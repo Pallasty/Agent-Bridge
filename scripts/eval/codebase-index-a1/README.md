@@ -61,7 +61,10 @@ most 1%, memory/I/O `full` PSI at most 0.1%, and no `cargo`, `rustc`, or
 `rustdoc` identity may appear. Every performance child then binds its sole
 cgroup PID to CPU 39, records the effective cpuset and pressure counters, and
 requires both external CPU39 activity and sibling-79 activity to stay at or
-below 5%. This is measured interference control, not host-wide CPU isolation.
+below 5%. Each CPU counter read is bracketed by two process-tick reads. The
+assessor subtracts only the inner process interval, so scheduler-tick ambiguity
+at either sampling boundary is conservatively charged to external activity.
+This is measured interference control, not host-wide CPU isolation.
 
 ```bash
 mkdir -p /home/pallasting/.cache/ab-codebase-index-a1-eval

@@ -1170,7 +1170,13 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
         .filter(|value| *value > 0);
     let total_delta = end.cpu_total_ticks.checked_sub(start.cpu_total_ticks);
     let idle_delta = end.cpu_idle_ticks.checked_sub(start.cpu_idle_ticks);
-    let process_delta = end.process_ticks.checked_sub(start.process_ticks);
+    let process_delta = quiet::conservative_inner_process_delta(
+        start.process_ticks_before_cpu_sample,
+        start.process_ticks_after_cpu_sample,
+        end.process_ticks_before_cpu_sample,
+        end.process_ticks_after_cpu_sample,
+    )
+    .ok();
     let computed_external =
         total_delta
             .zip(idle_delta)

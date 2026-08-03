@@ -49,7 +49,8 @@ pub struct CpuProcessSample {
     pub cpu_idle_ticks: u64,
     pub excluded_smt_total_ticks: u64,
     pub excluded_smt_idle_ticks: u64,
-    pub process_ticks: u64,
+    pub process_ticks_before_cpu_sample: u64,
+    pub process_ticks_after_cpu_sample: u64,
     pub pressure: PressureTotals,
     pub actual_affinity: String,
     pub effective_cpuset: String,
@@ -101,12 +102,20 @@ pub struct ChildInterferenceEvidence {
 /// Observe one fail-closed sample of CPU, process, pressure, affinity, cpuset,
 /// and competing Rust build activity from Linux procfs/cgroupfs.
 pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
+    let (process_ticks_before_cpu_sample, _) =
+        parse_process_stat_ticks(&fs::read_to_string("/proc/self/stat")?)?;
     let cpu_stat = fs::read_to_string("/proc/stat")?;
+    let (process_ticks_after_cpu_sample, _) =
+        parse_process_stat_ticks(&fs::read_to_string("/proc/self/stat")?)?;
+    if process_ticks_after_cpu_sample < process_ticks_before_cpu_sample {
+        return Err(invalid_data(
+            "process tick counter moved backwards across the CPU sample",
+        ));
+    }
     let (cpu_total_ticks, cpu_idle_ticks) = parse_cpu_stat(&cpu_stat, cpu)?;
     let excluded_smt_sibling = read_excluded_smt_sibling(cpu)?;
     let (excluded_smt_total_ticks, excluded_smt_idle_ticks) =
         parse_cpu_stat(&cpu_stat, excluded_smt_sibling)?;
-    let (process_ticks, _) = parse_process_stat_ticks(&fs::read_to_string("/proc/self/stat")?)?;
     let pressure = parse_pressure_totals(
         &fs::read_to_string("/proc/pressure/cpu")?,
         &fs::read_to_string("/proc/pressure/memory")?,
@@ -141,7 +150,8 @@ pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
         cpu_idle_ticks,
         excluded_smt_total_ticks,
         excluded_smt_idle_ticks,
-        process_ticks,
+        process_ticks_before_cpu_sample,
+        process_ticks_after_cpu_sample,
         pressure,
         actual_affinity,
         effective_cpuset,
@@ -241,7 +251,12 @@ pub fn child_interference(
         return Err(invalid_data("cpu idle delta exceeds cpu total delta"));
     }
     let nonidle_delta = total_delta - idle_delta;
-    let process_delta = checked_delta(end.process_ticks, start.process_ticks, "process ticks")?;
+    let process_delta = conservative_inner_process_delta(
+        start.process_ticks_before_cpu_sample,
+        start.process_ticks_after_cpu_sample,
+        end.process_ticks_before_cpu_sample,
+        end.process_ticks_after_cpu_sample,
+    )?;
     let external_delta = nonidle_delta
         .checked_sub(process_delta)
         .ok_or_else(|| invalid_data("process tick delta exceeds cpu39 non-idle tick delta"))?;
@@ -267,6 +282,34 @@ pub fn child_interference(
         external_cpu39_busy_bps,
         excluded_smt_sibling_busy_bps,
     })
+}
+
+/// Return only process ticks whose observation interval is provably contained
+/// by the two CPU-counter observations. This intentionally undercounts the
+/// measured process at both boundaries, so any sampling-boundary ambiguity is
+/// charged to external CPU activity rather than hidden from the interference
+/// gate.
+pub(crate) fn conservative_inner_process_delta(
+    start_process_before_cpu: u64,
+    start_process_after_cpu: u64,
+    end_process_before_cpu: u64,
+    end_process_after_cpu: u64,
+) -> io::Result<u64> {
+    checked_delta(
+        start_process_after_cpu,
+        start_process_before_cpu,
+        "start process ticks across CPU sample",
+    )?;
+    checked_delta(
+        end_process_after_cpu,
+        end_process_before_cpu,
+        "end process ticks across CPU sample",
+    )?;
+    checked_delta(
+        end_process_before_cpu,
+        start_process_after_cpu,
+        "inner process ticks",
+    )
 }
 
 fn quiet_window_from_samples(
@@ -861,7 +904,8 @@ mod tests {
             cpu_idle_ticks: idle,
             excluded_smt_total_ticks: total,
             excluded_smt_idle_ticks: idle,
-            process_ticks: process,
+            process_ticks_before_cpu_sample: process,
+            process_ticks_after_cpu_sample: process,
             pressure: PressureTotals {
                 cpu_some_us: 0,
                 memory_some_us: 0,
@@ -1057,5 +1101,28 @@ mod tests {
             Some(1_000)
         );
         assert!(child_interference(&start, &sample(1_200, 1_080, 80)).is_err());
+
+        let mut bracketed_start = sample(1_000, 900, 50);
+        bracketed_start.process_ticks_after_cpu_sample = 51;
+        let mut bracketed_end = sample(1_200, 1_080, 71);
+        bracketed_end.process_ticks_after_cpu_sample = 72;
+        assert_eq!(
+            child_interference(&bracketed_start, &bracketed_end)
+                .ok()
+                .map(|item| item.external_cpu39_busy_bps),
+            Some(0),
+            "the outer process delta may exceed CPU non-idle ticks while the conservative inner interval remains valid"
+        );
+    }
+
+    #[test]
+    fn child_interference_uses_a_process_interval_bracketed_by_cpu_samples() {
+        assert_eq!(
+            conservative_inner_process_delta(50, 51, 71, 72).ok(),
+            Some(20)
+        );
+        assert!(conservative_inner_process_delta(50, 71, 70, 72).is_err());
+        assert!(conservative_inner_process_delta(51, 50, 71, 72).is_err());
+        assert!(conservative_inner_process_delta(50, 51, 72, 71).is_err());
     }
 }
