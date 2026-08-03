@@ -4,7 +4,9 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::mem::MaybeUninit;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
+use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -26,8 +28,18 @@ const BPS_SCALE: u64 = 10_000;
 const MAX_PLAUSIBLE_CPU_ID: u32 = 1_048_575;
 const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const REQUIRED_CLOCK_TICKS_PER_SECOND: u64 = 100;
-const PROC_STAT_TOTAL_COUNTERS: u64 = 8;
 const PROC_STAT_NONIDLE_COUNTERS: u64 = 6;
+const PROC_STAT_IRQ_COUNTERS: u64 = 3;
+const ACCOUNTING_FLUSH_DURATION: Duration = Duration::from_millis(1);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchedstatCpuSample {
+    pub version: u32,
+    pub timestamp: u64,
+    pub runtime_ns: u64,
+    pub wait_ns: u64,
+    pub timeslices: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CompetingProcessEvidence {
@@ -54,15 +66,46 @@ pub struct PressureTotals {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CpuProcessSample {
     pub sampled_unix_ns: u64,
+    pub sample_started_monotonic_ns: u64,
+    pub sample_finished_monotonic_ns: u64,
+    pub blocking_sleep_started_monotonic_ns: u64,
+    pub blocking_sleep_deadline_monotonic_ns: u64,
+    pub blocking_sleep_returned_monotonic_ns: u64,
+    pub schedstat_read_finished_monotonic_ns: u64,
+    pub host_sample_before_monotonic_ns: u64,
+    pub host_sample_after_monotonic_ns: u64,
+    pub monotonic_clock_resolution_ns: u64,
     pub cpu: u32,
+    pub sampled_cpu: u32,
     pub excluded_smt_sibling: u32,
     pub cpu_total_ticks: u64,
     pub cpu_idle_ticks: u64,
+    pub cpu_irq_ticks: u64,
+    pub cpu_softirq_ticks: u64,
+    pub cpu_steal_ticks: u64,
     pub excluded_smt_total_ticks: u64,
     pub excluded_smt_idle_ticks: u64,
-    pub process_cpu_time_ns_before_cpu_sample: u64,
-    pub process_cpu_time_ns_after_cpu_sample: u64,
-    pub process_cpu_clock_resolution_ns: u64,
+    pub cpu_schedstat: SchedstatCpuSample,
+    pub cgroup_path: String,
+    pub cgroup_inode: u64,
+    pub cgroup_type: String,
+    pub cgroup_cpu_usage_usec_before_host_sample: u64,
+    pub cgroup_cpu_usage_usec_after_host_sample: u64,
+    pub cgroup_nr_periods_before_host_sample: u64,
+    pub cgroup_nr_periods_after_host_sample: u64,
+    pub cgroup_nr_throttled_before_host_sample: u64,
+    pub cgroup_nr_throttled_after_host_sample: u64,
+    pub cgroup_throttled_usec_before_host_sample: u64,
+    pub cgroup_throttled_usec_after_host_sample: u64,
+    pub cgroup_process_ids: Vec<u32>,
+    pub cgroup_thread_ids: Vec<u32>,
+    pub cgroup_nr_descendants: u64,
+    pub cgroup_nr_dying_descendants: u64,
+    pub accounting_flush_tid: u32,
+    pub accounting_flush_requested_ns: u64,
+    pub accounting_flush_observed_ns: u64,
+    pub accounting_flush_voluntary_switches_before: u64,
+    pub accounting_flush_voluntary_switches_after: u64,
     pub clock_ticks_per_second: u64,
     pub no_new_privileges: bool,
     pub seccomp_mode: u32,
@@ -112,39 +155,112 @@ pub struct HostQuietWindowEvidence {
 pub struct ChildInterferenceEvidence {
     pub start: CpuProcessSample,
     pub end: CpuProcessSample,
-    pub process_cpu_inner_delta_ns: u64,
-    pub process_cpu_inner_lower_bound_ns: u64,
-    pub cpu39_nonidle_upper_bound_ns: u64,
-    pub cpu39_total_lower_bound_ns: u64,
+    pub operation_started_monotonic_ns: u64,
+    pub operation_finished_monotonic_ns: u64,
+    pub operation_elapsed_ns: u64,
+    pub operation_elapsed_lower_bound_ns: u64,
+    pub cgroup_cpu_inner_delta_usec: u64,
+    pub cgroup_cpu_usage_floor_lower_bound_ns: u64,
+    pub end_current_pending_upper_bound_ns: u64,
+    pub own_cpu_lower_bound_ns: u64,
+    pub cpu39_scheduled_runtime_outer_ns: u64,
+    pub cpu39_external_scheduled_runtime_upper_bound_ns: u64,
+    pub cpu39_proc_stat_side_charge_upper_bound_ns: u64,
+    pub cpu39_combined_external_upper_bound_ns: u64,
     pub external_cpu39_busy_upper_bound_bps: u64,
     pub excluded_smt_nonidle_upper_bound_ns: u64,
-    pub excluded_smt_total_lower_bound_ns: u64,
     pub excluded_smt_sibling_busy_upper_bound_bps: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct CpuBusyBounds {
-    pub(crate) nonidle_upper_ns: u64,
-    pub(crate) total_lower_ns: u64,
+pub(crate) struct ScheduledInterferenceBounds {
+    pub(crate) cgroup_cpu_usage_floor_lower_bound_ns: u64,
+    pub(crate) own_cpu_lower_bound_ns: u64,
+    pub(crate) external_scheduled_runtime_upper_ns: u64,
+    pub(crate) proc_stat_side_charge_upper_bound_ns: u64,
+    pub(crate) combined_external_upper_bound_ns: u64,
+    pub(crate) operation_elapsed_lower_bound_ns: u64,
+    pub(crate) busy_upper_bound_bps: u64,
 }
 
-/// Observe one fail-closed sample of CPU, process, pressure, affinity, cpuset,
-/// and competing Rust build activity from Linux procfs/cgroupfs.
+/// Observe one fail-closed sample of scheduler, cgroup CPU, procfs CPU,
+/// pressure, affinity, cpuset, and competing Rust build activity.
 pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
-    let process_cpu_clock_resolution_ns = process_cpu_clock_resolution_ns()?;
+    let sample_started_monotonic_ns = monotonic_time_ns()?;
+    let monotonic_clock_resolution_ns = monotonic_clock_resolution_ns()?;
     let clock_ticks_per_second = clock_ticks_per_second()?;
-    let process_cpu_time_ns_before_cpu_sample = process_cpu_time_ns()?;
-    let cpu_stat = fs::read_to_string("/proc/stat")?;
-    let process_cpu_time_ns_after_cpu_sample = process_cpu_time_ns()?;
-    if process_cpu_time_ns_after_cpu_sample < process_cpu_time_ns_before_cpu_sample {
+    let excluded_smt_sibling = read_excluded_smt_sibling(cpu)?;
+    let cgroup_path = unified_cgroup_path(&fs::read_to_string("/proc/self/cgroup")?)?;
+    let cgroup_directory = cgroup_directory(&cgroup_path);
+    let cgroup_inode = fs::metadata(&cgroup_directory)?.ino();
+    let cgroup_type = fs::read_to_string(cgroup_directory.join("cgroup.type"))?
+        .trim()
+        .to_string();
+
+    let accounting_flush_tid = current_thread_id()?;
+    let (accounting_flush_voluntary_switches_before, _) = current_thread_context_switches()?;
+    let accounting_flush_requested_ns = u64::try_from(ACCOUNTING_FLUSH_DURATION.as_nanos())
+        .map_err(|_| invalid_data("accounting flush duration does not fit in u64"))?;
+    let blocking_sleep_started_monotonic_ns = monotonic_time_ns()?;
+    let blocking_sleep_deadline_monotonic_ns = blocking_sleep_started_monotonic_ns
+        .checked_add(accounting_flush_requested_ns)
+        .ok_or_else(|| invalid_data("blocking sleep deadline overflow"))?;
+    absolute_monotonic_sleep(blocking_sleep_deadline_monotonic_ns)?;
+    let blocking_sleep_returned_monotonic_ns = monotonic_time_ns()?;
+    let accounting_flush_observed_ns = checked_delta(
+        blocking_sleep_returned_monotonic_ns,
+        blocking_sleep_started_monotonic_ns,
+        "blocking accounting flush",
+    )?;
+    let accounting_flush_tid_after = current_thread_id()?;
+    let (accounting_flush_voluntary_switches_after, _) = current_thread_context_switches()?;
+    if accounting_flush_tid_after != accounting_flush_tid
+        || blocking_sleep_returned_monotonic_ns < blocking_sleep_deadline_monotonic_ns
+        || accounting_flush_voluntary_switches_after <= accounting_flush_voluntary_switches_before
+    {
         return Err(invalid_data(
-            "process CPU clock moved backwards across the CPU sample",
+            "blocking accounting flush did not prove a voluntary context switch",
         ));
     }
-    let (cpu_total_ticks, cpu_idle_ticks) = parse_cpu_stat(&cpu_stat, cpu)?;
-    let excluded_smt_sibling = read_excluded_smt_sibling(cpu)?;
+
+    let cgroup_cpu_before_host_sample =
+        parse_cgroup_cpu_stat(&fs::read_to_string(cgroup_directory.join("cpu.stat"))?)?;
+    let host_sample_before_monotonic_ns = monotonic_time_ns()?;
+    let schedstat_contents = fs::read_to_string("/proc/schedstat")?;
+    let schedstat_read_finished_monotonic_ns = monotonic_time_ns()?;
+    let cpu_schedstat = parse_schedstat_cpu(&schedstat_contents, cpu)?;
+    let cpu_stat = fs::read_to_string("/proc/stat")?;
+    let host_sample_after_monotonic_ns = monotonic_time_ns()?;
+    let sampled_cpu = current_cpu()?;
+    let sampled_unix_ns = unix_time_ns()?;
+    let cgroup_cpu_after_host_sample =
+        parse_cgroup_cpu_stat(&fs::read_to_string(cgroup_directory.join("cpu.stat"))?)?;
+    let cgroup_cpu_usage_usec_before_host_sample = cgroup_cpu_before_host_sample.usage_usec;
+    let cgroup_cpu_usage_usec_after_host_sample = cgroup_cpu_after_host_sample.usage_usec;
+    if cgroup_cpu_usage_usec_after_host_sample < cgroup_cpu_usage_usec_before_host_sample {
+        return Err(invalid_data(
+            "cgroup CPU usage moved backwards across the host sample",
+        ));
+    }
+    let cgroup_path_after = unified_cgroup_path(&fs::read_to_string("/proc/self/cgroup")?)?;
+    if cgroup_path_after != cgroup_path {
+        return Err(invalid_data(
+            "current task changed unified cgroup during the host sample",
+        ));
+    }
+
+    let cpu_stat_sample = parse_cpu_stat_sample(&cpu_stat, cpu)?;
+    let cpu_total_ticks = cpu_stat_sample.total_ticks;
+    let cpu_idle_ticks = cpu_stat_sample.idle_ticks;
     let (excluded_smt_total_ticks, excluded_smt_idle_ticks) =
         parse_cpu_stat(&cpu_stat, excluded_smt_sibling)?;
+    let cgroup_process_ids =
+        parse_cgroup_process_ids(&fs::read_to_string(cgroup_directory.join("cgroup.procs"))?)?;
+    let cgroup_thread_ids = parse_cgroup_process_ids(&fs::read_to_string(
+        cgroup_directory.join("cgroup.threads"),
+    )?)?;
+    let (cgroup_nr_descendants, cgroup_nr_dying_descendants) =
+        parse_cgroup_topology(&fs::read_to_string(cgroup_directory.join("cgroup.stat"))?)?;
     let pressure = parse_pressure_totals(
         &fs::read_to_string("/proc/pressure/cpu")?,
         &fs::read_to_string("/proc/pressure/memory")?,
@@ -159,7 +275,6 @@ pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
         )));
     }
 
-    let cgroup_path = unified_cgroup_path(&fs::read_to_string("/proc/self/cgroup")?)?;
     let (effective_cpuset, cpuset_path) = read_effective_cpuset(&cgroup_path)?;
     let effective_cpus = parse_cpu_list(&effective_cpuset)?;
     if !effective_cpus.contains(&cpu) {
@@ -172,18 +287,50 @@ pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
     let seccomp_mode = parse_status_u32(&process_status, "Seccomp:")?;
     let seccomp_filter_count = parse_status_u32(&process_status, "Seccomp_filters:")?;
     let thread_affinities = scan_thread_affinities()?;
+    let sample_finished_monotonic_ns = monotonic_time_ns()?;
 
     Ok(CpuProcessSample {
-        sampled_unix_ns: unix_time_ns()?,
+        sampled_unix_ns,
+        sample_started_monotonic_ns,
+        sample_finished_monotonic_ns,
+        blocking_sleep_started_monotonic_ns,
+        blocking_sleep_deadline_monotonic_ns,
+        blocking_sleep_returned_monotonic_ns,
+        schedstat_read_finished_monotonic_ns,
+        host_sample_before_monotonic_ns,
+        host_sample_after_monotonic_ns,
+        monotonic_clock_resolution_ns,
         cpu,
+        sampled_cpu,
         excluded_smt_sibling,
         cpu_total_ticks,
         cpu_idle_ticks,
+        cpu_irq_ticks: cpu_stat_sample.irq_ticks,
+        cpu_softirq_ticks: cpu_stat_sample.softirq_ticks,
+        cpu_steal_ticks: cpu_stat_sample.steal_ticks,
         excluded_smt_total_ticks,
         excluded_smt_idle_ticks,
-        process_cpu_time_ns_before_cpu_sample,
-        process_cpu_time_ns_after_cpu_sample,
-        process_cpu_clock_resolution_ns,
+        cpu_schedstat,
+        cgroup_path,
+        cgroup_inode,
+        cgroup_type,
+        cgroup_cpu_usage_usec_before_host_sample,
+        cgroup_cpu_usage_usec_after_host_sample,
+        cgroup_nr_periods_before_host_sample: cgroup_cpu_before_host_sample.nr_periods,
+        cgroup_nr_periods_after_host_sample: cgroup_cpu_after_host_sample.nr_periods,
+        cgroup_nr_throttled_before_host_sample: cgroup_cpu_before_host_sample.nr_throttled,
+        cgroup_nr_throttled_after_host_sample: cgroup_cpu_after_host_sample.nr_throttled,
+        cgroup_throttled_usec_before_host_sample: cgroup_cpu_before_host_sample.throttled_usec,
+        cgroup_throttled_usec_after_host_sample: cgroup_cpu_after_host_sample.throttled_usec,
+        cgroup_process_ids,
+        cgroup_thread_ids,
+        cgroup_nr_descendants,
+        cgroup_nr_dying_descendants,
+        accounting_flush_tid,
+        accounting_flush_requested_ns,
+        accounting_flush_observed_ns,
+        accounting_flush_voluntary_switches_before,
+        accounting_flush_voluntary_switches_after,
         clock_ticks_per_second,
         no_new_privileges,
         seccomp_mode,
@@ -245,82 +392,126 @@ pub fn observe_host_quiet_window(
 pub fn child_interference(
     start: &CpuProcessSample,
     end: &CpuProcessSample,
+    operation_started_monotonic_ns: u64,
+    operation_finished_monotonic_ns: u64,
 ) -> io::Result<ChildInterferenceEvidence> {
-    checked_delta(
+    let sample_elapsed_ns = checked_delta(
         end.sampled_unix_ns,
         start.sampled_unix_ns,
         "child sample unix time",
     )?;
-    validate_pressure_monotonic(start.pressure, end.pressure)?;
-    let start_affinity = parse_cpu_list(&start.actual_affinity)?;
-    let end_affinity = parse_cpu_list(&end.actual_affinity)?;
-    let expected_affinity = BTreeSet::from([39]);
-    if start_affinity != expected_affinity || end_affinity != expected_affinity {
+    let operation_elapsed_ns = checked_delta(
+        operation_finished_monotonic_ns,
+        operation_started_monotonic_ns,
+        "measured operation monotonic time",
+    )?;
+    if operation_elapsed_ns == 0
+        || sample_elapsed_ns < operation_elapsed_ns
+        || start.sample_finished_monotonic_ns > operation_started_monotonic_ns
+        || operation_finished_monotonic_ns > end.sample_started_monotonic_ns
+    {
         return Err(invalid_data(
-            "child-interference samples must both be pinned exclusively to cpu39",
+            "child samples do not contain the non-zero measured operation interval",
         ));
     }
+    validate_pressure_monotonic(start.pressure, end.pressure)?;
+    let process_id = std::process::id();
+    validate_child_endpoint(start, process_id)?;
+    validate_child_endpoint(end, process_id)?;
     if start.actual_affinity != end.actual_affinity
         || start.effective_cpuset != end.effective_cpuset
-        || start.cpu != 39
-        || end.cpu != 39
-        || start.excluded_smt_sibling != 79
-        || end.excluded_smt_sibling != 79
-    {
-        return Err(invalid_data(
-            "affinity or effective cpuset changed during child measurement",
-        ));
-    }
-    if !start.no_new_privileges
-        || !end.no_new_privileges
-        || start.seccomp_mode != 2
-        || end.seccomp_mode != 2
-        || start.seccomp_filter_count == 0
+        || start.cgroup_path != end.cgroup_path
+        || start.cgroup_inode != end.cgroup_inode
+        || start.clock_ticks_per_second != end.clock_ticks_per_second
+        || start.cpu_schedstat.version != end.cpu_schedstat.version
+        || start.monotonic_clock_resolution_ns != end.monotonic_clock_resolution_ns
         || start.seccomp_filter_count != end.seccomp_filter_count
-        || !thread_affinities_are_exact(&start.thread_affinities, 39, std::process::id())
-        || !thread_affinities_are_exact(&end.thread_affinities, 39, std::process::id())
     {
         return Err(invalid_data(
-            "child process lacks the frozen all-thread CPU39/seccomp confinement evidence",
-        ));
-    }
-    let effective_cpus = parse_cpu_list(&start.effective_cpuset)?;
-    if !effective_cpus.contains(&39) {
-        return Err(invalid_data(
-            "cpu39 is absent from the child effective cpuset",
+            "child confinement or accounting domain changed during measurement",
         ));
     }
 
-    let total_delta = checked_delta(
-        end.cpu_total_ticks,
-        start.cpu_total_ticks,
-        "cpu total ticks",
+    checked_delta(
+        end.cpu_schedstat.timestamp,
+        start.cpu_schedstat.timestamp,
+        "schedstat timestamp",
     )?;
-    let idle_delta = checked_delta(end.cpu_idle_ticks, start.cpu_idle_ticks, "cpu idle ticks")?;
-    if idle_delta > total_delta {
-        return Err(invalid_data("cpu idle delta exceeds cpu total delta"));
-    }
-    if start.clock_ticks_per_second != end.clock_ticks_per_second
-        || start.process_cpu_clock_resolution_ns != end.process_cpu_clock_resolution_ns
-    {
+    checked_delta(
+        end.cpu_schedstat.wait_ns,
+        start.cpu_schedstat.wait_ns,
+        "cpu39 schedstat wait time",
+    )?;
+    let timeslice_delta = checked_delta(
+        end.cpu_schedstat.timeslices,
+        start.cpu_schedstat.timeslices,
+        "cpu39 schedstat timeslices",
+    )?;
+    if timeslice_delta == 0 {
         return Err(invalid_data(
-            "CPU clock resolution or USER_HZ changed during child measurement",
+            "cpu39 schedstat timeslices did not advance across the operation",
         ));
     }
-    let cpu39_bounds =
-        conservative_cpu_busy_bounds_ns(total_delta, idle_delta, start.clock_ticks_per_second)?;
-    let process_cpu_inner_delta_ns = conservative_inner_process_delta(
-        start.process_cpu_time_ns_before_cpu_sample,
-        start.process_cpu_time_ns_after_cpu_sample,
-        end.process_cpu_time_ns_before_cpu_sample,
-        end.process_cpu_time_ns_after_cpu_sample,
+    let cpu39_scheduled_runtime_outer_ns = checked_delta(
+        end.cpu_schedstat.runtime_ns,
+        start.cpu_schedstat.runtime_ns,
+        "cpu39 scheduled runtime",
     )?;
-    let process_cpu_inner_lower_bound_ns = conservative_process_cpu_lower_bound_ns(
-        process_cpu_inner_delta_ns,
-        start.process_cpu_clock_resolution_ns,
+    let cgroup_cpu_inner_delta_usec = checked_delta(
+        end.cgroup_cpu_usage_usec_before_host_sample,
+        start.cgroup_cpu_usage_usec_after_host_sample,
+        "inner cgroup CPU usage",
     )?;
-    let external_cpu39_busy_upper_bound_bps =
-        conservative_external_busy_upper_bps(&cpu39_bounds, process_cpu_inner_lower_bound_ns)?;
+    checked_delta(
+        end.cgroup_nr_periods_before_host_sample,
+        start.cgroup_nr_periods_after_host_sample,
+        "inner cgroup CPU periods",
+    )?;
+    if end.cgroup_nr_throttled_before_host_sample != start.cgroup_nr_throttled_after_host_sample
+        || end.cgroup_throttled_usec_before_host_sample
+            != start.cgroup_throttled_usec_after_host_sample
+    {
+        return Err(invalid_data(
+            "child cgroup was CPU-throttled during the measured operation",
+        ));
+    }
+    let irq_delta_ticks = checked_delta(end.cpu_irq_ticks, start.cpu_irq_ticks, "cpu39 IRQ ticks")?
+        .checked_add(checked_delta(
+            end.cpu_softirq_ticks,
+            start.cpu_softirq_ticks,
+            "cpu39 softirq ticks",
+        )?)
+        .and_then(|value| {
+            value.checked_add(
+                checked_delta(
+                    end.cpu_steal_ticks,
+                    start.cpu_steal_ticks,
+                    "cpu39 steal ticks",
+                )
+                .ok()?,
+            )
+        })
+        .ok_or_else(|| invalid_data("cpu39 IRQ/softirq/steal delta overflow"))?;
+    let end_current_pending_upper_bound_ns = checked_delta(
+        end.schedstat_read_finished_monotonic_ns,
+        end.blocking_sleep_deadline_monotonic_ns,
+        "end current scheduler slice upper bound",
+    )?
+    .checked_add(
+        end.monotonic_clock_resolution_ns
+            .checked_mul(2)
+            .ok_or_else(|| invalid_data("monotonic resolution allowance overflow"))?,
+    )
+    .ok_or_else(|| invalid_data("end current scheduler slice upper bound overflow"))?;
+    let cpu39_bounds = conservative_scheduled_interference_bounds(
+        cpu39_scheduled_runtime_outer_ns,
+        cgroup_cpu_inner_delta_usec,
+        end_current_pending_upper_bound_ns,
+        irq_delta_ticks,
+        operation_elapsed_ns,
+        start.monotonic_clock_resolution_ns,
+        start.clock_ticks_per_second,
+    )?;
     let sibling_total_delta = checked_delta(
         end.excluded_smt_total_ticks,
         start.excluded_smt_total_ticks,
@@ -331,64 +522,170 @@ pub fn child_interference(
         start.excluded_smt_idle_ticks,
         "excluded SMT sibling idle ticks",
     )?;
-    let sibling_bounds = conservative_cpu_busy_bounds_ns(
+    let excluded_smt_nonidle_upper_bound_ns = conservative_proc_stat_nonidle_upper_bound_ns(
         sibling_total_delta,
         sibling_idle_delta,
         start.clock_ticks_per_second,
     )?;
-    let excluded_smt_sibling_busy_upper_bound_bps =
-        conservative_external_busy_upper_bps(&sibling_bounds, 0)?;
+    let excluded_smt_sibling_busy_upper_bound_bps = ratio_bps_ceil(
+        excluded_smt_nonidle_upper_bound_ns,
+        cpu39_bounds.operation_elapsed_lower_bound_ns,
+    )?;
 
     Ok(ChildInterferenceEvidence {
         start: start.clone(),
         end: end.clone(),
-        process_cpu_inner_delta_ns,
-        process_cpu_inner_lower_bound_ns,
-        cpu39_nonidle_upper_bound_ns: cpu39_bounds.nonidle_upper_ns,
-        cpu39_total_lower_bound_ns: cpu39_bounds.total_lower_ns,
-        external_cpu39_busy_upper_bound_bps,
-        excluded_smt_nonidle_upper_bound_ns: sibling_bounds.nonidle_upper_ns,
-        excluded_smt_total_lower_bound_ns: sibling_bounds.total_lower_ns,
+        operation_started_monotonic_ns,
+        operation_finished_monotonic_ns,
+        operation_elapsed_ns,
+        operation_elapsed_lower_bound_ns: cpu39_bounds.operation_elapsed_lower_bound_ns,
+        cgroup_cpu_inner_delta_usec,
+        cgroup_cpu_usage_floor_lower_bound_ns: cpu39_bounds.cgroup_cpu_usage_floor_lower_bound_ns,
+        end_current_pending_upper_bound_ns,
+        own_cpu_lower_bound_ns: cpu39_bounds.own_cpu_lower_bound_ns,
+        cpu39_scheduled_runtime_outer_ns,
+        cpu39_external_scheduled_runtime_upper_bound_ns: cpu39_bounds
+            .external_scheduled_runtime_upper_ns,
+        cpu39_proc_stat_side_charge_upper_bound_ns: cpu39_bounds
+            .proc_stat_side_charge_upper_bound_ns,
+        cpu39_combined_external_upper_bound_ns: cpu39_bounds.combined_external_upper_bound_ns,
+        external_cpu39_busy_upper_bound_bps: cpu39_bounds.busy_upper_bound_bps,
+        excluded_smt_nonidle_upper_bound_ns,
         excluded_smt_sibling_busy_upper_bound_bps,
     })
 }
 
-/// Return only process CPU time whose observation interval is provably contained
-/// by the two CPU-counter observations. This intentionally undercounts the
-/// measured process at both boundaries, so any sampling-boundary ambiguity is
-/// charged to external CPU activity rather than hidden from the interference
-/// gate.
-pub(crate) fn conservative_inner_process_delta(
-    start_process_before_cpu: u64,
-    start_process_after_cpu: u64,
-    end_process_before_cpu: u64,
-    end_process_after_cpu: u64,
-) -> io::Result<u64> {
+fn validate_child_endpoint(sample: &CpuProcessSample, process_id: u32) -> io::Result<()> {
+    let expected_affinity = BTreeSet::from([39]);
+    let requested_flush_ns = u64::try_from(ACCOUNTING_FLUSH_DURATION.as_nanos())
+        .map_err(|_| invalid_data("accounting flush duration does not fit in u64"))?;
+    if sample.cpu != 39
+        || sample.sampled_cpu != 39
+        || sample.excluded_smt_sibling != 79
+        || parse_cpu_list(&sample.actual_affinity)? != expected_affinity
+        || !parse_cpu_list(&sample.effective_cpuset)?.contains(&39)
+        || sample.clock_ticks_per_second != REQUIRED_CLOCK_TICKS_PER_SECOND
+        || sample.cpu_schedstat.version != 17
+    {
+        return Err(invalid_data(format!(
+            "child endpoint CPU contract is invalid: requested={}, sampled={}, sibling={}, affinity={}, cpuset={}, USER_HZ={}, schedstat={}",
+            sample.cpu,
+            sample.sampled_cpu,
+            sample.excluded_smt_sibling,
+            sample.actual_affinity,
+            sample.effective_cpuset,
+            sample.clock_ticks_per_second,
+            sample.cpu_schedstat.version,
+        )));
+    }
+    if sample.cgroup_path.is_empty()
+        || sample.cgroup_inode == 0
+        || sample.cgroup_type != "domain"
+        || sample.cgroup_process_ids != [process_id]
+        || sample.cgroup_nr_descendants != 0
+        || sample.cgroup_nr_dying_descendants != 0
+        || !sample
+            .cgroup_thread_ids
+            .contains(&sample.accounting_flush_tid)
+    {
+        return Err(invalid_data(format!(
+            "child endpoint cgroup contract is invalid: path={:?}, inode={}, type={:?}, processes={:?}, threads={:?}, sampler_tid={}, descendants={}, dying_descendants={}",
+            sample.cgroup_path,
+            sample.cgroup_inode,
+            sample.cgroup_type,
+            sample.cgroup_process_ids,
+            sample.cgroup_thread_ids,
+            sample.accounting_flush_tid,
+            sample.cgroup_nr_descendants,
+            sample.cgroup_nr_dying_descendants,
+        )));
+    }
+    if sample.accounting_flush_requested_ns != requested_flush_ns
+        || sample.accounting_flush_observed_ns < sample.accounting_flush_requested_ns
+        || sample.accounting_flush_voluntary_switches_after
+            <= sample.accounting_flush_voluntary_switches_before
+    {
+        return Err(invalid_data(format!(
+            "child endpoint blocking switch contract is invalid: requested={}, observed={}, nvcsw={}..{}",
+            sample.accounting_flush_requested_ns,
+            sample.accounting_flush_observed_ns,
+            sample.accounting_flush_voluntary_switches_before,
+            sample.accounting_flush_voluntary_switches_after,
+        )));
+    }
+    let sampled_thread_ids = sample
+        .thread_affinities
+        .iter()
+        .map(|thread| thread.tid)
+        .collect::<Vec<_>>();
+    if !sample.no_new_privileges
+        || sample.seccomp_mode != 2
+        || sample.seccomp_filter_count == 0
+        || !thread_affinities_are_exact(&sample.thread_affinities, 39, process_id)
+        || !sampled_thread_ids.contains(&sample.accounting_flush_tid)
+        || sample.cgroup_thread_ids != sampled_thread_ids
+    {
+        return Err(invalid_data(format!(
+            "child endpoint thread/seccomp contract is invalid: nnp={}, seccomp={}, filters={}, sampler_tid={}, cgroup_threads={:?}, affinity_threads={:?}",
+            sample.no_new_privileges,
+            sample.seccomp_mode,
+            sample.seccomp_filter_count,
+            sample.accounting_flush_tid,
+            sample.cgroup_thread_ids,
+            sample.thread_affinities,
+        )));
+    }
     checked_delta(
-        start_process_after_cpu,
-        start_process_before_cpu,
-        "start process CPU time across CPU sample",
+        sample.cgroup_cpu_usage_usec_after_host_sample,
+        sample.cgroup_cpu_usage_usec_before_host_sample,
+        "cgroup CPU usage across host sample",
     )?;
     checked_delta(
-        end_process_after_cpu,
-        end_process_before_cpu,
-        "end process CPU time across CPU sample",
+        sample.cgroup_nr_periods_after_host_sample,
+        sample.cgroup_nr_periods_before_host_sample,
+        "cgroup CPU periods across host sample",
     )?;
-    checked_delta(
-        end_process_before_cpu,
-        start_process_after_cpu,
-        "inner process CPU time",
-    )
+    if sample.cgroup_nr_throttled_after_host_sample != sample.cgroup_nr_throttled_before_host_sample
+        || sample.cgroup_throttled_usec_after_host_sample
+            != sample.cgroup_throttled_usec_before_host_sample
+    {
+        return Err(invalid_data(
+            "child cgroup was CPU-throttled during an endpoint sample",
+        ));
+    }
+    let expected_deadline = sample
+        .blocking_sleep_started_monotonic_ns
+        .checked_add(sample.accounting_flush_requested_ns)
+        .ok_or_else(|| invalid_data("blocking sleep deadline overflow"))?;
+    let observed_flush = checked_delta(
+        sample.blocking_sleep_returned_monotonic_ns,
+        sample.blocking_sleep_started_monotonic_ns,
+        "blocking accounting flush",
+    )?;
+    if sample.sample_started_monotonic_ns > sample.blocking_sleep_started_monotonic_ns
+        || expected_deadline != sample.blocking_sleep_deadline_monotonic_ns
+        || sample.blocking_sleep_returned_monotonic_ns < sample.blocking_sleep_deadline_monotonic_ns
+        || sample.accounting_flush_observed_ns != observed_flush
+        || sample.blocking_sleep_returned_monotonic_ns > sample.host_sample_before_monotonic_ns
+        || sample.host_sample_before_monotonic_ns > sample.schedstat_read_finished_monotonic_ns
+        || sample.schedstat_read_finished_monotonic_ns > sample.host_sample_after_monotonic_ns
+        || sample.host_sample_after_monotonic_ns > sample.sample_finished_monotonic_ns
+        || sample.monotonic_clock_resolution_ns == 0
+    {
+        return Err(invalid_data(
+            "child endpoint monotonic ordering or blocking deadline is invalid",
+        ));
+    }
+    Ok(())
 }
 
-/// Bound Linux `/proc/stat` deltas despite the independent floor conversion of
-/// each cumulative cputime field to USER_HZ. The selected total is eight
-/// fields; non-idle is the other six after idle+iowait are removed.
-pub(crate) fn conservative_cpu_busy_bounds_ns(
+/// Bound non-idle `/proc/stat` time despite independent floor conversion of
+/// its six cumulative non-idle fields to USER_HZ.
+pub(crate) fn conservative_proc_stat_nonidle_upper_bound_ns(
     total_delta_ticks: u64,
     idle_delta_ticks: u64,
     ticks_per_second: u64,
-) -> io::Result<CpuBusyBounds> {
+) -> io::Result<u64> {
     if ticks_per_second != REQUIRED_CLOCK_TICKS_PER_SECOND
         || NANOSECONDS_PER_SECOND % ticks_per_second != 0
     {
@@ -404,49 +701,75 @@ pub(crate) fn conservative_cpu_busy_bounds_ns(
     let nonidle_upper_ticks = nonidle_delta_ticks
         .checked_add(PROC_STAT_NONIDLE_COUNTERS)
         .ok_or_else(|| invalid_data("CPU non-idle tick upper bound overflow"))?;
-    let total_lower_ticks = total_delta_ticks
-        .checked_sub(PROC_STAT_TOTAL_COUNTERS)
-        .ok_or_else(|| invalid_data("CPU total delta is too short for a safe lower bound"))?;
-    if total_lower_ticks == 0 {
+    u128::from(nonidle_upper_ticks)
+        .checked_mul(u128::from(tick_ns))
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| invalid_data("CPU non-idle nanosecond upper bound overflow"))
+}
+
+pub(crate) fn conservative_scheduled_interference_bounds(
+    scheduled_runtime_outer_ns: u64,
+    cgroup_cpu_inner_delta_usec: u64,
+    end_endpoint_pending_upper_ns: u64,
+    irq_softirq_steal_delta_ticks: u64,
+    operation_elapsed_ns: u64,
+    monotonic_clock_resolution_ns: u64,
+    ticks_per_second: u64,
+) -> io::Result<ScheduledInterferenceBounds> {
+    if operation_elapsed_ns == 0 || monotonic_clock_resolution_ns == 0 {
+        return Err(invalid_data("measured operation duration must be non-zero"));
+    }
+    if ticks_per_second != REQUIRED_CLOCK_TICKS_PER_SECOND
+        || NANOSECONDS_PER_SECOND % ticks_per_second != 0
+    {
         return Err(invalid_data(
-            "CPU total delta is too short for a non-zero safe lower bound",
+            "the frozen evaluator requires USER_HZ=100 with an exact nanosecond tick",
         ));
     }
-    let nonidle_upper_ns = u128::from(nonidle_upper_ticks)
-        .checked_mul(u128::from(tick_ns))
+    let cgroup_cpu_usage_floor_lower_bound_ns = u128::from(cgroup_cpu_inner_delta_usec)
+        .checked_mul(1_000)
         .and_then(|value| u64::try_from(value).ok())
-        .ok_or_else(|| invalid_data("CPU non-idle nanosecond upper bound overflow"))?;
-    let total_lower_ns = u128::from(total_lower_ticks)
-        .checked_mul(u128::from(tick_ns))
-        .and_then(|value| u64::try_from(value).ok())
-        .ok_or_else(|| invalid_data("CPU total nanosecond lower bound overflow"))?;
-    Ok(CpuBusyBounds {
-        nonidle_upper_ns,
-        total_lower_ns,
+        .ok_or_else(|| invalid_data("cgroup CPU lower bound overflow"))?
+        .saturating_sub(999);
+    let own_cpu_lower_bound_ns =
+        cgroup_cpu_usage_floor_lower_bound_ns.saturating_sub(end_endpoint_pending_upper_ns);
+    let external_scheduled_runtime_upper_ns = scheduled_runtime_outer_ns
+        .checked_sub(own_cpu_lower_bound_ns)
+        .ok_or_else(|| {
+            invalid_data("cgroup CPU lower bound exceeds CPU39 scheduled runtime outer bound")
+        })?;
+    let tick_ns = NANOSECONDS_PER_SECOND / ticks_per_second;
+    let proc_stat_side_charge_upper_bound_ns = u128::from(
+        irq_softirq_steal_delta_ticks
+            .checked_add(PROC_STAT_IRQ_COUNTERS)
+            .ok_or_else(|| invalid_data("IRQ/softirq/steal tick upper bound overflow"))?,
+    )
+    .checked_mul(u128::from(tick_ns))
+    .and_then(|value| u64::try_from(value).ok())
+    .ok_or_else(|| invalid_data("IRQ/softirq/steal nanosecond upper bound overflow"))?;
+    let combined_external_upper_bound_ns = external_scheduled_runtime_upper_ns
+        .checked_add(proc_stat_side_charge_upper_bound_ns)
+        .ok_or_else(|| invalid_data("combined CPU39 interference upper bound overflow"))?;
+    let operation_clock_error_ns = monotonic_clock_resolution_ns
+        .checked_mul(2)
+        .ok_or_else(|| invalid_data("operation clock resolution allowance overflow"))?;
+    let operation_elapsed_lower_bound_ns = operation_elapsed_ns
+        .checked_sub(operation_clock_error_ns)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| invalid_data("operation duration is below clock resolution"))?;
+    let busy_upper_bound_bps = ratio_bps_ceil(
+        combined_external_upper_bound_ns,
+        operation_elapsed_lower_bound_ns,
+    )?;
+    Ok(ScheduledInterferenceBounds {
+        cgroup_cpu_usage_floor_lower_bound_ns,
+        own_cpu_lower_bound_ns,
+        external_scheduled_runtime_upper_ns,
+        proc_stat_side_charge_upper_bound_ns,
+        combined_external_upper_bound_ns,
+        operation_elapsed_lower_bound_ns,
+        busy_upper_bound_bps,
     })
-}
-
-pub(crate) fn conservative_process_cpu_lower_bound_ns(
-    process_cpu_delta_ns: u64,
-    clock_resolution_ns: u64,
-) -> io::Result<u64> {
-    if clock_resolution_ns == 0 {
-        return Err(invalid_data(
-            "process CPU clock resolution must be non-zero",
-        ));
-    }
-    Ok(process_cpu_delta_ns.saturating_sub(clock_resolution_ns))
-}
-
-pub(crate) fn conservative_external_busy_upper_bps(
-    bounds: &CpuBusyBounds,
-    process_cpu_lower_bound_ns: u64,
-) -> io::Result<u64> {
-    let external_upper_ns = bounds
-        .nonidle_upper_ns
-        .checked_sub(process_cpu_lower_bound_ns)
-        .ok_or_else(|| invalid_data("process CPU lower bound exceeds CPU non-idle upper bound"))?;
-    ratio_bps_ceil(external_upper_ns, bounds.total_lower_ns)
 }
 
 pub(crate) fn thread_affinities_are_exact(
@@ -669,7 +992,21 @@ fn quiet_window_from_samples(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProcStatCpuSample {
+    total_ticks: u64,
+    idle_ticks: u64,
+    irq_ticks: u64,
+    softirq_ticks: u64,
+    steal_ticks: u64,
+}
+
 fn parse_cpu_stat(contents: &str, cpu: u32) -> io::Result<(u64, u64)> {
+    let sample = parse_cpu_stat_sample(contents, cpu)?;
+    Ok((sample.total_ticks, sample.idle_ticks))
+}
+
+fn parse_cpu_stat_sample(contents: &str, cpu: u32) -> io::Result<ProcStatCpuSample> {
     let label = format!("cpu{cpu}");
     let mut match_value = None;
     for line in contents.lines() {
@@ -701,9 +1038,222 @@ fn parse_cpu_stat(contents: &str, cpu: u32) -> io::Result<(u64, u64)> {
         let idle = values[3]
             .checked_add(values[4])
             .ok_or_else(|| invalid_data(format!("{label} idle ticks overflow")))?;
-        match_value = Some((total, idle));
+        match_value = Some(ProcStatCpuSample {
+            total_ticks: total,
+            idle_ticks: idle,
+            irq_ticks: values[5],
+            softirq_ticks: values[6],
+            steal_ticks: values[7],
+        });
     }
     match_value.ok_or_else(|| invalid_data(format!("missing {label} line in /proc/stat")))
+}
+
+pub(crate) fn parse_schedstat_cpu(contents: &str, cpu: u32) -> io::Result<SchedstatCpuSample> {
+    let label = format!("cpu{cpu}");
+    let mut version = None;
+    let mut timestamp = None;
+    let mut cpu_values = None;
+    for line in contents.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(first) = fields.next() else {
+            continue;
+        };
+        if first == "version" {
+            if version.is_some() {
+                return Err(invalid_data("duplicate /proc/schedstat version line"));
+            }
+            let value = fields
+                .next()
+                .ok_or_else(|| invalid_data("missing /proc/schedstat version"))?;
+            if fields.next().is_some() {
+                return Err(invalid_data("invalid /proc/schedstat version line"));
+            }
+            version = Some(value.parse::<u32>().map_err(|error| {
+                invalid_data(format!(
+                    "invalid /proc/schedstat version {value:?}: {error}"
+                ))
+            })?);
+            continue;
+        }
+        if first == "timestamp" {
+            if timestamp.is_some() {
+                return Err(invalid_data("duplicate /proc/schedstat timestamp line"));
+            }
+            let value = fields
+                .next()
+                .ok_or_else(|| invalid_data("missing /proc/schedstat timestamp"))?;
+            if fields.next().is_some() {
+                return Err(invalid_data("invalid /proc/schedstat timestamp line"));
+            }
+            timestamp = Some(value.parse::<u64>().map_err(|error| {
+                invalid_data(format!(
+                    "invalid /proc/schedstat timestamp {value:?}: {error}"
+                ))
+            })?);
+            continue;
+        }
+        if first != label {
+            continue;
+        }
+        if cpu_values.is_some() {
+            return Err(invalid_data(format!(
+                "duplicate {label} line in /proc/schedstat"
+            )));
+        }
+        let values = fields
+            .map(|value| {
+                value.parse::<u64>().map_err(|error| {
+                    invalid_data(format!(
+                        "invalid {label} schedstat counter {value:?}: {error}"
+                    ))
+                })
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        if values.len() != 9 || values[..6].iter().any(|value| *value != 0) {
+            return Err(invalid_data(format!(
+                "{label} does not match the frozen schedstat v17 nine-field layout"
+            )));
+        }
+        cpu_values = Some((values[6], values[7], values[8]));
+    }
+    let version = version.ok_or_else(|| invalid_data("missing /proc/schedstat version line"))?;
+    if version != 17 {
+        return Err(invalid_data(format!(
+            "the frozen evaluator requires /proc/schedstat version 17, found {version}"
+        )));
+    }
+    let (runtime_ns, wait_ns, timeslices) = cpu_values
+        .ok_or_else(|| invalid_data(format!("missing {label} line in /proc/schedstat")))?;
+    Ok(SchedstatCpuSample {
+        version,
+        timestamp: timestamp
+            .ok_or_else(|| invalid_data("missing /proc/schedstat timestamp line"))?,
+        runtime_ns,
+        wait_ns,
+        timeslices,
+    })
+}
+
+pub(crate) fn parse_cgroup_cpu_usage_usec(contents: &str) -> io::Result<u64> {
+    let mut usage_usec = None;
+    for line in contents.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(key) = fields.next() else {
+            continue;
+        };
+        let value = fields
+            .next()
+            .ok_or_else(|| invalid_data(format!("missing value for cgroup cpu.stat {key}")))?;
+        if fields.next().is_some() {
+            return Err(invalid_data(format!(
+                "invalid cgroup cpu.stat line for {key}"
+            )));
+        }
+        let value = value.parse::<u64>().map_err(|error| {
+            invalid_data(format!("invalid cgroup cpu.stat {key} value: {error}"))
+        })?;
+        if key == "usage_usec" && usage_usec.replace(value).is_some() {
+            return Err(invalid_data("duplicate cgroup cpu.stat usage_usec"));
+        }
+    }
+    usage_usec.ok_or_else(|| invalid_data("missing cgroup cpu.stat usage_usec"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CgroupCpuStatSample {
+    usage_usec: u64,
+    nr_periods: u64,
+    nr_throttled: u64,
+    throttled_usec: u64,
+}
+
+fn parse_cgroup_cpu_stat(contents: &str) -> io::Result<CgroupCpuStatSample> {
+    let usage_usec = parse_cgroup_cpu_usage_usec(contents)?;
+    Ok(CgroupCpuStatSample {
+        usage_usec,
+        nr_periods: parse_unique_keyed_u64(contents, "nr_periods", "cgroup cpu.stat")?,
+        nr_throttled: parse_unique_keyed_u64(contents, "nr_throttled", "cgroup cpu.stat")?,
+        throttled_usec: parse_unique_keyed_u64(contents, "throttled_usec", "cgroup cpu.stat")?,
+    })
+}
+
+fn parse_unique_keyed_u64(contents: &str, wanted: &str, source: &str) -> io::Result<u64> {
+    let mut result = None;
+    for line in contents.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(key) = fields.next() else {
+            continue;
+        };
+        if key != wanted {
+            continue;
+        }
+        let value = fields
+            .next()
+            .ok_or_else(|| invalid_data(format!("missing {wanted} value in {source}")))?;
+        if fields.next().is_some() || result.is_some() {
+            return Err(invalid_data(format!(
+                "invalid or duplicate {wanted} in {source}"
+            )));
+        }
+        result = Some(value.parse::<u64>().map_err(|error| {
+            invalid_data(format!("invalid {wanted} value in {source}: {error}"))
+        })?);
+    }
+    result.ok_or_else(|| invalid_data(format!("missing {wanted} in {source}")))
+}
+
+fn parse_cgroup_process_ids(contents: &str) -> io::Result<Vec<u32>> {
+    let mut process_ids = BTreeSet::new();
+    for line in contents.lines() {
+        if line.is_empty() || line.trim() != line {
+            return Err(invalid_data("invalid whitespace in cgroup.procs"));
+        }
+        let process_id = line
+            .parse::<u32>()
+            .map_err(|error| invalid_data(format!("invalid cgroup.procs pid: {error}")))?;
+        if process_id == 0 || !process_ids.insert(process_id) {
+            return Err(invalid_data("zero or duplicate pid in cgroup.procs"));
+        }
+    }
+    if process_ids.is_empty() {
+        return Err(invalid_data("cgroup.procs contains no processes"));
+    }
+    Ok(process_ids.into_iter().collect())
+}
+
+fn parse_cgroup_topology(contents: &str) -> io::Result<(u64, u64)> {
+    let mut nr_descendants = None;
+    let mut nr_dying_descendants = None;
+    for line in contents.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(key) = fields.next() else {
+            continue;
+        };
+        let value = fields
+            .next()
+            .ok_or_else(|| invalid_data(format!("missing value for cgroup.stat {key}")))?;
+        if fields.next().is_some() {
+            return Err(invalid_data(format!("invalid cgroup.stat line for {key}")));
+        }
+        let value = value
+            .parse::<u64>()
+            .map_err(|error| invalid_data(format!("invalid cgroup.stat {key} value: {error}")))?;
+        match key {
+            "nr_descendants" if nr_descendants.replace(value).is_some() => {
+                return Err(invalid_data("duplicate cgroup.stat nr_descendants"));
+            }
+            "nr_dying_descendants" if nr_dying_descendants.replace(value).is_some() => {
+                return Err(invalid_data("duplicate cgroup.stat nr_dying_descendants"));
+            }
+            _ => {}
+        }
+    }
+    Ok((
+        nr_descendants.ok_or_else(|| invalid_data("missing cgroup.stat nr_descendants"))?,
+        nr_dying_descendants
+            .ok_or_else(|| invalid_data("missing cgroup.stat nr_dying_descendants"))?,
+    ))
 }
 
 fn read_excluded_smt_sibling(cpu: u32) -> io::Result<u32> {
@@ -992,6 +1542,10 @@ fn unified_cgroup_path(contents: &str) -> io::Result<String> {
     result.ok_or_else(|| invalid_data("missing unified cgroup v2 path"))
 }
 
+fn cgroup_directory(cgroup_path: &str) -> PathBuf {
+    Path::new("/sys/fs/cgroup").join(cgroup_path.trim_start_matches('/'))
+}
+
 fn read_effective_cpuset(cgroup_path: &str) -> io::Result<(String, PathBuf)> {
     let cgroup_root = Path::new("/sys/fs/cgroup");
     let mut current = cgroup_root.join(cgroup_path.trim_start_matches('/'));
@@ -1047,7 +1601,7 @@ fn ratio_bps(numerator: u64, denominator: u64) -> io::Result<u64> {
         .map_err(|_| invalid_data("basis-point ratio does not fit in u64"))
 }
 
-fn ratio_bps_ceil(numerator: u64, denominator: u64) -> io::Result<u64> {
+pub(crate) fn ratio_bps_ceil(numerator: u64, denominator: u64) -> io::Result<u64> {
     if denominator == 0 {
         return Err(invalid_data("basis-point ratio denominator is zero"));
     }
@@ -1074,37 +1628,90 @@ fn unix_time_ns() -> io::Result<u64> {
         .map_err(|_| invalid_data("Unix timestamp does not fit in u64 nanoseconds"))
 }
 
-fn process_cpu_time_ns() -> io::Result<u64> {
+pub fn monotonic_time_ns() -> io::Result<u64> {
     let mut value = MaybeUninit::<libc::timespec>::uninit();
     // SAFETY: clock_gettime initializes `value` on success and the pointer is
     // valid for one libc::timespec.
-    let result = unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, value.as_mut_ptr()) };
-    if result != 0 {
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, value.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: the successful clock_gettime call initialized the value.
-    timespec_to_ns(unsafe { value.assume_init() }, "process CPU clock")
+    timespec_to_ns(unsafe { value.assume_init() }, "monotonic clock")
 }
 
-fn process_cpu_clock_resolution_ns() -> io::Result<u64> {
+fn monotonic_clock_resolution_ns() -> io::Result<u64> {
     let mut value = MaybeUninit::<libc::timespec>::uninit();
     // SAFETY: clock_getres initializes `value` on success and the pointer is
     // valid for one libc::timespec.
-    let result = unsafe { libc::clock_getres(libc::CLOCK_PROCESS_CPUTIME_ID, value.as_mut_ptr()) };
-    if result != 0 {
+    if unsafe { libc::clock_getres(libc::CLOCK_MONOTONIC, value.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: the successful clock_getres call initialized the value.
-    let resolution = timespec_to_ns(
-        unsafe { value.assume_init() },
-        "process CPU clock resolution",
-    )?;
+    let resolution = timespec_to_ns(unsafe { value.assume_init() }, "monotonic resolution")?;
     if resolution == 0 {
-        return Err(invalid_data(
-            "process CPU clock resolution must be non-zero",
-        ));
+        return Err(invalid_data("monotonic clock resolution is zero"));
     }
     Ok(resolution)
+}
+
+fn absolute_monotonic_sleep(deadline_ns: u64) -> io::Result<()> {
+    let deadline = ns_to_timespec(deadline_ns)?;
+    // SAFETY: `deadline` is a valid immutable timespec and TIMER_ABSTIME does
+    // not use a remainder pointer. Any interruption is rejected fail-closed.
+    let result = unsafe {
+        libc::clock_nanosleep(
+            libc::CLOCK_MONOTONIC,
+            libc::TIMER_ABSTIME,
+            &deadline,
+            ptr::null_mut(),
+        )
+    };
+    if result != 0 {
+        return Err(io::Error::from_raw_os_error(result));
+    }
+    Ok(())
+}
+
+fn current_thread_context_switches() -> io::Result<(u64, u64)> {
+    let mut usage = MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: getrusage initializes the supplied rusage on success.
+    if unsafe { libc::getrusage(libc::RUSAGE_THREAD, usage.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: guarded by the successful getrusage call above.
+    let usage = unsafe { usage.assume_init() };
+    let voluntary = u64::try_from(usage.ru_nvcsw)
+        .map_err(|_| invalid_data("negative RUSAGE_THREAD voluntary context switches"))?;
+    let involuntary = u64::try_from(usage.ru_nivcsw)
+        .map_err(|_| invalid_data("negative RUSAGE_THREAD involuntary context switches"))?;
+    Ok((voluntary, involuntary))
+}
+
+fn current_thread_id() -> io::Result<u32> {
+    // SAFETY: gettid has no pointer arguments.
+    let value = unsafe { libc::syscall(libc::SYS_gettid) };
+    if value <= 0 {
+        return Err(io::Error::last_os_error());
+    }
+    u32::try_from(value).map_err(|_| invalid_data("current thread id does not fit in u32"))
+}
+
+fn current_cpu() -> io::Result<u32> {
+    // SAFETY: sched_getcpu has no arguments and returns the current CPU or -1.
+    let value = unsafe { libc::sched_getcpu() };
+    if value < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    u32::try_from(value).map_err(|_| invalid_data("current CPU does not fit in u32"))
+}
+
+fn ns_to_timespec(value: u64) -> io::Result<libc::timespec> {
+    Ok(libc::timespec {
+        tv_sec: libc::time_t::try_from(value / NANOSECONDS_PER_SECOND)
+            .map_err(|_| invalid_data("timespec seconds do not fit in time_t"))?,
+        tv_nsec: libc::c_long::try_from(value % NANOSECONDS_PER_SECOND)
+            .map_err(|_| invalid_data("timespec nanoseconds do not fit in c_long"))?,
+    })
 }
 
 fn timespec_to_ns(value: libc::timespec, name: &str) -> io::Result<u64> {
@@ -1117,7 +1724,7 @@ fn timespec_to_ns(value: libc::timespec, name: &str) -> io::Result<u64> {
         .map_err(|_| invalid_data(format!("{name} nanoseconds do not fit in u64")))?;
     seconds
         .checked_mul(NANOSECONDS_PER_SECOND)
-        .and_then(|value| value.checked_add(nanoseconds))
+        .and_then(|result| result.checked_add(nanoseconds))
         .ok_or_else(|| invalid_data(format!("{name} does not fit in u64 nanoseconds")))
 }
 
@@ -1149,24 +1756,63 @@ fn invalid_input(message: impl Into<String>) -> io::Error {
 mod tests {
     use super::*;
 
-    fn sample(total: u64, idle: u64, process: u64) -> CpuProcessSample {
+    fn sample(total: u64, idle: u64, cgroup_usage_usec: u64) -> CpuProcessSample {
+        let monotonic = total.saturating_mul(1_000_000);
+        let process_id = std::process::id();
         CpuProcessSample {
             sampled_unix_ns: total.saturating_mul(1_000_000),
+            sample_started_monotonic_ns: monotonic,
+            sample_finished_monotonic_ns: monotonic + 1_000_005,
+            blocking_sleep_started_monotonic_ns: monotonic + 1,
+            blocking_sleep_deadline_monotonic_ns: monotonic + 1_000_001,
+            blocking_sleep_returned_monotonic_ns: monotonic + 1_000_001,
+            schedstat_read_finished_monotonic_ns: monotonic + 1_000_003,
+            host_sample_before_monotonic_ns: monotonic + 1_000_002,
+            host_sample_after_monotonic_ns: monotonic + 1_000_004,
+            monotonic_clock_resolution_ns: 1,
             cpu: 39,
+            sampled_cpu: 39,
             excluded_smt_sibling: 79,
             cpu_total_ticks: total,
             cpu_idle_ticks: idle,
+            cpu_irq_ticks: 0,
+            cpu_softirq_ticks: 0,
+            cpu_steal_ticks: 0,
             excluded_smt_total_ticks: total,
             excluded_smt_idle_ticks: idle,
-            process_cpu_time_ns_before_cpu_sample: process,
-            process_cpu_time_ns_after_cpu_sample: process,
-            process_cpu_clock_resolution_ns: 1,
+            cpu_schedstat: SchedstatCpuSample {
+                version: 17,
+                timestamp: total,
+                runtime_ns: monotonic,
+                wait_ns: total,
+                timeslices: total,
+            },
+            cgroup_path: "/test.service".to_string(),
+            cgroup_inode: 1,
+            cgroup_type: "domain".to_string(),
+            cgroup_cpu_usage_usec_before_host_sample: cgroup_usage_usec,
+            cgroup_cpu_usage_usec_after_host_sample: cgroup_usage_usec,
+            cgroup_nr_periods_before_host_sample: total,
+            cgroup_nr_periods_after_host_sample: total,
+            cgroup_nr_throttled_before_host_sample: 0,
+            cgroup_nr_throttled_after_host_sample: 0,
+            cgroup_throttled_usec_before_host_sample: 0,
+            cgroup_throttled_usec_after_host_sample: 0,
+            cgroup_process_ids: vec![process_id],
+            cgroup_thread_ids: vec![process_id],
+            cgroup_nr_descendants: 0,
+            cgroup_nr_dying_descendants: 0,
+            accounting_flush_tid: process_id,
+            accounting_flush_requested_ns: 1_000_000,
+            accounting_flush_observed_ns: 1_000_000,
+            accounting_flush_voluntary_switches_before: total,
+            accounting_flush_voluntary_switches_after: total + 1,
             clock_ticks_per_second: 100,
             no_new_privileges: true,
             seccomp_mode: 2,
             seccomp_filter_count: 1,
             thread_affinities: vec![ThreadAffinityEvidence {
-                tid: std::process::id(),
+                tid: process_id,
                 allowed_cpus: "39".to_string(),
             }],
             pressure: PressureTotals {
@@ -1348,67 +1994,108 @@ mod tests {
     }
 
     #[test]
-    fn child_interference_subtracts_only_the_bounded_process_cpu_time() {
-        let start = sample(1_000, 900, 500_000_000);
-        let end = sample(1_200, 1_080, 700_000_000);
-        let evidence = child_interference(&start, &end);
+    fn child_interference_aligns_schedstat_with_cgroup_cpu_and_charges_irq_fields() {
+        let bounds = conservative_scheduled_interference_bounds(
+            5_006_135_957,
+            4_998_058,
+            0,
+            0,
+            5_000_000_000,
+            1,
+            100,
+        )
+        .unwrap();
+
+        assert_eq!(bounds.cgroup_cpu_usage_floor_lower_bound_ns, 4_998_057_001);
+        assert_eq!(bounds.own_cpu_lower_bound_ns, 4_998_057_001);
+        assert_eq!(bounds.external_scheduled_runtime_upper_ns, 8_078_956);
+        assert_eq!(bounds.proc_stat_side_charge_upper_bound_ns, 30_000_000);
+        assert_eq!(bounds.combined_external_upper_bound_ns, 38_078_956);
+        assert_eq!(bounds.operation_elapsed_lower_bound_ns, 4_999_999_998);
+        assert_eq!(bounds.busy_upper_bound_bps, 77);
+
+        let pending = conservative_scheduled_interference_bounds(
+            5_006_135_957,
+            4_998_058,
+            1_000_000,
+            0,
+            5_000_000_000,
+            1,
+            100,
+        )
+        .unwrap();
+        assert_eq!(pending.own_cpu_lower_bound_ns, 4_997_057_001);
+        assert_eq!(pending.external_scheduled_runtime_upper_ns, 9_078_956);
+
+        let one_usec =
+            conservative_scheduled_interference_bounds(1, 1, 0, 0, 1_000_000_000, 1, 100).unwrap();
+        assert_eq!(one_usec.cgroup_cpu_usage_floor_lower_bound_ns, 1);
+
+        assert!(conservative_scheduled_interference_bounds(
+            4_998_056_999,
+            4_998_058,
+            0,
+            0,
+            5_000_000_000,
+            1,
+            100,
+        )
+        .is_err());
+        assert!(conservative_scheduled_interference_bounds(1, 0, 0, 0, 0, 1, 100).is_err());
+        assert!(conservative_scheduled_interference_bounds(1, 0, 0, 0, 1, 1, 128).is_err());
 
         assert_eq!(
-            evidence
-                .as_ref()
-                .ok()
-                .map(|item| item.external_cpu39_busy_upper_bound_bps),
-            Some(313)
+            conservative_proc_stat_nonidle_upper_bound_ns(500, 499, 100).ok(),
+            Some(70_000_000)
         );
-        assert_eq!(
-            evidence
-                .ok()
-                .map(|item| item.excluded_smt_sibling_busy_upper_bound_bps),
-            Some(1_355)
-        );
-        assert!(child_interference(&start, &sample(1_200, 1_080, 800_000_000)).is_err());
-
-        let mut bracketed_start = sample(1_000, 900, 500_000_000);
-        bracketed_start.process_cpu_time_ns_after_cpu_sample = 510_000_000;
-        let mut bracketed_end = sample(1_200, 1_080, 720_000_000);
-        bracketed_end.process_cpu_time_ns_after_cpu_sample = 730_000_000;
-        assert_eq!(
-            child_interference(&bracketed_start, &bracketed_end)
-                .ok()
-                .map(|item| item.external_cpu39_busy_upper_bound_bps),
-            Some(261),
-            "only the inner process-clock bracket may be deducted from the conservative host upper bound"
-        );
+        assert_eq!(ratio_bps_ceil(50_000_001, 1_000_000_000).ok(), Some(501));
     }
 
     #[test]
-    fn child_interference_uses_a_process_interval_bracketed_by_cpu_samples() {
-        assert_eq!(
-            conservative_inner_process_delta(50, 51, 71, 72).ok(),
-            Some(20)
+    fn parses_frozen_schedstat_and_cgroup_cpu_usage_contracts() {
+        let schedstat = concat!(
+            "version 17\n",
+            "timestamp 123\n",
+            "cpu39 0 0 0 0 0 0 5006135957 8078957 42\n",
+            "domain0 SMT mask 0 0 0\n",
+            "cpu79 0 0 0 0 0 0 7000000000 9000000 43\n",
         );
-        assert!(conservative_inner_process_delta(50, 71, 70, 72).is_err());
-        assert!(conservative_inner_process_delta(51, 50, 71, 72).is_err());
-        assert!(conservative_inner_process_delta(50, 51, 72, 71).is_err());
-    }
-
-    #[test]
-    fn child_interference_uses_high_resolution_process_time_and_tick_error_bounds() {
-        let bounds = conservative_cpu_busy_bounds_ns(200, 180, 100).unwrap();
-        assert_eq!(bounds.nonidle_upper_ns, 260_000_000);
-        assert_eq!(bounds.total_lower_ns, 1_920_000_000);
-
-        let process_lower = conservative_process_cpu_lower_bound_ns(210_000_000, 1).unwrap();
-        assert_eq!(process_lower, 209_999_999);
         assert_eq!(
-            conservative_external_busy_upper_bps(&bounds, process_lower).ok(),
-            Some(261),
-            "upper-bound ratios must round up rather than admit a fractional false green"
+            parse_schedstat_cpu(schedstat, 39).ok(),
+            Some(SchedstatCpuSample {
+                version: 17,
+                timestamp: 123,
+                runtime_ns: 5_006_135_957,
+                wait_ns: 8_078_957,
+                timeslices: 42,
+            })
         );
+        assert!(parse_schedstat_cpu(&schedstat.replace("version 17", "version 16"), 39).is_err());
+        assert!(parse_schedstat_cpu(
+            &schedstat.replace("cpu39 0 0 0 0 0 0", "cpu39 1 0 0 0 0 0"),
+            39,
+        )
+        .is_err());
 
-        assert!(conservative_cpu_busy_bounds_ns(8, 8, 100).is_err());
-        assert!(conservative_cpu_busy_bounds_ns(200, 201, 100).is_err());
-        assert!(conservative_cpu_busy_bounds_ns(200, 180, 0).is_err());
-        assert!(conservative_cpu_busy_bounds_ns(200, 180, 128).is_err());
+        assert_eq!(
+            parse_cgroup_cpu_usage_usec("usage_usec 12345\nuser_usec 10000\nsystem_usec 2345\n")
+                .ok(),
+            Some(12_345)
+        );
+        assert!(parse_cgroup_cpu_usage_usec("user_usec 10000\n").is_err());
+        assert!(parse_cgroup_cpu_usage_usec("usage_usec 1\nusage_usec 2\n").is_err());
+        assert_eq!(
+            parse_cgroup_cpu_stat(
+                "usage_usec 12345\nnr_periods 7\nnr_throttled 0\nthrottled_usec 0\n"
+            )
+            .ok(),
+            Some(CgroupCpuStatSample {
+                usage_usec: 12_345,
+                nr_periods: 7,
+                nr_throttled: 0,
+                throttled_usec: 0,
+            })
+        );
+        assert!(parse_cgroup_cpu_stat("usage_usec 12345\nnr_periods 7\nnr_throttled 0\n").is_err());
     }
 }

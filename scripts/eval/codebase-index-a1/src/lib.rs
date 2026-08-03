@@ -1163,48 +1163,80 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
     };
     let start = &evidence.start;
     let end = &evidence.end;
-    let elapsed_us = end
-        .sampled_unix_ns
-        .checked_sub(start.sampled_unix_ns)
+    let sample_elapsed_ns = end.sampled_unix_ns.checked_sub(start.sampled_unix_ns);
+    let elapsed_us = sample_elapsed_ns
         .map(|value| value / 1_000)
         .filter(|value| *value > 0);
-    let total_delta = end.cpu_total_ticks.checked_sub(start.cpu_total_ticks);
-    let idle_delta = end.cpu_idle_ticks.checked_sub(start.cpu_idle_ticks);
-    let process_delta = quiet::conservative_inner_process_delta(
-        start.process_cpu_time_ns_before_cpu_sample,
-        start.process_cpu_time_ns_after_cpu_sample,
-        end.process_cpu_time_ns_before_cpu_sample,
-        end.process_cpu_time_ns_after_cpu_sample,
-    )
-    .ok();
-    let process_lower = process_delta.and_then(|delta| {
-        quiet::conservative_process_cpu_lower_bound_ns(delta, start.process_cpu_clock_resolution_ns)
+    let operation_elapsed = evidence
+        .operation_finished_monotonic_ns
+        .checked_sub(evidence.operation_started_monotonic_ns);
+    let cgroup_delta = end
+        .cgroup_cpu_usage_usec_before_host_sample
+        .checked_sub(start.cgroup_cpu_usage_usec_after_host_sample);
+    let scheduled_delta = end
+        .cpu_schedstat
+        .runtime_ns
+        .checked_sub(start.cpu_schedstat.runtime_ns);
+    let irq_delta = end
+        .cpu_irq_ticks
+        .checked_sub(start.cpu_irq_ticks)
+        .and_then(|irq| {
+            end.cpu_softirq_ticks
+                .checked_sub(start.cpu_softirq_ticks)
+                .and_then(|softirq| irq.checked_add(softirq))
+        })
+        .and_then(|sum| {
+            end.cpu_steal_ticks
+                .checked_sub(start.cpu_steal_ticks)
+                .and_then(|steal| sum.checked_add(steal))
+        });
+    let clock_allowance = end.monotonic_clock_resolution_ns.checked_mul(2);
+    let end_pending = end
+        .schedstat_read_finished_monotonic_ns
+        .checked_sub(end.blocking_sleep_deadline_monotonic_ns)
+        .zip(clock_allowance)
+        .and_then(|(pending, allowance)| pending.checked_add(allowance));
+    let cpu39_bounds = scheduled_delta
+        .zip(cgroup_delta)
+        .zip(end_pending)
+        .zip(irq_delta)
+        .zip(operation_elapsed)
+        .and_then(|((((scheduled, cgroup), pending), irq), elapsed)| {
+            quiet::conservative_scheduled_interference_bounds(
+                scheduled,
+                cgroup,
+                pending,
+                irq,
+                elapsed,
+                start.monotonic_clock_resolution_ns,
+                start.clock_ticks_per_second,
+            )
             .ok()
-    });
-    let cpu39_bounds = total_delta.zip(idle_delta).and_then(|(total, idle)| {
-        quiet::conservative_cpu_busy_bounds_ns(total, idle, start.clock_ticks_per_second).ok()
-    });
-    let computed_external =
-        cpu39_bounds
-            .as_ref()
-            .zip(process_lower)
-            .and_then(|(bounds, process)| {
-                quiet::conservative_external_busy_upper_bps(bounds, process).ok()
-            });
+        });
     let sibling_total_delta = end
         .excluded_smt_total_ticks
         .checked_sub(start.excluded_smt_total_ticks);
     let sibling_idle_delta = end
         .excluded_smt_idle_ticks
         .checked_sub(start.excluded_smt_idle_ticks);
-    let sibling_bounds = sibling_total_delta
-        .zip(sibling_idle_delta)
-        .and_then(|(total, idle)| {
-            quiet::conservative_cpu_busy_bounds_ns(total, idle, start.clock_ticks_per_second).ok()
-        });
-    let computed_sibling_busy = sibling_bounds
-        .as_ref()
-        .and_then(|bounds| quiet::conservative_external_busy_upper_bps(bounds, 0).ok());
+    let sibling_nonidle_upper =
+        sibling_total_delta
+            .zip(sibling_idle_delta)
+            .and_then(|(total, idle)| {
+                quiet::conservative_proc_stat_nonidle_upper_bound_ns(
+                    total,
+                    idle,
+                    start.clock_ticks_per_second,
+                )
+                .ok()
+            });
+    let computed_sibling_busy = sibling_nonidle_upper
+        .zip(
+            cpu39_bounds
+                .as_ref()
+                .map(|bounds| bounds.operation_elapsed_lower_bound_ns),
+        )
+        .and_then(|(nonidle, elapsed)| quiet::ratio_bps_ceil(nonidle, elapsed).ok());
     let cpu_pressure = elapsed_us.and_then(|duration| {
         pressure_delta_bps(
             start.pressure.cpu_some_us,
@@ -1233,49 +1265,133 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
         pressure_delta_bps(start.pressure.io_full_us, end.pressure.io_full_us, duration)
     });
     let expected_affinity = [39_u32].into_iter().collect();
+    let endpoint_valid = |sample: &quiet::CpuProcessSample| {
+        let expected_deadline = sample
+            .blocking_sleep_started_monotonic_ns
+            .checked_add(sample.accounting_flush_requested_ns);
+        let observed_flush = sample
+            .blocking_sleep_returned_monotonic_ns
+            .checked_sub(sample.blocking_sleep_started_monotonic_ns);
+        let expected_thread_ids = sample
+            .thread_affinities
+            .iter()
+            .map(|thread| thread.tid)
+            .collect::<Vec<_>>();
+        sample.cpu == 39
+            && sample.sampled_cpu == 39
+            && sample.excluded_smt_sibling == 79
+            && parse_cpu_list(&sample.actual_affinity).as_ref() == Some(&expected_affinity)
+            && parse_cpu_list(&sample.effective_cpuset).is_some_and(|cpus| cpus.contains(&39))
+            && sample.clock_ticks_per_second == 100
+            && sample.cpu_schedstat.version == 17
+            && sample.cgroup_path.starts_with('/')
+            && sample.cgroup_inode > 0
+            && sample.cgroup_type == "domain"
+            && sample.cgroup_process_ids == [run.execution.process_id]
+            && sample.cgroup_thread_ids == expected_thread_ids
+            && sample.cgroup_nr_descendants == 0
+            && sample.cgroup_nr_dying_descendants == 0
+            && sample
+                .cgroup_thread_ids
+                .contains(&sample.accounting_flush_tid)
+            && sample.accounting_flush_requested_ns == 1_000_000
+            && sample.accounting_flush_observed_ns >= sample.accounting_flush_requested_ns
+            && sample.accounting_flush_voluntary_switches_after
+                > sample.accounting_flush_voluntary_switches_before
+            && sample.no_new_privileges
+            && sample.seccomp_mode == 2
+            && sample.seccomp_filter_count > 0
+            && quiet::thread_affinities_are_exact(
+                &sample.thread_affinities,
+                39,
+                run.execution.process_id,
+            )
+            && sample
+                .thread_affinities
+                .iter()
+                .any(|thread| thread.tid == sample.accounting_flush_tid)
+            && sample.competing_build_processes.is_empty()
+            && sample.cgroup_cpu_usage_usec_after_host_sample
+                >= sample.cgroup_cpu_usage_usec_before_host_sample
+            && sample.cgroup_nr_periods_after_host_sample
+                >= sample.cgroup_nr_periods_before_host_sample
+            && sample.cgroup_nr_throttled_after_host_sample
+                == sample.cgroup_nr_throttled_before_host_sample
+            && sample.cgroup_throttled_usec_after_host_sample
+                == sample.cgroup_throttled_usec_before_host_sample
+            && expected_deadline == Some(sample.blocking_sleep_deadline_monotonic_ns)
+            && observed_flush == Some(sample.accounting_flush_observed_ns)
+            && sample.sample_started_monotonic_ns <= sample.blocking_sleep_started_monotonic_ns
+            && sample.blocking_sleep_deadline_monotonic_ns
+                <= sample.blocking_sleep_returned_monotonic_ns
+            && sample.blocking_sleep_returned_monotonic_ns <= sample.host_sample_before_monotonic_ns
+            && sample.host_sample_before_monotonic_ns <= sample.schedstat_read_finished_monotonic_ns
+            && sample.schedstat_read_finished_monotonic_ns <= sample.host_sample_after_monotonic_ns
+            && sample.host_sample_after_monotonic_ns <= sample.sample_finished_monotonic_ns
+            && sample.monotonic_clock_resolution_ns > 0
+    };
     let valid = run.execution.started_unix_ns <= start.sampled_unix_ns
         && start.sampled_unix_ns < end.sampled_unix_ns
         && end.sampled_unix_ns <= run.execution.finished_unix_ns
-        && start.cpu == 39
-        && end.cpu == 39
-        && start.excluded_smt_sibling == 79
-        && end.excluded_smt_sibling == 79
-        && parse_cpu_list(&start.actual_affinity).as_ref() == Some(&expected_affinity)
+        && endpoint_valid(start)
+        && endpoint_valid(end)
         && start.actual_affinity == end.actual_affinity
         && start.effective_cpuset == end.effective_cpuset
-        && parse_cpu_list(&start.effective_cpuset).is_some_and(|cpus| cpus.contains(&39))
-        && start.clock_ticks_per_second == 100
+        && start.cgroup_path == end.cgroup_path
+        && start.cgroup_inode == end.cgroup_inode
+        && run.measurement.cgroup_path.as_ref() == Some(&start.cgroup_path)
         && start.clock_ticks_per_second == end.clock_ticks_per_second
-        && start.process_cpu_clock_resolution_ns > 0
-        && start.process_cpu_clock_resolution_ns == end.process_cpu_clock_resolution_ns
-        && start.no_new_privileges
-        && end.no_new_privileges
-        && start.seccomp_mode == 2
-        && end.seccomp_mode == 2
-        && start.seccomp_filter_count > 0
+        && start.monotonic_clock_resolution_ns == end.monotonic_clock_resolution_ns
         && start.seccomp_filter_count == end.seccomp_filter_count
-        && quiet::thread_affinities_are_exact(
-            &start.thread_affinities,
-            39,
-            run.execution.process_id,
-        )
-        && quiet::thread_affinities_are_exact(&end.thread_affinities, 39, run.execution.process_id)
-        && start.competing_build_processes.is_empty()
-        && end.competing_build_processes.is_empty()
-        && process_delta == Some(evidence.process_cpu_inner_delta_ns)
-        && process_lower == Some(evidence.process_cpu_inner_lower_bound_ns)
-        && cpu39_bounds.as_ref().map(|bounds| bounds.nonidle_upper_ns)
-            == Some(evidence.cpu39_nonidle_upper_bound_ns)
-        && cpu39_bounds.as_ref().map(|bounds| bounds.total_lower_ns)
-            == Some(evidence.cpu39_total_lower_bound_ns)
-        && computed_external == Some(evidence.external_cpu39_busy_upper_bound_bps)
-        && evidence.external_cpu39_busy_upper_bound_bps <= quiet::CHILD_EXTERNAL_CPU39_BUSY_BPS
-        && sibling_bounds
+        && start.cpu_schedstat.timestamp <= end.cpu_schedstat.timestamp
+        && start.cpu_schedstat.wait_ns <= end.cpu_schedstat.wait_ns
+        && start.cpu_schedstat.timeslices < end.cpu_schedstat.timeslices
+        && start.cgroup_nr_periods_after_host_sample <= end.cgroup_nr_periods_before_host_sample
+        && start.cgroup_nr_throttled_after_host_sample
+            == end.cgroup_nr_throttled_before_host_sample
+        && start.cgroup_throttled_usec_after_host_sample
+            == end.cgroup_throttled_usec_before_host_sample
+        && start.sample_finished_monotonic_ns <= evidence.operation_started_monotonic_ns
+        && evidence.operation_started_monotonic_ns < evidence.operation_finished_monotonic_ns
+        && evidence.operation_finished_monotonic_ns <= end.sample_started_monotonic_ns
+        && sample_elapsed_ns
+            .zip(operation_elapsed)
+            .is_some_and(|(sample, operation)| sample >= operation)
+        && operation_elapsed == Some(evidence.operation_elapsed_ns)
+        && run.measurement.elapsed_ns == Some(evidence.operation_elapsed_ns)
+        && cgroup_delta == Some(evidence.cgroup_cpu_inner_delta_usec)
+        && scheduled_delta == Some(evidence.cpu39_scheduled_runtime_outer_ns)
+        && end_pending == Some(evidence.end_current_pending_upper_bound_ns)
+        && cpu39_bounds
             .as_ref()
-            .map(|bounds| bounds.nonidle_upper_ns)
-            == Some(evidence.excluded_smt_nonidle_upper_bound_ns)
-        && sibling_bounds.as_ref().map(|bounds| bounds.total_lower_ns)
-            == Some(evidence.excluded_smt_total_lower_bound_ns)
+            .map(|bounds| bounds.cgroup_cpu_usage_floor_lower_bound_ns)
+            == Some(evidence.cgroup_cpu_usage_floor_lower_bound_ns)
+        && cpu39_bounds
+            .as_ref()
+            .map(|bounds| bounds.own_cpu_lower_bound_ns)
+            == Some(evidence.own_cpu_lower_bound_ns)
+        && cpu39_bounds
+            .as_ref()
+            .map(|bounds| bounds.external_scheduled_runtime_upper_ns)
+            == Some(evidence.cpu39_external_scheduled_runtime_upper_bound_ns)
+        && cpu39_bounds
+            .as_ref()
+            .map(|bounds| bounds.proc_stat_side_charge_upper_bound_ns)
+            == Some(evidence.cpu39_proc_stat_side_charge_upper_bound_ns)
+        && cpu39_bounds
+            .as_ref()
+            .map(|bounds| bounds.combined_external_upper_bound_ns)
+            == Some(evidence.cpu39_combined_external_upper_bound_ns)
+        && cpu39_bounds
+            .as_ref()
+            .map(|bounds| bounds.operation_elapsed_lower_bound_ns)
+            == Some(evidence.operation_elapsed_lower_bound_ns)
+        && cpu39_bounds
+            .as_ref()
+            .map(|bounds| bounds.busy_upper_bound_bps)
+            == Some(evidence.external_cpu39_busy_upper_bound_bps)
+        && evidence.external_cpu39_busy_upper_bound_bps <= quiet::CHILD_EXTERNAL_CPU39_BUSY_BPS
+        && sibling_nonidle_upper == Some(evidence.excluded_smt_nonidle_upper_bound_ns)
         && computed_sibling_busy == Some(evidence.excluded_smt_sibling_busy_upper_bound_bps)
         && evidence.excluded_smt_sibling_busy_upper_bound_bps <= quiet::CHILD_SMT_SIBLING_BUSY_BPS
         && cpu_pressure.is_some_and(|value| value <= quiet::QUIET_CPU_SOME_PRESSURE_BPS)

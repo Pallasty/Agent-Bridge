@@ -120,16 +120,32 @@ Canonical trials therefore must:
 - after base preflight, pass a 30-second/1-Hz quiet window for CPU39 and SMT
   sibling79 (both at least 95% overall idle and 90% in every bucket, CPU/memory/
   I/O `some` plus memory/I/O `full` PSI bounded, no cargo/rustc/rustdoc), then
-  bind the sole cgroup PID to CPU39 and require at most 5% external activity on
-  CPU39 and sibling79. The transient service applies `CPUAffinity=39`, native-
-  architecture seccomp, `NoNewPrivileges`, and a deny rule for every later
-  `sched_setaffinity`; both endpoints also require every enumerated TID to have
-  exactly CPU39 affinity. Each `/proc/stat` snapshot is bracketed by process-
-  level nanosecond CPU-clock reads. With frozen `USER_HZ=100`, the gate adds
-  one tick of uncertainty for each of six non-idle fields, removes one tick for
-  each of eight total fields, subtracts only the inner process-clock lower
-  bound, and rounds the final ratio upward. Any counter contradiction fails
-  closed; no threshold tolerance or saturating external subtraction is used.
+  bind the sole PID and every cgroup thread to CPU39, set the default
+  `CPUWeight=100` explicitly so direct CPU-controller counters exist, require a
+  domain cgroup with no descendants or observed CPU throttling, and require at
+  most 5% external activity on CPU39 and sibling79. The transient service applies
+  `CPUAffinity=39`, native-architecture seccomp, `NoNewPrivileges`, and a deny
+  rule for every later `sched_setaffinity`; both endpoints independently require
+  every enumerated TID to retain exactly CPU39 affinity.
+- At each endpoint, perform an absolute one-millisecond `CLOCK_MONOTONIC` sleep
+  and prove a real depart by requiring `RUSAGE_THREAD.ru_nvcsw` to increase;
+  then read direct-cgroup `cpu.stat before`, `/proc/schedstat` v17 CPU39,
+  `/proc/stat` CPU39/79, and `cpu.stat after` in that order. The own-CPU lower
+  bound is the inner `usage_usec` delta minus its 999-nanosecond floor error and
+  the complete end sleep-deadline-to-schedstat wall upper bound. It is
+  checked-subtracted from CPU39's scheduled-runtime outer bound. Operation time
+  is independently bracketed by monotonic timestamps and its denominator loses
+  two clock-resolution units; the assessor also mirrors the producer's rule
+  that the enclosing Unix sample span cannot be shorter than that operation.
+  Underflow or ordering drift fails closed; ratios use ceiling division and are
+  never capped.
+- Add the printed CPU39 IRQ/softirq/steal deltas with one `USER_HZ` tick per
+  field as a deliberately conservative side charge. Keep CPU79 on a separate
+  six-non-idle-field `delta+6` `/proc/stat` gate: CPU39's forced context switch
+  cannot flush a continuously current CPU79 task. Because this host has no IRQ
+  time accounting, these printed counters are not promoted into a claim about
+  all short interrupt wall time. The entire contract remains frozen-host,
+  evaluator-only interference control rather than general Linux isolation.
 
 The explicit-parent boolean is only a routing fact; it is not disk-backed
 proof by itself. Shared login-session cgroup counters are diagnostic only and
@@ -200,12 +216,16 @@ candidate API, authoritative failpoints, explicit staging placement, and the
 measured FullVec timing seam. It also characterizes field-complete FullVec
 equivalence, root isolation, cleanup, schema, page/freelist, integrity, and
 foreign-key invariants. A live canonical attempt additionally exposed the
-non-atomic ordering of `/proc/stat` and `/proc/self/stat`; a later attempt then
-proved that bracketing alone could not reconcile independently quantized
-USER_HZ fields. Dedicated RED-to-GREEN contracts now guard the high-resolution
-process-clock bracket, explicit six/eight-field counter bounds, upward ratio
-rounding, all-thread CPU39/seccomp confinement, and assessor rejection of
-reversed or forged raw and derived evidence.
+non-atomic ordering of `/proc/stat` and `/proc/self/stat`; attempt11 then proved
+that even a process-clock bracket cannot reconcile scheduler `sum_exec_runtime`
+with CPU-state `/proc/stat` accounting for the dynamic multithreaded A1
+workload. The former `+6/-8` proof covered `USER_HZ` serialization error, not
+the error between those underlying kernel accounting domains, so no empirical
+tolerance was added. Dedicated RED-to-GREEN contracts now guard the aligned
+direct-cgroup/schedstat interval, absolute blocking-switch deadline, end-current
+slice deduction, monotonic operation bracket, CPU79 fallback, upward rounding,
+all-thread CPU39/seccomp/cgroup custody, no-throttle condition, and assessor
+rejection of forged raw or derived evidence.
 
 The final result, raw receipt identity, performance decision, and any A2
 nomination will be appended only after a clean release build and the frozen

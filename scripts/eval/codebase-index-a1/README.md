@@ -60,19 +60,34 @@ After base preflight, canonical execution requires a fresh 30-second, 1 Hz
 host-quiet window on CPU 39 and sibling 79. Both CPUs require at least 95%
 overall idle and 90% idle in every bucket. CPU/memory/I/O `some` PSI must be at
 most 1%, memory/I/O `full` PSI at most 0.1%, and no `cargo`, `rustc`, or
-`rustdoc` identity may appear. Every performance child then binds its sole
-cgroup PID to CPU 39, records the effective cpuset and pressure counters, and
-requires both external CPU39 activity and sibling-79 activity to stay at or
-below 5%. Both endpoints enumerate every live TID and require its allowed CPU
-set to be exactly `{39}`; a real transient smoke also proves that the seccomp
-contract rejects a later affinity change. Each `/proc/stat` read is bracketed
-by two `CLOCK_PROCESS_CPUTIME_ID` reads. For the frozen `USER_HZ=100` host, the
-assessor treats the six non-idle fields as an upper bound of `delta+6` ticks,
-the eight total fields as a lower bound of `delta-8` ticks, subtracts only the
-inner process-clock lower bound, and rounds the resulting busy ratio upward.
-Sampling and tick quantization are therefore charged to external activity.
-This is measured interference control, not host-wide CPU isolation or a claim
-that the process clock has one-nanosecond physical accuracy.
+`rustdoc` identity may appear. Every performance child then requires a sole
+cgroup PID, a domain cgroup with no descendants, an explicit default
+`CPUWeight=100` that activates direct CPU-controller evidence, no observed CPU
+throttling, and both external CPU39 activity and sibling-79 activity at or below
+5%. Both endpoints enumerate every cgroup TID and require its allowed CPU set to
+be exactly `{39}`; a real transient smoke also proves that the seccomp contract
+rejects a later affinity change.
+
+Each endpoint performs an absolute one-millisecond `CLOCK_MONOTONIC` sleep and
+requires `RUSAGE_THREAD.ru_nvcsw` to advance before sampling. It then brackets
+`/proc/schedstat` v17 CPU39 and `/proc/stat` with direct-cgroup `cpu.stat`
+reads. The inner own-CPU lower bound uses `end.cpu_stat_before -
+start.cpu_stat_after`, charges the one-microsecond output floor, and deducts the
+entire end sleep-deadline-to-schedstat interval plus clock resolution. That
+lower bound is checked-subtracted from the CPU39 scheduled-runtime outer bound;
+contradictions fail instead of clamping. The ratio uses the measured operation
+interval minus two monotonic-clock resolution units and always rounds upward.
+The assessor independently requires the enclosing Unix sample span to be at
+least that operation interval, preventing a coordinated denominator forgery.
+
+On the frozen `USER_HZ=100` host, the printed `/proc/stat`
+IRQ/softirq/steal deltas receive one tick per field as an additional,
+potentially double-counted side charge. CPU79 remains a separate six-field
+non-idle `delta+6` output-accounting gate because a CPU39 context switch cannot
+flush CPU79 schedstat. The host has no IRQ-time accounting, so neither printed
+side charge nor sibling gate is claimed as a strict upper bound for every short
+interrupt or every Linux configuration. This is conservative evaluator-only
+interference control for the frozen host, not host-wide CPU isolation.
 
 ```bash
 mkdir -p /home/pallasting/.cache/ab-codebase-index-a1-eval

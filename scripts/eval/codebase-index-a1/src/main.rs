@@ -10,7 +10,7 @@ use ab_codebase_index_a1::{
     assess_suite,
     provenance::{embedded_build_identity, executable_sha256, runtime_identity},
     quiet::{
-        child_interference as compute_child_interference, cpu_process_sample,
+        child_interference as compute_child_interference, cpu_process_sample, monotonic_time_ns,
         observe_host_quiet_window,
     },
     snapshot::{
@@ -1125,6 +1125,7 @@ fn transient_service_command_with_env(
         "--property=KillMode=control-group",
         "--property=TimeoutStopSec=30s",
         "--property=CPUAffinity=39",
+        "--property=CPUWeight=100",
         "--property=NoNewPrivileges=yes",
         "--property=SystemCallArchitectures=native",
         "--property=SystemCallErrorNumber=EPERM",
@@ -1452,7 +1453,7 @@ async fn run_one(
         let interference_start = expected_cgroup_unit
             .map(|_| cpu_process_sample(39))
             .transpose()?;
-        let started = Instant::now();
+        let operation_started_monotonic_ns = monotonic_time_ns()?;
         let (stats, authoritative_transaction_ns, full_vec, staged_native) = match mode {
             Mode::FullVec => {
                 let outcome = store
@@ -1516,14 +1517,29 @@ async fn run_one(
                 )
             }
         };
-        let elapsed_ns = duration_ns(started.elapsed());
+        let operation_finished_monotonic_ns = monotonic_time_ns()?;
+        let elapsed_ns = operation_finished_monotonic_ns
+            .checked_sub(operation_started_monotonic_ns)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "measured operation monotonic clock moved backwards",
+                )
+            })?;
         let interference_end = expected_cgroup_unit
             .map(|_| cpu_process_sample(39))
             .transpose()?;
         let child_interference = interference_start
             .as_ref()
             .zip(interference_end.as_ref())
-            .map(|(start, end)| compute_child_interference(start, end))
+            .map(|(start, end)| {
+                compute_child_interference(
+                    start,
+                    end,
+                    operation_started_monotonic_ns,
+                    operation_finished_monotonic_ns,
+                )
+            })
             .transpose()?;
         let vm_hwm = peak_rss_bytes();
         let cgroup_after = cgroup_memory_snapshot();
@@ -2037,7 +2053,7 @@ mod tests {
         AppError,
     };
     use ab_codebase_index_a1::{
-        quiet::{child_interference, cpu_process_sample},
+        quiet::{child_interference, cpu_process_sample, monotonic_time_ns},
         snapshot::cgroup_memory_snapshot,
         workload::materialize,
         FailureCase,
@@ -2079,6 +2095,7 @@ mod tests {
             "--property=KillMode=control-group",
             "--property=TimeoutStopSec=30s",
             "--property=CPUAffinity=39",
+            "--property=CPUWeight=100",
             "--property=NoNewPrivileges=yes",
             "--property=SystemCallArchitectures=native",
             "--property=SystemCallErrorNumber=EPERM",
@@ -2158,18 +2175,26 @@ mod tests {
                 .thread_affinities
                 .iter()
                 .all(|thread| thread.allowed_cpus == "39"));
+            let operation_started_monotonic_ns = monotonic_time_ns().unwrap();
             let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
             let mut accumulator = 0_u64;
             while std::time::Instant::now() < deadline {
                 accumulator = std::hint::black_box(accumulator.wrapping_add(1));
             }
             std::hint::black_box(accumulator);
+            let operation_finished_monotonic_ns = monotonic_time_ns().unwrap();
             let end = cpu_process_sample(39).unwrap();
-            let evidence = child_interference(&start, &end).unwrap();
+            let evidence = child_interference(
+                &start,
+                &end,
+                operation_started_monotonic_ns,
+                operation_finished_monotonic_ns,
+            )
+            .unwrap();
             assert_eq!(start.clock_ticks_per_second, 100);
-            assert!(start.process_cpu_clock_resolution_ns > 0);
-            assert!(evidence.process_cpu_inner_delta_ns > 0);
-            assert!(evidence.cpu39_total_lower_bound_ns > 0);
+            assert!(start.monotonic_clock_resolution_ns > 0);
+            assert!(evidence.cgroup_cpu_inner_delta_usec > 0);
+            assert!(evidence.cpu39_scheduled_runtime_outer_ns > 0);
             return;
         }
 

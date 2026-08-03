@@ -1,6 +1,6 @@
 use ab_codebase_index_a1::quiet::{
     ChildInterferenceEvidence, CpuProcessSample, HostQuietWindowEvidence, PressureTotals,
-    ThreadAffinityEvidence,
+    SchedstatCpuSample, ThreadAffinityEvidence,
 };
 use ab_codebase_index_a1::{
     assess_suite, canonical_workload, AuthoritativePragmaEvidence, AuthorityEvidence,
@@ -19,6 +19,10 @@ const WAL_FRAMES: u64 = 2_400;
 const QUIET_STARTED_UNIX_NS: u64 = 1_000_000_000;
 const QUIET_FINISHED_UNIX_NS: u64 = 31_000_000_000;
 const CHILDREN_STARTED_UNIX_NS: u64 = 32_000_000_000;
+const CHILD_SEQUENCE_SPACING_NS: u64 = 3_000_000_000;
+const CHILD_EXECUTION_DURATION_NS: u64 = 2_500_000_000;
+const FULL_ELAPSED_NS: u64 = 2_000_000_000;
+const STAGED_ELAPSED_NS: u64 = 2_100_000_000;
 const ORCHESTRATOR_PID: u32 = 777;
 
 fn wal_bytes(frames: u64) -> u64 {
@@ -191,28 +195,76 @@ fn execution(mode: Mode, pair: usize) -> ChildExecutionEvidence {
     };
     let position = usize::from(mode != first);
     let sequence = pair * 2 + position;
-    let started_unix_ns = CHILDREN_STARTED_UNIX_NS + sequence as u64 * 10_000_000;
+    let started_unix_ns = CHILDREN_STARTED_UNIX_NS + sequence as u64 * CHILD_SEQUENCE_SPACING_NS;
     ChildExecutionEvidence {
         mode,
         sequence,
         process_id: 1_000 + sequence as u32,
         started_unix_ns,
-        finished_unix_ns: started_unix_ns + 5_000_000,
+        finished_unix_ns: started_unix_ns + CHILD_EXECUTION_DURATION_NS,
     }
 }
 
-fn process_sample(sampled_unix_ns: u64, end: bool, process_id: u32) -> CpuProcessSample {
+fn process_sample(
+    sample_started_monotonic_ns: u64,
+    end: bool,
+    process_id: u32,
+    cgroup_path: &str,
+) -> CpuProcessSample {
+    let blocking_sleep_started_monotonic_ns = sample_started_monotonic_ns + 100;
+    let blocking_sleep_deadline_monotonic_ns = blocking_sleep_started_monotonic_ns + 1_000_000;
+    let blocking_sleep_returned_monotonic_ns = blocking_sleep_deadline_monotonic_ns + 100;
+    let host_sample_before_monotonic_ns = blocking_sleep_returned_monotonic_ns + 100;
+    let schedstat_read_finished_monotonic_ns = host_sample_before_monotonic_ns + 100;
+    let host_sample_after_monotonic_ns = schedstat_read_finished_monotonic_ns + 100;
     CpuProcessSample {
-        sampled_unix_ns,
+        sampled_unix_ns: sample_started_monotonic_ns + 1_000_000,
+        sample_started_monotonic_ns,
+        sample_finished_monotonic_ns: host_sample_after_monotonic_ns + 100,
+        blocking_sleep_started_monotonic_ns,
+        blocking_sleep_deadline_monotonic_ns,
+        blocking_sleep_returned_monotonic_ns,
+        schedstat_read_finished_monotonic_ns,
+        host_sample_before_monotonic_ns,
+        host_sample_after_monotonic_ns,
+        monotonic_clock_resolution_ns: 1,
         cpu: 39,
+        sampled_cpu: 39,
         excluded_smt_sibling: 79,
         cpu_total_ticks: if end { 1_100 } else { 1_000 },
         cpu_idle_ticks: if end { 990 } else { 900 },
+        cpu_irq_ticks: 0,
+        cpu_softirq_ticks: 0,
+        cpu_steal_ticks: 0,
         excluded_smt_total_ticks: if end { 2_200 } else { 2_000 },
         excluded_smt_idle_ticks: if end { 2_100 } else { 1_900 },
-        process_cpu_time_ns_before_cpu_sample: if end { 220_000_000 } else { 100_000_000 },
-        process_cpu_time_ns_after_cpu_sample: if end { 220_000_000 } else { 100_000_000 },
-        process_cpu_clock_resolution_ns: 1,
+        cpu_schedstat: SchedstatCpuSample {
+            version: 17,
+            timestamp: if end { 124 } else { 123 },
+            runtime_ns: if end { 1_080_000_000 } else { 1_000_000_000 },
+            wait_ns: if end { 20 } else { 10 },
+            timeslices: if end { 43 } else { 42 },
+        },
+        cgroup_path: cgroup_path.into(),
+        cgroup_inode: 77,
+        cgroup_type: "domain".into(),
+        cgroup_cpu_usage_usec_before_host_sample: if end { 160_000 } else { 99_000 },
+        cgroup_cpu_usage_usec_after_host_sample: if end { 161_000 } else { 100_000 },
+        cgroup_nr_periods_before_host_sample: if end { 101 } else { 100 },
+        cgroup_nr_periods_after_host_sample: if end { 101 } else { 100 },
+        cgroup_nr_throttled_before_host_sample: 0,
+        cgroup_nr_throttled_after_host_sample: 0,
+        cgroup_throttled_usec_before_host_sample: 0,
+        cgroup_throttled_usec_after_host_sample: 0,
+        cgroup_process_ids: vec![process_id],
+        cgroup_thread_ids: vec![process_id],
+        cgroup_nr_descendants: 0,
+        cgroup_nr_dying_descendants: 0,
+        accounting_flush_tid: process_id,
+        accounting_flush_requested_ns: 1_000_000,
+        accounting_flush_observed_ns: 1_000_100,
+        accounting_flush_voluntary_switches_before: if end { 20 } else { 10 },
+        accounting_flush_voluntary_switches_after: if end { 21 } else { 11 },
         clock_ticks_per_second: 100,
         no_new_privileges: true,
         seccomp_mode: 2,
@@ -234,27 +286,93 @@ fn process_sample(sampled_unix_ns: u64, end: bool, process_id: u32) -> CpuProces
     }
 }
 
-fn child_interference(execution: &ChildExecutionEvidence) -> ChildInterferenceEvidence {
+fn child_interference(
+    execution: &ChildExecutionEvidence,
+    cgroup_path: &str,
+) -> ChildInterferenceEvidence {
+    let operation_elapsed_ns = if execution.mode == Mode::StagedNative {
+        STAGED_ELAPSED_NS
+    } else {
+        FULL_ELAPSED_NS
+    };
+    let operation_started_monotonic_ns = execution.started_unix_ns + 10_000_000;
+    let operation_finished_monotonic_ns = operation_started_monotonic_ns + operation_elapsed_ns;
+    let end_current_pending_upper_bound_ns = 302;
+    let cgroup_cpu_usage_floor_lower_bound_ns = 59_999_001;
+    let own_cpu_lower_bound_ns = 59_998_699;
+    let cpu39_external_scheduled_runtime_upper_bound_ns = 20_001_301;
+    let cpu39_combined_external_upper_bound_ns = 50_001_301;
+    let operation_elapsed_lower_bound_ns = operation_elapsed_ns - 2;
     ChildInterferenceEvidence {
         start: process_sample(
             execution.started_unix_ns + 1_000_000,
             false,
             execution.process_id,
+            cgroup_path,
         ),
         end: process_sample(
-            execution.started_unix_ns + 4_000_000,
+            execution.started_unix_ns + 2_300_000_000,
             true,
             execution.process_id,
+            cgroup_path,
         ),
-        process_cpu_inner_delta_ns: 120_000_000,
-        process_cpu_inner_lower_bound_ns: 119_999_999,
-        cpu39_nonidle_upper_bound_ns: 160_000_000,
-        cpu39_total_lower_bound_ns: 920_000_000,
-        external_cpu39_busy_upper_bound_bps: 435,
+        operation_started_monotonic_ns,
+        operation_finished_monotonic_ns,
+        operation_elapsed_ns,
+        operation_elapsed_lower_bound_ns,
+        cgroup_cpu_inner_delta_usec: 60_000,
+        cgroup_cpu_usage_floor_lower_bound_ns,
+        end_current_pending_upper_bound_ns,
+        own_cpu_lower_bound_ns,
+        cpu39_scheduled_runtime_outer_ns: 80_000_000,
+        cpu39_external_scheduled_runtime_upper_bound_ns,
+        cpu39_proc_stat_side_charge_upper_bound_ns: 30_000_000,
+        cpu39_combined_external_upper_bound_ns,
+        external_cpu39_busy_upper_bound_bps: if execution.mode == Mode::StagedNative {
+            239
+        } else {
+            251
+        },
         excluded_smt_nonidle_upper_bound_ns: 60_000_000,
-        excluded_smt_total_lower_bound_ns: 1_920_000_000,
-        excluded_smt_sibling_busy_upper_bound_bps: 313,
+        excluded_smt_sibling_busy_upper_bound_bps: if execution.mode == Mode::StagedNative {
+            286
+        } else {
+            301
+        },
     }
+}
+
+fn set_run_elapsed(run: &mut RunReceipt, elapsed_ns: u64) {
+    run.measurement.elapsed_ns = Some(elapsed_ns);
+    let evidence = run
+        .child_interference
+        .as_mut()
+        .expect("canonical fixture has child interference evidence");
+    evidence.operation_finished_monotonic_ns = evidence.operation_started_monotonic_ns + elapsed_ns;
+    evidence.operation_elapsed_ns = elapsed_ns;
+    evidence.operation_elapsed_lower_bound_ns = elapsed_ns - 2;
+    evidence.external_cpu39_busy_upper_bound_bps = ceil_bps(
+        evidence.cpu39_combined_external_upper_bound_ns,
+        elapsed_ns - 2,
+    );
+    evidence.excluded_smt_sibling_busy_upper_bound_bps =
+        ceil_bps(evidence.excluded_smt_nonidle_upper_bound_ns, elapsed_ns - 2);
+}
+
+fn shift_sample_monotonic(sample: &mut CpuProcessSample, delta_ns: u64) {
+    sample.sample_started_monotonic_ns += delta_ns;
+    sample.sample_finished_monotonic_ns += delta_ns;
+    sample.blocking_sleep_started_monotonic_ns += delta_ns;
+    sample.blocking_sleep_deadline_monotonic_ns += delta_ns;
+    sample.blocking_sleep_returned_monotonic_ns += delta_ns;
+    sample.schedstat_read_finished_monotonic_ns += delta_ns;
+    sample.host_sample_before_monotonic_ns += delta_ns;
+    sample.host_sample_after_monotonic_ns += delta_ns;
+}
+
+fn ceil_bps(numerator: u64, denominator: u64) -> u64 {
+    let scaled = u128::from(numerator) * 10_000;
+    u64::try_from((scaled + u128::from(denominator - 1)) / u128::from(denominator)).unwrap()
 }
 
 fn host_quiet_window() -> HostQuietWindowEvidence {
@@ -328,7 +446,11 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
         build_identity: identity(true),
         workload: workload(),
         measurement: Measurement {
-            elapsed_ns: Some(if candidate { 105 } else { 100 }),
+            elapsed_ns: Some(if candidate {
+                STAGED_ELAPSED_NS
+            } else {
+                FULL_ELAPSED_NS
+            }),
             peak_rss_bytes: Some(if candidate { 69 } else { 100 }),
             vm_hwm_bytes: Some(if candidate { 68 } else { 99 }),
             authoritative_transaction_ns: Some(if candidate { 105 } else { 100 }),
@@ -363,7 +485,10 @@ fn run(mode: Mode, pair: usize) -> RunReceipt {
             getrusage_max_rss_bytes: Some(if candidate { 69 } else { 100 }),
             parent_wait4_max_rss_bytes: Some(if candidate { 69 } else { 100 }),
         },
-        child_interference: Some(child_interference(&execution)),
+        child_interference: Some(child_interference(
+            &execution,
+            &format!("/user.slice/{expected_cgroup_unit}.service"),
+        )),
         database: evidence(pair),
         fixture: FixtureEvidence {
             base_fixture_sha256: "4".repeat(64),
@@ -531,7 +656,8 @@ fn canonical_input() -> SuiteInput {
         };
         let expected_cgroup_unit =
             format!("ab-codebase-index-a1-{ORCHESTRATOR_PID}-fault-{case_arg}");
-        let started_unix_ns = CHILDREN_STARTED_UNIX_NS + sequence as u64 * 10_000_000;
+        let started_unix_ns =
+            CHILDREN_STARTED_UNIX_NS + sequence as u64 * CHILD_SEQUENCE_SPACING_NS;
         let authoritative_pragmas = pragmas(&trial_root);
         let mut rollback_after_cleanup = rollback_state();
         rollback_after_cleanup.database_sha256 = "d".repeat(64);
@@ -544,7 +670,7 @@ fn canonical_input() -> SuiteInput {
                 sequence,
                 process_id,
                 started_unix_ns,
-                finished_unix_ns: started_unix_ns + 5_000_000,
+                finished_unix_ns: started_unix_ns + CHILD_EXECUTION_DURATION_NS,
             },
             build_identity: identity(true),
             trial_root: trial_root.clone().into(),
@@ -774,7 +900,7 @@ fn decision_uses_338_thresholds_and_requires_eight_passing_pairs() {
         .staged_native
         .measurement
         .cgroup_memory_peak_after_bytes = Some(70);
-    edge.pairs[0].staged_native.measurement.elapsed_ns = Some(110);
+    set_run_elapsed(&mut edge.pairs[0].staged_native, 2_200_000_000);
     edge.pairs[0]
         .staged_native
         .measurement
@@ -864,12 +990,12 @@ fn paired_log_ratio_median_blocks_heteroscedastic_false_green() {
     let mut input = canonical_input();
     for (index, pair) in input.pairs.iter_mut().enumerate() {
         let (baseline, candidate) = if index < 5 {
-            (100, 130)
+            (1_500_000_000, 1_950_000_000)
         } else {
-            (10_000, 10_900)
+            (2_000_000_000, 2_180_000_000)
         };
-        pair.full_vec.measurement.elapsed_ns = Some(baseline);
-        pair.staged_native.measurement.elapsed_ns = Some(candidate);
+        set_run_elapsed(&mut pair.full_vec, baseline);
+        set_run_elapsed(&mut pair.staged_native, candidate);
     }
 
     // Independently sorting each population gives 5515 / 5050 = 1.092,
@@ -1228,7 +1354,7 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .child_interference
         .as_mut()
         .unwrap()
-        .cpu39_nonidle_upper_bound_ns += 1;
+        .cpu39_combined_external_upper_bound_ns += 1;
     assert_canonical_rejected(forged_cpu39_bound);
 
     let mut forged_process_lower_bound = canonical_input();
@@ -1237,7 +1363,7 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .child_interference
         .as_mut()
         .unwrap()
-        .process_cpu_inner_lower_bound_ns -= 1;
+        .own_cpu_lower_bound_ns -= 1;
     assert_canonical_rejected(forged_process_lower_bound);
 
     let mut changed_clock_resolution = canonical_input();
@@ -1247,7 +1373,7 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .as_mut()
         .unwrap()
         .end
-        .process_cpu_clock_resolution_ns = 2;
+        .monotonic_clock_resolution_ns = 2;
     assert_canonical_rejected(changed_clock_resolution);
 
     let mut unconfined_thread = canonical_input();
@@ -1281,6 +1407,17 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
     sibling.excluded_smt_sibling_busy_upper_bound_bps = 1_000;
     assert_canonical_rejected(noisy_smt_sibling);
 
+    let mut continuous_current_sibling = canonical_input();
+    let sibling = continuous_current_sibling.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap();
+    sibling.end.excluded_smt_total_ticks += 100;
+    sibling.excluded_smt_nonidle_upper_bound_ns = 1_060_000_000;
+    sibling.excluded_smt_sibling_busy_upper_bound_bps = 5_301;
+    assert_canonical_rejected(continuous_current_sibling);
+
     let mut noisy_memory_some = canonical_input();
     noisy_memory_some.pairs[0]
         .full_vec
@@ -1289,7 +1426,7 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .unwrap()
         .end
         .pressure
-        .memory_some_us = 31;
+        .memory_some_us = 30_000;
     assert_canonical_rejected(noisy_memory_some);
 
     let mut noisy_io_some = canonical_input();
@@ -1300,19 +1437,79 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .unwrap()
         .end
         .pressure
-        .io_some_us = 31;
+        .io_some_us = 30_000;
     assert_canonical_rejected(noisy_io_some);
 
-    let mut reversed_process_bracket = canonical_input();
-    let start = &mut reversed_process_bracket.pairs[0]
+    let mut forged_sleep_deadline = canonical_input();
+    let start = &mut forged_sleep_deadline.pairs[0]
         .full_vec
         .child_interference
         .as_mut()
         .unwrap()
         .start;
-    start.process_cpu_time_ns_before_cpu_sample = 101_000_000;
-    start.process_cpu_time_ns_after_cpu_sample = 100_000_000;
-    assert_canonical_rejected(reversed_process_bracket);
+    start.blocking_sleep_deadline_monotonic_ns += 1;
+    assert_canonical_rejected(forged_sleep_deadline);
+
+    let mut descendant_cgroup = canonical_input();
+    descendant_cgroup.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .end
+        .cgroup_nr_descendants = 1;
+    assert_canonical_rejected(descendant_cgroup);
+
+    let mut extra_cgroup_process = canonical_input();
+    extra_cgroup_process.pairs[0]
+        .staged_native
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .start
+        .cgroup_process_ids
+        .push(99_999);
+    assert_canonical_rejected(extra_cgroup_process);
+
+    let mut stagnant_timeslices = canonical_input();
+    let evidence = stagnant_timeslices.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap();
+    evidence.end.cpu_schedstat.timeslices = evidence.start.cpu_schedstat.timeslices;
+    assert_canonical_rejected(stagnant_timeslices);
+
+    let mut throttled_cgroup = canonical_input();
+    let end = &mut throttled_cgroup.pairs[0]
+        .staged_native
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .end;
+    end.cgroup_nr_throttled_before_host_sample = 1;
+    end.cgroup_nr_throttled_after_host_sample = 1;
+    end.cgroup_throttled_usec_before_host_sample = 100;
+    end.cgroup_throttled_usec_after_host_sample = 100;
+    assert_canonical_rejected(throttled_cgroup);
+
+    let mut coherent_cross_clock_forgery = canonical_input();
+    let forged_run = &mut coherent_cross_clock_forgery.pairs[0].full_vec;
+    set_run_elapsed(forged_run, 2_400_000_000);
+    shift_sample_monotonic(
+        &mut forged_run.child_interference.as_mut().unwrap().end,
+        200_000_000,
+    );
+    assert_canonical_rejected(coherent_cross_clock_forgery);
+
+    let mut forged_operation_elapsed = canonical_input();
+    forged_operation_elapsed.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .operation_elapsed_ns += 1;
+    assert_canonical_rejected(forged_operation_elapsed);
 }
 
 #[test]
