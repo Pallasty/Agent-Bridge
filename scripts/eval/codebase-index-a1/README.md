@@ -214,3 +214,21 @@ are both observed even on error. If raw evidence was already synced but cleanup
 or terminal write then fails, the `.raw.json` file is deliberately recognizable
 as raw-only/nonterminal evidence while the requested terminal path remains
 absent.
+
+## Accepted canonical packet
+
+Attempt23 is the accepted packet for revision
+`72ee0c93a53705a9aa544b9c495e6ec483d6e971`. It returned valid, eligible PASS
+with no reasons and all five pair counters at 10/10. The paired-ratio medians
+were 0.0303848877 for process RSS, 0.8812315456 for isolated-cgroup peak,
+0.9146710844 for elapsed time, 0.9424897767 for authoritative transaction time,
+and exactly 1.0 for both WAL bytes and frames. All eight failure receipts passed
+the exact rollback and frame-derived WAL-index checks.
+
+The terminal receipt SHA-256 is
+`f2d1d754657ba56c666de93c52f622d4c932cad219b68d842053285890c87a02`.
+Its retained raw packet SHA-256 is
+`a92e565a4de804a266984e0267da2aa229a5c1378020c354127bacee7170d4f6`,
+which exactly matches the terminal declaration. Suite cleanup succeeded and
+left no trial artifacts. This PASS nominates a separate default-off A2 review;
+it does not itself change normal dispatch or authorize runtime adoption.

@@ -2,7 +2,7 @@
 
 Date: 2026-08-02
 
-Status: implementation and canonical evaluation in progress
+Status: canonical PASS; default-off A2 candidate nominated
 
 ## Decision under test
 
@@ -249,6 +249,86 @@ systemd version, the exact SQLite WAL-index region boundaries, high monotonic
 operation PSI as observational, and counter reversal as invalid. A fresh release
 canonical run is still required; attempt15 cannot authorize promotion.
 
-The final result, raw receipt identity, performance decision, and any A2
-nomination will be appended only after a clean release build and the frozen
-canonical suite.
+## Canonical result
+
+Canonical attempt23 completed on the frozen plan with exit code 0. The
+assessor returned `evidence_valid=true`, `eligible=true`,
+`decision_pass=true`, and no reasons. The result therefore passes A1 and
+nominates `native_chunk_staged_v0` for a separately reviewed, still default-off
+A2 integration candidate. It does not change production dispatch or grant
+runtime adoption authority.
+
+Identity and custody:
+
+- source revision:
+  `72ee0c93a53705a9aa544b9c495e6ec483d6e971`;
+- release binary SHA-256:
+  `cd164119dffd7dd56f467f2799f8af72232b0eb78670b671734b55c9c2257b82`;
+- terminal receipt SHA-256:
+  `f2d1d754657ba56c666de93c52f622d4c932cad219b68d842053285890c87a02`;
+- raw receipt SHA-256:
+  `a92e565a4de804a266984e0267da2aa229a5c1378020c354127bacee7170d4f6`;
+- terminal receipt:
+  `/home/pallasting/.cache/ab-a1-canonical-72ee0c93-bqbe9l/results/canonical-attempt23.json`;
+- retained raw receipt: the same path with `.raw.json`; its actual digest
+  exactly matches the terminal declaration, and terminal/raw `input` plus
+  `assessment` are equal;
+- raw evidence was file- and directory-synced before suite cleanup;
+  `suite_cleanup_succeeded=true`, retained suite artifacts are false, and the
+  trial root is empty.
+
+The build, runtime-before, and runtime-after identities agree on the clean
+release revision, tracked-source/lockfile/executable digests, Rust 1.96.0,
+`staged-native`, empty encoded rustflags, and no profile override. Runtime
+provenance binds Linux 7.0.0-27, Xeon Gold 6138, glibc 2.43, and
+`systemd 259 (259.5-0ubuntu3)`. The inner quiet-window gate passed with CPU39
+at 99.16% overall/95.00% worst-bucket idle and sibling79 at 98.20%/91.91%; no
+competing Cargo/Rust process was observed. Across all twenty measured arms,
+the conservative external-activity maxima were 0.58% on CPU39 and 3.01% on
+sibling79, both below the frozen 5% bound.
+
+All five pair counters are 10/10: joint RSS/elapsed/cgroup peak, isolated
+cgroup peak, cache reconciliation, authoritative transaction, and WAL. Every
+individual pair assessment is green. The decision statistic is the geometric
+median of paired ratios; ordinary arm medians below are descriptive only.
+
+| Metric | FullVec ordinary median | Staged-native ordinary median | Paired-ratio median | Candidate change |
+| --- | ---: | ---: | ---: | ---: |
+| Process peak RSS | 548,759,552 B | 16,672,768 B | 0.0303848877 | -96.9615% |
+| Isolated cgroup peak | 2,231,975,936 B | 1,966,872,576 B | 0.8812315456 | -11.8768% |
+| End-to-end elapsed | 46.069841421 s | 42.174792092 s | 0.9146710844 | -8.5329% |
+| Authoritative transaction | 37.263682350 s | 35.344984234 s | 0.9424897767 | -5.7510% |
+| Main WAL bytes | 821,045,992 B | 821,045,992 B | 1.0000000000 | 0.0000% |
+| Main WAL frames | 199,283 | 199,283 | 1.0000000000 | 0.0000% |
+
+The bounded path emitted 342 batches for 1,400,000 rows at `B=4096`, retained
+at most 4,096 accumulator rows with a declared live-row bound of 4,113, and
+used a 260,976,640-byte same-device ext4 staging database. All ten staged arms
+proved explicit staging placement, committed the staging and authoritative
+transactions, restored authoritative autocommit, and removed staging state.
+
+All eight injected application failures were observed at their exact marker.
+Every receipt preserved the complete logical rollback snapshot, schema,
+PRAGMAs, page/freelist state, other root, non-codebase sentinel, connection
+usability, and staging cleanup. Post-fault WAL cleanup reached zero bytes in
+every case. The observed WAL frame/structurally exact SHM pairs were:
+
+| Failpoint | WAL frames | SHM bytes before -> retained after cleanup |
+| --- | ---: | ---: |
+| after staging batch | 0 | 32,768 -> 32,768 |
+| after symbol delete | 49,702 | 32,768 -> 425,984 |
+| after import delete | 83,263 | 32,768 -> 688,128 |
+| after call delete | 176,413 | 32,768 -> 1,441,792 |
+| after symbol rows | 176,414 | 32,768 -> 1,441,792 |
+| after import rows | 185,476 | 32,768 -> 1,507,328 |
+| after call rows | 187,193 | 32,768 -> 1,507,328 |
+| before commit | 199,178 | 32,768 -> 1,605,632 |
+
+This result selects bounded native SQLite staging over FullVec for the current
+`codebase_index` replacement boundary: it removes the whole-repository row
+heap while also improving the measured end-to-end, transaction, and isolated
+cgroup peaks without changing WAL work or row semantics. Its authority remains
+narrow. The evidence is a warm-cache, controlled `/home` ext4 comparison; it
+does not prove complete host page-cache attribution, live fuseblk behavior,
+crash durability, Arrow-wide infrastructure value, GPU behavior, or any
+MI50/ROCm runtime path. Those require separate units and gates.
