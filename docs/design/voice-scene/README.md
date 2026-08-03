@@ -183,6 +183,61 @@ express. A packet is S0-valid only when it passes both.
 - `S621_STORY_RENDER_ONE_SHOT_WORKER_IMPLEMENTATION_REVIEW.md`: S621 staged
   implementation ADR and the separation between MCP invocation and independent
   owner grant authority.
+- `story_render_descendant_custody_review.schema.json`: S632 strict source,
+  host-capability, threat-boundary, mechanism-selection, lock-custody, and
+  failure-matrix review contract.
+- `s632_story_render_descendant_custody_review.json`: S632 hash-bound selection
+  of a repository-owned Guardian for a dormant S633 prototype, while keeping
+  cgroup/systemd hardening, Supervisor integration, execution, and deployment
+  closed.
+- `S632_STORY_RENDER_DESCENDANT_CUSTODY_REVIEW.md`: S632 architecture decision
+  coupling descendant cleanup to shared `flock` custody and defining the
+  single-failure boundary and S633 acceptance gate.
+- `story_render_guardian_synthetic_prototype.schema.json`: S633 strict
+  protocol, startup-gate, shared-lock-custody, single-failure proof, synthetic
+  test-effect, authority, and runtime-nonadoption contract.
+- `s633_story_render_guardian_synthetic_prototype.json`: S633 hash-bound
+  evidence for eight real Linux synthetic tests, with Supervisor integration,
+  real Worker execution, MCP, configuration, and deployment closed.
+- `S633_STORY_RENDER_GUARDIAN_SYNTHETIC_PROTOTYPE.md`: S633 implementation and
+  test evidence for Host EOF cleanup, Guardian-loss fallback, payload FD
+  isolation, residual-descendant rejection, and the S634 integration-review
+  gate.
+- `story_render_guardian_supervisor_integration_review.schema.json`: S634
+  strict current-source, ABG2 transport, custody state-machine, replay-order,
+  rollout, rollback, authority, and runtime-nonadoption review contract.
+- `s634_story_render_guardian_supervisor_integration_review.json`: S634
+  hash-bound selection of a default-off GuardianV2 synthetic integration, with
+  exact source changes and all real Worker/runtime effects still closed.
+- `S634_STORY_RENDER_GUARDIAN_SUPERVISOR_INTEGRATION_REVIEW.md`: S634
+  architecture decision for sealed execution-plan transport, Host-owned
+  bounded stdio, async binding, last-close custody, replay continuity, and the
+  S635 synthetic-integration gate.
+- `s635_story_render_guardian_supervisor_synthetic_integration.json`: S635
+  hash-bound default-off GuardianV2 implementation and synthetic verification
+  receipt, with real Worker, runtime configuration, MCP, and deployment closed.
+- `S635_STORY_RENDER_GUARDIAN_SUPERVISOR_SYNTHETIC_INTEGRATION.md`: S635 ABG2,
+  sealed-plan, asynchronous binding, shared lock custody, cleanup, rollback,
+  and runtime-nonadoption evidence.
+- `story_render_guardian_runtime_adoption_review.schema.json`: S636 strict
+  source, installed-binary, live-process, current-client, model/Python,
+  packaging, authority, rollback, and implementation-ladder review contract.
+- `s636_story_render_guardian_runtime_adoption_review.json`: S636 hash-bound
+  decision that the model bundle is ready while eight Worker, identity,
+  packaging, authority, MCP, and deployment blockers keep runtime adoption
+  closed.
+- `S636_STORY_RENDER_GUARDIAN_RUNTIME_ADOPTION_REVIEW.md`: S636 evidence-layer
+  audit and ordered S637-S643 adoption path, beginning with a source-only real
+  Worker protocol adapter.
+- `story_render_real_worker_adapter_implementation.schema.json`: S637 strict
+  one-request/one-response process, fixed-fixture construction, private receipt
+  projection, current custody rejection, authority, and nonadoption contract.
+- `s637_story_render_real_worker_adapter_implementation.json`: S637 hash-bound
+  evidence that closes the missing Worker entrypoint while retaining pre-key
+  `custody_rejected` for the incompatible current execution contract.
+- `S637_STORY_RENDER_REAL_WORKER_ADAPTER_IMPLEMENTATION.md`: S637 Worker
+  implementation, redaction, real subprocess, rollback, remaining blockers,
+  and S638 identity/package gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.

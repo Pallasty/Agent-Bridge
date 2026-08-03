@@ -1,6 +1,15 @@
 #![cfg(target_os = "linux")]
 
 #[allow(dead_code)]
+#[path = "../src/story_render_guardian.rs"]
+mod story_render_guardian;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_protocol.rs"]
+mod story_render_guardian_protocol;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_supervision.rs"]
+mod story_render_guardian_supervision;
+#[allow(dead_code)]
 #[path = "../src/story_render_supervisor.rs"]
 mod story_render_supervisor;
 #[path = "../src/story_render_synthetic_composition.rs"]

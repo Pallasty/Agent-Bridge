@@ -4,6 +4,15 @@
 mod story_render_durable_synthetic_composition;
 #[path = "../src/story_render_fixed_synthetic_provider.rs"]
 mod story_render_fixed_synthetic_provider;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian.rs"]
+mod story_render_guardian;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_protocol.rs"]
+mod story_render_guardian_protocol;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_supervision.rs"]
+mod story_render_guardian_supervision;
 #[path = "../src/story_render_replay_continuity_file_synthetic.rs"]
 mod story_render_replay_continuity_file_synthetic;
 #[path = "../src/story_render_replay_continuity_synthetic.rs"]
@@ -26,18 +35,18 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use story_render_durable_synthetic_composition::{
-    StoryRenderDurableSyntheticCompositionError, run_s630_durable_synthetic_composition,
+    run_s630_durable_synthetic_composition, StoryRenderDurableSyntheticCompositionError,
 };
 use story_render_replay_continuity_file_synthetic::{
-    SYNTHETIC_FILE_REPLAY_DIRECTORY, StoryRenderFileReplayFault, StoryRenderFileReplayStore,
+    StoryRenderFileReplayFault, StoryRenderFileReplayStore, SYNTHETIC_FILE_REPLAY_DIRECTORY,
 };
 use story_render_replay_continuity_synthetic::{
     StoryRenderReplayContinuityError, StoryRenderReplayContinuityStore,
     StoryRenderSyntheticReplayMemory,
 };
 use story_render_supervisor::{
-    StoryRenderSupervisorConfig, StoryRenderSupervisorError, begin_story_render_admission,
-    start_story_render_supervisor,
+    begin_story_render_admission, start_story_render_supervisor, StoryRenderSupervisorConfig,
+    StoryRenderSupervisorError,
 };
 use story_render_synthetic_admission::StoryRenderSyntheticAdmissionError;
 use story_render_synthetic_composition::StoryRenderSyntheticResponse;
@@ -278,6 +287,7 @@ async fn busy_host_does_not_consume_durable_sequence() {
         lifecycle_config(root.path(), &pid_file),
         br#"{"synthetic":"s630-busy"}"#.to_vec(),
     )
+    .await
     .expect("start busy S630 Worker");
     let pid = wait_for_pid_file(&pid_file).await;
     let store = StoryRenderFileReplayStore::open(root.path()).expect("open S630 store");

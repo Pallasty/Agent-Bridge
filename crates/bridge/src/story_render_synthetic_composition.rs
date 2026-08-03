@@ -118,6 +118,7 @@ pub async fn run_s622_synthetic_composition(
 
     config.response_validator = s622_response_validator(request_id.clone());
     let output = start_story_render_supervisor(config, request)
+        .await
         .map_err(StoryRenderSyntheticCompositionError::Supervisor)?
         .await
         .map_err(StoryRenderSyntheticCompositionError::Supervisor)?;

@@ -147,6 +147,18 @@ pub(crate) mod story_render_synthetic_composition;
 #[cfg(target_os = "linux")]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod story_render_synthetic_admission;
+/// Dormant S635 ABG2 and sealed Worker plan protocol; no runtime caller.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_guardian_protocol;
+/// Dormant S635 generic Guardian entrypoint; no product entrypoint is wired.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_guardian;
+/// Default-off S635 GuardianV2 Host supervision; synthetic configuration only.
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod story_render_guardian_supervision;
 /// Dormant S623 synthetic Supervisor; no Worker, MCP, or deployment caller.
 #[cfg(target_os = "linux")]
 #[cfg_attr(not(test), allow(dead_code))]

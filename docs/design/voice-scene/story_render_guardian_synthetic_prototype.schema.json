@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_guardian_synthetic_prototype.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "decision",
+    "reviewed_at",
+    "evidence",
+    "protocol",
+    "startup_gate",
+    "custody",
+    "single_failure_proofs",
+    "test_effects",
+    "authority",
+    "runtime_effects",
+    "claims",
+    "nonclaims",
+    "receipt_sha256",
+    "next_gate"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.story_render_guardian_synthetic_prototype.v1"
+    },
+    "status": {
+      "const": "story_render_guardian_synthetic_prototype_verified"
+    },
+    "decision": {
+      "const": "dormant_single_failure_custody_proven_runtime_integration_blocked"
+    },
+    "reviewed_at": {"type": "string", "format": "date"},
+    "evidence": {
+      "type": "object",
+      "required": ["s632_review", "source_snapshot", "verification"],
+      "properties": {
+        "s632_review": {
+          "type": "object",
+          "required": ["path", "sha256", "decision_sha256"],
+          "properties": {
+            "path": {
+              "const": "docs/design/voice-scene/s632_story_render_descendant_custody_review.json"
+            },
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "decision_sha256": {
+              "const": "5c902205f35709c4ea4a6ebd588c608e046c3282509f772a48532793c0498227"
+            }
+          },
+          "additionalProperties": false
+        },
+        "source_snapshot": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/source_file"}
+        },
+        "verification": {
+          "type": "object",
+          "required": ["command", "passed", "failed", "test_threads"],
+          "properties": {
+            "command": {"type": "string", "minLength": 1},
+            "passed": {"const": 8},
+            "failed": {"const": 0},
+            "test_threads": {"const": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocol": {
+      "const": {
+        "magic": "ABG1",
+        "version": 1,
+        "maximum_body_bytes": 64,
+        "length_prefix": "u32_big_endian",
+        "frames": ["bound", "start", "cancel", "terminal", "failure"],
+        "unknown_or_trailing_fields": "reject",
+        "pid_binding": "worker_pid_equals_worker_pgid"
+      }
+    },
+    "startup_gate": {
+      "type": "object",
+      "required": [
+        "bootstrap_parent_death_sigkill",
+        "bootstrap_creates_session",
+        "worker_identity_recorded_before_payload",
+        "payload_before_host_acknowledgement",
+        "payload_inherits_custody_descriptors"
+      ],
+      "properties": {
+        "bootstrap_parent_death_sigkill": {"const": true},
+        "bootstrap_creates_session": {"const": true},
+        "worker_identity_recorded_before_payload": {"const": true},
+        "payload_before_host_acknowledgement": {"const": false},
+        "payload_inherits_custody_descriptors": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "custody": {
+      "type": "object",
+      "required": [
+        "lock_identity",
+        "host_retains_fallback_descriptor",
+        "guardian_retains_cleanup_descriptor",
+        "explicit_unlock_allowed",
+        "release_condition",
+        "cleanup_unproven_policy"
+      ],
+      "properties": {
+        "lock_identity": {"const": "shared_open_file_description"},
+        "host_retains_fallback_descriptor": {"const": true},
+        "guardian_retains_cleanup_descriptor": {"const": true},
+        "explicit_unlock_allowed": {"const": false},
+        "release_condition": {
+          "const": "last_descriptor_close_after_cleanup_proven"
+        },
+        "cleanup_unproven_policy": {
+          "const": "retain_or_leak_descriptor_for_manual_recovery"
+        }
+      },
+      "additionalProperties": false
+    },
+    "single_failure_proofs": {
+      "type": "object",
+      "minProperties": 6,
+      "additionalProperties": {"const": true}
+    },
+    "test_effects": {
+      "const": {
+        "repository_owned_processes_spawned": true,
+        "temporary_lock_files_created": true,
+        "temporary_marker_files_created": true,
+        "term_ignoring_descendant_spawned": true,
+        "all_fixture_processes_reaped_or_proven_not_live": true,
+        "temporary_roots_removed": true
+      }
+    },
+    "authority": {
+      "type": "object",
+      "minProperties": 7,
+      "additionalProperties": {"const": false}
+    },
+    "runtime_effects": {
+      "type": "object",
+      "minProperties": 12,
+      "additionalProperties": {"const": false}
+    },
+    "claims": {
+      "const": {
+        "guardian_protocol_implemented": true,
+        "synthetic_single_failure_custody_proven": true,
+        "current_supervisor_modified": false,
+        "runtime_integrated": false,
+        "mcp_registered": false,
+        "deployed": false
+      }
+    },
+    "nonclaims": {"$ref": "#/$defs/nonempty_strings"},
+    "receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "next_gate": {
+      "const": "story_render_guardian_supervisor_integration_review"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_file": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "nonempty_strings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_descendant_custody_review.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "decision",
+    "reviewed_at",
+    "evidence",
+    "current_baseline",
+    "threat_model",
+    "option_assessment",
+    "selected_architecture",
+    "failure_matrix",
+    "acceptance_gates",
+    "authority",
+    "runtime_effects",
+    "claims",
+    "decision_sha256",
+    "next_gate"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.story_render_descendant_custody_review.v1"
+    },
+    "status": {
+      "const": "story_render_descendant_custody_reviewable"
+    },
+    "decision": {
+      "const": "repository_guardian_with_lock_custody_selected_for_source_only_prototype"
+    },
+    "reviewed_at": {
+      "type": "string",
+      "format": "date"
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["source_snapshot", "host_snapshot", "primary_references"],
+      "properties": {
+        "source_snapshot": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/source_file"}
+        },
+        "host_snapshot": {
+          "type": "object",
+          "required": [
+            "kernel",
+            "cgroup_version",
+            "current_cgroup",
+            "current_cgroup_kill_present",
+            "current_cgroup_kill_writable_by_user",
+            "delegated_render_subtree_proven",
+            "user_systemd_state"
+          ],
+          "properties": {
+            "kernel": {"type": "string", "minLength": 1},
+            "cgroup_version": {"const": 2},
+            "current_cgroup": {"type": "string", "minLength": 1},
+            "current_cgroup_kill_present": {"const": true},
+            "current_cgroup_kill_writable_by_user": {"const": false},
+            "delegated_render_subtree_proven": {"const": false},
+            "user_systemd_state": {"const": "degraded"}
+          },
+          "additionalProperties": false
+        },
+        "primary_references": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["topic", "url", "finding"],
+            "properties": {
+              "topic": {"type": "string", "minLength": 1},
+              "url": {"type": "string", "format": "uri"},
+              "finding": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "current_baseline": {
+      "type": "object",
+      "required": [
+        "direct_worker_parent_death_signal",
+        "worker_session_and_process_group",
+        "controlled_path_group_termination",
+        "host_owned_lock",
+        "direct_worker_abrupt_exit_proven",
+        "arbitrary_descendant_abrupt_exit_proven"
+      ],
+      "properties": {
+        "direct_worker_parent_death_signal": {"const": true},
+        "worker_session_and_process_group": {"const": true},
+        "controlled_path_group_termination": {"const": true},
+        "host_owned_lock": {"const": true},
+        "direct_worker_abrupt_exit_proven": {"const": true},
+        "arbitrary_descendant_abrupt_exit_proven": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "threat_model": {
+      "type": "object",
+      "required": ["fault_model", "in_scope", "out_of_scope"],
+      "properties": {
+        "fault_model": {"const": "one_userspace_custodian_failure_at_a_time"},
+        "in_scope": {"$ref": "#/$defs/nonempty_strings"},
+        "out_of_scope": {"$ref": "#/$defs/nonempty_strings"}
+      },
+      "additionalProperties": false
+    },
+    "option_assessment": {
+      "type": "array",
+      "minItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["id", "role", "decision", "reason"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "minLength": 1},
+          "decision": {
+            "enum": ["select", "retain", "defer", "reject_as_baseline"]
+          },
+          "reason": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "selected_architecture": {
+      "type": "object",
+      "required": [
+        "name",
+        "actors",
+        "inherited_descriptors",
+        "startup_sequence",
+        "lock_invariant",
+        "liveness_invariant",
+        "termination_invariant",
+        "reaping_invariant",
+        "single_fault_paths"
+      ],
+      "properties": {
+        "name": {"const": "repository_owned_guardian"},
+        "actors": {"type": "object"},
+        "inherited_descriptors": {"$ref": "#/$defs/nonempty_strings"},
+        "startup_sequence": {"$ref": "#/$defs/nonempty_strings"},
+        "lock_invariant": {"type": "string", "minLength": 1},
+        "liveness_invariant": {"type": "string", "minLength": 1},
+        "termination_invariant": {"type": "string", "minLength": 1},
+        "reaping_invariant": {"type": "string", "minLength": 1},
+        "single_fault_paths": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "failure_matrix": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["fault", "owner", "required_result", "lock_release_allowed"],
+        "properties": {
+          "fault": {"type": "string", "minLength": 1},
+          "owner": {"type": "string", "minLength": 1},
+          "required_result": {"type": "string", "minLength": 1},
+          "lock_release_allowed": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "acceptance_gates": {
+      "type": "object",
+      "required": ["s633_scope", "required_tests", "supervisor_integration_allowed"],
+      "properties": {
+        "s633_scope": {"const": "guardian_protocol_and_synthetic_custody_prototype"},
+        "required_tests": {"$ref": "#/$defs/nonempty_strings"},
+        "supervisor_integration_allowed": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "authority": {
+      "const": {
+        "implementation_authorized": false,
+        "execution_authorized": false,
+        "deployment_authorized": false,
+        "runtime_adoption_authorized": false,
+        "cgroup_mutation_authorized": false,
+        "systemd_unit_creation_authorized": false
+      }
+    },
+    "runtime_effects": {
+      "type": "object",
+      "minProperties": 12,
+      "additionalProperties": {"const": false}
+    },
+    "claims": {
+      "type": "object",
+      "required": [
+        "direct_worker_baseline_verified",
+        "descendant_custody_gap_confirmed",
+        "guardian_implemented",
+        "descendant_cleanup_proven",
+        "runtime_enabled",
+        "deployed"
+      ],
+      "properties": {
+        "direct_worker_baseline_verified": {"const": true},
+        "descendant_custody_gap_confirmed": {"const": true},
+        "guardian_implemented": {"const": false},
+        "descendant_cleanup_proven": {"const": false},
+        "runtime_enabled": {"const": false},
+        "deployed": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "decision_sha256": {"$ref": "#/$defs/sha256"},
+    "next_gate": {
+      "const": "story_render_guardian_protocol_and_synthetic_custody_prototype"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_file": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "nonempty_strings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

@@ -3,6 +3,15 @@
 #[path = "../src/story_render_fixed_synthetic_provider.rs"]
 mod story_render_fixed_synthetic_provider;
 #[allow(dead_code)]
+#[path = "../src/story_render_guardian.rs"]
+mod story_render_guardian;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_protocol.rs"]
+mod story_render_guardian_protocol;
+#[allow(dead_code)]
+#[path = "../src/story_render_guardian_supervision.rs"]
+mod story_render_guardian_supervision;
+#[allow(dead_code)]
 #[path = "../src/story_render_supervisor.rs"]
 mod story_render_supervisor;
 #[path = "../src/story_render_synthetic_admission.rs"]
@@ -258,6 +267,7 @@ async fn busy_host_rejects_without_consuming_fixed_grant() {
         lifecycle_config(root.path(), &pid_file),
         br#"{"synthetic":"s626-busy"}"#.to_vec(),
     )
+    .await
     .expect("start first Worker");
     let pid = wait_for_pid_file(&pid_file).await;
     let mut provider = StoryRenderFixedSyntheticProvider::new(41);

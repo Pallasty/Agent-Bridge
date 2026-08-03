@@ -1,0 +1,365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_bridge.story_render_guardian_supervisor_integration_review.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "decision",
+    "reviewed_at",
+    "evidence",
+    "impact",
+    "current_findings",
+    "selected_integration",
+    "state_machine",
+    "replay_continuity",
+    "error_mapping",
+    "required_changes",
+    "rollout_and_rollback",
+    "authority",
+    "runtime_effects",
+    "claims",
+    "nonclaims",
+    "receipt_sha256",
+    "next_gate"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent_bridge.story_render_guardian_supervisor_integration_review.v1"
+    },
+    "status": {
+      "const": "story_render_guardian_supervisor_integration_reviewed"
+    },
+    "decision": {
+      "const": "default_off_synthetic_integration_contract_ready_implementation_blocked"
+    },
+    "reviewed_at": {"type": "string", "format": "date"},
+    "evidence": {
+      "type": "object",
+      "required": [
+        "reviewed_tree",
+        "s633_prototype",
+        "source_snapshot",
+        "verification"
+      ],
+      "properties": {
+        "reviewed_tree": {"$ref": "#/$defs/sha1"},
+        "s633_prototype": {
+          "type": "object",
+          "required": ["path", "sha256", "receipt_sha256"],
+          "properties": {
+            "path": {
+              "const": "docs/design/voice-scene/s633_story_render_guardian_synthetic_prototype.json"
+            },
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "receipt_sha256": {
+              "const": "fc1488bf4194d32f7c45aef2b50a02c0318f631721fbfe542490e28aa9154dc1"
+            }
+          },
+          "additionalProperties": false
+        },
+        "source_snapshot": {
+          "type": "array",
+          "minItems": 8,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/source_file"}
+        },
+        "verification": {
+          "type": "object",
+          "required": ["command", "passed", "failed"],
+          "properties": {
+            "command": {"type": "string", "minLength": 1},
+            "passed": {"const": 7},
+            "failed": {"const": 0}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "impact": {
+      "const": {
+        "architecture": "high",
+        "source_change_in_s634": "review_artifacts_only",
+        "runtime": "none",
+        "migration": "internal_async_api_break_in_s635",
+        "operational_privilege": "unchanged"
+      }
+    },
+    "current_findings": {
+      "const": {
+        "host_lock_explicit_unlock_on_drop": true,
+        "supervisor_spawns_worker_directly": true,
+        "supervisor_owns_child_wait": true,
+        "start_api_is_synchronous": true,
+        "worker_pid_immediately_available": true,
+        "guardian_v1_carries_worker_exit_status": false,
+        "guardian_v1_carries_real_exec_plan": false,
+        "guardian_v1_exposes_host_async_stdio": false,
+        "guardian_host_control_is_tokio_async": false,
+        "guardian_registered_in_bridge_library": false,
+        "runtime_callers_present": false
+      }
+    },
+    "selected_integration": {
+      "type": "object",
+      "required": [
+        "custody_mode_gate",
+        "default_mode",
+        "guardian_mode",
+        "lock_type",
+        "start_api",
+        "worker_binding_available_on_run_return",
+        "deadline_scope",
+        "host_control",
+        "guardian_control",
+        "control_protocol",
+        "exec_plan_transport",
+        "stdio_transport",
+        "result_transport",
+        "descriptor_allowlist"
+      ],
+      "properties": {
+        "custody_mode_gate": {"const": "StoryRenderCustodyMode"},
+        "default_mode": {"const": "direct_v1"},
+        "guardian_mode": {"const": "guardian_v2_default_off"},
+        "lock_type": {
+          "const": "last_close_shared_custody_without_explicit_unlock"
+        },
+        "start_api": {
+          "const": "async_bound_handshake_before_run_return"
+        },
+        "worker_binding_available_on_run_return": {"const": true},
+        "deadline_scope": {
+          "const": "one_absolute_deadline_includes_handshake_io_and_cleanup"
+        },
+        "host_control": {"const": "tokio_async_owned_cleanup_task"},
+        "guardian_control": {"const": "blocking_isolated_subprocess"},
+        "control_protocol": {
+          "const": {
+            "magic": "ABG2",
+            "version": 2,
+            "maximum_body_bytes": 64,
+            "length_prefix": "u32_big_endian",
+            "unknown_or_trailing_fields": "reject"
+          }
+        },
+        "exec_plan_transport": {
+          "const": {
+            "carrier": "sealed_memfd",
+            "canonical_encoding": "length_prefixed_binary_v1",
+            "maximum_bytes": 65536,
+            "digest": "sha256_echoed_in_bound_frame",
+            "unknown_or_trailing_fields": "reject"
+          }
+        },
+        "stdio_transport": {
+          "const": {
+            "carrier": "host_created_unix_socketpairs",
+            "worker_ends": "fixed_fds_via_guardian",
+            "host_io": "tokio_async_bounded",
+            "guardian_relays_payload_bytes": false,
+            "guardian_closes_worker_ends_after_spawn": true
+          }
+        },
+        "result_transport": {
+          "const": {
+            "control_protocol": "ABG2",
+            "terminal_carries": [
+              "worker_pid",
+              "worker_pgid",
+              "exit_kind",
+              "exit_value"
+            ],
+            "terminal_requires_group_absence": true,
+            "stdout_stderr_use_control_protocol": false
+          }
+        },
+        "descriptor_allowlist": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    },
+    "state_machine": {
+      "type": "object",
+      "required": [
+        "states",
+        "release_condition",
+        "cleanup_unproven",
+        "transitions",
+        "invariants"
+      ],
+      "properties": {
+        "states": {
+          "const": [
+            "admitted",
+            "guardian_spawned",
+            "bound",
+            "running",
+            "cancelling",
+            "terminal_clean",
+            "fallback_cleaning",
+            "manual_recovery_required",
+            "released"
+          ]
+        },
+        "release_condition": {
+          "const": "last_descriptor_close_after_group_absence_and_result_capture"
+        },
+        "cleanup_unproven": {
+          "const": "quarantine_host_descriptor_or_guardian_hold"
+        },
+        "transitions": {
+          "type": "array",
+          "minItems": 9,
+          "items": {"$ref": "#/$defs/transition"}
+        },
+        "invariants": {"$ref": "#/$defs/nonempty_strings"}
+      },
+      "additionalProperties": false
+    },
+    "replay_continuity": {
+      "type": "object",
+      "required": [
+        "order",
+        "busy_before_identity_and_reservation",
+        "reservation_before_payload_start",
+        "post_reservation_failure_consumes_sequence",
+        "finalize_failure_hides_worker_success",
+        "lock_release_before_continuity_finalize",
+        "independent_namespaces_preserved"
+      ],
+      "properties": {
+        "order": {
+          "const": [
+            "acquire_render_lock",
+            "generate_request_identity",
+            "reserve_sequence",
+            "spawn_guardian",
+            "record_worker_binding",
+            "acknowledge_start",
+            "bounded_worker_io",
+            "prove_worker_group_absent",
+            "validate_terminal_and_response",
+            "release_host_custody",
+            "commit_or_abort_sequence"
+          ]
+        },
+        "busy_before_identity_and_reservation": {"const": true},
+        "reservation_before_payload_start": {"const": true},
+        "post_reservation_failure_consumes_sequence": {"const": true},
+        "finalize_failure_hides_worker_success": {"const": true},
+        "lock_release_before_continuity_finalize": {"const": true},
+        "independent_namespaces_preserved": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "error_mapping": {
+      "type": "object",
+      "minProperties": 14,
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "required_changes": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/required_change"}
+    },
+    "rollout_and_rollback": {
+      "const": {
+        "default_off": true,
+        "activation_scope": "synthetic_config_per_admission",
+        "lock_namespace_shared_across_modes": true,
+        "rollback_scope": "future_admissions_only",
+        "in_flight_mode_switch_allowed": false,
+        "guardian_loss_downgrades_in_flight_to_direct": false,
+        "parity_gate_required": true,
+        "single_failure_fault_matrix_required": true,
+        "real_worker_gate_open": false,
+        "runtime_gate_open": false
+      }
+    },
+    "authority": {
+      "type": "object",
+      "minProperties": 7,
+      "additionalProperties": {"const": false}
+    },
+    "runtime_effects": {
+      "type": "object",
+      "minProperties": 14,
+      "additionalProperties": {"const": false}
+    },
+    "claims": {
+      "const": {
+        "integration_review_complete": true,
+        "supervisor_modified": false,
+        "guardian_v2_implemented": false,
+        "real_worker_executed": false,
+        "runtime_integrated": false,
+        "mcp_registered": false,
+        "deployed": false
+      }
+    },
+    "nonclaims": {"$ref": "#/$defs/nonempty_strings"},
+    "receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "next_gate": {
+      "const": "story_render_guardian_supervisor_synthetic_integration"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_file": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "transition": {
+      "type": "object",
+      "required": ["from", "event", "to"],
+      "properties": {
+        "from": {
+          "oneOf": [
+            {"type": "string", "minLength": 1},
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          ]
+        },
+        "event": {"type": "string", "minLength": 1},
+        "to": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "required_change": {
+      "type": "object",
+      "required": ["path", "symbols", "change", "risk", "acceptance"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "symbols": {"$ref": "#/$defs/nonempty_strings"},
+        "change": {"type": "string", "minLength": 1},
+        "risk": {"enum": ["low", "medium", "high"]},
+        "acceptance": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "nonempty_strings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

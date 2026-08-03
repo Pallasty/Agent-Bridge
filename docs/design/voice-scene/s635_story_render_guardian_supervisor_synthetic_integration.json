@@ -1,0 +1,142 @@
+{
+  "schema": "agent_bridge.story_render_guardian_supervisor_synthetic_integration.v1",
+  "status": "story_render_guardian_supervisor_synthetic_integration_verified",
+  "decision": "guardian_v2_default_off_synthetic_path_accepted_runtime_adoption_not_authorized",
+  "verified_at": "2026-08-02",
+  "baseline": {
+    "implementation_start": "49cf7238ab88b868d5cab5d05559d4e05408c8f4",
+    "landed_parent": "924e7fdd314e6efcd7a68e2c784c99ac3df2a18e",
+    "s634_receipt": {
+      "path": "docs/design/voice-scene/s634_story_render_guardian_supervisor_integration_review.json",
+      "sha256": "470a03d7a0fb544e7accacf23cdb8a56d2f856acf0dcbdb5d4c679ffcb6eecf5"
+    }
+  },
+  "implementation": {
+    "default_mode": "direct_v1",
+    "guardian_mode": "guardian_v2_explicit_synthetic_configuration_only",
+    "runtime_callers": 0,
+    "product_entrypoints": 0,
+    "mcp_tools_added": 0,
+    "deployment_effect": "none",
+    "start_boundary": "async_exact_bound_before_story_render_run",
+    "lock_release": "last_close_only_no_lock_un",
+    "control_protocol": {
+      "magic": "ABG2",
+      "version": 2,
+      "maximum_body_bytes": 64,
+      "length_prefix": "u32_big_endian",
+      "unknown_reserved_or_trailing_fields": "reject"
+    },
+    "exec_plan": {
+      "schema": "WorkerExecPlanV1",
+      "carrier": "linux_sealed_memfd",
+      "maximum_bytes": 65536,
+      "digest": "sha256_bound_frame_echo",
+      "worker_exec_failure_channel": "close_on_exec_status_pipe"
+    },
+    "stdio": {
+      "carrier": "host_created_unix_socketpairs",
+      "guardian_relays_payload": false,
+      "stdin_max_bytes": 65536,
+      "stdout_max_bytes": 65536,
+      "stderr_max_bytes": 16384
+    },
+    "payload_descriptor_audit": {
+      "fixed_range": "190-197",
+      "expected": "EBADF_after_worker_exec",
+      "verified": true
+    }
+  },
+  "failure_mapping": {
+    "guardian_spawn": "GuardianSpawnFailed",
+    "bound_timeout_or_mismatch": "GuardianProtocolRejected",
+    "worker_exec": "SpawnFailed",
+    "worker_nonzero_or_signaled": "WorkerFailed",
+    "worker_exit_with_live_group": "WorkerFailed_after_cleanup",
+    "guardian_loss": "GuardianLost_after_exact_reap_and_host_fallback",
+    "cleanup_unproven": "CleanupUnproven_and_host_lock_retained"
+  },
+  "source_evidence": [
+    {
+      "path": "crates/bridge/src/story_render_guardian_protocol.rs",
+      "sha256": "620814d8012ffb424eee5f1cafac71335d428da287381c18727df3f8be70c28f"
+    },
+    {
+      "path": "crates/bridge/src/story_render_guardian.rs",
+      "sha256": "454ec0b934aec110470a7eb968bfe7eaa36e92d010f2b99af055aec686cf2cf4"
+    },
+    {
+      "path": "crates/bridge/src/story_render_guardian_supervision.rs",
+      "sha256": "f2b01983df9e4e4c06a08381523c06d3150d2232413b9794e46939f32ea0b864"
+    },
+    {
+      "path": "crates/bridge/src/story_render_supervisor.rs",
+      "sha256": "928174a05da6fe5cab31b2e5bde2e84b874aadc9545f85ba91f48f8cfeb6b158"
+    },
+    {
+      "path": "crates/bridge/src/story_render_synthetic_admission.rs",
+      "sha256": "1820ac638570e184c762fd1de464d144855cab0995824db2c2250e4b88a3f4f2"
+    },
+    {
+      "path": "crates/bridge/src/story_render_synthetic_composition.rs",
+      "sha256": "40ff7c2e686e3794a11ba8d9ced67b289390df1ce7eef5d65d2323bb8d2ac8af"
+    },
+    {
+      "path": "crates/bridge/src/lib.rs",
+      "sha256": "74bc7722e3efdabcba5fd96099d504625215ae0cfe0dbf976b89f3ce32ec4bd2"
+    }
+  ],
+  "test_artifacts": [
+    {
+      "path": "crates/bridge/tests/story_render_guardian_protocol_s635.rs",
+      "sha256": "d59da10869b9f0c94165114950f2c5d5eb5ce7711c7e3c7aca0e462cd3bd4a6d"
+    },
+    {
+      "path": "crates/bridge/tests/story_render_guardian_s635.rs",
+      "sha256": "d29ec1aaae23f6dbdb9d24c10008cae5fe337eec60155584cb26e82c0904e400"
+    },
+    {
+      "path": "crates/bridge/tests/story_render_guardian_supervisor_s635.rs",
+      "sha256": "a100834deb68dce37ee607f9803800851eba7a2d7c6f1914f1e1ecbeeb660666"
+    },
+    {
+      "path": "crates/bridge/tests/fixtures/story_render_worker_s623.py",
+      "sha256": "5054e61cb6acc0e6f040d6aa57ad99ba614f0ca471a8ba8ecf2883cb2304d4ed"
+    }
+  ],
+  "test_evidence": {
+    "s635": {
+      "command": "cargo test -p ab-bridge --test story_render_guardian_protocol_s635 --test story_render_guardian_s635 --test story_render_guardian_supervisor_s635 -- --test-threads=1",
+      "passed": 18,
+      "failed": 0
+    },
+    "direct_v1_regression_s623_s631": {
+      "command": "cargo test -p ab-bridge --test story_render_supervisor_s623 --test story_render_synthetic_composition_s624 --test story_render_synthetic_admission_s625 --test story_render_fixed_synthetic_provider_s626 --test story_render_fixed_synthetic_replay_s627 --test story_render_durable_synthetic_composition_s630 --test story_render_durable_cancellation_crash_s631 -- --test-threads=1",
+      "passed": 55,
+      "failed": 0
+    },
+    "targeted_clippy": {
+      "command": "cargo clippy -p ab-bridge --no-deps --test story_render_guardian_protocol_s635 --test story_render_guardian_s635 --test story_render_guardian_supervisor_s635 --message-format=short",
+      "passed": true,
+      "pre_existing_bridge_warnings": 218
+    }
+  },
+  "nonclaims": [
+    "real_story_worker_compatibility",
+    "qwen3_tts_or_gpu_execution",
+    "audio_output_or_quality",
+    "simultaneous_host_and_guardian_loss",
+    "adversarial_process_group_escape",
+    "cgroup_or_systemd_custody",
+    "runtime_configuration_adoption",
+    "binary_deployment",
+    "mcp_or_current_client_visibility",
+    "human_audibility"
+  ],
+  "next_gate": {
+    "id": "S636",
+    "name": "story_render_guardian_runtime_adoption_review",
+    "authority": "review_only",
+    "real_worker_model_audio_mcp_deployment": "not_authorized"
+  }
+}

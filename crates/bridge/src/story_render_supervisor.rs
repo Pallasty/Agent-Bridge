@@ -1,8 +1,7 @@
-//! Synthetic-only S623 process supervisor for the fixed Story render protocol.
+//! Synthetic-only Story render process supervisor.
 //!
-//! There is deliberately no runtime caller. The module owns bounded transport,
-//! process-group cleanup, and a host lock; authority, model execution, MCP
-//! registration, and real custody remain outside this stage.
+//! DirectV1 remains the default rollback path. GuardianV2 is configuration-
+//! injected and default-off; neither mode has a product runtime caller here.
 
 #![deny(clippy::all)]
 
@@ -25,7 +24,16 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::sync::oneshot;
 
+use crate::story_render_guardian::GuardianLaunchSpec;
+use crate::story_render_guardian_supervision::start_guardian_supervision;
+
 pub type ResponseValidator = Arc<dyn Fn(&[u8]) -> bool + Send + Sync + 'static>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoryRenderCustodyMode {
+    DirectV1,
+    GuardianV2(GuardianLaunchSpec),
+}
 
 #[derive(Clone)]
 pub struct StoryRenderSupervisorConfig {
@@ -40,6 +48,7 @@ pub struct StoryRenderSupervisorConfig {
     pub termination_grace: Duration,
     pub environment: BTreeMap<String, String>,
     pub response_validator: ResponseValidator,
+    pub custody_mode: StoryRenderCustodyMode,
 }
 
 impl StoryRenderSupervisorConfig {
@@ -59,6 +68,7 @@ impl StoryRenderSupervisorConfig {
                 serde_json::from_slice::<serde_json::Value>(raw)
                     .is_ok_and(|value| value.is_object())
             }),
+            custody_mode: StoryRenderCustodyMode::DirectV1,
         }
     }
 }
@@ -112,6 +122,14 @@ pub enum StoryRenderSupervisorError {
     SignalFailed,
     #[error("cleanup_task_failed")]
     CleanupTaskFailed,
+    #[error("guardian_spawn_failed")]
+    GuardianSpawnFailed,
+    #[error("guardian_protocol_rejected")]
+    GuardianProtocolRejected,
+    #[error("guardian_lost")]
+    GuardianLost,
+    #[error("cleanup_unproven")]
+    CleanupUnproven,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,9 +140,9 @@ pub struct StoryRenderOutput {
 }
 
 pub struct StoryRenderRun {
-    worker_pid: u32,
-    cancel: Option<oneshot::Sender<()>>,
-    result: oneshot::Receiver<Result<StoryRenderOutput, StoryRenderSupervisorError>>,
+    pub(crate) worker_pid: u32,
+    pub(crate) cancel: Option<oneshot::Sender<()>>,
+    pub(crate) result: oneshot::Receiver<Result<StoryRenderOutput, StoryRenderSupervisorError>>,
 }
 
 pub struct StoryRenderAdmission {
@@ -137,11 +155,14 @@ impl StoryRenderAdmission {
         self.config.response_validator = response_validator;
     }
 
-    pub fn start(self, request: Vec<u8>) -> Result<StoryRenderRun, StoryRenderSupervisorError> {
+    pub async fn start(
+        self,
+        request: Vec<u8>,
+    ) -> Result<StoryRenderRun, StoryRenderSupervisorError> {
         if request.len() > self.config.stdin_max_bytes {
             return Err(StoryRenderSupervisorError::InputTooLarge);
         }
-        start_with_lock(self.config, request, self.lock)
+        start_with_lock(self.config, request, self.lock).await
     }
 }
 
@@ -177,7 +198,7 @@ impl Drop for StoryRenderRun {
     }
 }
 
-pub fn start_story_render_supervisor(
+pub async fn start_story_render_supervisor(
     config: StoryRenderSupervisorConfig,
     request: Vec<u8>,
 ) -> Result<StoryRenderRun, StoryRenderSupervisorError> {
@@ -187,7 +208,7 @@ pub fn start_story_render_supervisor(
         return Err(StoryRenderSupervisorError::InputTooLarge);
     }
     let lock = acquire_lock(&config.lock_path)?;
-    start_with_lock(config, request, lock)
+    start_with_lock(config, request, lock).await
 }
 
 pub fn begin_story_render_admission(
@@ -205,7 +226,20 @@ fn require_runtime() -> Result<(), StoryRenderSupervisorError> {
         .map_err(|_| StoryRenderSupervisorError::InvalidConfiguration)
 }
 
-fn start_with_lock(
+async fn start_with_lock(
+    config: StoryRenderSupervisorConfig,
+    request: Vec<u8>,
+    lock: HostLock,
+) -> Result<StoryRenderRun, StoryRenderSupervisorError> {
+    match config.custody_mode.clone() {
+        StoryRenderCustodyMode::DirectV1 => start_direct_with_lock(config, request, lock),
+        StoryRenderCustodyMode::GuardianV2(launch) => {
+            start_guardian_supervision(config, request, lock, launch).await
+        }
+    }
+}
+
+fn start_direct_with_lock(
     config: StoryRenderSupervisorConfig,
     request: Vec<u8>,
     lock: HostLock,
@@ -262,15 +296,7 @@ fn validate_config(config: &StoryRenderSupervisorConfig) -> Result<(), StoryRend
     Ok(())
 }
 
-struct HostLock(File);
-
-impl Drop for HostLock {
-    fn drop(&mut self) {
-        unsafe {
-            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
-        }
-    }
-}
+pub(crate) struct HostLock(pub(crate) File);
 
 fn acquire_lock(path: &Path) -> Result<HostLock, StoryRenderSupervisorError> {
     let file = OpenOptions::new()
@@ -477,7 +503,10 @@ async fn terminate_and_wait(
     Ok(())
 }
 
-fn signal_group(pid: u32, signal: libc::c_int) -> Result<(), StoryRenderSupervisorError> {
+pub(crate) fn signal_group(
+    pid: u32,
+    signal: libc::c_int,
+) -> Result<(), StoryRenderSupervisorError> {
     if pid <= 1 || pid > i32::MAX as u32 {
         return Err(StoryRenderSupervisorError::SignalFailed);
     }

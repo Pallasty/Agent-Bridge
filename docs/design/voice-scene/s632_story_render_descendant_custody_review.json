@@ -1,0 +1,275 @@
+{
+  "schema": "agent_bridge.story_render_descendant_custody_review.v1",
+  "status": "story_render_descendant_custody_reviewable",
+  "decision": "repository_guardian_with_lock_custody_selected_for_source_only_prototype",
+  "reviewed_at": "2026-08-02",
+  "evidence": {
+    "source_snapshot": [
+      {
+        "path": "crates/bridge/src/story_render_supervisor.rs",
+        "sha256": "1db1d70cc705a1d6e958db75d8619e019b232bcecdaeaa461998dccbebd5550c"
+      },
+      {
+        "path": "crates/bridge/tests/story_render_durable_cancellation_crash_s631.rs",
+        "sha256": "ed511093d8e367ff2423eedbdcfdabe75314a5e8708d8ff350279a35a3b132c0"
+      }
+    ],
+    "host_snapshot": {
+      "kernel": "Linux 7.0.0-27-generic x86_64 GNU/Linux",
+      "cgroup_version": 2,
+      "current_cgroup": "/user.slice/user-1000.slice/session-10.scope",
+      "current_cgroup_kill_present": true,
+      "current_cgroup_kill_writable_by_user": false,
+      "delegated_render_subtree_proven": false,
+      "user_systemd_state": "degraded"
+    },
+    "primary_references": [
+      {
+        "topic": "parent_death_signal",
+        "url": "https://man7.org/linux/man-pages/man2/pr_set_pdeathsig.2const.html",
+        "finding": "The signal targets the calling process when its parent thread dies and the setting is cleared in a forked child."
+      },
+      {
+        "topic": "child_subreaper",
+        "url": "https://man7.org/linux/man-pages/man2/PR_SET_CHILD_SUBREAPER.2const.html",
+        "finding": "An orphaned descendant is reparented to the nearest living subreaper, which can wait for it."
+      },
+      {
+        "topic": "process_group",
+        "url": "https://man7.org/linux/man-pages/man2/getpgrp.2.html",
+        "finding": "A forked child inherits its parent process group, but a process can later change grouping where permitted."
+      },
+      {
+        "topic": "flock_open_file_description",
+        "url": "https://man7.org/linux/man-pages/man2/flock.2.html",
+        "finding": "Duplicated descriptors share one flock and the lock persists until explicit unlock or the last duplicate closes."
+      },
+      {
+        "topic": "pidfd",
+        "url": "https://man7.org/linux/man-pages/man2/pidfd_open.2.html",
+        "finding": "A pidfd gives pollable identity and signal access for one process, not ownership of a descendant set."
+      },
+      {
+        "topic": "cgroup_v2_kill",
+        "url": "https://docs.kernel.org/admin-guide/cgroup-v2.html",
+        "finding": "Writing 1 to a non-root cgroup.kill kills the cgroup subtree and handles concurrent forks and migrations."
+      },
+      {
+        "topic": "systemd_unit_kill",
+        "url": "https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html",
+        "finding": "A control-group KillMode delegates unit process-set cleanup to the service manager, subject to manager and unit availability."
+      }
+    ]
+  },
+  "current_baseline": {
+    "direct_worker_parent_death_signal": true,
+    "worker_session_and_process_group": true,
+    "controlled_path_group_termination": true,
+    "host_owned_lock": true,
+    "direct_worker_abrupt_exit_proven": true,
+    "arbitrary_descendant_abrupt_exit_proven": false
+  },
+  "threat_model": {
+    "fault_model": "one_userspace_custodian_failure_at_a_time",
+    "in_scope": [
+      "host_exits_abruptly_while_guardian_remains_alive",
+      "guardian_exits_abruptly_while_host_remains_alive",
+      "worker_exits_before_its_descendants",
+      "worker_group_ignores_sigterm",
+      "spawn_and_readiness_failures_before_payload_start",
+      "normal_completion_and_host_cancellation"
+    ],
+    "out_of_scope": [
+      "simultaneous_host_and_guardian_loss",
+      "privileged_or_adversarial_descendant_escape_from_process_group",
+      "descendant_migration_out_of_a_future_cgroup",
+      "uninterruptible_kernel_sleep",
+      "kernel_panic_or_power_loss",
+      "cross_host_custody"
+    ]
+  },
+  "option_assessment": [
+    {
+      "id": "pr_set_pdeathsig",
+      "role": "direct_worker_defense",
+      "decision": "retain",
+      "reason": "It closes the direct-parent loss race for the Worker but does not propagate through fork."
+    },
+    {
+      "id": "session_process_group",
+      "role": "bounded_descendant_signal_set",
+      "decision": "retain",
+      "reason": "It supports TERM then KILL for descendants that retain the Worker group, without extra privilege."
+    },
+    {
+      "id": "pr_set_child_subreaper",
+      "role": "orphan_adoption_and_reaping",
+      "decision": "retain",
+      "reason": "It lets the Guardian adopt and wait for orphaned Worker descendants."
+    },
+    {
+      "id": "repository_owned_guardian",
+      "role": "host_independent_custodian",
+      "decision": "select",
+      "reason": "It preserves current stdio and fixture boundaries while keeping cleanup and the render lock alive after host loss."
+    },
+    {
+      "id": "pidfd",
+      "role": "race_resistant_process_identity",
+      "decision": "defer",
+      "reason": "It strengthens Worker identity and exit observation but cannot define or kill the complete descendant set."
+    },
+    {
+      "id": "cgroup_v2",
+      "role": "kernel_owned_process_set_hardening",
+      "decision": "defer",
+      "reason": "It is the stronger escape-resistant kill set, but no writable delegated per-render subtree is proven for this session."
+    },
+    {
+      "id": "systemd_transient_unit",
+      "role": "external_service_manager_custody",
+      "decision": "reject_as_baseline",
+      "reason": "It changes parent, stdio, lifecycle, and deployment assumptions and the current user manager is degraded."
+    }
+  ],
+  "selected_architecture": {
+    "name": "repository_owned_guardian",
+    "actors": {
+      "host": "Acquires admission, retains a fallback lock descriptor, records readiness, drives request and response, and cleans a known group if the Guardian alone fails.",
+      "guardian": "Runs outside the Worker group, becomes a child subreaper, retains the same lock open-file-description, owns Worker lifecycle, and survives Host EOF.",
+      "worker_bootstrap": "Sets parent-death SIGKILL and creates its session and group before waiting behind a start gate; payload exec is forbidden until the Host has acknowledged its PID and PGID.",
+      "payload": "Exec-replaces the bootstrap only after readiness and inherits neither the custody lock nor Guardian protocol descriptors."
+    },
+    "inherited_descriptors": [
+      "shared_flock_open_file_description_host_and_guardian_only",
+      "host_to_guardian_control_and_liveness_read_end",
+      "guardian_to_host_bounded_event_write_end",
+      "guardian_private_worker_start_gate"
+    ],
+    "startup_sequence": [
+      "host_acquires_nonblocking_flock_and_creates_cloexec_channels",
+      "host_spawns_guardian_with_only_explicit_fixed_descriptors",
+      "guardian_validates_descriptors_and_sets_child_subreaper",
+      "guardian_forks_bootstrap_which_sets_pdeathsig_and_session_before_blocking",
+      "guardian_reports_guardian_pid_worker_pid_and_pgid_while_payload_remains_gated",
+      "host_validates_and_records_identity_then_acknowledges_start",
+      "guardian_releases_start_gate_and_payload_exec_closes_all_custody_descriptors"
+    ],
+    "lock_invariant": "Host and Guardian retain duplicate descriptors for the same flock open-file-description; neither may call LOCK_UN, and the final descriptor may close only after its surviving custodian has completed cleanup.",
+    "liveness_invariant": "The Host owns the sole control-channel write end; EOF is an unforgeable local Host-loss signal to the Guardian, while Guardian event EOF is the Host fallback trigger.",
+    "termination_invariant": "Every started path sends SIGTERM to the recorded Worker process group, waits the bounded grace, sends SIGKILL, and proves the group absent before releasing custody.",
+    "reaping_invariant": "The Guardian waits for the direct Worker and drains all orphan descendants adopted as subreaper before its lock descriptor closes.",
+    "single_fault_paths": {
+      "host_lost": "Guardian observes EOF, terminates the Worker group, reaps direct and adopted children, then closes its final lock descriptor.",
+      "guardian_lost_before_payload_start": "Bootstrap parent-death handling prevents payload start; Host retains the lock and rejects the attempt.",
+      "guardian_lost_after_worker_identity": "Host observes Guardian EOF, uses the recorded PGID for bounded group cleanup, proves absence, then closes its final lock descriptor.",
+      "normal_completion": "Guardian reaps and proves group absence, closes its lock descriptor, and reports completion; Host closes its duplicate without LOCK_UN after accepting the terminal event."
+    }
+  },
+  "failure_matrix": [
+    {
+      "fault": "guardian_spawn_failed",
+      "owner": "host",
+      "required_result": "no_worker_started_and_host_closes_only_lock_descriptor",
+      "lock_release_allowed": true
+    },
+    {
+      "fault": "guardian_descriptor_validation_failed",
+      "owner": "host_and_guardian",
+      "required_result": "no_payload_start_and_both_descriptor_copies_close",
+      "lock_release_allowed": true
+    },
+    {
+      "fault": "bootstrap_failed_before_bound_event",
+      "owner": "guardian",
+      "required_result": "wait_bootstrap_and_report_failure_without_payload_start",
+      "lock_release_allowed": true
+    },
+    {
+      "fault": "host_lost_before_start_ack",
+      "owner": "guardian",
+      "required_result": "keep_start_gate_closed_kill_bootstrap_reap_then_close_lock",
+      "lock_release_allowed": true
+    },
+    {
+      "fault": "host_lost_after_payload_start",
+      "owner": "guardian",
+      "required_result": "term_grace_kill_group_reap_all_adopted_children_then_close_lock",
+      "lock_release_allowed": true
+    },
+    {
+      "fault": "guardian_lost_after_worker_bound",
+      "owner": "host",
+      "required_result": "kill_recorded_group_prove_absence_then_close_lock",
+      "lock_release_allowed": true
+    },
+    {
+      "fault": "worker_exit_with_live_group_members",
+      "owner": "guardian",
+      "required_result": "treat_as_cleanup_path_not_success_until_group_absent",
+      "lock_release_allowed": false
+    },
+    {
+      "fault": "group_absence_not_proven_before_deadline",
+      "owner": "surviving_custodian",
+      "required_result": "fail_closed_and_retain_lock_descriptor_for_manual_recovery",
+      "lock_release_allowed": false
+    },
+    {
+      "fault": "simultaneous_host_and_guardian_loss",
+      "owner": "none_in_selected_baseline",
+      "required_result": "explicit_nonclaim_until_cgroup_or_service_manager_profile",
+      "lock_release_allowed": false
+    }
+  ],
+  "acceptance_gates": {
+    "s633_scope": "guardian_protocol_and_synthetic_custody_prototype",
+    "required_tests": [
+      "payload_cannot_start_before_host_records_worker_identity",
+      "host_exit_eof_reaps_term_ignoring_group_before_lock_recovery",
+      "guardian_exit_after_bound_uses_host_fallback_before_lock_recovery",
+      "worker_exit_with_live_descendant_is_not_terminal_success",
+      "lock_has_no_unlock_gap_across_host_or_guardian_single_failure",
+      "payload_does_not_inherit_lock_or_protocol_descriptors",
+      "malformed_or_oversized_guardian_frame_fails_closed",
+      "current_supervisor_remains_unwired_and_runtime_dormant"
+    ],
+    "supervisor_integration_allowed": false
+  },
+  "authority": {
+    "implementation_authorized": false,
+    "execution_authorized": false,
+    "deployment_authorized": false,
+    "runtime_adoption_authorized": false,
+    "cgroup_mutation_authorized": false,
+    "systemd_unit_creation_authorized": false
+  },
+  "runtime_effects": {
+    "guardian_created": false,
+    "supervisor_modified": false,
+    "worker_spawned": false,
+    "descendant_spawned": false,
+    "cgroup_created": false,
+    "cgroup_killed": false,
+    "systemd_unit_created": false,
+    "lock_file_created": false,
+    "authorization_key_read": false,
+    "nonce_consumed": false,
+    "model_loaded": false,
+    "audio_rendered": false,
+    "audio_played": false,
+    "memory_written": false,
+    "configuration_modified": false,
+    "binary_deployed": false
+  },
+  "claims": {
+    "direct_worker_baseline_verified": true,
+    "descendant_custody_gap_confirmed": true,
+    "guardian_implemented": false,
+    "descendant_cleanup_proven": false,
+    "runtime_enabled": false,
+    "deployed": false
+  },
+  "decision_sha256": "5c902205f35709c4ea4a6ebd588c608e046c3282509f772a48532793c0498227",
+  "next_gate": "story_render_guardian_protocol_and_synthetic_custody_prototype"
+}
