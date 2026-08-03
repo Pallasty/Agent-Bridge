@@ -867,7 +867,7 @@ fn runtime_environment() -> RuntimeEnvironmentEvidence {
         canonical_cpu_siblings: read("/sys/devices/system/cpu/cpu39/topology/thread_siblings_list"),
         libc: command_first_line("getconf", &["GNU_LIBC_VERSION"]),
         allocator: allocator_environment(),
-        systemd_version: command_first_line("systemd", &["--version"]),
+        systemd_version: command_first_line("systemctl", &["--version"]),
         loadavg: read("/proc/loadavg"),
         cpu_pressure: read("/proc/pressure/cpu"),
         memory_pressure: read("/proc/pressure/memory"),
@@ -2067,6 +2067,13 @@ mod tests {
             AppError::EvidenceInvalid.exit_code(),
             AppError::DecisionFailed.exit_code()
         );
+    }
+
+    #[test]
+    fn runtime_environment_binds_installed_systemd_version() {
+        let environment = super::runtime_environment();
+        assert_ne!(environment.systemd_version, "UNBOUND");
+        assert!(environment.systemd_version.starts_with("systemd "));
     }
 
     #[test]

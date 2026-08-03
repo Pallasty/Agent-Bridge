@@ -84,8 +84,12 @@ receipt retains the raw 32-byte header and validates SQLite magic, format
 version, encoded page size, and frame-length layout before requiring a separate
 `wal_checkpoint(TRUNCATE)` cleanup to prove zero WAL bytes. This deliberately
 does not claim frame-checksum, commit-frame, torn-write, or crash-durability
-validity. Cleanup may change only the physical main-file SHA; every logical and
-schema field must stay equal.
+validity. The WAL-index is transient and may grow while the connection remains
+open. Its receipt must start at one 32 KiB region and then match the exact
+frame-derived layout: the first region covers 4,062 WAL frames and every later
+region covers 4,096. WAL truncation may therefore leave this structurally exact
+SHM allocation in place. Cleanup may change only the physical main-file SHA;
+every logical and schema field must stay equal.
 
 Post-commit staging cleanup cannot truthfully turn the already committed index
 operation into an error. Cleanup failure is therefore a warning plus
@@ -127,6 +131,12 @@ Canonical trials therefore must:
   `CPUAffinity=39`, native-architecture seccomp, `NoNewPrivileges`, and a deny
   rule for every later `sched_setaffinity`; both endpoints independently require
   every enumerated TID to retain exactly CPU39 affinity.
+- Retain operation-window `/proc/pressure/*` start/end counters and require
+  monotonic, recomputable deltas, but treat them as observations rather than
+  per-child eligibility thresholds. They are host-wide and include pressure
+  caused by the measured workload itself. The preregistered PSI bounds remain
+  attached to the 30-second preflight; per-child external-interference gates
+  remain CPU39, sibling79, cgroup ownership/throttling, affinity, and seccomp.
 - At each endpoint, perform an absolute one-millisecond `CLOCK_MONOTONIC` sleep
   and prove a real depart by requiring `RUSAGE_THREAD.ru_nvcsw` to increase;
   then read direct-cgroup `cpu.stat before`, `/proc/schedstat` v17 CPU39,
@@ -226,6 +236,18 @@ direct-cgroup/schedstat interval, absolute blocking-switch deadline, end-current
 slice deduction, monotonic operation bracket, CPU79 fallback, upward rounding,
 all-thread CPU39/seccomp/cgroup custody, no-throttle condition, and assessor
 rejection of forged raw or derived evidence.
+
+Canonical attempt15 is retained as nonterminal diagnostic evidence. All ten
+pairs and every aggregate RSS, cgroup-peak, elapsed, transaction, and WAL gate
+were green, but the assessor correctly withheld eligibility because three
+evaluator contracts were misbound: runtime provenance invoked a nonexistent
+`systemd` executable instead of the installed `systemctl`; failure receipts
+mistook normal frame-derived WAL-index region growth for rollback drift; and
+operation-window global PSI thresholds attempted to classify workload-created
+I/O pressure as external noise. RED-to-GREEN regressions now bind the installed
+systemd version, the exact SQLite WAL-index region boundaries, high monotonic
+operation PSI as observational, and counter reversal as invalid. A fresh release
+canonical run is still required; attempt15 cannot authorize promotion.
 
 The final result, raw receipt identity, performance decision, and any A2
 nomination will be appended only after a clean release build and the frozen

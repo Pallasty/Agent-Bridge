@@ -68,6 +68,14 @@ throttling, and both external CPU39 activity and sibling-79 activity at or below
 be exactly `{39}`; a real transient smoke also proves that the seccomp contract
 rejects a later affinity change.
 
+The child endpoints retain the five raw host-wide `/proc/pressure/*` counters
+and require monotonic, arithmetically valid deltas. Those operation-window PSI
+values are observational rather than eligibility thresholds: the measured
+database work contributes to the same global counters, so they cannot identify
+external interference. The frozen PSI thresholds apply only to the 30-second
+preflight window. CPU39, sibling79, cgroup ownership, throttling, affinity, and
+seccomp remain the per-child interference gates.
+
 Each endpoint performs an absolute one-millisecond `CLOCK_MONOTONIC` sleep and
 requires `RUSAGE_THREAD.ru_nvcsw` to advance before sampling. It then brackets
 `/proc/schedstat` v17 CPU39 and `/proc/stat` with direct-cgroup `cpu.stat`
@@ -180,7 +188,12 @@ connection, and staging cleanup. Fault children prove an empty WAL start. A
 rollback may leave an uncommitted WAL. The receipt retains its raw 32-byte
 header and independently checks SQLite magic, format version, encoded page
 size, and frame-length layout before a separate TRUNCATE cleanup proves a
-zero-length WAL. This is header/layout evidence, not frame-checksum,
+zero-length WAL. The transient WAL-index sidecar is checked structurally rather
+than required to remain at its initial size: it begins at 32 KiB and must occupy
+exactly the regions implied by the observed WAL frame count (4,062 frames in the
+first region and 4,096 in each later region). It may retain that exact size
+while the connection remains open after WAL truncation. This is header/layout
+evidence, not frame-checksum,
 commit-frame, torn-write, or crash-durability proof. Cleanup may change only the
 main-file physical SHA; logical rows, schema metadata, page/freelist state,
 integrity, and foreign-key evidence must remain identical.

@@ -762,6 +762,40 @@ fn canonical_accepts_complete_balanced_threshold_passing_evidence() {
 }
 
 #[test]
+fn canonical_accepts_structural_wal_index_growth_after_fault_rollback() {
+    let mut input = canonical_input();
+    let receipt = &mut input.failure_atomicity[1];
+    let frames = 4_063;
+    receipt.post_fault_wal_header_layout = wal_header_layout(frames);
+    receipt.main_wal_bytes_after = wal_bytes(frames);
+    receipt.main_shm_bytes_after = 65_536;
+    receipt.main_shm_bytes_after_cleanup = 65_536;
+
+    let assessment = assess_suite(&input);
+    assert!(assessment.eligible, "{:#?}", assessment.reasons);
+    assert!(assessment.decision_pass);
+}
+
+#[test]
+fn canonical_treats_operation_window_system_pressure_as_observational() {
+    let mut input = canonical_input();
+    let evidence = input.pairs[0]
+        .staged_native
+        .child_interference
+        .as_mut()
+        .unwrap();
+    evidence.end.pressure.cpu_some_us = 1_000_000;
+    evidence.end.pressure.memory_some_us = 1_000_000;
+    evidence.end.pressure.memory_full_us = 1_000_000;
+    evidence.end.pressure.io_some_us = 1_000_000;
+    evidence.end.pressure.io_full_us = 1_000_000;
+
+    let assessment = assess_suite(&input);
+    assert!(assessment.eligible, "{:#?}", assessment.reasons);
+    assert!(assessment.decision_pass);
+}
+
+#[test]
 fn canonical_raw_packet_round_trips_complete_input_and_recomputes_assessment() {
     let input = canonical_input();
     let assessment = assess_suite(&input);
@@ -1418,27 +1452,16 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
     sibling.excluded_smt_sibling_busy_upper_bound_bps = 5_301;
     assert_canonical_rejected(continuous_current_sibling);
 
-    let mut noisy_memory_some = canonical_input();
-    noisy_memory_some.pairs[0]
-        .full_vec
-        .child_interference
-        .as_mut()
-        .unwrap()
-        .end
-        .pressure
-        .memory_some_us = 30_000;
-    assert_canonical_rejected(noisy_memory_some);
-
-    let mut noisy_io_some = canonical_input();
-    noisy_io_some.pairs[0]
+    let mut reversed_system_pressure = canonical_input();
+    reversed_system_pressure.pairs[0]
         .staged_native
         .child_interference
         .as_mut()
         .unwrap()
-        .end
+        .start
         .pressure
-        .io_some_us = 30_000;
-    assert_canonical_rejected(noisy_io_some);
+        .io_full_us = 1;
+    assert_canonical_rejected(reversed_system_pressure);
 
     let mut forged_sleep_deadline = canonical_input();
     let start = &mut forged_sleep_deadline.pairs[0]
