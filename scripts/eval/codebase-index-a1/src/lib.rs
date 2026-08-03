@@ -1171,21 +1171,25 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
     let total_delta = end.cpu_total_ticks.checked_sub(start.cpu_total_ticks);
     let idle_delta = end.cpu_idle_ticks.checked_sub(start.cpu_idle_ticks);
     let process_delta = quiet::conservative_inner_process_delta(
-        start.process_ticks_before_cpu_sample,
-        start.process_ticks_after_cpu_sample,
-        end.process_ticks_before_cpu_sample,
-        end.process_ticks_after_cpu_sample,
+        start.process_cpu_time_ns_before_cpu_sample,
+        start.process_cpu_time_ns_after_cpu_sample,
+        end.process_cpu_time_ns_before_cpu_sample,
+        end.process_cpu_time_ns_after_cpu_sample,
     )
     .ok();
+    let process_lower = process_delta.and_then(|delta| {
+        quiet::conservative_process_cpu_lower_bound_ns(delta, start.process_cpu_clock_resolution_ns)
+            .ok()
+    });
+    let cpu39_bounds = total_delta.zip(idle_delta).and_then(|(total, idle)| {
+        quiet::conservative_cpu_busy_bounds_ns(total, idle, start.clock_ticks_per_second).ok()
+    });
     let computed_external =
-        total_delta
-            .zip(idle_delta)
-            .zip(process_delta)
-            .and_then(|((total, idle), process)| {
-                total
-                    .checked_sub(idle)?
-                    .checked_sub(process)
-                    .and_then(|external| exact_ratio_bps(external, total))
+        cpu39_bounds
+            .as_ref()
+            .zip(process_lower)
+            .and_then(|(bounds, process)| {
+                quiet::conservative_external_busy_upper_bps(bounds, process).ok()
             });
     let sibling_total_delta = end
         .excluded_smt_total_ticks
@@ -1193,14 +1197,14 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
     let sibling_idle_delta = end
         .excluded_smt_idle_ticks
         .checked_sub(start.excluded_smt_idle_ticks);
-    let computed_sibling_busy =
-        sibling_total_delta
-            .zip(sibling_idle_delta)
-            .and_then(|(total, idle)| {
-                total
-                    .checked_sub(idle)
-                    .and_then(|busy| exact_ratio_bps(busy, total))
-            });
+    let sibling_bounds = sibling_total_delta
+        .zip(sibling_idle_delta)
+        .and_then(|(total, idle)| {
+            quiet::conservative_cpu_busy_bounds_ns(total, idle, start.clock_ticks_per_second).ok()
+        });
+    let computed_sibling_busy = sibling_bounds
+        .as_ref()
+        .and_then(|bounds| quiet::conservative_external_busy_upper_bps(bounds, 0).ok());
     let cpu_pressure = elapsed_us.and_then(|duration| {
         pressure_delta_bps(
             start.pressure.cpu_some_us,
@@ -1240,12 +1244,40 @@ fn validate_child_interference(run: &RunReceipt, reasons: &mut Vec<String>, pair
         && start.actual_affinity == end.actual_affinity
         && start.effective_cpuset == end.effective_cpuset
         && parse_cpu_list(&start.effective_cpuset).is_some_and(|cpus| cpus.contains(&39))
+        && start.clock_ticks_per_second == 100
+        && start.clock_ticks_per_second == end.clock_ticks_per_second
+        && start.process_cpu_clock_resolution_ns > 0
+        && start.process_cpu_clock_resolution_ns == end.process_cpu_clock_resolution_ns
+        && start.no_new_privileges
+        && end.no_new_privileges
+        && start.seccomp_mode == 2
+        && end.seccomp_mode == 2
+        && start.seccomp_filter_count > 0
+        && start.seccomp_filter_count == end.seccomp_filter_count
+        && quiet::thread_affinities_are_exact(
+            &start.thread_affinities,
+            39,
+            run.execution.process_id,
+        )
+        && quiet::thread_affinities_are_exact(&end.thread_affinities, 39, run.execution.process_id)
         && start.competing_build_processes.is_empty()
         && end.competing_build_processes.is_empty()
-        && computed_external == Some(evidence.external_cpu39_busy_bps)
-        && evidence.external_cpu39_busy_bps <= quiet::CHILD_EXTERNAL_CPU39_BUSY_BPS
-        && computed_sibling_busy == Some(evidence.excluded_smt_sibling_busy_bps)
-        && evidence.excluded_smt_sibling_busy_bps <= quiet::CHILD_SMT_SIBLING_BUSY_BPS
+        && process_delta == Some(evidence.process_cpu_inner_delta_ns)
+        && process_lower == Some(evidence.process_cpu_inner_lower_bound_ns)
+        && cpu39_bounds.as_ref().map(|bounds| bounds.nonidle_upper_ns)
+            == Some(evidence.cpu39_nonidle_upper_bound_ns)
+        && cpu39_bounds.as_ref().map(|bounds| bounds.total_lower_ns)
+            == Some(evidence.cpu39_total_lower_bound_ns)
+        && computed_external == Some(evidence.external_cpu39_busy_upper_bound_bps)
+        && evidence.external_cpu39_busy_upper_bound_bps <= quiet::CHILD_EXTERNAL_CPU39_BUSY_BPS
+        && sibling_bounds
+            .as_ref()
+            .map(|bounds| bounds.nonidle_upper_ns)
+            == Some(evidence.excluded_smt_nonidle_upper_bound_ns)
+        && sibling_bounds.as_ref().map(|bounds| bounds.total_lower_ns)
+            == Some(evidence.excluded_smt_total_lower_bound_ns)
+        && computed_sibling_busy == Some(evidence.excluded_smt_sibling_busy_upper_bound_bps)
+        && evidence.excluded_smt_sibling_busy_upper_bound_bps <= quiet::CHILD_SMT_SIBLING_BUSY_BPS
         && cpu_pressure.is_some_and(|value| value <= quiet::QUIET_CPU_SOME_PRESSURE_BPS)
         && memory_some_pressure.is_some_and(|value| value <= quiet::QUIET_MEMORY_SOME_PRESSURE_BPS)
         && memory_full_pressure.is_some_and(|value| value <= quiet::QUIET_MEMORY_FULL_PRESSURE_BPS)

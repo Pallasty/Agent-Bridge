@@ -50,6 +50,8 @@ contract pins the service process to logical CPU 39 and separately observes its
 non-allocated SMT sibling 79. It records kernel, microcode, libc/allocator,
 systemd, load, and pressure context. Each service has a 1,800-second runtime
 cap, control-group kill mode, a 30-second stop timeout, and collection enabled.
+It also enables `NoNewPrivileges`, limits the seccomp ABI to native syscalls,
+and denies `sched_setaffinity` after systemd has applied `CPUAffinity=39`.
 Every stop/show client is itself bounded; success or timeout must prove the unit
 reached an inactive/dead state (or was collected) and that any retained cgroup
 reports `populated=0` with no processes.
@@ -61,10 +63,16 @@ most 1%, memory/I/O `full` PSI at most 0.1%, and no `cargo`, `rustc`, or
 `rustdoc` identity may appear. Every performance child then binds its sole
 cgroup PID to CPU 39, records the effective cpuset and pressure counters, and
 requires both external CPU39 activity and sibling-79 activity to stay at or
-below 5%. Each CPU counter read is bracketed by two process-tick reads. The
-assessor subtracts only the inner process interval, so scheduler-tick ambiguity
-at either sampling boundary is conservatively charged to external activity.
-This is measured interference control, not host-wide CPU isolation.
+below 5%. Both endpoints enumerate every live TID and require its allowed CPU
+set to be exactly `{39}`; a real transient smoke also proves that the seccomp
+contract rejects a later affinity change. Each `/proc/stat` read is bracketed
+by two `CLOCK_PROCESS_CPUTIME_ID` reads. For the frozen `USER_HZ=100` host, the
+assessor treats the six non-idle fields as an upper bound of `delta+6` ticks,
+the eight total fields as a lower bound of `delta-8` ticks, subtracts only the
+inner process-clock lower bound, and rounds the resulting busy ratio upward.
+Sampling and tick quantization are therefore charged to external activity.
+This is measured interference control, not host-wide CPU isolation or a claim
+that the process clock has one-nanosecond physical accuracy.
 
 ```bash
 mkdir -p /home/pallasting/.cache/ab-codebase-index-a1-eval
@@ -105,7 +113,8 @@ Its run evidence includes:
 - child PID, sequence, start/finish time, observed AB/BA order, elapsed time,
   `/proc/self/io`, minor/major faults, VmHWM, and `getrusage` RSS;
 - host-quiet bucket deltas for CPU39 and sibling79, plus per-child CPU/process,
-  sibling, PSI, affinity/cpuset, and competing-build-process identities;
+  sibling, PSI, all-thread affinity/seccomp, cpuset, conservative counter
+  bounds, and competing-build-process identities;
 - transient-cgroup identity, exact process-ID set, `memory.current`, `memory.peak`,
   `memory.max`, and `memory.stat` anon/file/shmem components;
 - database/WAL/SHM bytes, validated WAL layout and frames, checkpoint/reset

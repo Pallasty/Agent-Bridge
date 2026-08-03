@@ -1,5 +1,6 @@
 use ab_codebase_index_a1::quiet::{
     ChildInterferenceEvidence, CpuProcessSample, HostQuietWindowEvidence, PressureTotals,
+    ThreadAffinityEvidence,
 };
 use ab_codebase_index_a1::{
     assess_suite, canonical_workload, AuthoritativePragmaEvidence, AuthorityEvidence,
@@ -200,17 +201,26 @@ fn execution(mode: Mode, pair: usize) -> ChildExecutionEvidence {
     }
 }
 
-fn process_sample(sampled_unix_ns: u64, end: bool) -> CpuProcessSample {
+fn process_sample(sampled_unix_ns: u64, end: bool, process_id: u32) -> CpuProcessSample {
     CpuProcessSample {
         sampled_unix_ns,
         cpu: 39,
         excluded_smt_sibling: 79,
         cpu_total_ticks: if end { 1_100 } else { 1_000 },
         cpu_idle_ticks: if end { 990 } else { 900 },
-        excluded_smt_total_ticks: if end { 2_100 } else { 2_000 },
-        excluded_smt_idle_ticks: if end { 1_995 } else { 1_900 },
-        process_ticks_before_cpu_sample: if end { 15 } else { 10 },
-        process_ticks_after_cpu_sample: if end { 15 } else { 10 },
+        excluded_smt_total_ticks: if end { 2_200 } else { 2_000 },
+        excluded_smt_idle_ticks: if end { 2_100 } else { 1_900 },
+        process_cpu_time_ns_before_cpu_sample: if end { 220_000_000 } else { 100_000_000 },
+        process_cpu_time_ns_after_cpu_sample: if end { 220_000_000 } else { 100_000_000 },
+        process_cpu_clock_resolution_ns: 1,
+        clock_ticks_per_second: 100,
+        no_new_privileges: true,
+        seccomp_mode: 2,
+        seccomp_filter_count: 1,
+        thread_affinities: vec![ThreadAffinityEvidence {
+            tid: process_id,
+            allowed_cpus: "39".into(),
+        }],
         pressure: PressureTotals {
             cpu_some_us: 0,
             memory_some_us: 0,
@@ -226,10 +236,24 @@ fn process_sample(sampled_unix_ns: u64, end: bool) -> CpuProcessSample {
 
 fn child_interference(execution: &ChildExecutionEvidence) -> ChildInterferenceEvidence {
     ChildInterferenceEvidence {
-        start: process_sample(execution.started_unix_ns + 1_000_000, false),
-        end: process_sample(execution.started_unix_ns + 4_000_000, true),
-        external_cpu39_busy_bps: 500,
-        excluded_smt_sibling_busy_bps: 500,
+        start: process_sample(
+            execution.started_unix_ns + 1_000_000,
+            false,
+            execution.process_id,
+        ),
+        end: process_sample(
+            execution.started_unix_ns + 4_000_000,
+            true,
+            execution.process_id,
+        ),
+        process_cpu_inner_delta_ns: 120_000_000,
+        process_cpu_inner_lower_bound_ns: 119_999_999,
+        cpu39_nonidle_upper_bound_ns: 160_000_000,
+        cpu39_total_lower_bound_ns: 920_000_000,
+        external_cpu39_busy_upper_bound_bps: 435,
+        excluded_smt_nonidle_upper_bound_ns: 60_000_000,
+        excluded_smt_total_lower_bound_ns: 1_920_000_000,
+        excluded_smt_sibling_busy_upper_bound_bps: 313,
     }
 }
 
@@ -1176,7 +1200,7 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .child_interference
         .as_mut()
         .unwrap()
-        .external_cpu39_busy_bps = 501;
+        .external_cpu39_busy_upper_bound_bps = 501;
     assert_canonical_rejected(noisy);
 
     let mut wrong_affinity = canonical_input();
@@ -1195,8 +1219,57 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .child_interference
         .as_mut()
         .unwrap()
-        .excluded_smt_sibling_busy_bps = 499;
+        .excluded_smt_sibling_busy_upper_bound_bps = 499;
     assert_canonical_rejected(forged_smt_busy);
+
+    let mut forged_cpu39_bound = canonical_input();
+    forged_cpu39_bound.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .cpu39_nonidle_upper_bound_ns += 1;
+    assert_canonical_rejected(forged_cpu39_bound);
+
+    let mut forged_process_lower_bound = canonical_input();
+    forged_process_lower_bound.pairs[0]
+        .staged_native
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .process_cpu_inner_lower_bound_ns -= 1;
+    assert_canonical_rejected(forged_process_lower_bound);
+
+    let mut changed_clock_resolution = canonical_input();
+    changed_clock_resolution.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .end
+        .process_cpu_clock_resolution_ns = 2;
+    assert_canonical_rejected(changed_clock_resolution);
+
+    let mut unconfined_thread = canonical_input();
+    unconfined_thread.pairs[0]
+        .staged_native
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .end
+        .thread_affinities[0]
+        .allowed_cpus = "0-79".into();
+    assert_canonical_rejected(unconfined_thread);
+
+    let mut missing_seccomp_custody = canonical_input();
+    missing_seccomp_custody.pairs[0]
+        .full_vec
+        .child_interference
+        .as_mut()
+        .unwrap()
+        .start
+        .no_new_privileges = false;
+    assert_canonical_rejected(missing_seccomp_custody);
 
     let mut noisy_smt_sibling = canonical_input();
     let sibling = noisy_smt_sibling.pairs[0]
@@ -1205,7 +1278,7 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .as_mut()
         .unwrap();
     sibling.end.excluded_smt_idle_ticks = 1_990;
-    sibling.excluded_smt_sibling_busy_bps = 1_000;
+    sibling.excluded_smt_sibling_busy_upper_bound_bps = 1_000;
     assert_canonical_rejected(noisy_smt_sibling);
 
     let mut noisy_memory_some = canonical_input();
@@ -1237,8 +1310,8 @@ fn canonical_rejects_noisy_or_forged_child_interference_evidence() {
         .as_mut()
         .unwrap()
         .start;
-    start.process_ticks_before_cpu_sample = 11;
-    start.process_ticks_after_cpu_sample = 10;
+    start.process_cpu_time_ns_before_cpu_sample = 101_000_000;
+    start.process_cpu_time_ns_after_cpu_sample = 100_000_000;
     assert_canonical_rejected(reversed_process_bracket);
 }
 

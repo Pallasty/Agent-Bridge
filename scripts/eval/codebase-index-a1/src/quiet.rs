@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
+use std::mem::MaybeUninit;
 use std::path::{Component, Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -23,12 +24,22 @@ pub const CHILD_SMT_SIBLING_BUSY_BPS: u64 = 500;
 
 const BPS_SCALE: u64 = 10_000;
 const MAX_PLAUSIBLE_CPU_ID: u32 = 1_048_575;
+const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
+const REQUIRED_CLOCK_TICKS_PER_SECOND: u64 = 100;
+const PROC_STAT_TOTAL_COUNTERS: u64 = 8;
+const PROC_STAT_NONIDLE_COUNTERS: u64 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CompetingProcessEvidence {
     pub pid: u32,
     pub comm: String,
     pub start_ticks: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ThreadAffinityEvidence {
+    pub tid: u32,
+    pub allowed_cpus: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,8 +60,14 @@ pub struct CpuProcessSample {
     pub cpu_idle_ticks: u64,
     pub excluded_smt_total_ticks: u64,
     pub excluded_smt_idle_ticks: u64,
-    pub process_ticks_before_cpu_sample: u64,
-    pub process_ticks_after_cpu_sample: u64,
+    pub process_cpu_time_ns_before_cpu_sample: u64,
+    pub process_cpu_time_ns_after_cpu_sample: u64,
+    pub process_cpu_clock_resolution_ns: u64,
+    pub clock_ticks_per_second: u64,
+    pub no_new_privileges: bool,
+    pub seccomp_mode: u32,
+    pub seccomp_filter_count: u32,
+    pub thread_affinities: Vec<ThreadAffinityEvidence>,
     pub pressure: PressureTotals,
     pub actual_affinity: String,
     pub effective_cpuset: String,
@@ -95,21 +112,33 @@ pub struct HostQuietWindowEvidence {
 pub struct ChildInterferenceEvidence {
     pub start: CpuProcessSample,
     pub end: CpuProcessSample,
-    pub external_cpu39_busy_bps: u64,
-    pub excluded_smt_sibling_busy_bps: u64,
+    pub process_cpu_inner_delta_ns: u64,
+    pub process_cpu_inner_lower_bound_ns: u64,
+    pub cpu39_nonidle_upper_bound_ns: u64,
+    pub cpu39_total_lower_bound_ns: u64,
+    pub external_cpu39_busy_upper_bound_bps: u64,
+    pub excluded_smt_nonidle_upper_bound_ns: u64,
+    pub excluded_smt_total_lower_bound_ns: u64,
+    pub excluded_smt_sibling_busy_upper_bound_bps: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CpuBusyBounds {
+    pub(crate) nonidle_upper_ns: u64,
+    pub(crate) total_lower_ns: u64,
 }
 
 /// Observe one fail-closed sample of CPU, process, pressure, affinity, cpuset,
 /// and competing Rust build activity from Linux procfs/cgroupfs.
 pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
-    let (process_ticks_before_cpu_sample, _) =
-        parse_process_stat_ticks(&fs::read_to_string("/proc/self/stat")?)?;
+    let process_cpu_clock_resolution_ns = process_cpu_clock_resolution_ns()?;
+    let clock_ticks_per_second = clock_ticks_per_second()?;
+    let process_cpu_time_ns_before_cpu_sample = process_cpu_time_ns()?;
     let cpu_stat = fs::read_to_string("/proc/stat")?;
-    let (process_ticks_after_cpu_sample, _) =
-        parse_process_stat_ticks(&fs::read_to_string("/proc/self/stat")?)?;
-    if process_ticks_after_cpu_sample < process_ticks_before_cpu_sample {
+    let process_cpu_time_ns_after_cpu_sample = process_cpu_time_ns()?;
+    if process_cpu_time_ns_after_cpu_sample < process_cpu_time_ns_before_cpu_sample {
         return Err(invalid_data(
-            "process tick counter moved backwards across the CPU sample",
+            "process CPU clock moved backwards across the CPU sample",
         ));
     }
     let (cpu_total_ticks, cpu_idle_ticks) = parse_cpu_stat(&cpu_stat, cpu)?;
@@ -121,10 +150,8 @@ pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
         &fs::read_to_string("/proc/pressure/memory")?,
         &fs::read_to_string("/proc/pressure/io")?,
     )?;
-    let actual_affinity = status_value(
-        &fs::read_to_string("/proc/self/status")?,
-        "Cpus_allowed_list:",
-    )?;
+    let process_status = fs::read_to_string("/proc/self/status")?;
+    let actual_affinity = status_value(&process_status, "Cpus_allowed_list:")?;
     let actual_cpus = parse_cpu_list(&actual_affinity)?;
     if !actual_cpus.contains(&cpu) {
         return Err(invalid_data(format!(
@@ -141,6 +168,10 @@ pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
             cpuset_path.display()
         )));
     }
+    let no_new_privileges = parse_status_u32(&process_status, "NoNewPrivs:")? == 1;
+    let seccomp_mode = parse_status_u32(&process_status, "Seccomp:")?;
+    let seccomp_filter_count = parse_status_u32(&process_status, "Seccomp_filters:")?;
+    let thread_affinities = scan_thread_affinities()?;
 
     Ok(CpuProcessSample {
         sampled_unix_ns: unix_time_ns()?,
@@ -150,8 +181,14 @@ pub fn cpu_process_sample(cpu: u32) -> io::Result<CpuProcessSample> {
         cpu_idle_ticks,
         excluded_smt_total_ticks,
         excluded_smt_idle_ticks,
-        process_ticks_before_cpu_sample,
-        process_ticks_after_cpu_sample,
+        process_cpu_time_ns_before_cpu_sample,
+        process_cpu_time_ns_after_cpu_sample,
+        process_cpu_clock_resolution_ns,
+        clock_ticks_per_second,
+        no_new_privileges,
+        seccomp_mode,
+        seccomp_filter_count,
+        thread_affinities,
         pressure,
         actual_affinity,
         effective_cpuset,
@@ -234,6 +271,19 @@ pub fn child_interference(
             "affinity or effective cpuset changed during child measurement",
         ));
     }
+    if !start.no_new_privileges
+        || !end.no_new_privileges
+        || start.seccomp_mode != 2
+        || end.seccomp_mode != 2
+        || start.seccomp_filter_count == 0
+        || start.seccomp_filter_count != end.seccomp_filter_count
+        || !thread_affinities_are_exact(&start.thread_affinities, 39, std::process::id())
+        || !thread_affinities_are_exact(&end.thread_affinities, 39, std::process::id())
+    {
+        return Err(invalid_data(
+            "child process lacks the frozen all-thread CPU39/seccomp confinement evidence",
+        ));
+    }
     let effective_cpus = parse_cpu_list(&start.effective_cpuset)?;
     if !effective_cpus.contains(&39) {
         return Err(invalid_data(
@@ -250,17 +300,27 @@ pub fn child_interference(
     if idle_delta > total_delta {
         return Err(invalid_data("cpu idle delta exceeds cpu total delta"));
     }
-    let nonidle_delta = total_delta - idle_delta;
-    let process_delta = conservative_inner_process_delta(
-        start.process_ticks_before_cpu_sample,
-        start.process_ticks_after_cpu_sample,
-        end.process_ticks_before_cpu_sample,
-        end.process_ticks_after_cpu_sample,
+    if start.clock_ticks_per_second != end.clock_ticks_per_second
+        || start.process_cpu_clock_resolution_ns != end.process_cpu_clock_resolution_ns
+    {
+        return Err(invalid_data(
+            "CPU clock resolution or USER_HZ changed during child measurement",
+        ));
+    }
+    let cpu39_bounds =
+        conservative_cpu_busy_bounds_ns(total_delta, idle_delta, start.clock_ticks_per_second)?;
+    let process_cpu_inner_delta_ns = conservative_inner_process_delta(
+        start.process_cpu_time_ns_before_cpu_sample,
+        start.process_cpu_time_ns_after_cpu_sample,
+        end.process_cpu_time_ns_before_cpu_sample,
+        end.process_cpu_time_ns_after_cpu_sample,
     )?;
-    let external_delta = nonidle_delta
-        .checked_sub(process_delta)
-        .ok_or_else(|| invalid_data("process tick delta exceeds cpu39 non-idle tick delta"))?;
-    let external_cpu39_busy_bps = ratio_bps(external_delta, total_delta)?;
+    let process_cpu_inner_lower_bound_ns = conservative_process_cpu_lower_bound_ns(
+        process_cpu_inner_delta_ns,
+        start.process_cpu_clock_resolution_ns,
+    )?;
+    let external_cpu39_busy_upper_bound_bps =
+        conservative_external_busy_upper_bps(&cpu39_bounds, process_cpu_inner_lower_bound_ns)?;
     let sibling_total_delta = checked_delta(
         end.excluded_smt_total_ticks,
         start.excluded_smt_total_ticks,
@@ -271,20 +331,29 @@ pub fn child_interference(
         start.excluded_smt_idle_ticks,
         "excluded SMT sibling idle ticks",
     )?;
-    let sibling_busy_delta = sibling_total_delta
-        .checked_sub(sibling_idle_delta)
-        .ok_or_else(|| invalid_data("excluded SMT sibling idle exceeds total ticks"))?;
-    let excluded_smt_sibling_busy_bps = ratio_bps(sibling_busy_delta, sibling_total_delta)?;
+    let sibling_bounds = conservative_cpu_busy_bounds_ns(
+        sibling_total_delta,
+        sibling_idle_delta,
+        start.clock_ticks_per_second,
+    )?;
+    let excluded_smt_sibling_busy_upper_bound_bps =
+        conservative_external_busy_upper_bps(&sibling_bounds, 0)?;
 
     Ok(ChildInterferenceEvidence {
         start: start.clone(),
         end: end.clone(),
-        external_cpu39_busy_bps,
-        excluded_smt_sibling_busy_bps,
+        process_cpu_inner_delta_ns,
+        process_cpu_inner_lower_bound_ns,
+        cpu39_nonidle_upper_bound_ns: cpu39_bounds.nonidle_upper_ns,
+        cpu39_total_lower_bound_ns: cpu39_bounds.total_lower_ns,
+        external_cpu39_busy_upper_bound_bps,
+        excluded_smt_nonidle_upper_bound_ns: sibling_bounds.nonidle_upper_ns,
+        excluded_smt_total_lower_bound_ns: sibling_bounds.total_lower_ns,
+        excluded_smt_sibling_busy_upper_bound_bps,
     })
 }
 
-/// Return only process ticks whose observation interval is provably contained
+/// Return only process CPU time whose observation interval is provably contained
 /// by the two CPU-counter observations. This intentionally undercounts the
 /// measured process at both boundaries, so any sampling-boundary ambiguity is
 /// charged to external CPU activity rather than hidden from the interference
@@ -298,18 +367,100 @@ pub(crate) fn conservative_inner_process_delta(
     checked_delta(
         start_process_after_cpu,
         start_process_before_cpu,
-        "start process ticks across CPU sample",
+        "start process CPU time across CPU sample",
     )?;
     checked_delta(
         end_process_after_cpu,
         end_process_before_cpu,
-        "end process ticks across CPU sample",
+        "end process CPU time across CPU sample",
     )?;
     checked_delta(
         end_process_before_cpu,
         start_process_after_cpu,
-        "inner process ticks",
+        "inner process CPU time",
     )
+}
+
+/// Bound Linux `/proc/stat` deltas despite the independent floor conversion of
+/// each cumulative cputime field to USER_HZ. The selected total is eight
+/// fields; non-idle is the other six after idle+iowait are removed.
+pub(crate) fn conservative_cpu_busy_bounds_ns(
+    total_delta_ticks: u64,
+    idle_delta_ticks: u64,
+    ticks_per_second: u64,
+) -> io::Result<CpuBusyBounds> {
+    if ticks_per_second != REQUIRED_CLOCK_TICKS_PER_SECOND
+        || NANOSECONDS_PER_SECOND % ticks_per_second != 0
+    {
+        return Err(invalid_data(
+            "the frozen evaluator requires USER_HZ=100 with an exact nanosecond tick",
+        ));
+    }
+    if idle_delta_ticks > total_delta_ticks {
+        return Err(invalid_data("CPU idle delta exceeds CPU total delta"));
+    }
+    let nonidle_delta_ticks = total_delta_ticks - idle_delta_ticks;
+    let tick_ns = NANOSECONDS_PER_SECOND / ticks_per_second;
+    let nonidle_upper_ticks = nonidle_delta_ticks
+        .checked_add(PROC_STAT_NONIDLE_COUNTERS)
+        .ok_or_else(|| invalid_data("CPU non-idle tick upper bound overflow"))?;
+    let total_lower_ticks = total_delta_ticks
+        .checked_sub(PROC_STAT_TOTAL_COUNTERS)
+        .ok_or_else(|| invalid_data("CPU total delta is too short for a safe lower bound"))?;
+    if total_lower_ticks == 0 {
+        return Err(invalid_data(
+            "CPU total delta is too short for a non-zero safe lower bound",
+        ));
+    }
+    let nonidle_upper_ns = u128::from(nonidle_upper_ticks)
+        .checked_mul(u128::from(tick_ns))
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| invalid_data("CPU non-idle nanosecond upper bound overflow"))?;
+    let total_lower_ns = u128::from(total_lower_ticks)
+        .checked_mul(u128::from(tick_ns))
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| invalid_data("CPU total nanosecond lower bound overflow"))?;
+    Ok(CpuBusyBounds {
+        nonidle_upper_ns,
+        total_lower_ns,
+    })
+}
+
+pub(crate) fn conservative_process_cpu_lower_bound_ns(
+    process_cpu_delta_ns: u64,
+    clock_resolution_ns: u64,
+) -> io::Result<u64> {
+    if clock_resolution_ns == 0 {
+        return Err(invalid_data(
+            "process CPU clock resolution must be non-zero",
+        ));
+    }
+    Ok(process_cpu_delta_ns.saturating_sub(clock_resolution_ns))
+}
+
+pub(crate) fn conservative_external_busy_upper_bps(
+    bounds: &CpuBusyBounds,
+    process_cpu_lower_bound_ns: u64,
+) -> io::Result<u64> {
+    let external_upper_ns = bounds
+        .nonidle_upper_ns
+        .checked_sub(process_cpu_lower_bound_ns)
+        .ok_or_else(|| invalid_data("process CPU lower bound exceeds CPU non-idle upper bound"))?;
+    ratio_bps_ceil(external_upper_ns, bounds.total_lower_ns)
+}
+
+pub(crate) fn thread_affinities_are_exact(
+    threads: &[ThreadAffinityEvidence],
+    cpu: u32,
+    required_tid: u32,
+) -> bool {
+    let expected = BTreeSet::from([cpu]);
+    !threads.is_empty()
+        && threads.iter().any(|thread| thread.tid == required_tid)
+        && threads.windows(2).all(|pair| pair[0].tid < pair[1].tid)
+        && threads
+            .iter()
+            .all(|thread| parse_cpu_list(&thread.allowed_cpus).is_ok_and(|cpus| cpus == expected))
 }
 
 fn quiet_window_from_samples(
@@ -569,11 +720,6 @@ fn read_excluded_smt_sibling(cpu: u32) -> io::Result<u32> {
         .ok_or_else(|| invalid_data(format!("{path} lacks an excluded SMT sibling")))
 }
 
-fn parse_process_stat_ticks(contents: &str) -> io::Result<(u64, u64)> {
-    let (_, ticks, start_ticks) = parse_process_stat(contents)?;
-    Ok((ticks, start_ticks))
-}
-
 fn parse_process_stat(contents: &str) -> io::Result<(u32, u64, u64)> {
     let open = contents
         .find('(')
@@ -767,6 +913,43 @@ fn scan_competing_build_processes() -> io::Result<Vec<CompetingProcessEvidence>>
     Ok(processes.into_iter().collect())
 }
 
+fn scan_thread_affinities() -> io::Result<Vec<ThreadAffinityEvidence>> {
+    let mut threads = BTreeSet::new();
+    for entry in fs::read_dir("/proc/self/task")? {
+        let entry = entry?;
+        let name = entry
+            .file_name()
+            .to_str()
+            .ok_or_else(|| invalid_data("non-UTF-8 thread id in /proc/self/task"))?
+            .to_string();
+        let tid = name
+            .parse::<u32>()
+            .map_err(|error| invalid_data(format!("invalid thread id {name:?}: {error}")))?;
+        let status = fs::read_to_string(entry.path().join("status"))?;
+        let allowed_cpus = status_value(&status, "Cpus_allowed_list:")?;
+        parse_cpu_list(&allowed_cpus)?;
+        if !threads.insert(ThreadAffinityEvidence { tid, allowed_cpus }) {
+            return Err(invalid_data(format!(
+                "duplicate thread id {tid} in /proc/self/task"
+            )));
+        }
+    }
+    if threads.is_empty() {
+        return Err(invalid_data("/proc/self/task contains no threads"));
+    }
+    Ok(threads.into_iter().collect())
+}
+
+fn parse_status_u32(contents: &str, key: &str) -> io::Result<u32> {
+    status_value(contents, key)?
+        .parse::<u32>()
+        .map_err(|error| {
+            invalid_data(format!(
+                "invalid numeric {key} value in /proc/self/status: {error}"
+            ))
+        })
+}
+
 fn status_value(contents: &str, key: &str) -> io::Result<String> {
     let mut result = None;
     for line in contents.lines() {
@@ -864,6 +1047,20 @@ fn ratio_bps(numerator: u64, denominator: u64) -> io::Result<u64> {
         .map_err(|_| invalid_data("basis-point ratio does not fit in u64"))
 }
 
+fn ratio_bps_ceil(numerator: u64, denominator: u64) -> io::Result<u64> {
+    if denominator == 0 {
+        return Err(invalid_data("basis-point ratio denominator is zero"));
+    }
+    let scaled = u128::from(numerator)
+        .checked_mul(u128::from(BPS_SCALE))
+        .ok_or_else(|| invalid_data("basis-point ratio overflow"))?;
+    let rounded = scaled
+        .checked_add(u128::from(denominator - 1))
+        .ok_or_else(|| invalid_data("basis-point ceiling overflow"))?
+        / u128::from(denominator);
+    u64::try_from(rounded).map_err(|_| invalid_data("basis-point ratio does not fit in u64"))
+}
+
 fn checked_delta(end: u64, start: u64, name: &str) -> io::Result<u64> {
     end.checked_sub(start)
         .ok_or_else(|| invalid_data(format!("{name} counter moved backwards")))
@@ -875,6 +1072,63 @@ fn unix_time_ns() -> io::Result<u64> {
         .map_err(|error| invalid_data(format!("system clock precedes Unix epoch: {error}")))?;
     u64::try_from(duration.as_nanos())
         .map_err(|_| invalid_data("Unix timestamp does not fit in u64 nanoseconds"))
+}
+
+fn process_cpu_time_ns() -> io::Result<u64> {
+    let mut value = MaybeUninit::<libc::timespec>::uninit();
+    // SAFETY: clock_gettime initializes `value` on success and the pointer is
+    // valid for one libc::timespec.
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, value.as_mut_ptr()) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the successful clock_gettime call initialized the value.
+    timespec_to_ns(unsafe { value.assume_init() }, "process CPU clock")
+}
+
+fn process_cpu_clock_resolution_ns() -> io::Result<u64> {
+    let mut value = MaybeUninit::<libc::timespec>::uninit();
+    // SAFETY: clock_getres initializes `value` on success and the pointer is
+    // valid for one libc::timespec.
+    let result = unsafe { libc::clock_getres(libc::CLOCK_PROCESS_CPUTIME_ID, value.as_mut_ptr()) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the successful clock_getres call initialized the value.
+    let resolution = timespec_to_ns(
+        unsafe { value.assume_init() },
+        "process CPU clock resolution",
+    )?;
+    if resolution == 0 {
+        return Err(invalid_data(
+            "process CPU clock resolution must be non-zero",
+        ));
+    }
+    Ok(resolution)
+}
+
+fn timespec_to_ns(value: libc::timespec, name: &str) -> io::Result<u64> {
+    if value.tv_sec < 0 || value.tv_nsec < 0 || value.tv_nsec >= 1_000_000_000 {
+        return Err(invalid_data(format!("invalid {name} timespec")));
+    }
+    let seconds = u64::try_from(value.tv_sec)
+        .map_err(|_| invalid_data(format!("{name} seconds do not fit in u64")))?;
+    let nanoseconds = u64::try_from(value.tv_nsec)
+        .map_err(|_| invalid_data(format!("{name} nanoseconds do not fit in u64")))?;
+    seconds
+        .checked_mul(NANOSECONDS_PER_SECOND)
+        .and_then(|value| value.checked_add(nanoseconds))
+        .ok_or_else(|| invalid_data(format!("{name} does not fit in u64 nanoseconds")))
+}
+
+fn clock_ticks_per_second() -> io::Result<u64> {
+    // SAFETY: sysconf has no pointer arguments and `_SC_CLK_TCK` is a valid
+    // selector on the Linux target required by this evaluator.
+    let value = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if value <= 0 {
+        return Err(invalid_data("sysconf(_SC_CLK_TCK) returned no value"));
+    }
+    u64::try_from(value).map_err(|_| invalid_data("USER_HZ does not fit in u64"))
 }
 
 fn sleep_until(deadline: Instant) {
@@ -904,8 +1158,17 @@ mod tests {
             cpu_idle_ticks: idle,
             excluded_smt_total_ticks: total,
             excluded_smt_idle_ticks: idle,
-            process_ticks_before_cpu_sample: process,
-            process_ticks_after_cpu_sample: process,
+            process_cpu_time_ns_before_cpu_sample: process,
+            process_cpu_time_ns_after_cpu_sample: process,
+            process_cpu_clock_resolution_ns: 1,
+            clock_ticks_per_second: 100,
+            no_new_privileges: true,
+            seccomp_mode: 2,
+            seccomp_filter_count: 1,
+            thread_affinities: vec![ThreadAffinityEvidence {
+                tid: std::process::id(),
+                allowed_cpus: "39".to_string(),
+            }],
             pressure: PressureTotals {
                 cpu_some_us: 0,
                 memory_some_us: 0,
@@ -936,8 +1199,8 @@ mod tests {
     fn parses_process_stat_with_spaces_and_parentheses_in_comm() {
         let stat = "42 (cargo worker) x) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 20";
 
-        assert_eq!(parse_process_stat_ticks(stat).ok(), Some((23, 4242)));
-        assert!(parse_process_stat_ticks("42 malformed").is_err());
+        assert_eq!(parse_process_stat(stat).ok(), Some((42, 23, 4242)));
+        assert!(parse_process_stat("42 malformed").is_err());
     }
 
     #[test]
@@ -1085,33 +1348,36 @@ mod tests {
     }
 
     #[test]
-    fn child_interference_subtracts_only_the_measured_process_ticks() {
-        let start = sample(1_000, 900, 50);
-        let end = sample(1_200, 1_080, 60);
+    fn child_interference_subtracts_only_the_bounded_process_cpu_time() {
+        let start = sample(1_000, 900, 500_000_000);
+        let end = sample(1_200, 1_080, 700_000_000);
         let evidence = child_interference(&start, &end);
 
         assert_eq!(
-            evidence.ok().map(|item| item.external_cpu39_busy_bps),
-            Some(500)
+            evidence
+                .as_ref()
+                .ok()
+                .map(|item| item.external_cpu39_busy_upper_bound_bps),
+            Some(313)
         );
         assert_eq!(
-            child_interference(&start, &end)
+            evidence
                 .ok()
-                .map(|item| item.excluded_smt_sibling_busy_bps),
-            Some(1_000)
+                .map(|item| item.excluded_smt_sibling_busy_upper_bound_bps),
+            Some(1_355)
         );
-        assert!(child_interference(&start, &sample(1_200, 1_080, 80)).is_err());
+        assert!(child_interference(&start, &sample(1_200, 1_080, 800_000_000)).is_err());
 
-        let mut bracketed_start = sample(1_000, 900, 50);
-        bracketed_start.process_ticks_after_cpu_sample = 51;
-        let mut bracketed_end = sample(1_200, 1_080, 71);
-        bracketed_end.process_ticks_after_cpu_sample = 72;
+        let mut bracketed_start = sample(1_000, 900, 500_000_000);
+        bracketed_start.process_cpu_time_ns_after_cpu_sample = 510_000_000;
+        let mut bracketed_end = sample(1_200, 1_080, 720_000_000);
+        bracketed_end.process_cpu_time_ns_after_cpu_sample = 730_000_000;
         assert_eq!(
             child_interference(&bracketed_start, &bracketed_end)
                 .ok()
-                .map(|item| item.external_cpu39_busy_bps),
-            Some(0),
-            "the outer process delta may exceed CPU non-idle ticks while the conservative inner interval remains valid"
+                .map(|item| item.external_cpu39_busy_upper_bound_bps),
+            Some(261),
+            "only the inner process-clock bracket may be deducted from the conservative host upper bound"
         );
     }
 
@@ -1124,5 +1390,25 @@ mod tests {
         assert!(conservative_inner_process_delta(50, 71, 70, 72).is_err());
         assert!(conservative_inner_process_delta(51, 50, 71, 72).is_err());
         assert!(conservative_inner_process_delta(50, 51, 72, 71).is_err());
+    }
+
+    #[test]
+    fn child_interference_uses_high_resolution_process_time_and_tick_error_bounds() {
+        let bounds = conservative_cpu_busy_bounds_ns(200, 180, 100).unwrap();
+        assert_eq!(bounds.nonidle_upper_ns, 260_000_000);
+        assert_eq!(bounds.total_lower_ns, 1_920_000_000);
+
+        let process_lower = conservative_process_cpu_lower_bound_ns(210_000_000, 1).unwrap();
+        assert_eq!(process_lower, 209_999_999);
+        assert_eq!(
+            conservative_external_busy_upper_bps(&bounds, process_lower).ok(),
+            Some(261),
+            "upper-bound ratios must round up rather than admit a fractional false green"
+        );
+
+        assert!(conservative_cpu_busy_bounds_ns(8, 8, 100).is_err());
+        assert!(conservative_cpu_busy_bounds_ns(200, 201, 100).is_err());
+        assert!(conservative_cpu_busy_bounds_ns(200, 180, 0).is_err());
+        assert!(conservative_cpu_busy_bounds_ns(200, 180, 128).is_err());
     }
 }

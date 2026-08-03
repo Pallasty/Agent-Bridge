@@ -121,9 +121,15 @@ Canonical trials therefore must:
   sibling79 (both at least 95% overall idle and 90% in every bucket, CPU/memory/
   I/O `some` plus memory/I/O `full` PSI bounded, no cargo/rustc/rustdoc), then
   bind the sole cgroup PID to CPU39 and require at most 5% external activity on
-  CPU39 and sibling79. Each per-child CPU snapshot is bracketed by process-tick
-  reads; only the process interval strictly inside the two CPU snapshots is
-  subtracted, so boundary ambiguity remains charged to external activity.
+  CPU39 and sibling79. The transient service applies `CPUAffinity=39`, native-
+  architecture seccomp, `NoNewPrivileges`, and a deny rule for every later
+  `sched_setaffinity`; both endpoints also require every enumerated TID to have
+  exactly CPU39 affinity. Each `/proc/stat` snapshot is bracketed by process-
+  level nanosecond CPU-clock reads. With frozen `USER_HZ=100`, the gate adds
+  one tick of uncertainty for each of six non-idle fields, removes one tick for
+  each of eight total fields, subtracts only the inner process-clock lower
+  bound, and rounds the final ratio upward. Any counter contradiction fails
+  closed; no threshold tolerance or saturating external subtraction is used.
 
 The explicit-parent boolean is only a routing fact; it is not disk-backed
 proof by itself. Shared login-session cgroup counters are diagnostic only and
@@ -194,9 +200,12 @@ candidate API, authoritative failpoints, explicit staging placement, and the
 measured FullVec timing seam. It also characterizes field-complete FullVec
 equivalence, root isolation, cleanup, schema, page/freelist, integrity, and
 foreign-key invariants. A live canonical attempt additionally exposed the
-non-atomic ordering of `/proc/stat` and `/proc/self/stat`; a dedicated RED now
-guards the conservative bracketed-tick fix and the assessor rejects reversed
-or forged brackets.
+non-atomic ordering of `/proc/stat` and `/proc/self/stat`; a later attempt then
+proved that bracketing alone could not reconcile independently quantized
+USER_HZ fields. Dedicated RED-to-GREEN contracts now guard the high-resolution
+process-clock bracket, explicit six/eight-field counter bounds, upward ratio
+rounding, all-thread CPU39/seccomp confinement, and assessor rejection of
+reversed or forged raw and derived evidence.
 
 The final result, raw receipt identity, performance decision, and any A2
 nomination will be appended only after a clean release build and the frozen

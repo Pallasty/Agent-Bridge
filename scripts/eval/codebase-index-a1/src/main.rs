@@ -1125,6 +1125,10 @@ fn transient_service_command_with_env(
         "--property=KillMode=control-group",
         "--property=TimeoutStopSec=30s",
         "--property=CPUAffinity=39",
+        "--property=NoNewPrivileges=yes",
+        "--property=SystemCallArchitectures=native",
+        "--property=SystemCallErrorNumber=EPERM",
+        "--property=SystemCallFilter=~sched_setaffinity",
         "--unit",
         unit,
     ]);
@@ -2033,7 +2037,9 @@ mod tests {
         AppError,
     };
     use ab_codebase_index_a1::{
-        quiet::cpu_process_sample, snapshot::cgroup_memory_snapshot, workload::materialize,
+        quiet::{child_interference, cpu_process_sample},
+        snapshot::cgroup_memory_snapshot,
+        workload::materialize,
         FailureCase,
     };
 
@@ -2073,6 +2079,10 @@ mod tests {
             "--property=KillMode=control-group",
             "--property=TimeoutStopSec=30s",
             "--property=CPUAffinity=39",
+            "--property=NoNewPrivileges=yes",
+            "--property=SystemCallArchitectures=native",
+            "--property=SystemCallErrorNumber=EPERM",
+            "--property=SystemCallFilter=~sched_setaffinity",
             "--collect",
         ] {
             assert!(args.iter().any(|arg| *arg == OsStr::new(required)));
@@ -2131,8 +2141,35 @@ mod tests {
                 .path
                 .ends_with(&format!("/{expected_unit}.service")));
             assert_eq!(snapshot.process_ids, [std::process::id()]);
-            let sample = cpu_process_sample(39).unwrap();
-            assert_eq!(sample.actual_affinity, "39");
+            let blocked_affinity_change = std::process::Command::new("/usr/bin/taskset")
+                .args(["-pc", "39", "0"])
+                .status()
+                .unwrap();
+            assert!(
+                !blocked_affinity_change.success(),
+                "the transient seccomp contract must reject sched_setaffinity even when the requested mask is unchanged"
+            );
+            let start = cpu_process_sample(39).unwrap();
+            assert_eq!(start.actual_affinity, "39");
+            assert!(start.no_new_privileges);
+            assert_eq!(start.seccomp_mode, 2);
+            assert!(start.seccomp_filter_count > 0);
+            assert!(start
+                .thread_affinities
+                .iter()
+                .all(|thread| thread.allowed_cpus == "39"));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+            let mut accumulator = 0_u64;
+            while std::time::Instant::now() < deadline {
+                accumulator = std::hint::black_box(accumulator.wrapping_add(1));
+            }
+            std::hint::black_box(accumulator);
+            let end = cpu_process_sample(39).unwrap();
+            let evidence = child_interference(&start, &end).unwrap();
+            assert_eq!(start.clock_ticks_per_second, 100);
+            assert!(start.process_cpu_clock_resolution_ns > 0);
+            assert!(evidence.process_cpu_inner_delta_ns > 0);
+            assert!(evidence.cpu39_total_lower_bound_ns > 0);
             return;
         }
 
