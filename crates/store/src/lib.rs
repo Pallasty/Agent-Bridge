@@ -2064,6 +2064,42 @@ pub struct CodebaseIndexA1FullVecOutcome {
     pub telemetry: CodebaseIndexA1FullVecTelemetry,
 }
 
+/// Explicit dispatch selector for the A1 staged-native dispatch seam.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CodebaseIndexA1DispatchStrategy {
+    FullVec,
+    NativeChunkStagedV0(CodebaseIndexA1Options),
+}
+
+/// Structured provenance for an environment-selected codebase index path.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1DispatchReceipt {
+    pub selected_namespace: String,
+    pub requested_strategy: Option<String>,
+    pub effective_strategy: String,
+    pub fallback_reason: Option<String>,
+    pub batch_rows: Option<usize>,
+    pub staging_parent_configured: bool,
+}
+
+/// Stats plus dispatch provenance for an environment-selected operation.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodebaseIndexA1EnvDispatchOutcome {
+    pub stats: CodebaseIndexStats,
+    pub dispatch: CodebaseIndexA1DispatchReceipt,
+}
+
+/// Result from an explicit strategy dispatch.
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CodebaseIndexA1DispatchOutcome {
+    FullVec(CodebaseIndexA1FullVecOutcome),
+    NativeChunkStagedV0(CodebaseIndexA1Outcome),
+}
+
 /// Read-only PRAGMA evidence captured from the authoritative store connection.
 #[cfg(feature = "codebase-index-bounded-native-a1")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

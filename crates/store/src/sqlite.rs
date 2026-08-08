@@ -3050,6 +3050,8 @@ fn reindex_should_sweep_mismatched_dims(
 
 #[cfg(feature = "codebase-index-bounded-native-a1")]
 const CODEBASE_INDEX_A1_MAX_BATCH_ROWS: usize = 65_536;
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+const CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS: usize = 4_096;
 
 #[cfg(feature = "codebase-index-bounded-native-a1")]
 #[derive(Default)]
@@ -3286,7 +3288,136 @@ struct CodebaseIndexFullVecReceipt {
     writer: CodebaseIndexTransactionReceipt,
 }
 
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_a1_strategy_from_env() -> Option<crate::CodebaseIndexA1DispatchStrategy> {
+    codebase_index_dispatch_strategy_from_env(
+        "AB_CODEBASE_INDEX_A1_STRATEGY",
+        "AB_CODEBASE_INDEX_A1_BATCH_ROWS",
+        "AB_CODEBASE_INDEX_A1_STAGING_PARENT",
+    )
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_a2_strategy_from_env() -> Option<crate::CodebaseIndexA1DispatchStrategy> {
+    codebase_index_dispatch_strategy_from_env(
+        "AB_CODEBASE_INDEX_A2_STRATEGY",
+        "AB_CODEBASE_INDEX_A2_BATCH_ROWS",
+        "AB_CODEBASE_INDEX_A2_STAGING_PARENT",
+    )
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_dispatch_strategy_from_env(
+    strategy_key: &str,
+    batch_rows_key: &str,
+    staging_parent_key: &str,
+) -> Option<crate::CodebaseIndexA1DispatchStrategy> {
+    let strategy = std::env::var(strategy_key).ok()?;
+    let batch_rows = std::env::var(batch_rows_key)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|rows| (1..=CODEBASE_INDEX_A1_MAX_BATCH_ROWS).contains(rows))
+        .unwrap_or(CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+    let staging_parent = std::env::var_os(staging_parent_key).map(PathBuf::from);
+
+    match strategy.to_ascii_lowercase().as_str() {
+        "native_chunk_staged_v0" | "native-chunk-staged-v0" => {
+            Some(crate::CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(
+                crate::CodebaseIndexA1Options {
+                    batch_rows,
+                    failpoint: None,
+                    staging_parent,
+                },
+            ))
+        }
+        "full_vec" | "fullvec" | "fullvec_a1" => {
+            Some(crate::CodebaseIndexA1DispatchStrategy::FullVec)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(feature = "codebase-index-bounded-native-a1")]
+fn codebase_index_env_dispatch_selection() -> (
+    crate::CodebaseIndexA1DispatchStrategy,
+    crate::CodebaseIndexA1DispatchReceipt,
+) {
+    let a2_requested = std::env::var("AB_CODEBASE_INDEX_A2_STRATEGY").ok();
+    let a1_requested = std::env::var("AB_CODEBASE_INDEX_A1_STRATEGY").ok();
+    let a2 = codebase_index_a2_strategy_from_env();
+    let a1 = codebase_index_a1_strategy_from_env();
+    let (namespace, strategy, requested_strategy, fallback_reason) = if let Some(strategy) = a2 {
+        ("a2", strategy, a2_requested, None)
+    } else if let Some(strategy) = a1 {
+        let fallback_reason = a2_requested
+            .as_deref()
+            .map(|_| "a2_strategy_unknown".to_string());
+        (
+            "a1",
+            strategy,
+            a2_requested.or(a1_requested),
+            fallback_reason,
+        )
+    } else {
+        let fallback_reason = if a2_requested.is_some() {
+            Some("a2_and_a1_strategy_unknown".to_string())
+        } else if a1_requested.is_some() {
+            Some("a1_strategy_unknown".to_string())
+        } else {
+            None
+        };
+        (
+            "default",
+            crate::CodebaseIndexA1DispatchStrategy::FullVec,
+            a2_requested.or(a1_requested),
+            fallback_reason,
+        )
+    };
+    let (effective_strategy, batch_rows, staging_parent_configured) = match &strategy {
+        crate::CodebaseIndexA1DispatchStrategy::FullVec => ("full_vec".to_string(), None, false),
+        crate::CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => (
+            "native_chunk_staged_v0".to_string(),
+            Some(options.batch_rows),
+            options.staging_parent.is_some(),
+        ),
+    };
+    (
+        strategy,
+        crate::CodebaseIndexA1DispatchReceipt {
+            selected_namespace: namespace.to_string(),
+            requested_strategy,
+            effective_strategy,
+            fallback_reason,
+            batch_rows,
+            staging_parent_configured,
+        },
+    )
+}
+
 impl SqliteStore {
+    /// Run the environment-selected codebase index path and return its
+    /// structured dispatch provenance. This remains feature-gated and
+    /// default-off; the ordinary trait method discards the receipt.
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    pub async fn codebase_index_with_env_dispatch(
+        &self,
+        root_path: &str,
+        languages: &[String],
+    ) -> Result<crate::CodebaseIndexA1EnvDispatchOutcome> {
+        let (strategy, dispatch) = codebase_index_env_dispatch_selection();
+        let stats = match strategy {
+            crate::CodebaseIndexA1DispatchStrategy::FullVec => self
+                .codebase_index_full_vec_with_timing(root_path, languages)
+                .await
+                .map(|receipt| receipt.stats)?,
+            crate::CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => self
+                .codebase_index_bounded_native_a1(root_path, languages, options)
+                .await
+                .map(|outcome| outcome.stats)?,
+        };
+        Ok(crate::CodebaseIndexA1EnvDispatchOutcome { stats, dispatch })
+    }
+
     async fn codebase_index_full_vec_with_timing(
         &self,
         root_path: &str,
@@ -3667,6 +3798,28 @@ impl SqliteStore {
                 indexed_at,
             },
         })
+    }
+
+    /// Evaluation-only explicit strategy dispatch over the A1 codebase index
+    /// variants. Explicit `strategy` selection is opt-in; default runtime path
+    /// remains [`StateStore::codebase_index`] unless callers invoke this seam.
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    pub async fn codebase_index_with_a1_strategy(
+        &self,
+        root_path: &str,
+        languages: &[String],
+        strategy: crate::CodebaseIndexA1DispatchStrategy,
+    ) -> Result<crate::CodebaseIndexA1DispatchOutcome> {
+        match strategy {
+            crate::CodebaseIndexA1DispatchStrategy::FullVec => self
+                .codebase_index_full_vec_a1(root_path, languages)
+                .await
+                .map(crate::CodebaseIndexA1DispatchOutcome::FullVec),
+            crate::CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => self
+                .codebase_index_bounded_native_a1(root_path, languages, options)
+                .await
+                .map(crate::CodebaseIndexA1DispatchOutcome::NativeChunkStagedV0),
+        }
     }
 }
 
@@ -10349,17 +10502,27 @@ impl StateStore for SqliteStore {
         root_path: &str,
         languages: &[String],
     ) -> Result<CodebaseIndexStats> {
-        let receipt = self
-            .codebase_index_full_vec_with_timing(root_path, languages)
-            .await?;
-        let _timing_evidence = (
-            receipt.extraction_and_accumulation_ns,
-            receipt.writer.authoritative_transaction_ns,
-            receipt.writer.autocommit_before,
-            receipt.writer.autocommit_during,
-            receipt.writer.autocommit_after,
-        );
-        Ok(receipt.stats)
+        #[cfg(feature = "codebase-index-bounded-native-a1")]
+        {
+            return self
+                .codebase_index_with_env_dispatch(root_path, languages)
+                .await
+                .map(|outcome| outcome.stats);
+        }
+        #[cfg(not(feature = "codebase-index-bounded-native-a1"))]
+        {
+            let receipt = self
+                .codebase_index_full_vec_with_timing(root_path, languages)
+                .await?;
+            let _timing_evidence = (
+                receipt.extraction_and_accumulation_ns,
+                receipt.writer.authoritative_transaction_ns,
+                receipt.writer.autocommit_before,
+                receipt.writer.autocommit_during,
+                receipt.writer.autocommit_after,
+            );
+            return Ok(receipt.stats);
+        }
     }
 
     async fn codebase_index_status(&self, root_path: &str) -> Result<CodebaseIndexStatus> {
@@ -13719,7 +13882,7 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MemoryListSort, PlanStep, StateStore};
+    use crate::{CodebaseIndexA1DispatchStrategy, MemoryListSort, PlanStep, StateStore};
 
     fn mk_record(key: &str, updated_at: i64) -> MemoryRecord {
         MemoryRecord {
@@ -13758,6 +13921,192 @@ mod tests {
             })
             .await
             .expect("drop timestamp guards");
+    }
+
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    #[test]
+    fn codebase_index_a1_strategy_from_env_parses_strategy_and_batch_tolerantly() {
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        let key_strategy = "AB_CODEBASE_INDEX_A1_STRATEGY";
+        let key_batch = "AB_CODEBASE_INDEX_A1_BATCH_ROWS";
+        let key_staging_parent = "AB_CODEBASE_INDEX_A1_STAGING_PARENT";
+
+        let old_strategy = std::env::var_os(key_strategy);
+        let old_batch = std::env::var_os(key_batch);
+        let old_staging_parent = std::env::var_os(key_staging_parent);
+
+        // Known canonical alias maps to native strategy; unknown batch values
+        // fall back to the hard-coded default.
+        std::env::set_var(key_strategy, "native-chunk-staged-v0");
+        std::env::set_var(key_batch, "0");
+        let fallback0 =
+            codebase_index_a1_strategy_from_env().expect("environment strategy must be readable");
+        match fallback0 {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+                assert_eq!(options.failpoint, None);
+                assert_eq!(options.staging_parent, None);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Hard over-limit batch values also fall back to default.
+        std::env::set_var(key_batch, "999999");
+        let fallback_over = codebase_index_a1_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match fallback_over {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Valid values are passed through directly.
+        std::env::set_var(key_batch, "128");
+        let passthrough = codebase_index_a1_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match passthrough {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, 128);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Non-numeric values always fallback to default.
+        std::env::set_var(key_batch, "not-a-number");
+        let fallback_non_numeric = codebase_index_a1_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match fallback_non_numeric {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Unknown strategy should remain disabled.
+        std::env::set_var(key_strategy, "mystery");
+        assert!(codebase_index_a1_strategy_from_env().is_none());
+
+        if let Some(parent) = old_staging_parent {
+            std::env::set_var(key_staging_parent, parent);
+        } else {
+            std::env::remove_var(key_staging_parent);
+        }
+        if let Some(value) = old_strategy {
+            std::env::set_var(key_strategy, value);
+        } else {
+            std::env::remove_var(key_strategy);
+        }
+        if let Some(value) = old_batch {
+            std::env::set_var(key_batch, value);
+        } else {
+            std::env::remove_var(key_batch);
+        }
+    }
+
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    #[test]
+    fn codebase_index_a2_strategy_from_env_parses_strategy_and_batch_tolerantly() {
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        let key_strategy = "AB_CODEBASE_INDEX_A2_STRATEGY";
+        let key_batch = "AB_CODEBASE_INDEX_A2_BATCH_ROWS";
+        let key_staging_parent = "AB_CODEBASE_INDEX_A2_STAGING_PARENT";
+
+        let old_strategy = std::env::var_os(key_strategy);
+        let old_batch = std::env::var_os(key_batch);
+        let old_staging_parent = std::env::var_os(key_staging_parent);
+
+        // Known canonical alias maps to native strategy; unknown batch values
+        // fall back to the hard-coded default.
+        std::env::set_var(key_strategy, "native-chunk-staged-v0");
+        std::env::set_var(key_batch, "0");
+        let fallback0 =
+            codebase_index_a2_strategy_from_env().expect("environment strategy must be readable");
+        match fallback0 {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+                assert_eq!(options.failpoint, None);
+                assert_eq!(options.staging_parent, None);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Hard over-limit batch values also fall back to default.
+        std::env::set_var(key_batch, "999999");
+        let fallback_over = codebase_index_a2_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match fallback_over {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Valid values are passed through directly.
+        std::env::set_var(key_batch, "128");
+        let passthrough = codebase_index_a2_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match passthrough {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, 128);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Non-numeric values always fallback to default.
+        std::env::set_var(key_batch, "not-a-number");
+        let fallback_non_numeric = codebase_index_a2_strategy_from_env()
+            .expect("environment strategy must still be readable");
+        match fallback_non_numeric {
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(options) => {
+                assert_eq!(options.batch_rows, CODEBASE_INDEX_A1_DEFAULT_BATCH_ROWS);
+            }
+            CodebaseIndexA1DispatchStrategy::FullVec => {
+                panic!("native strategy must map to NativeChunkStagedV0");
+            }
+        }
+
+        // Unknown strategy should remain disabled.
+        std::env::set_var(key_strategy, "mystery");
+        assert!(codebase_index_a2_strategy_from_env().is_none());
+
+        if let Some(parent) = old_staging_parent {
+            std::env::set_var(key_staging_parent, parent);
+        } else {
+            std::env::remove_var(key_staging_parent);
+        }
+        if let Some(value) = old_strategy {
+            std::env::set_var(key_strategy, value);
+        } else {
+            std::env::remove_var(key_strategy);
+        }
+        if let Some(value) = old_batch {
+            std::env::set_var(key_batch, value);
+        } else {
+            std::env::remove_var(key_batch);
+        }
     }
 
     async fn pin_memory_durable_timestamps(
@@ -20720,17 +21069,25 @@ mod tests {
         ] {
             let mut record = make_memrec(
                 key,
-                &format!("Source admission for {source}. Verdict approved SPDX MIT Evidence reviewed"),
+                &format!(
+                    "Source admission for {source}. Verdict approved SPDX MIT Evidence reviewed"
+                ),
             );
             record.kind = "skill_source_admission".to_string();
-            store.memory_save(&record).await.expect("save source admission");
+            store
+                .memory_save(&record)
+                .await
+                .expect("save source admission");
         }
         for key in [
             "skill_source_admission:alpha/skills",
             "skill_source_admission:bravo/skills",
         ] {
             let record = store.memory_get(key).await.expect("get").expect("record");
-            assert_eq!(record.status, "active", "{key} must remain independently active");
+            assert_eq!(
+                record.status, "active",
+                "{key} must remain independently active"
+            );
             assert!(record.superseded_by.is_none());
         }
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -23795,7 +24152,11 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(v, latest_schema_version_for_test(), "schema after all migrations");
+        assert_eq!(
+            v,
+            latest_schema_version_for_test(),
+            "schema after all migrations"
+        );
         assert_eq!(n, 1, "last_cofire_at present exactly once");
 
         seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
@@ -23846,7 +24207,11 @@ mod tests {
             })
             .await
             .expect("probe after upgrade");
-        assert_eq!(v, latest_schema_version_for_test(), "re-open ran through all migrations");
+        assert_eq!(
+            v,
+            latest_schema_version_for_test(),
+            "re-open ran through all migrations"
+        );
         assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -23886,7 +24251,11 @@ mod tests {
             })
             .await
             .expect("probe v39 schema");
-        assert_eq!(v, latest_schema_version_for_test(), "schema after all migrations");
+        assert_eq!(
+            v,
+            latest_schema_version_for_test(),
+            "schema after all migrations"
+        );
         assert_eq!(table_n, 1, "retrieval_surfacing table exists");
         assert_eq!(key_idx_n, 1, "key/surfaced_at index exists");
         assert_eq!(at_idx_n, 1, "surfaced_at index exists");
@@ -23924,7 +24293,11 @@ mod tests {
             })
             .await
             .expect("probe v40 schema");
-        assert_eq!(v, latest_schema_version_for_test(), "schema after v40+v41+v42+v43");
+        assert_eq!(
+            v,
+            latest_schema_version_for_test(),
+            "schema after v40+v41+v42+v43"
+        );
         assert_eq!(col_n, 1, "consumed_at column exists exactly once");
         assert_eq!(idx_n, 1, "pending partial index exists");
 
@@ -28118,7 +28491,11 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, latest_schema_version_for_test(), "schema must be at the latest version");
+        assert_eq!(
+            probe.0,
+            latest_schema_version_for_test(),
+            "schema must be at the latest version"
+        );
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),
