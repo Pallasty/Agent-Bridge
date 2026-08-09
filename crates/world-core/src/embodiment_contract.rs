@@ -308,6 +308,9 @@ pub enum ContractViolation {
     AuthorityDecisionNotApproved,
     ProjectionMissingReObservation,
     VerifiedReceiptMissingObservation,
+    ReceiptBodyMismatch,
+    ReceiptObservationSchemaMismatch,
+    ReceiptWorldRevisionRegression,
     CanonicalMemoryWithoutPromotion,
 }
 
@@ -333,6 +336,52 @@ pub fn validate_effect_receipt(receipt: &EffectReceipt) -> Result<(), ContractVi
         return Err(ContractViolation::VerifiedReceiptMissingObservation);
     }
     Ok(())
+}
+
+/// Build a verified receipt only after a caller supplies a post-effect
+/// observation.  This function records evidence; it does not execute the plan.
+pub fn complete_verified_effect_receipt(
+    plan: &ProjectionPlan,
+    execution: Value,
+    outcome: Value,
+    observed_after: ObservationEnvelope,
+    rollback: Option<Value>,
+) -> Result<EffectReceipt, Vec<ContractViolation>> {
+    let mut violations = Vec::new();
+    if !plan.is_closed_loop() {
+        violations.push(ContractViolation::ProjectionMissingReObservation);
+    }
+    if observed_after.body_id != plan.body_id {
+        violations.push(ContractViolation::ReceiptBodyMismatch);
+    }
+    if observed_after.schema != OBSERVATION_SCHEMA_V0 {
+        violations.push(ContractViolation::ReceiptObservationSchemaMismatch);
+    }
+    if observed_after.world_revision < plan.precondition.world_revision {
+        violations.push(ContractViolation::ReceiptWorldRevisionRegression);
+    }
+    if !violations.is_empty() {
+        return Err(violations);
+    }
+
+    Ok(EffectReceipt {
+        schema: EFFECT_RECEIPT_SCHEMA_V0.into(),
+        receipt_id: format!(
+            "effect-receipt-{}-{}",
+            plan.plan_id, observed_after.world_revision
+        ),
+        plan_id: plan.plan_id.clone(),
+        intent_id: plan.intent_id.clone(),
+        body_id: plan.body_id.clone(),
+        status: EffectStatus::Succeeded,
+        precondition: plan.precondition.clone(),
+        execution,
+        outcome,
+        observed_after: Some(observed_after),
+        verified: true,
+        reversible: plan.reversible,
+        rollback,
+    })
 }
 
 pub fn validate_memory_use(decision: &MemoryUseDecision) -> Result<(), ContractViolation> {
@@ -555,5 +604,42 @@ mod tests {
             validate_memory_use(&decision),
             Err(ContractViolation::CanonicalMemoryWithoutPromotion)
         );
+    }
+
+    #[test]
+    fn real_reversible_temp_file_trial_requires_after_observation() {
+        use std::fs;
+
+        let path = std::env::temp_dir().join(format!("agent-bridge-p4-{}", uuid::Uuid::new_v4()));
+        fs::write(&path, b"p4-before").unwrap();
+        let observed_contents = fs::read(&path).unwrap();
+        assert_eq!(observed_contents, b"p4-before");
+
+        let mut after = observation();
+        after.world_revision = 8;
+        after.payload = json!({"path": "temporary", "bytes": observed_contents.len()});
+        let receipt = complete_verified_effect_receipt(
+            &plan(),
+            json!({"write": true}),
+            json!({"read_back_bytes": observed_contents.len()}),
+            after,
+            Some(json!({"delete": true})),
+        )
+        .unwrap();
+        assert!(receipt.is_verified_closed_loop());
+        assert!(validate_effect_receipt(&receipt).is_ok());
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn verified_receipt_rejects_body_or_revision_mismatch() {
+        let mut after = observation();
+        after.body_id = BodyId::from_raw("body-other");
+        after.world_revision = 0;
+        let errors = complete_verified_effect_receipt(&plan(), json!({}), json!({}), after, None)
+            .unwrap_err();
+        assert!(errors.contains(&ContractViolation::ReceiptBodyMismatch));
+        assert!(errors.contains(&ContractViolation::ReceiptWorldRevisionRegression));
     }
 }
