@@ -3580,6 +3580,7 @@ impl SqliteStore {
                 calls: call_count,
                 duration_ms: start.elapsed().as_millis() as u64,
                 root_path: root_for_return,
+                dispatch: None,
             },
             extraction_and_accumulation_ns,
             writer,
@@ -3772,6 +3773,7 @@ impl SqliteStore {
                 calls: staging.calls,
                 duration_ms,
                 root_path: root,
+                dispatch: None,
             },
             telemetry: crate::CodebaseIndexA1Telemetry {
                 strategy: "native_chunk_staged_v0".to_string(),
@@ -10507,7 +10509,11 @@ impl StateStore for SqliteStore {
             return self
                 .codebase_index_with_env_dispatch(root_path, languages)
                 .await
-                .map(|outcome| outcome.stats);
+                .map(|outcome| {
+                    let mut stats = outcome.stats;
+                    stats.dispatch = Some(outcome.dispatch);
+                    stats
+                });
         }
         #[cfg(not(feature = "codebase-index-bounded-native-a1"))]
         {
@@ -13882,7 +13888,9 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CodebaseIndexA1DispatchStrategy, MemoryListSort, PlanStep, StateStore};
+    #[cfg(feature = "codebase-index-bounded-native-a1")]
+    use crate::CodebaseIndexA1DispatchStrategy;
+    use crate::{MemoryListSort, PlanStep, StateStore};
 
     fn mk_record(key: &str, updated_at: i64) -> MemoryRecord {
         MemoryRecord {

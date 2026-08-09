@@ -1962,6 +1962,25 @@ pub struct CodebaseIndexStats {
     pub calls: u32,
     pub duration_ms: u64,
     pub root_path: String,
+    /// Dispatch provenance is present only when the default-off bounded-index
+    /// feature owns strategy selection. Ordinary builds omit this field and
+    /// retain the historical response shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<CodebaseIndexA1DispatchReceipt>,
+}
+
+/// Structured provenance for an environment-selected codebase index path.
+///
+/// This receipt is part of the stable caller response even though the
+/// strategy-selection implementation remains feature-gated and default-off.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodebaseIndexA1DispatchReceipt {
+    pub selected_namespace: String,
+    pub requested_strategy: Option<String>,
+    pub effective_strategy: String,
+    pub fallback_reason: Option<String>,
+    pub batch_rows: Option<usize>,
+    pub staging_parent_configured: bool,
 }
 
 /// Evaluation-only options for the default-off staged native A1 path.
@@ -2070,18 +2089,6 @@ pub struct CodebaseIndexA1FullVecOutcome {
 pub enum CodebaseIndexA1DispatchStrategy {
     FullVec,
     NativeChunkStagedV0(CodebaseIndexA1Options),
-}
-
-/// Structured provenance for an environment-selected codebase index path.
-#[cfg(feature = "codebase-index-bounded-native-a1")]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CodebaseIndexA1DispatchReceipt {
-    pub selected_namespace: String,
-    pub requested_strategy: Option<String>,
-    pub effective_strategy: String,
-    pub fallback_reason: Option<String>,
-    pub batch_rows: Option<usize>,
-    pub staging_parent_configured: bool,
 }
 
 /// Stats plus dispatch provenance for an environment-selected operation.

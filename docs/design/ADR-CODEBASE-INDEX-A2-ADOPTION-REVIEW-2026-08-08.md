@@ -1,7 +1,7 @@
 # ADR: codebase-index A2 adoption review
 
 Date: 2026-08-08  
-Status: HOLD — default-off candidate only
+Status: HOLD — default-off candidate only; caller/shadow/rollback evidence closed
 
 ## Decision
 
@@ -26,15 +26,42 @@ new authority path in this review.
 
 1. Obtain a fresh canonical receipt for the exact adoption commit on a host
    satisfying the frozen CPU39/79 quiet-window and `/home` ext4 contract.
-2. Review receipt delivery to an operational caller; the ordinary
-   `StateStore::codebase_index` API currently discards dispatch provenance.
-3. Run a separately authorized default-off shadow against a copied or
-   explicitly isolated AB database, with no live-database write claim until
-   ownership and rollback policy are recorded.
-4. Define rollback from A2 to FullVec/A1 and retain the selected namespace,
-   effective strategy, batch size, and fallback reason in the operational
-   evidence.
-5. Re-run the full package gate after any caller or configuration change.
+2. Re-run the full package gate after any later caller or configuration change.
+
+## Closed evidence on the rebased candidate
+
+The ordinary `StateStore::codebase_index` result now retains an optional
+dispatch receipt without changing the trait signature. The field is omitted
+when the bounded-index feature is not compiled, preserving the historical JSON
+shape. With the explicit default-off feature and environment gate, operational
+callers receive the selected namespace, requested and effective strategies,
+batch size, staging-parent presence, and fallback reason.
+
+The integration fixture `codebase_index_a2_default_off_shadow_mutates_only_copied_database`
+creates a schema-initialized source database, records its complete typed
+snapshot and bytes, copies it, and opens only the copy for A2. It requires the
+source bytes and snapshot to remain exact, the copied database to contain the
+new generation, the receipt to name namespace `a2` and
+`native_chunk_staged_v0`, and the private staging directory to be empty after
+success. This is isolated-fixture evidence only; it does not open or claim
+ownership of the live Agent-Bridge database.
+
+Rollback is configuration-only and fail-closed:
+
+- unset `AB_CODEBASE_INDEX_A2_STRATEGY` to return to A1 selection or the
+  historical FullVec default;
+- set `AB_CODEBASE_INDEX_A2_STRATEGY=full_vec` for an explicit A2-namespace
+  FullVec rollback while retaining the operational receipt;
+- an unknown A2 strategy falls back to a valid A1 strategy and records
+  `fallback_reason=a2_strategy_unknown`;
+- if neither namespace is valid, dispatch uses FullVec and records the invalid
+  namespace reason;
+- staging or replay failure preserves the prior authoritative generation, and
+  a retry after repairing staging must match the explicit A1 baseline.
+
+The feature remains absent from default features. No configuration file,
+daemon environment, MCP schema, deployment script, or live database path is
+changed by this evidence unit.
 
 ## Non-goals
 
@@ -44,7 +71,10 @@ or a default strategy change.
 
 ## Current disposition
 
-The implementation is reviewable and the isolated candidate commit is
-`629dccb4`. The candidate remains HOLD because the fresh canonical receipt and
-operational caller review are not complete. A failed host quiet-window check is
-an environmental block, not evidence for relaxing the frozen thresholds.
+The original isolated candidate was `629dccb4`; its rebased evidence successor
+must be identified by the final commit and a fresh canonical receipt before
+promotion review. Operational caller delivery, copied-database shadow, and
+rollback recording are now closed in code and tests. The candidate remains HOLD
+because the exact-successor canonical receipt is not complete. A failed host
+quiet-window check is an environmental block, not evidence for relaxing the
+frozen thresholds.

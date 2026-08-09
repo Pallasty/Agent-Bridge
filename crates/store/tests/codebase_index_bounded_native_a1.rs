@@ -1059,7 +1059,7 @@ async fn codebase_index_with_a2_env_switches_to_native_chunk_staged_v0() {
         .expect("open a2 env switched store");
     seed_authoritative_rows(&env_db, target_root, other_root);
 
-    let _ = with_a2_index_options_env(
+    let stats = with_a2_index_options_env(
         Some("native_chunk_staged_v0"),
         Some("4"),
         Some(&staging_parent),
@@ -1072,12 +1072,120 @@ async fn codebase_index_with_a2_env_switches_to_native_chunk_staged_v0() {
     )
     .await;
 
+    let dispatch = stats
+        .dispatch
+        .expect("ordinary caller must retain A2 dispatch provenance");
+    assert_eq!(dispatch.selected_namespace, "a2");
+    assert_eq!(
+        dispatch.requested_strategy.as_deref(),
+        Some("native_chunk_staged_v0")
+    );
+    assert_eq!(dispatch.effective_strategy, "native_chunk_staged_v0");
+    assert_eq!(dispatch.fallback_reason, None);
+    assert_eq!(dispatch.batch_rows, Some(4));
+    assert!(dispatch.staging_parent_configured);
+
     assert!(
         std::fs::read_dir(&staging_parent)
             .expect("read a2 env staging parent")
             .count()
             == 0,
         "a2 env switched staged-native path must cleanup temporary staging"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_a2_explicit_full_vec_rollback_is_receipted() {
+    let temp_dir = tempfile::tempdir().expect("temporary A2 FullVec rollback fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let db_path = temp_dir.path().join("a2-full-vec-rollback.db");
+    let store = SqliteStore::open(&db_path)
+        .await
+        .expect("open A2 FullVec rollback store");
+    seed_authoritative_rows(&db_path, target_root, "/fixture/a2-full-vec-other-root");
+
+    let stats = with_a2_index_options_env(Some("full_vec"), None, None, || async {
+        store
+            .codebase_index(target_root, &["rust".to_string()])
+            .await
+            .expect("run explicit A2 FullVec rollback")
+    })
+    .await;
+
+    let dispatch = stats
+        .dispatch
+        .expect("A2 FullVec rollback must retain dispatch provenance");
+    assert_eq!(dispatch.selected_namespace, "a2");
+    assert_eq!(dispatch.requested_strategy.as_deref(), Some("full_vec"));
+    assert_eq!(dispatch.effective_strategy, "full_vec");
+    assert_eq!(dispatch.fallback_reason, None);
+    assert_eq!(dispatch.batch_rows, None);
+    assert!(!dispatch.staging_parent_configured);
+}
+
+#[tokio::test]
+async fn codebase_index_a2_default_off_shadow_mutates_only_copied_database() {
+    let temp_dir = tempfile::tempdir().expect("temporary isolated shadow fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/a2-shadow-other-root";
+    let live_db = temp_dir.path().join("live-fixture.db");
+    let shadow_db = temp_dir.path().join("shadow-copy.db");
+    let staging_parent = temp_dir.path().join("shadow-staging");
+    std::fs::create_dir_all(&staging_parent).expect("create shadow staging parent");
+
+    let live_store = SqliteStore::open(&live_db)
+        .await
+        .expect("initialize live fixture schema");
+    drop(live_store);
+    seed_authoritative_rows(&live_db, target_root, other_root);
+    let live_before = authoritative_snapshot(&live_db);
+    let live_bytes_before = std::fs::read(&live_db).expect("read live fixture before shadow");
+    std::fs::copy(&live_db, &shadow_db).expect("copy isolated shadow database");
+
+    let shadow_store = SqliteStore::open(&shadow_db)
+        .await
+        .expect("open copied shadow store");
+    let stats = with_a2_index_options_env(
+        Some("native_chunk_staged_v0"),
+        Some("4"),
+        Some(&staging_parent),
+        || async {
+            shadow_store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("run A2 only on copied shadow database")
+        },
+    )
+    .await;
+
+    let dispatch = stats
+        .dispatch
+        .expect("shadow caller must receive dispatch provenance");
+    assert_eq!(dispatch.selected_namespace, "a2");
+    assert_eq!(dispatch.effective_strategy, "native_chunk_staged_v0");
+    assert_eq!(dispatch.batch_rows, Some(4));
+    assert!(dispatch.staging_parent_configured);
+    assert_eq!(
+        std::fs::read(&live_db).expect("read live fixture after shadow"),
+        live_bytes_before,
+        "isolated A2 shadow must not change the source database bytes"
+    );
+    assert_eq!(authoritative_snapshot(&live_db), live_before);
+    assert_ne!(
+        authoritative_snapshot(&shadow_db).normalize_target_clock(target_root),
+        live_before.normalize_target_clock(target_root),
+        "copied shadow must contain the newly indexed generation"
+    );
+    assert_eq!(
+        std::fs::read_dir(&staging_parent)
+            .expect("read shadow staging parent")
+            .count(),
+        0,
+        "shadow staging state must be cleaned"
     );
 }
 
@@ -1154,7 +1262,7 @@ async fn codebase_index_with_a2_unknown_strategy_falls_back_to_a1_strategy() {
         .expect("open a2-unknown fallback store");
     seed_authoritative_rows(&env_db, target_root, other_root);
 
-    let _ = with_a1_a2_index_options_env(
+    let stats = with_a1_a2_index_options_env(
         (
             Some("native_chunk_staged_v0"),
             Some("4"),
@@ -1169,6 +1277,22 @@ async fn codebase_index_with_a2_unknown_strategy_falls_back_to_a1_strategy() {
         },
     )
     .await;
+
+    let dispatch = stats
+        .dispatch
+        .expect("fallback caller must retain dispatch provenance");
+    assert_eq!(dispatch.selected_namespace, "a1");
+    assert_eq!(
+        dispatch.requested_strategy.as_deref(),
+        Some("not-a2-strategy")
+    );
+    assert_eq!(dispatch.effective_strategy, "native_chunk_staged_v0");
+    assert_eq!(
+        dispatch.fallback_reason.as_deref(),
+        Some("a2_strategy_unknown")
+    );
+    assert_eq!(dispatch.batch_rows, Some(4));
+    assert!(dispatch.staging_parent_configured);
 
     assert!(
         std::fs::metadata(&a1_staging_parent)
