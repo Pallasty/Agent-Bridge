@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D79-SUCCESSOR-PREFLIGHT-D80-V1",
+  "baseline_commit": "105934371189e42788a9c8c5f59f11ca922e9fdd",
+  "source_pins": {
+    "fh_l8_runtime_scope_lock_d79_result.json": "1c4522d9ab92ae4fd59e9f9ba8514e7f2725f83b35f7f1c1988930b65d315c1b",
+    "fh_l8_runtime_numeric_proof_d60_result.json": "2a5a755d340393260b3e6c2c435d3838a773ca6302c67abf4987bfbd0a02141f",
+    "fh_l8_integrated_envelope_refresh_d77_result.json": "8612e020fa9ccea8eddb071e81ccdf10fa92c53e7446818c40d81f84ac8fd82c",
+    "fh_l8_owner_allocator_proof_d78_result.json": "e9707ca4782aa32ccd6900ff02de05bbdc271a28c8ee0db2de21a03d2abbe558"
+  },
+  "required_blockers": [
+    "D79_SCOPE_MEMORY_CONTROLLER_ABSENT",
+    "D60_RUNTIME_INPUTS_INCOMPLETE",
+    "D58_ALLOCATOR_NUMERIC_INPUTS_MISSING",
+    "D59_PRODUCTION_PAGE_CACHE_ENVIRONMENT_UNRESOLVED",
+    "D23_EXTERNAL_RESERVATION_UNRESOLVED"
+  ],
+  "allowed_next_unit": "D60_ENVIRONMENT_AND_MARGIN_PRECOMMIT_PACKET_ONLY",
+  "forbidden_actions": [
+    "TIMING_MEASUREMENT",
+    "FULL53_EXECUTION",
+    "EXTERNAL_RESOURCE_REQUEST",
+    "RUNTIME_ENABLEMENT",
+    "NUMERIC_PEAK_OR_RUNTIME_CLAIM"
+  ],
+  "decision": "NO_GO_D80_SUCCESSOR_EXECUTION_BLOCKED",
+  "full53_execution_authorized": false
+}
