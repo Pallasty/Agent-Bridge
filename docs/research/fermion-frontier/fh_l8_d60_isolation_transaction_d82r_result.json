@@ -1,0 +1,30 @@
+{
+  "status": "VERIFIED_D82R_REVERSIBLE_TRANSACTION_TOOL_LIVE_APPLY_CREDENTIAL_BLOCKED",
+  "contract_sha256": "1ebafbbb43795d6b4416dbe6d8add5366f73bd68cfe780f85b45d04e5e1a880c",
+  "transaction_tool_sha256": "3622b2c4ba9d89b53801bf81001ea54c228eaae77749270aeaa4911776576e25",
+  "receipt_capture_sha256": "264db5cd848233cc4bd8d727365963514b1fe35881b57662e763314e0c04caf9",
+  "transaction_mode_count": 5,
+  "simulation_transaction_test_count": 6,
+  "simulation_receipt_test_count": 3,
+  "live_plan_status": "BLOCKED",
+  "live_plan_blockers": [
+    "host_admin_credential_missing"
+  ],
+  "root_cpuset_available": true,
+  "root_cpuset_already_enabled": false,
+  "target_cpu_online": true,
+  "target_cpu_no_smt_sibling": true,
+  "irq_conflicts_present": true,
+  "live_apply_invocation_attempted": true,
+  "live_apply_passed_preflight": false,
+  "transaction_state_absent_after_attempt": true,
+  "target_cgroup_absent_after_attempt": true,
+  "host_cgroup_mutations_executed": 0,
+  "irq_mutations_executed": 0,
+  "timing_measurements_executed": 0,
+  "scientific_kernel_calls_executed": 0,
+  "numeric_runtime_seconds_proven": false,
+  "full53_execution_authorized": false,
+  "decision": "BLOCKED_D82R_LIVE_APPLY_REQUIRES_HOST_ADMIN_CREDENTIAL",
+  "next_gate": "HOST_ADMIN_RUN_D82R_APPLY_RUN_RECEIPT_VERIFY_ROLLBACK"
+}

@@ -239,6 +239,13 @@ finds that root cpuset propagation and all target-service predicates are absent,
 fail-closed and no measurement is authorized. Host-admin provisioning plus a fresh in-service D82
 receipt is the next gate; the old D81 session cgroup identity cannot be reused after that move.
 
+D82R supplies the reversible host transaction for that gate. It persists original root-cpuset and
+per-IRQ state before mutation, supports plan/apply/verify/run/rollback, automatically rolls back a
+partial apply and refuses to overwrite populated cgroups or externally drifted IRQ affinity. Nine
+simulation tests pass. The live apply invocation stopped before mutation because the current EUID
+lacks a non-interactive host-admin credential; no state file or target cgroup exists and D83 remains
+closed.
+
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
 3,110,572,064-byte scratch design, 359,759,114 bytes above D23. It also fixes integer work counts,
