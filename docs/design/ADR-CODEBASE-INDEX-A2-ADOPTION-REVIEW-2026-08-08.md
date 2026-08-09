@@ -1,6 +1,6 @@
 # ADR: codebase-index A2 adoption review
 
-Date: 2026-08-08  
+Date: 2026-08-08
 Status: HOLD — default-off candidate only; caller/shadow/rollback evidence closed
 
 ## Decision
@@ -17,8 +17,9 @@ new authority path in this review.
   transaction gates for the staged-native algorithm.
 - The A2 dispatch seam preserves A2 precedence, A1 fallback, exact rollback,
   retry-after-staging-repair, and structured dispatch provenance.
-- `ab-store` package verification passed with 487 unit tests and 21 A1/A2
-  integration tests.
+- `ab-store` package verification passed with 484 unit tests and 23 A1/A2
+  integration tests. The feature-gated integration suite also passed five
+  consecutive default-concurrency repetitions (115 test executions total).
 - Non-promotable diagnostic dogfood proved fresh-child and isolated SQLite
   execution without touching the live database.
 
@@ -78,3 +79,9 @@ rollback recording are now closed in code and tests. The candidate remains HOLD
 because the exact-successor canonical receipt is not complete. A failed host
 quiet-window check is an environmental block, not evidence for relaxing the
 frozen thresholds.
+
+The 2026-08-09 local canonical attempt was rejected before workload execution:
+the available output filesystems were `fuseblk` under `/home` and `f2fs` under
+`/Data`, rather than the frozen persistent `ext4` class. The same session was
+restricted to CPUs `0-15`, so it also could not satisfy the frozen CPU39/79
+contract. No receipt was produced and neither constraint was relaxed.
