@@ -2,6 +2,18 @@
 
 Status date: 2026-08-09
 
+## 2026-08-09 — FH-L8 D82R reversible CPU15 isolation transaction
+
+- Implemented plan/apply/verify/run/rollback with pre-mutation state persistence, exact IRQ
+  before/after records, automatic apply-failure rollback and refusal to overwrite populated-cgroup
+  or third-party IRQ drift.
+- Six transaction simulations and three receipt simulations pass. The receipt writer admits only an
+  all-green D82 result and uses exclusive creation outside the repository.
+- A live apply invocation stopped at the root-credential preflight. EUID remains 1000, the state
+  file and target cgroup remain absent, root subtree control remains unchanged, and host/IRQ mutation
+  counts are zero.
+- Next gate is `HOST_ADMIN_RUN_D82R_APPLY_RUN_RECEIPT_VERIFY_ROLLBACK`; D83 remains forbidden.
+
 ## 2026-08-09 — FH-L8 D82 owner policy and load-isolation gate
 
 - Froze the owner-selected runtime claim as an empirical admission envelope, not a deterministic

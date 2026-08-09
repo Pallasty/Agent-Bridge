@@ -458,6 +458,18 @@ All copied JSON files are research-only outputs. They contain no credentials.
 - D82 executes no host mutation or measurement. A fresh all-green D82 receipt is required before
   D83 may seal the exact confirmatory measurement packet.
 
+## FH-L8 D82R reversible CPU15 isolation transaction
+
+- `fh_l8_d60_isolation_transaction_d82r_contract.json`: exact CPU15 parent/service cgroups,
+  five transaction modes, state-before-mutation and rollback safety rules.
+- `fh_l8_d60_isolation_transaction_d82r.py`: root-gated plan/apply/verify/run/rollback tool with
+  per-IRQ restoration records and automatic failure rollback.
+- `fh_l8_d60_isolation_receipt_capture_d82r.py`: exclusive fresh-receipt writer that only accepts an
+  all-green live D82 result from inside the exact service cgroup.
+- D82R result/checker and nine simulation tests prove the tool path while recording the live
+  credential blocker and zero host mutation.
+- `FH_L8_D60_ISOLATION_TRANSACTION_D82R_ZH.md`: Chinese operator sequence and rollback boundary.
+
 ## FH-L8 D64 owner-local capacity observation
 
 - `fh_l8_d23_capacity_attestation_d64.json` and `fh_l8_d23_capacity_attestation_d64.py`: live
