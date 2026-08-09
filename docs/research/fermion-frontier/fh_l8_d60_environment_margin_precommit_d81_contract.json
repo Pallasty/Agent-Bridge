@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-ENVIRONMENT-MARGIN-PRECOMMIT-D81-V1",
+  "baseline_commit": "9860c56492e67d724c234f9be87da1ad863797df",
+  "selected_rule_form": "precommitted_measurement_population_margin_and_timeout_rule",
+  "operation_population": {
+    "scientific_kernel_calls": 213099,
+    "candidate_visits": 47947275,
+    "merge_record_reads_upper": 95894550,
+    "merge_record_writes_upper": 95894550,
+    "merge_heap_comparisons_design_upper": 958945500
+  },
+  "environment_precommit": {
+    "python_implementation": "CPython",
+    "python_version": "3.14.4",
+    "machine": "x86_64",
+    "cpu_model": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "online_cpu_list": "0-15",
+    "scaling_driver": "intel_pstate",
+    "scaling_governor": "powersave",
+    "energy_performance_preference": "balance_performance",
+    "filesystem_type": "f2fs",
+    "cgroup_version": "v2",
+    "cgroup_path": "/user.slice/user-1000.slice/session-3.scope",
+    "concurrent_load_exclusion_mechanism": null
+  },
+  "rule_precommit": {
+    "operation_class_cost_mapping": "MEASURE_EACH_FROZEN_OPERATION_CLASS_SEPARATELY_THEN_APPLY_FROZEN_POPULATION",
+    "measurement_margin": null,
+    "ood_policy": "FAIL_CLOSED_IF_ENVIRONMENT_IDENTITY_OR_ANY_OPERATION_CLASS_IS_OUTSIDE_PRECOMMIT",
+    "timeout_policy": null
+  },
+  "owner_numeric_inputs_required": [
+    "measurement_margin",
+    "timeout_policy"
+  ],
+  "host_mechanism_input_required": "concurrent_load_exclusion_mechanism",
+  "authority": {
+    "environment_observation_only": true,
+    "timing_measurements_executed": 0,
+    "external_requests_sent": 0,
+    "scientific_kernel_calls_executed": 0,
+    "numeric_runtime_seconds_proven": false,
+    "full53_execution_authorized": false
+  },
+  "decision": "BLOCKED_D81_PRECOMMIT_PACKET_MISSING_OWNER_NUMERIC_POLICY_AND_LOAD_ISOLATION"
+}

@@ -1,0 +1,23 @@
+{
+  "status": "VERIFIED_D81_PRECOMMIT_PACKET_EMITTED_FAIL_CLOSED",
+  "baseline_commit_verified": true,
+  "environment_identity_field_count": 11,
+  "environment_identity_verified_on_capture_host": true,
+  "selected_rule_form_verified": true,
+  "operation_population_class_count": 5,
+  "missing_input_count": 3,
+  "missing_inputs": [
+    "concurrent_load_exclusion_mechanism",
+    "measurement_margin",
+    "timeout_policy"
+  ],
+  "owner_numeric_input_count": 2,
+  "host_mechanism_input_count": 1,
+  "timing_measurements_executed": 0,
+  "external_requests_sent": 0,
+  "scientific_kernel_calls_executed": 0,
+  "numeric_runtime_seconds_proven": false,
+  "full53_execution_authorized": false,
+  "decision": "BLOCKED_D81_PRECOMMIT_PACKET_MISSING_OWNER_NUMERIC_POLICY_AND_LOAD_ISOLATION",
+  "next_gate": "OWNER_NUMERIC_MARGIN_TIMEOUT_AND_LOAD_ISOLATION_INPUT"
+}
