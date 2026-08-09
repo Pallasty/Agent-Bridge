@@ -5,6 +5,7 @@
 
 pub mod action_query;
 pub mod embodiment;
+pub mod embodiment_attention;
 pub mod embodiment_contract;
 pub mod event_query;
 pub mod evidence_query;
@@ -19,6 +20,7 @@ pub mod verification;
 
 pub use action_query::*;
 pub use embodiment::*;
+pub use embodiment_attention::*;
 pub use embodiment_contract::*;
 pub use event_query::*;
 pub use evidence_query::*;
