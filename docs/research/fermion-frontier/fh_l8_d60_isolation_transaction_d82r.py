@@ -186,6 +186,27 @@ def write_exact(backend: Any, path: Path, value: str) -> None:
         raise D82RTransactionError(f"write drift: {path}")
 
 
+def irq_effective_path(configured_path: Path) -> Path:
+    return configured_path.with_name("effective_affinity_list")
+
+
+def irq_is_active(backend: Any, configured_path: Path) -> bool:
+    effective_path = irq_effective_path(configured_path)
+    # Older kernels may not expose effective_affinity_list. Preserve the
+    # conservative configured-mask behavior in that case.
+    return not backend.exists(effective_path) or bool(
+        parse_cpu_list(backend.read(effective_path))
+    )
+
+
+def irq_conflict_paths(backend: Any, cpu: int) -> list[Path]:
+    return [
+        path
+        for path in backend.irq_paths()
+        if irq_is_active(backend, path) and cpu in parse_cpu_list(backend.read(path))
+    ]
+
+
 def plan(backend: Any, contract: Mapping[str, Any]) -> dict[str, Any]:
     target = contract["target"]
     cpu = int(target["cpu"])
@@ -195,10 +216,13 @@ def plan(backend: Any, contract: Mapping[str, Any]) -> dict[str, Any]:
     subtree = set(backend.read(CGROUP_ROOT / "cgroup.subtree_control").split())
     online = parse_cpu_list(backend.read(CPU_ROOT / "online"))
     siblings = backend.read(CPU_ROOT / f"cpu{cpu}" / "topology/thread_siblings_list")
-    conflicts = [
+    conflicts = [str(path) for path in irq_conflict_paths(backend, cpu)]
+    exclusive_active_irqs = [
         str(path)
         for path in backend.irq_paths()
-        if cpu in parse_cpu_list(backend.read(path))
+        if backend.exists(irq_effective_path(path))
+        and parse_cpu_list(backend.read(path)) == {cpu}
+        and cpu in parse_cpu_list(backend.read(irq_effective_path(path)))
     ]
     blockers: list[str] = []
     if backend.euid() != contract["transaction"]["apply_requires_euid"]:
@@ -213,6 +237,8 @@ def plan(backend: Any, contract: Mapping[str, Any]) -> dict[str, Any]:
         blockers.append("target_cgroup_already_exists")
     if backend.state_exists():
         blockers.append("transaction_state_already_exists")
+    if exclusive_active_irqs:
+        blockers.append("target_cpu_has_exclusive_active_irq_affinity")
     return {
         "status": "READY" if not blockers else "BLOCKED",
         "euid": backend.euid(),
@@ -223,6 +249,7 @@ def plan(backend: Any, contract: Mapping[str, Any]) -> dict[str, Any]:
         "target_cpu_thread_siblings": siblings,
         "irq_conflict_count": len(conflicts),
         "irq_conflict_paths": conflicts,
+        "exclusive_active_irq_paths": exclusive_active_irqs,
         "blockers": blockers,
         "mutations_executed": 0,
     }
@@ -266,9 +293,14 @@ def verify_applied(backend: Any, contract: Mapping[str, Any]) -> dict[str, Any]:
                 == target["service_partition_state"],
             }
         )
-    conflicts = sum(
-        cpu in parse_cpu_list(backend.read(path)) for path in backend.irq_paths()
-    )
+    configured_conflicts = irq_conflict_paths(backend, cpu)
+    effective_conflicts = [
+        path
+        for path in backend.irq_paths()
+        if backend.exists(irq_effective_path(path))
+        and cpu in parse_cpu_list(backend.read(irq_effective_path(path)))
+    ]
+    conflicts = len(configured_conflicts) + len(effective_conflicts)
     checks["irq_conflicts_zero"] = conflicts == target["irq_conflict_count_required"]
     return {
         "status": "VERIFIED" if all(checks.values()) else "FAILED",

@@ -24,7 +24,11 @@ class FakeBackend:
             str(MODULE.CPU_ROOT / "online"): "0-15",
             str(MODULE.CPU_ROOT / "cpu15/topology/thread_siblings_list"): "15",
             str(MODULE.IRQ_ROOT / "1/smp_affinity_list"): "0-15",
+            str(MODULE.IRQ_ROOT / "1/effective_affinity_list"): "15",
             str(MODULE.IRQ_ROOT / "2/smp_affinity_list"): "0-14",
+            str(MODULE.IRQ_ROOT / "2/effective_affinity_list"): "0",
+            str(MODULE.IRQ_ROOT / "3/smp_affinity_list"): "0-15",
+            str(MODULE.IRQ_ROOT / "3/effective_affinity_list"): "",
         }
 
     def euid(self):
@@ -72,6 +76,10 @@ class FakeBackend:
             self.files[key] = " ".join(sorted(current))
         else:
             self.files[key] = value
+            if path.name == "smp_affinity_list":
+                effective = path.with_name("effective_affinity_list")
+                if str(effective) in self.files and self.files[str(effective)]:
+                    self.files[str(effective)] = str(min(MODULE.parse_cpu_list(value)))
 
     def irq_paths(self):
         return [
@@ -125,6 +133,29 @@ class D82RTests(unittest.TestCase):
             MODULE.apply(backend, self.contract)
         self.assertIsNone(backend.state)
         self.assertEqual(backend.read(MODULE.IRQ_ROOT / "1/smp_affinity_list"), "0-15")
+
+    def test_inactive_irq_with_default_mask_is_not_mutated(self):
+        inactive = MODULE.IRQ_ROOT / "3/smp_affinity_list"
+        backend = FakeBackend(fail_write=str(inactive))
+        result = MODULE.apply(backend, self.contract)
+        self.assertEqual(result["status"], "APPLIED")
+        self.assertEqual(backend.read(inactive), "0-15")
+        self.assertEqual(MODULE.verify_applied(backend, self.contract)["status"], "VERIFIED")
+        MODULE.rollback(backend, self.contract)
+
+    def test_exclusive_active_irq_blocks_before_mutation(self):
+        backend = FakeBackend()
+        irq = MODULE.IRQ_ROOT / "4/smp_affinity_list"
+        backend.files[str(irq)] = "15"
+        backend.files[str(irq.with_name("effective_affinity_list"))] = "15"
+        plan = MODULE.plan(backend, self.contract)
+        self.assertIn("target_cpu_has_exclusive_active_irq_affinity", plan["blockers"])
+        with self.assertRaisesRegex(
+            MODULE.D82RTransactionError, "target_cpu_has_exclusive_active_irq_affinity"
+        ):
+            MODULE.apply(backend, self.contract)
+        self.assertIsNone(backend.state)
+        self.assertEqual(backend.read(irq), "15")
 
     def test_irq_drift_refuses_rollback_without_clobber(self):
         backend = FakeBackend()

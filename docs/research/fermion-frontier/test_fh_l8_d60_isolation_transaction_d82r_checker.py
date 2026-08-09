@@ -12,11 +12,20 @@ SPEC.loader.exec_module(MODULE)  # type: ignore[union-attr]
 
 
 class D82RCheckerTests(unittest.TestCase):
-    def test_current_result_is_fail_closed_and_zero_mutation(self):
+    def test_current_result_is_fail_closed_and_rolled_back(self):
         result = MODULE.verify()
-        self.assertEqual(result["live_plan_blockers"], ["host_admin_credential_missing"])
-        self.assertEqual(result["host_cgroup_mutations_executed"], 0)
-        self.assertEqual(result["irq_mutations_executed"], 0)
+        self.assertEqual(
+            result["live_plan_blockers"],
+            [
+                "host_admin_credential_missing",
+                "target_cpu_has_exclusive_active_irq_affinity",
+            ],
+        )
+        self.assertTrue(result["live_host_mutations_rolled_back"])
+        self.assertTrue(result["live_irq_mutations_rolled_back"])
+        self.assertEqual(result["residual_host_cgroup_mutations"], 0)
+        self.assertEqual(result["residual_irq_mutations"], 0)
+        self.assertFalse(result["receipt_captured"])
         self.assertFalse(result["full53_execution_authorized"])
 
 
