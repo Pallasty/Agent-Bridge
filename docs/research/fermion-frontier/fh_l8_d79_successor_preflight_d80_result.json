@@ -1,0 +1,22 @@
+{
+  "status": "VERIFIED_D80_CURRENT_MASTER_SUCCESSOR_PREFLIGHT",
+  "baseline_commit_verified": true,
+  "source_pins_verified": true,
+  "blocker_count": 5,
+  "blockers": [
+    "D79_SCOPE_MEMORY_CONTROLLER_ABSENT",
+    "D60_RUNTIME_INPUTS_INCOMPLETE",
+    "D58_ALLOCATOR_NUMERIC_INPUTS_MISSING",
+    "D59_PRODUCTION_PAGE_CACHE_ENVIRONMENT_UNRESOLVED",
+    "D23_EXTERNAL_RESERVATION_UNRESOLVED"
+  ],
+  "d60_missing_input_count": 9,
+  "allowed_next_unit": "D60_ENVIRONMENT_AND_MARGIN_PRECOMMIT_PACKET_ONLY",
+  "timing_measurements_executed": 0,
+  "external_requests_sent": 0,
+  "scientific_kernel_calls_executed": 0,
+  "numeric_peak_memory_proven": false,
+  "numeric_runtime_seconds_proven": false,
+  "full53_execution_authorized": false,
+  "decision": "NO_GO_D80_SUCCESSOR_EXECUTION_BLOCKED"
+}
