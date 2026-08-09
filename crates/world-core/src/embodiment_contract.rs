@@ -4,10 +4,15 @@
 //! mutate a body, persist memory, or grant authority.  Runtime layers may
 //! consume them after applying their own policy and owner gates.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ActionReceipt, BodyDescriptor, BodyId, IntentId, LeaseId, ObservationEnvelope};
+use crate::{
+    ActionReceipt, BodyDescriptor, BodyId, IntentId, LeaseId, ObservationEnvelope,
+    OBSERVATION_SCHEMA_V0,
+};
 
 pub const OBSERVED_WORLD_SCHEMA_V0: &str = "agent_bridge.observed_world.v0";
 pub const COMPONENT_PROPOSAL_SCHEMA_V0: &str = "agent_bridge.component_proposal.v0";
@@ -76,6 +81,96 @@ impl ObservedWorld {
             observations,
         }
     }
+
+    pub fn is_read_only(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObservedWorldViolation {
+    DuplicateBody(String),
+    UnknownBody(String),
+    UnsupportedObservationSchema(String),
+    StaleObservation(String),
+    WorldRevisionMismatch { expected: u64, actual: u64 },
+    InvalidConfidence(String),
+}
+
+/// Aggregate a deterministic, read-only world view from explicit observations.
+///
+/// This is intentionally a pure P1 boundary: it does not sample hardware,
+/// persist state, infer intent, or execute an action. Callers must provide the
+/// sampling timestamp and freshness bound explicitly.
+pub fn aggregate_observed_world(
+    mut bodies: Vec<BodyDescriptor>,
+    mut observations: Vec<ObservationEnvelope>,
+    now_unix_ms: u64,
+    max_age_ms: u64,
+) -> Result<ObservedWorld, Vec<ObservedWorldViolation>> {
+    let mut violations = Vec::new();
+    let mut body_ids = BTreeSet::new();
+    for body in &bodies {
+        if !body_ids.insert(body.body_id.to_string()) {
+            violations.push(ObservedWorldViolation::DuplicateBody(
+                body.body_id.to_string(),
+            ));
+        }
+    }
+
+    let expected_revision = observations
+        .first()
+        .map(|observation| observation.world_revision);
+    for observation in &observations {
+        let body_id = observation.body_id.to_string();
+        if !body_ids.contains(&body_id) {
+            violations.push(ObservedWorldViolation::UnknownBody(body_id.clone()));
+        }
+        if observation.schema != OBSERVATION_SCHEMA_V0 {
+            violations.push(ObservedWorldViolation::UnsupportedObservationSchema(
+                observation.schema.clone(),
+            ));
+        }
+        if !observation.is_fresh_at(now_unix_ms, max_age_ms) {
+            violations.push(ObservedWorldViolation::StaleObservation(body_id));
+        }
+        if !observation.confidence.is_finite() || !(0.0..=1.0).contains(&observation.confidence) {
+            violations.push(ObservedWorldViolation::InvalidConfidence(
+                observation.body_id.to_string(),
+            ));
+        }
+        if let Some(expected) = expected_revision {
+            if observation.world_revision != expected {
+                violations.push(ObservedWorldViolation::WorldRevisionMismatch {
+                    expected,
+                    actual: observation.world_revision,
+                });
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        return Err(violations);
+    }
+
+    bodies.sort_by(|left, right| left.body_id.as_str().cmp(right.body_id.as_str()));
+    observations.sort_by(|left, right| {
+        left.body_id
+            .as_str()
+            .cmp(right.body_id.as_str())
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.observed_at_unix_ms.cmp(&right.observed_at_unix_ms))
+    });
+    Ok(ObservedWorld::from_observations(
+        expected_revision.unwrap_or_default(),
+        observations
+            .iter()
+            .map(|observation| observation.observed_at_unix_ms)
+            .max()
+            .unwrap_or_default(),
+        bodies,
+        observations,
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -316,6 +411,81 @@ mod tests {
             validate_projection(&cognitive, &authority(), &plan()),
             Err(ContractViolation::CognitiveDecisionHasAuthority)
         );
+    }
+
+    fn body(id: &str) -> BodyDescriptor {
+        BodyDescriptor {
+            body_id: BodyId::from_raw(id),
+            kind: "host".into(),
+            label: id.into(),
+            capabilities: vec!["body_status".into()],
+            authority_scope: "local".into(),
+            online: true,
+            last_observed_unix_ms: Some(100),
+        }
+    }
+
+    fn observation_for(body_id: &str, source: &str, revision: u64) -> ObservationEnvelope {
+        ObservationEnvelope {
+            schema: OBSERVATION_SCHEMA_V0.into(),
+            body_id: BodyId::from_raw(body_id),
+            source: source.into(),
+            observed_at_unix_ms: 100,
+            freshness_ms: 20,
+            confidence: 0.9,
+            world_revision: revision,
+            payload: json!({"ready": true}),
+        }
+    }
+
+    #[test]
+    fn observed_world_aggregation_is_sorted_and_read_only() {
+        let world = aggregate_observed_world(
+            vec![body("body-b"), body("body-a")],
+            vec![
+                observation_for("body-b", "memory", 3),
+                observation_for("body-a", "cpu", 3),
+            ],
+            110,
+            30,
+        )
+        .unwrap();
+        assert!(world.is_read_only());
+        assert_eq!(world.world_revision, 3);
+        assert_eq!(world.bodies[0].body_id.as_str(), "body-a");
+        assert_eq!(world.observations[0].body_id.as_str(), "body-a");
+    }
+
+    #[test]
+    fn observed_world_aggregation_rejects_mixed_revision_and_unknown_body() {
+        let errors = aggregate_observed_world(
+            vec![body("body-a")],
+            vec![
+                observation_for("body-a", "cpu", 3),
+                observation_for("body-b", "ram", 4),
+            ],
+            110,
+            30,
+        )
+        .unwrap_err();
+        assert!(errors.contains(&ObservedWorldViolation::UnknownBody("body-b".into())));
+        assert!(
+            errors.contains(&ObservedWorldViolation::WorldRevisionMismatch {
+                expected: 3,
+                actual: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn observed_world_aggregation_rejects_stale_and_invalid_observations() {
+        let mut observation = observation_for("body-a", "cpu", 3);
+        observation.observed_at_unix_ms = 1;
+        observation.confidence = 1.5;
+        let errors =
+            aggregate_observed_world(vec![body("body-a")], vec![observation], 110, 30).unwrap_err();
+        assert!(errors.contains(&ObservedWorldViolation::StaleObservation("body-a".into())));
+        assert!(errors.contains(&ObservedWorldViolation::InvalidConfidence("body-a".into())));
     }
 
     #[test]
