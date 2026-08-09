@@ -270,12 +270,14 @@ fn worker_exit_with_live_descendant_is_failure_not_terminal_success() {
 }
 
 #[test]
-fn guardian_prototype_remains_unwired_and_synthetic_only() {
+fn guardian_prototype_remains_synthetic_only_after_s635_product_wiring() {
     let supervisor = include_str!("../src/story_render_supervisor.rs");
     let bridge_lib = include_str!("../src/lib.rs");
     let guardian = include_str!("../src/story_render_guardian_synthetic.rs");
 
-    assert!(!supervisor.contains("story_render_guardian"));
+    assert!(supervisor.contains("story_render_guardian::GuardianLaunchSpec"));
+    assert!(supervisor.contains("story_render_guardian_supervision::start_guardian_supervision"));
+    assert!(!supervisor.contains("story_render_guardian_synthetic"));
     assert!(!bridge_lib.contains("story_render_guardian_synthetic"));
     for required in [
         "PR_SET_CHILD_SUBREAPER",

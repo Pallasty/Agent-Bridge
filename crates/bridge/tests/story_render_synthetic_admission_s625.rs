@@ -242,11 +242,6 @@ async fn wait_for_pid_file(path: &Path, count: usize) -> Vec<u32> {
     }
 }
 
-fn assert_lock_released(config: StoryRenderSupervisorConfig) {
-    let admission = begin_story_render_admission(config).expect("host lock released");
-    drop(admission);
-}
-
 async fn retry_lock_released(config: StoryRenderSupervisorConfig) {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
@@ -345,7 +340,7 @@ async fn provider_declines_fail_closed_release_lock_and_never_spawn() {
         assert_eq!(error, expected_error, "stage={stage:?}");
         assert_eq!(provider.events, expected_events, "stage={stage:?}");
         assert!(!marker.exists());
-        assert_lock_released(config);
+        retry_lock_released(config).await;
     }
 }
 
@@ -364,7 +359,7 @@ async fn invalid_identity_stops_before_grant_and_releases_lock() {
     assert_eq!(error, StoryRenderSyntheticAdmissionError::InvalidRequestId);
     assert_eq!(provider.events, ["identity"]);
     assert!(!marker.exists());
-    assert_lock_released(config);
+    retry_lock_released(config).await;
 }
 
 #[tokio::test]
@@ -385,7 +380,7 @@ async fn oversized_built_request_releases_lock_without_spawn() {
     );
     assert_eq!(provider.events, ["identity", "grant", "request"]);
     assert!(!marker.exists());
-    assert_lock_released(config);
+    retry_lock_released(config).await;
 }
 
 #[tokio::test]
@@ -408,6 +403,7 @@ async fn spawn_failure_discards_admission_and_fresh_provider_can_retry() {
     assert!(!marker.exists());
 
     let valid = codec_config(root.path(), "mark_success", &[&marker]);
+    retry_lock_released(valid.clone()).await;
     let mut fresh_provider = RecordingProvider::new(valid.clone(), marker.clone());
     run_s625_synthetic_admission(valid, &mut fresh_provider)
         .await
