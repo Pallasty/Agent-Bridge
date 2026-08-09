@@ -431,6 +431,33 @@ All copied JSON files are research-only outputs. They contain no credentials.
   environment and authority checks.
 - `FH_L8_PRODUCTION_IO_PAGE_CACHE_D59_ZH.md`: Chinese NO-GO rationale and D60 handoff.
 
+## FH-L8 D60 premeasurement rule and D81 environment precommit
+
+- `fh_l8_runtime_rule_d60_contract.json`, checker, result and tests: freeze the five operation
+  populations, admissible static/measurement rule forms, environment obligations and forbidden
+  margin sources without timing execution.
+- `fh_l8_d60_environment_margin_precommit_d81_contract.json`, checker, result and tests: freeze the
+  capture-host identity and selected measurement-rule form while leaving exactly owner margin,
+  timeout and load isolation fail-closed.
+- `FH_L8_D60_ENVIRONMENT_MARGIN_PRECOMMIT_D81_ZH.md`: Chinese D81 scope, missing-input and authority
+  summary.
+
+## FH-L8 D82 owner policy and load-isolation gate
+
+- `fh_l8_d60_owner_policy_isolation_d82_contract.json`: owner-approved 99%/99% distribution-free
+  sample-maximum rule, exact 459-per-class/2,295-total population, no-scalar timeout semantics and
+  exact CPU15 cgroup-v2 isolated-partition receipt requirements.
+- `fh_l8_d60_owner_policy_isolation_d82.py` and result: validate the statistical arithmetic,
+  timeout nonclaims, upstream pins and eleven live isolation predicates. The current host remains
+  fail-closed because root cpuset propagation, exact service cgroup, exclusive CPU, affinity,
+  root-isolated membership and IRQ exclusion are absent.
+- `test_fh_l8_d60_owner_policy_isolation_d82.py`: owner-policy, scalar/posthoc rejection, admitted
+  synthetic receipt, SMT/IRQ drift and authority regressions.
+- `FH_L8_D60_OWNER_POLICY_ISOLATION_D82_ZH.md`: Chinese decision, live blocker and administrator
+  handoff summary.
+- D82 executes no host mutation or measurement. A fresh all-green D82 receipt is required before
+  D83 may seal the exact confirmatory measurement packet.
+
 ## FH-L8 D64 owner-local capacity observation
 
 - `fh_l8_d23_capacity_attestation_d64.json` and `fh_l8_d23_capacity_attestation_d64.py`: live

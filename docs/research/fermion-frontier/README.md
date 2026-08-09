@@ -224,6 +224,21 @@ CPU0, 512-MiB/384-MiB-high, zero-swap and structural-digest checks. The fixed64 
 host-level spread reinforces the existing boundary: both sets are empirical observations, not
 allocator/timing upper bounds, full-53 extrapolations or resource authority.
 
+D60 subsequently restricted runtime closure to either a proved static per-operation upper bound or
+a precommitted measurement-population/margin/timeout rule. D81 froze the latter rule form, all five
+operation populations and the capture-host identity, but correctly blocked on owner numeric policy
+and concurrent-load isolation. D82 now closes the owner-input portion: five classes each require
+459 fresh confirmatory samples, with 99% per-class coverage/confidence and a 95% family-wise lower
+bound; scalar margins, posthoc exclusions, retries and deadline extensions are forbidden. The claim
+remains an empirical admission envelope, not deterministic worst-case seconds.
+
+D82 also makes CPU isolation machine-checkable. The exact target is an isolated cgroup-v2 service
+partition on the no-SMT CPU15, with effective, exclusive-effective and process-affinity sets all
+equal to CPU15, root isolated membership and zero enumerable IRQ-affinity conflicts. Live preflight
+finds that root cpuset propagation and all target-service predicates are absent, so the decision is
+fail-closed and no measurement is authorized. Host-admin provisioning plus a fresh in-service D82
+receipt is the next gate; the old D81 session cgroup identity cannot be reused after that move.
+
 D51 closes that design-only successor by splitting admission, kernel/spill, 32-way external merge
 and publication lifetimes. Retaining old runs until the terminal receipt requires a conservative
 3,110,572,064-byte scratch design, 359,759,114 bytes above D23. It also fixes integer work counts,
