@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-OWNER-POLICY-ISOLATION-D82-V1",
+  "baseline_commit": "75ffd49a3a17fea9ee7fe37c8fa141e302a0b232",
+  "source_pins": {
+    "fh_l8_d60_environment_margin_precommit_d81_contract.json": "1e43735bb42651647a510d2715d98f2040445b3d399b3d0f0fcc941d6accc5f4",
+    "fh_l8_d60_environment_margin_precommit_d81_result.json": "ebd52e30bf795723dff295ad9abd4cbd8b963966dfc2902c92b3152bff1ca218",
+    "fh_l8_d60_environment_margin_precommit_d81.py": "4d2217bf1180619dcb8d10ac4339c0a1816cb403002469a7488b916c9e3935b4"
+  },
+  "owner_decision": {
+    "runtime_claim_class": "EMPIRICAL_ADMISSION_RUNTIME_ENVELOPE_NOT_DETERMINISTIC_WORST_CASE",
+    "deterministic_worst_case_runtime_claimed": false,
+    "numeric_runtime_seconds_proven": false
+  },
+  "measurement_margin": {
+    "method": "DISTRIBUTION_FREE_ONE_SIDED_SAMPLE_MAXIMUM_TOLERANCE_LIMIT",
+    "coverage_numerator": 99,
+    "coverage_denominator": 100,
+    "confidence_per_operation_class_numerator": 99,
+    "confidence_per_operation_class_denominator": 100,
+    "sample_size_formula": "CEIL(LOG(1-CONFIDENCE)/LOG(COVERAGE))",
+    "confirmatory_samples_per_operation_class": 459,
+    "operation_class_count": 5,
+    "total_confirmatory_samples": 2295,
+    "familywise_confidence_lower_bound_numerator": 95,
+    "familywise_confidence_lower_bound_denominator": 100,
+    "sample_statistic": "MAXIMUM_OF_ALL_REGISTERED_PRODUCTION_PATH_BATCH_COSTS_PER_OPERATION_CLASS",
+    "tolerance_limit_scope": "BATCH_COST_POPULATION_ONLY_NOT_A_WHOLE_RUN_TAIL_OR_WORST_CASE_PROOF",
+    "sampling_assumption": "IID_WITHIN_EACH_OPERATION_CLASS_UNDER_THE_SEALED_ENVIRONMENT",
+    "operation_class_cost_attribution": "EXCLUSIVE_DIRECT_COST_MAPPING_MUST_BE_SEALED_BEFORE_MEASUREMENT",
+    "warmups_are_confirmatory_samples": false,
+    "posthoc_sample_exclusion_allowed": false,
+    "d54r_evidence_disposition": "PILOT_AND_HOTSPOT_ORDERING_ONLY",
+    "scalar_margin_multiplier": null,
+    "confirmatory_sample_timeout_seconds": 240
+  },
+  "timeout_policy": {
+    "full_run_deadline_rule": "CEILING_OF_SEALED_EMPIRICAL_ADMISSION_RUNTIME_ENVELOPE_SECONDS",
+    "deadline_scalar_multiplier": null,
+    "timeout_disposition": "INDETERMINATE_MEASUREMENT_FAILURE",
+    "automatic_retry_allowed": false,
+    "deadline_extension_allowed": false,
+    "systemd_service_type": "exec",
+    "runtime_timeout_directive": "RuntimeMaxSec",
+    "termination_signal": "SIGTERM",
+    "termination_grace_seconds": 30,
+    "final_signal": "SIGKILL"
+  },
+  "load_isolation_requirement": {
+    "mechanism": "CGROUP_V2_CPUSET_ISOLATED_PARTITION",
+    "target_cpu": 15,
+    "target_service_cgroup_path": "/fh-l8-d60-isolated.slice/fh-l8-d82-measurement.service",
+    "target_cpu_topology": "SINGLE_THREAD_E_CORE_NO_SMT_SIBLING",
+    "fresh_recalibration_required": true,
+    "root_cpuset_controller_required": true,
+    "root_cpuset_subtree_control_required": true,
+    "partition_state_required": "isolated",
+    "exclusive_effective_cpu_set_required": "15",
+    "effective_cpu_set_required": "15",
+    "process_affinity_required": "15",
+    "root_isolated_cpu_membership_required": true,
+    "target_cpu_online_required": true,
+    "irq_affinity_target_conflict_count_required": 0,
+    "host_admin_provisioning_required": true
+  },
+  "next_packet_requirements": [
+    "run_D82_verifier_inside_the_exact_isolated_service_cgroup",
+    "recapture_environment_identity_because_D81_session_cgroup_path_is_superseded",
+    "seal_exclusive_operation_class_batch_definitions_and_cost_attribution",
+    "authorize_only_the_exact_2295_sample_confirmatory_plan",
+    "retain_zero_full53_authority"
+  ],
+  "authority": {
+    "host_cgroup_mutations_executed": 0,
+    "timing_measurements_executed": 0,
+    "production_io_executed": 0,
+    "external_requests_sent": 0,
+    "scientific_kernel_calls_executed": 0,
+    "numeric_runtime_seconds_proven": false,
+    "full53_execution_authorized": false
+  }
+}

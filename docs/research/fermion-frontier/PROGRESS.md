@@ -1,6 +1,32 @@
 # Research progress ledger
 
-Status date: 2026-07-26
+Status date: 2026-08-09
+
+## 2026-08-09 — FH-L8 D82 owner policy and load-isolation gate
+
+- Froze the owner-selected runtime claim as an empirical admission envelope, not a deterministic
+  worst-case proof. Each of the five operation classes requires 459 fresh confirmatory samples;
+  the total is 2,295, with 99% per-class coverage/confidence and a 95% Bonferroni family-wise
+  confidence lower bound.
+- Froze a no-scalar timeout policy: each confirmatory sample has a 240-second operational cap;
+  the future full-run deadline is the ceiling of the sealed empirical envelope. Timeout is an
+  indeterminate failure, with no retry or extension and TERM/30-second-grace/KILL termination.
+- Live cgroup v2 preflight found cpuset available at root but absent from root subtree control. The
+  current session is not the exact CPU15 isolated service, effective/exclusive CPU and affinity
+  predicates fail, CPU15 is not in the root isolated set, and IRQ conflicts remain.
+- D82 performs no host cgroup mutation, timing measurement, production I/O, external request or
+  scientific kernel call. It closes the two owner policy inputs but remains fail-closed on the one
+  load-isolation input. Next gate:
+  `HOST_ADMIN_CPUSET_ISOLATED_PARTITION_PROVISIONING_AND_FRESH_D82_RECEIPT`.
+
+## 2026-08-09 — FH-L8 D81 environment/margin precommit
+
+- Froze the CPython/CPU/governor/filesystem/cgroup-v2 capture identity, the precommitted
+  measurement-rule form and all five D60 operation populations.
+- D81 intentionally left owner margin, timeout and a verifiable concurrent-load exclusion
+  mechanism unset. It executed no timing work and granted no numeric runtime or full53 authority.
+- D82 supersedes only the owner-input part of this blocker; D81's ordinary session cgroup path must
+  be freshly recaptured after the isolated service exists.
 
 ## 2026-07-26 — FH-L8 D64 owner-local capacity observation
 
