@@ -4,14 +4,55 @@ use ab_store::{
     CodebaseIndexA1DispatchOutcome, CodebaseIndexA1DispatchStrategy, CodebaseIndexA1Failpoint,
     CodebaseIndexA1Options, SqliteStore, StateStore,
 };
+use std::ffi::OsString;
 use std::path::Path;
-use std::sync::Mutex;
 use tokio_rusqlite::rusqlite::{self, params, Connection};
 
-static CODEBASE_INDEX_A1_STRATEGY_ENV_LOCK: Mutex<()> = Mutex::new(());
+static CODEBASE_INDEX_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+const CODEBASE_INDEX_ENV_KEYS: [&str; 6] = [
+    "AB_CODEBASE_INDEX_A1_STRATEGY",
+    "AB_CODEBASE_INDEX_A1_BATCH_ROWS",
+    "AB_CODEBASE_INDEX_A1_STAGING_PARENT",
+    "AB_CODEBASE_INDEX_A2_STRATEGY",
+    "AB_CODEBASE_INDEX_A2_BATCH_ROWS",
+    "AB_CODEBASE_INDEX_A2_STAGING_PARENT",
+];
+
+struct CleanIndexEnv {
+    _guard: tokio::sync::MutexGuard<'static, ()>,
+    prior: Vec<(&'static str, Option<OsString>)>,
+}
+
+impl Drop for CleanIndexEnv {
+    fn drop(&mut self) {
+        for (key, value) in self.prior.drain(..) {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
+async fn clean_index_env() -> CleanIndexEnv {
+    let guard = CODEBASE_INDEX_ENV_LOCK.lock().await;
+    let prior = CODEBASE_INDEX_ENV_KEYS
+        .into_iter()
+        .map(|key| {
+            let value = std::env::var_os(key);
+            std::env::remove_var(key);
+            (key, value)
+        })
+        .collect();
+    CleanIndexEnv {
+        _guard: guard,
+        prior,
+    }
+}
 
 #[tokio::test]
 async fn codebase_index_env_dispatch_reports_selection_and_fallback_reason() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary dispatch receipt fixture");
     let db_path = temp_dir.path().join("index.sqlite3");
     let store = SqliteStore::open(&db_path)
@@ -51,7 +92,6 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = R>,
 {
-    let _guard = CODEBASE_INDEX_A1_STRATEGY_ENV_LOCK.lock().unwrap();
     let key = "AB_CODEBASE_INDEX_A1_STRATEGY";
     let value_bytes = std::env::var_os(key);
     if let Some(value) = value {
@@ -77,7 +117,6 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = R>,
 {
-    let _guard = CODEBASE_INDEX_A1_STRATEGY_ENV_LOCK.lock().unwrap();
     let key_strategy = "AB_CODEBASE_INDEX_A1_STRATEGY";
     let key_batch = "AB_CODEBASE_INDEX_A1_BATCH_ROWS";
     let key_staging_parent = "AB_CODEBASE_INDEX_A1_STAGING_PARENT";
@@ -128,7 +167,6 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = R>,
 {
-    let _guard = CODEBASE_INDEX_A1_STRATEGY_ENV_LOCK.lock().unwrap();
     let key_strategy = "AB_CODEBASE_INDEX_A2_STRATEGY";
     let key_batch = "AB_CODEBASE_INDEX_A2_BATCH_ROWS";
     let key_staging_parent = "AB_CODEBASE_INDEX_A2_STAGING_PARENT";
@@ -178,7 +216,6 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = R>,
 {
-    let _guard = CODEBASE_INDEX_A1_STRATEGY_ENV_LOCK.lock().unwrap();
 
     let key_a1_strategy = "AB_CODEBASE_INDEX_A1_STRATEGY";
     let key_a1_batch = "AB_CODEBASE_INDEX_A1_BATCH_ROWS";
@@ -562,6 +599,7 @@ fn target_timestamps(snapshot: &AuthoritativeSnapshot, target_root: &str) -> Vec
 
 #[tokio::test]
 async fn bounded_native_a1_persists_multiple_batches_in_one_index() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -598,6 +636,7 @@ async fn bounded_native_a1_persists_multiple_batches_in_one_index() {
 
 #[tokio::test]
 async fn bounded_native_a1_rolls_back_every_authoritative_phase() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 rollback fixture");
     let source_root = temp_dir.path().join("source");
     let staging_parent = temp_dir.path().join("rollback-staging");
@@ -685,6 +724,7 @@ async fn bounded_native_a1_rolls_back_every_authoritative_phase() {
 
 #[tokio::test]
 async fn bounded_native_a1_matches_full_vec_authoritative_contract() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 equivalence fixture");
     let source_root = temp_dir.path().join("source");
     multitype_source_fixture(&source_root);
@@ -787,6 +827,7 @@ async fn bounded_native_a1_matches_full_vec_authoritative_contract() {
 
 #[tokio::test]
 async fn bounded_native_a1_uses_and_cleans_explicit_staging_parent() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 staging-parent fixture");
     let source_root = temp_dir.path().join("source");
     let staging_parent = temp_dir.path().join("explicit-staging");
@@ -838,6 +879,7 @@ async fn bounded_native_a1_uses_and_cleans_explicit_staging_parent() {
 
 #[tokio::test]
 async fn full_vec_a1_timing_seam_matches_default_path() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary FullVec seam fixture");
     let source_root = temp_dir.path().join("source");
     multitype_source_fixture(&source_root);
@@ -881,6 +923,7 @@ async fn full_vec_a1_timing_seam_matches_default_path() {
 
 #[tokio::test]
 async fn codebase_index_with_a1_strategy_explicitly_dispatches_full_vec() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 dispatch fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -925,6 +968,7 @@ async fn codebase_index_with_a1_strategy_explicitly_dispatches_full_vec() {
 
 #[tokio::test]
 async fn codebase_index_default_env_is_full_vec_and_matches_explicit_full_vec() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary env default fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -967,6 +1011,7 @@ async fn codebase_index_default_env_is_full_vec_and_matches_explicit_full_vec() 
 
 #[tokio::test]
 async fn codebase_index_with_a1_env_switches_to_native_chunk_staged_v0() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary env switched fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1004,6 +1049,7 @@ async fn codebase_index_with_a1_env_switches_to_native_chunk_staged_v0() {
 
 #[tokio::test]
 async fn codebase_index_with_a1_env_invalid_staging_parent_returns_error() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary env invalid staging parent fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1045,6 +1091,7 @@ async fn codebase_index_with_a1_env_invalid_staging_parent_returns_error() {
 
 #[tokio::test]
 async fn codebase_index_with_a2_env_switches_to_native_chunk_staged_v0() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary a2 env switched fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1096,6 +1143,7 @@ async fn codebase_index_with_a2_env_switches_to_native_chunk_staged_v0() {
 
 #[tokio::test]
 async fn codebase_index_a2_explicit_full_vec_rollback_is_receipted() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A2 FullVec rollback fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1127,6 +1175,7 @@ async fn codebase_index_a2_explicit_full_vec_rollback_is_receipted() {
 
 #[tokio::test]
 async fn codebase_index_a2_default_off_shadow_mutates_only_copied_database() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary isolated shadow fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1191,6 +1240,7 @@ async fn codebase_index_a2_default_off_shadow_mutates_only_copied_database() {
 
 #[tokio::test]
 async fn codebase_index_with_a2_env_preempts_a1_native_env() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary a2 precedence fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1245,6 +1295,7 @@ async fn codebase_index_with_a2_env_preempts_a1_native_env() {
 
 #[tokio::test]
 async fn codebase_index_with_a2_unknown_strategy_falls_back_to_a1_strategy() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary a2 fallback fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1317,6 +1368,7 @@ async fn codebase_index_with_a2_unknown_strategy_falls_back_to_a1_strategy() {
 
 #[tokio::test]
 async fn codebase_index_with_a2_unknown_strategy_falls_back_to_a1_staged_native_equivalence() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary a2 fallback equivalence fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1402,6 +1454,7 @@ async fn codebase_index_with_a2_unknown_strategy_falls_back_to_a1_staged_native_
 #[tokio::test]
 async fn codebase_index_with_a2_unknown_strategy_and_a1_staging_failure_reverts_without_partial_effect(
 ) {
+    let _env = clean_index_env().await;
     let temp_dir =
         tempfile::tempdir().expect("temporary a2 fallback invalid-a1 staging failure fixture");
     let source_root = temp_dir.path().join("source");
@@ -1477,6 +1530,7 @@ async fn codebase_index_with_a2_unknown_strategy_and_a1_staging_failure_reverts_
 
 #[tokio::test]
 async fn codebase_index_with_a2_unknown_strategy_recovers_after_a1_staging_parent_is_fixed() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary a2 fallback staging recovery fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1598,6 +1652,7 @@ async fn codebase_index_with_a2_unknown_strategy_recovers_after_a1_staging_paren
 
 #[tokio::test]
 async fn codebase_index_with_a1_env_unknown_strategy_defaults_to_full_vec() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary env fallback fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1640,6 +1695,7 @@ async fn codebase_index_with_a1_env_unknown_strategy_defaults_to_full_vec() {
 
 #[tokio::test]
 async fn codebase_index_with_a1_env_fullvec_alias_switches_to_full_vec() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary env fullvec alias fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1682,6 +1738,7 @@ async fn codebase_index_with_a1_env_fullvec_alias_switches_to_full_vec() {
 
 #[tokio::test]
 async fn codebase_index_with_a1_env_dash_alias_switches_to_native() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary env alias fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1749,6 +1806,7 @@ async fn codebase_index_with_a1_env_dash_alias_switches_to_native() {
 
 #[tokio::test]
 async fn codebase_index_with_a1_strategy_explicitly_dispatches_staged_native() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 dispatch staging fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -1799,6 +1857,7 @@ async fn codebase_index_with_a1_strategy_explicitly_dispatches_staged_native() {
 
 #[tokio::test]
 async fn a1_pragma_evidence_is_authoritative_read_only_and_stable() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 PRAGMA fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
