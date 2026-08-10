@@ -3494,7 +3494,7 @@ fn default_identity_days() -> u32 {
     3
 }
 
-/// Request body for `POST /embed`. Single text → single 384-d vector. For
+/// Request body for `POST /embed`. Single text → one model-dependent vector. For
 /// throughput callers we may later add a `batch` variant; v0 keeps the shape
 /// minimal so non-Rust clients (Unity/C#, Unreal/C++, Godot/GDScript, web/JS)
 /// can hit it with one POST per perception event.
@@ -3514,7 +3514,8 @@ async fn embed_endpoint(
     let text = req.text;
     let (name, dim, vec) = tokio::task::spawn_blocking(move || {
         let v = backend.embed(&text);
-        (backend.name().to_string(), backend.dim(), v)
+        let (name, dim) = embed_response_metadata(backend.name(), backend.dim(), &text, &v);
+        (name, dim, v)
     })
     .await
     .map_err(internal_error)?;
@@ -3523,6 +3524,27 @@ async fn embed_endpoint(
         "backend": name,
         "dim": dim,
     })))
+}
+
+/// Report what actually produced the wire vector, not merely what the optional
+/// ONNX backend was configured to produce. During cold start or model failure,
+/// `OnnxBackend` deliberately returns the deterministic hash fallback; labelling
+/// that 384d vector as gte/768 makes remote clients reject it and previously let
+/// write paths persist dimension-mismatched rows under a false backend tag.
+fn embed_response_metadata(
+    configured_name: &str,
+    _configured_dim: usize,
+    text: &str,
+    vector: &[f32],
+) -> (String, usize) {
+    let actual_dim = vector.len();
+    if configured_name != "fnv1a-hash-384"
+        && vector == HashBackend.embed(text).as_slice()
+    {
+        ("fnv1a-hash-384".to_string(), actual_dim)
+    } else {
+        (configured_name.to_string(), actual_dim)
+    }
 }
 
 /// Select the raw inner embedding backend for `/embed`. Mirrors the env
@@ -8128,6 +8150,23 @@ mod tests {
     fn embed_request_deserializes_text_field() {
         let req: EmbedRequest = serde_json::from_str(r#"{"text":"hello world"}"#).unwrap();
         assert_eq!(req.text, "hello world");
+    }
+
+    #[test]
+    fn embed_response_metadata_exposes_hash_fallback_honestly() {
+        let text = "cold model";
+        let vector = HashBackend.embed(text);
+        let (name, dim) = embed_response_metadata("gte-multilingual-base", 768, text, &vector);
+        assert_eq!(name, "fnv1a-hash-384");
+        assert_eq!(dim, vector.len());
+    }
+
+    #[test]
+    fn embed_response_metadata_uses_actual_vector_length() {
+        let vector = vec![0.1, 0.2, 0.3];
+        let (name, dim) = embed_response_metadata("test-model", 768, "text", &vector);
+        assert_eq!(name, "test-model");
+        assert_eq!(dim, 3);
     }
 
     #[tokio::test]

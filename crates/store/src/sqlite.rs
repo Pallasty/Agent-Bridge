@@ -10327,11 +10327,20 @@ impl StateStore for SqliteStore {
         // same-backend wrong-dim rows when the two agree — see
         // `reindex_should_sweep_mismatched_dims` for why the gate is mandatory.
         let expected_dim = crate::vector::vector_dim();
-        let dominant_dim = self
+        let dominant_profile = self
             .dominant_embedding_profile()
             .await
-            .map_err(|e| Error::Backend(format!("memory_reindex dominant-dim probe: {e}")))?
-            .dim;
+            .map_err(|e| Error::Backend(format!("memory_reindex dominant-dim probe: {e}")))?;
+        let dominant_dim = dominant_profile.dim;
+        if stale_flag
+            && current_backend == "fnv1a-hash-384"
+            && dominant_profile.backend.as_deref() != Some(current_backend.as_str())
+        {
+            return Err(Error::Backend(format!(
+                "memory_reindex refused to replace dominant {:?}/{:?} embeddings with hash fallback; wait for the configured model or remote embed service",
+                dominant_profile.backend, dominant_profile.dim
+            )));
+        }
         let dim_aware =
             reindex_should_sweep_mismatched_dims(stale_flag, expected_dim, dominant_dim);
         let expected_bytes = (expected_dim * 4) as i64;
@@ -17311,6 +17320,64 @@ mod tests {
             Some(backend_name.as_str()),
             "backend tag stays the current backend (dim clause, not backend clause)"
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_reindex_only_stale_refuses_hash_downgrade_of_non_hash_store() {
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::MemoryRecord;
+        use std::sync::Arc;
+
+        let _ = set_default_backend(Arc::new(HashBackend));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-reindex-hash-downgrade-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        store
+            .memory_save(&MemoryRecord {
+                key: "dominant_non_hash".into(),
+                kind: "fact".into(),
+                content: "preserve the dominant embedding space".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save row");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET embedding_backend = 'gte-multilingual-base'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("label dominant space");
+
+        let error = store
+            .memory_reindex_embeddings(100, true)
+            .await
+            .expect_err("hash fallback must not replace a non-hash dominant space");
+        assert!(error.to_string().contains("refused to replace dominant"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
