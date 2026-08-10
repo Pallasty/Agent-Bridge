@@ -2,6 +2,15 @@
 
 Status date: 2026-08-09
 
+## 2026-08-10 — FH-L8 D84 managed-IRQ reboot outcome
+
+- Verified the rebooted kernel command line contains `isolcpus=managed_irq,15`.
+- IRQ175 remains `nvme0q15` with configured and effective affinity exactly CPU15, so the frozen
+  D82 zero-conflict acceptance predicate still fails. No fresh D82R receipt is authorized.
+- Transaction state and target cgroup are absent. No measurement or full53 authority is opened;
+  next gate is the pinned paired `irqaffinity=0-14 isolcpus=managed_irq,15` boot candidate; it has
+  not been executed by D84.
+
 ## 2026-08-09 — FH-L8 D83 runtime-rule precommit
 
 - Froze the D81/D82 empirical runtime-rule packet: 459 fresh samples for each of five operation

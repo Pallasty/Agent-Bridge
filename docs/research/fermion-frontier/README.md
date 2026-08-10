@@ -1,5 +1,9 @@
 # Fermion frontier research takeover
 
+D84 records the post-reboot outcome of the managed-IRQ boot candidate: the command-line token is
+present, but NVMe IRQ175 remains exclusively affined to CPU15. The D82 isolation predicate and D83
+runtime lock therefore remain closed. See `FH_L8_D60_MANAGED_IRQ_REBOOT_OUTCOME_D84_ZH.md`.
+
 The D60 runtime-rule lane now has a fail-closed D83 precommit packet. It freezes the D82 empirical
 sampling/timeout policy but requires a fresh post-boot D82R isolation receipt and same-scope
 environment recapture. Neither is currently admitted, so runtime lock, measurement and full53

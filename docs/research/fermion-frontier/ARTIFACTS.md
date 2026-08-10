@@ -2,6 +2,14 @@
 
 All copied JSON files are research-only outputs. They contain no credentials.
 
+## FH-L8 D60 managed-IRQ reboot outcome D84
+
+- `FH_L8_D60_MANAGED_IRQ_REBOOT_OUTCOME_D84_ZH.md`: reboot evidence and revised gate.
+- `fh_l8_d60_managed_irq_reboot_outcome_d84_contract.json`: source-pinned observed snapshot.
+- `fh_l8_d60_managed_irq_reboot_outcome_d84.py`: read-only fail-closed verifier.
+- `fh_l8_d60_managed_irq_reboot_outcome_d84_result.json`: committed NO-GO result.
+- `test_fh_l8_d60_managed_irq_reboot_outcome_d84.py`: acceptance and authority regressions.
+
 ## FH-L8 D60 runtime-rule precommit D83
 
 - `FH_L8_D60_RUNTIME_RULE_PRECOMMIT_D83_ZH.md`: scope, blocker and authority boundary.
