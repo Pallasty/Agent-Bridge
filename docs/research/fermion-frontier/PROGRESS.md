@@ -2,6 +2,14 @@
 
 Status date: 2026-08-09
 
+## 2026-08-10 — FH-L8 D91R GRUB UEFI rehearsal fix
+
+- Embedded kernel/initramfs into standalone GRUB EFI and disabled host-only initramfs fstab inputs.
+- QEMU/OVMF loaded the kernel, found `/dev/vda`, switched root and reached systemd basic with no
+  GRUB prompt or kernel panic. Multi-user is not a D91 requirement.
+- MMC, host bootloader, D82R, measurement and full53 authority remain untouched/closed. Next gate
+  is a separately admitted D92 physical-media materialization and firmware-boot packet.
+
 ## 2026-08-10 — FH-L8 D85 maxcpus queue topology
 
 - Paired IRQ housekeeping parameters are live, but the installed GRUB snippet lacks `maxcpus=15`.
