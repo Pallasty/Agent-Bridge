@@ -1,0 +1,17 @@
+{
+  "status": "VERIFIED_D89_OFFLINE_ROOTFS_STAGING_COMPLETE",
+  "archive_integrity_pass": true,
+  "capacity_budget_pass": true,
+  "required_package_set_present": true,
+  "required_tool_paths_present": true,
+  "mmc_identity_unchanged_and_unmounted": true,
+  "rootfs_staging_complete": true,
+  "payload_bundle_complete": false,
+  "mmc_write_authorized": false,
+  "bootloader_change_authorized": false,
+  "reboot_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "PASS_D89_ROOTFS_STAGED_PAYLOAD_ASSEMBLY_NOT_STARTED",
+  "next_gate": "OWNER_ADMIT_D90_OFFLINE_PAYLOAD_ASSEMBLY"
+}
