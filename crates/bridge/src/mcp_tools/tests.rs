@@ -33879,13 +33879,16 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
         mk_call(300, "plan_update", true, 500),
         mk_call(400, "session_finalize", true, 500),
     ];
-    let report = compute_practical_workflow_scorecard(&calls, 86_400, 600);
+    let report = compute_practical_workflow_scorecard(&calls, 86_400, 600, 1_000);
 
     assert_eq!(report.total_calls, 7);
     assert_eq!(report.successful_calls, 5);
     assert_eq!(report.failed_calls, 2);
     assert_eq!(report.continuation.bootstrap_calls, 1);
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.right_censored_bootstraps, 0);
     assert_eq!(report.continuation.bootstraps_with_followup, 1);
+    assert_eq!(report.continuation.eligible_bootstraps_without_followup, 0);
     assert_eq!(report.continuation.followup_rate, Some(1.0));
     assert_eq!(report.continuation.median_followup_secs, Some(12));
     assert_eq!(report.completion.finalize_signals, 1);
@@ -33899,12 +33902,32 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
 
 #[test]
 fn practical_scorecard_keeps_missing_signals_explicit() {
-    let report = compute_practical_workflow_scorecard(&[], 3_600, 600);
+    let report = compute_practical_workflow_scorecard(&[], 3_600, 600, 1_000);
     assert_eq!(report.continuation.followup_rate, None);
     assert_eq!(report.continuation.median_followup_secs, None);
     assert_eq!(report.completion.finalize_signals, 0);
     assert_eq!(report.recovery.repeated_failure_loops, 0);
     assert!(report.recommendations[0].contains("No bootstrap signal"));
+}
+
+#[test]
+fn practical_scorecard_excludes_right_censored_bootstraps_from_rate() {
+    let calls = vec![
+        mk_call(100, "session_bootstrap", true, 2_000),
+        mk_call(900, "session_bootstrap", true, 2_000),
+    ];
+    let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 1_000);
+
+    assert_eq!(report.continuation.bootstrap_calls, 2);
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.right_censored_bootstraps, 1);
+    assert_eq!(report.continuation.bootstraps_with_followup, 0);
+    assert_eq!(report.continuation.eligible_bootstraps_without_followup, 1);
+    assert_eq!(report.continuation.followup_rate, Some(0.0));
+    assert!(report
+        .recommendations
+        .iter()
+        .any(|item| item.contains("right-censored")));
 }
 
 #[tokio::test]

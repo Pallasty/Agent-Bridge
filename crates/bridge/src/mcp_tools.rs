@@ -40054,7 +40054,10 @@ pub struct PracticalWorkflowScorecard {
 #[derive(Debug, serde::Serialize, PartialEq)]
 pub struct PracticalContinuationMetrics {
     pub bootstrap_calls: usize,
+    pub eligible_bootstrap_calls: usize,
+    pub right_censored_bootstraps: usize,
     pub bootstraps_with_followup: usize,
+    pub eligible_bootstraps_without_followup: usize,
     pub followup_rate: Option<f64>,
     pub median_followup_secs: Option<i64>,
     pub interpretation: &'static str,
@@ -40087,6 +40090,7 @@ pub fn compute_practical_workflow_scorecard(
     calls: &[ab_store::McpToolCallRow],
     window_secs: i64,
     followup_window_secs: i64,
+    as_of_ts: i64,
 ) -> PracticalWorkflowScorecard {
     let successful_calls = calls.iter().filter(|call| call.ok).count();
     let failed_calls = calls.len().saturating_sub(successful_calls);
@@ -40094,8 +40098,17 @@ pub fn compute_practical_workflow_scorecard(
         .iter()
         .filter(|call| call.ok && call.tool_name == "session_bootstrap")
         .collect();
+    let eligibility_cutoff = as_of_ts.saturating_sub(followup_window_secs);
+    let eligible_bootstraps: Vec<_> = bootstraps
+        .iter()
+        .copied()
+        .filter(|bootstrap| bootstrap.ts <= eligibility_cutoff)
+        .collect();
+    let right_censored_bootstraps = bootstraps
+        .len()
+        .saturating_sub(eligible_bootstraps.len());
     let mut followup_latencies = Vec::new();
-    for bootstrap in &bootstraps {
+    for bootstrap in &eligible_bootstraps {
         if let Some(next) = calls.iter().find(|call| {
             call.ok
                 && call.ts > bootstrap.ts
@@ -40114,11 +40127,14 @@ pub fn compute_practical_workflow_scorecard(
     } else {
         Some(followup_latencies[followup_latencies.len() / 2])
     };
-    let followup_rate = if bootstraps.is_empty() {
+    let followup_rate = if eligible_bootstraps.is_empty() {
         None
     } else {
-        Some(followup_latencies.len() as f64 / bootstraps.len() as f64)
+        Some(followup_latencies.len() as f64 / eligible_bootstraps.len() as f64)
     };
+    let eligible_bootstraps_without_followup = eligible_bootstraps
+        .len()
+        .saturating_sub(followup_latencies.len());
 
     let failures: Vec<_> = calls
         .iter()
@@ -40144,8 +40160,11 @@ pub fn compute_practical_workflow_scorecard(
     let mut recommendations = Vec::new();
     if bootstraps.is_empty() {
         recommendations.push("No bootstrap signal in this window; widen the window before judging continuation.".into());
-    } else if followup_latencies.len() < bootstraps.len() {
-        recommendations.push("Inspect bootstrap sessions without a successful follow-up inside the selected recovery window.".into());
+    } else if eligible_bootstraps_without_followup > 0 {
+        recommendations.push("Inspect eligible bootstraps without later global MCP activity; exact per-session attribution is unavailable in current telemetry.".into());
+    }
+    if right_censored_bootstraps > 0 {
+        recommendations.push("Re-run after the follow-up window closes before judging right-censored recent bootstraps.".into());
     }
     if repeated_failure_loops > 0 {
         recommendations.push("Inspect repeated same-tool failures before retrying or requesting authorization again.".into());
@@ -40153,7 +40172,7 @@ pub fn compute_practical_workflow_scorecard(
     recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
 
     PracticalWorkflowScorecard {
-        schema_version: 1,
+        schema_version: 2,
         read_only: true,
         window_secs,
         total_calls: calls.len(),
@@ -40161,10 +40180,13 @@ pub fn compute_practical_workflow_scorecard(
         failed_calls,
         continuation: PracticalContinuationMetrics {
             bootstrap_calls: bootstraps.len(),
+            eligible_bootstrap_calls: eligible_bootstraps.len(),
+            right_censored_bootstraps,
             bootstraps_with_followup: followup_latencies.len(),
+            eligible_bootstraps_without_followup,
             followup_rate,
             median_followup_secs,
-            interpretation: "A successful call after bootstrap is a continuation proxy, not proof that recalled context was correct.",
+            interpretation: "A successful global MCP call after bootstrap is a continuation proxy, not same-session attribution or proof that recalled context was correct. Recent bootstraps without a complete follow-up window are right-censored and excluded from the rate.",
         },
         completion: PracticalCompletionMetrics {
             finalize_signals: calls
@@ -40254,6 +40276,10 @@ impl McpTool for PracticalWorkflowScorecardTool {
             &calls,
             window_secs,
             followup_window_secs,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+                .unwrap_or(0),
         );
         let payload = serde_json::to_value(&report).unwrap_or_else(|_| json!({}));
         Ok(ToolResult::json_text(&payload))
