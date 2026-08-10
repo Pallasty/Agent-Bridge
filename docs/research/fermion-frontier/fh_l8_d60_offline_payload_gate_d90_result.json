@@ -1,0 +1,19 @@
+{
+  "status": "VERIFIED_D90_OFFLINE_PAYLOAD_ASSEMBLY_COMPLETE",
+  "manifest_integrity_pass": true,
+  "capacity_budget_pass": true,
+  "source_bundle_complete": true,
+  "boot_artifact_set_complete": true,
+  "static_nvme_dependency_absent": true,
+  "mmc_identity_unchanged_and_unmounted": true,
+  "payload_assembly_complete": true,
+  "boot_configuration_materialized": false,
+  "physical_media_execution_ready": false,
+  "mmc_write_authorized": false,
+  "bootloader_change_authorized": false,
+  "reboot_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "PASS_D90_PAYLOAD_ASSEMBLED_PHYSICAL_MEDIA_AND_BOOT_PROOF_STILL_BLOCKED",
+  "next_gate": "OWNER_ADMIT_D91_OFFLINE_PAYLOAD_BOOT_REHEARSAL"
+}
