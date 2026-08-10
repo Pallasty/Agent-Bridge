@@ -1,0 +1,29 @@
+{
+  "schema": "agent_bridge.qwen3_tts.control_logit_stability_policy.v1",
+  "status": "CONTROL_ONLY_DEFAULT_OFF",
+  "case_id": "zh-short-neutral-serena",
+  "burn_in_labels": ["B0_burn_in", "B1_burn_in"],
+  "trial_labels": ["M0_measured", "M1_measured", "M2_measured", "M3_measured", "M4_measured", "M5_measured"],
+  "execution": {
+    "processes": 1,
+    "model_loads": 1,
+    "device": "mps",
+    "dtype": "float16",
+    "do_sample": false,
+    "subtalker_dosample": false,
+    "max_new_tokens": 256,
+    "synchronize_mps_at_trial_boundaries": true,
+    "offline_local_snapshot_only": true,
+    "worker_socket_use": false,
+    "audio_decode_write_or_playback": false,
+    "weight_mutation_or_proxy": false,
+    "quantized_weight_writing": false
+  },
+  "authority": {
+    "allows_fake_q8": false,
+    "allows_writer": false,
+    "allows_runtime_candidate": false,
+    "allows_worker_replacement": false,
+    "allows_deployment": false
+  }
+}

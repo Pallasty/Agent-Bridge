@@ -128,11 +128,12 @@ def classify_path(pair_metrics: list[dict]) -> str:
     return "UNSTABLE"
 
 
-def summarize_path(trials: list[dict], selector) -> dict:
+def summarize_path(trials: list[dict], selector, labels: list[str] | None = None) -> dict:
+    labels = labels or TRIAL_LABELS
     rows = []
     for left_index, right_index in combinations(range(len(trials)), 2):
         metrics = compare_logit_arrays(selector(trials[left_index]), selector(trials[right_index]))
-        rows.append({"pair": [TRIAL_LABELS[left_index], TRIAL_LABELS[right_index]], **metrics})
+        rows.append({"pair": [labels[left_index], labels[right_index]], **metrics})
     compatible = [row for row in rows if row.get("compatible") and row.get("finite")]
     warm_rows = [row for row in rows if "C0_cold" not in row["pair"]]
     return {

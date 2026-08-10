@@ -9,6 +9,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/eval/qwen3_control_logit_stability.py"
 POLICY = ROOT / "scripts/eval/fixtures/qwen3_tts_control_logit_stability_policy_v0.json"
+BURNIN_SCRIPT = ROOT / "scripts/eval/qwen3_control_logit_stability_burnin.py"
+BURNIN_POLICY = ROOT / "scripts/eval/fixtures/qwen3_tts_control_logit_stability_policy_v1.json"
 
 
 def load_module():
@@ -89,3 +91,17 @@ def test_runner_contains_no_audio_or_quantized_weight_writer():
     source = SCRIPT.read_text(encoding="utf-8")
     forbidden = ("soundfile", "save_pretrained", "save_file(", "temporary_linear_forward_proxy", "worker.sock")
     assert all(token not in source for token in forbidden)
+
+
+def test_burnin_policy_has_two_unmeasured_calls_and_six_measurements():
+    module = load_module()
+    policy = json.loads(BURNIN_POLICY.read_text(encoding="utf-8"))
+    burnin = importlib.util.spec_from_file_location("qwen3_control_logit_stability_burnin", BURNIN_SCRIPT)
+    burnin_module = importlib.util.module_from_spec(burnin)
+    assert burnin.loader is not None
+    burnin.loader.exec_module(burnin_module)
+    burnin_module.validate_policy(policy)
+    assert policy["burn_in_labels"] == ["B0_burn_in", "B1_burn_in"]
+    assert len(policy["trial_labels"]) == 6
+    trials = [{"value": logits()} for _ in policy["trial_labels"]]
+    assert module.summarize_path(trials, lambda trial: trial["value"], policy["trial_labels"])["pair_count"] == 15
