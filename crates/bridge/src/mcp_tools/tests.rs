@@ -2334,6 +2334,35 @@ async fn session_bootstrap_surfaces_work_memory_block() {
     assert!(text.contains("Bootstrap should surface this scratchpad note"));
 }
 
+#[test]
+fn work_memory_resume_row_prefers_structured_next_step() {
+    let row = mk_mem_scoped(
+        "resume_structured",
+        WORK_MEMORY_KIND,
+        "# Active Work Memory\ncwd: /tmp/project\nslot: active\nstatus: active\n\n## Summary\nold summary\n\n## Next Step\nRun the focused recovery test.\n\n## Evidence\nold evidence",
+        &["work_memory", "slot:active"],
+        Some("project:/tmp/project"),
+    );
+    let rendered = format_work_memory_resume_row(&row, 120);
+    assert!(rendered.contains("Run the focused recovery test."));
+    assert!(rendered.contains("old summary"));
+    assert!(!rendered.contains("cwd:"));
+}
+
+#[test]
+fn work_memory_resume_row_uses_precompact_tail() {
+    let row = mk_mem_scoped(
+        "resume_precompact",
+        WORK_MEMORY_KIND,
+        "# PreCompact Work Memory\ncwd: /tmp/project\n\n## Recent Context Excerpt\nold context that should not consume the resume cue\nlatest decision: keep the practical lane\nnext action: repair restart continuation",
+        &["work_memory", "source:precompact"],
+        Some("project:/tmp/project"),
+    );
+    let rendered = format_work_memory_resume_row(&row, 90);
+    assert!(rendered.contains("next action: repair restart continuation"));
+    assert!(!rendered.contains("# PreCompact Work Memory"));
+}
+
 #[tokio::test]
 async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_foreign_scope() {
     let (hub, _temp_dir) = mk_test_hub_with_store().await;

@@ -16122,9 +16122,53 @@ fn format_work_memory_block(
         },
         String::new(),
     ];
-    out.extend(format_bootstrap_memory_rows(&rows, snippet_len));
+    out.extend(
+        rows.iter()
+            .map(|row| format_work_memory_resume_row(row, snippet_len)),
+    );
     out.push(String::new());
     Some(out)
+}
+
+/// Render the part of a scratchpad that is useful after interruption.
+/// Generic bootstrap rows show a content prefix, but work-memory prefixes are
+/// mostly metadata (`cwd`, slot, timestamp). A precompact snapshot stores its
+/// newest conversation at the tail, while structured slots carry an explicit
+/// Next Step or Summary section. Prefer those resume cues and keep the key as
+/// the drill-down handle for the full record.
+fn format_work_memory_resume_row(record: &MemoryRecord, snippet_len: usize) -> String {
+    fn section<'a>(content: &'a str, heading: &str) -> Option<&'a str> {
+        let body = content.split_once(heading)?.1.trim_start_matches(['\r', '\n']);
+        let end = body
+            .find("\n## ")
+            .or_else(|| body.find("\r\n## "))
+            .unwrap_or(body.len());
+        let value = body[..end].trim();
+        (!value.is_empty()).then_some(value)
+    }
+
+    let precompact = record.tags.iter().any(|tag| tag == "source:precompact");
+    let cue = if precompact {
+        tail_chars(&record.content, snippet_len).0
+    } else {
+        let next = section(&record.content, "## Next Step");
+        let summary = section(&record.content, "## Summary");
+        let combined = match (next, summary) {
+            (Some(next), Some(summary)) => format!("Next: {next} | Summary: {summary}"),
+            (Some(next), None) => format!("Next: {next}"),
+            (None, Some(summary)) => format!("Summary: {summary}"),
+            (None, None) => record.content.clone(),
+        };
+        truncate_chars(&combined, snippet_len).0
+    };
+    let cue = cue.split_whitespace().collect::<Vec<_>>().join(" ");
+    let truncated = cue.chars().count() < record.content.chars().count();
+    format!(
+        "[work_memory] {}: {}{}",
+        record.key,
+        cue,
+        if truncated { "…" } else { "" }
+    )
 }
 
 /// Format the cross-node peer wake block for session_bootstrap. `rows` are
