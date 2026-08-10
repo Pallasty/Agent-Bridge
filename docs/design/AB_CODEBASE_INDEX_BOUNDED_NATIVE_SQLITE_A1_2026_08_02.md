@@ -42,6 +42,89 @@ would retain a write transaction for the complete filesystem walk.
 - A1 grants no GPU, MI50, ROCm, Arrow Flight, DataFusion, C Data, or C Device
   authority.
 
+### Runtime gate (default-off)
+
+- `AB_CODEBASE_INDEX_A1_STRATEGY`
+  - `native_chunk_staged_v0` or `native-chunk-staged-v0`: force the A1 staged-native
+    experimental path.
+  - `full_vec`, `fullvec`, `fullvec_a1`: force the legacy FullVec path (control).
+  - Any other value: default-off (`None`), i.e. legacy `StateStore::codebase_index`.
+- `AB_CODEBASE_INDEX_A1_BATCH_ROWS`
+  - Integer in `1..=65_536` is accepted for the staged-native batch size.
+  - Invalid, missing, or out-of-range values fall back to `4096`.
+- `AB_CODEBASE_INDEX_A1_STAGING_PARENT`
+  - Optional explicit directory for the private staging DB.
+  - If unset, A1 chooses an internal temporary parent.
+
+- `AB_CODEBASE_INDEX_A2_STRATEGY`
+  - Default-off gate for the separately reviewed A2 dispatch candidate.
+  - Current implementation keeps this on the same `native_chunk_staged_v0`
+    implementation as A1 but uses a separate namespace and precedence.
+    - `native_chunk_staged_v0` or `native-chunk-staged-v0`: force candidate
+      staged-native dispatch path.
+    - `full_vec`, `fullvec`, `fullvec_a1`: force baseline FullVec control.
+    - Any other value: disabled (`None`).
+- `AB_CODEBASE_INDEX_A2_BATCH_ROWS`
+  - Integer in `1..=65_536` accepted for the candidate batch size.
+  - Invalid, missing, or out-of-range values fall back to `4096`.
+- `AB_CODEBASE_INDEX_A2_STAGING_PARENT`
+  - Optional explicit directory for the private staging DB used by the
+    candidate path.
+
+- Precedence: A2 namespace is checked before A1. If `AB_CODEBASE_INDEX_A2_*`
+  is set and decodes to a valid strategy, A1 values are ignored for that
+  `codebase_index` call. If A2 is unset or cannot be decoded (including
+  malformed/unknown strategy values), A1 namespace may still select behavior.
+
+The feature-gated `SqliteStore::codebase_index_with_env_dispatch` seam returns
+the normal stats together with a structured dispatch receipt. The receipt names
+the selected namespace (`a2`, `a1`, or `default`), preserves the requested
+strategy string, records the effective strategy and batch size, indicates
+whether a staging parent was configured, and explains fallback causes such as
+`a2_strategy_unknown`. The ordinary `StateStore::codebase_index` path uses the
+same resolver but intentionally discards this receipt, so this unit adds
+observability without changing default-off authority.
+
+Package-level verification after the receipt change passed with the bounded
+native feature enabled: 487 `ab-store` unit tests and 21 A1/A2 integration
+tests passed; the single `ab-store` doc-test was ignored by its existing
+annotation and no test failed. A default-feature `cargo check -p ab-store`
+also passed. The package still emits two pre-existing warnings (a Greek
+identifier confusable and an unnecessary `mut`); neither is in this unit.
+
+## Change-boundary audit
+
+The intended A1/A2 slice is limited to the dispatch/data-plane definitions in
+`crates/store/src/lib.rs`, the SQLite implementation in
+`crates/store/src/sqlite.rs`, its bounded-native integration test, and this
+design record. The current worktree also contains unrelated edits under
+`crates/bridge/`; those files are outside this unit and must not be included in
+an A2 adoption change. `crates/store/src/lib.rs` also contains an existing
+feature-module ordering/reformatting hunk unrelated to the dispatch receipt;
+it remains unclaimed until ownership is explicitly resolved. Consequently,
+this unit is validated but not yet represented by a clean, isolated commit.
+
+## Non-promotable dogfood
+
+The evaluation-only diagnostic suite was run from a fresh temporary target with
+100 generated documents, `B=128`, and two FullVec/staged-native pairs. The
+evaluator tests passed, the diagnostic receipt was internally valid, and both
+arms executed through fresh child processes against isolated SQLite copies.
+The receipt also proved `live_database_touched=false`, `production_write=false`,
+and `runtime_adoption_authorized=false`; staged-native cleanup and authoritative
+transaction invariants held for the diagnostic cases.
+
+The result remains deliberately non-promotable: the trial used `/tmp` tmpfs,
+the shared login-session cgroup, a dirty tracked tree, and a diagnostic-scale
+workload. The assessor therefore returned `eligible=false` solely under the
+diagnostic evidence rule. This is dogfood of the execution path, not a new
+canonical performance result and not permission to enable A2.
+
+If `AB_CODEBASE_INDEX_A1_STRATEGY` is unset/unknown, the staged-native path is not
+reachable from the production `codebase_index` seam, even when batch/staging options
+are present. To run a staged-native path, either set the strategy env var (for
+evaluation) or call `codebase_index_with_a1_strategy` explicitly.
+
 ## Frozen semantics
 
 | Property | Required evidence |

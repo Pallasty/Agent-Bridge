@@ -1,8 +1,298 @@
 #![cfg(feature = "codebase-index-bounded-native-a1")]
 
-use ab_store::{CodebaseIndexA1Failpoint, CodebaseIndexA1Options, SqliteStore, StateStore};
+use ab_store::{
+    CodebaseIndexA1DispatchOutcome, CodebaseIndexA1DispatchStrategy, CodebaseIndexA1Failpoint,
+    CodebaseIndexA1Options, SqliteStore, StateStore,
+};
+use std::ffi::OsString;
 use std::path::Path;
 use tokio_rusqlite::rusqlite::{self, params, Connection};
+
+static CODEBASE_INDEX_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+const CODEBASE_INDEX_ENV_KEYS: [&str; 6] = [
+    "AB_CODEBASE_INDEX_A1_STRATEGY",
+    "AB_CODEBASE_INDEX_A1_BATCH_ROWS",
+    "AB_CODEBASE_INDEX_A1_STAGING_PARENT",
+    "AB_CODEBASE_INDEX_A2_STRATEGY",
+    "AB_CODEBASE_INDEX_A2_BATCH_ROWS",
+    "AB_CODEBASE_INDEX_A2_STAGING_PARENT",
+];
+
+struct CleanIndexEnv {
+    _guard: tokio::sync::MutexGuard<'static, ()>,
+    prior: Vec<(&'static str, Option<OsString>)>,
+}
+
+impl Drop for CleanIndexEnv {
+    fn drop(&mut self) {
+        for (key, value) in self.prior.drain(..) {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
+async fn clean_index_env() -> CleanIndexEnv {
+    let guard = CODEBASE_INDEX_ENV_LOCK.lock().await;
+    let prior = CODEBASE_INDEX_ENV_KEYS
+        .into_iter()
+        .map(|key| {
+            let value = std::env::var_os(key);
+            std::env::remove_var(key);
+            (key, value)
+        })
+        .collect();
+    CleanIndexEnv {
+        _guard: guard,
+        prior,
+    }
+}
+
+#[tokio::test]
+async fn codebase_index_env_dispatch_reports_selection_and_fallback_reason() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary dispatch receipt fixture");
+    let db_path = temp_dir.path().join("index.sqlite3");
+    let store = SqliteStore::open(&db_path)
+        .await
+        .expect("open sqlite store");
+    let target_root = temp_dir.path().join("src");
+    std::fs::create_dir_all(&target_root).expect("create target root");
+    std::fs::write(target_root.join("lib.rs"), "fn receipt_probe() {}\n")
+        .expect("write source fixture");
+
+    let receipt = with_a1_a2_index_options_env(
+        (Some("native_chunk_staged_v0"), Some("2"), None),
+        (Some("mystery"), None, None),
+        || async {
+            store
+                .codebase_index_with_env_dispatch(target_root.to_str().unwrap(), &[])
+                .await
+                .expect("fallback dispatch should succeed")
+                .dispatch
+        },
+    )
+    .await;
+
+    assert_eq!(receipt.selected_namespace, "a1");
+    assert_eq!(receipt.requested_strategy.as_deref(), Some("mystery"));
+    assert_eq!(receipt.effective_strategy, "native_chunk_staged_v0");
+    assert_eq!(
+        receipt.fallback_reason.as_deref(),
+        Some("a2_strategy_unknown")
+    );
+    assert_eq!(receipt.batch_rows, Some(2));
+    assert!(!receipt.staging_parent_configured);
+}
+
+async fn with_a1_index_strategy_env<R, Fut, F>(value: Option<&str>, f: F) -> R
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let key = "AB_CODEBASE_INDEX_A1_STRATEGY";
+    let value_bytes = std::env::var_os(key);
+    if let Some(value) = value {
+        std::env::set_var(key, value);
+    } else {
+        std::env::remove_var(key);
+    }
+    let result = f().await;
+    match value_bytes {
+        Some(previous) => std::env::set_var(key, previous),
+        None => std::env::remove_var(key),
+    }
+    result
+}
+
+async fn with_a1_index_options_env<R, Fut, F>(
+    strategy: Option<&str>,
+    batch_rows: Option<&str>,
+    staging_parent: Option<&std::path::Path>,
+    f: F,
+) -> R
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let key_strategy = "AB_CODEBASE_INDEX_A1_STRATEGY";
+    let key_batch = "AB_CODEBASE_INDEX_A1_BATCH_ROWS";
+    let key_staging_parent = "AB_CODEBASE_INDEX_A1_STAGING_PARENT";
+    let old_strategy = std::env::var_os(key_strategy);
+    let old_batch = std::env::var_os(key_batch);
+    let old_parent = std::env::var_os(key_staging_parent);
+
+    if let Some(strategy) = strategy {
+        std::env::set_var(key_strategy, strategy);
+    } else {
+        std::env::remove_var(key_strategy);
+    }
+    if let Some(batch_rows) = batch_rows {
+        std::env::set_var(key_batch, batch_rows);
+    } else {
+        std::env::remove_var(key_batch);
+    }
+    if let Some(staging_parent) = staging_parent {
+        std::env::set_var(key_staging_parent, staging_parent);
+    } else {
+        std::env::remove_var(key_staging_parent);
+    }
+
+    let result = f().await;
+
+    match old_strategy {
+        Some(previous) => std::env::set_var(key_strategy, previous),
+        None => std::env::remove_var(key_strategy),
+    }
+    match old_batch {
+        Some(previous) => std::env::set_var(key_batch, previous),
+        None => std::env::remove_var(key_batch),
+    }
+    match old_parent {
+        Some(previous) => std::env::set_var(key_staging_parent, previous),
+        None => std::env::remove_var(key_staging_parent),
+    }
+    result
+}
+
+async fn with_a2_index_options_env<R, Fut, F>(
+    strategy: Option<&str>,
+    batch_rows: Option<&str>,
+    staging_parent: Option<&std::path::Path>,
+    f: F,
+) -> R
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let key_strategy = "AB_CODEBASE_INDEX_A2_STRATEGY";
+    let key_batch = "AB_CODEBASE_INDEX_A2_BATCH_ROWS";
+    let key_staging_parent = "AB_CODEBASE_INDEX_A2_STAGING_PARENT";
+    let old_strategy = std::env::var_os(key_strategy);
+    let old_batch = std::env::var_os(key_batch);
+    let old_parent = std::env::var_os(key_staging_parent);
+
+    if let Some(strategy) = strategy {
+        std::env::set_var(key_strategy, strategy);
+    } else {
+        std::env::remove_var(key_strategy);
+    }
+    if let Some(batch_rows) = batch_rows {
+        std::env::set_var(key_batch, batch_rows);
+    } else {
+        std::env::remove_var(key_batch);
+    }
+    if let Some(staging_parent) = staging_parent {
+        std::env::set_var(key_staging_parent, staging_parent);
+    } else {
+        std::env::remove_var(key_staging_parent);
+    }
+
+    let result = f().await;
+
+    match old_strategy {
+        Some(previous) => std::env::set_var(key_strategy, previous),
+        None => std::env::remove_var(key_strategy),
+    }
+    match old_batch {
+        Some(previous) => std::env::set_var(key_batch, previous),
+        None => std::env::remove_var(key_batch),
+    }
+    match old_parent {
+        Some(previous) => std::env::set_var(key_staging_parent, previous),
+        None => std::env::remove_var(key_staging_parent),
+    }
+    result
+}
+
+async fn with_a1_a2_index_options_env<R, Fut, F>(
+    a1: (Option<&str>, Option<&str>, Option<&std::path::Path>),
+    a2: (Option<&str>, Option<&str>, Option<&std::path::Path>),
+    f: F,
+) -> R
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+
+    let key_a1_strategy = "AB_CODEBASE_INDEX_A1_STRATEGY";
+    let key_a1_batch = "AB_CODEBASE_INDEX_A1_BATCH_ROWS";
+    let key_a1_parent = "AB_CODEBASE_INDEX_A1_STAGING_PARENT";
+    let key_a2_strategy = "AB_CODEBASE_INDEX_A2_STRATEGY";
+    let key_a2_batch = "AB_CODEBASE_INDEX_A2_BATCH_ROWS";
+    let key_a2_parent = "AB_CODEBASE_INDEX_A2_STAGING_PARENT";
+
+    let old_a1_strategy = std::env::var_os(key_a1_strategy);
+    let old_a1_batch = std::env::var_os(key_a1_batch);
+    let old_a1_parent = std::env::var_os(key_a1_parent);
+    let old_a2_strategy = std::env::var_os(key_a2_strategy);
+    let old_a2_batch = std::env::var_os(key_a2_batch);
+    let old_a2_parent = std::env::var_os(key_a2_parent);
+
+    if let Some(value) = a1.0 {
+        std::env::set_var(key_a1_strategy, value);
+    } else {
+        std::env::remove_var(key_a1_strategy);
+    }
+    if let Some(value) = a1.1 {
+        std::env::set_var(key_a1_batch, value);
+    } else {
+        std::env::remove_var(key_a1_batch);
+    }
+    if let Some(value) = a1.2 {
+        std::env::set_var(key_a1_parent, value);
+    } else {
+        std::env::remove_var(key_a1_parent);
+    }
+
+    if let Some(value) = a2.0 {
+        std::env::set_var(key_a2_strategy, value);
+    } else {
+        std::env::remove_var(key_a2_strategy);
+    }
+    if let Some(value) = a2.1 {
+        std::env::set_var(key_a2_batch, value);
+    } else {
+        std::env::remove_var(key_a2_batch);
+    }
+    if let Some(value) = a2.2 {
+        std::env::set_var(key_a2_parent, value);
+    } else {
+        std::env::remove_var(key_a2_parent);
+    }
+
+    let result = f().await;
+
+    match old_a1_strategy {
+        Some(previous) => std::env::set_var(key_a1_strategy, previous),
+        None => std::env::remove_var(key_a1_strategy),
+    }
+    match old_a1_batch {
+        Some(previous) => std::env::set_var(key_a1_batch, previous),
+        None => std::env::remove_var(key_a1_batch),
+    }
+    match old_a1_parent {
+        Some(previous) => std::env::set_var(key_a1_parent, previous),
+        None => std::env::remove_var(key_a1_parent),
+    }
+
+    match old_a2_strategy {
+        Some(previous) => std::env::set_var(key_a2_strategy, previous),
+        None => std::env::remove_var(key_a2_strategy),
+    }
+    match old_a2_batch {
+        Some(previous) => std::env::set_var(key_a2_batch, previous),
+        None => std::env::remove_var(key_a2_batch),
+    }
+    match old_a2_parent {
+        Some(previous) => std::env::set_var(key_a2_parent, previous),
+        None => std::env::remove_var(key_a2_parent),
+    }
+
+    result
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SymbolRow {
@@ -309,6 +599,7 @@ fn target_timestamps(snapshot: &AuthoritativeSnapshot, target_root: &str) -> Vec
 
 #[tokio::test]
 async fn bounded_native_a1_persists_multiple_batches_in_one_index() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);
@@ -345,6 +636,7 @@ async fn bounded_native_a1_persists_multiple_batches_in_one_index() {
 
 #[tokio::test]
 async fn bounded_native_a1_rolls_back_every_authoritative_phase() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 rollback fixture");
     let source_root = temp_dir.path().join("source");
     let staging_parent = temp_dir.path().join("rollback-staging");
@@ -432,6 +724,7 @@ async fn bounded_native_a1_rolls_back_every_authoritative_phase() {
 
 #[tokio::test]
 async fn bounded_native_a1_matches_full_vec_authoritative_contract() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 equivalence fixture");
     let source_root = temp_dir.path().join("source");
     multitype_source_fixture(&source_root);
@@ -534,6 +827,7 @@ async fn bounded_native_a1_matches_full_vec_authoritative_contract() {
 
 #[tokio::test]
 async fn bounded_native_a1_uses_and_cleans_explicit_staging_parent() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 staging-parent fixture");
     let source_root = temp_dir.path().join("source");
     let staging_parent = temp_dir.path().join("explicit-staging");
@@ -585,6 +879,7 @@ async fn bounded_native_a1_uses_and_cleans_explicit_staging_parent() {
 
 #[tokio::test]
 async fn full_vec_a1_timing_seam_matches_default_path() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary FullVec seam fixture");
     let source_root = temp_dir.path().join("source");
     multitype_source_fixture(&source_root);
@@ -627,7 +922,942 @@ async fn full_vec_a1_timing_seam_matches_default_path() {
 }
 
 #[tokio::test]
+async fn codebase_index_with_a1_strategy_explicitly_dispatches_full_vec() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary A1 dispatch fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/full-vec-dispatch-sentinel";
+    let default_db = temp_dir.path().join("default.db");
+    let dispatch_db = temp_dir.path().join("dispatch.db");
+    let default_store = SqliteStore::open(&default_db)
+        .await
+        .expect("open default dispatch store");
+    let dispatch_store = SqliteStore::open(&dispatch_db)
+        .await
+        .expect("open strategy dispatch store");
+    seed_authoritative_rows(&default_db, target_root, other_root);
+    seed_authoritative_rows(&dispatch_db, target_root, other_root);
+
+    let default_stats = default_store
+        .codebase_index(target_root, &[])
+        .await
+        .expect("run default FullVec path");
+    let dispatch_stats = dispatch_store
+        .codebase_index_with_a1_strategy(target_root, &[], CodebaseIndexA1DispatchStrategy::FullVec)
+        .await
+        .expect("run explicit FullVec dispatch");
+
+    match dispatch_stats {
+        CodebaseIndexA1DispatchOutcome::FullVec(outcome) => {
+            assert_eq!(outcome.stats.indexed_files, default_stats.indexed_files);
+            assert_eq!(outcome.stats.symbols, default_stats.symbols);
+            assert_eq!(outcome.stats.imports, default_stats.imports);
+            assert_eq!(outcome.stats.calls, default_stats.calls);
+            assert_eq!(outcome.stats.root_path, default_stats.root_path);
+        }
+        _ => panic!("explicit FullVec strategy must return FullVec dispatch outcome"),
+    }
+
+    assert_eq!(
+        authoritative_snapshot(&default_db).normalize_target_clock(target_root),
+        authoritative_snapshot(&dispatch_db).normalize_target_clock(target_root)
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_default_env_is_full_vec_and_matches_explicit_full_vec() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary env default fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/default-env-full-vec-sentinel";
+    let default_db = temp_dir.path().join("default.db");
+    let env_db = temp_dir.path().join("env.db");
+    let default_store = SqliteStore::open(&default_db)
+        .await
+        .expect("open default env fixture store");
+    let env_store = SqliteStore::open(&env_db)
+        .await
+        .expect("open environment-gated fixture store");
+    seed_authoritative_rows(&default_db, target_root, other_root);
+    seed_authoritative_rows(&env_db, target_root, other_root);
+
+    let default_stats = default_store
+        .codebase_index(target_root, &[])
+        .await
+        .expect("run default FullVec baseline");
+
+    let env_stats = with_a1_index_strategy_env::<_, _, _>(None, || async {
+        env_store
+            .codebase_index(target_root, &[])
+            .await
+            .expect("run codebase_index with default-off env gate")
+    })
+    .await;
+
+    assert_eq!(env_stats.indexed_files, default_stats.indexed_files);
+    assert_eq!(env_stats.symbols, default_stats.symbols);
+    assert_eq!(env_stats.imports, default_stats.imports);
+    assert_eq!(env_stats.calls, default_stats.calls);
+    assert_eq!(env_stats.root_path, default_stats.root_path);
+    assert_eq!(
+        authoritative_snapshot(&default_db).normalize_target_clock(target_root),
+        authoritative_snapshot(&env_db).normalize_target_clock(target_root)
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a1_env_switches_to_native_chunk_staged_v0() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary env switched fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/env-native-chunk-staged-root";
+    let staging_parent = temp_dir.path().join("env-staging");
+    std::fs::create_dir_all(&staging_parent).expect("create env staging parent");
+    let env_db = temp_dir.path().join("env.db");
+    let store = SqliteStore::open(&env_db)
+        .await
+        .expect("open env switched store");
+    seed_authoritative_rows(&env_db, target_root, other_root);
+
+    let _ = with_a1_index_options_env(
+        Some("native_chunk_staged_v0"),
+        Some("4"),
+        Some(&staging_parent),
+        || async {
+            store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("run env-switched codebase_index")
+        },
+    )
+    .await;
+
+    assert!(
+        std::fs::read_dir(&staging_parent)
+            .expect("read env staging parent")
+            .count()
+            == 0,
+        "env switched staged-native path must cleanup temporary staging"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a1_env_invalid_staging_parent_returns_error() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary env invalid staging parent fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/env-invalid-staging-parent-fallback";
+    let staging_parent = temp_dir.path().join("invalid-staging-parent");
+    std::fs::write(&staging_parent, b"not-a-directory")
+        .expect("write invalid staging-parent sentinel");
+
+    let env_db = temp_dir.path().join("env.db");
+    let store = SqliteStore::open(&env_db)
+        .await
+        .expect("open env invalid parent store");
+    seed_authoritative_rows(&env_db, target_root, other_root);
+    let before = authoritative_snapshot(&env_db);
+
+    let err = with_a1_index_options_env(
+        Some("native_chunk_staged_v0"),
+        Some("4"),
+        Some(&staging_parent),
+        || async {
+            store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect_err("invalid staging parent should error")
+        },
+    )
+    .await;
+
+    assert!(
+        err.to_string().contains("codebase_index A1 staging dir"),
+        "invalid staging parent error should mention staging dir creation: {err}"
+    );
+    assert_eq!(
+        authoritative_snapshot(&env_db).normalize_target_clock(target_root),
+        before.normalize_target_clock(target_root)
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a2_env_switches_to_native_chunk_staged_v0() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary a2 env switched fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/env-native-chunk-staged-root-a2";
+    let staging_parent = temp_dir.path().join("env-a2-staging");
+    std::fs::create_dir_all(&staging_parent).expect("create a2 env staging parent");
+
+    let env_db = temp_dir.path().join("env-a2.db");
+    let store = SqliteStore::open(&env_db)
+        .await
+        .expect("open a2 env switched store");
+    seed_authoritative_rows(&env_db, target_root, other_root);
+
+    let stats = with_a2_index_options_env(
+        Some("native_chunk_staged_v0"),
+        Some("4"),
+        Some(&staging_parent),
+        || async {
+            store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("run a2 env-switched codebase_index")
+        },
+    )
+    .await;
+
+    let dispatch = stats
+        .dispatch
+        .expect("ordinary caller must retain A2 dispatch provenance");
+    assert_eq!(dispatch.selected_namespace, "a2");
+    assert_eq!(
+        dispatch.requested_strategy.as_deref(),
+        Some("native_chunk_staged_v0")
+    );
+    assert_eq!(dispatch.effective_strategy, "native_chunk_staged_v0");
+    assert_eq!(dispatch.fallback_reason, None);
+    assert_eq!(dispatch.batch_rows, Some(4));
+    assert!(dispatch.staging_parent_configured);
+
+    assert!(
+        std::fs::read_dir(&staging_parent)
+            .expect("read a2 env staging parent")
+            .count()
+            == 0,
+        "a2 env switched staged-native path must cleanup temporary staging"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_a2_explicit_full_vec_rollback_is_receipted() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary A2 FullVec rollback fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let db_path = temp_dir.path().join("a2-full-vec-rollback.db");
+    let store = SqliteStore::open(&db_path)
+        .await
+        .expect("open A2 FullVec rollback store");
+    seed_authoritative_rows(&db_path, target_root, "/fixture/a2-full-vec-other-root");
+
+    let stats = with_a2_index_options_env(Some("full_vec"), None, None, || async {
+        store
+            .codebase_index(target_root, &["rust".to_string()])
+            .await
+            .expect("run explicit A2 FullVec rollback")
+    })
+    .await;
+
+    let dispatch = stats
+        .dispatch
+        .expect("A2 FullVec rollback must retain dispatch provenance");
+    assert_eq!(dispatch.selected_namespace, "a2");
+    assert_eq!(dispatch.requested_strategy.as_deref(), Some("full_vec"));
+    assert_eq!(dispatch.effective_strategy, "full_vec");
+    assert_eq!(dispatch.fallback_reason, None);
+    assert_eq!(dispatch.batch_rows, None);
+    assert!(!dispatch.staging_parent_configured);
+}
+
+#[tokio::test]
+async fn codebase_index_a2_default_off_shadow_mutates_only_copied_database() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary isolated shadow fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/a2-shadow-other-root";
+    let live_db = temp_dir.path().join("live-fixture.db");
+    let shadow_db = temp_dir.path().join("shadow-copy.db");
+    let staging_parent = temp_dir.path().join("shadow-staging");
+    std::fs::create_dir_all(&staging_parent).expect("create shadow staging parent");
+
+    let live_store = SqliteStore::open(&live_db)
+        .await
+        .expect("initialize live fixture schema");
+    drop(live_store);
+    seed_authoritative_rows(&live_db, target_root, other_root);
+    let live_before = authoritative_snapshot(&live_db);
+    let live_bytes_before = std::fs::read(&live_db).expect("read live fixture before shadow");
+    std::fs::copy(&live_db, &shadow_db).expect("copy isolated shadow database");
+
+    let shadow_store = SqliteStore::open(&shadow_db)
+        .await
+        .expect("open copied shadow store");
+    let stats = with_a2_index_options_env(
+        Some("native_chunk_staged_v0"),
+        Some("4"),
+        Some(&staging_parent),
+        || async {
+            shadow_store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("run A2 only on copied shadow database")
+        },
+    )
+    .await;
+
+    let dispatch = stats
+        .dispatch
+        .expect("shadow caller must receive dispatch provenance");
+    assert_eq!(dispatch.selected_namespace, "a2");
+    assert_eq!(dispatch.effective_strategy, "native_chunk_staged_v0");
+    assert_eq!(dispatch.batch_rows, Some(4));
+    assert!(dispatch.staging_parent_configured);
+    assert_eq!(
+        std::fs::read(&live_db).expect("read live fixture after shadow"),
+        live_bytes_before,
+        "isolated A2 shadow must not change the source database bytes"
+    );
+    assert_eq!(authoritative_snapshot(&live_db), live_before);
+    assert_ne!(
+        authoritative_snapshot(&shadow_db).normalize_target_clock(target_root),
+        live_before.normalize_target_clock(target_root),
+        "copied shadow must contain the newly indexed generation"
+    );
+    assert_eq!(
+        std::fs::read_dir(&staging_parent)
+            .expect("read shadow staging parent")
+            .count(),
+        0,
+        "shadow staging state must be cleaned"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a2_env_preempts_a1_native_env() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary a2 precedence fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/env-preempt-a1-root";
+    let a1_staging_parent = temp_dir.path().join("a1-invalid-staging");
+    std::fs::write(&a1_staging_parent, b"invalid-a1-parent")
+        .expect("write invalid a1 staging parent sentinel");
+    let a2_staging_parent = temp_dir.path().join("a2-staging");
+    std::fs::create_dir_all(&a2_staging_parent).expect("create a2 precedence staging parent");
+
+    let env_db = temp_dir.path().join("env-a2-preempt.db");
+    let store = SqliteStore::open(&env_db)
+        .await
+        .expect("open a2 precedence store");
+    seed_authoritative_rows(&env_db, target_root, other_root);
+
+    let _ = with_a1_a2_index_options_env(
+        (
+            Some("native_chunk_staged_v0"),
+            Some("4"),
+            Some(&a1_staging_parent),
+        ),
+        (
+            Some("native_chunk_staged_v0"),
+            Some("4"),
+            Some(&a2_staging_parent),
+        ),
+        || async {
+            store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("run a2-preempting codebase_index")
+        },
+    )
+    .await;
+
+    assert!(
+        std::fs::metadata(&a1_staging_parent)
+            .expect("a1 invalid parent should remain a file")
+            .is_file(),
+        "a1 invalid parent should not be touched when a2 wins"
+    );
+    assert!(
+        std::fs::read_dir(&a2_staging_parent)
+            .expect("read a2 staging parent")
+            .count()
+            == 0,
+        "a2 env switched staged-native path must cleanup temporary staging"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a2_unknown_strategy_falls_back_to_a1_strategy() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary a2 fallback fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/fallback-a2-unknown-a1-root";
+    let a2_staging_parent = temp_dir.path().join("a2-invalid-staging");
+    std::fs::write(&a2_staging_parent, b"invalid-a2-parent")
+        .expect("write invalid a2 staging parent sentinel");
+    let a1_staging_parent = temp_dir.path().join("a1-staging");
+    std::fs::create_dir_all(&a1_staging_parent).expect("create fallback a1 staging parent");
+
+    let env_db = temp_dir.path().join("env-a2-unknown.db");
+    let store = SqliteStore::open(&env_db)
+        .await
+        .expect("open a2-unknown fallback store");
+    seed_authoritative_rows(&env_db, target_root, other_root);
+
+    let stats = with_a1_a2_index_options_env(
+        (
+            Some("native_chunk_staged_v0"),
+            Some("4"),
+            Some(&a1_staging_parent),
+        ),
+        (Some("not-a2-strategy"), Some("4"), Some(&a2_staging_parent)),
+        || async {
+            store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("run a2-unknown fallback to a1 codebase_index")
+        },
+    )
+    .await;
+
+    let dispatch = stats
+        .dispatch
+        .expect("fallback caller must retain dispatch provenance");
+    assert_eq!(dispatch.selected_namespace, "a1");
+    assert_eq!(
+        dispatch.requested_strategy.as_deref(),
+        Some("not-a2-strategy")
+    );
+    assert_eq!(dispatch.effective_strategy, "native_chunk_staged_v0");
+    assert_eq!(
+        dispatch.fallback_reason.as_deref(),
+        Some("a2_strategy_unknown")
+    );
+    assert_eq!(dispatch.batch_rows, Some(4));
+    assert!(dispatch.staging_parent_configured);
+
+    assert!(
+        std::fs::metadata(&a1_staging_parent)
+            .expect("a1 fallback staging parent should remain a directory")
+            .is_dir(),
+        "a1 fallback path should be used when a2 strategy is unknown"
+    );
+    assert!(
+        std::fs::read_dir(&a1_staging_parent)
+            .expect("read a1 fallback staging parent")
+            .count()
+            == 0,
+        "a1 fallback staged-native path must cleanup temporary staging"
+    );
+    assert!(
+        std::fs::metadata(&a2_staging_parent)
+            .expect("a2 invalid parent should remain file")
+            .is_file(),
+        "invalid a2 fallback parent should stay untouched"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a2_unknown_strategy_falls_back_to_a1_staged_native_equivalence() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary a2 fallback equivalence fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/fallback-a2-unknown-a1-exact";
+    let a2_staging_parent = temp_dir.path().join("a2-invalid-staging");
+    std::fs::write(&a2_staging_parent, b"invalid-a2-parent")
+        .expect("write invalid a2 fallback parent sentinel");
+    let a1_staging_parent = temp_dir.path().join("a1-staging");
+    std::fs::create_dir_all(&a1_staging_parent)
+        .expect("create fallback a1 equivalence staging parent");
+
+    let a1_db = temp_dir.path().join("a1-exact.db");
+    let fallback_db = temp_dir.path().join("a2-unknown-exact.db");
+    let a1_store = SqliteStore::open(&a1_db)
+        .await
+        .expect("open a1 exact reference store");
+    let fallback_store = SqliteStore::open(&fallback_db)
+        .await
+        .expect("open a2-unknown fallback store");
+    seed_authoritative_rows(&a1_db, target_root, other_root);
+    seed_authoritative_rows(&fallback_db, target_root, other_root);
+
+    let a1_outcome = a1_store
+        .codebase_index_with_a1_strategy(
+            target_root,
+            &["rust".to_string()],
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(CodebaseIndexA1Options {
+                batch_rows: 4,
+                failpoint: None,
+                staging_parent: Some(a1_staging_parent.clone()),
+            }),
+        )
+        .await
+        .expect("run explicit A1 staged-native reference");
+    let a1_stats = match a1_outcome {
+        CodebaseIndexA1DispatchOutcome::NativeChunkStagedV0(outcome) => outcome.stats,
+        _ => panic!("explicit staged-native A1 strategy must return native outcome"),
+    };
+    let a1_snapshot = authoritative_snapshot(&a1_db).normalize_target_clock(target_root);
+
+    let fallback_stats = with_a1_a2_index_options_env(
+        (
+            Some("native_chunk_staged_v0"),
+            Some("4"),
+            Some(&a1_staging_parent),
+        ),
+        (Some("not-a2-strategy"), Some("4"), Some(&a2_staging_parent)),
+        || async {
+            fallback_store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("run codebase_index with unknown A2 strategy")
+        },
+    )
+    .await;
+
+    assert_eq!(fallback_stats.indexed_files, a1_stats.indexed_files);
+    assert_eq!(fallback_stats.symbols, a1_stats.symbols);
+    assert_eq!(fallback_stats.imports, a1_stats.imports);
+    assert_eq!(fallback_stats.calls, a1_stats.calls);
+    assert_eq!(fallback_stats.root_path, a1_stats.root_path);
+    assert_eq!(
+        authoritative_snapshot(&fallback_db).normalize_target_clock(target_root),
+        a1_snapshot,
+        "A2 unknown-strategy fallback should produce the same authoritative snapshot as explicit A1 staged-native"
+    );
+    assert!(
+        std::fs::read_dir(&a1_staging_parent)
+            .expect("read a1 fallback equivalence staging parent")
+            .count()
+            == 0,
+        "a1 fallback staged-native path should cleanup temporary staging"
+    );
+    assert!(
+        std::fs::metadata(&a2_staging_parent)
+            .expect("a2 invalid fallback parent should remain file")
+            .is_file(),
+        "invalid a2 parent should stay untouched"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a2_unknown_strategy_and_a1_staging_failure_reverts_without_partial_effect(
+) {
+    let _env = clean_index_env().await;
+    let temp_dir =
+        tempfile::tempdir().expect("temporary a2 fallback invalid-a1 staging failure fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/fallback-a2-unknown-a1-fail";
+
+    let a1_staging_parent = temp_dir.path().join("a1-invalid-staging");
+    std::fs::write(&a1_staging_parent, b"invalid-a1-staging-parent")
+        .expect("write invalid a1 staging parent sentinel");
+    let a2_staging_parent = temp_dir.path().join("a2-invalid-staging");
+    std::fs::write(&a2_staging_parent, b"invalid-a2-staging-parent")
+        .expect("write invalid a2 staging parent sentinel");
+
+    let fallback_db = temp_dir.path().join("a2-unknown-failure.db");
+    let store = SqliteStore::open(&fallback_db)
+        .await
+        .expect("open a2 unknown with a1 failure store");
+    seed_authoritative_rows(&fallback_db, target_root, other_root);
+    let before = authoritative_snapshot(&fallback_db);
+    let before_status = store
+        .codebase_index_status(target_root)
+        .await
+        .expect("status before fallback failure");
+
+    let err = with_a1_a2_index_options_env(
+        (
+            Some("native_chunk_staged_v0"),
+            Some("4"),
+            Some(&a1_staging_parent),
+        ),
+        (Some("not-a2-strategy"), Some("4"), Some(&a2_staging_parent)),
+        || async {
+            store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect_err("unknown A2 strategy should still hit A1 staging failure")
+        },
+    )
+    .await;
+
+    assert!(
+        err.to_string().contains("codebase_index A1 staging dir"),
+        "invalid A1 fallback staging parent should surface a clear staging-dir error, got {err}"
+    );
+    assert_eq!(
+        authoritative_snapshot(&fallback_db).normalize_target_clock(target_root),
+        before.normalize_target_clock(target_root),
+        "A2-unknown + A1 staging failure should rollback authoritative state"
+    );
+
+    let after_status = store
+        .codebase_index_status(target_root)
+        .await
+        .expect("status after failure should remain readable");
+    assert_eq!(after_status.symbols, before_status.symbols);
+    assert_eq!(after_status.imports, before_status.imports);
+    assert_eq!(after_status.calls, before_status.calls);
+
+    assert!(
+        std::fs::metadata(&a1_staging_parent)
+            .expect("a1 invalid parent should remain file")
+            .is_file(),
+        "invalid A1 fallback parent should remain untouched by attempted staging open failure"
+    );
+    assert!(
+        std::fs::metadata(&a2_staging_parent)
+            .expect("a2 invalid parent should remain file")
+            .is_file(),
+        "invalid A2 sentinel should remain untouched when A2 is unknown"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a2_unknown_strategy_recovers_after_a1_staging_parent_is_fixed() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary a2 fallback staging recovery fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/fallback-a2-unknown-a1-recovery";
+
+    let invalid_a1_staging_parent = temp_dir.path().join("a1-invalid-staging");
+    std::fs::write(&invalid_a1_staging_parent, b"invalid-a1-staging-parent")
+        .expect("write invalid a1 staging parent sentinel");
+    let valid_a1_staging_parent = temp_dir.path().join("a1-valid-staging");
+    std::fs::create_dir_all(&valid_a1_staging_parent).expect("create valid a1 staging parent");
+    let a2_staging_parent = temp_dir.path().join("a2-invalid-staging");
+    std::fs::write(&a2_staging_parent, b"invalid-a2-staging-parent")
+        .expect("write invalid a2 staging parent sentinel");
+
+    let fallback_db = temp_dir.path().join("a2-unknown-recovery.db");
+    let fallback_store = SqliteStore::open(&fallback_db)
+        .await
+        .expect("open a2 unknown recovery fallback store");
+    seed_authoritative_rows(&fallback_db, target_root, other_root);
+    let before_retry = authoritative_snapshot(&fallback_db).normalize_target_clock(target_root);
+
+    let baseline_db = temp_dir.path().join("a2-unknown-recovery-baseline.db");
+    let baseline_store = SqliteStore::open(&baseline_db)
+        .await
+        .expect("open a2 unknown recovery baseline store");
+    seed_authoritative_rows(&baseline_db, target_root, other_root);
+
+    let first = with_a1_a2_index_options_env(
+        (
+            Some("native_chunk_staged_v0"),
+            Some("4"),
+            Some(&invalid_a1_staging_parent),
+        ),
+        (Some("not-a2-strategy"), Some("4"), Some(&a2_staging_parent)),
+        || async {
+            fallback_store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect_err("invalid A1 staging parent should fail before retrying")
+        },
+    )
+    .await;
+    assert!(
+        first.to_string().contains("codebase_index A1 staging dir"),
+        "invalid A1 staging parent should surface staging-dir error on first attempt, got {first}"
+    );
+    assert_eq!(
+        authoritative_snapshot(&fallback_db).normalize_target_clock(target_root),
+        before_retry,
+        "failed fallback should not mutate authoritative rows"
+    );
+
+    let baseline_explicit = baseline_store
+        .codebase_index_with_a1_strategy(
+            target_root,
+            &["rust".to_string()],
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(CodebaseIndexA1Options {
+                batch_rows: 4,
+                failpoint: None,
+                staging_parent: Some(valid_a1_staging_parent.clone()),
+            }),
+        )
+        .await
+        .expect("run baseline explicit A1 staged-native");
+    let baseline_stats = match baseline_explicit {
+        CodebaseIndexA1DispatchOutcome::NativeChunkStagedV0(outcome) => outcome.stats,
+        _ => panic!("explicit staged-native A1 strategy should return native outcome"),
+    };
+    let baseline_snapshot =
+        authoritative_snapshot(&baseline_db).normalize_target_clock(target_root);
+
+    let retry = with_a1_a2_index_options_env(
+        (
+            Some("native_chunk_staged_v0"),
+            Some("4"),
+            Some(&valid_a1_staging_parent),
+        ),
+        (Some("not-a2-strategy"), Some("4"), Some(&a2_staging_parent)),
+        || async {
+            fallback_store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("A2 unknown should recover once A1 staging parent is valid")
+        },
+    )
+    .await;
+
+    assert_eq!(retry.indexed_files, baseline_stats.indexed_files);
+    assert_eq!(retry.symbols, baseline_stats.symbols);
+    assert_eq!(retry.imports, baseline_stats.imports);
+    assert_eq!(retry.calls, baseline_stats.calls);
+    assert_eq!(retry.root_path, baseline_stats.root_path);
+    assert_eq!(
+        authoritative_snapshot(&fallback_db).normalize_target_clock(target_root),
+        baseline_snapshot,
+        "recovered A2-unknown fallback should match explicit A1 baseline"
+    );
+    assert!(
+        std::fs::read_dir(&valid_a1_staging_parent)
+            .expect("read valid a1 staging parent")
+            .count()
+            == 0,
+        "successful retry should cleanup staging artifacts"
+    );
+    assert!(
+        std::fs::metadata(&invalid_a1_staging_parent)
+            .expect("invalid a1 parent should remain file")
+            .is_file(),
+        "invalid a1 parent from failed attempt should remain untouched"
+    );
+    assert!(
+        std::fs::metadata(&a2_staging_parent)
+            .expect("a2 parent should remain file")
+            .is_file(),
+        "invalid a2 parent should remain untouched"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a1_env_unknown_strategy_defaults_to_full_vec() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary env fallback fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/env-unknown-strategy-fallback";
+    let default_db = temp_dir.path().join("default.db");
+    let env_db = temp_dir.path().join("env.db");
+    let default_store = SqliteStore::open(&default_db)
+        .await
+        .expect("open env fallback baseline store");
+    let env_store = SqliteStore::open(&env_db)
+        .await
+        .expect("open env fallback gated store");
+    seed_authoritative_rows(&default_db, target_root, other_root);
+    seed_authoritative_rows(&env_db, target_root, other_root);
+
+    let default_stats = default_store
+        .codebase_index(target_root, &[])
+        .await
+        .expect("run baseline FullVec fallback path");
+
+    let env_stats = with_a1_index_strategy_env(Some("definitely_not_a1_strategy"), || async {
+        env_store
+            .codebase_index(target_root, &[])
+            .await
+            .expect("run codebase_index with unknown strategy env")
+    })
+    .await;
+
+    assert_eq!(env_stats.indexed_files, default_stats.indexed_files);
+    assert_eq!(env_stats.symbols, default_stats.symbols);
+    assert_eq!(env_stats.imports, default_stats.imports);
+    assert_eq!(env_stats.calls, default_stats.calls);
+    assert_eq!(env_stats.root_path, default_stats.root_path);
+    assert_eq!(
+        authoritative_snapshot(&default_db).normalize_target_clock(target_root),
+        authoritative_snapshot(&env_db).normalize_target_clock(target_root)
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a1_env_fullvec_alias_switches_to_full_vec() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary env fullvec alias fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let other_root = "/fixture/env-fullvec-alias-fallback";
+    let default_db = temp_dir.path().join("default.db");
+    let env_db = temp_dir.path().join("env.db");
+    let default_store = SqliteStore::open(&default_db)
+        .await
+        .expect("open env alias baseline store");
+    let env_store = SqliteStore::open(&env_db)
+        .await
+        .expect("open env alias switched store");
+    seed_authoritative_rows(&default_db, target_root, other_root);
+    seed_authoritative_rows(&env_db, target_root, other_root);
+
+    let default_stats = default_store
+        .codebase_index(target_root, &[])
+        .await
+        .expect("run baseline FullVec path");
+
+    let env_stats = with_a1_index_options_env(Some("FULLVEC_A1"), None, None, || async {
+        env_store
+            .codebase_index(target_root, &[])
+            .await
+            .expect("run codebase_index with FULLVEC_A1 strategy")
+    })
+    .await;
+
+    assert_eq!(env_stats.indexed_files, default_stats.indexed_files);
+    assert_eq!(env_stats.symbols, default_stats.symbols);
+    assert_eq!(env_stats.imports, default_stats.imports);
+    assert_eq!(env_stats.calls, default_stats.calls);
+    assert_eq!(env_stats.root_path, default_stats.root_path);
+    assert_eq!(
+        authoritative_snapshot(&default_db).normalize_target_clock(target_root),
+        authoritative_snapshot(&env_db).normalize_target_clock(target_root)
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a1_env_dash_alias_switches_to_native() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary env alias fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let target_root = source_root.to_str().expect("UTF-8 fixture path");
+    let staging_parent = temp_dir.path().join("alias-staging");
+    std::fs::create_dir_all(&staging_parent).expect("create alias staging parent");
+
+    let env_db = temp_dir.path().join("alias.env.db");
+    let default_db = temp_dir.path().join("alias.default.db");
+    let env_store = SqliteStore::open(&env_db)
+        .await
+        .expect("open alias env switched store");
+    let default_store = SqliteStore::open(&default_db)
+        .await
+        .expect("open alias dispatch default store");
+    seed_authoritative_rows(&env_db, target_root, "/fixture/native-alias-target");
+    seed_authoritative_rows(&default_db, target_root, "/fixture/native-alias-target");
+
+    let _ = with_a1_index_options_env(
+        Some("native-chunk-staged-v0"),
+        Some("4"),
+        Some(&staging_parent),
+        || async {
+            env_store
+                .codebase_index(target_root, &["rust".to_string()])
+                .await
+                .expect("run env alias native strategy")
+        },
+    )
+    .await;
+
+    let explicit = default_store
+        .codebase_index_with_a1_strategy(
+            target_root,
+            &["rust".to_string()],
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(CodebaseIndexA1Options {
+                batch_rows: 4,
+                failpoint: None,
+                staging_parent: Some(staging_parent.clone()),
+            }),
+        )
+        .await
+        .expect("run explicit native strategy");
+
+    match explicit {
+        CodebaseIndexA1DispatchOutcome::NativeChunkStagedV0(outcome) => {
+            assert!(outcome.telemetry.batch_rows == 4);
+            assert!(outcome.telemetry.staging_cleanup_succeeded);
+        }
+        _ => panic!("explicit native strategy must return native outcome"),
+    }
+
+    let env_snapshot = authoritative_snapshot(&env_db).normalize_target_clock(target_root);
+    let explicit_db_snapshot =
+        authoritative_snapshot(&default_db).normalize_target_clock(target_root);
+    assert_eq!(env_snapshot, explicit_db_snapshot);
+    assert!(
+        std::fs::read_dir(&staging_parent)
+            .expect("read alias staging parent")
+            .count()
+            == 0,
+        "alias native strategy must cleanup staging parent"
+    );
+}
+
+#[tokio::test]
+async fn codebase_index_with_a1_strategy_explicitly_dispatches_staged_native() {
+    let _env = clean_index_env().await;
+    let temp_dir = tempfile::tempdir().expect("temporary A1 dispatch staging fixture");
+    let source_root = temp_dir.path().join("source");
+    source_fixture(&source_root);
+    let staging_parent = temp_dir.path().join("dispatch-staging");
+    std::fs::create_dir_all(&staging_parent).expect("create dispatch staging parent");
+    let store = SqliteStore::open(&temp_dir.path().join("state.db"))
+        .await
+        .expect("open dispatch store");
+
+    let dispatch = store
+        .codebase_index_with_a1_strategy(
+            source_root.to_str().expect("UTF-8 fixture path"),
+            &["rust".to_string()],
+            CodebaseIndexA1DispatchStrategy::NativeChunkStagedV0(CodebaseIndexA1Options {
+                batch_rows: 4,
+                failpoint: None,
+                staging_parent: Some(staging_parent.clone()),
+            }),
+        )
+        .await
+        .expect("run staged-native via dispatch API");
+
+    match dispatch {
+        CodebaseIndexA1DispatchOutcome::NativeChunkStagedV0(outcome) => {
+            assert_eq!(outcome.telemetry.strategy, "native_chunk_staged_v0");
+            assert!(outcome.telemetry.batch_rows > 0);
+            assert!(outcome.telemetry.staging_cleanup_succeeded);
+            assert!(outcome.telemetry.staging_file_path.starts_with(
+                staging_parent
+                    .canonicalize()
+                    .expect("canonical dispatch staging parent")
+            ));
+            assert!(
+                !outcome.telemetry.staging_file_path.exists(),
+                "dispatch telemetry must point at cleaned staging file"
+            );
+            assert!(
+                std::fs::read_dir(&staging_parent)
+                    .expect("read dispatch staging parent")
+                    .count()
+                    == 0,
+                "dispatch staged-native path must cleanup temporary staging"
+            );
+        }
+        _ => panic!("explicit staged-native strategy must return staged-native outcome"),
+    }
+}
+
+#[tokio::test]
 async fn a1_pragma_evidence_is_authoritative_read_only_and_stable() {
+    let _env = clean_index_env().await;
     let temp_dir = tempfile::tempdir().expect("temporary A1 PRAGMA fixture");
     let source_root = temp_dir.path().join("source");
     source_fixture(&source_root);

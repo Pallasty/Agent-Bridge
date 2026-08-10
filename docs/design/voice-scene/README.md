@@ -238,6 +238,14 @@ express. A packet is S0-valid only when it passes both.
 - `S637_STORY_RENDER_REAL_WORKER_ADAPTER_IMPLEMENTATION.md`: S637 Worker
   implementation, redaction, real subprocess, rollback, remaining blockers,
   and S638 identity/package gate.
+- `story_render_artifact_identity_and_python_package.schema.json`: S638
+  source/isolated-package receipt schema with explicit runtime non-authority.
+- `s638_story_render_artifact_identity_and_python_package.json`: S638
+  hash-bound package/custody/descriptor-launch result and honest inference
+  dependency blocker.
+- `S638_STORY_RENDER_ARTIFACT_IDENTITY_AND_PYTHON_PACKAGE.md`: S638 immutable
+  control package, POSIX custody, offline Python boundary, rollback, and S639
+  source-only Guardian entrypoint gate.
 - `character_state.schema.json`: S3 ledger and resume snapshot contract.
 - `realtime_interaction.schema.json`: S4 PTT turn receipt and owner gates.
 - `voice_audition.schema.json`: S5 blinded three-voice audition plan.
