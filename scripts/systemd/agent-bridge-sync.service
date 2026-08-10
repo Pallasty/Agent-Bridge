@@ -45,6 +45,10 @@ Environment=AGENT_BRIDGE_MEMORY_IMPORT_EMBED_BATCH_SIZE=8
 # Keep cross-node convergence bounded: imported rows are stored without an
 # ONNX vector and can be filled later by explicit idle-time reindexing.
 Environment=AGENT_BRIDGE_MEMORY_IMPORT_SKIP_EMBEDDINGS=1
+# Drain one small stale batch only when the wrapper has configured an explicit
+# remote embedding delegate. Nodes without AGENT_BRIDGE_EMBED_REMOTE_URL keep
+# deferring vectors and never cold-start a local ONNX model during sync.
+Environment=AGENT_BRIDGE_SYNC_REMOTE_REINDEX_BATCH_SIZE=8
 ExecStart=-%h/.local/bin/agent-bridge sync -v
 StandardOutput=append:%h/.cache/agent-bridge/sync.log
 StandardError=append:%h/.cache/agent-bridge/sync.log
