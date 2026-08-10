@@ -1,0 +1,16 @@
+{
+  "status": "VERIFIED_D88R_PRIVILEGED_BOOT_PAYLOAD_PREREQUISITES_COMPLETE",
+  "kernel_initramfs_digests_complete": true,
+  "root_image_builder_present": true,
+  "mmc_identity_unchanged_and_unmounted": true,
+  "privileged_scope_clean": true,
+  "boot_payload_prerequisites_complete": true,
+  "rootfs_build_authorized": false,
+  "mmc_write_authorized": false,
+  "bootloader_change_authorized": false,
+  "reboot_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "PASS_D88R_PRIVILEGED_PREREQUISITES_STAGED_NO_IMAGE_BUILT",
+  "next_gate": "OWNER_ADMIT_D89_OFFLINE_ROOTFS_STAGING_BUILD"
+}

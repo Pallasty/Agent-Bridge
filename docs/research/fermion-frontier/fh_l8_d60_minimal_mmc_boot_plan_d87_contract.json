@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-MINIMAL-MMC-BOOT-PLAN-D87-V1",
+  "baseline_commit": "2ff48a30fbbe6b328557a6cdaa7d60cf65515e79",
+  "source_pins": {
+    "FH_L8_D60_ALTERNATE_STORAGE_TOPOLOGY_GATE_D86_ZH.md": "caa093cf5706432493d135c35219607d8317d41406ad7d37892c78fe822dbc74",
+    "fh_l8_d60_alternate_storage_topology_gate_d86_contract.json": "23f7a49a3ef609e02eff4c33d0946e317c7d1ec8acf9bd06c84b935abc747dab",
+    "fh_l8_d60_alternate_storage_topology_gate_d86_result.json": "757bcc89b158d9f816d807e692206cbfb31884cec471430edee1738878e72d74"
+  },
+  "target": {
+    "disk": "/dev/mmcblk0",
+    "disk_bytes": 63864569856,
+    "existing_partition": "/dev/mmcblk0p1",
+    "existing_uuid": "17a6b72c-efcc-4445-b447-385e96a109a2",
+    "target_cpu": 15,
+    "forbidden_controller": "nvme0",
+    "minimum_root_bytes": 40000000000
+  },
+  "planned_layout": {
+    "partition_table": "gpt",
+    "esp_bytes": 536870912,
+    "esp_fstype": "vfat",
+    "root_minimum_bytes": 40000000000,
+    "root_fstype": "ext4",
+    "root_label": "FH_L8_MINROOT",
+    "evidence_path": "/var/lib/fh-l8/evidence",
+    "bootloader_target": "x86_64-efi",
+    "removable_fallback_path": "EFI/BOOT/BOOTX64.EFI"
+  },
+  "required_preflight": {
+    "candidate_identity_rechecked": false,
+    "candidate_unmounted_rechecked": false,
+    "data_disposition_recorded": false,
+    "backup_target_capacity_proven": false,
+    "backup_image_digest_proven": false,
+    "firmware_sd_bootability_proven": false,
+    "payload_manifest_digest_proven": false,
+    "rollback_boot_entry_proven": false
+  },
+  "required_payload": [
+    "kernel_and_initramfs_with_sdhci_pci_and_root_fs_support",
+    "standalone_uefi_bootloader_on_mmc_esp",
+    "fh_l8_d82r_transaction_and_checker_bundle",
+    "python_runtime_and_required_system_tools",
+    "offline_contracts_source_pins_and_checksums",
+    "local_evidence_directory"
+  ],
+  "measurement_acceptance": [
+    "root_source_is_mmcblk0",
+    "no_nvme_mount_swap_or_open_block_dependency",
+    "nvme_controller_unbound_or_power_disabled_before_measurement",
+    "mmc_irq_effective_affinity_excludes_cpu15",
+    "cpu15_online_and_d82r_residue_absent",
+    "fresh_d82r_plan_apply_verify_run_rollback_receipt"
+  ],
+  "authority": {
+    "plan_only": true,
+    "mount_authorized": false,
+    "backup_write_authorized": false,
+    "partition_authorized": false,
+    "format_authorized": false,
+    "payload_install_authorized": false,
+    "bootloader_change_authorized": false,
+    "firmware_change_authorized": false,
+    "reboot_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "status": "VERIFIED_D87R_MMC_EXECUTION_PREFLIGHT_BLOCKED",
+  "stable_identity_gate_pass": true,
+  "eligible_backup_targets": [],
+  "existing_data_gate_pass": false,
+  "independent_boot_gate_pass": false,
+  "execution_admitted": false,
+  "blockers": [
+    "NO_BACKUP_TARGET_MEETS_IMAGE_PLUS_20GB_RESERVE",
+    "EXISTING_F2FS_DATA_NOT_DISPOSED_OR_VERIFIABLY_BACKED_UP",
+    "FIRMWARE_SD_BOOTABILITY_NOT_PROVEN",
+    "BOOT_PAYLOAD_MANIFEST_INCOMPLETE"
+  ],
+  "backup_write_authorized": false,
+  "partition_authorized": false,
+  "format_authorized": false,
+  "bootloader_change_authorized": false,
+  "reboot_authorized": false,
+  "d82r_transaction_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "NO_GO_D87R_MMC_EXECUTION_PREFLIGHT_UNSATISFIED",
+  "next_gate": "OWNER_PROVIDE_DISPOSABLE_64GB_MEDIA_OR_SAFE_BACKUP_TARGET_AND_SD_BOOT_PROOF"
+}

@@ -2,6 +2,14 @@
 
 All copied JSON files are research-only outputs. They contain no credentials.
 
+## FH-L8 D60 maxcpus queue topology D85
+
+- `FH_L8_D60_MAXCPUS_QUEUE_TOPOLOGY_D85_ZH.md`: latest reboot evidence and gate.
+- `fh_l8_d60_maxcpus_queue_topology_d85_contract.json`: source-pinned queue/IRQ acceptance.
+- `fh_l8_d60_maxcpus_queue_topology_d85.py`: read-only verifier.
+- `fh_l8_d60_maxcpus_queue_topology_d85_result.json`: committed blocked result.
+- `test_fh_l8_d60_maxcpus_queue_topology_d85.py`: fail-closed regressions.
+
 ## FH-L8 D60 managed-IRQ reboot outcome D84
 
 - `FH_L8_D60_MANAGED_IRQ_REBOOT_OUTCOME_D84_ZH.md`: reboot evidence and revised gate.

@@ -1,0 +1,20 @@
+{
+  "status": "VERIFIED_D88_OFFLINE_BOOT_PAYLOAD_PARTIAL",
+  "efi_python_artifacts_pinned": true,
+  "d82r_source_bundle_pinned": true,
+  "kernel_initramfs_digests_complete": false,
+  "root_image_builder_present": false,
+  "boot_payload_manifest_complete": false,
+  "blockers": [
+    "PRIVILEGED_KERNEL_AND_INITRAMFS_SHA256_ABSENT",
+    "ROOT_IMAGE_BUILDER_ABSENT"
+  ],
+  "package_install_authorized": false,
+  "privileged_boot_read_authorized": false,
+  "root_image_build_authorized": false,
+  "mmc_write_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "PARTIAL_D88_SOURCE_AND_EFI_PINNED_PRIVILEGED_STAGING_REQUIRED",
+  "next_gate": "OWNER_ADMIT_D88R_PRIVILEGED_BOOT_PAYLOAD_STAGING"
+}

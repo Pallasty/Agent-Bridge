@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "receipt_id": "FH-L8-D60-PRIVILEGED-BOOT-PAYLOAD-D88R-20260809",
+  "authorized_scope": [
+    "sha256_read_only_boot_artifacts",
+    "install_mmdebstrap_from_configured_ubuntu_repository"
+  ],
+  "boot_artifacts": {
+    "/boot/vmlinuz-7.0.0-29-generic": {
+      "bytes": 17295752,
+      "mode": "0600",
+      "sha256": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682"
+    },
+    "/boot/initrd.img-7.0.0-29-generic": {
+      "bytes": 40010273,
+      "mode": "0600",
+      "sha256": "74faacc386a388ba97ac7d26c628bf2ba927f51cecbedfcf87ad5314542fd342"
+    }
+  },
+  "installed_builder": {
+    "package": "mmdebstrap",
+    "version": "1.5.7-3",
+    "path": "/usr/bin/mmdebstrap",
+    "apt_history_start": "2026-08-09 21:32:23",
+    "apt_history_end": "2026-08-09 21:32:24"
+  },
+  "post_state": {
+    "mmc_disk": "/dev/mmcblk0",
+    "mmc_bytes": 63864569856,
+    "mmc_partition": "/dev/mmcblk0p1",
+    "mmc_partition_bytes": 63847792640,
+    "mmc_fstype": "f2fs",
+    "mmc_uuid": "17a6b72c-efcc-4445-b447-385e96a109a2",
+    "mmc_mountpoints": []
+  },
+  "out_of_scope_actions_observed": false
+}

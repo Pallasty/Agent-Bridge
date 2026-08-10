@@ -1,0 +1,20 @@
+{
+  "status": "VERIFIED_D85_NO_SUPPORTED_NVME_PCI_TOTAL_QUEUE_CONTROL",
+  "target_irq_action": "nvme0q15",
+  "target_irq_observed": 174,
+  "target_irq_number_is_stable_identity": false,
+  "nvme_queue_count": 16,
+  "supported_total_queue_parameter_present": false,
+  "runtime_queue_count_writable": false,
+  "root_filesystem_on_target_controller": true,
+  "driver_unload_admissible": false,
+  "target_irq_conflict_present": true,
+  "transaction_residue_absent": true,
+  "d82r_transaction_authorized": false,
+  "custom_kernel_authorized": false,
+  "hardware_change_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "NO_GO_D85_STOCK_NVME_PCI_DRIVER_HAS_NO_TOTAL_QUEUE_COUNT_CONTROL",
+  "next_gate": "OWNER_CHOOSE_CUSTOM_KERNEL_OR_DIFFERENT_HARDWARE_OR_TARGET_CONTRACT"
+}

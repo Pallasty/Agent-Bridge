@@ -2,6 +2,13 @@
 
 Status date: 2026-08-09
 
+## 2026-08-10 — FH-L8 D85 maxcpus queue topology
+
+- Paired IRQ housekeeping parameters are live, but the installed GRUB snippet lacks `maxcpus=15`.
+- CPU15 is online, NVMe exposes 16 queues, and `nvme0q15` (IRQ174) remains affined to CPU15;
+  D82R has one conflict and refuses mutation. Next gate is host-admin installation of the maxcpus
+  boot config followed by a fresh reboot.
+
 ## 2026-08-10 — FH-L8 D84 managed-IRQ reboot outcome
 
 - Verified the rebooted kernel command line contains `isolcpus=managed_irq,15`.
