@@ -3,10 +3,10 @@
   "contract_id": "FH-L8-D60-MANAGED-IRQ-REBOOT-OUTCOME-D84-V1",
   "baseline_commit": "9d1b83d0b71f10f1bad6d4d1f5087fae5ab3963e",
   "source_pins": {
-    "FH_L8_D60_MANAGED_IRQ_BOOT_PLAN_ZH.md": "52771c1e9d316faaec4e2dac82fe82d5041d70e4a3898a0387d1538fbb775c98",
+    "FH_L8_D60_MANAGED_IRQ_BOOT_PLAN_ZH.md": "9761909a1b932584614aac79e5b8e03be8d57a8e7332b0aa100ac8aef4f0b7bb",
     "fh_l8_d60_isolation_transaction_d82r_contract.json": "1ebafbbb43795d6b4416dbe6d8add5366f73bd68cfe780f85b45d04e5e1a880c",
     "fh_l8_d60_isolation_transaction_d82r_result.json": "290b1ec2434785432f9edaf07384e83b80c59ddcc8b8f23a1355134ddb21c123",
-    "fh_l8_d60_runtime_rule_precommit_d83_contract.json": "de6c5d8e927f25525fc9e812cdf6b6db02b69bd7a75efc89e93c39f74eb6f346",
+    "fh_l8_d60_runtime_rule_precommit_d83_contract.json": "1397d8e37e0ec1726ec358901909024e6079c7bb7bca58201082c561fabea433",
     "fh_l8_d60_runtime_rule_precommit_d83_result.json": "3dc24d7b21b65d1e982d6b9226cae0c93bc94f00d584ea5dfd372de056eafa47"
   },
   "reboot_acceptance_rule": {

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-MAXCPUS-QUEUE-TOPOLOGY-D85-V1",
+  "baseline_commit": "c39fcd841aadeaa16dfee5bb1a89a3b6939d289f",
+  "source_pins": {
+    "FH_L8_D60_MANAGED_IRQ_BOOT_PLAN_ZH.md": "9761909a1b932584614aac79e5b8e03be8d57a8e7332b0aa100ac8aef4f0b7bb",
+    "fh_l8_d60_managed_irq_reboot_outcome_d84_result.json": "35de1aac92b903c163697a29d5da87e25ecd2b9451bb769f569b711e0e5639fa",
+    "fh_l8_d60_runtime_rule_precommit_d83_result.json": "3dc24d7b21b65d1e982d6b9226cae0c93bc94f00d584ea5dfd372de056eafa47"
+  },
+  "acceptance": {
+    "required_cmdline_tokens": ["maxcpus=15", "irqaffinity=0-14", "isolcpus=managed_irq,15"],
+    "cpu15_must_be_online_after_boot": true,
+    "nvme_irq_effective_affinity_must_exclude_cpu15": true,
+    "all_d82r_irq_conflicts_required": 0
+  },
+  "observed_snapshot": {
+    "cmdline_tokens_present": ["irqaffinity=0-14", "isolcpus=managed_irq,15"],
+    "maxcpus_token_present": false,
+    "online_cpu_list": "0-15",
+    "cpu15_online": true,
+    "nvme_queue_count": 16,
+    "conflicting_irq": 174,
+    "conflicting_irq_action": "nvme0q15",
+    "conflicting_irq_configured_affinity": "15",
+    "conflicting_irq_effective_affinity": "15",
+    "d82r_plan_irq_conflict_count": 1,
+    "transaction_residue_absent": true,
+    "target_cgroup_absent": true
+  },
+  "authority": {
+    "observation_only": true,
+    "host_mutations_executed": 0,
+    "timing_measurements_executed": 0,
+    "runtime_lock_precommitted": false,
+    "measurement_authorized": false,
+    "numeric_runtime_seconds_proven": false,
+    "full53_execution_authorized": false
+  }
+}
