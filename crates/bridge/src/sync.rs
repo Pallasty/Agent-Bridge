@@ -40,6 +40,7 @@ const MEMORY_EDGES_FILE: &str = "memory_edges.jsonl";
 const FORUM_FILE: &str = "forum.jsonl";
 const SYNC_LOCK_RESOURCE: &str = "memory-sync";
 const SYNC_LOCK_TTL_SECS: u64 = 600;
+const SYNC_REMOTE_REINDEX_BATCH_MAX: usize = 1_000;
 
 struct SyncLockGuard {
     path: PathBuf,
@@ -158,6 +159,7 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
          cd repo && git rebase --abort (or --quit), then check out main."
     })?;
 
+    let remote_reindex_batch_size = prepare_remote_reindex();
     let memory_file = repo.join(MEMORY_FILE);
     let memory_edges_file = repo.join(MEMORY_EDGES_FILE);
     let store = open_store().await?;
@@ -200,6 +202,27 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
                     "ies"
                 }
             );
+        }
+    }
+
+    // Imported records can intentionally arrive without vectors so a sync
+    // process never cold-starts a large local ONNX model. When this node has
+    // an explicit remote embedding delegate, opportunistically drain one
+    // bounded stale batch. Failure is non-fatal: cross-node convergence must
+    // not depend on embedding availability.
+    if let Some(batch_size) = remote_reindex_batch_size {
+        match store.memory_reindex_embeddings(batch_size, true).await {
+            Ok(updated) if verbose || updated > 0 => {
+                eprintln!(
+                    "[sync] remote embedding reindex: updated={updated} batch_size={batch_size}"
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!(
+                    "[sync] WARNING: remote embedding reindex failed; continuing sync: {error}"
+                );
+            }
         }
     }
 
@@ -812,6 +835,51 @@ async fn open_store() -> Result<SqliteStore> {
     Ok(store)
 }
 
+fn sync_remote_reindex_batch_size_from(
+    batch_value: Option<&str>,
+    remote_url: Option<&str>,
+) -> Option<usize> {
+    let remote_configured = remote_url.is_some_and(|value| !value.trim().is_empty());
+    if !remote_configured {
+        return None;
+    }
+    batch_value?
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|batch| *batch > 0)
+        .map(|batch| batch.min(SYNC_REMOTE_REINDEX_BATCH_MAX))
+}
+
+fn sync_remote_reindex_batch_size() -> Option<usize> {
+    sync_remote_reindex_batch_size_from(
+        std::env::var("AGENT_BRIDGE_SYNC_REMOTE_REINDEX_BATCH_SIZE")
+            .ok()
+            .as_deref(),
+        std::env::var("AGENT_BRIDGE_EMBED_REMOTE_URL")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn prepare_remote_reindex() -> Option<usize> {
+    let batch_size = sync_remote_reindex_batch_size()?;
+    match crate::remote_embed::install_strict_if_configured() {
+        crate::remote_embed::InstallOutcome::Installed(url) => {
+            eprintln!("[sync] strict remote embedding delegation active: {url}");
+            Some(batch_size)
+        }
+        crate::remote_embed::InstallOutcome::NotConfigured => None,
+        crate::remote_embed::InstallOutcome::AlreadyInitialized => {
+            eprintln!(
+                "[sync] WARNING: remote embedding reindex skipped; an embedding backend \
+                 was already initialized"
+            );
+            None
+        }
+    }
+}
+
 fn ensure_command_on_path(cmd: &str, hint: &str) -> Result<()> {
     let path = std::env::var_os("PATH").ok_or_else(|| anyhow!("PATH unset"))?;
     let found = std::env::split_paths(&path).any(|p| p.join(cmd).is_file());
@@ -1309,6 +1377,30 @@ fn iso8601_utc_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_reindex_requires_delegate_and_positive_bounded_batch() {
+        assert_eq!(
+            sync_remote_reindex_batch_size_from(Some("8"), Some("http://127.0.0.1:7878/embed")),
+            Some(8)
+        );
+        assert_eq!(
+            sync_remote_reindex_batch_size_from(
+                Some(" 5000 "),
+                Some("http://127.0.0.1:7878/embed")
+            ),
+            Some(SYNC_REMOTE_REINDEX_BATCH_MAX)
+        );
+        for (batch, remote) in [
+            (None, Some("http://127.0.0.1:7878/embed")),
+            (Some("0"), Some("http://127.0.0.1:7878/embed")),
+            (Some("invalid"), Some("http://127.0.0.1:7878/embed")),
+            (Some("8"), None),
+            (Some("8"), Some("   ")),
+        ] {
+            assert_eq!(sync_remote_reindex_batch_size_from(batch, remote), None);
+        }
+    }
 
     #[test]
     fn env_override_wins() {
