@@ -1,0 +1,87 @@
+{
+  "schema": "agent_bridge.qwen3_tts.activation_resource_ladder.v0",
+  "status": "RESOURCE_LADDER_COMPLETED",
+  "activation_plan_sha256": "d87deeeadf81aaba2d010bded7c60e8b0bd8f74419b6e6a132a46d1d9fd2fb12",
+  "corpus_sha256": "9193f6e5359fcf3ecd9c0a5a2726886908ffa3a266ab7597f283629e710a7afd",
+  "measurement": {
+    "tool": "/usr/bin/time -l",
+    "host_memory_unit": "bytes",
+    "global_host_bytes_max_plan_field_boundary": "bounded retained summary state only; not total model process RSS or peak footprint"
+  },
+  "runs": [
+    {
+      "modules": 8,
+      "case_ids": [
+        "zh-short-neutral-serena"
+      ],
+      "capture_status": "CAPTURED_READ_ONLY_SMOKE",
+      "report_sha256": "ecec09473460c285412bc66d697c2733dcb8137ad89d5cb1ae84d013380c0136",
+      "time_log_sha256": "f23dfdd3ebf2451176b03032d681cb37bd783d2e01a0050647399598bcbb4c84",
+      "elapsed_seconds": 10.37,
+      "maximum_resident_set_bytes": 5019353088,
+      "peak_memory_footprint_bytes": 6334695560,
+      "swaps": 0,
+      "empty_activations": 0,
+      "nonfinite_activations": 0
+    },
+    {
+      "modules": 24,
+      "case_ids": [
+        "zh-long-technical-vivian"
+      ],
+      "capture_status": "CAPTURED_READ_ONLY_SMOKE",
+      "report_sha256": "06c5b9e77c1b4777874787edd2360a555def4f11d39fd10559673acf9f442e32",
+      "time_log_sha256": "b01b37f9cb6d2c4002e0f88fcfb890e69a3fb7c6b05ba89bf3d37bff2509d6d5",
+      "elapsed_seconds": 24.75,
+      "maximum_resident_set_bytes": 5020139520,
+      "peak_memory_footprint_bytes": 8051886096,
+      "swaps": 0,
+      "empty_activations": 0,
+      "nonfinite_activations": 0
+    },
+    {
+      "modules": 48,
+      "case_ids": [
+        "zh-long-narrative-serena"
+      ],
+      "capture_status": "CAPTURED_READ_ONLY_SMOKE",
+      "report_sha256": "a13450ed1897adedcd1876b3421cf605a465d0fd01a31184806226c54d2c4679",
+      "time_log_sha256": "ddac6847084fc2f091bca11dc03d4331ee1b69ca5802641b00c7074753ef6364",
+      "elapsed_seconds": 24.0,
+      "maximum_resident_set_bytes": 5020434432,
+      "peak_memory_footprint_bytes": 7303333904,
+      "swaps": 0,
+      "empty_activations": 0,
+      "nonfinite_activations": 0
+    },
+    {
+      "modules": 96,
+      "case_ids": "ALL_FROZEN_CORPUS_CASES_IN_ORDER",
+      "capture_status": "CAPTURED_READ_ONLY_FULL",
+      "report_sha256": "365b9f9e9b7cd5a3b9890945ed8f4428cc9aa51b1c3dc3a448b1bdf2847fb4b4",
+      "time_log_sha256": "a23d1c622fa6b26de5733efcbb1dc6ffb1a9f6f16d8d01aea67377f3ea012220",
+      "elapsed_seconds": 210.47,
+      "maximum_resident_set_bytes": 5018288128,
+      "peak_memory_footprint_bytes": 10146793920,
+      "swaps": 0,
+      "empty_activations": 0,
+      "nonfinite_activations": 0
+    }
+  ],
+  "summary": {
+    "module_ladder": [
+      8,
+      24,
+      48,
+      96
+    ],
+    "runs_completed": 4,
+    "maximum_observed_resident_set_bytes": 5020434432,
+    "maximum_observed_peak_memory_footprint_bytes": 10146793920,
+    "total_swaps": 0
+  },
+  "allows_fake_quant_execution": false,
+  "allows_quantized_weight_writing": false,
+  "allows_runtime_candidate_generation": false,
+  "allows_runtime_wiring_or_promotion": false
+}

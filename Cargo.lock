@@ -158,6 +158,20 @@ name = "ab-owned-lab-role-artifacts"
 version = "0.14.0"
 
 [[package]]
+name = "ab-qwen-quant"
+version = "0.14.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "half",
+ "memmap2",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
 name = "ab-store"
 version = "0.14.0"
 dependencies = [

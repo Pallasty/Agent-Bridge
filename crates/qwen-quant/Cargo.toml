@@ -1,0 +1,22 @@
+[package]
+name = "ab-qwen-quant"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Read-only Qwen3-TTS SafeTensors inventory and quantization diagnostics"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+half = "2"
+memmap2 = "0.9"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+

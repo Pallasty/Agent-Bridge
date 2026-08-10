@@ -1,0 +1,1351 @@
+{
+  "schema": "agent_bridge.qwen3_tts.activation_probe_plan.v1",
+  "status": "PLAN_ONLY_DEFAULT_OFF",
+  "static_report_sha256": "6999f67da3b3ac6319cdc68049cba9e5ac78e5f98dd252615877db7354178e93",
+  "selection": {
+    "eligible_families": [
+      "attention",
+      "feed_forward_or_projection"
+    ],
+    "excluded": [
+      "speech_tokenizer_codec",
+      "text_embedding",
+      "all_code_predictor",
+      "norm_scale_or_bias"
+    ],
+    "eligible_count": 196,
+    "selected_count": 96,
+    "max_modules": 96,
+    "algorithm": "layer_role_rotating_stratified_v1",
+    "selected_layers": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27
+    ],
+    "selected_role_counts": {
+      "down_proj": 14,
+      "gate_proj": 13,
+      "k_proj": 14,
+      "o_proj": 14,
+      "q_proj": 14,
+      "up_proj": 13,
+      "v_proj": 14
+    }
+  },
+  "source_assets": [
+    {
+      "partition": "talker",
+      "bytes": 3833402552,
+      "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137"
+    },
+    {
+      "partition": "speech_tokenizer_codec",
+      "bytes": 682293092,
+      "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+    }
+  ],
+  "capture_budget": {
+    "values_per_module_max": 4096,
+    "histogram_bins": [
+      64,
+      256
+    ],
+    "global_host_bytes_max": 268435456,
+    "retain_full_activations": false,
+    "detach_to_cpu_float32": true,
+    "statistics": [
+      "count",
+      "sample_min",
+      "sample_max",
+      "mean",
+      "rms",
+      "variance",
+      "kurtosis",
+      "zero_ratio",
+      "outlier_ratio",
+      "sample_normalized_entropy"
+    ]
+  },
+  "execution_boundary": {
+    "loads_separate_offline_model": true,
+    "modifies_worker_v1": false,
+    "quantizes_or_mutates_weights": false,
+    "writes_audio": false,
+    "allows_candidate_or_promotion": false
+  },
+  "modules": [
+    {
+      "module": "talker.model.layers.0.mlp.down_proj",
+      "tensor": "talker.model.layers.0.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.007355588362221996,
+      "static_entropy_256": 0.7476796981443683
+    },
+    {
+      "module": "talker.model.layers.1.mlp.gate_proj",
+      "tensor": "talker.model.layers.1.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.007371762485794745,
+      "static_entropy_256": 0.8748499003557121
+    },
+    {
+      "module": "talker.model.layers.2.mlp.up_proj",
+      "tensor": "talker.model.layers.2.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006692523138754277,
+      "static_entropy_256": 0.8514993811116993
+    },
+    {
+      "module": "talker.model.layers.3.self_attn.q_proj",
+      "tensor": "talker.model.layers.3.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006772949775642795,
+      "static_entropy_256": 0.7701729999299549
+    },
+    {
+      "module": "talker.model.layers.4.self_attn.k_proj",
+      "tensor": "talker.model.layers.4.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006714705074033536,
+      "static_entropy_256": 0.8432143065517432
+    },
+    {
+      "module": "talker.model.layers.5.self_attn.v_proj",
+      "tensor": "talker.model.layers.5.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006880490342080522,
+      "static_entropy_256": 0.8634464067339506
+    },
+    {
+      "module": "talker.model.layers.6.self_attn.o_proj",
+      "tensor": "talker.model.layers.6.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006368085424831587,
+      "static_entropy_256": 0.835916462436252
+    },
+    {
+      "module": "talker.model.layers.7.mlp.down_proj",
+      "tensor": "talker.model.layers.7.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.0065351087370135825,
+      "static_entropy_256": 0.8458647856863448
+    },
+    {
+      "module": "talker.model.layers.8.mlp.gate_proj",
+      "tensor": "talker.model.layers.8.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006861706883205566,
+      "static_entropy_256": 0.738101766760449
+    },
+    {
+      "module": "talker.model.layers.9.mlp.up_proj",
+      "tensor": "talker.model.layers.9.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006667178361790416,
+      "static_entropy_256": 0.8798242093463867
+    },
+    {
+      "module": "talker.model.layers.10.self_attn.q_proj",
+      "tensor": "talker.model.layers.10.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006591988991172319,
+      "static_entropy_256": 0.741887356087933
+    },
+    {
+      "module": "talker.model.layers.11.self_attn.k_proj",
+      "tensor": "talker.model.layers.11.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006743921042537186,
+      "static_entropy_256": 0.8321892526042722
+    },
+    {
+      "module": "talker.model.layers.12.self_attn.v_proj",
+      "tensor": "talker.model.layers.12.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006664055349869272,
+      "static_entropy_256": 0.8606583887280591
+    },
+    {
+      "module": "talker.model.layers.13.self_attn.o_proj",
+      "tensor": "talker.model.layers.13.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006515523363891836,
+      "static_entropy_256": 0.8207977658075816
+    },
+    {
+      "module": "talker.model.layers.14.mlp.down_proj",
+      "tensor": "talker.model.layers.14.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006871476692537165,
+      "static_entropy_256": 0.8388394532591603
+    },
+    {
+      "module": "talker.model.layers.15.mlp.gate_proj",
+      "tensor": "talker.model.layers.15.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006404938549746784,
+      "static_entropy_256": 0.7844041003029066
+    },
+    {
+      "module": "talker.model.layers.16.mlp.up_proj",
+      "tensor": "talker.model.layers.16.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006677955379151837,
+      "static_entropy_256": 0.8528256272927808
+    },
+    {
+      "module": "talker.model.layers.17.self_attn.q_proj",
+      "tensor": "talker.model.layers.17.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.0068140282982861785,
+      "static_entropy_256": 0.755588640041335
+    },
+    {
+      "module": "talker.model.layers.18.self_attn.k_proj",
+      "tensor": "talker.model.layers.18.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.00668600947783473,
+      "static_entropy_256": 0.8442777793693831
+    },
+    {
+      "module": "talker.model.layers.19.self_attn.v_proj",
+      "tensor": "talker.model.layers.19.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.00686506651393673,
+      "static_entropy_256": 0.8712915825412104
+    },
+    {
+      "module": "talker.model.layers.20.self_attn.o_proj",
+      "tensor": "talker.model.layers.20.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006482303695578642,
+      "static_entropy_256": 0.7779934176771868
+    },
+    {
+      "module": "talker.model.layers.21.mlp.down_proj",
+      "tensor": "talker.model.layers.21.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.007225757867949156,
+      "static_entropy_256": 0.8512919310995357
+    },
+    {
+      "module": "talker.model.layers.22.mlp.gate_proj",
+      "tensor": "talker.model.layers.22.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006476737954040573,
+      "static_entropy_256": 0.8449093760784331
+    },
+    {
+      "module": "talker.model.layers.23.mlp.up_proj",
+      "tensor": "talker.model.layers.23.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006624628800910539,
+      "static_entropy_256": 0.8250962120089085
+    },
+    {
+      "module": "talker.model.layers.24.self_attn.q_proj",
+      "tensor": "talker.model.layers.24.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.0066786478059218946,
+      "static_entropy_256": 0.7712392322834096
+    },
+    {
+      "module": "talker.model.layers.25.self_attn.k_proj",
+      "tensor": "talker.model.layers.25.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006678098855089724,
+      "static_entropy_256": 0.8443686643494366
+    },
+    {
+      "module": "talker.model.layers.26.self_attn.v_proj",
+      "tensor": "talker.model.layers.26.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.00747648511786784,
+      "static_entropy_256": 0.8478916855377735
+    },
+    {
+      "module": "talker.model.layers.27.self_attn.o_proj",
+      "tensor": "talker.model.layers.27.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006489003040156322,
+      "static_entropy_256": 0.8342521124720063
+    },
+    {
+      "module": "talker.model.layers.0.mlp.gate_proj",
+      "tensor": "talker.model.layers.0.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006737797301062376,
+      "static_entropy_256": 0.8438415090337106
+    },
+    {
+      "module": "talker.model.layers.1.mlp.up_proj",
+      "tensor": "talker.model.layers.1.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006845296723883347,
+      "static_entropy_256": 0.854386797905633
+    },
+    {
+      "module": "talker.model.layers.2.self_attn.q_proj",
+      "tensor": "talker.model.layers.2.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.00659450184475031,
+      "static_entropy_256": 0.7643913970607203
+    },
+    {
+      "module": "talker.model.layers.3.self_attn.k_proj",
+      "tensor": "talker.model.layers.3.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.007077691186694019,
+      "static_entropy_256": 0.7911255928388848
+    },
+    {
+      "module": "talker.model.layers.4.self_attn.v_proj",
+      "tensor": "talker.model.layers.4.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006637447858311301,
+      "static_entropy_256": 0.851068690077777
+    },
+    {
+      "module": "talker.model.layers.5.self_attn.o_proj",
+      "tensor": "talker.model.layers.5.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006380332947557987,
+      "static_entropy_256": 0.6885943057528725
+    },
+    {
+      "module": "talker.model.layers.6.mlp.down_proj",
+      "tensor": "talker.model.layers.6.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006721472868494063,
+      "static_entropy_256": 0.8214352877589786
+    },
+    {
+      "module": "talker.model.layers.7.mlp.gate_proj",
+      "tensor": "talker.model.layers.7.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006681852730174944,
+      "static_entropy_256": 0.7926764880847325
+    },
+    {
+      "module": "talker.model.layers.8.mlp.up_proj",
+      "tensor": "talker.model.layers.8.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.00652409282080891,
+      "static_entropy_256": 0.8743426586588532
+    },
+    {
+      "module": "talker.model.layers.9.self_attn.q_proj",
+      "tensor": "talker.model.layers.9.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.00675819758197394,
+      "static_entropy_256": 0.7396645184902599
+    },
+    {
+      "module": "talker.model.layers.10.self_attn.k_proj",
+      "tensor": "talker.model.layers.10.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006994685932852988,
+      "static_entropy_256": 0.8090959274710819
+    },
+    {
+      "module": "talker.model.layers.11.self_attn.v_proj",
+      "tensor": "talker.model.layers.11.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.0069437386963701634,
+      "static_entropy_256": 0.8814151132420154
+    },
+    {
+      "module": "talker.model.layers.12.self_attn.o_proj",
+      "tensor": "talker.model.layers.12.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006409769997996147,
+      "static_entropy_256": 0.7846220810084026
+    },
+    {
+      "module": "talker.model.layers.13.mlp.down_proj",
+      "tensor": "talker.model.layers.13.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.007126611492878148,
+      "static_entropy_256": 0.8511427469905578
+    },
+    {
+      "module": "talker.model.layers.14.mlp.gate_proj",
+      "tensor": "talker.model.layers.14.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.00675730061672031,
+      "static_entropy_256": 0.7613884339922118
+    },
+    {
+      "module": "talker.model.layers.15.mlp.up_proj",
+      "tensor": "talker.model.layers.15.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006627040463832481,
+      "static_entropy_256": 0.8793474042203755
+    },
+    {
+      "module": "talker.model.layers.16.self_attn.q_proj",
+      "tensor": "talker.model.layers.16.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006824786207302735,
+      "static_entropy_256": 0.7647188319614138
+    },
+    {
+      "module": "talker.model.layers.17.self_attn.k_proj",
+      "tensor": "talker.model.layers.17.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006824920354432846,
+      "static_entropy_256": 0.8606052567452406
+    },
+    {
+      "module": "talker.model.layers.18.self_attn.v_proj",
+      "tensor": "talker.model.layers.18.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006814318502569876,
+      "static_entropy_256": 0.8736940516782293
+    },
+    {
+      "module": "talker.model.layers.19.self_attn.o_proj",
+      "tensor": "talker.model.layers.19.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006673464469680371,
+      "static_entropy_256": 0.827583709491872
+    },
+    {
+      "module": "talker.model.layers.20.mlp.down_proj",
+      "tensor": "talker.model.layers.20.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006807851034351191,
+      "static_entropy_256": 0.8290553543376254
+    },
+    {
+      "module": "talker.model.layers.21.mlp.gate_proj",
+      "tensor": "talker.model.layers.21.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006770398350253032,
+      "static_entropy_256": 0.8009327740533284
+    },
+    {
+      "module": "talker.model.layers.22.mlp.up_proj",
+      "tensor": "talker.model.layers.22.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.0066677896838848215,
+      "static_entropy_256": 0.8605728081279002
+    },
+    {
+      "module": "talker.model.layers.23.self_attn.q_proj",
+      "tensor": "talker.model.layers.23.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006695170524143857,
+      "static_entropy_256": 0.7915839616325568
+    },
+    {
+      "module": "talker.model.layers.24.self_attn.k_proj",
+      "tensor": "talker.model.layers.24.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006730969740531819,
+      "static_entropy_256": 0.8570961190298955
+    },
+    {
+      "module": "talker.model.layers.25.self_attn.v_proj",
+      "tensor": "talker.model.layers.25.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.007148678237421116,
+      "static_entropy_256": 0.8128534628118902
+    },
+    {
+      "module": "talker.model.layers.26.self_attn.o_proj",
+      "tensor": "talker.model.layers.26.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006524930320016853,
+      "static_entropy_256": 0.7932010808328853
+    },
+    {
+      "module": "talker.model.layers.27.mlp.down_proj",
+      "tensor": "talker.model.layers.27.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006872997202028535,
+      "static_entropy_256": 0.7226436311738806
+    },
+    {
+      "module": "talker.model.layers.0.mlp.up_proj",
+      "tensor": "talker.model.layers.0.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006860783939613145,
+      "static_entropy_256": 0.873207485061047
+    },
+    {
+      "module": "talker.model.layers.1.self_attn.q_proj",
+      "tensor": "talker.model.layers.1.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.00685982104302724,
+      "static_entropy_256": 0.7851997029843347
+    },
+    {
+      "module": "talker.model.layers.2.self_attn.k_proj",
+      "tensor": "talker.model.layers.2.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.007395956806286953,
+      "static_entropy_256": 0.8163936204767621
+    },
+    {
+      "module": "talker.model.layers.3.self_attn.v_proj",
+      "tensor": "talker.model.layers.3.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006649640429078465,
+      "static_entropy_256": 0.8389155998259712
+    },
+    {
+      "module": "talker.model.layers.4.self_attn.o_proj",
+      "tensor": "talker.model.layers.4.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006410992333987196,
+      "static_entropy_256": 0.8522216447437974
+    },
+    {
+      "module": "talker.model.layers.5.mlp.down_proj",
+      "tensor": "talker.model.layers.5.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006896585029793362,
+      "static_entropy_256": 0.8791730211769374
+    },
+    {
+      "module": "talker.model.layers.6.mlp.gate_proj",
+      "tensor": "talker.model.layers.6.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006502981560563592,
+      "static_entropy_256": 0.815382692464046
+    },
+    {
+      "module": "talker.model.layers.7.mlp.up_proj",
+      "tensor": "talker.model.layers.7.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006563819254445699,
+      "static_entropy_256": 0.8875572150467879
+    },
+    {
+      "module": "talker.model.layers.8.self_attn.q_proj",
+      "tensor": "talker.model.layers.8.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006469838027279051,
+      "static_entropy_256": 0.7669972336388463
+    },
+    {
+      "module": "talker.model.layers.9.self_attn.k_proj",
+      "tensor": "talker.model.layers.9.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006958446599387878,
+      "static_entropy_256": 0.8049812028699944
+    },
+    {
+      "module": "talker.model.layers.10.self_attn.v_proj",
+      "tensor": "talker.model.layers.10.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006640096487001895,
+      "static_entropy_256": 0.8737800361477448
+    },
+    {
+      "module": "talker.model.layers.11.self_attn.o_proj",
+      "tensor": "talker.model.layers.11.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006542175159683505,
+      "static_entropy_256": 0.7940216323265612
+    },
+    {
+      "module": "talker.model.layers.12.mlp.down_proj",
+      "tensor": "talker.model.layers.12.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006832972019220662,
+      "static_entropy_256": 0.8634630152617171
+    },
+    {
+      "module": "talker.model.layers.13.mlp.gate_proj",
+      "tensor": "talker.model.layers.13.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.00666210414741738,
+      "static_entropy_256": 0.7895522470630456
+    },
+    {
+      "module": "talker.model.layers.14.mlp.up_proj",
+      "tensor": "talker.model.layers.14.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006648800454469967,
+      "static_entropy_256": 0.8632419757915455
+    },
+    {
+      "module": "talker.model.layers.15.self_attn.q_proj",
+      "tensor": "talker.model.layers.15.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006670153464506451,
+      "static_entropy_256": 0.6948187683553494
+    },
+    {
+      "module": "talker.model.layers.16.self_attn.k_proj",
+      "tensor": "talker.model.layers.16.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006861779337508763,
+      "static_entropy_256": 0.8143493949348319
+    },
+    {
+      "module": "talker.model.layers.17.self_attn.v_proj",
+      "tensor": "talker.model.layers.17.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.007118482046156372,
+      "static_entropy_256": 0.8442514507370454
+    },
+    {
+      "module": "talker.model.layers.18.self_attn.o_proj",
+      "tensor": "talker.model.layers.18.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006537566177168159,
+      "static_entropy_256": 0.8063122885468299
+    },
+    {
+      "module": "talker.model.layers.19.mlp.down_proj",
+      "tensor": "talker.model.layers.19.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006901839488173549,
+      "static_entropy_256": 0.8537263517983996
+    },
+    {
+      "module": "talker.model.layers.20.mlp.gate_proj",
+      "tensor": "talker.model.layers.20.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006712275371966291,
+      "static_entropy_256": 0.8111779077807469
+    },
+    {
+      "module": "talker.model.layers.21.mlp.up_proj",
+      "tensor": "talker.model.layers.21.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006848333847899353,
+      "static_entropy_256": 0.8244436188385359
+    },
+    {
+      "module": "talker.model.layers.22.self_attn.q_proj",
+      "tensor": "talker.model.layers.22.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006606080674789998,
+      "static_entropy_256": 0.7923914581134155
+    },
+    {
+      "module": "talker.model.layers.23.self_attn.k_proj",
+      "tensor": "talker.model.layers.23.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006748667153197774,
+      "static_entropy_256": 0.7794191479565867
+    },
+    {
+      "module": "talker.model.layers.24.self_attn.v_proj",
+      "tensor": "talker.model.layers.24.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.007085784779138013,
+      "static_entropy_256": 0.8494579248228822
+    },
+    {
+      "module": "talker.model.layers.25.self_attn.o_proj",
+      "tensor": "talker.model.layers.25.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006550342186429754,
+      "static_entropy_256": 0.8494863562438486
+    },
+    {
+      "module": "talker.model.layers.26.mlp.down_proj",
+      "tensor": "talker.model.layers.26.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006695487995989058,
+      "static_entropy_256": 0.8283706715466984
+    },
+    {
+      "module": "talker.model.layers.27.mlp.gate_proj",
+      "tensor": "talker.model.layers.27.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006575258340052086,
+      "static_entropy_256": 0.7479925552797586
+    },
+    {
+      "module": "talker.model.layers.0.self_attn.q_proj",
+      "tensor": "talker.model.layers.0.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006711530096697515,
+      "static_entropy_256": 0.7613884428812708
+    },
+    {
+      "module": "talker.model.layers.1.self_attn.k_proj",
+      "tensor": "talker.model.layers.1.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006781038760610135,
+      "static_entropy_256": 0.8559422935738058
+    },
+    {
+      "module": "talker.model.layers.2.self_attn.v_proj",
+      "tensor": "talker.model.layers.2.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006907792003188368,
+      "static_entropy_256": 0.7326063352195085
+    },
+    {
+      "module": "talker.model.layers.3.self_attn.o_proj",
+      "tensor": "talker.model.layers.3.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006606890525321534,
+      "static_entropy_256": 0.7924916627005811
+    },
+    {
+      "module": "talker.model.layers.4.mlp.down_proj",
+      "tensor": "talker.model.layers.4.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.007323444036734284,
+      "static_entropy_256": 0.7943932023899115
+    },
+    {
+      "module": "talker.model.layers.5.mlp.gate_proj",
+      "tensor": "talker.model.layers.5.mlp.gate_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006593843971321707,
+      "static_entropy_256": 0.8204636825096535
+    },
+    {
+      "module": "talker.model.layers.6.mlp.up_proj",
+      "tensor": "talker.model.layers.6.mlp.up_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        6144,
+        2048
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006802710258280406,
+      "static_entropy_256": 0.8486080290421026
+    },
+    {
+      "module": "talker.model.layers.7.self_attn.q_proj",
+      "tensor": "talker.model.layers.7.self_attn.q_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.00683662562325903,
+      "static_entropy_256": 0.7524085394564795
+    },
+    {
+      "module": "talker.model.layers.8.self_attn.k_proj",
+      "tensor": "talker.model.layers.8.self_attn.k_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.00707402469161819,
+      "static_entropy_256": 0.785066956665891
+    },
+    {
+      "module": "talker.model.layers.9.self_attn.v_proj",
+      "tensor": "talker.model.layers.9.self_attn.v_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        1024,
+        2048
+      ],
+      "elements": 2097152,
+      "static_q8_nrmse": 0.006471611931493479,
+      "static_entropy_256": 0.868942087789567
+    },
+    {
+      "module": "talker.model.layers.10.self_attn.o_proj",
+      "tensor": "talker.model.layers.10.self_attn.o_proj.weight",
+      "family": "attention",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        2048
+      ],
+      "elements": 4194304,
+      "static_q8_nrmse": 0.006496049769539687,
+      "static_entropy_256": 0.870205098187974
+    },
+    {
+      "module": "talker.model.layers.11.mlp.down_proj",
+      "tensor": "talker.model.layers.11.mlp.down_proj.weight",
+      "family": "feed_forward_or_projection",
+      "source_dtype": "BF16",
+      "shape": [
+        2048,
+        6144
+      ],
+      "elements": 12582912,
+      "static_q8_nrmse": 0.006695932359997519,
+      "static_entropy_256": 0.8875612267129245
+    }
+  ]
+}

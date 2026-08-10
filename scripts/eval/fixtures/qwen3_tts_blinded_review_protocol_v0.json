@@ -1,0 +1,47 @@
+{
+  "schema": "agent_bridge.qwen3_tts.blinded_review_protocol.v0",
+  "status": "PREREGISTERED_BEFORE_CANDIDATE",
+  "corpus_sha256": "9193f6e5359fcf3ecd9c0a5a2726886908ffa3a266ab7597f283629e710a7afd",
+  "design": {
+    "comparison": "paired_fp16_vs_candidate",
+    "presentation": "randomized_A_B_without_backend_or_precision_labels",
+    "artifact_binding": "exact_wav_sha256_required",
+    "case_order": "deterministically_shuffled_from_sealed_manifest",
+    "replay_limit_per_artifact": 3,
+    "minimum_reviewers": 1,
+    "recommended_reviewers": 2,
+    "reviewer_must_not_see_machine_metrics_before_rating": true
+  },
+  "ratings": {
+    "intelligibility": {
+      "scale": ["unintelligible", "partial", "complete"],
+      "candidate_gate": "complete_fraction_at_least_0.95_and_zero_partial_or_truncated_cases"
+    },
+    "naturalness": {
+      "scale": "1_to_5_half_points_allowed",
+      "paired_mean_drop_max": 0.25
+    },
+    "speaker_consistency": {
+      "scale": "1_to_5_half_points_allowed",
+      "paired_mean_drop_max": 0.25
+    },
+    "instruction_emotion_adherence": {
+      "scale": "1_to_5_half_points_allowed",
+      "paired_mean_drop_max": 0.25
+    },
+    "preference": ["A", "B", "no_preference"]
+  },
+  "fail_closed_rules": [
+    "missing_artifact_hash",
+    "backend_identity_revealed_before_rating",
+    "text_speaker_or_instruct_mismatch",
+    "audio_normalization_or_postprocessing_mismatch",
+    "partial_or_truncated_candidate_case",
+    "review_record_changed_after_unblinding"
+  ],
+  "authorization": {
+    "plays_audio_automatically": false,
+    "allows_candidate_generation": false,
+    "allows_promotion": false
+  }
+}

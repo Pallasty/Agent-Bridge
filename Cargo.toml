@@ -14,6 +14,7 @@ members = [
     "crates/oob-alert",
     "crates/memory-columnar",
     "crates/owned-lab-role-artifacts",
+    "crates/qwen-quant",
     "bin/agent-cli",
 ]
 

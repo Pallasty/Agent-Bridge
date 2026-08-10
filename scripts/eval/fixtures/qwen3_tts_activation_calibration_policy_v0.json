@@ -1,0 +1,72 @@
+{
+  "schema": "agent_bridge.qwen3_tts.activation_calibration_policy.v0",
+  "status": "FROZEN_DEFAULT_OFF",
+  "source_model": {
+    "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "local_snapshot_required": true,
+    "device": "mps",
+    "runtime_dtype": "float16",
+    "runtime": {
+      "python": "3.12.13",
+      "torch": "2.13.0",
+      "qwen_tts": "0.1.1",
+      "generation_api": "generate_custom_voice",
+      "language": "Chinese"
+    }
+  },
+  "source_assets": [
+    {
+      "partition": "talker",
+      "bytes": 3833402552,
+      "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137"
+    },
+    {
+      "partition": "speech_tokenizer_codec",
+      "bytes": 682293092,
+      "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+    }
+  ],
+  "activation_plan": {
+    "schema": "agent_bridge.qwen3_tts.activation_probe_plan.v1",
+    "sha256": "d87deeeadf81aaba2d010bded7c60e8b0bd8f74419b6e6a132a46d1d9fd2fb12",
+    "static_report_sha256": "6999f67da3b3ac6319cdc68049cba9e5ac78e5f98dd252615877db7354178e93",
+    "selection_algorithm": "layer_role_rotating_stratified_v1",
+    "selected_modules": 96,
+    "covered_talker_layers": 28
+  },
+  "corpus": {
+    "schema": "agent_bridge.qwen3_tts.quantization_corpus.v0",
+    "sha256": "9193f6e5359fcf3ecd9c0a5a2726886908ffa3a266ab7597f283629e710a7afd",
+    "cases": 16
+  },
+  "capture_requirements": {
+    "full_status": "CAPTURED_READ_ONLY_FULL",
+    "minimum_samples_per_module_case": 4096,
+    "zero_empty_module_cases": true,
+    "zero_nonfinite_sample_candidates": true,
+    "exact_parameter_weight_identity": true,
+    "record_output_shape_and_dtype_digest": true,
+    "retain_full_activations": false
+  },
+  "resource_ladder": {
+    "schema": "agent_bridge.qwen3_tts.activation_resource_ladder.v0",
+    "receipt_sha256": "8e9a3f4ec9596ea142940a2857c16122c3c73baeb47975e382a6f15c4e34f7d2",
+    "module_counts": [
+      8,
+      24,
+      48,
+      96
+    ],
+    "long_case_required_at_24_and_48": true,
+    "full_corpus_only_at_96": true
+  },
+  "evidence_boundary": {
+    "sample_min_max_are_not_full_activation_extrema": true,
+    "entropy_is_sample_normalized_without_fixed_global_edges": true,
+    "activation_calibration_can_only_admit_functional_sensitivity_design": true,
+    "allows_fake_quant_execution": false,
+    "allows_quantized_weight_writing": false,
+    "allows_runtime_candidate_generation": false,
+    "allows_runtime_wiring_or_promotion": false
+  }
+}
