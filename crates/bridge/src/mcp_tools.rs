@@ -40047,6 +40047,7 @@ pub struct PracticalWorkflowScorecard {
     pub continuation: PracticalContinuationMetrics,
     pub completion: PracticalCompletionMetrics,
     pub recovery: PracticalRecoveryMetrics,
+    pub coordination: PracticalCoordinationMetrics,
     pub operator_burden: PracticalOperatorBurdenMetrics,
     pub recommendations: Vec<String>,
 }
@@ -40077,6 +40078,18 @@ pub struct PracticalRecoveryMetrics {
     pub failed_calls: usize,
     pub failures_followed_by_success: usize,
     pub repeated_failure_loops: usize,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalCoordinationMetrics {
+    pub calls: usize,
+    pub ratio: Option<f64>,
+    pub forum_reads: usize,
+    pub forum_posts: usize,
+    pub memory_saves: usize,
+    pub capability_checks: usize,
+    pub context_snapshots: usize,
     pub interpretation: &'static str,
 }
 
@@ -40168,6 +40181,23 @@ pub fn compute_practical_workflow_scorecard(
         })
         .count();
 
+    let count_tool = |name: &str| calls.iter().filter(|call| call.tool_name == name).count();
+    let forum_reads = count_tool("forum_read");
+    let forum_posts = count_tool("forum_post");
+    let memory_saves = count_tool("memory_save");
+    let capability_checks = count_tool("capabilities");
+    let context_snapshots = count_tool("context_governor_snapshot");
+    let coordination_calls = forum_reads
+        .saturating_add(forum_posts)
+        .saturating_add(memory_saves)
+        .saturating_add(capability_checks)
+        .saturating_add(context_snapshots);
+    let coordination_ratio = if calls.is_empty() {
+        None
+    } else {
+        Some(coordination_calls as f64 / calls.len() as f64)
+    };
+
     let mut recommendations = Vec::new();
     if bootstraps.is_empty() {
         recommendations.push("No bootstrap signal in this window; widen the window before judging continuation.".into());
@@ -40184,6 +40214,9 @@ pub fn compute_practical_workflow_scorecard(
     }
     if repeated_failure_loops > 0 {
         recommendations.push("Inspect repeated same-tool failures before retrying or requesting authorization again.".into());
+    }
+    if calls.len() >= 20 && coordination_calls.saturating_mul(2) > calls.len() {
+        recommendations.push("More than half of observed calls are workflow coordination (forum read/post, memory save, capability checks, or context snapshots); collapse repeated gates and keep only milestone coordination.".into());
     }
     recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
 
@@ -40222,6 +40255,16 @@ pub fn compute_practical_workflow_scorecard(
             failures_followed_by_success,
             repeated_failure_loops,
             interpretation: "A later successful call is a recovery proxy; repeated same-tool failures within five minutes flag a retry loop.",
+        },
+        coordination: PracticalCoordinationMetrics {
+            calls: coordination_calls,
+            ratio: coordination_ratio,
+            forum_reads,
+            forum_posts,
+            memory_saves,
+            capability_checks,
+            context_snapshots,
+            interpretation: "Coordination calls keep work aligned, but a sustained majority suggests process overhead is crowding out task execution. The ratio is descriptive and does not judge individual call value.",
         },
         operator_burden: PracticalOperatorBurdenMetrics {
             repeated_authorization_prompts: None,

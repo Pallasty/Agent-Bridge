@@ -33901,9 +33901,50 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
     assert_eq!(report.completion.plan_update_signals, 1);
     assert_eq!(report.recovery.failures_followed_by_success, 2);
     assert_eq!(report.recovery.repeated_failure_loops, 1);
+    assert_eq!(report.coordination.calls, 3);
+    assert_eq!(report.coordination.memory_saves, 3);
+    assert_eq!(report.coordination.ratio, Some(3.0 / 7.0));
+    assert!(!report
+        .recommendations
+        .iter()
+        .any(|item| item.contains("More than half")));
     assert_eq!(report.operator_burden.instrumentation_status, "unavailable");
     assert_eq!(report.operator_burden.repeated_authorization_prompts, None);
     assert_eq!(report.operator_burden.manual_interventions, None);
+}
+
+#[test]
+fn practical_scorecard_flags_coordination_majority() {
+    let mut calls = Vec::new();
+    for ts in 0..6 {
+        calls.push(mk_call(ts, "forum_read", true, 500));
+    }
+    for ts in 6..11 {
+        calls.push(mk_call(ts, "forum_post", true, 200));
+    }
+    for ts in 11..15 {
+        calls.push(mk_call(ts, "memory_save", true, 300));
+    }
+    for ts in 15..18 {
+        calls.push(mk_call(ts, "capabilities", true, 500));
+    }
+    for ts in 18..20 {
+        calls.push(mk_call(ts, "memory_get", true, 500));
+    }
+
+    let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 1_000);
+
+    assert_eq!(report.schema_version, 3);
+    assert_eq!(report.coordination.calls, 18);
+    assert_eq!(report.coordination.ratio, Some(0.9));
+    assert_eq!(report.coordination.forum_reads, 6);
+    assert_eq!(report.coordination.forum_posts, 5);
+    assert_eq!(report.coordination.memory_saves, 4);
+    assert_eq!(report.coordination.capability_checks, 3);
+    assert!(report
+        .recommendations
+        .iter()
+        .any(|item| item.contains("More than half")));
 }
 
 #[test]
@@ -33913,6 +33954,8 @@ fn practical_scorecard_keeps_missing_signals_explicit() {
     assert_eq!(report.continuation.median_followup_secs, None);
     assert_eq!(report.completion.finalize_signals, 0);
     assert_eq!(report.recovery.repeated_failure_loops, 0);
+    assert_eq!(report.coordination.calls, 0);
+    assert_eq!(report.coordination.ratio, None);
     assert!(report.recommendations[0].contains("No bootstrap signal"));
 }
 
