@@ -48,7 +48,7 @@ pub struct RemoteEmbedBackend {
     /// Local backend used only when the remote is unreachable. `OnnxBackend` in
     /// production (zero-sized; loads the model lazily on first use, i.e. only in
     /// the degraded path). Injectable for tests.
-    fallback: Arc<dyn EmbeddingBackend>,
+    fallback: Option<Arc<dyn EmbeddingBackend>>,
     /// Daemon-reported model name + dim, learned from the first successful
     /// response. Until then [`name`]/[`dim`] mirror the compiled default, which
     /// matches the daemon by construction (both run the same compiled default).
@@ -64,9 +64,21 @@ impl RemoteEmbedBackend {
         Self::with_fallback(url, Arc::new(ab_store::OnnxBackend))
     }
 
+    /// Construct a remote-only backend. A failed request returns an empty
+    /// vector so the store's dimension guard rejects the write; it never
+    /// cold-starts a local ONNX model. This is intended for bounded background
+    /// maintenance where skipping a batch is preferable to a multi-GB spike.
+    pub fn new_strict(url: String) -> Self {
+        Self::with_optional_fallback(url, None)
+    }
+
     /// Construct with an explicit fallback backend (tests inject `HashBackend`
     /// to avoid loading the real model).
     pub fn with_fallback(url: String, fallback: Arc<dyn EmbeddingBackend>) -> Self {
+        Self::with_optional_fallback(url, Some(fallback))
+    }
+
+    fn with_optional_fallback(url: String, fallback: Option<Arc<dyn EmbeddingBackend>>) -> Self {
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(CONNECT_TIMEOUT)
             .timeout_read(READ_TIMEOUT)
@@ -114,14 +126,38 @@ impl RemoteEmbedBackend {
 
     fn warn_fallback_once(&self) {
         if self.warned_fallback.set(()).is_ok() {
-            tracing::warn!(
-                url = %self.url,
-                "RemoteEmbedBackend: remote /embed unreachable — falling back to local \
-                 in-process embedding (this process now loads the model locally). \
-                 Embedding correctness preserved; RAM sharing degraded until the \
-                 service returns."
-            );
+            if self.fallback.is_some() {
+                tracing::warn!(
+                    url = %self.url,
+                    "RemoteEmbedBackend: remote /embed unreachable — falling back to local \
+                     in-process embedding (this process now loads the model locally). \
+                     Embedding correctness preserved; RAM sharing degraded until the \
+                     service returns."
+                );
+            } else {
+                tracing::warn!(
+                    url = %self.url,
+                    "RemoteEmbedBackend: remote /embed unreachable in strict mode; \
+                     returning an empty vector so the caller skips the write"
+                );
+            }
         }
+    }
+
+    fn fallback_embed(&self, text: &str) -> Vec<f32> {
+        self.warn_fallback_once();
+        self.fallback
+            .as_ref()
+            .map(|fallback| fallback.embed(text))
+            .unwrap_or_default()
+    }
+
+    fn fallback_embed_batch(&self, texts: &[&str]) -> Vec<Vec<f32>> {
+        self.warn_fallback_once();
+        self.fallback
+            .as_ref()
+            .map(|fallback| fallback.embed_batch(texts))
+            .unwrap_or_else(|| vec![Vec::new(); texts.len()])
     }
 }
 
@@ -152,8 +188,7 @@ impl EmbeddingBackend for RemoteEmbedBackend {
         // Per-tier graceful degradation: remote down → local in-process embed.
         // The fallback's model loads lazily here, ONLY in this degraded path; a
         // reachable remote never triggers a local model load.
-        self.warn_fallback_once();
-        self.fallback.embed(text)
+        self.fallback_embed(text)
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Vec<Vec<f32>> {
@@ -166,8 +201,7 @@ impl EmbeddingBackend for RemoteEmbedBackend {
             match self.try_remote(t) {
                 Some(v) => out.push(v),
                 None => {
-                    self.warn_fallback_once();
-                    return self.fallback.embed_batch(texts);
+                    return self.fallback_embed_batch(texts);
                 }
             }
         }
@@ -244,10 +278,25 @@ pub enum InstallOutcome {
 /// arm) BEFORE the first `default_backend()` / `warmup()`. daemon-http MUST NOT
 /// call this — it is the embedding server and would self-delegate into a loop.
 pub fn install_if_configured() -> InstallOutcome {
+    install_configured_backend(false)
+}
+
+/// Install a remote-only backend when configured. Unlike
+/// [`install_if_configured`], an unreachable delegate never falls back to a
+/// local ONNX model. Background sync uses this to keep memory bounded.
+pub fn install_strict_if_configured() -> InstallOutcome {
+    install_configured_backend(true)
+}
+
+fn install_configured_backend(strict: bool) -> InstallOutcome {
     let Some(url) = remote_url_from_env() else {
         return InstallOutcome::NotConfigured;
     };
-    let backend = RemoteEmbedBackend::new(url.clone());
+    let backend = if strict {
+        RemoteEmbedBackend::new_strict(url.clone())
+    } else {
+        RemoteEmbedBackend::new(url.clone())
+    };
     // Learn the daemon's model name/dim now, so the first memory_save tags
     // correctly (name() is read before the first real embed).
     backend.learn_from_daemon_best_effort();
@@ -320,6 +369,16 @@ mod tests {
         assert_eq!(normalize_url(Some("   ".into())), None);
         assert_eq!(normalize_url(Some(String::new())), None);
         assert_eq!(normalize_url(None), None);
+    }
+
+    #[test]
+    fn strict_backend_never_uses_a_local_fallback() {
+        let backend = RemoteEmbedBackend::new_strict("http://127.0.0.1:1/embed".to_string());
+        assert!(backend.embed("unreachable").is_empty());
+        assert_eq!(
+            backend.embed_batch(&["first", "second"]),
+            vec![Vec::<f32>::new(), Vec::<f32>::new()]
+        );
     }
 
     #[test]

@@ -27,6 +27,7 @@ fn stat(name: &str, calls: u64, errors: u64, p95: u32, avg_result_size: f64) -> 
 
 fn call(ts: i64, tool_name: &str, ok: bool, duration_ms: u32, result_size: u32) -> McpToolCallRow {
     McpToolCallRow {
+        id: ts,
         ts,
         tool_name: tool_name.to_string(),
         mcp_session_id: None,
