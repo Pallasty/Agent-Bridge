@@ -19,7 +19,7 @@
 //!
 //! Best-effort: empty log → empty section. Errors → empty section.
 
-use ab_store::StateStore;
+use ab_store::{MemoryPeekResult, StateStore};
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -54,8 +54,24 @@ pub async fn compute_section(store: &dyn StateStore, is_compact: bool) -> Result
         *counts.entry((a_key.clone(), b_key.clone())).or_insert(0) += 1;
     }
 
-    let mut ranked: Vec<((String, String), u32)> =
-        counts.into_iter().filter(|(_, c)| *c >= 2).collect();
+    let mut ranked: Vec<((String, String), u32)> = Vec::new();
+    for ((from, to), count) in counts.into_iter().filter(|(_, c)| *c >= 2) {
+        // Query-log history outlives memory lifecycle changes. Re-check both
+        // endpoints so an archived/superseded/tombstoned task cannot return
+        // to bootstrap as a predicted next step after the owner changes
+        // direction. Missing or unreadable envelopes fail closed.
+        let from_active = matches!(
+            store.memory_peek(&from).await,
+            Ok(MemoryPeekResult::Present { record }) if record.status == "active"
+        );
+        let to_active = matches!(
+            store.memory_peek(&to).await,
+            Ok(MemoryPeekResult::Present { record }) if record.status == "active"
+        );
+        if from_active && to_active {
+            ranked.push(((from, to), count));
+        }
+    }
     if ranked.is_empty() {
         return Ok(Vec::new());
     }
@@ -85,7 +101,7 @@ pub async fn compute_section(store: &dyn StateStore, is_compact: bool) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ab_store::{MemoryQueryRecord, SqliteStore};
+    use ab_store::{MemoryQueryRecord, MemoryRecord, SqliteStore};
 
     async fn fresh_store(tag: &str) -> (std::path::PathBuf, SqliteStore) {
         let temp_dir = std::env::temp_dir().join(format!(
@@ -117,6 +133,27 @@ mod tests {
     #[tokio::test]
     async fn repeated_transitions_surface_singletons_drop() {
         let (dir, store) = fresh_store("repeat").await;
+        for key in ["A", "B", "C", "D"] {
+            store
+                .memory_save(&MemoryRecord {
+                    key: key.into(),
+                    kind: format!("test_{key}"),
+                    content: format!("unique content for {key}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: "active".into(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save endpoint");
+        }
         // A→B twice (within window), A→B once more (within window), A→C once,
         // self-loop B→B, and a B→D pair with too-wide gap.
         for r in [
@@ -156,6 +193,27 @@ mod tests {
     #[tokio::test]
     async fn compact_mode_caps_at_three() {
         let (dir, store) = fresh_store("compact").await;
+        for key in ["A", "B", "C", "D", "E", "F", "G", "H"] {
+            store
+                .memory_save(&MemoryRecord {
+                    key: key.into(),
+                    kind: format!("test_{key}"),
+                    content: format!("unique content for {key}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: "active".into(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save endpoint");
+        }
         // 4 distinct transitions A→B, C→D, E→F, G→H each with count 2.
         let mut t = 1_000i64;
         for (a, b) in [("A", "B"), ("C", "D"), ("E", "F"), ("G", "H")] {
@@ -173,6 +231,49 @@ mod tests {
         let count_rows = |v: &[String]| v.iter().filter(|l| l.starts_with("  •")).count();
         assert_eq!(count_rows(&full), 4, "non-compact lists all 4");
         assert_eq!(count_rows(&compact), 3, "compact caps at 3");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn retired_transition_endpoint_never_resurfaces() {
+        let (dir, store) = fresh_store("retired-endpoint").await;
+        for (key, status) in [("current", "active"), ("obsolete", "superseded")] {
+            store
+                .memory_save(&MemoryRecord {
+                    key: key.into(),
+                    kind: format!("test_{key}"),
+                    content: format!("unique content for {key}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 0,
+                    updated_at: 0,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: status.into(),
+                    trigger_pattern: None,
+                    superseded_by: (status == "superseded").then(|| "current".into()),
+                })
+                .await
+                .expect("save endpoint");
+        }
+        for at in [1_000, 1_100] {
+            store
+                .record_memory_query(&rec("current", at))
+                .await
+                .expect("record current");
+            store
+                .record_memory_query(&rec("obsolete", at + 10))
+                .await
+                .expect("record obsolete");
+        }
+
+        let lines = compute_section(&store, false).await.expect("section");
+        assert!(
+            lines.is_empty(),
+            "superseded endpoint must suppress the historical transition: {lines:?}"
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }
