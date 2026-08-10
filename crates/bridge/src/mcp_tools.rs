@@ -75,6 +75,14 @@ use tokio::process::Command as TokioCommand;
 
 mod operator_request;
 use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
+#[cfg(feature = "embodiment-runtime-p4")]
+mod embodiment_runtime;
+#[cfg(all(feature = "embodiment-runtime-p4", test))]
+use embodiment_runtime::parse_projection_preview_config;
+#[cfg(feature = "embodiment-runtime-p4")]
+use embodiment_runtime::{
+    configured_projection_preview_operations, EmbodimentProjectionPreviewTool,
+};
 mod story;
 use story::{StoryCommandPreflightTool, StoryMcpConfig};
 
@@ -24486,9 +24494,49 @@ impl McpTool for CapabilitiesTool {
 
         let sec = &self.hub.security;
         let mobile = mobile_capabilities_json(policy, !compact).await;
-        // Reality view: count what this host actually exposes for the policy,
+        // Reality view: report what this host actually exposes for the policy,
         // not the nominal fully-available surface.
-        let exposed_tool_count = build_registry_current_view(policy).list().len();
+        let exposed_tools = build_registry_current_view(policy).list();
+        let exposed_tool_count = exposed_tools.len();
+        #[cfg(feature = "embodiment-runtime-p4")]
+        let embodiment_p4 = match configured_projection_preview_operations() {
+            Ok(Some(operations)) => json!({
+                "compiled": true,
+                "mcp_opted_in": true,
+                "configuration_valid": true,
+                "allowed_operation_count": operations.len(),
+                "dry_run_only": true,
+                "tool_exposed": exposed_tools
+                    .iter()
+                    .any(|tool| tool.name == "embodiment_projection_preview")
+            }),
+            Ok(None) => json!({
+                "compiled": true,
+                "mcp_opted_in": false,
+                "configuration_valid": true,
+                "allowed_operation_count": 0,
+                "dry_run_only": true,
+                "tool_exposed": false
+            }),
+            Err(error) => json!({
+                "compiled": true,
+                "mcp_opted_in": true,
+                "configuration_valid": false,
+                "allowed_operation_count": 0,
+                "dry_run_only": true,
+                "tool_exposed": false,
+                "configuration_error": error
+            }),
+        };
+        #[cfg(not(feature = "embodiment-runtime-p4"))]
+        let embodiment_p4 = json!({
+            "compiled": false,
+            "mcp_opted_in": false,
+            "configuration_valid": false,
+            "allowed_operation_count": 0,
+            "dry_run_only": true,
+            "tool_exposed": false
+        });
         let instinct_observer = compact_instinct_observer_status_json(
             crate::instinct::observer_status_json(),
             include_instinct_sessions,
@@ -24522,6 +24570,7 @@ impl McpTool for CapabilitiesTool {
                 "available": browser_available,
                 "headless": std::env::var("AGENT_BRIDGE_HEADLESS").map(|v| v == "1").unwrap_or(false)
             },
+            "embodiment_p4": embodiment_p4,
             "memory": {
                 "available": memory_available,
                 "db_path": db_path,
@@ -44234,6 +44283,21 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
     let chatgpt_forum_tags = configured_chatgpt_forum_tags();
     register_chatgpt_forum_tools(&mut reg, &hub, policy, chatgpt_forum_tags.clone());
     register_chatgpt_collab_tools(&mut reg, policy);
+    #[cfg(feature = "embodiment-runtime-p4")]
+    match configured_projection_preview_operations() {
+        Ok(Some(operations)) => reg_if(
+            &mut reg,
+            policy,
+            Tier::Niche,
+            Arc::new(EmbodimentProjectionPreviewTool::new(operations)),
+        ),
+        Ok(None) => {}
+        Err(error) => tracing::warn!(
+            tool = "embodiment_projection_preview",
+            %error,
+            "invalid embodiment P4 MCP configuration; tool left unregistered"
+        ),
+    }
     match StoryMcpConfig::from_env() {
         Ok(Some(config)) => reg_if(
             &mut reg,
@@ -47603,6 +47667,15 @@ pub(crate) fn build_registry_current_view(policy: ToolPolicy) -> ToolRegistry {
     );
     register_chatgpt_forum_tools(&mut registry, &hub, policy, configured_chatgpt_forum_tags());
     register_chatgpt_collab_tools(&mut registry, policy);
+    #[cfg(feature = "embodiment-runtime-p4")]
+    if let Ok(Some(operations)) = configured_projection_preview_operations() {
+        reg_if(
+            &mut registry,
+            policy,
+            Tier::Niche,
+            Arc::new(EmbodimentProjectionPreviewTool::new(operations)),
+        );
+    }
     registry
 }
 
