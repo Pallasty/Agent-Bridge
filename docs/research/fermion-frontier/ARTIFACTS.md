@@ -2,6 +2,14 @@
 
 All copied JSON files are research-only outputs. They contain no credentials.
 
+## FH-L8 D60 runtime-rule precommit D83
+
+- `FH_L8_D60_RUNTIME_RULE_PRECOMMIT_D83_ZH.md`: scope, blocker and authority boundary.
+- `fh_l8_d60_runtime_rule_precommit_d83_contract.json`: source-pinned frozen rule and fresh-input gate.
+- `fh_l8_d60_runtime_rule_precommit_d83.py`: read-only fail-closed verifier.
+- `fh_l8_d60_runtime_rule_precommit_d83_result.json`: committed blocked result.
+- `test_fh_l8_d60_runtime_rule_precommit_d83.py`: rule, mutation, scope and authority regressions.
+
 ## FH-L8 independent reference route S0
 
 - `FH_L8_INDEPENDENT_REFERENCE_ROUTE_S0_ZH.md`: route decision and D1 boundary.
