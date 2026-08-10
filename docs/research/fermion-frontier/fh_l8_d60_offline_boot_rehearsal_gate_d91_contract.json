@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-OFFLINE-BOOT-REHEARSAL-GATE-D91-V1",
+  "baseline_commit": "13219c10e842b23b75bf8f566a3cb294df3526f1",
+  "source_pins": {
+    "FH_L8_D60_OFFLINE_PAYLOAD_GATE_D90_ZH.md": "63ca7cf9ff478c255b69049c96759f39188edb90887f2860841090f319f7bdce",
+    "fh_l8_d60_offline_payload_gate_d90_contract.json": "098b51f3bdc79f40a33c7517d0ced61e084897d4d1b540abe365daa67ce0cdd6",
+    "fh_l8_d60_offline_payload_gate_d90_result.json": "a867f884a71d19e80a87dbc1d4c78e7e098f57edb0d84b75a09cfd9724d1dea2",
+    "fh_l8_d60_offline_payload_d90_receipt.json": "18958bb0d1cd26f1ff7b4f52e62c84515d651342e432c9a369db79254cc8a2d1"
+  },
+  "receipt": "fh_l8_d60_offline_boot_rehearsal_d91_receipt.json",
+  "requirements": {
+    "direct_kernel_boot_required": true,
+    "uefi_loader_format_required": true,
+    "uefi_grub_kernel_chain_required": true,
+    "mmc_must_remain_untouched": true
+  },
+  "authority": {
+    "receipt_verification_only": true,
+    "grub_rehearsal_mutation_authorized": false,
+    "mmc_mount_authorized": false,
+    "mmc_write_authorized": false,
+    "bootloader_change_authorized": false,
+    "reboot_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}

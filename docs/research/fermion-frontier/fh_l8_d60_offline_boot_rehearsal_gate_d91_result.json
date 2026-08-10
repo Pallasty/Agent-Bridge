@@ -1,0 +1,17 @@
+{
+  "status": "VERIFIED_D91_DIRECT_KERNEL_PASS_UEFI_CHAIN_BLOCKED",
+  "direct_kernel_boot_pass": true,
+  "uefi_loader_format_pass": true,
+  "uefi_grub_kernel_chain_pass": false,
+  "mmc_and_host_untouched": true,
+  "boot_rehearsal_complete": false,
+  "physical_sd_boot_proven": false,
+  "mmc_write_authorized": false,
+  "bootloader_change_authorized": false,
+  "reboot_authorized": false,
+  "d82r_transaction_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "PARTIAL_D91_DIRECT_BOOT_PROVEN_UEFI_GRUB_MAPPING_REQUIRES_FIX",
+  "next_gate": "OWNER_ADMIT_D91R_GRUB_UEFI_REHEARSAL_FIX_OR_ACCEPT_DIRECT_KERNEL_ONLY"
+}
