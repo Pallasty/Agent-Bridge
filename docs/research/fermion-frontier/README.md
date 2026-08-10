@@ -1,5 +1,10 @@
 # Fermion frontier research takeover
 
+The D60 runtime-rule lane now has a fail-closed D83 precommit packet. It freezes the D82 empirical
+sampling/timeout policy but requires a fresh post-boot D82R isolation receipt and same-scope
+environment recapture. Neither is currently admitted, so runtime lock, measurement and full53
+authority remain closed. See `FH_L8_D60_RUNTIME_RULE_PRECOMMIT_D83_ZH.md`.
+
 Current independent-reference successor: `FH-L8-INDEPENDENT-REFERENCE-S0` closes the fixed
 uniform-supremum and ordinary-light-cone architectures and selects the state-specific per-step exact
 defect ledger. See `FH_L8_INDEPENDENT_REFERENCE_ROUTE_S0_ZH.md`.

@@ -1,0 +1,18 @@
+{
+  "status": "VERIFIED_D83_RUNTIME_RULE_FROZEN_FAIL_CLOSED",
+  "source_pin_count": 9,
+  "rule_structure_frozen": true,
+  "owner_numeric_policy_frozen": true,
+  "fresh_isolation_receipt_admitted": false,
+  "environment_recapture_admitted": false,
+  "premeasurement_inputs_complete": false,
+  "service_only_d79_observation_admitted_as_scope_proof": false,
+  "runtime_lock_precommitted": false,
+  "measurement_authorized": false,
+  "timing_measurements_executed": 0,
+  "scientific_kernel_calls_executed": 0,
+  "numeric_runtime_seconds_proven": false,
+  "full53_execution_authorized": false,
+  "decision": "BLOCKED_D83_FRESH_ISOLATION_RECEIPT_AND_ENVIRONMENT_RECAPTURE_REQUIRED",
+  "next_gate": "D82R_BOOT_RESTART_FRESH_RECEIPT_THEN_D83_REVERIFY"
+}
