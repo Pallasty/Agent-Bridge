@@ -3388,6 +3388,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .expect("record tool call");

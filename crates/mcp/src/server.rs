@@ -411,6 +411,9 @@ async fn record_mcp_tool_failure(store: Option<&dyn StateStore>, tool_name: &str
 
 #[derive(Debug, Clone)]
 struct ConnectionTelemetry {
+    /// Random per-process identifier used only to correlate calls emitted by
+    /// this MCP connection. It is not derived from client or user identity.
+    mcp_session_id: String,
     client_name: Option<String>,
     profile: String,
     source: String,
@@ -436,6 +439,7 @@ impl ConnectionTelemetry {
             .ok()
             .and_then(nonempty_string);
         Self {
+            mcp_session_id: uuid::Uuid::new_v4().to_string(),
             client_name,
             profile,
             source,
@@ -747,6 +751,7 @@ async fn record_mcp_tool_call_telemetry(
             telemetry.model.clone(),
             telemetry.model_reasoning_effort.clone(),
             telemetry.codex_host.clone(),
+            Some(telemetry.mcp_session_id.clone()),
         )
         .await
     {

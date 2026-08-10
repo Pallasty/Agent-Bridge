@@ -33763,6 +33763,7 @@ fn mk_call(ts: i64, name: &str, ok: bool, result_size: u32) -> ab_store::McpTool
     ab_store::McpToolCallRow {
         ts,
         tool_name: name.into(),
+        mcp_session_id: Some("test-session".into()),
         duration_ms: 10,
         ok,
         args_size: Some(100),
@@ -33859,6 +33860,7 @@ fn attention_report_handles_missing_result_size() {
     let calls = vec![ab_store::McpToolCallRow {
         ts: 0,
         tool_name: "weird_tool".into(),
+        mcp_session_id: Some("test-session".into()),
         duration_ms: 10,
         ok: true,
         args_size: Some(100),
@@ -33885,6 +33887,8 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
     assert_eq!(report.successful_calls, 5);
     assert_eq!(report.failed_calls, 2);
     assert_eq!(report.continuation.bootstrap_calls, 1);
+    assert_eq!(report.continuation.attributed_bootstrap_calls, 1);
+    assert_eq!(report.continuation.legacy_unattributed_bootstraps, 0);
     assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
     assert_eq!(report.continuation.right_censored_bootstraps, 0);
     assert_eq!(report.continuation.bootstraps_with_followup, 1);
@@ -33928,6 +33932,34 @@ fn practical_scorecard_excludes_right_censored_bootstraps_from_rate() {
         .recommendations
         .iter()
         .any(|item| item.contains("right-censored")));
+}
+
+#[test]
+fn practical_scorecard_requires_same_session_followup() {
+    let mut bootstrap = mk_call(100, "session_bootstrap", true, 2_000);
+    bootstrap.mcp_session_id = Some("session-a".into());
+    let mut other_session_call = mk_call(112, "memory_get", true, 500);
+    other_session_call.mcp_session_id = Some("session-b".into());
+    let report =
+        compute_practical_workflow_scorecard(&[bootstrap, other_session_call], 3_600, 600, 1_000);
+
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.bootstraps_with_followup, 0);
+    assert_eq!(report.continuation.eligible_bootstraps_without_followup, 1);
+    assert_eq!(report.continuation.followup_rate, Some(0.0));
+}
+
+#[test]
+fn practical_scorecard_excludes_legacy_unattributed_bootstrap() {
+    let mut bootstrap = mk_call(100, "session_bootstrap", true, 2_000);
+    bootstrap.mcp_session_id = None;
+    let report = compute_practical_workflow_scorecard(&[bootstrap], 3_600, 600, 1_000);
+
+    assert_eq!(report.continuation.bootstrap_calls, 1);
+    assert_eq!(report.continuation.attributed_bootstrap_calls, 0);
+    assert_eq!(report.continuation.legacy_unattributed_bootstraps, 1);
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 0);
+    assert_eq!(report.continuation.followup_rate, None);
 }
 
 #[tokio::test]

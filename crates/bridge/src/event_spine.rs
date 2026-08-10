@@ -410,6 +410,7 @@ mod tests {
         McpToolCallRow {
             ts,
             tool_name: tool_name.to_string(),
+            mcp_session_id: None,
             duration_ms: 12,
             ok,
             args_size: Some(4),

@@ -217,6 +217,9 @@ pub struct McpToolSourceStats {
 pub struct McpToolCallRow {
     pub ts: i64,
     pub tool_name: String,
+    /// Random, process-local MCP connection identifier. `None` denotes
+    /// pre-attribution telemetry written before the additive schema column.
+    pub mcp_session_id: Option<String>,
     pub duration_ms: u32,
     pub ok: bool,
     /// Argument JSON payload size at MCP entry (`None` when not
@@ -3205,6 +3208,7 @@ pub trait StateStore: Send + Sync {
         model: Option<String>,
         model_reasoning_effort: Option<String>,
         codex_host: Option<String>,
+        mcp_session_id: Option<String>,
     ) -> Result<()> {
         let _ = (
             tool_name,
@@ -3218,6 +3222,7 @@ pub trait StateStore: Send + Sync {
             model,
             model_reasoning_effort,
             codex_host,
+            mcp_session_id,
         );
         Ok(())
     }

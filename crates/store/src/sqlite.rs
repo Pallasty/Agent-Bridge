@@ -548,6 +548,15 @@ CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_codex_host
     ON mcp_tool_calls(codex_host, ts DESC);
 "#;
 
+// Version-less additive telemetry attribution rung. Schema version 43 is
+// owned by truth-evidence identity, so this local-only nullable column must not
+// advance schema_meta. Old binaries keep writing NULL; new MCP processes write
+// a random per-process UUID. No client/user identifier is persisted.
+const SCHEMA_MCP_SESSION_ATTRIBUTION_INDEX: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_mcp_session
+    ON mcp_tool_calls(mcp_session_id, ts ASC, id ASC);
+"#;
+
 // v30 — XM (cross-machine messaging) v0.1. Adds `read_at` timestamp on
 // agent_messages so the P-XM-7 GC pass can apply the "touched within 7 days"
 // semantic (created OR read inside the window). NULL = unread.
@@ -1879,6 +1888,25 @@ impl SqliteStore {
             temporal_evidence::migrate_or_verify_v43(c, None)?;
             #[cfg(feature = "episode-observation-slice-b")]
             episode_observation_slice_b::migrate_or_verify(c)?;
+            let mcp_session_exists: i64 = c
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('mcp_tool_calls') \
+                     WHERE name='mcp_session_id'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if mcp_session_exists == 0 {
+                if let Err(error) = c.execute(
+                    "ALTER TABLE mcp_tool_calls ADD COLUMN mcp_session_id TEXT",
+                    [],
+                ) {
+                    if !error.to_string().contains("duplicate column name") {
+                        return Err(error);
+                    }
+                }
+            }
+            c.execute_batch(SCHEMA_MCP_SESSION_ATTRIBUTION_INDEX)?;
             Ok(())
         })
         .await
@@ -4806,6 +4834,7 @@ impl StateStore for SqliteStore {
         model: Option<String>,
         model_reasoning_effort: Option<String>,
         codex_host: Option<String>,
+        mcp_session_id: Option<String>,
     ) -> Result<()> {
         let ts = now_secs();
         let tn = tool_name.to_string();
@@ -4817,8 +4846,9 @@ impl StateStore for SqliteStore {
                 c.execute(
                     "INSERT INTO mcp_tool_calls
                        (ts, tool_name, duration_ms, ok, args_size, result_size,
-                        client_name, profile, source, model, model_reasoning_effort, codex_host)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                        client_name, profile, source, model, model_reasoning_effort, codex_host,
+                        mcp_session_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                     params![
                         ts,
                         tn,
@@ -4831,7 +4861,8 @@ impl StateStore for SqliteStore {
                         source,
                         model,
                         model_reasoning_effort,
-                        codex_host
+                        codex_host,
+                        mcp_session_id
                     ],
                 )?;
                 Ok(())
@@ -5054,7 +5085,8 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolCallRow>> {
                 let mut stmt = c.prepare(
-                    "SELECT ts, tool_name, duration_ms, ok, args_size, result_size
+                    "SELECT ts, tool_name, duration_ms, ok, args_size, result_size,
+                            mcp_session_id
                      FROM mcp_tool_calls
                      WHERE ts >= ?1
                      ORDER BY ts ASC, id ASC
@@ -5068,6 +5100,7 @@ impl StateStore for SqliteStore {
                         ok: row.get::<_, i64>(3)? != 0,
                         args_size: row.get::<_, Option<i64>>(4)?.map(|v| v.max(0) as u32),
                         result_size: row.get::<_, Option<i64>>(5)?.map(|v| v.max(0) as u32),
+                        mcp_session_id: row.get(6)?,
                     })
                 })?;
                 let collected: std::result::Result<Vec<_>, _> = iter.collect();
@@ -20935,6 +20968,7 @@ mod tests {
                 Some("gpt-5.5".to_string()),
                 Some("xhigh".to_string()),
                 Some("desktop".to_string()),
+                Some("mcp-session-a".to_string()),
             )
             .await
             .expect("record codex ok");
@@ -20951,6 +20985,7 @@ mod tests {
                 Some("gpt-5.5".to_string()),
                 Some("xhigh".to_string()),
                 Some("desktop".to_string()),
+                Some("mcp-session-a".to_string()),
             )
             .await
             .expect("record codex error");
@@ -20967,9 +21002,19 @@ mod tests {
                 None,
                 None,
                 None,
+                Some("mcp-session-b".to_string()),
             )
             .await
             .expect("record hook");
+
+        let recent = store
+            .recent_mcp_tool_calls(86_400, 10)
+            .await
+            .expect("recent attributed calls");
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0].mcp_session_id.as_deref(), Some("mcp-session-a"));
+        assert_eq!(recent[1].mcp_session_id.as_deref(), Some("mcp-session-a"));
+        assert_eq!(recent[2].mcp_session_id.as_deref(), Some("mcp-session-b"));
 
         let codex = store
             .mcp_tool_call_stats_filtered(

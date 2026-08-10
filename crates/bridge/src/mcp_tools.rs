@@ -40054,6 +40054,8 @@ pub struct PracticalWorkflowScorecard {
 #[derive(Debug, serde::Serialize, PartialEq)]
 pub struct PracticalContinuationMetrics {
     pub bootstrap_calls: usize,
+    pub attributed_bootstrap_calls: usize,
+    pub legacy_unattributed_bootstraps: usize,
     pub eligible_bootstrap_calls: usize,
     pub right_censored_bootstraps: usize,
     pub bootstraps_with_followup: usize,
@@ -40098,8 +40100,16 @@ pub fn compute_practical_workflow_scorecard(
         .iter()
         .filter(|call| call.ok && call.tool_name == "session_bootstrap")
         .collect();
+    let attributed_bootstraps: Vec<_> = bootstraps
+        .iter()
+        .copied()
+        .filter(|bootstrap| bootstrap.mcp_session_id.is_some())
+        .collect();
+    let legacy_unattributed_bootstraps = bootstraps
+        .len()
+        .saturating_sub(attributed_bootstraps.len());
     let eligibility_cutoff = as_of_ts.saturating_sub(followup_window_secs);
-    let eligible_bootstraps: Vec<_> = bootstraps
+    let eligible_bootstraps: Vec<_> = attributed_bootstraps
         .iter()
         .copied()
         .filter(|bootstrap| bootstrap.ts <= eligibility_cutoff)
@@ -40113,6 +40123,7 @@ pub fn compute_practical_workflow_scorecard(
             call.ok
                 && call.ts > bootstrap.ts
                 && call.ts <= bootstrap.ts.saturating_add(followup_window_secs)
+                && call.mcp_session_id == bootstrap.mcp_session_id
                 && !matches!(
                     call.tool_name.as_str(),
                     "session_bootstrap" | "practical_workflow_scorecard"
@@ -40160,11 +40171,16 @@ pub fn compute_practical_workflow_scorecard(
     let mut recommendations = Vec::new();
     if bootstraps.is_empty() {
         recommendations.push("No bootstrap signal in this window; widen the window before judging continuation.".into());
+    } else if attributed_bootstraps.is_empty() {
+        recommendations.push("No attributed bootstrap is available yet; reconnect or start a current MCP process before judging same-session continuation.".into());
     } else if eligible_bootstraps_without_followup > 0 {
-        recommendations.push("Inspect eligible bootstraps without later global MCP activity; exact per-session attribution is unavailable in current telemetry.".into());
+        recommendations.push("Inspect eligible MCP sessions without a successful same-session follow-up inside the selected recovery window.".into());
     }
     if right_censored_bootstraps > 0 {
         recommendations.push("Re-run after the follow-up window closes before judging right-censored recent bootstraps.".into());
+    }
+    if legacy_unattributed_bootstraps > 0 {
+        recommendations.push("Historical pre-attribution bootstraps are reported as legacy and excluded from the same-session rate.".into());
     }
     if repeated_failure_loops > 0 {
         recommendations.push("Inspect repeated same-tool failures before retrying or requesting authorization again.".into());
@@ -40172,7 +40188,7 @@ pub fn compute_practical_workflow_scorecard(
     recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
 
     PracticalWorkflowScorecard {
-        schema_version: 2,
+        schema_version: 3,
         read_only: true,
         window_secs,
         total_calls: calls.len(),
@@ -40180,13 +40196,15 @@ pub fn compute_practical_workflow_scorecard(
         failed_calls,
         continuation: PracticalContinuationMetrics {
             bootstrap_calls: bootstraps.len(),
+            attributed_bootstrap_calls: attributed_bootstraps.len(),
+            legacy_unattributed_bootstraps,
             eligible_bootstrap_calls: eligible_bootstraps.len(),
             right_censored_bootstraps,
             bootstraps_with_followup: followup_latencies.len(),
             eligible_bootstraps_without_followup,
             followup_rate,
             median_followup_secs,
-            interpretation: "A successful global MCP call after bootstrap is a continuation proxy, not same-session attribution or proof that recalled context was correct. Recent bootstraps without a complete follow-up window are right-censored and excluded from the rate.",
+            interpretation: "A successful call from the same random MCP-process session after bootstrap is a continuation proxy, not proof that recalled context was correct. Legacy unattributed and recent right-censored bootstraps are excluded from the rate.",
         },
         completion: PracticalCompletionMetrics {
             finalize_signals: calls
@@ -40234,7 +40252,7 @@ impl McpTool for PracticalWorkflowScorecardTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Read-only practical continuity scorecard over existing MCP telemetry. Reports bootstrap follow-up, completion signals, failure recovery and retry loops. Authorization prompts and manual interventions stay explicitly unavailable because Codex-native UI events are not in this telemetry.".into(),
+            description: "Read-only practical continuity scorecard over existing MCP telemetry. Reports anonymous same-MCP-session bootstrap follow-up, right-censoring, legacy attribution coverage, completion signals, failure recovery and retry loops. Authorization prompts and manual interventions stay explicitly unavailable because Codex-native UI events are not in this telemetry.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
