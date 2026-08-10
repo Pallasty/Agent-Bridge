@@ -2958,15 +2958,27 @@ async fn wait_for_embedding_model_if_cold_fallback(backend_name: &str, content: 
         return;
     }
 
-    let max_wait_ms = std::env::var("AGENT_BRIDGE_ONNX_COLD_WRITE_WAIT_MS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(30_000)
-        .min(120_000);
+    let max_wait_ms = embedding_cold_write_wait_ms(
+        std::env::var("AGENT_BRIDGE_ONNX_COLD_WRITE_WAIT_MS")
+            .ok()
+            .as_deref(),
+    );
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(max_wait_ms);
     while !crate::vector::model_init_done() && std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
+}
+
+/// Keep foreground memory writes responsive while the optional ONNX model is
+/// initializing. A hash fallback is explicitly labelled as such and the
+/// existing reindex sweep can repair it after the model becomes ready, so a
+/// 30-second foreground stall buys little practical continuity. Deployments
+/// that prefer first-write embedding quality can still raise the budget.
+fn embedding_cold_write_wait_ms(configured: Option<&str>) -> u64 {
+    configured
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(2_000)
+        .min(120_000)
 }
 
 async fn perceive_with_cold_fallback_retry(
@@ -13891,6 +13903,19 @@ mod tests {
     #[cfg(feature = "codebase-index-bounded-native-a1")]
     use crate::CodebaseIndexA1DispatchStrategy;
     use crate::{MemoryListSort, PlanStep, StateStore};
+
+    #[test]
+    fn cold_embedding_write_wait_defaults_to_two_seconds() {
+        assert_eq!(embedding_cold_write_wait_ms(None), 2_000);
+        assert_eq!(embedding_cold_write_wait_ms(Some("invalid")), 2_000);
+    }
+
+    #[test]
+    fn cold_embedding_write_wait_honors_override_with_safety_cap() {
+        assert_eq!(embedding_cold_write_wait_ms(Some("0")), 0);
+        assert_eq!(embedding_cold_write_wait_ms(Some("15000")), 15_000);
+        assert_eq!(embedding_cold_write_wait_ms(Some("999999")), 120_000);
+    }
 
     fn mk_record(key: &str, updated_at: i64) -> MemoryRecord {
         MemoryRecord {
