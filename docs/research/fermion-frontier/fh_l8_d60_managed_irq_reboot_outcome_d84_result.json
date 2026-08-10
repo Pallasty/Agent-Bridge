@@ -1,0 +1,19 @@
+{
+  "status": "VERIFIED_D84_REBOOT_PARAMETER_PRESENT_MANAGED_IRQ_NOT_ISOLATED",
+  "source_pin_count": 5,
+  "boot_parameter_admitted": true,
+  "target_irq_identity_admitted": true,
+  "configured_affinity_excludes_target": false,
+  "effective_affinity_excludes_target": false,
+  "reboot_acceptance_admitted": false,
+  "transaction_residue_absent": true,
+  "fresh_d82r_receipt_authorized": false,
+  "runtime_lock_precommitted": false,
+  "measurement_authorized": false,
+  "timing_measurements_executed": 0,
+  "scientific_kernel_calls_executed": 0,
+  "numeric_runtime_seconds_proven": false,
+  "full53_execution_authorized": false,
+  "decision": "NO_GO_D84_MANAGED_IRQ_BOOT_PARAMETER_INEFFECTIVE_FOR_NVME0Q15",
+  "next_gate": "APPLY_IRQAFFINITY_HOUSEKEEPING_PLUS_MANAGED_IRQ_BOOT_PLAN_THEN_RESTART"
+}
