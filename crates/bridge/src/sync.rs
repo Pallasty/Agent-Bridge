@@ -159,6 +159,7 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
          cd repo && git rebase --abort (or --quit), then check out main."
     })?;
 
+    let remote_reindex_batch_size = prepare_remote_reindex();
     let memory_file = repo.join(MEMORY_FILE);
     let memory_edges_file = repo.join(MEMORY_EDGES_FILE);
     let store = open_store().await?;
@@ -209,7 +210,7 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
     // an explicit remote embedding delegate, opportunistically drain one
     // bounded stale batch. Failure is non-fatal: cross-node convergence must
     // not depend on embedding availability.
-    if let Some(batch_size) = sync_remote_reindex_batch_size() {
+    if let Some(batch_size) = remote_reindex_batch_size {
         match store.memory_reindex_embeddings(batch_size, true).await {
             Ok(updated) if verbose || updated > 0 => {
                 eprintln!(
@@ -859,6 +860,24 @@ fn sync_remote_reindex_batch_size() -> Option<usize> {
             .ok()
             .as_deref(),
     )
+}
+
+fn prepare_remote_reindex() -> Option<usize> {
+    let batch_size = sync_remote_reindex_batch_size()?;
+    match crate::remote_embed::install_strict_if_configured() {
+        crate::remote_embed::InstallOutcome::Installed(url) => {
+            eprintln!("[sync] strict remote embedding delegation active: {url}");
+            Some(batch_size)
+        }
+        crate::remote_embed::InstallOutcome::NotConfigured => None,
+        crate::remote_embed::InstallOutcome::AlreadyInitialized => {
+            eprintln!(
+                "[sync] WARNING: remote embedding reindex skipped; an embedding backend \
+                 was already initialized"
+            );
+            None
+        }
+    }
 }
 
 fn ensure_command_on_path(cmd: &str, hint: &str) -> Result<()> {
