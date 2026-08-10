@@ -215,6 +215,9 @@ pub struct McpToolSourceStats {
 /// K minutes, which were never referenced).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct McpToolCallRow {
+    /// Monotonic SQLite row id used to order calls that share one-second
+    /// timestamp resolution.
+    pub id: i64,
     pub ts: i64,
     pub tool_name: String,
     /// Random, process-local MCP connection identifier. `None` denotes

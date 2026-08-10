@@ -5085,7 +5085,7 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Vec<McpToolCallRow>> {
                 let mut stmt = c.prepare(
-                    "SELECT ts, tool_name, duration_ms, ok, args_size, result_size,
+                    "SELECT id, ts, tool_name, duration_ms, ok, args_size, result_size,
                             mcp_session_id
                      FROM mcp_tool_calls
                      WHERE ts >= ?1
@@ -5094,13 +5094,14 @@ impl StateStore for SqliteStore {
                 )?;
                 let iter = stmt.query_map(params![cutoff, lim], |row| {
                     Ok(McpToolCallRow {
-                        ts: row.get(0)?,
-                        tool_name: row.get(1)?,
-                        duration_ms: row.get::<_, i64>(2)? as u32,
-                        ok: row.get::<_, i64>(3)? != 0,
-                        args_size: row.get::<_, Option<i64>>(4)?.map(|v| v.max(0) as u32),
-                        result_size: row.get::<_, Option<i64>>(5)?.map(|v| v.max(0) as u32),
-                        mcp_session_id: row.get(6)?,
+                        id: row.get(0)?,
+                        ts: row.get(1)?,
+                        tool_name: row.get(2)?,
+                        duration_ms: row.get::<_, i64>(3)? as u32,
+                        ok: row.get::<_, i64>(4)? != 0,
+                        args_size: row.get::<_, Option<i64>>(5)?.map(|v| v.max(0) as u32),
+                        result_size: row.get::<_, Option<i64>>(6)?.map(|v| v.max(0) as u32),
+                        mcp_session_id: row.get(7)?,
                     })
                 })?;
                 let collected: std::result::Result<Vec<_>, _> = iter.collect();

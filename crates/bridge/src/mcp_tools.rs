@@ -40114,14 +40114,14 @@ pub fn compute_practical_workflow_scorecard(
         .copied()
         .filter(|bootstrap| bootstrap.ts <= eligibility_cutoff)
         .collect();
-    let right_censored_bootstraps = bootstraps
+    let right_censored_bootstraps = attributed_bootstraps
         .len()
         .saturating_sub(eligible_bootstraps.len());
     let mut followup_latencies = Vec::new();
     for bootstrap in &eligible_bootstraps {
         if let Some(next) = calls.iter().find(|call| {
             call.ok
-                && call.ts > bootstrap.ts
+                && call.id > bootstrap.id
                 && call.ts <= bootstrap.ts.saturating_add(followup_window_secs)
                 && call.mcp_session_id == bootstrap.mcp_session_id
                 && !matches!(
