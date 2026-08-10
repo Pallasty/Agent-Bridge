@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "contract_id": "FH-L8-D60-OFFLINE-BOOT-PAYLOAD-GATE-D88-V1",
+  "baseline_commit": "bc9036363f464d72c76e098c186cd6f5d3b84f7d",
+  "source_pins": {
+    "FH_L8_D60_MMC_EXECUTION_PREFLIGHT_D87R_ZH.md": "d3d924fdd94dae447064ad0f181584c1f19f45540ba762c22973d647b15da786",
+    "fh_l8_d60_mmc_execution_preflight_d87r_contract.json": "9e1200025d5901d2e521c70b7bc9eba12350abf089e6ef3f0f365f706a23a634",
+    "fh_l8_d60_mmc_execution_preflight_d87r_result.json": "18364af53c04381d092a1b1547298ad08ea04f27e7411a4dc61a8a38637bd336"
+  },
+  "manifest": "fh_l8_d60_offline_boot_payload_d88_manifest.json",
+  "requirements": {
+    "readable_artifacts_minimum": 3,
+    "d82r_source_artifacts_minimum": 5,
+    "protected_boot_artifacts_require_sha256": true,
+    "root_image_builder_required": true
+  },
+  "authority": {
+    "observation_only": true,
+    "package_install_authorized": false,
+    "privileged_boot_read_authorized": false,
+    "root_image_build_authorized": false,
+    "mmc_write_authorized": false,
+    "reboot_authorized": false,
+    "d82r_transaction_authorized": false,
+    "measurement_authorized": false,
+    "full53_execution_authorized": false
+  }
+}
