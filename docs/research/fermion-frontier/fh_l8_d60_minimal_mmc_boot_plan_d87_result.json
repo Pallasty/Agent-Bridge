@@ -1,0 +1,19 @@
+{
+  "status": "VERIFIED_D87_MINIMAL_MMC_BOOT_PLAN_CLOSED",
+  "plan_complete": true,
+  "layout_fits_candidate": true,
+  "planned_root_capacity_bytes": 63327698944,
+  "existing_media_backup_gate_complete": false,
+  "independent_boot_gate_complete": false,
+  "all_preflight_evidence_complete": false,
+  "execution_ready": false,
+  "partition_authorized": false,
+  "format_authorized": false,
+  "bootloader_change_authorized": false,
+  "reboot_authorized": false,
+  "d82r_transaction_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "PLAN_READY_EXECUTION_BLOCKED_PENDING_D87R_PREFLIGHT_AND_OWNER_ADMISSION",
+  "next_gate": "OWNER_ADMIT_D87R_MMC_BOOT_IMAGE_EXECUTION"
+}
