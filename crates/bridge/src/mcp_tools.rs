@@ -19871,8 +19871,17 @@ impl McpTool for SessionBootstrapTool {
         ) {
             lines.extend(block);
         }
+        // Work memory already has a resume-aware block above. Exclude it from
+        // the generic prefix-snippet list so bootstrap does not duplicate the
+        // same lane with metadata (`cwd`, slot, timestamp) instead of its
+        // actionable Summary/Next Step or precompact tail.
+        let regular_rows: Vec<MemoryRecord> = rows
+            .iter()
+            .filter(|row| row.kind != WORK_MEMORY_KIND)
+            .cloned()
+            .collect();
         lines.extend(cap_block_lines(
-            format_bootstrap_memory_rows(&rows, snippet_len),
+            format_bootstrap_memory_rows(&regular_rows, snippet_len),
             BUDGET_BOOTSTRAP_ROWS,
         ));
         lines.push("=== End Bootstrap ===".to_string());

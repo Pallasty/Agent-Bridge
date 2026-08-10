@@ -2334,6 +2334,64 @@ async fn session_bootstrap_surfaces_work_memory_block() {
     assert!(text.contains("Bootstrap should surface this scratchpad note"));
 }
 
+#[tokio::test]
+async fn session_bootstrap_recovers_actionable_work_memory_after_store_restart() {
+    use std::sync::Arc;
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-work-memory-restart-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let db_path = temp_dir.join("state.db");
+    let cwd = "/tmp/agent-bridge-restart-resume";
+
+    let first_store = ab_store::SqliteStore::open(&db_path)
+        .await
+        .expect("open first store");
+    let first_hub = crate::Hub::builder()
+        .store(Arc::new(first_store))
+        .build();
+    WorkMemoryTool::new(first_hub.clone())
+        .execute(
+            json!({
+                "op": "save",
+                "cwd": cwd,
+                "session_id": "before-restart",
+                "summary": "Network interruption happened after the implementation landed.",
+                "next_step": "Verify the reopened store and continue without repeating work.",
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("save before restart");
+    drop(first_hub);
+
+    let reopened_store = ab_store::SqliteStore::open(&db_path)
+        .await
+        .expect("reopen store after simulated process restart");
+    let reopened_hub = crate::Hub::builder()
+        .store(Arc::new(reopened_store))
+        .build();
+    let boot = SessionBootstrapTool::new(reopened_hub)
+        .execute(
+            json!({"cwd": cwd, "frontend": "claude-code", "limit": 5}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("bootstrap after restart");
+    let text = result_text(&boot);
+    assert!(text.contains("Network interruption happened"));
+    assert!(text.contains("Verify the reopened store"));
+    assert!(!text.contains("cwd: /tmp/agent-bridge-restart-resume"));
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
 #[test]
 fn work_memory_resume_row_prefers_structured_next_step() {
     let row = mk_mem_scoped(
