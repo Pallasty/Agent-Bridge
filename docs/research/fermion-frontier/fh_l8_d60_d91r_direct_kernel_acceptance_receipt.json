@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "receipt_id": "FH-L8-D60-DIRECT-KERNEL-ACCEPTANCE-D91R-20260810",
+  "decision": "ACCEPT_DIRECT_KERNEL_ONLY_LIMITED_REHEARSAL_EVIDENCE",
+  "accepted_evidence": {
+    "direct_kernel_boot_pass": true,
+    "systemd_basic_target_reached": true,
+    "rootfs_mounted_in_qemu": true,
+    "efi_binary_format_pass": true
+  },
+  "rejected_or_open": {
+    "uefi_grub_kernel_chain_pass": false,
+    "physical_sd_boot_proven": false,
+    "firmware_sd_capability_proven": false,
+    "root_esp_uuid_materialized": false
+  },
+  "scope": {
+    "qemu_only": true,
+    "mmc_touched": false,
+    "host_rebooted": false,
+    "efi_variables_changed": false,
+    "d82r_executed": false,
+    "measurement_executed": false
+  }
+}
