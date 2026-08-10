@@ -7,6 +7,9 @@ A Unix-native AI-agent control plane: desktop notifications, cross-session memor
 MCP tool registry, terminal multiplexer glue, browser automation (CDP), git-worktree
 orchestration, and sub-agent spawning — all pluggable via Rust traits.
 
+Current single-developer priorities and frozen research lanes are maintained in
+[`docs/ACTIVE-PRODUCT-ROADMAP.md`](docs/ACTIVE-PRODUCT-ROADMAP.md).
+
 ## Install
 
 agent-bridge is distributed as **source only** — there are no prebuilt
@@ -26,6 +29,22 @@ to inspect the current state; choosing a new version or tag remains an explicit
 owner release decision. `scripts/agent-bridge-release-candidate-audit.py`
 profiles the post-tag change set, format debt, and clean-worktree evidence; it
 recommends a candidate version but never writes one or creates a tag.
+
+For day-to-day source/install drift, run the smaller project truth snapshot:
+
+```bash
+python3 scripts/agent-bridge-project-truth-snapshot.py \
+  --probe-remotes --inspect-worktrees \
+  --binary ~/.local/bin/agent-bridge.real
+```
+
+It inspects the current checkout, configured fetch/push endpoints, installed
+binary provenance, and dirty-worktree counts without fetching, changing refs,
+cleaning WIP, installing, or deploying. The explicitly selected binary is run
+with `--version`; the snapshot reports that subprocess separately and does not
+claim to prove the binary's own side effects. `READY_ALIGNED` means the observed
+identities agree; it still requires a fresh-process health/MCP smoke before live
+acceptance.
 
 You need a Rust toolchain ([rustup](https://rustup.rs)) and a working C
 linker; no system libraries otherwise (`zbus` and `rusqlite` with the
