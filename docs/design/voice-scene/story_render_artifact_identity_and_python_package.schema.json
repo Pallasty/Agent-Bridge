@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bridge.local/schemas/story-render-artifact-package-s638-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "baseline", "source_evidence", "package_contract", "blockers", "authority", "claims", "next_gate", "receipt_sha256"],
+  "properties": {
+    "schema": {"const": "agent_bridge.story_render_artifact_identity_and_python_package.v1"},
+    "status": {"const": "source_and_isolated_package_tests_accepted_runtime_closed"},
+    "baseline": {"type": "object"},
+    "source_evidence": {"type": "array", "minItems": 2},
+    "package_contract": {"type": "object"},
+    "blockers": {"type": "object"},
+    "authority": {"type": "object"},
+    "claims": {"type": "object"},
+    "next_gate": {"type": "object"},
+    "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
