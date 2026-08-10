@@ -1,0 +1,20 @@
+{
+  "status": "VERIFIED_D86_ALTERNATE_STORAGE_STRUCTURAL_CANDIDATE_ONLY",
+  "candidate_disk": "mmcblk0",
+  "candidate_controller_independent": true,
+  "candidate_irq_excludes_target_cpu": true,
+  "candidate_unmounted": true,
+  "minimal_image_capacity_pass": true,
+  "full_workspace_clone_required_bytes": 533148512256,
+  "full_workspace_clone_capacity_pass": false,
+  "independent_boot_path_proven": false,
+  "nvme_dependency_absent": false,
+  "minimal_measurement_bundle_proven": false,
+  "structural_candidate": true,
+  "alternate_topology_admitted": false,
+  "d82r_transaction_authorized": false,
+  "measurement_authorized": false,
+  "full53_execution_authorized": false,
+  "decision": "STRUCTURAL_CANDIDATE_ONLY_D86_MMC_REQUIRES_MINIMAL_BOOT_IMAGE",
+  "next_gate": "OWNER_ADMIT_D87_MINIMAL_MMC_BOOT_IMAGE_PLAN"
+}
