@@ -40215,8 +40215,9 @@ pub fn compute_practical_workflow_scorecard(
     if repeated_failure_loops > 0 {
         recommendations.push("Inspect repeated same-tool failures before retrying or requesting authorization again.".into());
     }
-    if calls.len() >= 20 && coordination_calls.saturating_mul(2) > calls.len() {
-        recommendations.push("More than half of observed calls are workflow coordination (forum read/post, memory save, capability checks, or context snapshots); collapse repeated gates and keep only milestone coordination.".into());
+    if calls.len() >= 20 && coordination_calls.saturating_mul(5) >= calls.len().saturating_mul(2)
+    {
+        recommendations.push("At least two in five observed calls are workflow coordination (forum read/post, memory save, capability checks, or context snapshots); inspect repeated gates and keep only milestone coordination.".into());
     }
     recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
 

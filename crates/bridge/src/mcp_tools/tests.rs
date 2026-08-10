@@ -33907,7 +33907,7 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
     assert!(!report
         .recommendations
         .iter()
-        .any(|item| item.contains("More than half")));
+        .any(|item| item.contains("two in five")));
     assert_eq!(report.operator_burden.instrumentation_status, "unavailable");
     assert_eq!(report.operator_burden.repeated_authorization_prompts, None);
     assert_eq!(report.operator_burden.manual_interventions, None);
@@ -33944,7 +33944,7 @@ fn practical_scorecard_flags_coordination_majority() {
     assert!(report
         .recommendations
         .iter()
-        .any(|item| item.contains("More than half")));
+        .any(|item| item.contains("two in five")));
 }
 
 #[test]
