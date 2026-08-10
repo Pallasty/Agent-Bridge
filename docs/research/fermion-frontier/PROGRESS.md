@@ -2,6 +2,16 @@
 
 Status date: 2026-08-09
 
+## 2026-08-09 — FH-L8 D83 runtime-rule precommit
+
+- Froze the D81/D82 empirical runtime-rule packet: 459 fresh samples for each of five operation
+  classes, 2,295 total, and a 240-second per-sample operational timeout.
+- Requires a fresh post-boot all-green D82R isolation receipt plus environment recapture from the
+  exact CPU15 isolated service. D79 service-only observation is explicitly not scope proof.
+- No receipt or recapture is admitted in the committed state. Runtime lock, measurement, numeric
+  proof and full53 authority remain closed; next gate is
+  `D82R_BOOT_RESTART_FRESH_RECEIPT_THEN_D83_REVERIFY`.
+
 ## 2026-08-09 — FH-L8 D82R reversible CPU15 isolation transaction
 
 - Implemented plan/apply/verify/run/rollback with pre-mutation state persistence, exact IRQ
