@@ -143,7 +143,9 @@ use crate::ide::{
     queue_ide_command_with_dir_policy, read_ide_snapshot, IdeCommandDirPolicy, IdeCommandOptions,
     IdeSnapshotOptions,
 };
-use crate::project::{changes_digest, detect_project, git_topology_preflight, resolve_cwd};
+use crate::project::{
+    changes_digest, detect_project, git_topology_preflight, resolve_cwd, session_git_currentness,
+};
 use crate::security::Cap;
 use crate::seed_substrate as ab_seed_bridge;
 use crate::session_handoff::build_handoff_brief;
@@ -19079,6 +19081,7 @@ const BUDGET_SIBLING_WARN: usize = 200;
 // B1 audit-gap v0 (2026-05-19) — project-state digest. 7 rows max
 // (3 decisions + 1 handoff + 3 projects) × ~120 char snippets ≈ 200 tokens.
 const BUDGET_PROJECT_DIGEST: usize = 220;
+const BUDGET_GIT_CURRENTNESS: usize = 120;
 // SSB §3.6 (2026-06-15) — recent verify-first NotVerified events surfaced at
 // cold start. Top 5 inert/failed actions × ~80 char ≈ 160 tokens; hidden when
 // none, so the budget only bites on a session that actually had a no-op.
@@ -19453,6 +19456,43 @@ impl McpTool for SessionBootstrapTool {
                 String::new(),
             ]
         };
+
+        // Agent-facing orientation guard. This is read-only and deliberately
+        // uses only local refs: bootstrap must never fetch, switch, reset, or
+        // turn a possibly dirty feature checkout into an implicit mutation.
+        if let Some(state) = session_git_currentness(std::path::Path::new(&cwd)) {
+            let warnings = state["warnings"]
+                .as_array()
+                .map(|xs| {
+                    xs.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            let block = vec![
+                "=== Git Currentness Warning (read-only) ===".to_string(),
+                format!(
+                    "branch={} head={} target={} ahead={} behind={} clean={} warnings={}",
+                    state["branch"].as_str().unwrap_or("?"),
+                    state["head"]
+                        .as_str()
+                        .unwrap_or("?")
+                        .chars()
+                        .take(12)
+                        .collect::<String>(),
+                    state["target_ref"].as_str().unwrap_or("?"),
+                    state["ahead"].as_u64().unwrap_or(0),
+                    state["behind"].as_u64().unwrap_or(0),
+                    state["clean"].as_bool().unwrap_or(false),
+                    warnings,
+                ),
+                "Verify the intended worktree/branch before continuing; no Git state was changed."
+                    .to_string(),
+                String::new(),
+            ];
+            lines.extend(cap_block_lines(block, BUDGET_GIT_CURRENTNESS));
+        }
 
         // Inject USER.md profile if present.
         if let Ok(profile) = std::fs::read_to_string(user_profile_path()) {
