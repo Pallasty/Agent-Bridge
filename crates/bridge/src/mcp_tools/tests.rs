@@ -7044,9 +7044,10 @@ fn code_review_context_preview_schema_stays_bounded_and_default_off() {
 fn tool_policy_codex_essential_exposes_extras_list() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let extras = p.extras();
-    // 61 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+    // 62 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
     //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-    //      + DIRECT(51: 6 avatar observation/sync/renderer tools
+    //      + DIRECT(52: practical_workflow_scorecard
+    //      + 6 avatar observation/sync/renderer tools
     //      + xiao_shu_action_request + 14 mobile bridge tools
     //      + memory_graph_topology + memory_retrieval_feedback
     //      + memory_consolidation_queue
@@ -7073,9 +7074,10 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     // profiles, not codex-essential direct extras.
     // T6 candidate-expansion gate ceremony tools are all/Niche only and
     // must not re-enter Codex's eager direct extras.
-    // 61 curated extras + 5 prune-continuity entries (2026-07: demoted
+    // 62 curated extras + 5 prune-continuity entries (2026-07: demoted
     // Essential->Standard, kept in codex-essential by name).
-    assert_eq!(extras.len(), 66);
+    assert_eq!(extras.len(), 67);
+    assert!(extras.contains(&"practical_workflow_scorecard"));
     assert!(extras.contains(&"ide_snapshot"));
     assert!(extras.contains(&"ide_command"));
     assert!(extras.contains(&"forum_post"));
@@ -33864,6 +33866,45 @@ fn attention_report_handles_missing_result_size() {
     }];
     let r = compute_attention_report(&calls, 7200, 2500, 600);
     assert_eq!(r.high_yield_calls, 0);
+}
+
+#[test]
+fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
+    let calls = vec![
+        mk_call(100, "session_bootstrap", true, 2_000),
+        mk_call(112, "memory_get", true, 500),
+        mk_call(200, "memory_save", false, 100),
+        mk_call(205, "memory_save", false, 100),
+        mk_call(215, "memory_save", true, 500),
+        mk_call(300, "plan_update", true, 500),
+        mk_call(400, "session_finalize", true, 500),
+    ];
+    let report = compute_practical_workflow_scorecard(&calls, 86_400, 600);
+
+    assert_eq!(report.total_calls, 7);
+    assert_eq!(report.successful_calls, 5);
+    assert_eq!(report.failed_calls, 2);
+    assert_eq!(report.continuation.bootstrap_calls, 1);
+    assert_eq!(report.continuation.bootstraps_with_followup, 1);
+    assert_eq!(report.continuation.followup_rate, Some(1.0));
+    assert_eq!(report.continuation.median_followup_secs, Some(12));
+    assert_eq!(report.completion.finalize_signals, 1);
+    assert_eq!(report.completion.plan_update_signals, 1);
+    assert_eq!(report.recovery.failures_followed_by_success, 2);
+    assert_eq!(report.recovery.repeated_failure_loops, 1);
+    assert_eq!(report.operator_burden.instrumentation_status, "unavailable");
+    assert_eq!(report.operator_burden.repeated_authorization_prompts, None);
+    assert_eq!(report.operator_burden.manual_interventions, None);
+}
+
+#[test]
+fn practical_scorecard_keeps_missing_signals_explicit() {
+    let report = compute_practical_workflow_scorecard(&[], 3_600, 600);
+    assert_eq!(report.continuation.followup_rate, None);
+    assert_eq!(report.continuation.median_followup_secs, None);
+    assert_eq!(report.completion.finalize_signals, 0);
+    assert_eq!(report.recovery.repeated_failure_loops, 0);
+    assert!(report.recommendations[0].contains("No bootstrap signal"));
 }
 
 #[tokio::test]

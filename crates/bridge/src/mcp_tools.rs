@@ -40033,6 +40033,234 @@ impl McpTool for ToolCallAttentionReportTool {
 }
 
 // ===========================================================================
+//        practical_workflow_scorecard — product continuity outcomes
+// ===========================================================================
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalWorkflowScorecard {
+    pub schema_version: u32,
+    pub read_only: bool,
+    pub window_secs: i64,
+    pub total_calls: usize,
+    pub successful_calls: usize,
+    pub failed_calls: usize,
+    pub continuation: PracticalContinuationMetrics,
+    pub completion: PracticalCompletionMetrics,
+    pub recovery: PracticalRecoveryMetrics,
+    pub operator_burden: PracticalOperatorBurdenMetrics,
+    pub recommendations: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalContinuationMetrics {
+    pub bootstrap_calls: usize,
+    pub bootstraps_with_followup: usize,
+    pub followup_rate: Option<f64>,
+    pub median_followup_secs: Option<i64>,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalCompletionMetrics {
+    pub finalize_signals: usize,
+    pub plan_update_signals: usize,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalRecoveryMetrics {
+    pub failed_calls: usize,
+    pub failures_followed_by_success: usize,
+    pub repeated_failure_loops: usize,
+    pub interpretation: &'static str,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct PracticalOperatorBurdenMetrics {
+    pub repeated_authorization_prompts: Option<usize>,
+    pub manual_interventions: Option<usize>,
+    pub instrumentation_status: &'static str,
+    pub interpretation: &'static str,
+}
+
+pub fn compute_practical_workflow_scorecard(
+    calls: &[ab_store::McpToolCallRow],
+    window_secs: i64,
+    followup_window_secs: i64,
+) -> PracticalWorkflowScorecard {
+    let successful_calls = calls.iter().filter(|call| call.ok).count();
+    let failed_calls = calls.len().saturating_sub(successful_calls);
+    let bootstraps: Vec<_> = calls
+        .iter()
+        .filter(|call| call.ok && call.tool_name == "session_bootstrap")
+        .collect();
+    let mut followup_latencies = Vec::new();
+    for bootstrap in &bootstraps {
+        if let Some(next) = calls.iter().find(|call| {
+            call.ok
+                && call.ts > bootstrap.ts
+                && call.ts <= bootstrap.ts.saturating_add(followup_window_secs)
+                && !matches!(
+                    call.tool_name.as_str(),
+                    "session_bootstrap" | "practical_workflow_scorecard"
+                )
+        }) {
+            followup_latencies.push(next.ts.saturating_sub(bootstrap.ts));
+        }
+    }
+    followup_latencies.sort_unstable();
+    let median_followup_secs = if followup_latencies.is_empty() {
+        None
+    } else {
+        Some(followup_latencies[followup_latencies.len() / 2])
+    };
+    let followup_rate = if bootstraps.is_empty() {
+        None
+    } else {
+        Some(followup_latencies.len() as f64 / bootstraps.len() as f64)
+    };
+
+    let failures: Vec<_> = calls
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| !call.ok)
+        .collect();
+    let failures_followed_by_success = failures
+        .iter()
+        .filter(|(index, failure)| {
+            calls[index.saturating_add(1)..].iter().any(|call| {
+                call.ok && call.ts <= failure.ts.saturating_add(followup_window_secs)
+            })
+        })
+        .count();
+    let repeated_failure_loops = failures
+        .windows(2)
+        .filter(|pair| {
+            pair[0].1.tool_name == pair[1].1.tool_name
+                && pair[1].1.ts.saturating_sub(pair[0].1.ts) <= 300
+        })
+        .count();
+
+    let mut recommendations = Vec::new();
+    if bootstraps.is_empty() {
+        recommendations.push("No bootstrap signal in this window; widen the window before judging continuation.".into());
+    } else if followup_latencies.len() < bootstraps.len() {
+        recommendations.push("Inspect bootstrap sessions without a successful follow-up inside the selected recovery window.".into());
+    }
+    if repeated_failure_loops > 0 {
+        recommendations.push("Inspect repeated same-tool failures before retrying or requesting authorization again.".into());
+    }
+    recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
+
+    PracticalWorkflowScorecard {
+        schema_version: 1,
+        read_only: true,
+        window_secs,
+        total_calls: calls.len(),
+        successful_calls,
+        failed_calls,
+        continuation: PracticalContinuationMetrics {
+            bootstrap_calls: bootstraps.len(),
+            bootstraps_with_followup: followup_latencies.len(),
+            followup_rate,
+            median_followup_secs,
+            interpretation: "A successful call after bootstrap is a continuation proxy, not proof that recalled context was correct.",
+        },
+        completion: PracticalCompletionMetrics {
+            finalize_signals: calls
+                .iter()
+                .filter(|call| call.ok && call.tool_name == "session_finalize")
+                .count(),
+            plan_update_signals: calls
+                .iter()
+                .filter(|call| call.ok && call.tool_name == "plan_update")
+                .count(),
+            interpretation: "Finalize and plan-update calls are completion signals; MCP telemetry cannot prove the user goal was achieved.",
+        },
+        recovery: PracticalRecoveryMetrics {
+            failed_calls,
+            failures_followed_by_success,
+            repeated_failure_loops,
+            interpretation: "A later successful call is a recovery proxy; repeated same-tool failures within five minutes flag a retry loop.",
+        },
+        operator_burden: PracticalOperatorBurdenMetrics {
+            repeated_authorization_prompts: None,
+            manual_interventions: None,
+            instrumentation_status: "unavailable",
+            interpretation: "Codex-native approval prompts and out-of-band operator actions are outside Agent-Bridge MCP telemetry.",
+        },
+        recommendations,
+    }
+}
+
+pub struct PracticalWorkflowScorecardTool {
+    hub: Hub,
+}
+
+impl PracticalWorkflowScorecardTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for PracticalWorkflowScorecardTool {
+    fn name(&self) -> &'static str {
+        "practical_workflow_scorecard"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only practical continuity scorecard over existing MCP telemetry. Reports bootstrap follow-up, completion signals, failure recovery and retry loops. Authorization prompts and manual interventions stay explicitly unavailable because Codex-native UI events are not in this telemetry.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer", "minimum": 60, "maximum": 2592000,
+                        "default": 604800,
+                        "description": "Telemetry lookback. Default 7 days."
+                    },
+                    "followup_window_secs": {
+                        "type": "integer", "minimum": 30, "maximum": 3600,
+                        "default": 600,
+                        "description": "Window for bootstrap continuation and failure recovery proxies."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(store) => store.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(Value::as_i64)
+            .unwrap_or(604_800)
+            .clamp(60, 2_592_000);
+        let followup_window_secs = args
+            .get("followup_window_secs")
+            .and_then(Value::as_i64)
+            .unwrap_or(600)
+            .clamp(30, 3_600);
+        let calls = match store.recent_mcp_tool_calls(window_secs, 2_000).await {
+            Ok(calls) => calls,
+            Err(error) => return Ok(ToolResult::error(format!("recent_mcp_tool_calls: {error}"))),
+        };
+        let report = compute_practical_workflow_scorecard(
+            &calls,
+            window_secs,
+            followup_window_secs,
+        );
+        let payload = serde_json::to_value(&report).unwrap_or_else(|_| json!({}));
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //        embed_text — Phase 2.1 raw encoder exposure for external apps
 // ===========================================================================
 
@@ -42450,6 +42678,8 @@ const CODEX_ESSENTIAL_GROUPS: &[&[&str]] = &[
 /// collab capability groups. Keep these explicit so the group drift guardrails
 /// stay about forum/presence/IDE families only.
 const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
+    // Compact read-only product outcomes for practical continuity work.
+    "practical_workflow_scorecard",
     // Avatar observation and sidecar-to-presence bridge: expose the read path
     // plus an explicit sync surface so Codex can inspect Xiao Shu without
     // widening to every Standard tool.
@@ -42615,6 +42845,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
+            | "practical_workflow_scorecard"
             | "context_governor_snapshot"
             | "memory_search"
             | "memory_save"
@@ -47687,6 +47918,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(ToolCallAttentionReportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(PracticalWorkflowScorecardTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
