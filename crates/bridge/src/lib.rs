@@ -43,6 +43,9 @@ pub mod dream_distill;
 pub mod dream_replay;
 pub mod embedding_dim_guard;
 pub mod embodiment_projection;
+/// Default-off P4 runtime gate; no MCP registration or adapter execution.
+#[cfg(feature = "embodiment-runtime-p4")]
+pub mod embodiment_runtime;
 /// Default-off Slice C1 orchestration seam. No store adapter or runtime caller
 /// is provided by this feature.
 #[cfg(feature = "episode-observation-slice-c1")]

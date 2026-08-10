@@ -1026,6 +1026,102 @@ async fn agent_task_contract_preview_is_pure_and_exposed_to_codex() {
     assert!(invalid.is_error);
 }
 
+#[cfg(feature = "embodiment-runtime-p4")]
+#[test]
+fn embodiment_projection_preview_config_is_explicit_and_fail_closed() {
+    assert_eq!(parse_projection_preview_config(None, None).unwrap(), None);
+    assert_eq!(
+        parse_projection_preview_config(Some("0"), Some("terminal_write")).unwrap(),
+        None
+    );
+    assert!(parse_projection_preview_config(Some("1"), None).is_err());
+    assert!(parse_projection_preview_config(Some("1"), Some("terminal write")).is_err());
+    assert_eq!(
+        parse_projection_preview_config(Some("1"), Some("terminal_write,body_status")).unwrap(),
+        Some(vec!["terminal_write".into(), "body_status".into()])
+    );
+}
+
+#[cfg(feature = "embodiment-runtime-p4")]
+fn embodiment_projection_preview_args(owner_confirmation: bool) -> Value {
+    json!({
+        "attention": {
+            "schema": "agent_bridge.attention_decision.v0",
+            "mode": "shadow",
+            "decision_id": "attention-mcp-1",
+            "body_id": "body-mac",
+            "input_schema": "agent_bridge.observed_world.v0",
+            "input_world_revision": 12,
+            "selected_observations": [{
+                "body_id": "body-mac",
+                "source": "body_status",
+                "observed_at_unix_ms": 100,
+                "world_revision": 12
+            }],
+            "omitted_observations": 0,
+            "authority": "non_authoritative"
+        },
+        "authority": {
+            "schema": "agent_bridge.authority_decision.v0",
+            "decision_id": "authority-mcp-1",
+            "cognitive_decision_id": "cognitive-mcp-1",
+            "body_id": "body-mac",
+            "status": "approved",
+            "boundary": "project_write",
+            "owner_confirmation": owner_confirmation,
+            "lease_id": null
+        },
+        "request": {
+            "intent_id": "intent-mcp-1",
+            "operation": "terminal_write",
+            "arguments": {"keys": "temporary"},
+            "precondition": {
+                "schema": "agent_bridge.observation.v0",
+                "body_id": "body-mac",
+                "source": "body_status",
+                "observed_at_unix_ms": 100,
+                "freshness_ms": 20,
+                "confidence": 1.0,
+                "world_revision": 12,
+                "payload": {"ready": true}
+            },
+            "reversible": true
+        }
+    })
+}
+
+#[cfg(feature = "embodiment-runtime-p4")]
+#[tokio::test]
+async fn embodiment_projection_preview_is_plan_only_and_owner_confirmed() {
+    let tool = EmbodimentProjectionPreviewTool::new(vec!["terminal_write".into()]);
+    assert_eq!(tool.name(), "embodiment_projection_preview");
+    assert!(tool.annotations().unwrap().read_only_hint);
+
+    let result = tool
+        .execute(
+            embodiment_projection_preview_args(true),
+            &ToolContext::default(),
+        )
+        .await
+        .unwrap();
+    let body = result_json(&result);
+    assert_eq!(body["dry_run"], true);
+    assert_eq!(body["executed"], false);
+    assert_eq!(body["lease_acquired"], false);
+    assert_eq!(body["effect_receipt_created"], false);
+    assert_eq!(body["plan"]["operation"], "terminal_write");
+    assert_eq!(body["plan"]["re_observation_required"], true);
+
+    let rejected = tool
+        .execute(
+            embodiment_projection_preview_args(false),
+            &ToolContext::default(),
+        )
+        .await
+        .unwrap();
+    assert!(rejected.is_error);
+}
+
 fn frontend_env_test_setup() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().expect("frontend env test lock")
