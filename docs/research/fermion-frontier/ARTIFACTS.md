@@ -2,6 +2,13 @@
 
 All copied JSON files are research-only outputs. They contain no credentials.
 
+## FH-L8 D60 GRUB UEFI rehearsal fix D91R
+
+- `FH_L8_D60_GRUB_UEFI_REHEARSAL_D91R_ZH.md`: five-attempt result and authority boundary.
+- `fh_l8_d60_run_grub_uefi_rehearsal_d91r.sh`: one-shot isolated virtual rehearsal.
+- `fh_l8_d60_grub_uefi_rehearsal_d91r_contract.json`, receipt, result and verifier bind the pass.
+- `test_fh_l8_d60_grub_uefi_rehearsal_d91r.py`: failure and authority regressions.
+
 ## FH-L8 D60 maxcpus queue topology D85
 
 - `FH_L8_D60_MAXCPUS_QUEUE_TOPOLOGY_D85_ZH.md`: latest reboot evidence and gate.

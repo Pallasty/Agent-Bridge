@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "receipt_id": "FH-L8-D60-GRUB-UEFI-REHEARSAL-D91R-20260810",
+  "attempt_count": 5,
+  "final_attempt": {
+    "staging_path": "/Data/CascadeProjects/.fh-l8-staging/d91r5",
+    "qemu": "10.2.1",
+    "ovmf": "2025.11-3ubuntu7",
+    "rootfs_image": {"bytes": 1073741824, "sha256": "90709496801651264c6f97cf525b9fe5644101e82e82a68aea9e21579c807b2d"},
+    "ovmf_vars": {"bytes": 540672, "sha256": "59f3d47e95bc433d051e888baffd316a0164429557d2a7355b96bd2226447e66"},
+    "embedded_grub_config": {"bytes": 208, "sha256": "94d0bc4f7028fc9a7d17fb0aeb661d4aa50a730772dc639bc422494c91006575"},
+    "standalone_efi": {"bytes": 63619072, "sha256": "9de11e6bf4cf8eab4332681ebe3e1578312378a21b6a9bc4466ca42e364648db"},
+    "serial_log": {"bytes": 57177, "sha256": "5468f7b28f084695136e4f6aced81fb8aa7b9709c61a2dce42021c69c60c653c"}
+  },
+  "observations": {
+    "standalone_efi_format_valid": true,
+    "kernel_loaded_from_embedded_memdisk": true,
+    "uefi_grub_kernel_chain_pass": true,
+    "rootfs_device_found": true,
+    "rootfs_switch_pass": true,
+    "systemd_basic_target_pass": true,
+    "multi_user_target_pass": false,
+    "multi_user_target_required": false,
+    "grub_prompt_observed": false,
+    "kernel_panic_observed": false,
+    "mmc_touched": false,
+    "host_rebooted": false
+  },
+  "attempt_history": [
+    "attempt1_hardcoded_hd0_grub_prompt",
+    "attempt2_search_file_grub_prompt",
+    "attempt3_embedded_kernel_initrd_hostonly_fstab_wait",
+    "attempt4_rd_fstab_no_hostonly_fstab_wait",
+    "attempt5_rd_fstab_zero_rootfs_switch_and_systemd_basic_pass"
+  ]
+}
