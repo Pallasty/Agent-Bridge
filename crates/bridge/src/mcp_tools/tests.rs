@@ -1474,6 +1474,7 @@ fn codex_essential_exposes_mobile_bridge_tools() {
         "mobile_current_focus",
         "mobile_screenshot",
         "mobile_health",
+        "mobile_projection_start",
         "mobile_ui_snapshot",
         "mobile_logcat_tail",
         "mobile_install_apk",

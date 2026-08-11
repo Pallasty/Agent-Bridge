@@ -63,6 +63,10 @@ Implemented a small Android-first MCP surface in
 - `mobile_click`: click by coordinates, or resolve one matching UI node and
   click the center of its bounds.
 - `mobile_input_text`: send text through `adb shell input text`.
+- `mobile_projection_start`: replace any prior companion projection Activity,
+  generate an in-memory one-use token, bind a random private-LAN port, and open
+  a short-lived title/text projection consent page. It returns no token and
+  never presses the consent button or starts the companion service.
 - `mobile_apple_status`: read-only Apple mobile readiness probe for Xcode,
   libimobiledevice, third-party iOS tools, and USB-visible iPhone/iPad/iPod
   devices.
@@ -85,6 +89,33 @@ Implemented a small Android-first MCP surface in
   source. Structured state remains the first read path.
 - Do not expose arbitrary `adb shell` in the mobile bridge. `shell_exec` already
   exists for explicit raw command escape hatches.
+- Projection payloads are authenticated but not encrypted. Do not project
+  secrets, require the device holder's explicit consent, cap each listener at
+  600 seconds, and report every authority bit as false.
+
+## 2026-08-11 Projection Tool Addendum
+
+The recovered Android companion and target-SDK-35 compatibility work made the
+projection protocol usable, but starting it still required an operator to
+coordinate a token environment variable, host process, expiry, and ADB extras.
+`mobile_projection_start` closes that product-integration gap:
+
+1. resolve one authorized ADB device;
+2. generate 32 random bytes from the host OS without returning them;
+3. bind `ProjectionSession` to a caller-selected private/link-local address and
+   an OS-selected port;
+4. use `am start -S` so an expired or active prior projection cannot absorb the
+   new Intent or keep polling;
+5. open the consent Activity and return `awaiting_device_consent` metadata;
+6. serve the zero-authority frame from an in-process thread until expiry or MCP
+   process shutdown.
+
+The first live attempt exposed Android Activity reuse: a successful `am start`
+could leave an expired Activity visible because the existing top instance did
+not rerun `onCreate`. The `-S` replacement rule was added before acceptance.
+The corrected MCP stdio path then replaced the old screen, required the device
+holder to press **Allow and connect**, rendered the authenticated frame, and
+stopped polling after **Disconnect**. `CompanionService` remained absent.
 
 ## Implementation Path
 

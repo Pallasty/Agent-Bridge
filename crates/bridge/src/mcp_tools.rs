@@ -43111,6 +43111,7 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "mobile_current_focus",
     "mobile_screenshot",
     "mobile_health",
+    "mobile_projection_start",
     "mobile_ui_snapshot",
     "mobile_logcat_tail",
     "mobile_install_apk",
@@ -46804,6 +46805,13 @@ pub(crate) fn build_registry_with_policy_surface(
         surface.android_adb,
         Tier::Niche,
         Arc::new(MobileHealthTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileProjectionStartTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,

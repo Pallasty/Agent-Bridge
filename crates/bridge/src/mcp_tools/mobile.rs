@@ -1275,6 +1275,202 @@ impl McpTool for MobileHealthTool {
     }
 }
 
+mobile_tool_struct!(MobileProjectionStartTool);
+#[async_trait]
+impl McpTool for MobileProjectionStartTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_start"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Replace any prior projection Activity, then open an explicit-consent \
+                 Android Activity for one short-lived, \
+                 read-only Agent-Bridge title/text projection. Generates an in-memory token, \
+                 binds a random private-LAN port, and never starts the companion service. \
+                 The device holder must still press Allow and connect; this tool grants no \
+                 attention, memory, sensor, or control authority. Payloads are authenticated \
+                 but not encrypted, so do not project secrets."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["bind", "title", "body"],
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "bind": { "type": "string", "description": "Private or link-local host IP reachable by the phone." },
+                    "title": { "type": "string", "maxLength": 160 },
+                    "body": { "type": "string", "maxLength": 8000 },
+                    "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 600, "default": 300 },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(s) => s,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let bind = match args.get("bind").and_then(Value::as_str) {
+            Some(value) => match value.parse::<std::net::IpAddr>() {
+                Ok(address) => address,
+                Err(_) => return Ok(ToolResult::error("bind must be an IP address")),
+            },
+            None => return Ok(ToolResult::error("missing 'bind'")),
+        };
+        let title = match args.get("title").and_then(Value::as_str) {
+            Some(value) => value,
+            None => return Ok(ToolResult::error("missing 'title'")),
+        };
+        let body = match args.get("body").and_then(Value::as_str) {
+            Some(value) => value,
+            None => return Ok(ToolResult::error("missing 'body'")),
+        };
+        let ttl_seconds = args
+            .get("ttl_seconds")
+            .and_then(Value::as_i64)
+            .unwrap_or(300);
+        if !(1..=crate::mobile_projection::MAX_SESSION_SECONDS).contains(&ttl_seconds) {
+            return Ok(ToolResult::error("ttl_seconds must be in 1..=600"));
+        }
+
+        let mut token = [0u8; 32];
+        let random_result = std::fs::File::open("/dev/urandom")
+            .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut token));
+        if let Err(error) = random_result {
+            return Ok(ToolResult::error(format!(
+                "generate projection token failed: {error}"
+            )));
+        }
+        let token_hex: String = token.iter().map(|byte| format!("{byte:02x}")).collect();
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs() as i64,
+            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
+        };
+        let expires_at = now + ttl_seconds;
+        let session_id = format!("mcp-{now}-{}", &token_hex[..12]);
+        let session = match crate::mobile_projection::ProjectionSession::bind(
+            bind,
+            0,
+            &token_hex,
+            &session_id,
+            expires_at,
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "start projection host: {error:#}"
+                )))
+            }
+        };
+        let endpoint = match session.local_addr() {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "read projection endpoint: {error}"
+                )))
+            }
+        };
+        let frame = match crate::mobile_projection::ProjectionFrame::new(
+            &session_id,
+            1,
+            expires_at,
+            title,
+            body,
+        ) {
+            Ok(frame) => frame,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "invalid projection frame: {error}"
+                )))
+            }
+        };
+
+        let adb_start = adb_args(&[
+            "shell",
+            "am",
+            "start",
+            "-S",
+            "-n",
+            "dev.agentbridge.companion/.ProjectionActivity",
+            "--es",
+            "projection_host",
+            &bind.to_string(),
+            "--ei",
+            "projection_port",
+            &endpoint.port().to_string(),
+            "--es",
+            "projection_token",
+            &token_hex,
+            "--es",
+            "projection_session_id",
+            &session_id,
+            "--el",
+            "projection_expires_at_unix_seconds",
+            &expires_at.to_string(),
+        ]);
+        let launched = match run_adb_command(Some(&serial), &adb_start, timeout_ms).await {
+            Ok(output)
+                if output.ok()
+                    && !output.stdout.contains("Error:")
+                    && !output.stderr.contains("Error:") =>
+            {
+                output
+            }
+            Ok(output) => {
+                return Ok(ToolResult::error(format!(
+                    "open projection consent Activity failed: {} {}",
+                    output.stdout.trim(),
+                    output.stderr.trim()
+                )))
+            }
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+
+        if let Err(error) = std::thread::Builder::new()
+            .name(format!("mobile-projection-{session_id}"))
+            .spawn(move || {
+                while SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| (duration.as_secs() as i64) < expires_at)
+                    .unwrap_or(false)
+                {
+                    let _ = session.serve_next(&frame, Duration::from_secs(1));
+                }
+            })
+        {
+            return Ok(ToolResult::error(format!(
+                "start projection listener thread failed: {error}"
+            )));
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "status": "awaiting_device_consent",
+            "serial": serial,
+            "session_id": session_id,
+            "endpoint": endpoint.to_string(),
+            "expires_at_unix_seconds": expires_at,
+            "ttl_seconds": ttl_seconds,
+            "activity_launch_duration_ms": launched.duration_ms,
+            "token_exposed": false,
+            "companion_service_started": false,
+            "replaced_prior_projection_activity": true,
+            "authority": {
+                "attention": false,
+                "memory": false,
+                "sensor": false,
+                "actuation": false
+            },
+            "next": "The device holder must review the source/session/expiry and press Allow and connect."
+        })))
+    }
+}
+
 mobile_tool_struct!(MobileUiSnapshotTool);
 #[async_trait]
 impl McpTool for MobileUiSnapshotTool {
