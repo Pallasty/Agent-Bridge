@@ -2421,6 +2421,45 @@ fn work_memory_resume_row_uses_precompact_tail() {
     assert!(!rendered.contains("# PreCompact Work Memory"));
 }
 
+#[test]
+fn bootstrap_work_memory_keeps_only_exact_project_scope() {
+    let cwd = "/Data/CascadeProjects/agent-bridge/";
+    let rows = vec![
+        mk_mem_scoped(
+            "exact",
+            WORK_MEMORY_KIND,
+            "current project",
+            &[],
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        ),
+        mk_mem_scoped(
+            "parent",
+            WORK_MEMORY_KIND,
+            "parent task",
+            &[],
+            Some("project:/Data/CascadeProjects"),
+        ),
+        mk_mem_scoped(
+            "global",
+            WORK_MEMORY_KIND,
+            "global task",
+            &[],
+            Some("global"),
+        ),
+        mk_mem_scoped(
+            "peer",
+            WORK_MEMORY_KIND,
+            "cross-node peer task",
+            &[],
+            Some("project:/Users/pallasting/Projects/agent-bridge"),
+        ),
+    ];
+
+    let filtered = exact_scope_work_memory_rows(rows, cwd);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].key, "exact");
+}
+
 #[tokio::test]
 async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_foreign_scope() {
     let (hub, _temp_dir) = mk_test_hub_with_store().await;
