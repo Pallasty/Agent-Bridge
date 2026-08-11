@@ -624,6 +624,83 @@ async fn session_bootstrap_surfaces_continuity_kernel_from_selected_rows() {
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
+#[test]
+fn targeted_compact_bootstrap_omits_auxiliary_sections_only_for_query_recovery() {
+    assert!(!include_bootstrap_auxiliary_sections(true, true));
+    assert!(include_bootstrap_auxiliary_sections(true, false));
+    assert!(include_bootstrap_auxiliary_sections(false, true));
+    assert!(include_bootstrap_auxiliary_sections(false, false));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn targeted_compact_bootstrap_keeps_task_state_and_omits_feedback_preamble() {
+    let (hub, temp_dir) = mk_test_hub_with_store().await;
+    let cwd = temp_dir.display().to_string();
+    let store = hub.store.clone().expect("store");
+    store
+        .memory_save(&MemoryRecord {
+            key: "targeted_compact_task_state".into(),
+            kind: "decision".into(),
+            content: "Continue the practical compact recovery task.".into(),
+            tags: vec![
+                "continuity_role:state".into(),
+                "continuity_confidence:verified".into(),
+                "continuity_actionability:plan_influence".into(),
+                "continuity_blast_radius:project".into(),
+            ],
+            related_keys: vec![],
+            scope: Some(format!("project:{cwd}")),
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 1_700_000_000,
+            access_count: 0,
+            importance: 0.9,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        })
+        .await
+        .expect("save task state");
+    store
+        .memory_save(&MemoryRecord {
+            key: "targeted_compact_unrelated_feedback".into(),
+            kind: "feedback".into(),
+            content: "Unrelated historical correction should not consume recovery payload.".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some(format!("project:{cwd}")),
+            created_at: 1_700_000_001,
+            updated_at: 1_700_000_001,
+            last_accessed_at: 1_700_000_001,
+            access_count: 0,
+            importance: 0.95,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        })
+        .await
+        .expect("save feedback");
+
+    let out = SessionBootstrapTool::new(hub)
+        .execute(
+            json!({
+                "cwd": cwd,
+                "query": "practical compact recovery task",
+                "limit": 10,
+                "frontend": "warp",
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("targeted compact bootstrap");
+    let text = result_text(&out);
+    assert!(text.contains("targeted_compact_task_state"), "{text}");
+    assert!(text.contains("Continuity Kernel"), "{text}");
+    assert!(!text.contains("Feedback preamble"), "{text}");
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
 #[tokio::test]
 async fn session_bootstrap_surfaces_distillation_candidates_propose_only() {
     // S1 surfacing: a verified lesson that is NOT yet distilled shows up
