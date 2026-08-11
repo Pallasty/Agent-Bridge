@@ -11,6 +11,8 @@ SCRIPT = ROOT / "scripts/eval/qwen3_control_logit_stability.py"
 POLICY = ROOT / "scripts/eval/fixtures/qwen3_tts_control_logit_stability_policy_v0.json"
 BURNIN_SCRIPT = ROOT / "scripts/eval/qwen3_control_logit_stability_burnin.py"
 BURNIN_POLICY = ROOT / "scripts/eval/fixtures/qwen3_tts_control_logit_stability_policy_v1.json"
+AUTH_PACK = ROOT / "scripts/eval/fixtures/qwen3_tts_fake_q8_burnin_bound_authorization_v1.json"
+AUTH_SCRIPT = ROOT / "scripts/eval/qwen3_fake_q8_burnin_authorization.py"
 
 
 def load_module():
@@ -105,3 +107,17 @@ def test_burnin_policy_has_two_unmeasured_calls_and_six_measurements():
     assert len(policy["trial_labels"]) == 6
     trials = [{"value": logits()} for _ in policy["trial_labels"]]
     assert module.summarize_path(trials, lambda trial: trial["value"], policy["trial_labels"])["pair_count"] == 15
+
+
+def test_authorization_pack_rejects_receipt_or_boundary_drift():
+    spec = importlib.util.spec_from_file_location("qwen3_fake_q8_burnin_authorization", AUTH_SCRIPT)
+    auth = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(auth)
+    pack = json.loads(AUTH_PACK.read_text(encoding="utf-8"))
+    receipt = {"status": "CONTROL_STABILITY_ENVELOPE_CAPTURED", "control_invariants": {"measured_count": 6}, "paths": {"talker_generated_rows": {"classification": "BIT_EXACT"}, "talker_terminal_decision": {"classification": "BIT_EXACT"}, "predictor_head_0": {"classification": "BIT_EXACT"}, "predictor_heads_1_through_14": {"classification": "BIT_EXACT"}}}
+    with pytest.raises(ValueError, match="receipt binding"):
+        auth.validate(pack, receipt, receipt_hash="0" * 64)
+    pack["authorization"]["allows_quantized_weight_writing"] = True
+    with pytest.raises(ValueError, match="forbidden authority"):
+        auth.validate(pack, receipt, receipt_hash=pack["control"]["receipt_sha256"])
