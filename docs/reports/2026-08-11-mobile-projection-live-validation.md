@@ -43,9 +43,10 @@ sensor/service side effects were directly observed.
 - ensured the APK entry is root `classes.dex`, not an absolute build path;
 - made debug keystore type explicit so JKS test signing is deterministic.
 
-## Remaining compatibility gap
+## Compatibility follow-up
 
-Android 16 warns that target SDK 27 is legacy. Do not merely increment the
-manifest number: first add and test notification channels, foreground-service
-type/restriction handling, and boot-start behavior. This is the next bounded
-mobile compatibility task; it does not invalidate the projection PASS.
+The Android 16 legacy-target warning was closed later the same day by the
+target-SDK-35 compatibility slice. Notification channels, foreground-service
+typing/restrictions, removal of boot start, disabled-by-default service state,
+and the projection UI were rebuilt and revalidated on the same device. See
+`2026-08-11-mobile-target35-compatibility.md`.

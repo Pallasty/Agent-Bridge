@@ -1,6 +1,8 @@
 package dev.agentbridge.companion;
 
 import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
@@ -28,6 +30,7 @@ import java.util.Locale;
 
 public final class CompanionService extends Service {
     private static final int NOTIFICATION_ID = 17031;
+    private static final String NOTIFICATION_CHANNEL_ID = "agent_bridge_companion_runtime";
     private static final int LAN_HEALTH_PORT = 17321;
     private static final long LAN_HEALTH_RETRY_MS = 5000L;
     private static final String PREFERENCES = "agent_bridge_companion";
@@ -85,7 +88,7 @@ public final class CompanionService extends Service {
             } else lanHealthState = "invalid_token";
         }
         if (intent != null && intent.hasExtra(IMU_REQUEST_ID)) startImuCapture(intent);
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     @Override public void onDestroy() {
@@ -156,8 +159,20 @@ public final class CompanionService extends Service {
     }
 
     private Notification buildNotification() {
-        PendingIntent pending = PendingIntent.getService(this, 0, new Intent(this, CompanionService.class), PendingIntent.FLAG_UPDATE_CURRENT);
-        return new Notification.Builder(this).setSmallIcon(android.R.drawable.stat_notify_sync)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(NOTIFICATION_CHANNEL_ID,
+                    "Agent-Bridge explicit runtime", NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("Visible only while the operator-enabled companion service is running");
+            ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).createNotificationChannel(channel);
+        }
+        int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) pendingFlags |= PendingIntent.FLAG_IMMUTABLE;
+        PendingIntent pending = PendingIntent.getService(this, 0,
+                new Intent(this, CompanionService.class), pendingFlags);
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+                : new Notification.Builder(this);
+        return builder.setSmallIcon(android.R.drawable.stat_notify_sync)
                 .setContentTitle("Agent-Bridge Companion").setContentText("Lifecycle and timing channel active")
                 .setContentIntent(pending).setOngoing(true).build();
     }

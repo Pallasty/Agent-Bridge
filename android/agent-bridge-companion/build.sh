@@ -23,7 +23,8 @@ javac -source 8 -target 8 -classpath "$platform/android.jar" -d "$out/classes" \
   $(find "$root/src" "$out/gen" -type f -name '*.java' | sort)
 jar cf "$out/classes.jar" -C "$out/classes" .
 if test "$dex_mode" = d8; then
-  "$tools/d8" --min-api 21 --output "$out/dex" "$out/classes.jar"
+  "$tools/d8" --min-api 21 --lib "$platform/android.jar" \
+    --output "$out/dex" "$out/classes.jar"
 else
   java -jar "$AB_COMPANION_DX_JAR" --dex --min-sdk-version=21 \
     --output="$out/dex/classes.dex" "$out/classes.jar"

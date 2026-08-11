@@ -16,6 +16,11 @@ The service has deliberately narrow authority:
 - HMAC-bound consent and result receipts with attention, memory, and actuation
   authority fixed to `false`.
 
+On Android target SDK 35 builds the service component is disabled after install,
+does not receive boot broadcasts, and is non-sticky. An operator must explicitly
+enable it before a bounded service test and disable it again afterward. The
+projection Activity does not enable or start the service.
+
 There is no camera, microphone, autonomous discovery, or remote actuation. The
 projection activity is a separate, user-visible slice: it connects only after
 the person holding the phone confirms a named endpoint and a session that
@@ -26,7 +31,7 @@ performed by repository tests.
 
 ## Build
 
-Set `ANDROID_SDK_ROOT` to an Android SDK containing a platform and build-tools,
+Set `ANDROID_SDK_ROOT` to an Android SDK containing API 35 and build-tools,
 then run:
 
 ```sh

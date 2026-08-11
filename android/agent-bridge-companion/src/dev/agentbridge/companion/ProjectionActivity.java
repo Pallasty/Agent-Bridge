@@ -38,6 +38,14 @@ public final class ProjectionActivity extends Activity {
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
+            getWindow().setDecorFitsSystemWindows(true);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            int systemUi = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+                systemUi |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            getWindow().getDecorView().setSystemUiVisibility(systemUi);
+        }
         host = getIntent().getStringExtra(HOST);
         token = getIntent().getStringExtra(TOKEN);
         sessionId = getIntent().getStringExtra(SESSION_ID);
@@ -58,7 +66,11 @@ public final class ProjectionActivity extends Activity {
         Button cancel = button("Cancel"); panel.addView(cancel);
         primary.setOnClickListener(new View.OnClickListener() { public void onClick(View view) { beginProjection(); } });
         cancel.setOnClickListener(new View.OnClickListener() { public void onClick(View view) { finish(); } });
-        setContentView(scroll(panel));
+        final ScrollView consentScroll = scroll(panel);
+        setContentView(consentScroll);
+        consentScroll.post(new Runnable() {
+            public void run() { consentScroll.scrollTo(0, 0); }
+        });
     }
 
     private void beginProjection() {

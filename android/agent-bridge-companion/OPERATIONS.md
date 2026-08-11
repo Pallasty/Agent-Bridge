@@ -5,6 +5,7 @@ never commit the token or challenge.
 
 ```sh
 adb install -r build/agent-bridge-companion-debug.apk
+adb shell pm enable dev.agentbridge.companion/.CompanionService
 adb shell am startservice \
   -n dev.agentbridge.companion/.CompanionService \
   --es health_token '<64-lower-hex-token>'
@@ -23,8 +24,13 @@ Stopping or uninstalling the package releases its wake/Wi-Fi locks:
 
 ```sh
 adb shell am stopservice -n dev.agentbridge.companion/.CompanionService
+adb shell pm disable dev.agentbridge.companion/.CompanionService
 adb uninstall dev.agentbridge.companion
 ```
+
+The service is disabled by default, is not started at boot, and returns
+`START_NOT_STICKY`. Always disable it after an explicit test. Projection does
+not require enabling it.
 
 The LAN health endpoint is read-only. Its request line is
 `ABH1 <unix-seconds> <32-lower-hex-nonce> <HMAC-SHA256>`. Use the Agent-Bridge
