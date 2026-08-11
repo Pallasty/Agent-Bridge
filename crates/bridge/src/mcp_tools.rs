@@ -35,7 +35,6 @@ use ab_store::{
     embed_text,
     mmr_rerank_by_text,
     now_secs,
-    prioritize_session_handoff,
     semantic_blend_score,
     semantic_rank_weights,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
@@ -18590,6 +18589,148 @@ fn memory_continuity_bootstrap_tier(
     }
 }
 
+/// Whether a session handoff may receive bootstrap *priority* for `cwd`.
+///
+/// Handoffs that fail this gate remain ordinary searchable memories; they are
+/// only denied the unconditional prefix/float that can otherwise displace
+/// current project state.  Priority is intentionally strict: an exact project
+/// scope, actionable continuity metadata, and a verified/non-stale source are
+/// required.  Auto-curated or identifier-unverified rows never qualify.
+fn bootstrap_handoff_priority_eligible(row: &MemoryRecord, cwd: &str) -> bool {
+    if row.kind != "session_handoff" || row.status != "active" {
+        return false;
+    }
+    if row
+        .tags
+        .iter()
+        .any(|tag| tag == "auto_curated" || tag == crate::curate::UNVERIFIED_IDENTIFIER_TAG)
+    {
+        return false;
+    }
+
+    let expected_scope = format!("project:{}", cwd.trim_end_matches('/'));
+    if row.scope.as_deref().map(|s| s.trim_end_matches('/')) != Some(expected_scope.as_str()) {
+        return false;
+    }
+
+    let Some(metadata) =
+        memory_continuity_metadata_from_tags(&row.tags, row.superseded_by.as_deref())
+    else {
+        return false;
+    };
+    if metadata.confidence.as_deref() == Some("stale") {
+        return false;
+    }
+    matches!(
+        memory_continuity_bootstrap_tier(&metadata),
+        Some(ContinuityBootstrapTier::MustBlock | ContinuityBootstrapTier::Active)
+    )
+}
+
+fn prioritize_bootstrap_handoffs(rows: Vec<MemoryRecord>, cwd: &str) -> Vec<MemoryRecord> {
+    let (priority, rest): (Vec<_>, Vec<_>) = rows
+        .into_iter()
+        .partition(|row| bootstrap_handoff_priority_eligible(row, cwd));
+    priority.into_iter().chain(rest).collect()
+}
+
+#[cfg(test)]
+mod bootstrap_handoff_priority_tests {
+    use super::*;
+
+    const CWD: &str = "/Data/CascadeProjects/agent-bridge";
+
+    fn handoff(key: &str, scope: Option<&str>, tags: &[&str]) -> MemoryRecord {
+        MemoryRecord {
+            key: key.into(),
+            kind: "session_handoff".into(),
+            content: String::new(),
+            tags: tags.iter().map(|tag| (*tag).into()).collect(),
+            related_keys: vec![],
+            scope: scope.map(str::to_string),
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[test]
+    fn admits_exact_scope_actionable_verified_handoff() {
+        let row = handoff(
+            "current",
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+            &[
+                "continuity_role:state",
+                "continuity_actionability:plan_influence",
+                "continuity_confidence:verified",
+            ],
+        );
+        assert!(bootstrap_handoff_priority_eligible(&row, CWD));
+    }
+
+    #[test]
+    fn rejects_auto_curated_unverified_background_and_cross_scope_handoffs() {
+        let cases = [
+            handoff(
+                "auto",
+                Some("project:/Data/CascadeProjects/agent-bridge"),
+                &["auto_curated", "continuity_actionability:must_block"],
+            ),
+            handoff(
+                "unverified",
+                Some("project:/Data/CascadeProjects/agent-bridge"),
+                &[
+                    crate::curate::UNVERIFIED_IDENTIFIER_TAG,
+                    "continuity_actionability:must_block",
+                ],
+            ),
+            handoff(
+                "archive",
+                Some("project:/Data/CascadeProjects/agent-bridge"),
+                &[
+                    "continuity_role:archive",
+                    "continuity_actionability:background",
+                ],
+            ),
+            handoff(
+                "root-scope",
+                Some("project:/Data/CascadeProjects"),
+                &["continuity_actionability:must_block"],
+            ),
+            handoff("global", None, &["continuity_actionability:must_block"]),
+        ];
+        for row in cases {
+            assert!(
+                !bootstrap_handoff_priority_eligible(&row, CWD),
+                "{} unexpectedly admitted",
+                row.key
+            );
+        }
+    }
+
+    #[test]
+    fn priority_partition_floats_only_admitted_handoffs() {
+        let mut lesson = handoff("lesson", None, &[]);
+        lesson.kind = "lesson".into();
+        let rejected = handoff("rejected", None, &["auto_curated"]);
+        let admitted = handoff(
+            "admitted",
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+            &["continuity_role:state", "continuity_confidence:verified"],
+        );
+        let out = prioritize_bootstrap_handoffs(vec![lesson, rejected, admitted], CWD);
+        assert_eq!(
+            out.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
+            vec!["admitted", "lesson", "rejected"]
+        );
+    }
+}
+
 fn format_continuity_kernel_row(r: &MemoryRecord, snippet_len: usize) -> String {
     let snippet: String = r.content.chars().take(snippet_len).collect();
     let ellipsis = if r.content.chars().count() > snippet_len {
@@ -19257,7 +19398,9 @@ impl McpTool for SessionBootstrapTool {
         ToolSchema {
             name: self.name().into(),
             description: "Build a compact memory bootstrap block. Returns top scoped \
-                 memories (global + project), session_handoff rows first. query= enables \
+                 memories (global + project). Current actionable exact-project \
+                 session_handoff rows receive priority; auto-curated, unverified, \
+                 background/archive, stale, global, and cross-project handoffs do not. query= enables \
                  semantic ranking. frontend='cursor'|'warp' uses compact format; default \
                  'claude-code' is full. When the outcome collector \
                  (AGENT_BRIDGE_OUTCOME_COLLECTOR) is on, the semantic page is logged to \
@@ -19277,7 +19420,7 @@ impl McpTool for SessionBootstrapTool {
                     "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 60 },
                     "query": {
                         "type": "string",
-                        "description": "Optional natural-language description of the current task (e.g. 'fix Warp IPC socket reconnect bug'). When provided, memories are ranked by semantic similarity instead of static importance. session_handoff rows are always prepended regardless."
+                        "description": "Optional natural-language description of the current task (e.g. 'fix Warp IPC socket reconnect bug'). When provided, memories are ranked by semantic similarity instead of static importance. Only current actionable exact-project session_handoff rows receive prefix priority."
                     },
                     "frontend": {
                         "type": "string",
@@ -19384,7 +19527,8 @@ impl McpTool for SessionBootstrapTool {
             .map(str::to_string);
 
         let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
-            // Semantic path: cosine-ranked results, session_handoff always prepended.
+            // Semantic path: cosine-ranked results, with only current,
+            // actionable, exact-project handoffs prepended.
             let semantic_hits = store
                 .memory_search_semantic_in_scope(q, &cwd, limit, 0.15)
                 .await
@@ -19393,13 +19537,16 @@ impl McpTool for SessionBootstrapTool {
                 .into_iter()
                 .filter(|h| h.record.status == "active")
                 .collect();
-            // Always prepend session_handoff rows for continuity.
+            // Handoffs that fail the priority gate remain eligible for normal
+            // semantic ranking; they simply cannot displace current state by
+            // kind alone.
             let handoff = store
                 .list_memories_in_scope(&cwd, Some("session_handoff"), MemoryListSort::Recent, 8)
                 .await
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|r| r.status == "active")
+                .filter(|r| bootstrap_handoff_priority_eligible(r, &cwd))
                 .collect::<Vec<_>>();
             let handoff_keys: std::collections::HashSet<_> =
                 handoff.iter().map(|r| r.key.clone()).collect();
@@ -19423,12 +19570,12 @@ impl McpTool for SessionBootstrapTool {
             combined.truncate(limit as usize);
             combined
         } else {
-            // Static path: existing ByImportance sort, session_handoff floated first.
+            // Static path: float only handoffs that pass the same gate.
             let rows = store
                 .list_memories_in_scope(&cwd, None, MemoryListSort::ByImportance, limit)
                 .await?;
             let rows: Vec<_> = rows.into_iter().filter(|r| r.status == "active").collect();
-            prioritize_session_handoff(rows)
+            prioritize_bootstrap_handoffs(rows, &cwd)
         };
 
         // Outcome-collector, ambient leg (stage 1, 2026-07-05): log the
