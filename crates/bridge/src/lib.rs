@@ -85,6 +85,10 @@ pub mod lswr_snapshot_wrapper_descriptor;
 pub mod lswr_snapshot_wrapper_exposure_dry_run;
 pub mod lswr_snapshot_wrapper_preflight_report;
 pub mod mcp_tools;
+/// Read-only client and verifier for the bounded Android companion LAN/IMU
+/// protocol. This module does not discover, provision, start, or actuate a
+/// mobile device.
+pub mod mobile_companion;
 /// Default-off, synthetic-only one-shot adapter; no runtime caller is wired.
 #[cfg(feature = "temporal-evidence-s4-synthetic")]
 #[cfg_attr(not(test), allow(dead_code))]

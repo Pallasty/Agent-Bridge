@@ -1,0 +1,46 @@
+# Agent-Bridge Android Companion
+
+Recovered source for the bounded Android IMU/LAN prototype found on `aio2` on
+2026-08-11. The authoritative recovery inputs were `classes.jar`, `classes.dex`,
+and the debug APK dated 2026-07-31. This directory replaces the untracked,
+binary-only copy; it does not claim source-level identity with files that no
+longer exist.
+
+The service has deliberately narrow authority:
+
+- authenticated, rate-limited health reads on the phone Wi-Fi address, TCP
+  port 17321;
+- explicit 100–1000 ms accelerometer/gyroscope captures requested through an
+  Android service intent;
+- summary/hash output through `dumpsys`, never a continuous raw sensor stream;
+- HMAC-bound consent and result receipts with attention, memory, and actuation
+  authority fixed to `false`.
+
+There is no camera, microphone, discovery, pairing UI, screen projection, or
+remote actuation in this slice. Starting the service or installing an APK is an
+operator action and is not performed by repository tests.
+
+## Build
+
+Set `ANDROID_SDK_ROOT` to an Android SDK containing a platform and build-tools,
+then run:
+
+```sh
+./build.sh
+```
+
+The script writes only beneath `build/`, uses a repository-local debug keystore
+only when explicitly requested with `AB_COMPANION_DEBUG_KEYSTORE`, and otherwise
+produces an unsigned APK. Pure protocol tests require only a JDK:
+
+```sh
+./test-protocol.sh
+```
+
+## Provision and inspect
+
+The app has no launcher activity. A 32-byte random token is provisioned as a
+64-character lowercase hexadecimal service extra. IMU capture also requires an
+explicit request id, 32-byte challenge, bounded duration, and bounded rate.
+Exact commands are intentionally kept in `OPERATIONS.md` so normal builds do
+not accidentally start a persistent service.
