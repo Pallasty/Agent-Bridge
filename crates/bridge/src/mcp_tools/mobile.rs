@@ -2131,6 +2131,167 @@ impl McpTool for MobileUiSnapshotTool {
     }
 }
 
+pub(super) fn mobile_wait_condition_met(match_count: usize, condition: &str) -> bool {
+    match condition {
+        "absent" => match_count == 0,
+        _ => match_count > 0,
+    }
+}
+
+mobile_tool_struct!(MobileWaitForUiTool);
+#[async_trait]
+impl McpTool for MobileWaitForUiTool {
+    fn name(&self) -> &'static str {
+        "mobile_wait_for_ui"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Poll bounded UIAutomator snapshots until a selector is present or absent. This is read-only and replaces fixed sleeps or repeated manual snapshots after an explicit mobile action. It returns matched compact nodes on success and honest timeout/error metadata otherwise.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["selector"],
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "selector": mobile_schema_selector(),
+                    "condition": { "type": "string", "enum": ["present", "absent"], "default": "present" },
+                    "wait_timeout_ms": { "type": "integer", "minimum": 250, "maximum": 60000, "default": 10000 },
+                    "poll_interval_ms": { "type": "integer", "minimum": 250, "maximum": 5000, "default": 500 },
+                    "stable_polls": { "type": "integer", "minimum": 1, "maximum": 5, "default": 1, "description": "Require the condition on this many consecutive successful snapshots." },
+                    "max_matches": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS, "description": "Per-ADB-command timeout, independent from the total wait timeout." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let adb_timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, adb_timeout_ms).await {
+            Ok(serial) => serial,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let selector = match args.get("selector") {
+            Some(value) => match MobileSelector::from_value(value) {
+                Ok(selector) => selector,
+                Err(e) => return Ok(ToolResult::error(e)),
+            },
+            None => return Ok(ToolResult::error("missing 'selector'")),
+        };
+        let condition = args
+            .get("condition")
+            .and_then(Value::as_str)
+            .unwrap_or("present");
+        if !matches!(condition, "present" | "absent") {
+            return Ok(ToolResult::error("condition must be present or absent"));
+        }
+        let wait_timeout_ms = args
+            .get("wait_timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(10_000)
+            .clamp(250, 60_000);
+        let poll_interval_ms = args
+            .get("poll_interval_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(500)
+            .clamp(250, 5_000);
+        let stable_polls = args
+            .get("stable_polls")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .clamp(1, 5) as usize;
+        let max_matches = args
+            .get("max_matches")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 50) as usize;
+
+        let started = Instant::now();
+        let mut attempts = 0usize;
+        let mut consecutive = 0usize;
+        let mut last_error: Option<String>;
+        let mut last_match_count: Option<usize> = None;
+        loop {
+            attempts += 1;
+            let before_snapshot_ms = started.elapsed().as_millis() as u64;
+            let snapshot_budget_ms = wait_timeout_ms.saturating_sub(before_snapshot_ms).max(1);
+            match tokio::time::timeout(
+                Duration::from_millis(snapshot_budget_ms),
+                mobile_dump_ui_xml(&serial, adb_timeout_ms),
+            )
+            .await
+            {
+                Ok(Ok((_dump, cat))) => match parse_uiautomator_nodes(&cat.stdout) {
+                    Ok(nodes) => {
+                        let matches: Vec<&MobileUiNode> =
+                            nodes.iter().filter(|node| selector.matches(node)).collect();
+                        last_match_count = Some(matches.len());
+                        last_error = None;
+                        if mobile_wait_condition_met(matches.len(), condition) {
+                            consecutive += 1;
+                            if consecutive >= stable_polls {
+                                let elapsed_ms = started.elapsed().as_millis() as u64;
+                                let matched_nodes: Vec<Value> = matches
+                                    .into_iter()
+                                    .take(max_matches)
+                                    .map(MobileUiNode::compact_json)
+                                    .collect();
+                                return Ok(ToolResult::json_text(&json!({
+                                    "status": "matched",
+                                    "serial": serial,
+                                    "condition": condition,
+                                    "attempts": attempts,
+                                    "elapsed_ms": elapsed_ms,
+                                    "stable_polls_required": stable_polls,
+                                    "match_count": last_match_count,
+                                    "returned_matches": matched_nodes.len(),
+                                    "matches": matched_nodes,
+                                    "analysis": MobileUiAnalysis::from_nodes(&nodes).as_json(),
+                                })));
+                            }
+                        } else {
+                            consecutive = 0;
+                        }
+                    }
+                    Err(e) => {
+                        consecutive = 0;
+                        last_error = Some(e);
+                    }
+                },
+                Ok(Err(e)) => {
+                    consecutive = 0;
+                    last_error = Some(e);
+                }
+                Err(_) => {
+                    consecutive = 0;
+                    last_error = Some("UI snapshot exceeded the remaining wait timeout".into());
+                }
+            }
+
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            if elapsed_ms >= wait_timeout_ms {
+                return Ok(ToolResult::json_text(&json!({
+                    "status": "timeout",
+                    "serial": serial,
+                    "condition": condition,
+                    "attempts": attempts,
+                    "elapsed_ms": elapsed_ms,
+                    "wait_timeout_ms": wait_timeout_ms,
+                    "stable_polls_required": stable_polls,
+                    "stable_polls_observed": consecutive,
+                    "last_match_count": last_match_count,
+                    "last_error": last_error,
+                })));
+            }
+            let remaining_ms = wait_timeout_ms.saturating_sub(elapsed_ms);
+            tokio::time::sleep(Duration::from_millis(poll_interval_ms.min(remaining_ms))).await;
+        }
+    }
+}
+
 mobile_tool_struct!(MobileLogcatTailTool);
 #[async_trait]
 impl McpTool for MobileLogcatTailTool {

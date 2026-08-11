@@ -1479,6 +1479,7 @@ fn codex_essential_exposes_mobile_bridge_tools() {
         "mobile_projection_status",
         "mobile_projection_stop",
         "mobile_ui_snapshot",
+        "mobile_wait_for_ui",
         "mobile_logcat_tail",
         "mobile_install_apk",
         "mobile_launch_app",
@@ -1540,6 +1541,14 @@ fn mobile_projection_phase_is_honest_about_idle_and_terminal_states() {
         mobile_projection_phase(2, 98, false, true, 200, 100),
         "expired"
     );
+}
+
+#[test]
+fn mobile_wait_condition_supports_present_and_absent() {
+    assert!(mobile_wait_condition_met(1, "present"));
+    assert!(!mobile_wait_condition_met(0, "present"));
+    assert!(mobile_wait_condition_met(0, "absent"));
+    assert!(!mobile_wait_condition_met(2, "absent"));
 }
 
 #[test]

@@ -62,6 +62,10 @@ Implemented a small Android-first MCP surface in
 - `mobile_ui_snapshot`: run `uiautomator dump`, return XML plus a compact node
   summary suitable for selector choice. It now reports whether the visible tree
   is semantic, canvas-only, or SurfaceView-dominated.
+- `mobile_wait_for_ui`: poll bounded UIAutomator snapshots until a full
+  selector is present or absent. It supports consecutive-snapshot stability,
+  compact matched nodes, and a hard total wait budget independent of the
+  per-ADB timeout.
 - `mobile_logcat_tail`: return recent `logcat` lines, optionally filtered.
 - `mobile_install_apk`: install or reinstall an APK on a selected device.
 - `mobile_launch_app`: launch an app package or component.
@@ -322,8 +326,6 @@ most useful when it bundles state and preserves structured fallbacks:
 ## Open Follow-Ups
 
 - Add WebView CDP attachment for debuggable WebViews.
-- Consider a later `mobile_wait_for_text` helper once selector matching is
-  proven stable.
 - If full Xcode becomes available, expand Apple support in this order:
   simulator/device install and launch -> WDA/XCUITest UI snapshot -> selector
   actions. Until then, keep iOS support to `mobile_apple_status`,
