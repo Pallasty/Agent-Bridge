@@ -41,6 +41,11 @@ produces an unsigned APK. Pure protocol tests require only a JDK:
 ./test-protocol.sh
 ```
 
+The preferred DEX compiler is SDK `d8`. Debian installations that package the
+legacy Android compiler as `dalvik-exchange` can instead set
+`AB_COMPANION_DX_JAR` to `com.android.dx.jar`. Debug signing defaults to JKS;
+set `AB_COMPANION_KEYSTORE_TYPE` explicitly for another keystore format.
+
 ## Provision and inspect
 
 The app has no launcher activity. A 32-byte random token is provisioned as a

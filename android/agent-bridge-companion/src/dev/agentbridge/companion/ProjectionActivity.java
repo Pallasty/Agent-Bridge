@@ -93,7 +93,7 @@ public final class ProjectionActivity extends Activity {
             } finally {
                 handler.postDelayed(new Runnable() { public void run() { poll(); } }, 2000L);
             }
-        }, "AgentBridgeProjectionPull").start();
+        } }, "AgentBridgeProjectionPull").start();
     }
 
     private String fetchFrame() throws Exception {

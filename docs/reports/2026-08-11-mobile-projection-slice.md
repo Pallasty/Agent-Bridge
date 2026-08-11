@@ -33,8 +33,30 @@ Pure-Java tests cover request generation, response authentication, tamper
 rejection, and lifetime bounds. Rust tests cover zero-authority frame creation,
 HMAC behavior, and a complete authenticated TCP pull with a decoded frame.
 
-The current Codex environment has neither `adb` nor an Android SDK, even though
-a device is physically attached to the host. Consequently this slice does not
-claim APK compilation or on-device UI validation. Those are the remaining
-integration checks once the existing host-side Android tools are exposed to the
-workspace; no additional protocol design is required.
+## Live-device addendum
+
+The earlier tooling limitation was closed on 2026-08-11 with a minimal Debian
+Android toolchain and an attached OPPO PKW110 (`arm64-v8a`, Android 16/API 36).
+
+Verified on the device:
+
+- Java sources compiled against Android API 23 and produced a real DEX/APK;
+- the APK contained root `classes.dex` and passed APK signature v1/v2/v3
+  verification with an ephemeral 30-day local test certificate;
+- package version `0.1.0` installed cleanly with no prior package replacement;
+- the consent screen showed the exact private host, session, expiry, and
+  zero-authority statement before any projection pull;
+- after user consent, the phone at `192.168.1.7` repeatedly authenticated to the
+  host at `192.168.1.16:17322` and displayed the expected Chinese title/body;
+- Activity Manager showed no `CompanionService`; SensorService showed no
+  companion sensor registration;
+- after the user pressed Disconnect, the UI reported `Disconnected by you`, the
+  button was disabled, and a subsequent observation window produced no pulls;
+- the host listener was then stopped early and the device-side temporary APK
+  copy was removed. The installed test application remains available for the
+  next compatibility check.
+
+Android 16 displayed an operating-system warning because the recovered manifest
+targets API 27. Raising target SDK safely requires a separate compatibility
+slice covering notification channels, foreground-service types/restrictions,
+and boot behavior; this live result does not claim those changes are complete.
