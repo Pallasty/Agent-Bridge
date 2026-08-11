@@ -1475,6 +1475,8 @@ fn codex_essential_exposes_mobile_bridge_tools() {
         "mobile_screenshot",
         "mobile_health",
         "mobile_projection_start",
+        "mobile_projection_status",
+        "mobile_projection_stop",
         "mobile_ui_snapshot",
         "mobile_logcat_tail",
         "mobile_install_apk",
@@ -1485,6 +1487,30 @@ fn codex_essential_exposes_mobile_bridge_tools() {
     ] {
         assert!(codex_essential_tool(Tier::Standard, t), "{t}");
     }
+}
+
+#[test]
+fn mobile_projection_phase_is_honest_about_idle_and_terminal_states() {
+    assert_eq!(
+        mobile_projection_phase(0, 0, false, false, 200, 100),
+        "awaiting_consent"
+    );
+    assert_eq!(
+        mobile_projection_phase(2, 98, false, false, 200, 100),
+        "connected_recently"
+    );
+    assert_eq!(
+        mobile_projection_phase(2, 90, false, false, 200, 100),
+        "connected_then_idle"
+    );
+    assert_eq!(
+        mobile_projection_phase(2, 98, true, false, 200, 100),
+        "stopped"
+    );
+    assert_eq!(
+        mobile_projection_phase(2, 98, false, true, 200, 100),
+        "expired"
+    );
 }
 
 #[test]

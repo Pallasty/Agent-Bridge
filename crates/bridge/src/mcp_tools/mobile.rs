@@ -1276,6 +1276,71 @@ impl McpTool for MobileHealthTool {
 }
 
 mobile_tool_struct!(MobileProjectionStartTool);
+
+struct MobileProjectionRuntimeState {
+    session_id: String,
+    serial: String,
+    endpoint: String,
+    started_at: i64,
+    expires_at: i64,
+    pulls: std::sync::atomic::AtomicU64,
+    last_pull_unix_seconds: std::sync::atomic::AtomicU64,
+    stop_requested: std::sync::atomic::AtomicBool,
+    ended: std::sync::atomic::AtomicBool,
+}
+
+fn mobile_projection_registry(
+) -> &'static std::sync::Mutex<HashMap<String, Arc<MobileProjectionRuntimeState>>> {
+    static REGISTRY: std::sync::OnceLock<
+        std::sync::Mutex<HashMap<String, Arc<MobileProjectionRuntimeState>>>,
+    > = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+pub(super) fn mobile_projection_phase(
+    pulls: u64,
+    last_pull_unix_seconds: u64,
+    stop_requested: bool,
+    ended: bool,
+    expires_at: i64,
+    now: i64,
+) -> &'static str {
+    if stop_requested {
+        "stopped"
+    } else if ended || now >= expires_at {
+        "expired"
+    } else if pulls == 0 {
+        "awaiting_consent"
+    } else if last_pull_unix_seconds.saturating_add(5) >= now.max(0) as u64 {
+        "connected_recently"
+    } else {
+        "connected_then_idle"
+    }
+}
+
+fn mobile_projection_snapshot(state: &MobileProjectionRuntimeState, now: i64) -> Value {
+    use std::sync::atomic::Ordering;
+    let pulls = state.pulls.load(Ordering::Relaxed);
+    let last_pull = state.last_pull_unix_seconds.load(Ordering::Relaxed);
+    let stopped = state.stop_requested.load(Ordering::Relaxed);
+    let ended = state.ended.load(Ordering::Relaxed);
+    json!({
+        "session_id": state.session_id,
+        "serial": state.serial,
+        "endpoint": state.endpoint,
+        "started_at_unix_seconds": state.started_at,
+        "expires_at_unix_seconds": state.expires_at,
+        "phase": mobile_projection_phase(pulls, last_pull, stopped, ended, state.expires_at, now),
+        "pull_count": pulls,
+        "last_pull_unix_seconds": if last_pull == 0 { Value::Null } else { json!(last_pull) },
+        "consent_observed": pulls > 0,
+        "listener_active": !stopped && !ended && now < state.expires_at,
+        "stop_requested": stopped,
+        "ended": ended,
+        "disconnect_inference": "connected_then_idle means pulls stopped or paused; without a signed device disconnect event it is not proof of explicit disconnect"
+    })
+}
+
 #[async_trait]
 impl McpTool for MobileProjectionStartTool {
     fn name(&self) -> &'static str {
@@ -1354,6 +1419,24 @@ impl McpTool for MobileProjectionStartTool {
         };
         let expires_at = now + ttl_seconds;
         let session_id = format!("mcp-{now}-{}", &token_hex[..12]);
+        let replaced_listener_count = {
+            use std::sync::atomic::Ordering;
+            let mut registry = mobile_projection_registry().lock().unwrap();
+            registry.retain(|_, state| now <= state.expires_at + 600);
+            let mut stopped = 0u64;
+            for state in registry.values() {
+                if state.serial == serial && !state.ended.load(Ordering::Relaxed) {
+                    state.stop_requested.store(true, Ordering::Relaxed);
+                    stopped += 1;
+                }
+            }
+            if registry.len() >= 32 {
+                return Ok(ToolResult::error(
+                    "projection runtime registry is full; wait for old session records to age out",
+                ));
+            }
+            stopped
+        };
         let session = match crate::mobile_projection::ProjectionSession::bind(
             bind,
             0,
@@ -1432,18 +1515,48 @@ impl McpTool for MobileProjectionStartTool {
             Err(error) => return Ok(ToolResult::error(error)),
         };
 
+        let runtime = Arc::new(MobileProjectionRuntimeState {
+            session_id: session_id.clone(),
+            serial: serial.clone(),
+            endpoint: endpoint.to_string(),
+            started_at: now,
+            expires_at,
+            pulls: std::sync::atomic::AtomicU64::new(0),
+            last_pull_unix_seconds: std::sync::atomic::AtomicU64::new(0),
+            stop_requested: std::sync::atomic::AtomicBool::new(false),
+            ended: std::sync::atomic::AtomicBool::new(false),
+        });
+        mobile_projection_registry()
+            .lock()
+            .unwrap()
+            .insert(session_id.clone(), runtime.clone());
+        let runtime_thread = runtime.clone();
         if let Err(error) = std::thread::Builder::new()
             .name(format!("mobile-projection-{session_id}"))
             .spawn(move || {
-                while SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|duration| (duration.as_secs() as i64) < expires_at)
-                    .unwrap_or(false)
+                use std::sync::atomic::Ordering;
+                while !runtime_thread.stop_requested.load(Ordering::Relaxed)
+                    && SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| (duration.as_secs() as i64) < expires_at)
+                        .unwrap_or(false)
                 {
-                    let _ = session.serve_next(&frame, Duration::from_secs(1));
+                    if let Ok(Some(_peer)) = session.serve_next(&frame, Duration::from_secs(1)) {
+                        runtime_thread.pulls.fetch_add(1, Ordering::Relaxed);
+                        if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
+                            runtime_thread
+                                .last_pull_unix_seconds
+                                .store(duration.as_secs(), Ordering::Relaxed);
+                        }
+                    }
                 }
+                runtime_thread.ended.store(true, Ordering::Relaxed);
             })
         {
+            mobile_projection_registry()
+                .lock()
+                .unwrap()
+                .remove(&session_id);
             return Ok(ToolResult::error(format!(
                 "start projection listener thread failed: {error}"
             )));
@@ -1460,6 +1573,7 @@ impl McpTool for MobileProjectionStartTool {
             "token_exposed": false,
             "companion_service_started": false,
             "replaced_prior_projection_activity": true,
+            "replaced_prior_listener_count": replaced_listener_count,
             "authority": {
                 "attention": false,
                 "memory": false,
@@ -1467,6 +1581,144 @@ impl McpTool for MobileProjectionStartTool {
                 "actuation": false
             },
             "next": "The device holder must review the source/session/expiry and press Allow and connect."
+        })))
+    }
+}
+
+pub struct MobileProjectionStatusTool;
+impl MobileProjectionStatusTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MobileProjectionStatusTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_status"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read in-process mobile projection lifecycle state. Reports whether \
+                 consent was observed through authenticated pulls and whether the listener is \
+                 active. An idle connection is reported honestly as ambiguous, not as proof \
+                 that the device explicitly disconnected."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string", "description": "Optional exact session; omit to list recent sessions." }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs() as i64,
+            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
+        };
+        let session_id = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty());
+        let registry = mobile_projection_registry().lock().unwrap();
+        if let Some(session_id) = session_id {
+            return match registry.get(session_id) {
+                Some(state) => Ok(ToolResult::json_text(&json!({
+                    "status": "ok",
+                    "session": mobile_projection_snapshot(state, now)
+                }))),
+                None => Ok(ToolResult::error(
+                    "projection session not found in this MCP process",
+                )),
+            };
+        }
+        let mut sessions: Vec<Value> = registry
+            .values()
+            .map(|state| mobile_projection_snapshot(state, now))
+            .collect();
+        sessions.sort_by_key(|value| {
+            std::cmp::Reverse(
+                value
+                    .get("started_at_unix_seconds")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+            )
+        });
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "session_count": sessions.len(),
+            "sessions": sessions
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileProjectionStopTool);
+#[async_trait]
+impl McpTool for MobileProjectionStopTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_stop"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Stop one mobile projection listener before TTL and force-stop the \
+                 companion Activity on its selected Android device. The disabled companion \
+                 service is not enabled or started."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(error) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(error));
+        }
+        let Some(session_id) = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(ToolResult::error("missing 'session_id'"));
+        };
+        let state = {
+            let registry = mobile_projection_registry().lock().unwrap();
+            match registry.get(session_id) {
+                Some(state) => state.clone(),
+                None => {
+                    return Ok(ToolResult::error(
+                        "projection session not found in this MCP process",
+                    ))
+                }
+            }
+        };
+        use std::sync::atomic::Ordering;
+        state.stop_requested.store(true, Ordering::Relaxed);
+        let adb_stop = run_adb_command(
+            Some(&state.serial),
+            &adb_args(&["shell", "am", "force-stop", "dev.agentbridge.companion"]),
+            mobile_timeout_ms(&args),
+        )
+        .await;
+        let adb = match adb_stop {
+            Ok(output) => output.as_json(),
+            Err(error) => json!({ "status": "error", "error": error }),
+        };
+        Ok(ToolResult::json_text(&json!({
+            "status": "stop_requested",
+            "session_id": state.session_id,
+            "serial": state.serial,
+            "listener_stop_requested": true,
+            "companion_service_started": false,
+            "adb_force_stop": adb
         })))
     }
 }

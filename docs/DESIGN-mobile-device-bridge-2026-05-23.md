@@ -67,6 +67,11 @@ Implemented a small Android-first MCP surface in
   generate an in-memory one-use token, bind a random private-LAN port, and open
   a short-lived title/text projection consent page. It returns no token and
   never presses the consent button or starts the companion service.
+- `mobile_projection_status`: inspect one session or recent sessions without
+  touching the device. It reports observed pulls and uses deliberately honest
+  lifecycle phases: an idle authenticated client is not called disconnected.
+- `mobile_projection_stop`: stop the host listener early and force-stop the
+  selected companion package, without starting any background service.
 - `mobile_apple_status`: read-only Apple mobile readiness probe for Xcode,
   libimobiledevice, third-party iOS tools, and USB-visible iPhone/iPad/iPod
   devices.
@@ -116,6 +121,21 @@ not rerun `onCreate`. The `-S` replacement rule was added before acceptance.
 The corrected MCP stdio path then replaced the old screen, required the device
 holder to press **Allow and connect**, rendered the authenticated frame, and
 stopped polling after **Disconnect**. `CompanionService` remained absent.
+
+Lifecycle control was added after that first acceptance pass. Starting a new
+session now stops older listeners for the same device serial. Runtime state is
+kept in-process with bounded retention and exposes pull count, last-pull time,
+consent observation, listener state, and stop/end state. The status phases are
+`awaiting_consent`, `connected_recently`, `connected_then_idle`, `stopped`, and
+`expired`; because the current polling protocol has no explicit disconnect
+event, `connected_then_idle` intentionally does not claim one.
+
+Physical-device acceptance on 2026-08-11 used serial
+`3K661F0178H00000`. After the holder pressed **Allow and connect**, status
+reported `connected_recently` with authenticated pulls. `mobile_projection_stop`
+returned a successful ADB force-stop, status changed to `stopped`, the listener
+ended, and both `pidof` and `dumpsys activity services` showed no remaining
+companion process or service.
 
 ## Implementation Path
 
