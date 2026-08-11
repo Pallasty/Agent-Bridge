@@ -19780,7 +19780,7 @@ impl McpTool for SessionBootstrapTool {
                         .join(", ")
                 })
                 .unwrap_or_default();
-            let block = vec![
+            let mut block = vec![
                 "=== Git Currentness Warning (read-only) ===".to_string(),
                 format!(
                     "branch={} head={} target={} ahead={} behind={} clean={} warnings={}",
@@ -19797,10 +19797,41 @@ impl McpTool for SessionBootstrapTool {
                     state["clean"].as_bool().unwrap_or(false),
                     warnings,
                 ),
-                "Verify the intended worktree/branch before continuing; no Git state was changed."
-                    .to_string(),
-                String::new(),
             ];
+            if let Some(recovery) = state["recovery_worktree"].as_object() {
+                block.push(format!(
+                    "local_recovery_candidate={} branch={} head={} ahead={} behind=0 clean=true",
+                    recovery
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?"),
+                    recovery
+                        .get("branch")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?"),
+                    recovery
+                        .get("head")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                        .chars()
+                        .take(12)
+                        .collect::<String>(),
+                    recovery
+                        .get("ahead")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
+                ));
+                block.push(
+                    "Consider resuming from that local integration worktree; verify intent first. No Git state was changed."
+                        .to_string(),
+                );
+            } else {
+                block.push(
+                    "Verify the intended worktree/branch before continuing; no safe local integration worktree was identified and no Git state was changed."
+                        .to_string(),
+                );
+            }
+            block.push(String::new());
             lines.extend(cap_block_lines(block, BUDGET_GIT_CURRENTNESS));
         }
 
