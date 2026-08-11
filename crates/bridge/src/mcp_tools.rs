@@ -16150,6 +16150,33 @@ fn exact_scope_work_memory_rows(rows: Vec<MemoryRecord>, cwd: &str) -> Vec<Memor
         .collect()
 }
 
+/// Select the bounded automatic bootstrap view without changing explicit
+/// work-memory reads. Structured lanes remain independently useful, but old
+/// per-session precompact snapshots describe superseded interruption points;
+/// only the newest live snapshot for this exact project is resumed.
+fn bootstrap_work_memory_rows(
+    rows: Vec<MemoryRecord>,
+    cwd: &str,
+    now: i64,
+) -> Vec<MemoryRecord> {
+    let rows: Vec<MemoryRecord> = exact_scope_work_memory_rows(rows, cwd)
+        .into_iter()
+        .filter(|row| work_memory_is_live(row, now))
+        .collect();
+    let newest_precompact_key = rows
+        .iter()
+        .filter(|row| row.tags.iter().any(|tag| tag == "source:precompact"))
+        .max_by_key(|row| (row.updated_at.max(row.created_at), row.key.as_str()))
+        .map(|row| row.key.clone());
+
+    rows.into_iter()
+        .filter(|row| {
+            !row.tags.iter().any(|tag| tag == "source:precompact")
+                || newest_precompact_key.as_deref() == Some(row.key.as_str())
+        })
+        .collect()
+}
+
 /// Render the part of a scratchpad that is useful after interruption.
 /// Generic bootstrap rows show a content prefix, but work-memory prefixes are
 /// mostly metadata (`cwd`, slot, timestamp). A precompact snapshot stores its
@@ -19888,7 +19915,7 @@ impl McpTool for SessionBootstrapTool {
                 .list_memories_in_scope(&cwd, Some(WORK_MEMORY_KIND), MemoryListSort::Recent, 8)
                 .await
                 .unwrap_or_default();
-            let work_rows = exact_scope_work_memory_rows(work_rows, &cwd);
+            let work_rows = bootstrap_work_memory_rows(work_rows, &cwd, unix_now_secs());
             if let Some(block) = format_work_memory_block(&work_rows, is_compact, 180) {
                 lines.extend(cap_block_lines(block, BUDGET_WORK_MEMORY));
             }
