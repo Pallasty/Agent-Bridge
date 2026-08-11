@@ -16131,6 +16131,23 @@ fn format_work_memory_block(
     Some(out)
 }
 
+/// Keep the automatic bootstrap scratchpad local to the exact project cwd.
+/// `list_memories_in_scope` intentionally includes ancestor scopes for durable
+/// memory recall, but a short-lived work lane from `/Data` or `…/Projects`
+/// describes a different task surface and must not silently resume inside a
+/// child repository. Cross-node alias lanes have their own explicit peer block.
+fn exact_scope_work_memory_rows(rows: Vec<MemoryRecord>, cwd: &str) -> Vec<MemoryRecord> {
+    let requested = work_memory_scope(cwd.trim_end_matches('/'));
+    rows.into_iter()
+        .filter(|row| {
+            row.scope
+                .as_deref()
+                .map(|scope| scope.trim_end_matches('/') == requested)
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
 /// Render the part of a scratchpad that is useful after interruption.
 /// Generic bootstrap rows show a content prefix, but work-memory prefixes are
 /// mostly metadata (`cwd`, slot, timestamp). A precompact snapshot stores its
@@ -19869,6 +19886,7 @@ impl McpTool for SessionBootstrapTool {
                 .list_memories_in_scope(&cwd, Some(WORK_MEMORY_KIND), MemoryListSort::Recent, 8)
                 .await
                 .unwrap_or_default();
+            let work_rows = exact_scope_work_memory_rows(work_rows, &cwd);
             if let Some(block) = format_work_memory_block(&work_rows, is_compact, 180) {
                 lines.extend(cap_block_lines(block, BUDGET_WORK_MEMORY));
             }
