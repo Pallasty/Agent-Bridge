@@ -182,6 +182,10 @@ impl AgentRuntime for GeminiRuntime {
         "gemini"
     }
 
+    fn workspace_contract(&self) -> crate::WorkspaceRuntimeContract {
+        crate::WorkspaceRuntimeContract::local_agent(true)
+    }
+
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         if cfg.interactive {
             return self.spawn_interactive(cfg).await;

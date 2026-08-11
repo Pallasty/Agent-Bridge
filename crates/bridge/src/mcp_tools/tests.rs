@@ -15789,10 +15789,9 @@ async fn agent_spawn_interactive_rejects_non_pty_backends_before_spawn() {
         );
         let msg = result_text(&out);
         assert!(
-            msg.contains(&format!(
-                "{runtime_id}: interactive sessions are not supported"
-            )),
-            "{backend} should reject via runtime interactive gate, got: {msg}"
+            msg.contains(&format!("{runtime_id}: interactive request rejected"))
+                && msg.contains("Unsupported"),
+            "{backend} should reject via workspace runtime contract, got: {msg}"
         );
         assert!(
             !msg.contains("No such file") && !msg.contains("spawn "),
@@ -15811,6 +15810,9 @@ struct MockRuntime {
 impl ab_agent::AgentRuntime for MockRuntime {
     fn id(&self) -> &str {
         &self.id
+    }
+    fn workspace_contract(&self) -> ab_agent::WorkspaceRuntimeContract {
+        ab_agent::WorkspaceRuntimeContract::local_agent(false)
     }
     async fn spawn(&self, cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
         if self.fail {
@@ -15833,6 +15835,61 @@ impl ab_agent::AgentRuntime for MockRuntime {
     async fn capabilities(&self) -> ab_agent::AgentCapabilities {
         ab_agent::AgentCapabilities::default()
     }
+}
+
+#[tokio::test]
+async fn agent_backend_descriptors_are_sorted_and_mark_the_default() {
+    let hub = crate::Hub::builder()
+        .agent(mock("z-default", false))
+        .register_agent(mock("a-backup", false))
+        .build();
+
+    let descriptors = agent_backend_descriptors(&hub).await;
+    assert_eq!(descriptors.len(), 2);
+    assert_eq!(descriptors[0]["id"], "a-backup");
+    assert_eq!(descriptors[0]["default"], false);
+    assert_eq!(descriptors[1]["id"], "z-default");
+    assert_eq!(descriptors[1]["default"], true);
+    assert_eq!(
+        descriptors[1]["workspace_runtime"]["schema_version"],
+        "ab.workspace_runtime.v0"
+    );
+    assert_eq!(
+        descriptors[1]["workspace_runtime"]["network_isolation"],
+        "unknown"
+    );
+}
+
+#[test]
+fn workspace_runtime_request_rejects_unknown_capabilities() {
+    struct UndescribedRuntime;
+    #[async_trait]
+    impl ab_agent::AgentRuntime for UndescribedRuntime {
+        fn id(&self) -> &str {
+            "undescribed"
+        }
+        async fn spawn(&self, _cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
+            unreachable!("validation must happen before spawn")
+        }
+        async fn send_input(
+            &self,
+            _session: &ab_core::SessionId,
+            _text: &str,
+        ) -> ab_core::Result<()> {
+            Ok(())
+        }
+        async fn capabilities(&self) -> ab_agent::AgentCapabilities {
+            ab_agent::AgentCapabilities::default()
+        }
+    }
+
+    let cfg = SpawnConfig {
+        interactive: true,
+        ..SpawnConfig::default()
+    };
+    let error = validate_workspace_runtime_request(&UndescribedRuntime, &cfg)
+        .expect_err("unknown interactive capability must fail closed");
+    assert!(error.contains("Unknown"), "got: {error}");
 }
 
 fn mock(id: &str, fail: bool) -> Arc<dyn ab_agent::AgentRuntime> {

@@ -160,6 +160,10 @@ impl AgentRuntime for OzAgentRuntime {
         "warp-oz"
     }
 
+    fn workspace_contract(&self) -> crate::WorkspaceRuntimeContract {
+        crate::WorkspaceRuntimeContract::cloud_agent()
+    }
+
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         cfg.reject_unsupported_interactive(self.id())?;
         crate::sandbox::reject_nonlocal_if_requested(

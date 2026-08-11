@@ -10175,6 +10175,55 @@ fn agent_spawn_workload_class(node: Option<&str>, interactive: bool) -> &'static
     }
 }
 
+fn agent_node_is_remote(node: Option<&str>) -> bool {
+    node.is_some_and(|node| {
+        !node.eq_ignore_ascii_case("local") && !node.eq_ignore_ascii_case("localhost")
+    })
+}
+
+fn validate_workspace_runtime_request(
+    runtime: &dyn AgentRuntime,
+    cfg: &SpawnConfig,
+) -> std::result::Result<(), String> {
+    use ab_agent::{CapabilitySupport, RuntimeLocality};
+
+    let contract = runtime.workspace_contract();
+    if cfg.interactive && contract.interactive != CapabilitySupport::Supported {
+        return Err(format!(
+            "{}: interactive request rejected by workspace runtime contract ({:?})",
+            runtime.id(),
+            contract.interactive
+        ));
+    }
+
+    let remote = agent_node_is_remote(cfg.node.as_deref());
+    if remote && contract.locality != RuntimeLocality::LocalOrRemote {
+        return Err(format!(
+            "{}: remote node request rejected by workspace runtime contract ({:?})",
+            runtime.id(),
+            contract.locality
+        ));
+    }
+
+    let workspace_sandbox = cfg
+        .env
+        .get("AGENT_BRIDGE_AGENT_SANDBOX")
+        .is_some_and(|value| value.eq_ignore_ascii_case("workspace"));
+    let sandbox_support = if remote {
+        contract.remote_sandbox
+    } else {
+        contract.workspace_sandbox
+    };
+    if workspace_sandbox && sandbox_support != CapabilitySupport::Supported {
+        return Err(format!(
+            "{}: workspace sandbox request rejected by workspace runtime contract ({sandbox_support:?})",
+            runtime.id()
+        ));
+    }
+
+    Ok(())
+}
+
 fn body_span_id(body_span: Option<&Value>) -> Option<&str> {
     body_span?
         .get("span_id")
@@ -10295,6 +10344,7 @@ async fn spawn_agent_with_body_span(
     agent: Arc<dyn AgentRuntime>,
     cfg: SpawnConfig,
 ) -> std::result::Result<(ab_agent::AgentSession, Option<Value>), String> {
+    validate_workspace_runtime_request(agent.as_ref(), &cfg)?;
     let interactive = cfg.interactive;
     let runtime_id = agent.id().to_string();
     let span_id = if crate::body_telemetry::body_telemetry_enabled() {
@@ -24625,6 +24675,22 @@ impl CapabilitiesTool {
     }
 }
 
+async fn agent_backend_descriptors(hub: &Hub) -> Vec<Value> {
+    let mut runtimes: Vec<_> = hub.agents.values().cloned().collect();
+    runtimes.sort_by(|left, right| left.id().cmp(right.id()));
+    let default_id = hub.agent.as_ref().map(|runtime| runtime.id());
+    let mut descriptors = Vec::with_capacity(runtimes.len());
+    for runtime in runtimes {
+        descriptors.push(json!({
+            "id": runtime.id(),
+            "default": default_id == Some(runtime.id()),
+            "agent_capabilities": runtime.capabilities().await,
+            "workspace_runtime": runtime.workspace_contract(),
+        }));
+    }
+    descriptors
+}
+
 #[async_trait]
 impl McpTool for CapabilitiesTool {
     fn name(&self) -> &'static str {
@@ -24731,6 +24797,7 @@ impl McpTool for CapabilitiesTool {
             _ => std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into()),
         };
         let agent_binary_found = which_binary(&agent_bin);
+        let agent_backends = agent_backend_descriptors(&self.hub).await;
 
         // Hooks: check what's installed
         let home = dirs_home();
@@ -24843,7 +24910,8 @@ impl McpTool for CapabilitiesTool {
                 "available": agent_available,
                 "runtime": runtime_id,
                 "binary": agent_bin,
-                "binary_found": agent_binary_found
+                "binary_found": agent_binary_found,
+                "backends": agent_backends
             },
             "hooks": {
                 "configured": configured_hooks,
