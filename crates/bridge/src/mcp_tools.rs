@@ -19941,7 +19941,7 @@ impl McpTool for SessionBootstrapTool {
                 .unwrap_or_default();
             let handoffs_picked: Vec<MemoryRecord> = handoff_pool
                 .into_iter()
-                .filter(|r| r.status == "active")
+                .filter(|r| bootstrap_handoff_priority_eligible(r, &cwd))
                 .take(1)
                 .collect();
             let project_pool = store

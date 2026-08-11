@@ -2523,6 +2523,85 @@ async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_fo
 }
 
 #[tokio::test]
+async fn session_bootstrap_state_digest_keeps_only_priority_eligible_handoff() {
+    let (hub, _temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let cwd = "/tmp/bootstrap-state-digest-handoff";
+    let local_scope = format!("project:{cwd}");
+    let actionable_tags = [
+        "continuity_role:state",
+        "continuity_actionability:plan_influence",
+        "continuity_confidence:verified",
+    ];
+
+    for row in [
+        mk_mem_scoped(
+            "bootstrap_digest_exact_actionable",
+            "session_handoff",
+            "continue the exact project task",
+            &actionable_tags,
+            Some(&local_scope),
+        ),
+        mk_mem_scoped(
+            "bootstrap_digest_global_not_priority",
+            "session_handoff",
+            "unrelated global historical handoff",
+            &actionable_tags,
+            None,
+        ),
+        mk_mem_scoped(
+            "bootstrap_digest_stale_not_priority",
+            "session_handoff",
+            "stale project handoff",
+            &[
+                "continuity_role:state",
+                "continuity_actionability:plan_influence",
+                "continuity_confidence:stale",
+            ],
+            Some(&local_scope),
+        ),
+    ] {
+        store.memory_save(&row).await.expect("save handoff row");
+    }
+
+    let out = SessionBootstrapTool::new(hub)
+        .execute(
+            json!({
+                "cwd": cwd,
+                "limit": 10,
+                "frontend": "claude-code",
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("bootstrap state digest");
+    let text = result_text(&out);
+    let digest_start = text
+        .find("=== Project State Digest")
+        .expect("state digest should be present");
+    let digest_tail = &text[digest_start..];
+    let digest_end = digest_tail
+        .get(1..)
+        .and_then(|tail| tail.find("\n=== "))
+        .map(|offset| offset + 1)
+        .unwrap_or(digest_tail.len());
+    let digest = &digest_tail[..digest_end];
+
+    assert!(
+        digest.contains("bootstrap_digest_exact_actionable"),
+        "exact actionable handoff should orient the project digest: {digest}"
+    );
+    assert!(
+        !digest.contains("bootstrap_digest_global_not_priority"),
+        "global handoff must not receive project-digest priority: {digest}"
+    );
+    assert!(
+        !digest.contains("bootstrap_digest_stale_not_priority"),
+        "stale handoff must not receive project-digest priority: {digest}"
+    );
+}
+
+#[tokio::test]
 async fn lifecycle_precompact_saves_work_memory_snapshot() {
     let (hub, _temp_dir) = mk_test_hub_with_store().await;
     let ctx = ToolContext::default();
