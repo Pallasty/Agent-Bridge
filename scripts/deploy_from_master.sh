@@ -11,10 +11,10 @@
 # live-wrong). See lesson_deploy_race_stale_branch_binary_clobber_20260603.
 #
 # This script enforces the discipline that prevents that:
-#   1. build from the LATEST origin/master (the superset of every merged lane),
+#   1. build from the LATEST selected remote/master (the superset of every merged lane),
 #      never a stale branch;
 #   2. re-fetch after the potentially long release build and refuse to deploy
-#      when origin/master advanced during that build;
+#      when the selected remote/master advanced during that build;
 #   3. anti-regression gate: the new binary must still contain every lane
 #      feature-marker the CURRENTLY-deployed binary has (catches a stale build);
 #   4. back up the current .real before overwriting (so a clobber is recoverable
@@ -37,9 +37,11 @@
 #   AGENT_BRIDGE_REAL_BIN      real binary path (default $INSTALL_DIR/agent-bridge.real)
 #   AGENT_BRIDGE_AUDIO_EMBODY_PATH installed adapter path
 #                              (default ~/.local/share/ab-tts/audio_embody.py)
-#   CARGO_TARGET_DIR           build target dir (default ~/.cache/agent-bridge-deploy-target,
-#                              kept OFF /Data so the ntfs-3g volume filling up can't
-#                              ENOSPC the release build; honored if you set it)
+#   CARGO_TARGET_DIR           build target root (default ~/.cache/agent-bridge-deploy-target,
+#                              with one child per master SHA to prevent cross-ref artifact reuse;
+#                              kept OFF /Data so ntfs-3g pressure cannot ENOSPC the release build)
+#   AGENT_BRIDGE_DEPLOY_REMOTE git remote containing authoritative master
+#                              (default: origin; use github after GitHub migration)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +52,8 @@ REAL_PATH="${AGENT_BRIDGE_REAL_BIN:-$INSTALL_DIR/agent-bridge.real}"
 WRAPPER_PATH="$INSTALL_DIR/agent-bridge"
 ADAPTER_SOURCE="$REPO/scripts/audio_embody.py"
 ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
+DEPLOY_REMOTE="${AGENT_BRIDGE_DEPLOY_REMOTE:-origin}"
+MASTER_REF="refs/remotes/$DEPLOY_REMOTE/master"
 
 # Lane feature-markers. The gate asserts: every marker present in the CURRENT
 # deployed binary is also present in the NEW one (new may add more — superset OK).
@@ -133,10 +137,12 @@ if [ -n "$USE_BINARY" ]; then
     say "WARNING: --use-binary skips the build-from-master guarantee."
     say "         Only the regression gate + backup protect this deploy."
 else
-    say ">> fetching origin/master ..."
-    git -C "$REPO" fetch origin --quiet
-    MASTER_SHA="$(git -C "$REPO" rev-parse origin/master)"
-    PROVENANCE="origin/master @ ${MASTER_SHA:0:7}"
+    git -C "$REPO" remote get-url "$DEPLOY_REMOTE" >/dev/null 2>&1 ||
+        die "configured deploy remote does not exist: $DEPLOY_REMOTE"
+    say ">> fetching $DEPLOY_REMOTE/master ..."
+    git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
+    MASTER_SHA="$(git -C "$REPO" rev-parse --verify "$MASTER_REF")"
+    PROVENANCE="$DEPLOY_REMOTE/master @ ${MASTER_SHA:0:7}"
     # Build in a worktree placed as a SIBLING of the repo so the cross-repo path
     # dep (crates/seed-bridge -> ../../../AiOT/rust/seed_neuron) resolves natively
     # without symlinks. AiOT is always a sibling of the repo on every node.
@@ -170,33 +176,42 @@ else
     # worktrees' target/ dirs fill to 100%, ENOSPC-ing the release build
     # mid-link (hit twice on 2026-06-19 by two agents; both had to set
     # CARGO_TARGET_DIR=/home by hand to recover). Redirecting it off /Data is the
-    # root fix. A stable shared path also keeps cargo's dependency cache warm
-    # across deploys (deps are most of the build); cargo's own target lock makes
-    # concurrent deploys serialize safely. Honor an operator-set CARGO_TARGET_DIR.
+    # root fix. A SHA-scoped path prevents concurrent builds from different
+    # worktrees from reusing a binary compiled from another ref. Cargo's target
+    # lock serializes writes, but does not prove final executable provenance.
+    # Honor an operator-set CARGO_TARGET_DIR as the root of this scoped path.
     # See lesson_data_fills_from_worktree_targets_deploy_builds_there_20260619.
-    DEPLOY_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
+    DEPLOY_TARGET_ROOT="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
+    DEPLOY_TARGET_DIR="$DEPLOY_TARGET_ROOT/$MASTER_SHA"
     mkdir -p "$DEPLOY_TARGET_DIR" || die "cannot create build target dir $DEPLOY_TARGET_DIR"
     say ">> cargo build --release --bin agent-bridge"
     say "   (target dir: $DEPLOY_TARGET_DIR — off /Data; takes several minutes) ..."
     ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge )
     NEW_BIN="$DEPLOY_TARGET_DIR/release/agent-bridge"
     [ -x "$NEW_BIN" ] || die "build produced no binary at $NEW_BIN"
+    BUILT_VERSION="$("$NEW_BIN" --version 2>&1)" ||
+        die "built binary does not execute for provenance verification"
+    case "$BUILT_VERSION" in
+        *"${MASTER_SHA:0:12}"*) ;;
+        *) die "built binary provenance mismatch: expected ${MASTER_SHA:0:12}, got: $BUILT_VERSION" ;;
+    esac
+    say "OK: built binary reports master ${MASTER_SHA:0:12}."
 fi
 
 is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach-O): $NEW_BIN"
 
 # ---- 2. post-build master recheck ----
 # A release build can take tens of minutes. Another lane may merge during that
-# window, making this artifact stale even though it came from origin/master at
+# window, making this artifact stale even though it came from remote/master at
 # build start. Re-check before the first live-state mutation (backup/copy).
 if [ -z "$USE_BINARY" ]; then
-    say ">> rechecking origin/master after build ..."
-    git -C "$REPO" fetch origin --quiet
-    CURRENT_MASTER_SHA="$(git -C "$REPO" rev-parse origin/master)"
+    say ">> rechecking $DEPLOY_REMOTE/master after build ..."
+    git -C "$REPO" fetch "$DEPLOY_REMOTE" "+refs/heads/master:$MASTER_REF" --quiet
+    CURRENT_MASTER_SHA="$(git -C "$REPO" rev-parse --verify "$MASTER_REF")"
     if [ "$CURRENT_MASTER_SHA" != "$MASTER_SHA" ]; then
-        die "origin/master advanced during the release build (${MASTER_SHA:0:7} -> ${CURRENT_MASTER_SHA:0:7}); refusing to deploy a stale artifact before backup/copy. Re-run the deploy from the new master."
+        die "$DEPLOY_REMOTE/master advanced during the release build (${MASTER_SHA:0:7} -> ${CURRENT_MASTER_SHA:0:7}); refusing to deploy a stale artifact before backup/copy. Re-run the deploy from the new master."
     fi
-    say "OK: origin/master is still ${MASTER_SHA:0:7}."
+    say "OK: $DEPLOY_REMOTE/master is still ${MASTER_SHA:0:7}."
 fi
 
 # ---- 3. anti-regression gate vs the currently-deployed binary ----
@@ -212,7 +227,7 @@ if [ -f "$REAL_PATH" ]; then
         printf '  - %s\n' $missing
         die "regression detected — new binary drops a capability the live one has.
        This usually means it was built from a STALE branch, not latest master.
-       Refusing to clobber. Rebuild from origin/master."
+       Refusing to clobber. Rebuild from the authoritative remote/master."
     fi
     say "OK: new binary is a superset of the current deployed binary's markers."
 else

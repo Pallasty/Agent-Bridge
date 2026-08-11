@@ -45,6 +45,8 @@
 //!                    decoupled per thread 6 #226 / #228 / #231 split with
 //!                    `embed_text` MCP tool. Returns the raw inner backend's
 //!                    output without substrate side-effects.
+//!   - `GET /embed/readiness` — honest local-model readiness plus bounded
+//!                              stale-vector repair status.
 //!   - `POST /agent/messages` — XM v0.1: write a message addressed to
 //!                              a specific session on this node's inbox.
 //!                              See `docs/DESIGN-cross-machine-agent-messaging-2026-05-17.md`.
@@ -76,7 +78,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 mod avatar_aura_startup;
 use avatar_aura_startup::preload_avatar_aura_io;
@@ -86,7 +88,41 @@ pub use avatar_aura_startup::{AvatarAuraIoStartupConfig, AvatarAuraIoStartupErro
 struct AppState {
     store: Arc<dyn StateStore>,
     embed_backend: Arc<dyn EmbeddingBackend>,
+    embed_maintenance: Arc<Mutex<EmbedMaintenanceStatus>>,
     avatar_aura_io_default: Option<Arc<crate::avatar_renderer::SanitizedAuraIoReport>>,
+}
+
+#[derive(Clone, Debug)]
+struct EmbedMaintenanceStatus {
+    phase: &'static str,
+    batch_limit: usize,
+    updated: usize,
+    detail: Option<String>,
+}
+
+impl EmbedMaintenanceStatus {
+    fn from_env() -> Self {
+        let enabled = std::env::var("AGENT_BRIDGE_EMBED_AUTO_REPAIR")
+            .ok()
+            .map(|raw| {
+                !matches!(
+                    raw.trim().to_ascii_lowercase().as_str(),
+                    "0" | "false" | "off" | "no"
+                )
+            })
+            .unwrap_or(true);
+        let batch_limit = std::env::var("AGENT_BRIDGE_EMBED_AUTO_REPAIR_BATCH")
+            .ok()
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .unwrap_or(100)
+            .clamp(1, 1000);
+        Self {
+            phase: if enabled { "waiting" } else { "disabled" },
+            batch_limit,
+            updated: 0,
+            detail: None,
+        }
+    }
 }
 
 async fn prepare_app_state(
@@ -97,8 +133,92 @@ async fn prepare_app_state(
     Ok(AppState {
         store,
         embed_backend: build_raw_embed_backend(),
+        embed_maintenance: Arc::new(Mutex::new(EmbedMaintenanceStatus::from_env())),
         avatar_aura_io_default,
     })
+}
+
+fn set_embed_maintenance(
+    status: &Arc<Mutex<EmbedMaintenanceStatus>>,
+    phase: &'static str,
+    updated: usize,
+    detail: Option<String>,
+) {
+    let mut current = status
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    current.phase = phase;
+    current.updated = updated;
+    current.detail = detail;
+}
+
+/// Warm the daemon's raw ONNX backend and, once it is genuinely ready, repair
+/// at most one stale batch. This is deliberately once-per-process and bounded:
+/// readiness recovery must not turn daemon startup into an unbounded migration.
+fn spawn_embed_readiness_maintenance(state: &AppState) {
+    let initial = state
+        .embed_maintenance
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    if initial.phase == "disabled" {
+        return;
+    }
+    if state.embed_backend.name() == "fnv1a-hash-384" {
+        set_embed_maintenance(
+            &state.embed_maintenance,
+            "skipped",
+            0,
+            Some("explicit hash backend has no semantic model to repair against".into()),
+        );
+        return;
+    }
+
+    let backend = state.embed_backend.clone();
+    let store = state.store.clone();
+    let status = state.embed_maintenance.clone();
+    tokio::spawn(async move {
+        let _ = tokio::task::spawn_blocking(move || backend.embed("warmup")).await;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(120);
+        while ab_store::vector::local_model_ready().is_none()
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        match ab_store::vector::local_model_ready() {
+            Some(true) => {}
+            Some(false) => {
+                set_embed_maintenance(
+                    &status,
+                    "skipped",
+                    0,
+                    Some(
+                        "local semantic model failed to initialize; hash fallback remains active"
+                            .into(),
+                    ),
+                );
+                return;
+            }
+            None => {
+                set_embed_maintenance(
+                    &status,
+                    "timed_out",
+                    0,
+                    Some("local semantic model did not become ready within 120 seconds".into()),
+                );
+                return;
+            }
+        }
+
+        set_embed_maintenance(&status, "running", 0, None);
+        match store
+            .memory_reindex_embeddings(initial.batch_limit, true)
+            .await
+        {
+            Ok(updated) => set_embed_maintenance(&status, "complete", updated, None),
+            Err(error) => set_embed_maintenance(&status, "failed", 0, Some(error.to_string())),
+        }
+    });
 }
 
 /// Parse the `listen` argument into one or more addresses. Comma-separated
@@ -166,6 +286,7 @@ pub async fn run_with_config(
             tokio::net::TcpListener::bind(addr).await
         })
         .await?;
+    spawn_embed_readiness_maintenance(&state);
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/.well-known/agent.json/:session_id", get(agent_card))
@@ -278,6 +399,7 @@ pub async fn run_with_config(
         )
         .route("/identity", get(identity_endpoint))
         .route("/embed", post(embed_endpoint))
+        .route("/embed/readiness", get(embed_readiness_endpoint))
         .route("/agent/messages", post(agent_message_write))
         .route("/agent/inbox", get(agent_inbox_read))
         .route(
@@ -3503,6 +3625,36 @@ struct EmbedRequest {
     text: String,
 }
 
+async fn embed_readiness_endpoint(State(s): State<AppState>) -> Json<Value> {
+    let configured_backend = s.embed_backend.name();
+    let (model_state, semantic_ready) = if configured_backend == "fnv1a-hash-384" {
+        ("hash_only", false)
+    } else {
+        match ab_store::vector::local_model_ready() {
+            None => ("loading", false),
+            Some(true) => ("ready", true),
+            Some(false) => ("fallback", false),
+        }
+    };
+    let maintenance = s
+        .embed_maintenance
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    Json(json!({
+        "configured_backend": configured_backend,
+        "configured_dim": s.embed_backend.dim(),
+        "model_state": model_state,
+        "semantic_ready": semantic_ready,
+        "automatic_repair": {
+            "phase": maintenance.phase,
+            "batch_limit": maintenance.batch_limit,
+            "updated": maintenance.updated,
+            "detail": maintenance.detail,
+        }
+    }))
+}
+
 async fn embed_endpoint(
     State(s): State<AppState>,
     Json(req): Json<EmbedRequest>,
@@ -3538,9 +3690,7 @@ fn embed_response_metadata(
     vector: &[f32],
 ) -> (String, usize) {
     let actual_dim = vector.len();
-    if configured_name != "fnv1a-hash-384"
-        && vector == HashBackend.embed(text).as_slice()
-    {
+    if configured_name != "fnv1a-hash-384" && vector == HashBackend.embed(text).as_slice() {
         ("fnv1a-hash-384".to_string(), actual_dim)
     } else {
         (configured_name.to_string(), actual_dim)
@@ -8170,6 +8320,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn embed_readiness_reports_hash_only_and_bounded_repair_status() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let store: Arc<dyn StateStore> = Arc::new(
+            ab_store::SqliteStore::open(&temp.path().join("state.db"))
+                .await
+                .expect("open temporary store"),
+        );
+        let status = EmbedMaintenanceStatus {
+            phase: "skipped",
+            batch_limit: 100,
+            updated: 0,
+            detail: Some("explicit hash backend".into()),
+        };
+        let Json(body) = embed_readiness_endpoint(State(AppState {
+            store,
+            embed_backend: Arc::new(HashBackend),
+            embed_maintenance: Arc::new(Mutex::new(status)),
+            avatar_aura_io_default: None,
+        }))
+        .await;
+
+        assert_eq!(body["model_state"], "hash_only");
+        assert_eq!(body["semantic_ready"], false);
+        assert_eq!(body["automatic_repair"]["phase"], "skipped");
+        assert_eq!(body["automatic_repair"]["batch_limit"], 100);
+    }
+
+    #[tokio::test]
     async fn avatar_heartbeat_health_rejects_unsafe_label_as_bad_request() {
         let temp = tempfile::tempdir().expect("create tempdir");
         let store: std::sync::Arc<dyn StateStore> = std::sync::Arc::new(
@@ -8181,6 +8359,7 @@ mod tests {
             State(AppState {
                 store,
                 embed_backend: build_raw_embed_backend(),
+                embed_maintenance: Arc::new(Mutex::new(EmbedMaintenanceStatus::from_env())),
                 avatar_aura_io_default: None,
             }),
             Query(AvatarHeartbeatHealthQuery {
@@ -8327,6 +8506,7 @@ mod tests {
         AppState {
             store,
             embed_backend: build_raw_embed_backend(),
+            embed_maintenance: Arc::new(Mutex::new(EmbedMaintenanceStatus::from_env())),
             avatar_aura_io_default: None,
         }
     }

@@ -17,7 +17,7 @@ Agent-Bridge should reduce the cost of using several local AI development tools:
 - **R0 — project truth and roadmap reset:** one read-only command reports source, remote, installed-binary, dirty-WIP, and alignment status. Preserve all dirty worktrees.
 - **R1 — real-task memory usefulness (collecting):** evaluate 20 real development tasks for helpful recall, stale/wrong recall, repeated explanation, payload size, and latency. The local recorder is implemented; the product conclusion remains blocked until 20 organically occurring tasks are observed.
 - **R2 — lower coordination ceremony (dogfooding):** ordinary single-developer work uses the local plan, optional work memory, and final result; forum is reserved for parallel agents, cross-device handoff, shared high-risk changes, or active incidents. A single short-lived coordination registry holds at most five genuinely active shared threads. Historical forum `open` status is not the product backlog. See `docs/R2-LOW-CEREMONY-OPERATING-MODE.md`.
-- **R3 — continuity dogfood:** make bootstrap, topic-shift recall, work memory, and final curation useful in daily tasks before adding new memory mechanisms.
+- **R3 — continuity dogfood:** keep bootstrap orientation exact-project and actionable across both semantic results and the Project State Digest; validate the behavior in daily tasks before adding new memory mechanisms. See `docs/R3-CONTINUITY-DOGFOOD.md`.
 
 ## Admission rule for new work
 

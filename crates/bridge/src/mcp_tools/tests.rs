@@ -2460,6 +2460,55 @@ fn bootstrap_work_memory_keeps_only_exact_project_scope() {
     assert_eq!(filtered[0].key, "exact");
 }
 
+#[test]
+fn bootstrap_work_memory_keeps_latest_live_precompact_and_structured_lanes() {
+    let cwd = "/Data/CascadeProjects/agent-bridge";
+    let now = unix_now_secs();
+    let mut structured = mk_mem_scoped(
+        "structured",
+        WORK_MEMORY_KIND,
+        "## Next Step\nKeep this explicit lane",
+        &["work_memory", "slot:active"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    structured.updated_at = now - 30;
+    let mut older = mk_mem_scoped(
+        "precompact_old",
+        WORK_MEMORY_KIND,
+        "old interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    older.updated_at = now - 20;
+    older.created_at = now - 20;
+    let mut newest = mk_mem_scoped(
+        "precompact_new",
+        WORK_MEMORY_KIND,
+        "new interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    newest.updated_at = now - 10;
+    newest.created_at = now - 10;
+    let mut expired = mk_mem_scoped(
+        "precompact_expired",
+        WORK_MEMORY_KIND,
+        "expired interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    expired.updated_at = now - 15 * WORK_MEMORY_SECONDS_PER_DAY;
+    expired.created_at = expired.updated_at;
+
+    let selected = bootstrap_work_memory_rows(
+        vec![older, expired, structured, newest],
+        cwd,
+        now,
+    );
+    let keys: Vec<&str> = selected.iter().map(|row| row.key.as_str()).collect();
+    assert_eq!(keys, vec!["structured", "precompact_new"]);
+}
+
 #[tokio::test]
 async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_foreign_scope() {
     let (hub, _temp_dir) = mk_test_hub_with_store().await;
@@ -2519,6 +2568,85 @@ async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_fo
     assert!(
         !text.contains("bootstrap_semantic_foreign_hidden"),
         "foreign-project semantic hit must not enter bootstrap: {text}"
+    );
+}
+
+#[tokio::test]
+async fn session_bootstrap_state_digest_keeps_only_priority_eligible_handoff() {
+    let (hub, _temp_dir) = mk_test_hub_with_store().await;
+    let store = hub.store.clone().expect("store");
+    let cwd = "/tmp/bootstrap-state-digest-handoff";
+    let local_scope = format!("project:{cwd}");
+    let actionable_tags = [
+        "continuity_role:state",
+        "continuity_actionability:plan_influence",
+        "continuity_confidence:verified",
+    ];
+
+    for row in [
+        mk_mem_scoped(
+            "bootstrap_digest_exact_actionable",
+            "session_handoff",
+            "continue the exact project task",
+            &actionable_tags,
+            Some(&local_scope),
+        ),
+        mk_mem_scoped(
+            "bootstrap_digest_global_not_priority",
+            "session_handoff",
+            "unrelated global historical handoff",
+            &actionable_tags,
+            None,
+        ),
+        mk_mem_scoped(
+            "bootstrap_digest_stale_not_priority",
+            "session_handoff",
+            "stale project handoff",
+            &[
+                "continuity_role:state",
+                "continuity_actionability:plan_influence",
+                "continuity_confidence:stale",
+            ],
+            Some(&local_scope),
+        ),
+    ] {
+        store.memory_save(&row).await.expect("save handoff row");
+    }
+
+    let out = SessionBootstrapTool::new(hub)
+        .execute(
+            json!({
+                "cwd": cwd,
+                "limit": 10,
+                "frontend": "claude-code",
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("bootstrap state digest");
+    let text = result_text(&out);
+    let digest_start = text
+        .find("=== Project State Digest")
+        .expect("state digest should be present");
+    let digest_tail = &text[digest_start..];
+    let digest_end = digest_tail
+        .get(1..)
+        .and_then(|tail| tail.find("\n=== "))
+        .map(|offset| offset + 1)
+        .unwrap_or(digest_tail.len());
+    let digest = &digest_tail[..digest_end];
+
+    assert!(
+        digest.contains("bootstrap_digest_exact_actionable"),
+        "exact actionable handoff should orient the project digest: {digest}"
+    );
+    assert!(
+        !digest.contains("bootstrap_digest_global_not_priority"),
+        "global handoff must not receive project-digest priority: {digest}"
+    );
+    assert!(
+        !digest.contains("bootstrap_digest_stale_not_priority"),
+        "stale handoff must not receive project-digest priority: {digest}"
     );
 }
 
@@ -7511,6 +7639,10 @@ fn host_surface_gates_device_and_credential_families() {
             ],
         ),
         (
+            "cloudflare_kitesurf",
+            &["cloudflare_kitesurf_snapshot"],
+        ),
+        (
             "github_api",
             &["github_issue_create", "github_issue_list", "github_pr_list"],
         ),
@@ -7529,6 +7661,7 @@ fn host_surface_gates_device_and_credential_families() {
             "brave" => surface.brave = false,
             "notion" => surface.notion = false,
             "cloudflare" => surface.cloudflare = false,
+            "cloudflare_kitesurf" => surface.cloudflare_kitesurf = false,
             "github_api" => surface.github_api = false,
             "gitlab_api" => surface.gitlab_api = false,
             "tailscale_api" => surface.tailscale_api = false,

@@ -74,6 +74,8 @@ use tokio::process::Command as TokioCommand;
 
 mod operator_request;
 use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
+mod kitesurf;
+use kitesurf::CloudflareKitesurfSnapshotTool;
 #[cfg(feature = "embodiment-runtime-p4")]
 mod embodiment_runtime;
 #[cfg(all(feature = "embodiment-runtime-p4", test))]
@@ -16221,6 +16223,33 @@ fn exact_scope_work_memory_rows(rows: Vec<MemoryRecord>, cwd: &str) -> Vec<Memor
         .collect()
 }
 
+/// Select the bounded automatic bootstrap view without changing explicit
+/// work-memory reads. Structured lanes remain independently useful, but old
+/// per-session precompact snapshots describe superseded interruption points;
+/// only the newest live snapshot for this exact project is resumed.
+fn bootstrap_work_memory_rows(
+    rows: Vec<MemoryRecord>,
+    cwd: &str,
+    now: i64,
+) -> Vec<MemoryRecord> {
+    let rows: Vec<MemoryRecord> = exact_scope_work_memory_rows(rows, cwd)
+        .into_iter()
+        .filter(|row| work_memory_is_live(row, now))
+        .collect();
+    let newest_precompact_key = rows
+        .iter()
+        .filter(|row| row.tags.iter().any(|tag| tag == "source:precompact"))
+        .max_by_key(|row| (row.updated_at.max(row.created_at), row.key.as_str()))
+        .map(|row| row.key.clone());
+
+    rows.into_iter()
+        .filter(|row| {
+            !row.tags.iter().any(|tag| tag == "source:precompact")
+                || newest_precompact_key.as_deref() == Some(row.key.as_str())
+        })
+        .collect()
+}
+
 /// Render the part of a scratchpad that is useful after interruption.
 /// Generic bootstrap rows show a content prefix, but work-memory prefixes are
 /// mostly metadata (`cwd`, slot, timestamp). A precompact snapshot stores its
@@ -19959,7 +19988,7 @@ impl McpTool for SessionBootstrapTool {
                 .list_memories_in_scope(&cwd, Some(WORK_MEMORY_KIND), MemoryListSort::Recent, 8)
                 .await
                 .unwrap_or_default();
-            let work_rows = exact_scope_work_memory_rows(work_rows, &cwd);
+            let work_rows = bootstrap_work_memory_rows(work_rows, &cwd, unix_now_secs());
             if let Some(block) = format_work_memory_block(&work_rows, is_compact, 180) {
                 lines.extend(cap_block_lines(block, BUDGET_WORK_MEMORY));
             }
@@ -20014,7 +20043,7 @@ impl McpTool for SessionBootstrapTool {
                 .unwrap_or_default();
             let handoffs_picked: Vec<MemoryRecord> = handoff_pool
                 .into_iter()
-                .filter(|r| r.status == "active")
+                .filter(|r| bootstrap_handoff_priority_eligible(r, &cwd))
                 .take(1)
                 .collect();
             let project_pool = store
@@ -24916,7 +24945,18 @@ impl McpTool for CapabilitiesTool {
             "browser": {
                 "backend": browser_id,
                 "available": browser_available,
-                "headless": std::env::var("AGENT_BRIDGE_HEADLESS").map(|v| v == "1").unwrap_or(false)
+                "headless": std::env::var("AGENT_BRIDGE_HEADLESS").map(|v| v == "1").unwrap_or(false),
+                "remote_kitesurf": {
+                    "default_off": true,
+                    "runtime_opted_in": env_flag_enabled("AGENT_BRIDGE_KITESURF"),
+                    "token_present": env_credential_present("CLOUDFLARE_API_TOKEN"),
+                    "account_id_present": env_credential_present("CLOUDFLARE_ACCOUNT_ID"),
+                    "tool_exposed": exposed_tools
+                        .iter()
+                        .any(|tool| tool.name == "cloudflare_kitesurf_snapshot"),
+                    "read_only": true,
+                    "stateless": true
+                }
             },
             "embodiment_p4": embodiment_p4,
             "memory": {
@@ -43454,6 +43494,8 @@ pub struct HostSurface {
     pub notion: bool,
     /// `CLOUDFLARE_API_TOKEN` — `cloudflare_*`.
     pub cloudflare: bool,
+    /// Cloudflare credentials + explicit `AGENT_BRIDGE_KITESURF=1` opt-in.
+    pub cloudflare_kitesurf: bool,
     /// `GITHUB_TOKEN` — `github_*`.
     pub github_api: bool,
     /// `GITLAB_TOKEN` — `gitlab_*` (API tools; git-over-ssh is unrelated).
@@ -43473,6 +43515,7 @@ impl HostSurface {
             brave: true,
             notion: true,
             cloudflare: true,
+            cloudflare_kitesurf: true,
             github_api: true,
             gitlab_api: true,
             tailscale_api: true,
@@ -43493,6 +43536,9 @@ impl HostSurface {
             brave: env_credential_present("BRAVE_SEARCH_TOKEN"),
             notion: env_credential_present("NOTION_TOKEN"),
             cloudflare: env_credential_present("CLOUDFLARE_API_TOKEN"),
+            cloudflare_kitesurf: env_credential_present("CLOUDFLARE_API_TOKEN")
+                && env_credential_present("CLOUDFLARE_ACCOUNT_ID")
+                && env_flag_enabled("AGENT_BRIDGE_KITESURF"),
             github_api: env_credential_present("GITHUB_TOKEN"),
             gitlab_api: env_credential_present("GITLAB_TOKEN"),
             tailscale_api: env_credential_present("TAILSCALE_OAUTH_CLIENT_ID")
@@ -47661,6 +47707,13 @@ pub(crate) fn build_registry_with_policy_surface(
 
     // Cloudflare REST API: zones / workers / R2 read scopes (others 403 with current token).
     // Demoted to Niche — 0 calls in 7-day audit window.
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.cloudflare_kitesurf,
+        Tier::Niche,
+        Arc::new(CloudflareKitesurfSnapshotTool::new(hub.clone())),
+    );
     reg_if_available(
         &mut reg,
         policy,
