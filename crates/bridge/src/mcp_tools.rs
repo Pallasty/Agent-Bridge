@@ -10188,11 +10188,34 @@ fn validate_workspace_runtime_request(
     use ab_agent::{CapabilitySupport, RuntimeLocality};
 
     let contract = runtime.workspace_contract();
+    if contract.source_kind != "agent_prompt" {
+        return Err(format!(
+            "{}: source kind '{}' is incompatible with agent_spawn ('agent_prompt' required)",
+            runtime.id(),
+            contract.source_kind
+        ));
+    }
+
+    if !cfg.interactive && contract.one_shot != CapabilitySupport::Supported {
+        return Err(format!(
+            "{}: one-shot request rejected by workspace runtime contract ({:?})",
+            runtime.id(),
+            contract.one_shot
+        ));
+    }
+
     if cfg.interactive && contract.interactive != CapabilitySupport::Supported {
         return Err(format!(
             "{}: interactive request rejected by workspace runtime contract ({:?})",
             runtime.id(),
             contract.interactive
+        ));
+    }
+
+    if contract.locality == RuntimeLocality::Unknown {
+        return Err(format!(
+            "{}: request rejected because workspace runtime locality is unknown",
+            runtime.id()
         ));
     }
 

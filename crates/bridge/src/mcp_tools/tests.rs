@@ -15890,6 +15890,50 @@ fn workspace_runtime_request_rejects_unknown_capabilities() {
     let error = validate_workspace_runtime_request(&UndescribedRuntime, &cfg)
         .expect_err("unknown interactive capability must fail closed");
     assert!(error.contains("Unknown"), "got: {error}");
+
+    let error = validate_workspace_runtime_request(&UndescribedRuntime, &SpawnConfig::default())
+        .expect_err("unknown one-shot capability must fail closed");
+    assert!(
+        error.contains("one-shot") && error.contains("Unknown"),
+        "got: {error}"
+    );
+}
+
+#[test]
+fn workspace_runtime_request_rejects_incompatible_source_kind() {
+    struct ShellRuntime;
+    #[async_trait]
+    impl ab_agent::AgentRuntime for ShellRuntime {
+        fn id(&self) -> &str {
+            "shell-runtime"
+        }
+        fn workspace_contract(&self) -> ab_agent::WorkspaceRuntimeContract {
+            ab_agent::WorkspaceRuntimeContract {
+                source_kind: "shell_command",
+                ..ab_agent::WorkspaceRuntimeContract::local_agent(false)
+            }
+        }
+        async fn spawn(&self, _cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
+            unreachable!("validation must happen before spawn")
+        }
+        async fn send_input(
+            &self,
+            _session: &ab_core::SessionId,
+            _text: &str,
+        ) -> ab_core::Result<()> {
+            Ok(())
+        }
+        async fn capabilities(&self) -> ab_agent::AgentCapabilities {
+            ab_agent::AgentCapabilities::default()
+        }
+    }
+
+    let error = validate_workspace_runtime_request(&ShellRuntime, &SpawnConfig::default())
+        .expect_err("agent_spawn must reject a non-prompt source kind");
+    assert!(
+        error.contains("shell_command") && error.contains("agent_prompt"),
+        "got: {error}"
+    );
 }
 
 fn mock(id: &str, fail: bool) -> Arc<dyn ab_agent::AgentRuntime> {

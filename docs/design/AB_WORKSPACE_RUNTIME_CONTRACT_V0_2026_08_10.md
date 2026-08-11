@@ -22,6 +22,9 @@ authority.
 `agent_spawn` validates requests that depend on declared runtime properties
 before starting a process:
 
+- the source kind must be `agent_prompt` and one-shot calls require explicit
+  one-shot support;
+- runtime locality must be known;
 - interactive requests require explicit interactive support;
 - a remote node requires `local_or_remote` locality;
 - a requested workspace sandbox requires explicit support at the selected
