@@ -37,9 +37,9 @@
 #   AGENT_BRIDGE_REAL_BIN      real binary path (default $INSTALL_DIR/agent-bridge.real)
 #   AGENT_BRIDGE_AUDIO_EMBODY_PATH installed adapter path
 #                              (default ~/.local/share/ab-tts/audio_embody.py)
-#   CARGO_TARGET_DIR           build target dir (default ~/.cache/agent-bridge-deploy-target,
-#                              kept OFF /Data so the ntfs-3g volume filling up can't
-#                              ENOSPC the release build; honored if you set it)
+#   CARGO_TARGET_DIR           build target root (default ~/.cache/agent-bridge-deploy-target,
+#                              with one child per master SHA to prevent cross-ref artifact reuse;
+#                              kept OFF /Data so ntfs-3g pressure cannot ENOSPC the release build)
 #   AGENT_BRIDGE_DEPLOY_REMOTE git remote containing authoritative master
 #                              (default: origin; use github after GitHub migration)
 set -euo pipefail
@@ -176,17 +176,26 @@ else
     # worktrees' target/ dirs fill to 100%, ENOSPC-ing the release build
     # mid-link (hit twice on 2026-06-19 by two agents; both had to set
     # CARGO_TARGET_DIR=/home by hand to recover). Redirecting it off /Data is the
-    # root fix. A stable shared path also keeps cargo's dependency cache warm
-    # across deploys (deps are most of the build); cargo's own target lock makes
-    # concurrent deploys serialize safely. Honor an operator-set CARGO_TARGET_DIR.
+    # root fix. A SHA-scoped path prevents concurrent builds from different
+    # worktrees from reusing a binary compiled from another ref. Cargo's target
+    # lock serializes writes, but does not prove final executable provenance.
+    # Honor an operator-set CARGO_TARGET_DIR as the root of this scoped path.
     # See lesson_data_fills_from_worktree_targets_deploy_builds_there_20260619.
-    DEPLOY_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
+    DEPLOY_TARGET_ROOT="${CARGO_TARGET_DIR:-$HOME/.cache/agent-bridge-deploy-target}"
+    DEPLOY_TARGET_DIR="$DEPLOY_TARGET_ROOT/$MASTER_SHA"
     mkdir -p "$DEPLOY_TARGET_DIR" || die "cannot create build target dir $DEPLOY_TARGET_DIR"
     say ">> cargo build --release --bin agent-bridge"
     say "   (target dir: $DEPLOY_TARGET_DIR — off /Data; takes several minutes) ..."
     ( cd "$BUILD_DIR" && CARGO_TARGET_DIR="$DEPLOY_TARGET_DIR" CARGO_TERM_COLOR=never cargo build --release --bin agent-bridge )
     NEW_BIN="$DEPLOY_TARGET_DIR/release/agent-bridge"
     [ -x "$NEW_BIN" ] || die "build produced no binary at $NEW_BIN"
+    BUILT_VERSION="$("$NEW_BIN" --version 2>&1)" ||
+        die "built binary does not execute for provenance verification"
+    case "$BUILT_VERSION" in
+        *"${MASTER_SHA:0:12}"*) ;;
+        *) die "built binary provenance mismatch: expected ${MASTER_SHA:0:12}, got: $BUILT_VERSION" ;;
+    esac
+    say "OK: built binary reports master ${MASTER_SHA:0:12}."
 fi
 
 is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach-O): $NEW_BIN"
