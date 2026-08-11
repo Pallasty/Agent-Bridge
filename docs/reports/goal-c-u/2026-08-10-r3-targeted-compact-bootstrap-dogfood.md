@@ -44,7 +44,7 @@ It omits only auxiliary panels:
 - due-review and inert-action dashboards;
 - associative BFS activation and predicted-next transitions.
 
-Static compact bootstraps and full bootstraps retain their prior behavior.
+Query-relevant feedback remains eligible in the ordinary semantic result rows; only the unconditional feedback preamble is omitted. Static compact bootstraps and full bootstraps retain their prior behavior.
 
 ## Candidate remeasurement
 

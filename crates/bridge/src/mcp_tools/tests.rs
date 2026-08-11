@@ -663,9 +663,10 @@ async fn targeted_compact_bootstrap_keeps_task_state_and_omits_feedback_preamble
         .expect("save task state");
     store
         .memory_save(&MemoryRecord {
-            key: "targeted_compact_unrelated_feedback".into(),
+            key: "targeted_compact_semantic_feedback".into(),
             kind: "feedback".into(),
-            content: "Unrelated historical correction should not consume recovery payload.".into(),
+            content: "Practical compact recovery should preserve query-relevant corrections."
+                .into(),
             tags: vec![],
             related_keys: vec![],
             scope: Some(format!("project:{cwd}")),
@@ -695,6 +696,7 @@ async fn targeted_compact_bootstrap_keeps_task_state_and_omits_feedback_preamble
         .expect("targeted compact bootstrap");
     let text = result_text(&out);
     assert!(text.contains("targeted_compact_task_state"), "{text}");
+    assert!(text.contains("targeted_compact_semantic_feedback"), "{text}");
     assert!(text.contains("Continuity Kernel"), "{text}");
     assert!(!text.contains("Feedback preamble"), "{text}");
 
