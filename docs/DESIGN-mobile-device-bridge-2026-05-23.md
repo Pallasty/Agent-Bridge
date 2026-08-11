@@ -54,6 +54,11 @@ Implemented a small Android-first MCP surface in
   saved to disk by default or returned inline when requested.
 - `mobile_health`: collect focus, foreground package, recent logcat
   crash/error markers, and optional UI/canvas analysis in one compact result.
+- `mobile_debug_bundle`: collect a bounded local diagnostic directory with a
+  JSON manifest, focus state, package details, recent logcat, crash-dropbox
+  excerpts, UI XML, and an optional screenshot. It creates a new private
+  directory (`0700` on Unix), private files (`0600`), and preserves partial
+  results when one source is unavailable.
 - `mobile_ui_snapshot`: run `uiautomator dump`, return XML plus a compact node
   summary suitable for selector choice. It now reports whether the visible tree
   is semantic, canvas-only, or SurfaceView-dominated.
@@ -317,10 +322,6 @@ most useful when it bundles state and preserves structured fallbacks:
 ## Open Follow-Ups
 
 - Add WebView CDP attachment for debuggable WebViews.
-- Add app debug bundle collection: package info, focused activity, recent
-  logcat, tombstones/crash snippets, UI XML, and optional screenshot. The new
-  `mobile_health` tool is the compact first step; this follow-up is the larger
-  artifact bundle.
 - Consider a later `mobile_wait_for_text` helper once selector matching is
   proven stable.
 - If full Xcode becomes available, expand Apple support in this order:

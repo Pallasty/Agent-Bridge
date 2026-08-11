@@ -1474,6 +1474,7 @@ fn codex_essential_exposes_mobile_bridge_tools() {
         "mobile_current_focus",
         "mobile_screenshot",
         "mobile_health",
+        "mobile_debug_bundle",
         "mobile_projection_start",
         "mobile_projection_status",
         "mobile_projection_stop",
@@ -1487,6 +1488,34 @@ fn codex_essential_exposes_mobile_bridge_tools() {
     ] {
         assert!(codex_essential_tool(Tier::Standard, t), "{t}");
     }
+}
+
+#[test]
+fn mobile_debug_bundle_path_is_unique_per_device_and_timestamp() {
+    let path = mobile_debug_bundle_path(Path::new("/tmp"), "emulator:5555/unsafe", 42);
+    assert_eq!(
+        path,
+        Path::new("/tmp/agent-bridge-mobile-debug-emulator-5555-unsafe-42")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn mobile_debug_bundle_permissions_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!(
+        "ab-mobile-bundle-permissions-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).expect("create test bundle");
+    harden_mobile_bundle_path(&root, true).expect("harden directory");
+    let file = root.join("manifest.json");
+    write_mobile_bundle_text(&file, "{}").expect("write private file");
+    assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    std::fs::remove_dir_all(root).expect("remove test bundle");
 }
 
 #[test]

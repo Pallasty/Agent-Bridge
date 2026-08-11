@@ -881,6 +881,68 @@ pub(super) fn mobile_screenshot_path(args: &Value, serial: &str) -> PathBuf {
     ))
 }
 
+pub(super) fn mobile_debug_bundle_path(parent: &Path, serial: &str, now: u64) -> PathBuf {
+    parent.join(format!(
+        "agent-bridge-mobile-debug-{}-{now}",
+        sanitize_mobile_path_component(serial)
+    ))
+}
+
+pub(super) fn write_mobile_bundle_text(
+    path: &Path,
+    body: &str,
+) -> std::result::Result<u64, String> {
+    std::fs::write(path, body).map_err(|e| format!("write {} failed: {e}", path.display()))?;
+    harden_mobile_bundle_path(path, false)?;
+    Ok(body.len() as u64)
+}
+
+pub(super) fn harden_mobile_bundle_path(
+    path: &Path,
+    directory: bool,
+) -> std::result::Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if directory { 0o700 } else { 0o600 };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .map_err(|e| format!("set private permissions on {} failed: {e}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    let _ = (path, directory);
+    Ok(())
+}
+
+fn record_mobile_bundle_text(
+    bundle: &Path,
+    name: &str,
+    filename: &str,
+    out: std::result::Result<AdbCommandOutput, String>,
+    artifacts: &mut Vec<Value>,
+) -> bool {
+    match out {
+        Ok(out) if out.ok() => {
+            let path = bundle.join(filename);
+            match write_mobile_bundle_text(&path, &out.stdout) {
+                Ok(bytes) => artifacts.push(json!({ "name": name, "path": path, "status": "ok", "bytes": bytes, "truncated": out.truncated })),
+                Err(e) => {
+                    artifacts.push(json!({ "name": name, "status": "error", "error": e }));
+                    return true;
+                }
+            }
+            false
+        }
+        Ok(out) => {
+            artifacts.push(json!({ "name": name, "status": "error", "adb": out.as_json() }));
+            true
+        }
+        Err(e) => {
+            artifacts.push(json!({ "name": name, "status": "error", "error": e }));
+            true
+        }
+    }
+}
+
 pub(super) fn adb_input_text_arg(text: &str) -> String {
     text.replace(' ', "%s")
 }
@@ -1271,6 +1333,262 @@ impl McpTool for MobileHealthTool {
             "focus": focus_status,
             "logcat": logcat,
             "ui": ui,
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileDebugBundleTool);
+#[async_trait]
+impl McpTool for MobileDebugBundleTool {
+    fn name(&self) -> &'static str {
+        "mobile_debug_bundle"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Collect a bounded, read-only Android app debug bundle into a new local directory. Includes a manifest, focus state, package details, recent logcat, crash-dropbox excerpts, UI XML, and an optional screenshot. Individual collection failures are recorded as partial results instead of discarding the useful artifacts.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "serial": mobile_schema_serial(),
+                    "package": { "type": "string", "description": "Android package to inspect. Defaults to the parsed foreground package when available." },
+                    "output_parent": { "type": "string", "description": "Existing local parent directory. Defaults to the system temp directory; a unique child directory is always created." },
+                    "log_lines": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 500 },
+                    "include_ui": { "type": "boolean", "default": true },
+                    "include_screenshot": { "type": "boolean", "default": false },
+                    "include_crash_dropbox": { "type": "boolean", "default": true },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let timeout_ms = mobile_timeout_ms(&args);
+        let serial = match resolve_mobile_serial(&args, timeout_ms).await {
+            Ok(serial) => serial,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let parent = args
+            .get("output_parent")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        if !parent.is_dir() {
+            return Ok(ToolResult::error(format!(
+                "debug bundle output parent is not an existing directory: {}",
+                parent.display()
+            )));
+        }
+        let bundle = mobile_debug_bundle_path(&parent, &serial, now);
+        if bundle.exists() {
+            return Ok(ToolResult::error(format!(
+                "debug bundle path already exists; retry after the timestamp changes: {}",
+                bundle.display()
+            )));
+        }
+        if let Err(e) = std::fs::create_dir(&bundle) {
+            return Ok(ToolResult::error(format!(
+                "create debug bundle directory {} failed: {e}",
+                bundle.display()
+            )));
+        }
+        if let Err(e) = harden_mobile_bundle_path(&bundle, true) {
+            return Ok(ToolResult::error(e));
+        }
+
+        let mut artifacts = Vec::new();
+        let mut partial = false;
+        let focus = run_adb_command(
+            Some(&serial),
+            &adb_args(&["shell", "dumpsys", "window"]),
+            timeout_ms,
+        )
+        .await;
+        let (focus_lines, foreground_package) = match focus {
+            Ok(out) if out.ok() => {
+                let path = bundle.join("focus.txt");
+                match write_mobile_bundle_text(&path, &out.stdout) {
+                    Ok(bytes) => artifacts.push(json!({ "name": "focus", "path": path, "status": "ok", "bytes": bytes, "truncated": out.truncated })),
+                    Err(e) => { partial = true; artifacts.push(json!({ "name": "focus", "status": "error", "error": e })); }
+                }
+                let lines = parse_focus_lines(&out.stdout);
+                let package = parse_foreground_package(&lines);
+                (lines, package)
+            }
+            Ok(out) => {
+                partial = true;
+                artifacts.push(json!({ "name": "focus", "status": "error", "adb": out.as_json() }));
+                (Vec::new(), None)
+            }
+            Err(e) => {
+                partial = true;
+                artifacts.push(json!({ "name": "focus", "status": "error", "error": e }));
+                (Vec::new(), None)
+            }
+        };
+        let package = args
+            .get("package")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| foreground_package.clone());
+
+        if let Some(package) = package.as_deref() {
+            partial |= record_mobile_bundle_text(
+                &bundle,
+                "package",
+                "package.txt",
+                run_adb_command(
+                    Some(&serial),
+                    &vec![
+                        "shell".into(),
+                        "dumpsys".into(),
+                        "package".into(),
+                        package.into(),
+                    ],
+                    timeout_ms,
+                )
+                .await,
+                &mut artifacts,
+            );
+        } else {
+            partial = true;
+            artifacts.push(json!({ "name": "package", "status": "skipped", "reason": "no package supplied and foreground package unavailable" }));
+        }
+
+        let log_lines = args
+            .get("log_lines")
+            .and_then(Value::as_u64)
+            .unwrap_or(500)
+            .clamp(1, 5000)
+            .to_string();
+        partial |= record_mobile_bundle_text(
+            &bundle,
+            "logcat",
+            "logcat.txt",
+            run_adb_command(
+                Some(&serial),
+                &vec!["logcat".into(), "-d".into(), "-t".into(), log_lines.clone()],
+                timeout_ms,
+            )
+            .await,
+            &mut artifacts,
+        );
+
+        if args
+            .get("include_crash_dropbox")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+        {
+            partial |= record_mobile_bundle_text(
+                &bundle,
+                "crash_dropbox",
+                "crash-dropbox.txt",
+                run_adb_command(
+                    Some(&serial),
+                    &adb_args(&["shell", "dumpsys", "dropbox", "--print", "data_app_crash"]),
+                    timeout_ms,
+                )
+                .await,
+                &mut artifacts,
+            );
+        } else {
+            artifacts.push(json!({ "name": "crash_dropbox", "status": "skipped" }));
+        }
+
+        if args
+            .get("include_ui")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+        {
+            match mobile_dump_ui_xml(&serial, timeout_ms).await {
+                Ok((_dump, cat)) => {
+                    let path = bundle.join("ui.xml");
+                    match write_mobile_bundle_text(&path, &cat.stdout) {
+                        Ok(bytes) => artifacts.push(json!({ "name": "ui", "path": path, "status": "ok", "bytes": bytes, "truncated": cat.truncated })),
+                        Err(e) => { partial = true; artifacts.push(json!({ "name": "ui", "status": "error", "error": e })); }
+                    }
+                }
+                Err(e) => {
+                    partial = true;
+                    artifacts.push(json!({ "name": "ui", "status": "error", "error": e }));
+                }
+            }
+        } else {
+            artifacts.push(json!({ "name": "ui", "status": "skipped" }));
+        }
+
+        if args
+            .get("include_screenshot")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            match run_adb_binary_command(
+                Some(&serial),
+                &adb_args(&["exec-out", "screencap", "-p"]),
+                timeout_ms,
+            )
+            .await
+            {
+                Ok(out)
+                    if out.ok() && out.stdout.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]) =>
+                {
+                    let path = bundle.join("screenshot.png");
+                    match std::fs::write(&path, &out.stdout) {
+                        Ok(()) => match harden_mobile_bundle_path(&path, false) {
+                            Ok(()) => artifacts.push(json!({ "name": "screenshot", "path": path, "status": "ok", "bytes": out.stdout.len() })),
+                            Err(e) => { partial = true; artifacts.push(json!({ "name": "screenshot", "status": "error", "error": e })); }
+                        },
+                        Err(e) => { partial = true; artifacts.push(json!({ "name": "screenshot", "status": "error", "error": e.to_string() })); }
+                    }
+                }
+                Ok(out) => {
+                    partial = true;
+                    artifacts.push(json!({ "name": "screenshot", "status": "error", "adb": out.as_json(), "error": "screencap did not return a valid PNG" }));
+                }
+                Err(e) => {
+                    partial = true;
+                    artifacts.push(json!({ "name": "screenshot", "status": "error", "error": e }));
+                }
+            }
+        } else {
+            artifacts.push(json!({ "name": "screenshot", "status": "skipped" }));
+        }
+
+        let manifest_path = bundle.join("manifest.json");
+        let manifest = json!({
+            "schema": "agent_bridge.mobile_debug_bundle.v1",
+            "status": if partial { "partial" } else { "ok" },
+            "created_at_unix_seconds": now,
+            "serial": serial,
+            "package": package,
+            "foreground_package": foreground_package,
+            "focus_lines": focus_lines,
+            "requested_log_lines": log_lines,
+            "artifacts": artifacts,
+        });
+        let manifest_body =
+            serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| manifest.to_string());
+        if let Err(e) = write_mobile_bundle_text(&manifest_path, &manifest_body) {
+            return Ok(ToolResult::error(e));
+        }
+        Ok(ToolResult::json_text(&json!({
+            "status": manifest["status"],
+            "serial": serial,
+            "package": manifest["package"],
+            "bundle_path": bundle,
+            "manifest_path": manifest_path,
+            "artifact_count": manifest["artifacts"].as_array().map(Vec::len).unwrap_or(0),
+            "artifacts": manifest["artifacts"],
         })))
     }
 }
