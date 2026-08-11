@@ -1476,6 +1476,7 @@ fn codex_essential_exposes_mobile_bridge_tools() {
         "mobile_health",
         "mobile_debug_bundle",
         "mobile_projection_start",
+        "mobile_projection_update",
         "mobile_projection_status",
         "mobile_projection_stop",
         "mobile_ui_snapshot",

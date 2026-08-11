@@ -43113,6 +43113,7 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "mobile_health",
     "mobile_debug_bundle",
     "mobile_projection_start",
+    "mobile_projection_update",
     "mobile_projection_status",
     "mobile_projection_stop",
     "mobile_ui_snapshot",
@@ -46823,6 +46824,13 @@ pub(crate) fn build_registry_with_policy_surface(
         surface.android_adb,
         Tier::Niche,
         Arc::new(MobileProjectionStartTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileProjectionUpdateTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,

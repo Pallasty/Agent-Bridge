@@ -79,6 +79,10 @@ Implemented a small Android-first MCP surface in
 - `mobile_projection_status`: inspect one session or recent sessions without
   touching the device. It reports observed pulls and uses deliberately honest
   lifecycle phases: an idle authenticated client is not called disconnected.
+- `mobile_projection_update`: replace title/text within an active consented
+  session while preserving its endpoint, token, expiry, and zero-authority
+  boundary. Status distinguishes host-side revision update from authenticated
+  delivery of that revision to the device.
 - `mobile_projection_stop`: stop the host listener early and force-stop the
   selected companion package, without starting any background service.
 - `mobile_apple_status`: read-only Apple mobile readiness probe for Xcode,
@@ -138,6 +142,14 @@ consent observation, listener state, and stop/end state. The status phases are
 `awaiting_consent`, `connected_recently`, `connected_then_idle`, `stopped`, and
 `expired`; because the current polling protocol has no explicit disconnect
 event, `connected_then_idle` intentionally does not claim one.
+
+The projection frame is now revisioned inside the same short-lived session.
+Updates do not reopen the Activity, extend TTL, change the token, or start a
+service. The listener reports both `current_revision` and
+`last_served_revision`; only equality (or a later served revision) proves that
+an authenticated device pull observed the current content. One in-flight poll
+may still receive the prior revision, so update itself returns
+`updated_awaiting_authenticated_pull` rather than claiming delivery.
 
 Physical-device acceptance on 2026-08-11 used serial
 `3K661F0178H00000`. After the holder pressed **Allow and connect**, status

@@ -278,6 +278,21 @@ mod tests {
     }
 
     #[test]
+    fn frame_revision_can_advance_without_changing_session_boundary() {
+        let first = ProjectionFrame::new("session-1", 1, 1234, "Status", "Ready").unwrap();
+        let second = ProjectionFrame::new("session-1", 2, 1234, "Status", "Updated").unwrap();
+        assert_eq!(second.revision, first.revision + 1);
+        assert_eq!(second.session_id, first.session_id);
+        assert_eq!(
+            second.expires_at_unix_seconds,
+            first.expires_at_unix_seconds
+        );
+        assert!(!second.attention_authority);
+        assert!(!second.memory_authority);
+        assert!(!second.actuation_authority);
+    }
+
+    #[test]
     fn projection_hmac_known_answer() {
         assert_eq!(
             hex(&hmac_sha256(&[0x0b; 20], b"Hi There")),

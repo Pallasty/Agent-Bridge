@@ -1601,7 +1601,9 @@ struct MobileProjectionRuntimeState {
     endpoint: String,
     started_at: i64,
     expires_at: i64,
+    frame: std::sync::RwLock<crate::mobile_projection::ProjectionFrame>,
     pulls: std::sync::atomic::AtomicU64,
+    last_served_revision: std::sync::atomic::AtomicU64,
     last_pull_unix_seconds: std::sync::atomic::AtomicU64,
     stop_requested: std::sync::atomic::AtomicBool,
     ended: std::sync::atomic::AtomicBool,
@@ -1642,12 +1644,20 @@ fn mobile_projection_snapshot(state: &MobileProjectionRuntimeState, now: i64) ->
     let last_pull = state.last_pull_unix_seconds.load(Ordering::Relaxed);
     let stopped = state.stop_requested.load(Ordering::Relaxed);
     let ended = state.ended.load(Ordering::Relaxed);
+    let frame = state.frame.read().unwrap();
+    let current_revision = frame.revision;
+    let last_served_revision = state.last_served_revision.load(Ordering::Relaxed);
     json!({
         "session_id": state.session_id,
         "serial": state.serial,
         "endpoint": state.endpoint,
         "started_at_unix_seconds": state.started_at,
         "expires_at_unix_seconds": state.expires_at,
+        "current_revision": current_revision,
+        "last_served_revision": last_served_revision,
+        "current_revision_observed_by_device": last_served_revision >= current_revision,
+        "title_chars": frame.title.chars().count(),
+        "body_chars": frame.body.chars().count(),
         "phase": mobile_projection_phase(pulls, last_pull, stopped, ended, state.expires_at, now),
         "pull_count": pulls,
         "last_pull_unix_seconds": if last_pull == 0 { Value::Null } else { json!(last_pull) },
@@ -1839,7 +1849,9 @@ impl McpTool for MobileProjectionStartTool {
             endpoint: endpoint.to_string(),
             started_at: now,
             expires_at,
+            frame: std::sync::RwLock::new(frame),
             pulls: std::sync::atomic::AtomicU64::new(0),
+            last_served_revision: std::sync::atomic::AtomicU64::new(0),
             last_pull_unix_seconds: std::sync::atomic::AtomicU64::new(0),
             stop_requested: std::sync::atomic::AtomicBool::new(false),
             ended: std::sync::atomic::AtomicBool::new(false),
@@ -1859,8 +1871,12 @@ impl McpTool for MobileProjectionStartTool {
                         .map(|duration| (duration.as_secs() as i64) < expires_at)
                         .unwrap_or(false)
                 {
+                    let frame = runtime_thread.frame.read().unwrap().clone();
                     if let Ok(Some(_peer)) = session.serve_next(&frame, Duration::from_secs(1)) {
                         runtime_thread.pulls.fetch_add(1, Ordering::Relaxed);
+                        runtime_thread
+                            .last_served_revision
+                            .store(frame.revision, Ordering::Relaxed);
                         if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
                             runtime_thread
                                 .last_pull_unix_seconds
@@ -1899,6 +1915,106 @@ impl McpTool for MobileProjectionStartTool {
                 "actuation": false
             },
             "next": "The device holder must review the source/session/expiry and press Allow and connect."
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileProjectionUpdateTool);
+#[async_trait]
+impl McpTool for MobileProjectionUpdateTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_update"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Update title/text inside one active, already consent-gated projection session. The update keeps the original endpoint, token, expiry, and zero-authority boundary; it does not reopen the Activity, extend TTL, start a service, or grant new authority. Delivery is confirmed separately when status reports the revision as served by an authenticated device pull.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["session_id", "title", "body"],
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "title": { "type": "string", "maxLength": 160 },
+                    "body": { "type": "string", "maxLength": 8000 }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(error) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(error));
+        }
+        let Some(session_id) = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(ToolResult::error("missing 'session_id'"));
+        };
+        let Some(title) = args.get("title").and_then(Value::as_str) else {
+            return Ok(ToolResult::error("missing 'title'"));
+        };
+        let Some(body) = args.get("body").and_then(Value::as_str) else {
+            return Ok(ToolResult::error("missing 'body'"));
+        };
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs() as i64,
+            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
+        };
+        let state = {
+            let registry = mobile_projection_registry().lock().unwrap();
+            match registry.get(session_id) {
+                Some(state) => state.clone(),
+                None => {
+                    return Ok(ToolResult::error(
+                        "projection session not found in this MCP process",
+                    ))
+                }
+            }
+        };
+        use std::sync::atomic::Ordering;
+        if state.stop_requested.load(Ordering::Relaxed)
+            || state.ended.load(Ordering::Relaxed)
+            || now >= state.expires_at
+        {
+            return Ok(ToolResult::error(
+                "projection session is stopped or expired; start a new consent session",
+            ));
+        }
+        let mut frame = state.frame.write().unwrap();
+        let revision = frame.revision.saturating_add(1);
+        let updated = match crate::mobile_projection::ProjectionFrame::new(
+            &state.session_id,
+            revision,
+            state.expires_at,
+            title,
+            body,
+        ) {
+            Ok(frame) => frame,
+            Err(error) => {
+                return Ok(ToolResult::error(format!(
+                    "invalid projection frame: {error}"
+                )))
+            }
+        };
+        *frame = updated;
+        let last_served_revision = state.last_served_revision.load(Ordering::Relaxed);
+        Ok(ToolResult::json_text(&json!({
+            "status": "updated_awaiting_authenticated_pull",
+            "session_id": state.session_id,
+            "revision": revision,
+            "last_served_revision": last_served_revision,
+            "expires_at_unix_seconds": state.expires_at,
+            "ttl_extended": false,
+            "activity_reopened": false,
+            "companion_service_started": false,
+            "authority": {
+                "attention": false,
+                "memory": false,
+                "sensor": false,
+                "actuation": false
+            }
         })))
     }
 }
