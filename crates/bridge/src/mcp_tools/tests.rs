@@ -7590,6 +7590,10 @@ fn host_surface_gates_device_and_credential_families() {
             ],
         ),
         (
+            "cloudflare_kitesurf",
+            &["cloudflare_kitesurf_snapshot"],
+        ),
+        (
             "github_api",
             &["github_issue_create", "github_issue_list", "github_pr_list"],
         ),
@@ -7608,6 +7612,7 @@ fn host_surface_gates_device_and_credential_families() {
             "brave" => surface.brave = false,
             "notion" => surface.notion = false,
             "cloudflare" => surface.cloudflare = false,
+            "cloudflare_kitesurf" => surface.cloudflare_kitesurf = false,
             "github_api" => surface.github_api = false,
             "gitlab_api" => surface.gitlab_api = false,
             "tailscale_api" => surface.tailscale_api = false,

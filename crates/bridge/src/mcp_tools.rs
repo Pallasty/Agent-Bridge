@@ -74,6 +74,8 @@ use tokio::process::Command as TokioCommand;
 
 mod operator_request;
 use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
+mod kitesurf;
+use kitesurf::CloudflareKitesurfSnapshotTool;
 #[cfg(feature = "embodiment-runtime-p4")]
 mod embodiment_runtime;
 #[cfg(all(feature = "embodiment-runtime-p4", test))]
@@ -24826,7 +24828,18 @@ impl McpTool for CapabilitiesTool {
             "browser": {
                 "backend": browser_id,
                 "available": browser_available,
-                "headless": std::env::var("AGENT_BRIDGE_HEADLESS").map(|v| v == "1").unwrap_or(false)
+                "headless": std::env::var("AGENT_BRIDGE_HEADLESS").map(|v| v == "1").unwrap_or(false),
+                "remote_kitesurf": {
+                    "default_off": true,
+                    "runtime_opted_in": env_flag_enabled("AGENT_BRIDGE_KITESURF"),
+                    "token_present": env_credential_present("CLOUDFLARE_API_TOKEN"),
+                    "account_id_present": env_credential_present("CLOUDFLARE_ACCOUNT_ID"),
+                    "tool_exposed": exposed_tools
+                        .iter()
+                        .any(|tool| tool.name == "cloudflare_kitesurf_snapshot"),
+                    "read_only": true,
+                    "stateless": true
+                }
             },
             "embodiment_p4": embodiment_p4,
             "memory": {
@@ -43363,6 +43376,8 @@ pub struct HostSurface {
     pub notion: bool,
     /// `CLOUDFLARE_API_TOKEN` — `cloudflare_*`.
     pub cloudflare: bool,
+    /// Cloudflare credentials + explicit `AGENT_BRIDGE_KITESURF=1` opt-in.
+    pub cloudflare_kitesurf: bool,
     /// `GITHUB_TOKEN` — `github_*`.
     pub github_api: bool,
     /// `GITLAB_TOKEN` — `gitlab_*` (API tools; git-over-ssh is unrelated).
@@ -43382,6 +43397,7 @@ impl HostSurface {
             brave: true,
             notion: true,
             cloudflare: true,
+            cloudflare_kitesurf: true,
             github_api: true,
             gitlab_api: true,
             tailscale_api: true,
@@ -43402,6 +43418,9 @@ impl HostSurface {
             brave: env_credential_present("BRAVE_SEARCH_TOKEN"),
             notion: env_credential_present("NOTION_TOKEN"),
             cloudflare: env_credential_present("CLOUDFLARE_API_TOKEN"),
+            cloudflare_kitesurf: env_credential_present("CLOUDFLARE_API_TOKEN")
+                && env_credential_present("CLOUDFLARE_ACCOUNT_ID")
+                && env_flag_enabled("AGENT_BRIDGE_KITESURF"),
             github_api: env_credential_present("GITHUB_TOKEN"),
             gitlab_api: env_credential_present("GITLAB_TOKEN"),
             tailscale_api: env_credential_present("TAILSCALE_OAUTH_CLIENT_ID")
@@ -47570,6 +47589,13 @@ pub(crate) fn build_registry_with_policy_surface(
 
     // Cloudflare REST API: zones / workers / R2 read scopes (others 403 with current token).
     // Demoted to Niche — 0 calls in 7-day audit window.
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.cloudflare_kitesurf,
+        Tier::Niche,
+        Arc::new(CloudflareKitesurfSnapshotTool::new(hub.clone())),
+    );
     reg_if_available(
         &mut reg,
         policy,
