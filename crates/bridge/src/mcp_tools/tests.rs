@@ -2460,6 +2460,55 @@ fn bootstrap_work_memory_keeps_only_exact_project_scope() {
     assert_eq!(filtered[0].key, "exact");
 }
 
+#[test]
+fn bootstrap_work_memory_keeps_latest_live_precompact_and_structured_lanes() {
+    let cwd = "/Data/CascadeProjects/agent-bridge";
+    let now = unix_now_secs();
+    let mut structured = mk_mem_scoped(
+        "structured",
+        WORK_MEMORY_KIND,
+        "## Next Step\nKeep this explicit lane",
+        &["work_memory", "slot:active"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    structured.updated_at = now - 30;
+    let mut older = mk_mem_scoped(
+        "precompact_old",
+        WORK_MEMORY_KIND,
+        "old interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    older.updated_at = now - 20;
+    older.created_at = now - 20;
+    let mut newest = mk_mem_scoped(
+        "precompact_new",
+        WORK_MEMORY_KIND,
+        "new interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    newest.updated_at = now - 10;
+    newest.created_at = now - 10;
+    let mut expired = mk_mem_scoped(
+        "precompact_expired",
+        WORK_MEMORY_KIND,
+        "expired interruption",
+        &["work_memory", "source:precompact", "ttl:14d"],
+        Some("project:/Data/CascadeProjects/agent-bridge"),
+    );
+    expired.updated_at = now - 15 * WORK_MEMORY_SECONDS_PER_DAY;
+    expired.created_at = expired.updated_at;
+
+    let selected = bootstrap_work_memory_rows(
+        vec![older, expired, structured, newest],
+        cwd,
+        now,
+    );
+    let keys: Vec<&str> = selected.iter().map(|row| row.key.as_str()).collect();
+    assert_eq!(keys, vec!["structured", "precompact_new"]);
+}
+
 #[tokio::test]
 async fn session_bootstrap_semantic_query_keeps_local_and_global_but_excludes_foreign_scope() {
     let (hub, _temp_dir) = mk_test_hub_with_store().await;
