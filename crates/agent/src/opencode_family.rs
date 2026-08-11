@@ -432,6 +432,10 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         self.runtime_id
     }
 
+    fn workspace_contract(&self) -> crate::WorkspaceRuntimeContract {
+        crate::WorkspaceRuntimeContract::local_or_remote_agent(true)
+    }
+
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         if cfg.interactive {
             return self.spawn_interactive(cfg).await;

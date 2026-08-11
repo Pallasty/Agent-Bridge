@@ -105,9 +105,118 @@ pub struct AgentCapabilities {
     pub supports_thinking: bool,
 }
 
+/// Conservative capability state used by routing decisions. `Unknown` is
+/// deliberately distinct from `Supported`: callers must not infer authority
+/// from a runtime failing to describe itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilitySupport {
+    Supported,
+    Unsupported,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeLocality {
+    Local,
+    LocalOrRemote,
+    Cloud,
+    #[default]
+    Unknown,
+}
+
+/// Read-only construction-time description of an agent runtime's execution
+/// shape. This is routing metadata, not a runtime enforcement attestation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkspaceRuntimeContract {
+    pub schema_version: &'static str,
+    pub source_kind: &'static str,
+    pub locality: RuntimeLocality,
+    pub one_shot: CapabilitySupport,
+    pub interactive: CapabilitySupport,
+    pub cancellable: CapabilitySupport,
+    pub live_output: CapabilitySupport,
+    pub workspace_sandbox: CapabilitySupport,
+    pub remote_sandbox: CapabilitySupport,
+    pub network_isolation: CapabilitySupport,
+}
+
+impl Default for WorkspaceRuntimeContract {
+    fn default() -> Self {
+        Self {
+            schema_version: "ab.workspace_runtime.v0",
+            source_kind: "agent_prompt",
+            locality: RuntimeLocality::Unknown,
+            one_shot: CapabilitySupport::Unknown,
+            interactive: CapabilitySupport::Unknown,
+            cancellable: CapabilitySupport::Unknown,
+            live_output: CapabilitySupport::Unknown,
+            workspace_sandbox: CapabilitySupport::Unknown,
+            remote_sandbox: CapabilitySupport::Unknown,
+            network_isolation: CapabilitySupport::Unknown,
+        }
+    }
+}
+
+impl WorkspaceRuntimeContract {
+    pub fn agent_prompt(locality: RuntimeLocality) -> Self {
+        Self {
+            locality,
+            ..Self::default()
+        }
+    }
+
+    pub fn local_agent(interactive: bool) -> Self {
+        Self {
+            one_shot: CapabilitySupport::Supported,
+            interactive: if interactive {
+                CapabilitySupport::Supported
+            } else {
+                CapabilitySupport::Unsupported
+            },
+            cancellable: CapabilitySupport::Supported,
+            live_output: if interactive {
+                CapabilitySupport::Supported
+            } else {
+                CapabilitySupport::Unsupported
+            },
+            workspace_sandbox: CapabilitySupport::Supported,
+            remote_sandbox: CapabilitySupport::Unsupported,
+            ..Self::agent_prompt(RuntimeLocality::Local)
+        }
+    }
+
+    pub fn local_or_remote_agent(interactive: bool) -> Self {
+        Self {
+            locality: RuntimeLocality::LocalOrRemote,
+            ..Self::local_agent(interactive)
+        }
+    }
+
+    pub fn cloud_agent() -> Self {
+        Self {
+            one_shot: CapabilitySupport::Supported,
+            interactive: CapabilitySupport::Unsupported,
+            cancellable: CapabilitySupport::Unsupported,
+            live_output: CapabilitySupport::Unsupported,
+            workspace_sandbox: CapabilitySupport::Unsupported,
+            remote_sandbox: CapabilitySupport::Unsupported,
+            ..Self::agent_prompt(RuntimeLocality::Cloud)
+        }
+    }
+}
+
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
     fn id(&self) -> &str;
+
+    /// Construction-time execution descriptor. The default is intentionally
+    /// unknown so newly added runtimes cannot silently gain routing authority.
+    fn workspace_contract(&self) -> WorkspaceRuntimeContract {
+        WorkspaceRuntimeContract::default()
+    }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession>;
 
@@ -148,4 +257,28 @@ pub trait AgentRuntime: Send + Sync {
     }
 
     async fn capabilities(&self) -> AgentCapabilities;
+}
+
+#[cfg(test)]
+mod workspace_contract_tests {
+    use super::*;
+
+    #[test]
+    fn default_contract_grants_no_execution_authority() {
+        let contract = WorkspaceRuntimeContract::default();
+        assert_eq!(contract.locality, RuntimeLocality::Unknown);
+        assert_eq!(contract.interactive, CapabilitySupport::Unknown);
+        assert_eq!(contract.workspace_sandbox, CapabilitySupport::Unknown);
+        assert_eq!(contract.network_isolation, CapabilitySupport::Unknown);
+    }
+
+    #[test]
+    fn local_interactive_contract_is_explicit_about_non_claims() {
+        let contract = WorkspaceRuntimeContract::local_agent(true);
+        assert_eq!(contract.locality, RuntimeLocality::Local);
+        assert_eq!(contract.interactive, CapabilitySupport::Supported);
+        assert_eq!(contract.workspace_sandbox, CapabilitySupport::Supported);
+        assert_eq!(contract.remote_sandbox, CapabilitySupport::Unsupported);
+        assert_eq!(contract.network_isolation, CapabilitySupport::Unknown);
+    }
 }
