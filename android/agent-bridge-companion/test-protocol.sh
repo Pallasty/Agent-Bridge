@@ -11,5 +11,6 @@ javac -source 8 -target 8 -d "$out" \
   "$root/src/dev/agentbridge/companion/ImuSampleSummary.java" \
   "$root/src/dev/agentbridge/companion/ConsentReceiptProtocol.java" \
   "$root/src/dev/agentbridge/companion/ImuResultAttestationProtocol.java" \
+  "$root/src/dev/agentbridge/companion/ProjectionProtocol.java" \
   "$root/test/dev/agentbridge/companion/ProtocolTest.java"
 java -cp "$out" dev.agentbridge.companion.ProtocolTest

@@ -16,9 +16,13 @@ The service has deliberately narrow authority:
 - HMAC-bound consent and result receipts with attention, memory, and actuation
   authority fixed to `false`.
 
-There is no camera, microphone, discovery, pairing UI, screen projection, or
-remote actuation in this slice. Starting the service or installing an APK is an
-operator action and is not performed by repository tests.
+There is no camera, microphone, autonomous discovery, or remote actuation. The
+projection activity is a separate, user-visible slice: it connects only after
+the person holding the phone confirms a named endpoint and a session that
+expires within ten minutes. It displays authenticated title/text frames and
+offers an always-visible disconnect action. It does not start the IMU service.
+Starting the service or installing an APK is an operator action and is not
+performed by repository tests.
 
 ## Build
 
@@ -44,3 +48,11 @@ The app has no launcher activity. A 32-byte random token is provisioned as a
 explicit request id, 32-byte challenge, bounded duration, and bounded rate.
 Exact commands are intentionally kept in `OPERATIONS.md` so normal builds do
 not accidentally start a persistent service.
+
+## Projection boundary
+
+The host binds only a private/link-local address. The phone pulls rather than
+accepting inbound control, and both request and response are HMAC-bound to the
+session, timestamp, and nonce. Projection payloads are not encrypted; use only
+on a trusted LAN and do not project secrets. Closing the activity immediately
+stops pulls, while both sides independently enforce the expiry time.

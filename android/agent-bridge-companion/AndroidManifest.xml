@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application android:allowBackup="false" android:label="Agent-Bridge Companion">
+        <activity
+            android:name=".ProjectionActivity"
+            android:exported="true"
+            android:label="Agent-Bridge Projection" />
         <service
             android:name=".CompanionService"
             android:enabled="true"

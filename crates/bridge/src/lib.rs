@@ -89,6 +89,8 @@ pub mod mcp_tools;
 /// protocol. This module does not discover, provision, start, or actuate a
 /// mobile device.
 pub mod mobile_companion;
+/// Ephemeral, consent-gated, read-only projection sessions for mobile nodes.
+pub mod mobile_projection;
 /// Default-off, synthetic-only one-shot adapter; no runtime caller is wired.
 #[cfg(feature = "temporal-evidence-s4-synthetic")]
 #[cfg_attr(not(test), allow(dead_code))]

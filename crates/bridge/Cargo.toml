@@ -111,3 +111,7 @@ path = "src/main.rs"
 name = "episode-observation-c2c-live-lab"
 path = "src/bin/episode_observation_c2c_live_lab.rs"
 required-features = ["episode-observation-c2c-keychain-macos-live-lab"]
+
+[[bin]]
+name = "mobile-projection-host"
+path = "src/bin/mobile_projection_host.rs"
