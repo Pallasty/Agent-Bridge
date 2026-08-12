@@ -1290,6 +1290,12 @@ fn codex_essential_exposes_xiao_shu_action_request() {
 }
 
 #[test]
+fn codex_lean_exposes_consent_gated_kitesurf_snapshot() {
+    assert!(codex_lean_tool("cloudflare_kitesurf_snapshot"));
+    assert!(!gemini_lean_tool("cloudflare_kitesurf_snapshot"));
+}
+
+#[test]
 fn codex_essential_exposes_avatar_observation_surface() {
     for tool in [
         "avatar_adapter_capabilities",
