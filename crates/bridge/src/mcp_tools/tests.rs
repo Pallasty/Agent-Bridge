@@ -625,11 +625,9 @@ async fn session_bootstrap_surfaces_continuity_kernel_from_selected_rows() {
 }
 
 #[test]
-fn targeted_compact_bootstrap_omits_auxiliary_sections_only_for_query_recovery() {
-    assert!(!include_bootstrap_auxiliary_sections(true, true));
-    assert!(include_bootstrap_auxiliary_sections(true, false));
-    assert!(include_bootstrap_auxiliary_sections(false, true));
-    assert!(include_bootstrap_auxiliary_sections(false, false));
+fn targeted_bootstrap_omits_global_auxiliary_sections_for_every_frontend() {
+    assert!(!include_bootstrap_auxiliary_sections(true));
+    assert!(include_bootstrap_auxiliary_sections(false));
 }
 
 #[tokio::test(flavor = "current_thread")]

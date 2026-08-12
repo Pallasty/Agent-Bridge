@@ -19504,12 +19504,14 @@ pub struct SessionBootstrapTool {
     hub: Hub,
 }
 
-/// A compact bootstrap with an explicit task query is a recovery packet, not a
-/// general cold-start dashboard. Keep the sections that answer "where am I and
-/// what blocks this task?" while leaving research/curation/associative panels
-/// to static compact and full bootstraps.
-fn include_bootstrap_auxiliary_sections(is_compact: bool, has_query: bool) -> bool {
-    !(is_compact && has_query)
+/// A bootstrap with an explicit task query is a recovery packet, not a general
+/// cold-start dashboard. Keep the sections that answer "where am I and what
+/// blocks this task?" while leaving global letters and the
+/// research/curation/associative panels to static bootstraps. This applies to
+/// every frontend: a full Codex/Claude rendering must not re-introduce global
+/// auxiliary state that compact Warp/Cursor recovery already omits.
+fn include_bootstrap_auxiliary_sections(has_query: bool) -> bool {
+    !has_query
 }
 
 impl SessionBootstrapTool {
@@ -19655,8 +19657,7 @@ impl McpTool for SessionBootstrapTool {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        let include_auxiliary_sections =
-            include_bootstrap_auxiliary_sections(is_compact, query.is_some());
+        let include_auxiliary_sections = include_bootstrap_auxiliary_sections(query.is_some());
 
         let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
             // Semantic path: cosine-ranked results, with only current,
