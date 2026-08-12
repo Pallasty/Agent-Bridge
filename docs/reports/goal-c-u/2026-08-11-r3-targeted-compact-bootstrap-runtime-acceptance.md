@@ -30,3 +30,14 @@ Date: 2026-08-11
 ## Boundary
 
 This accepts the merged compact-query behavior as installed and reachable through a fresh MCP process. It does not claim existing Warp/Codex MCP processes have reconnected; that remains a separate client refresh action.
+
+## Evidence closeout
+
+Later on 2026-08-11, before integrating this report:
+
+- direct `ls-remote` checks showed GitLab and GitHub `master` aligned at `d803106b05da0def82e278e45926205c0332e748`;
+- the installed artifact remained the accepted `c6a924397f5f` build with SHA-256 `1967c6f6c06d9ca5615eef6e2b506a951936e1baadf46354fb1c6b75ca67b0b3`;
+- daemon health remained `ok` and Palace remained HTTP 200;
+- `agent-bridge doctor` observed 9 current `.real` MCP consumers and only 2 stale Warp consumers, with 0 failures.
+
+This follow-up closes the earlier dual-remote and Codex-client uncertainty. It does not claim the two remaining Warp consumers were refreshed.
