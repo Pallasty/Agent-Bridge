@@ -1,8 +1,6 @@
 use super::*;
 
 const INLINE_IMAGE_MAX_BYTES: usize = 8 * 1024 * 1024;
-const MARKDOWN_MAX_CHARS: usize = 32_000;
-const A11Y_MAX_CHARS: usize = 48_000;
 
 pub(super) struct CloudflareKitesurfSnapshotTool {
     hub: Hub,
@@ -23,10 +21,10 @@ impl McpTool for CloudflareKitesurfSnapshotTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Capture a stateless, read-only Kitesurf evidence bundle for a public \
-                 URL: screenshot digest, bounded Markdown, accessibility tree, metadata, and \
-                 optional inline PNG. Requires runtime opt-in, Browser policy, Cloudflare \
-                 credentials, and per_call_opt_in=true."
+            description: "Capture a stateless, read-only Kitesurf screenshot for a public URL, \
+                 returning its digest, byte count, runtime metadata, and optional inline PNG. \
+                 Requires Browser policy, Cloudflare credentials, runtime opt-in, and \
+                 per_call_opt_in=true."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -146,30 +144,13 @@ fn result_from_snapshot(
         )));
     }
 
-    let (markdown, markdown_truncated, markdown_chars) =
-        truncate_chars(&snapshot.markdown, MARKDOWN_MAX_CHARS);
-    let accessibility_raw =
-        serde_json::to_string(&snapshot.accessibility_tree).unwrap_or_else(|_| "null".to_string());
-    let (accessibility_preview, accessibility_truncated, accessibility_chars) =
-        truncate_chars(&accessibility_raw, A11Y_MAX_CHARS);
-    let accessibility_tree = if accessibility_truncated {
-        json!({
-            "truncated": true,
-            "original_chars": accessibility_chars,
-            "json_preview": accessibility_preview
-        })
-    } else {
-        snapshot.accessibility_tree
-    };
     let metadata = json!({
-        "schema_version": "agent_bridge.cloudflare_kitesurf_snapshot.v0",
+        "schema_version": "agent_bridge.cloudflare_kitesurf_snapshot.v1",
         "provider": "cloudflare-browser-run",
         "engine": "kitesurf",
         "read_only": true,
         "stateless": true,
         "source_url": snapshot.source_url,
-        "title": snapshot.title,
-        "http_status": snapshot.http_status,
         "browser_ms_used": snapshot.browser_ms_used,
         "viewport": {
             "width": request.viewport_width,
@@ -182,13 +163,8 @@ fn result_from_snapshot(
             "sha256": format!("{:x}", Sha256::digest(&screenshot)),
             "included_inline": include_image
         },
-        "markdown": markdown,
-        "markdown_chars": markdown_chars,
-        "markdown_truncated": markdown_truncated,
-        "accessibility_tree": accessibility_tree,
-        "accessibility_tree_chars": accessibility_chars,
-        "accessibility_tree_truncated": accessibility_truncated,
         "limitations": [
+            "Kitesurf currently exposes screenshot output only; no Markdown or accessibility tree is returned",
             "no cookies, credentials, custom headers, or injected scripts",
             "Kitesurf beta is not pixel-identical to Chromium",
             "no durable browser session is created"
@@ -243,10 +219,6 @@ mod tests {
         let snapshot = crate::cloudflare_api::KitesurfSnapshot {
             source_url: "https://example.com/".into(),
             screenshot_base64: general_purpose::STANDARD.encode(b"png"),
-            markdown: "hello".into(),
-            accessibility_tree: json!({"role": "RootWebArea"}),
-            title: Some("Example".into()),
-            http_status: Some(200),
             browser_ms_used: Some(42),
         };
         let request = crate::cloudflare_api::KitesurfSnapshotRequest {
@@ -261,6 +233,9 @@ mod tests {
         let structured = result.structured_content.expect("structured metadata");
         assert_eq!(structured["screenshot"]["bytes"], 3);
         assert_eq!(structured["screenshot"]["included_inline"], false);
-        assert_eq!(structured["markdown"], "hello");
+        assert_eq!(
+            structured["schema_version"],
+            "agent_bridge.cloudflare_kitesurf_snapshot.v1"
+        );
     }
 }
