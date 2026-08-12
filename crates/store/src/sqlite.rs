@@ -5124,7 +5124,7 @@ impl StateStore for SqliteStore {
             .call(move |c| -> RusqliteResult<Vec<McpToolCallRow>> {
                 let mut stmt = c.prepare(
                     "SELECT id, ts, tool_name, duration_ms, ok, args_size, result_size,
-                            mcp_session_id
+                            mcp_session_id, source
                      FROM mcp_tool_calls
                      WHERE ts >= ?1
                      ORDER BY ts ASC, id ASC
@@ -5135,6 +5135,7 @@ impl StateStore for SqliteStore {
                         id: row.get(0)?,
                         ts: row.get(1)?,
                         tool_name: row.get(2)?,
+                        source: row.get(8)?,
                         duration_ms: row.get::<_, i64>(3)? as u32,
                         ok: row.get::<_, i64>(4)? != 0,
                         args_size: row.get::<_, Option<i64>>(5)?.map(|v| v.max(0) as u32),
@@ -21079,8 +21080,10 @@ mod tests {
             .expect("recent attributed calls");
         assert_eq!(recent.len(), 3);
         assert_eq!(recent[0].mcp_session_id.as_deref(), Some("mcp-session-a"));
+        assert_eq!(recent[0].source.as_deref(), Some("codex"));
         assert_eq!(recent[1].mcp_session_id.as_deref(), Some("mcp-session-a"));
         assert_eq!(recent[2].mcp_session_id.as_deref(), Some("mcp-session-b"));
+        assert_eq!(recent[2].source.as_deref(), Some("hook"));
 
         let codex = store
             .mcp_tool_call_stats_filtered(

@@ -411,6 +411,7 @@ mod tests {
             id: ts,
             ts,
             tool_name: tool_name.to_string(),
+            source: None,
             mcp_session_id: None,
             duration_ms: 12,
             ok,

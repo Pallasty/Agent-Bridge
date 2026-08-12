@@ -40447,7 +40447,13 @@ pub struct PracticalWorkflowScorecard {
 
 #[derive(Debug, serde::Serialize, PartialEq)]
 pub struct PracticalContinuationMetrics {
+    /// All successful `session_bootstrap` calls, including lifecycle hooks.
     pub bootstrap_calls: usize,
+    /// Non-interactive hook bootstraps retained in telemetry but excluded from
+    /// continuation metrics.
+    pub excluded_hook_bootstraps: usize,
+    /// Bootstrap calls whose source can represent an interactive workflow.
+    pub continuation_candidate_bootstraps: usize,
     pub attributed_bootstrap_calls: usize,
     pub legacy_unattributed_bootstraps: usize,
     pub eligible_bootstrap_calls: usize,
@@ -40502,9 +40508,18 @@ pub fn compute_practical_workflow_scorecard(
 ) -> PracticalWorkflowScorecard {
     let successful_calls = calls.iter().filter(|call| call.ok).count();
     let failed_calls = calls.len().saturating_sub(successful_calls);
-    let bootstraps: Vec<_> = calls
+    let all_bootstraps: Vec<_> = calls
         .iter()
         .filter(|call| call.ok && call.tool_name == "session_bootstrap")
+        .collect();
+    let excluded_hook_bootstraps = all_bootstraps
+        .iter()
+        .filter(|bootstrap| bootstrap.source.as_deref() == Some("hook"))
+        .count();
+    let bootstraps: Vec<_> = all_bootstraps
+        .iter()
+        .copied()
+        .filter(|bootstrap| bootstrap.source.as_deref() != Some("hook"))
         .collect();
     let attributed_bootstraps: Vec<_> = bootstraps
         .iter()
@@ -40592,7 +40607,9 @@ pub fn compute_practical_workflow_scorecard(
     };
 
     let mut recommendations = Vec::new();
-    if bootstraps.is_empty() {
+    if bootstraps.is_empty() && excluded_hook_bootstraps > 0 {
+        recommendations.push("Only non-interactive hook bootstraps were observed in this window; wait for an interactive MCP bootstrap before judging continuation.".into());
+    } else if bootstraps.is_empty() {
         recommendations.push("No bootstrap signal in this window; widen the window before judging continuation.".into());
     } else if attributed_bootstraps.is_empty() {
         recommendations.push("No attributed bootstrap is available yet; reconnect or start a current MCP process before judging same-session continuation.".into());
@@ -40615,14 +40632,16 @@ pub fn compute_practical_workflow_scorecard(
     recommendations.push("Authorization prompts and manual interventions are not present in MCP telemetry; keep them explicitly unavailable instead of estimating them.".into());
 
     PracticalWorkflowScorecard {
-        schema_version: 3,
+        schema_version: 4,
         read_only: true,
         window_secs,
         total_calls: calls.len(),
         successful_calls,
         failed_calls,
         continuation: PracticalContinuationMetrics {
-            bootstrap_calls: bootstraps.len(),
+            bootstrap_calls: all_bootstraps.len(),
+            excluded_hook_bootstraps,
+            continuation_candidate_bootstraps: bootstraps.len(),
             attributed_bootstrap_calls: attributed_bootstraps.len(),
             legacy_unattributed_bootstraps,
             eligible_bootstrap_calls: eligible_bootstraps.len(),
@@ -40631,7 +40650,7 @@ pub fn compute_practical_workflow_scorecard(
             eligible_bootstraps_without_followup,
             followup_rate,
             median_followup_secs,
-            interpretation: "A successful call from the same random MCP-process session after bootstrap is a continuation proxy, not proof that recalled context was correct. Legacy unattributed and recent right-censored bootstraps are excluded from the rate.",
+            interpretation: "A successful call from the same random MCP-process session after a non-hook bootstrap is a continuation proxy, not proof that recalled context was correct. Non-interactive hook bootstraps, legacy unattributed candidates, and recent right-censored candidates are excluded from the rate.",
         },
         completion: PracticalCompletionMetrics {
             finalize_signals: calls

@@ -220,6 +220,10 @@ pub struct McpToolCallRow {
     pub id: i64,
     pub ts: i64,
     pub tool_name: String,
+    /// Attributed caller class (for example `codex` or `hook`).  This lets
+    /// row-level analyses keep non-interactive lifecycle hooks out of user
+    /// workflow cohorts without discarding their telemetry.
+    pub source: Option<String>,
     /// Random, process-local MCP connection identifier. `None` denotes
     /// pre-attribution telemetry written before the additive schema column.
     pub mcp_session_id: Option<String>,

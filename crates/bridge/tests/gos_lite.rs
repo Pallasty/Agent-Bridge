@@ -30,6 +30,7 @@ fn call(ts: i64, tool_name: &str, ok: bool, duration_ms: u32, result_size: u32) 
         id: ts,
         ts,
         tool_name: tool_name.to_string(),
+        source: None,
         mcp_session_id: None,
         duration_ms,
         ok,

@@ -34356,6 +34356,7 @@ fn mk_call(ts: i64, name: &str, ok: bool, result_size: u32) -> ab_store::McpTool
         id: ts,
         ts,
         tool_name: name.into(),
+        source: Some("codex".into()),
         mcp_session_id: Some("test-session".into()),
         duration_ms: 10,
         ok,
@@ -34454,6 +34455,7 @@ fn attention_report_handles_missing_result_size() {
         id: 0,
         ts: 0,
         tool_name: "weird_tool".into(),
+        source: Some("codex".into()),
         mcp_session_id: Some("test-session".into()),
         duration_ms: 10,
         ok: true,
@@ -34481,6 +34483,8 @@ fn practical_scorecard_reports_continuation_completion_and_recovery_proxies() {
     assert_eq!(report.successful_calls, 5);
     assert_eq!(report.failed_calls, 2);
     assert_eq!(report.continuation.bootstrap_calls, 1);
+    assert_eq!(report.continuation.excluded_hook_bootstraps, 0);
+    assert_eq!(report.continuation.continuation_candidate_bootstraps, 1);
     assert_eq!(report.continuation.attributed_bootstrap_calls, 1);
     assert_eq!(report.continuation.legacy_unattributed_bootstraps, 0);
     assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
@@ -34526,7 +34530,7 @@ fn practical_scorecard_flags_coordination_majority() {
 
     let report = compute_practical_workflow_scorecard(&calls, 3_600, 600, 1_000);
 
-    assert_eq!(report.schema_version, 3);
+    assert_eq!(report.schema_version, 4);
     assert_eq!(report.coordination.calls, 18);
     assert_eq!(report.coordination.ratio, Some(0.9));
     assert_eq!(report.coordination.forum_reads, 6);
@@ -34611,6 +34615,31 @@ fn practical_scorecard_excludes_legacy_unattributed_bootstrap() {
     assert_eq!(report.continuation.legacy_unattributed_bootstraps, 1);
     assert_eq!(report.continuation.eligible_bootstrap_calls, 0);
     assert_eq!(report.continuation.followup_rate, None);
+}
+
+#[test]
+fn practical_scorecard_excludes_noninteractive_hook_bootstrap_from_continuation() {
+    let mut hook = mk_call(100, "session_bootstrap", true, 2_000);
+    hook.source = Some("hook".into());
+    hook.mcp_session_id = Some("hook-process".into());
+    let codex = mk_call(200, "session_bootstrap", true, 2_000);
+    let followup = mk_call(212, "memory_get", true, 500);
+
+    let report = compute_practical_workflow_scorecard(
+        &[hook, codex, followup],
+        3_600,
+        600,
+        1_000,
+    );
+
+    assert_eq!(report.continuation.bootstrap_calls, 2);
+    assert_eq!(report.continuation.excluded_hook_bootstraps, 1);
+    assert_eq!(report.continuation.continuation_candidate_bootstraps, 1);
+    assert_eq!(report.continuation.attributed_bootstrap_calls, 1);
+    assert_eq!(report.continuation.eligible_bootstrap_calls, 1);
+    assert_eq!(report.continuation.bootstraps_with_followup, 1);
+    assert_eq!(report.continuation.eligible_bootstraps_without_followup, 0);
+    assert_eq!(report.continuation.followup_rate, Some(1.0));
 }
 
 #[tokio::test]
