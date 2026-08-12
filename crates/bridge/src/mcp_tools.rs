@@ -19503,6 +19503,15 @@ async fn record_session_bootstrap_event(
 pub struct SessionBootstrapTool {
     hub: Hub,
 }
+
+/// A compact bootstrap with an explicit task query is a recovery packet, not a
+/// general cold-start dashboard. Keep the sections that answer "where am I and
+/// what blocks this task?" while leaving research/curation/associative panels
+/// to static compact and full bootstraps.
+fn include_bootstrap_auxiliary_sections(is_compact: bool, has_query: bool) -> bool {
+    !(is_compact && has_query)
+}
+
 impl SessionBootstrapTool {
     pub fn new(hub: Hub) -> Self {
         Self { hub }
@@ -19521,7 +19530,9 @@ impl McpTool for SessionBootstrapTool {
                  session_handoff rows receive priority; auto-curated, unverified, \
                  background/archive, stale, global, and cross-project handoffs do not. query= enables \
                  semantic ranking. frontend='cursor'|'warp' uses compact format; default \
-                 'claude-code' is full. When the outcome collector \
+                 'claude-code' is full. Compact output with an explicit query is a task-recovery \
+                 packet and omits auxiliary identity, curation, review, and associative panels; \
+                 static compact and full output retain them. When the outcome collector \
                  (AGENT_BRIDGE_OUTCOME_COLLECTOR) is on, the semantic page is logged to \
                  retrieval_surfacing as mode=bootstrap — telemetry-only (excluded from \
                  reinforce/decay aggregates until a calibrated ambient rule exists); \
@@ -19644,6 +19655,8 @@ impl McpTool for SessionBootstrapTool {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
+        let include_auxiliary_sections =
+            include_bootstrap_auxiliary_sections(is_compact, query.is_some());
 
         let rows: Vec<MemoryRecord> = if let Some(ref q) = query {
             // Semantic path: cosine-ranked results, with only current,
@@ -19868,15 +19881,17 @@ impl McpTool for SessionBootstrapTool {
         // sessions. Read-only Phase α′ bridge; the actual EMA update
         // logic stays on AiOT side. This makes the 21-month trajectory
         // tangible at the level of working state, not just memory text.
-        if let Some(soul_block) = format_aiot_soul_block() {
-            let block = vec![
-                "=== AiOT Soul (read-only carrier identity from /Data/CascadeProjects/AiOT) ==="
-                    .to_string(),
-                soul_block,
-                "=== End AiOT Soul ===".to_string(),
-                String::new(),
-            ];
-            lines.extend(cap_block_lines(block, BUDGET_AIOT_SOUL));
+        if include_auxiliary_sections {
+            if let Some(soul_block) = format_aiot_soul_block() {
+                let block = vec![
+                    "=== AiOT Soul (read-only carrier identity from /Data/CascadeProjects/AiOT) ==="
+                        .to_string(),
+                    soul_block,
+                    "=== End AiOT Soul ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_AIOT_SOUL));
+            }
         }
 
         // Inject Agent-Bridge Seed sidecar grid state if available — symmetric
@@ -19886,14 +19901,17 @@ impl McpTool for SessionBootstrapTool {
         // substrate's identity" — together they triangulate self across
         // markdown / Python EMA / Rust grid. See
         // `plan_seed_integration_gaps_20260504`.
-        if let Some(seed_block) = format_agent_bridge_seed_block() {
-            let block = vec![
-                "=== Agent-Bridge Seed (self-organized network on memory stream) ===".to_string(),
-                seed_block,
-                "=== End Seed ===".to_string(),
-                String::new(),
-            ];
-            lines.extend(cap_block_lines(block, BUDGET_SEED));
+        if include_auxiliary_sections {
+            if let Some(seed_block) = format_agent_bridge_seed_block() {
+                let block = vec![
+                    "=== Agent-Bridge Seed (self-organized network on memory stream) ==="
+                        .to_string(),
+                    seed_block,
+                    "=== End Seed ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_SEED));
+            }
         }
 
         // Inject Perception Filter (path B) state if available — parallel
@@ -19902,15 +19920,17 @@ impl McpTool for SessionBootstrapTool {
         // current memory corpus look like to a self-organizing network?"
         // Model and dim are dynamic (env-overridable in the sidecar) — the
         // body of the block carries the ground-truth `model=... ({dim}d)`.
-        if let Some(pf_block) = format_perception_filter_block() {
-            let block = vec![
-                "=== Perception Filter (thermodynamic surprisal filter on memory stream) ==="
-                    .to_string(),
-                pf_block,
-                "=== End Perception Filter ===".to_string(),
-                String::new(),
-            ];
-            lines.extend(cap_block_lines(block, BUDGET_PERCEPTION));
+        if include_auxiliary_sections {
+            if let Some(pf_block) = format_perception_filter_block() {
+                let block = vec![
+                    "=== Perception Filter (thermodynamic surprisal filter on memory stream) ==="
+                        .to_string(),
+                    pf_block,
+                    "=== End Perception Filter ===".to_string(),
+                    String::new(),
+                ];
+                lines.extend(cap_block_lines(block, BUDGET_PERCEPTION));
+            }
         }
 
         // Inject up to 3 most recent letter-to-future-self entries.
@@ -19918,19 +19938,21 @@ impl McpTool for SessionBootstrapTool {
         // they sit between AGENT.md (stable identity) and memory rows
         // (specific knowledge). They carry "what I was thinking last time"
         // — momentary state that AGENT.md doesn't and shouldn't capture.
-        for path in recent_letters(3) {
-            if let Ok(body) = std::fs::read_to_string(&path) {
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("letter");
-                let block = vec![
-                    format!("=== Letter from past-self ({stem}) ==="),
-                    body.trim().to_string(),
-                    "=== End Letter ===".to_string(),
-                    String::new(),
-                ];
-                lines.extend(cap_block_lines(block, BUDGET_LETTER_EACH));
+        if include_auxiliary_sections {
+            for path in recent_letters(3) {
+                if let Ok(body) = std::fs::read_to_string(&path) {
+                    let stem = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("letter");
+                    let block = vec![
+                        format!("=== Letter from past-self ({stem}) ==="),
+                        body.trim().to_string(),
+                        "=== End Letter ===".to_string(),
+                        String::new(),
+                    ];
+                    lines.extend(cap_block_lines(block, BUDGET_LETTER_EACH));
+                }
             }
         }
 
@@ -19940,7 +19962,7 @@ impl McpTool for SessionBootstrapTool {
         // search query. Companion to L5 P1 (FTS retrieval boost) and
         // L5 P2 (memory_correction MCP tool). K=5 is the v0 default;
         // tune via L5-P1 30d measurement.
-        {
+        if include_auxiliary_sections {
             let now_ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -19960,7 +19982,7 @@ impl McpTool for SessionBootstrapTool {
         // (design_s1_distillation_surfacing_arc_20260707). Scope-less pools:
         // pub_* rows live under domain:* scopes and candidates under project
         // scopes, so the in-scope list would miss both.
-        if !distill_surfacing_disabled() {
+        if include_auxiliary_sections && !distill_surfacing_disabled() {
             let mut pool: Vec<MemoryRecord> = Vec::new();
             for kind in ["lesson", "error_pattern", "present_outcome", "outcome"] {
                 pool.extend(
@@ -20101,7 +20123,7 @@ impl McpTool for SessionBootstrapTool {
         // the dual-mechanism continuity architecture. Decisions tagged with
         // `review:Nd` re-surface here once they exceed their review interval.
         // Hidden when nothing is due (avoids visual noise on fresh sessions).
-        {
+        if include_auxiliary_sections {
             let now_ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -20131,7 +20153,7 @@ impl McpTool for SessionBootstrapTool {
         // staying buried in the semantic_events log — closing the loop from
         // bus event → presentation/handoff surface. Hidden when none (clean
         // session). Best-effort; a read failure never blocks bootstrap.
-        {
+        if include_auxiliary_sections {
             let now_ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
@@ -20192,20 +20214,24 @@ impl McpTool for SessionBootstrapTool {
         // `design_gamma_scope_revision_after_beta_dogfood_20260510` for why
         // γ became wiring instead of a prediction engine. Best-effort —
         // failures don't block bootstrap.
-        if let Ok(section) =
-            crate::bootstrap_bfs::compute_section(store.as_ref(), &cwd, is_compact).await
-        {
-            lines.extend(cap_block_lines(section, BUDGET_GAMMA_BFS));
+        if include_auxiliary_sections {
+            if let Ok(section) =
+                crate::bootstrap_bfs::compute_section(store.as_ref(), &cwd, is_compact).await
+            {
+                lines.extend(cap_block_lines(section, BUDGET_GAMMA_BFS));
+            }
         }
 
         // δ-4 PP-1 lift (2026-05-11) — surface repeated next-step transitions
         // from recent memory_get events as a predicted-next signal. Bumps the
         // Butlin PP-1 indicator from medium → strong by giving cold-start a
         // temporal-asymmetric "after A, B usually follows" line. Best-effort.
-        if let Ok(section) =
-            crate::bootstrap_transitions::compute_section(store.as_ref(), is_compact).await
-        {
-            lines.extend(cap_block_lines(section, BUDGET_DELTA_TRANSITIONS));
+        if include_auxiliary_sections {
+            if let Ok(section) =
+                crate::bootstrap_transitions::compute_section(store.as_ref(), is_compact).await
+            {
+                lines.extend(cap_block_lines(section, BUDGET_DELTA_TRANSITIONS));
+            }
         }
 
         // ε-5 (2026-05-11) — sibling-presence warning. Two agents in the
