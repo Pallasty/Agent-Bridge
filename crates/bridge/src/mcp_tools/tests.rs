@@ -1612,6 +1612,63 @@ fn mobile_projection_wait_reports_only_observed_or_terminal_facts() {
 }
 
 #[test]
+fn mobile_projection_patch_preserves_omitted_fields() {
+    let original = crate::mobile_projection::ProjectionFrame::new(
+        "session-1",
+        4,
+        500,
+        "Original title",
+        "Original body",
+    )
+    .unwrap()
+    .with_presentation(Some("Waiting"), &["First".into(), "Second".into()])
+    .unwrap();
+    let (patched, changed) =
+        mobile_projection_patch_frame(&original, &json!({"status": "Done"})).unwrap();
+    assert_eq!(patched.revision, 5);
+    assert_eq!(patched.title, "Original title");
+    assert_eq!(patched.body, "Original body");
+    assert_eq!(patched.status.as_deref(), Some("Done"));
+    assert_eq!(patched.actions, vec!["First", "Second"]);
+    assert_eq!(changed, vec!["status"]);
+}
+
+#[test]
+fn mobile_projection_patch_clears_only_explicit_nullable_fields() {
+    let original =
+        crate::mobile_projection::ProjectionFrame::new("session-1", 1, 500, "Title", "Body")
+            .unwrap()
+            .with_presentation(Some("Waiting"), &["First".into()])
+            .unwrap();
+    let (patched, changed) =
+        mobile_projection_patch_frame(&original, &json!({"status": null, "actions": []})).unwrap();
+    assert_eq!(patched.title, "Title");
+    assert_eq!(patched.body, "Body");
+    assert_eq!(patched.status, None);
+    assert!(patched.actions.is_empty());
+    assert_eq!(changed, vec!["status", "actions"]);
+}
+
+#[test]
+fn mobile_projection_patch_rejects_empty_or_malformed_updates() {
+    let original =
+        crate::mobile_projection::ProjectionFrame::new("session-1", 1, 500, "Title", "Body")
+            .unwrap();
+    assert_eq!(
+        mobile_projection_patch_frame(&original, &json!({})).unwrap_err(),
+        "provide at least one of title, body, status, or actions"
+    );
+    assert_eq!(
+        mobile_projection_patch_frame(&original, &json!({"title": null})).unwrap_err(),
+        "title must be a string when provided"
+    );
+    assert_eq!(
+        mobile_projection_patch_frame(&original, &json!({"actions": [1]})).unwrap_err(),
+        "actions must contain only strings"
+    );
+}
+
+#[test]
 fn mobile_debug_bundle_path_is_unique_per_device_and_timestamp() {
     let path = mobile_debug_bundle_path(Path::new("/tmp"), "emulator:5555/unsafe", 42);
     assert_eq!(

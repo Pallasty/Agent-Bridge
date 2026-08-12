@@ -1694,6 +1694,75 @@ fn mobile_projection_presentation(
     Ok((status, actions))
 }
 
+pub(super) fn mobile_projection_patch_frame(
+    current: &crate::mobile_projection::ProjectionFrame,
+    args: &Value,
+) -> std::result::Result<(crate::mobile_projection::ProjectionFrame, Vec<&'static str>), String> {
+    let mut changed_fields = Vec::new();
+    let title = match args.get("title") {
+        None => current.title.clone(),
+        Some(Value::String(value)) => {
+            changed_fields.push("title");
+            value.clone()
+        }
+        Some(_) => return Err("title must be a string when provided".into()),
+    };
+    let body = match args.get("body") {
+        None => current.body.clone(),
+        Some(Value::String(value)) => {
+            changed_fields.push("body");
+            value.clone()
+        }
+        Some(_) => return Err("body must be a string when provided".into()),
+    };
+    let status = match args.get("status") {
+        None => current.status.clone(),
+        Some(Value::Null) => {
+            changed_fields.push("status");
+            None
+        }
+        Some(Value::String(value)) => {
+            changed_fields.push("status");
+            Some(value.clone())
+        }
+        Some(_) => return Err("status must be a string or null when provided".into()),
+    };
+    let actions = match args.get("actions") {
+        None => current.actions.clone(),
+        Some(Value::Null) => {
+            changed_fields.push("actions");
+            Vec::new()
+        }
+        Some(Value::Array(values)) => {
+            changed_fields.push("actions");
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "actions must contain only strings".to_string())
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        }
+        Some(_) => return Err("actions must be an array of strings or null when provided".into()),
+    };
+    if changed_fields.is_empty() {
+        return Err("provide at least one of title, body, status, or actions".into());
+    }
+    let revision = current.revision.saturating_add(1);
+    let frame = crate::mobile_projection::ProjectionFrame::new(
+        &current.session_id,
+        revision,
+        current.expires_at_unix_seconds,
+        &title,
+        &body,
+    )
+    .and_then(|frame| frame.with_presentation(status.as_deref(), &actions))
+    .map_err(|error| format!("invalid projection frame: {error}"))?;
+    Ok((frame, changed_fields))
+}
+
 pub(super) fn mobile_projection_wait_outcome(
     pulls: u64,
     last_served_revision: u64,
@@ -1983,16 +2052,16 @@ impl McpTool for MobileProjectionUpdateTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Update title/text inside one active, already consent-gated projection session. The update keeps the original endpoint, token, expiry, and zero-authority boundary; it does not reopen the Activity, extend TTL, start a service, or grant new authority. Delivery is confirmed separately when status reports the revision as served by an authenticated device pull.".into(),
+            description: "Patch one active, already consent-gated projection session. Omitted presentation fields keep their current values; status:null and actions:null (or an empty array) explicitly clear those fields. At least one field must be supplied. The patch keeps the original endpoint, token, expiry, and zero-authority boundary; it does not reopen the Activity, extend TTL, start a service, or grant new authority. Delivery is confirmed separately when status reports the revision as served by an authenticated device pull.".into(),
             input_schema: json!({
                 "type": "object",
-                "required": ["session_id", "title", "body"],
+                "required": ["session_id"],
                 "properties": {
                     "session_id": { "type": "string" },
                     "title": { "type": "string", "maxLength": 160 },
                     "body": { "type": "string", "maxLength": 8000 }
-                    ,"status": { "type": "string", "maxLength": 80, "description": "Optional short state label rendered as a status card; omit to clear it." }
-                    ,"actions": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Optional ordered, display-only next actions; omit to clear them." }
+                    ,"status": { "type": ["string", "null"], "maxLength": 80, "description": "Short state label. Omit to preserve; pass null to clear." }
+                    ,"actions": { "type": ["array", "null"], "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Ordered, display-only next actions. Omit to preserve; pass null or [] to clear." }
                 }
             }),
         }
@@ -2008,12 +2077,6 @@ impl McpTool for MobileProjectionUpdateTool {
             .filter(|value| !value.trim().is_empty())
         else {
             return Ok(ToolResult::error("missing 'session_id'"));
-        };
-        let Some(title) = args.get("title").and_then(Value::as_str) else {
-            return Ok(ToolResult::error("missing 'title'"));
-        };
-        let Some(body) = args.get("body").and_then(Value::as_str) else {
-            return Ok(ToolResult::error("missing 'body'"));
         };
         let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(duration) => duration.as_secs() as i64,
@@ -2039,34 +2102,19 @@ impl McpTool for MobileProjectionUpdateTool {
                 "projection session is stopped or expired; start a new consent session",
             ));
         }
-        let (status, actions) = match mobile_projection_presentation(&args) {
+        let mut frame = state.frame.write().unwrap();
+        let (updated, changed_fields) = match mobile_projection_patch_frame(&frame, &args) {
             Ok(value) => value,
             Err(error) => return Ok(ToolResult::error(error)),
         };
-        let mut frame = state.frame.write().unwrap();
-        let revision = frame.revision.saturating_add(1);
-        let updated = match crate::mobile_projection::ProjectionFrame::new(
-            &state.session_id,
-            revision,
-            state.expires_at,
-            title,
-            body,
-        )
-        .and_then(|frame| frame.with_presentation(status, &actions))
-        {
-            Ok(frame) => frame,
-            Err(error) => {
-                return Ok(ToolResult::error(format!(
-                    "invalid projection frame: {error}"
-                )))
-            }
-        };
+        let revision = updated.revision;
         *frame = updated;
         let last_served_revision = state.last_served_revision.load(Ordering::Relaxed);
         Ok(ToolResult::json_text(&json!({
             "status": "updated_awaiting_authenticated_pull",
             "session_id": state.session_id,
             "revision": revision,
+            "changed_fields": changed_fields,
             "last_served_revision": last_served_revision,
             "expires_at_unix_seconds": state.expires_at,
             "ttl_extended": false,
