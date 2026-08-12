@@ -43,7 +43,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, MutableMapping
 
 SCHEMA_VERSION = "desktop_snapshot/v0.5"
 
@@ -81,6 +81,54 @@ def _run(cmd: list[str], timeout: float = 8.0,
         return 127, "", f"not found: {cmd[0]}"
     except subprocess.TimeoutExpired:
         return 124, "", f"timeout: {' '.join(cmd)}"
+
+
+def hydrate_linux_session_env(
+    env: MutableMapping[str, str] | None = None,
+    *,
+    runtime_dir: Path | None = None,
+) -> dict[str, str]:
+    """Restore the minimum trusted user-session environment for desktop reads.
+
+    MCP subprocesses may be launched without XDG_RUNTIME_DIR or the session D-Bus
+    address.  AT-SPI discovers its accessibility bus through that session bus, so
+    pyatspi otherwise aborts even when the desktop services are healthy.
+
+    Only the current UID's owned runtime directory and its real ``bus`` Unix socket
+    are accepted.  Existing variables are respected; no compositor socket is
+    guessed here (``_sway_env`` handles that independently).
+    """
+    target = os.environ if env is None else env
+    if not sys.platform.startswith("linux"):
+        return {}
+
+    uid = os.getuid()
+    candidate = runtime_dir
+    if candidate is None:
+        configured = target.get("XDG_RUNTIME_DIR")
+        candidate = Path(configured) if configured else Path(f"/run/user/{uid}")
+    try:
+        valid_runtime = candidate.is_dir() and candidate.stat().st_uid == uid
+    except OSError:
+        valid_runtime = False
+    if not valid_runtime:
+        return {}
+
+    restored: dict[str, str] = {}
+    if not target.get("XDG_RUNTIME_DIR"):
+        target["XDG_RUNTIME_DIR"] = str(candidate)
+        restored["XDG_RUNTIME_DIR"] = str(candidate)
+
+    bus_socket = candidate / "bus"
+    try:
+        valid_bus = bus_socket.is_socket() and bus_socket.stat().st_uid == uid
+    except OSError:
+        valid_bus = False
+    if not target.get("DBUS_SESSION_BUS_ADDRESS") and valid_bus:
+        address = f"unix:path={bus_socket}"
+        target["DBUS_SESSION_BUS_ADDRESS"] = address
+        restored["DBUS_SESSION_BUS_ADDRESS"] = address
+    return restored
 
 
 def _sway_env() -> dict[str, str]:
@@ -369,6 +417,7 @@ def collect_atspi(max_elements: int, windows: list[dict[str, Any]],
 
 
 def build_snapshot(args: argparse.Namespace) -> dict[str, Any]:
+    hydrate_linux_session_env()
     env = _sway_env()
     t0 = time.time()
     outputs = collect_outputs(env)

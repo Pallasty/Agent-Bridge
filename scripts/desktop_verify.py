@@ -38,6 +38,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from desktop_invoke import pid_is_descendant  # noqa: E402  reuse cage-subtree check
+from desktop_snapshot import hydrate_linux_session_env  # noqa: E402
 
 SCHEMA = "desktop_verify/v0"
 
@@ -85,6 +86,7 @@ def resolve_atspi_matches(app_match, role_match, name_match, cage_pid):
     Returns (matches, error). Each match: {role, name, app, pid, in_scope, states}.
     Mirrors desktop_invoke.find_element's walk but returns the full list (so cage
     filtering and 'gone' are correct even with multiple same-named widgets)."""
+    hydrate_linux_session_env()
     try:
         import pyatspi  # noqa: PLC0415  deferred binding
     except Exception as exc:  # noqa: BLE001  pragma: no cover
