@@ -20,6 +20,7 @@ import java.net.Socket;
 import java.security.SecureRandom;
 import java.util.Locale;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 public final class ProjectionActivity extends Activity {
     private static final String HOST = "projection_host";
@@ -33,7 +34,7 @@ public final class ProjectionActivity extends Activity {
     private String host, token, sessionId;
     private int port;
     private long expiresAt;
-    private TextView heading, body, state;
+    private TextView heading, body, statusCard, actionsHeading, actionsBody, state;
     private Button primary;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -85,7 +86,10 @@ public final class ProjectionActivity extends Activity {
         connected = true;
         LinearLayout panel = panel();
         heading = text("Connecting…", 24, Typeface.BOLD); panel.addView(heading);
+        statusCard = text("", 18, Typeface.BOLD); statusCard.setVisibility(View.GONE); panel.addView(statusCard);
         body = text("", 18, Typeface.NORMAL); panel.addView(body);
+        actionsHeading = text("Next actions", 17, Typeface.BOLD); actionsHeading.setVisibility(View.GONE); panel.addView(actionsHeading);
+        actionsBody = text("", 18, Typeface.NORMAL); actionsBody.setVisibility(View.GONE); panel.addView(actionsBody);
         state = text("Temporary read-only projection", 14, Typeface.ITALIC); panel.addView(state);
         primary = button("Disconnect"); panel.addView(primary);
         primary.setOnClickListener(new View.OnClickListener() { public void onClick(View view) { disconnect("Disconnected by you"); } });
@@ -135,6 +139,20 @@ public final class ProjectionActivity extends Activity {
                     || frame.getBoolean("memory_authority")
                     || frame.getBoolean("actuation_authority")) throw new IllegalArgumentException("invalid frame boundary");
             heading.setText(frame.getString("title")); body.setText(frame.getString("body"));
+            String statusValue = frame.optString("status", "").trim();
+            statusCard.setText(statusValue.isEmpty() ? "" : "STATUS  ·  " + statusValue);
+            statusCard.setVisibility(statusValue.isEmpty() ? View.GONE : View.VISIBLE);
+            JSONArray actions = frame.optJSONArray("actions");
+            StringBuilder actionText = new StringBuilder();
+            if (actions != null) for (int i = 0; i < actions.length() && i < 6; i++) {
+                String action = actions.optString(i, "").trim();
+                if (!action.isEmpty()) actionText.append(actionText.length() == 0 ? "" : "\n\n")
+                        .append(i + 1).append(". ").append(action);
+            }
+            boolean hasActions = actionText.length() > 0;
+            actionsHeading.setVisibility(hasActions ? View.VISIBLE : View.GONE);
+            actionsBody.setText(actionText.toString());
+            actionsBody.setVisibility(hasActions ? View.VISIBLE : View.GONE);
             state.setText(String.format(Locale.US, "Read-only · revision %d · disconnect anytime", frame.getLong("revision")));
         } catch (Exception error) { state.setText("Rejected invalid projection frame"); }
     }

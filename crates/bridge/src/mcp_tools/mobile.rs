@@ -1658,6 +1658,8 @@ fn mobile_projection_snapshot(state: &MobileProjectionRuntimeState, now: i64) ->
         "current_revision_observed_by_device": last_served_revision >= current_revision,
         "title_chars": frame.title.chars().count(),
         "body_chars": frame.body.chars().count(),
+        "status_present": frame.status.is_some(),
+        "action_count": frame.actions.len(),
         "phase": mobile_projection_phase(pulls, last_pull, stopped, ended, state.expires_at, now),
         "pull_count": pulls,
         "last_pull_unix_seconds": if last_pull == 0 { Value::Null } else { json!(last_pull) },
@@ -1667,6 +1669,29 @@ fn mobile_projection_snapshot(state: &MobileProjectionRuntimeState, now: i64) ->
         "ended": ended,
         "disconnect_inference": "connected_then_idle means pulls stopped or paused; without a signed device disconnect event it is not proof of explicit disconnect"
     })
+}
+
+fn mobile_projection_presentation(
+    args: &Value,
+) -> std::result::Result<(Option<&str>, Vec<String>), String> {
+    let status = args.get("status").and_then(Value::as_str);
+    if args.get("status").is_some() && status.is_none() {
+        return Err("status must be a string".into());
+    }
+    let actions = match args.get("actions") {
+        None => Vec::new(),
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "actions must contain only strings".to_string())
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+        Some(_) => return Err("actions must be an array of strings".into()),
+    };
+    Ok((status, actions))
 }
 
 pub(super) fn mobile_projection_wait_outcome(
@@ -1715,6 +1740,8 @@ impl McpTool for MobileProjectionStartTool {
                     "bind": { "type": "string", "description": "Private or link-local host IP reachable by the phone." },
                     "title": { "type": "string", "maxLength": 160 },
                     "body": { "type": "string", "maxLength": 8000 },
+                    "status": { "type": "string", "maxLength": 80, "description": "Optional short state label rendered as a status card." },
+                    "actions": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Optional ordered, display-only next actions. They grant no actuation authority." },
                     "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 600, "default": 300 },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
                 }
@@ -1809,13 +1836,19 @@ impl McpTool for MobileProjectionStartTool {
                 )))
             }
         };
+        let (status, actions) = match mobile_projection_presentation(&args) {
+            Ok(value) => value,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let frame = match crate::mobile_projection::ProjectionFrame::new(
             &session_id,
             1,
             expires_at,
             title,
             body,
-        ) {
+        )
+        .and_then(|frame| frame.with_presentation(status, &actions))
+        {
             Ok(frame) => frame,
             Err(error) => {
                 return Ok(ToolResult::error(format!(
@@ -1958,6 +1991,8 @@ impl McpTool for MobileProjectionUpdateTool {
                     "session_id": { "type": "string" },
                     "title": { "type": "string", "maxLength": 160 },
                     "body": { "type": "string", "maxLength": 8000 }
+                    ,"status": { "type": "string", "maxLength": 80, "description": "Optional short state label rendered as a status card; omit to clear it." }
+                    ,"actions": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Optional ordered, display-only next actions; omit to clear them." }
                 }
             }),
         }
@@ -2004,6 +2039,10 @@ impl McpTool for MobileProjectionUpdateTool {
                 "projection session is stopped or expired; start a new consent session",
             ));
         }
+        let (status, actions) = match mobile_projection_presentation(&args) {
+            Ok(value) => value,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let mut frame = state.frame.write().unwrap();
         let revision = frame.revision.saturating_add(1);
         let updated = match crate::mobile_projection::ProjectionFrame::new(
@@ -2012,7 +2051,9 @@ impl McpTool for MobileProjectionUpdateTool {
             state.expires_at,
             title,
             body,
-        ) {
+        )
+        .and_then(|frame| frame.with_presentation(status, &actions))
+        {
             Ok(frame) => frame,
             Err(error) => {
                 return Ok(ToolResult::error(format!(

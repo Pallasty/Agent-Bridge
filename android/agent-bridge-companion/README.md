@@ -29,6 +29,11 @@ offers an always-visible disconnect action. It does not start the IMU service.
 Starting the service or installing an APK is an operator action and is not
 performed by repository tests.
 
+Projection frames may additionally carry a short status label and up to six
+ordered next actions. These are display-only fields: they do not create
+buttons, callbacks, or any actuation path. Clients that do not render the
+optional fields continue to display the original title and body.
+
 ## Build
 
 Set `ANDROID_SDK_ROOT` to an Android SDK containing API 35 and build-tools,

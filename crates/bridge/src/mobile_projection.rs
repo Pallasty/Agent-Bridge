@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const PROJECTION_SCHEMA: &str = "agent_bridge.mobile_projection.frame.v1";
 pub const MAX_SESSION_SECONDS: i64 = 600;
+pub const MAX_ACTIONS: usize = 6;
 const MAX_REQUEST_BYTES: usize = 512;
 const MAX_FRAME_BYTES: usize = 16_384;
 const CLOCK_SKEW_SECONDS: i64 = 30;
@@ -22,6 +23,10 @@ pub struct ProjectionFrame {
     pub expires_at_unix_seconds: i64,
     pub title: String,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<String>,
     pub attention_authority: bool,
     pub memory_authority: bool,
     pub actuation_authority: bool,
@@ -46,10 +51,24 @@ impl ProjectionFrame {
             expires_at_unix_seconds: expires_at,
             title: title.to_owned(),
             body: body.to_owned(),
+            status: None,
+            actions: Vec::new(),
             attention_authority: false,
             memory_authority: false,
             actuation_authority: false,
         })
+    }
+
+    pub fn with_presentation(mut self, status: Option<&str>, actions: &[String]) -> Result<Self> {
+        if status.is_some_and(|value| value.chars().count() > 80)
+            || actions.len() > MAX_ACTIONS
+            || actions.iter().any(|value| value.chars().count() > 240)
+        {
+            bail!("projection presentation exceeds bounded display limits");
+        }
+        self.status = status.map(str::to_owned);
+        self.actions = actions.to_vec();
+        Ok(self)
     }
 }
 
@@ -290,6 +309,24 @@ mod tests {
         assert!(!second.attention_authority);
         assert!(!second.memory_authority);
         assert!(!second.actuation_authority);
+    }
+
+    #[test]
+    fn structured_presentation_is_optional_and_bounded() {
+        let actions = vec![
+            "Review the result".to_string(),
+            "Disconnect when done".to_string(),
+        ];
+        let frame = ProjectionFrame::new("session-1", 1, 1234, "Status", "Ready")
+            .unwrap()
+            .with_presentation(Some("Needs review"), &actions)
+            .unwrap();
+        assert_eq!(frame.status.as_deref(), Some("Needs review"));
+        assert_eq!(frame.actions, actions);
+        assert!(ProjectionFrame::new("session-1", 1, 1234, "", "")
+            .unwrap()
+            .with_presentation(None, &vec!["x".into(); MAX_ACTIONS + 1])
+            .is_err());
     }
 
     #[test]
