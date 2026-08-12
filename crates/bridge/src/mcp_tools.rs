@@ -43131,25 +43131,20 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "avatar_cortex_renderer_snapshot",
     "pet_presence_sync",
     "xiao_shu_action_request",
-    // Mobile bridge: compact enough to expose directly during Android
-    // install/debug lanes; mutation remains explicit per tool.
+    // Mobile bridge: expose observation and projection evidence in the
+    // essential profile. Projection lifecycle writes and device-control
+    // actions remain available only through broader, explicitly selected
+    // profiles.
     "mobile_list_devices",
     "mobile_current_focus",
     "mobile_screenshot",
     "mobile_health",
     "mobile_debug_bundle",
-    "mobile_projection_start",
-    "mobile_projection_update",
     "mobile_projection_status",
     "mobile_projection_wait",
-    "mobile_projection_stop",
     "mobile_ui_snapshot",
     "mobile_wait_for_ui",
     "mobile_logcat_tail",
-    "mobile_install_apk",
-    "mobile_launch_app",
-    "mobile_click",
-    "mobile_input_text",
     "mobile_apple_status",
     "mobile_ios_list_devices",
     "mobile_ios_apps",

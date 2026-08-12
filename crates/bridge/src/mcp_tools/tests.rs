@@ -1553,28 +1553,33 @@ fn apple_mobile_status_parses_ioreg_usb_devices() {
 }
 
 #[test]
-fn codex_essential_exposes_mobile_bridge_tools() {
+fn codex_essential_exposes_mobile_readonly_bridge_tools() {
     for t in [
         "mobile_list_devices",
         "mobile_current_focus",
         "mobile_screenshot",
         "mobile_health",
         "mobile_debug_bundle",
-        "mobile_projection_start",
-        "mobile_projection_update",
         "mobile_projection_status",
         "mobile_projection_wait",
-        "mobile_projection_stop",
         "mobile_ui_snapshot",
         "mobile_wait_for_ui",
         "mobile_logcat_tail",
+        "mobile_apple_status",
+    ] {
+        assert!(codex_essential_tool(Tier::Standard, t), "{t}");
+    }
+
+    for t in [
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
         "mobile_install_apk",
         "mobile_launch_app",
         "mobile_click",
         "mobile_input_text",
-        "mobile_apple_status",
     ] {
-        assert!(codex_essential_tool(Tier::Standard, t), "{t}");
+        assert!(!codex_essential_tool(Tier::Standard, t), "{t}");
     }
 }
 
@@ -7391,11 +7396,10 @@ fn code_review_context_preview_schema_stays_bounded_and_default_off() {
 fn tool_policy_codex_essential_exposes_extras_list() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     let extras = p.extras();
-    // 62 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
-    //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-    //      + DIRECT(52: practical_workflow_scorecard
+    // 67 total extras = 10 collab-group entries + 57 direct extras:
+    //      practical_workflow_scorecard
     //      + 6 avatar observation/sync/renderer tools
-    //      + xiao_shu_action_request + 14 mobile bridge tools
+    //      + xiao_shu_action_request + 14 read-only mobile bridge tools
     //      + memory_graph_topology + memory_retrieval_feedback
     //      + memory_consolidation_queue
     //      + memory_biocortex_shadow_trial
@@ -7421,8 +7425,8 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     // profiles, not codex-essential direct extras.
     // T6 candidate-expansion gate ceremony tools are all/Niche only and
     // must not re-enter Codex's eager direct extras.
-    // 62 curated extras + 5 prune-continuity entries (2026-07: demoted
-    // Essential->Standard, kept in codex-essential by name).
+    // The five prune-continuity entries remain part of the direct list by
+    // name, preserving the established Codex surface contract.
     assert_eq!(extras.len(), 67);
     assert!(extras.contains(&"practical_workflow_scorecard"));
     assert!(extras.contains(&"ide_snapshot"));
@@ -7445,12 +7449,27 @@ fn tool_policy_codex_essential_exposes_extras_list() {
     assert!(extras.contains(&"mobile_list_devices"));
     assert!(extras.contains(&"mobile_screenshot"));
     assert!(extras.contains(&"mobile_health"));
+    assert!(extras.contains(&"mobile_projection_status"));
+    assert!(extras.contains(&"mobile_projection_wait"));
     assert!(extras.contains(&"mobile_ui_snapshot"));
-    assert!(extras.contains(&"mobile_click"));
     assert!(extras.contains(&"mobile_apple_status"));
     assert!(extras.contains(&"mobile_ios_list_devices"));
     assert!(extras.contains(&"mobile_ios_apps"));
     assert!(extras.contains(&"mobile_ios_syslog_tail"));
+    for tool_name in [
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+        "mobile_install_apk",
+        "mobile_launch_app",
+        "mobile_click",
+        "mobile_input_text",
+    ] {
+        assert!(
+            !extras.contains(&tool_name),
+            "{tool_name} must stay out of codex-essential"
+        );
+    }
     assert!(extras.contains(&"memory_graph_topology"));
     assert!(extras.contains(&"memory_retrieval_feedback"));
     assert!(extras.contains(&"memory_consolidation_queue"));
@@ -7784,14 +7803,21 @@ fn host_surface_gates_device_and_credential_families() {
             &[
                 "mobile_click",
                 "mobile_current_focus",
+                "mobile_debug_bundle",
                 "mobile_health",
                 "mobile_input_text",
                 "mobile_install_apk",
                 "mobile_launch_app",
                 "mobile_list_devices",
                 "mobile_logcat_tail",
+                "mobile_projection_start",
+                "mobile_projection_status",
+                "mobile_projection_stop",
+                "mobile_projection_update",
+                "mobile_projection_wait",
                 "mobile_screenshot",
                 "mobile_ui_snapshot",
+                "mobile_wait_for_ui",
             ],
         ),
         (
