@@ -7649,6 +7649,33 @@ fn codex_lean_preserves_curated_surface() {
 }
 
 #[test]
+fn codex_lean_exposes_only_mobile_readonly_status_tools() {
+    let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+    for tool in [
+        "mobile_list_devices",
+        "mobile_health",
+        "mobile_projection_status",
+        "mobile_projection_wait",
+    ] {
+        assert!(p.includes(Tier::Standard, tool), "missing lean status tool: {tool}");
+    }
+    for tool in [
+        "mobile_screenshot",
+        "mobile_debug_bundle",
+        "mobile_ui_snapshot",
+        "mobile_logcat_tail",
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+        "mobile_install_apk",
+        "mobile_click",
+        "mobile_input_text",
+    ] {
+        assert!(!p.includes(Tier::Standard, tool), "control/heavy tool leaked into lean: {tool}");
+    }
+}
+
+#[test]
 fn collab_groups_no_partial_coverage() {
     // (d) The drift guardrail: no profile may list SOME-but-not-all members
     // of a collab group. Partial coverage = a new tool that wasn't added to
