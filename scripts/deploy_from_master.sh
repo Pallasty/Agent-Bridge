@@ -19,8 +19,10 @@
 #      feature-marker the CURRENTLY-deployed binary has (catches a stale build);
 #   4. back up the current .real before overwriting (so a clobber is recoverable
 #      — the clobbering lane on 2026-06-03 did NOT back ours up);
-#   5. never touch the wrapper (only .real);
-#   6. remind to /mcp reconnect (a running MCP server keeps the old binary).
+#   5. install repository-matched Python runtime assets at a stable path (the
+#      release build worktree is disposable and cannot be a runtime dependency);
+#   6. never touch the wrapper (only .real);
+#   7. remind to /mcp reconnect (a running MCP server keeps the old binary).
 #
 # Companion to scripts/wrapper/install.sh (which installs the WRAPPER; this
 # installs the BINARY). Honors the same env vars.
@@ -37,6 +39,8 @@
 #   AGENT_BRIDGE_REAL_BIN      real binary path (default $INSTALL_DIR/agent-bridge.real)
 #   AGENT_BRIDGE_AUDIO_EMBODY_PATH installed adapter path
 #                              (default ~/.local/share/ab-tts/audio_embody.py)
+#   AGENT_BRIDGE_RUNTIME_ASSET_DIR stable script directory
+#                              (default ~/.local/lib/agent-bridge/scripts)
 #   CARGO_TARGET_DIR           build target root (default ~/.cache/agent-bridge-deploy-target,
 #                              with one child per master SHA to prevent cross-ref artifact reuse;
 #                              kept OFF /Data so ntfs-3g pressure cannot ENOSPC the release build)
@@ -52,6 +56,17 @@ REAL_PATH="${AGENT_BRIDGE_REAL_BIN:-$INSTALL_DIR/agent-bridge.real}"
 WRAPPER_PATH="$INSTALL_DIR/agent-bridge"
 ADAPTER_SOURCE="$REPO/scripts/audio_embody.py"
 ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
+RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
+RUNTIME_ASSETS=(
+    desktop_action.py
+    desktop_confirm_store.py
+    desktop_grant.py
+    desktop_invoke.py
+    desktop_snapshot.py
+    desktop_steer.py
+    desktop_verify.py
+    vision_grounding_ocr.py
+)
 DEPLOY_REMOTE="${AGENT_BRIDGE_DEPLOY_REMOTE:-origin}"
 MASTER_REF="refs/remotes/$DEPLOY_REMOTE/master"
 
@@ -92,6 +107,9 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # ("superset" of nothing) — deploying completely unguarded. Fail closed instead.
 command -v strings >/dev/null 2>&1 || die "strings (binutils) is required for the regression gate; install binutils"
 [ -f "$ADAPTER_SOURCE" ] || die "repository audio adapter missing: $ADAPTER_SOURCE"
+for asset in "${RUNTIME_ASSETS[@]}"; do
+    [ -f "$REPO/scripts/$asset" ] || die "repository runtime asset missing: $REPO/scripts/$asset"
+done
 
 # pipe-free native-executable check — ELF on Linux, Mach-O on macOS.
 # (avoids `head | grep -q` SIGPIPE-under-pipefail flake). The byte magics below
@@ -123,7 +141,11 @@ markers_in() {
 }
 
 CLEANUP_WT=""
-cleanup() { [ -n "$CLEANUP_WT" ] && git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true; }
+CLEANUP_RUNTIME_STAGE=""
+cleanup() {
+    [ -n "$CLEANUP_WT" ] && git -C "$REPO" worktree remove --force "$CLEANUP_WT" >/dev/null 2>&1 || true
+    [ -n "$CLEANUP_RUNTIME_STAGE" ] && rm -rf "$CLEANUP_RUNTIME_STAGE" 2>/dev/null || true
+}
 trap cleanup EXIT
 
 # ---- 1. obtain the NEW binary (build from latest master, or --use-binary) ----
@@ -245,6 +267,7 @@ say "  new binary : $NEW_BIN ($new_size bytes)"
 say "  target     : $REAL_PATH (current $cur_size bytes)"
 say "  wrapper    : $WRAPPER_PATH (left untouched)"
 say "  adapter    : $ADAPTER_SOURCE -> $ADAPTER_PATH"
+say "  runtime    : ${#RUNTIME_ASSETS[@]} matched scripts -> $RUNTIME_ASSET_DIR"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     say
@@ -290,6 +313,33 @@ cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
     die "installed audio adapter differs from repository source"
 say ">> deployed matched audio adapter -> $ADAPTER_PATH"
 
+# Install script-backed MCP assets at a stable path. The release binary embeds
+# its disposable build worktree in CARGO_MANIFEST_DIR, so compile-time fallback
+# alone breaks as soon as the deploy cleanup removes that worktree. Stage the
+# complete dependency set, then swap the directory as one repository-matched
+# unit before installing the binary that resolves it.
+mkdir -p "$(dirname "$RUNTIME_ASSET_DIR")"
+runtime_stage="$RUNTIME_ASSET_DIR.stage.$$"
+CLEANUP_RUNTIME_STAGE="$runtime_stage"
+rm -rf "$runtime_stage"
+mkdir -p "$runtime_stage"
+for asset in "${RUNTIME_ASSETS[@]}"; do
+    install -m 755 "$REPO/scripts/$asset" "$runtime_stage/$asset"
+done
+if [ -e "$RUNTIME_ASSET_DIR" ]; then
+    runtime_bak="$RUNTIME_ASSET_DIR.bak-deploy-$(date +%Y%m%dT%H%M%S)"
+    mv "$RUNTIME_ASSET_DIR" "$runtime_bak"
+    if ! mv "$runtime_stage" "$RUNTIME_ASSET_DIR"; then
+        mv "$runtime_bak" "$RUNTIME_ASSET_DIR" || true
+        die "failed to activate staged runtime assets"
+    fi
+    say ">> backed up current runtime assets -> $runtime_bak"
+else
+    mv "$runtime_stage" "$RUNTIME_ASSET_DIR"
+fi
+CLEANUP_RUNTIME_STAGE=""
+say ">> deployed matched runtime assets -> $RUNTIME_ASSET_DIR"
+
 cp -f "$NEW_BIN" "$REAL_PATH"
 say ">> deployed -> $REAL_PATH"
 copied_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
@@ -309,6 +359,11 @@ dep_size="$(stat -c %s "$REAL_PATH" 2>/dev/null || stat -f %z "$REAL_PATH")"
 cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
     die "post-deploy audio adapter parity check failed"
 say "audio adapter parity: OK ($ADAPTER_PATH)"
+for asset in "${RUNTIME_ASSETS[@]}"; do
+    cmp -s "$REPO/scripts/$asset" "$RUNTIME_ASSET_DIR/$asset" ||
+        die "post-deploy runtime asset parity check failed: $asset"
+done
+say "runtime asset parity: OK (${#RUNTIME_ASSETS[@]} scripts in $RUNTIME_ASSET_DIR)"
 # unquoted on purpose: markers are one-per-line + whitespace-free, so word-splitting
 # gives one printf arg per marker (each gets its own "  + " prefix).
 # shellcheck disable=SC2046,SC2086
@@ -349,6 +404,7 @@ if [ "$stale" -gt 0 ]; then
 fi
 if [ -n "${bak:-}" ]; then say "      rollback: cp '$bak' '$REAL_PATH' && /mcp reconnect"; fi
 if [ -n "${adapter_bak:-}" ]; then say "      adapter rollback: cp '$adapter_bak' '$ADAPTER_PATH'"; fi
+if [ -n "${runtime_bak:-}" ]; then say "      runtime rollback: mv '$RUNTIME_ASSET_DIR' '${RUNTIME_ASSET_DIR}.failed' && mv '$runtime_bak' '$RUNTIME_ASSET_DIR'"; fi
 # Explicit success: the final command above must not leave a nonzero status (a
 # bare `[ -n "" ] && …` on a first install returns 1 and, as the last command
 # under `set -e`, would falsely report deploy failure to callers checking $?).

@@ -12,15 +12,23 @@ trap cleanup EXIT
 
 INSTALL_DIR="$ROOT/bin"
 ADAPTER_PATH="$ROOT/share/audio_embody.py"
+RUNTIME_ASSET_DIR="$ROOT/lib/agent-bridge/scripts"
 mkdir -p "$INSTALL_DIR"
 cp /bin/true "$ROOT/new-agent-bridge"
 
 AGENT_BRIDGE_INSTALL_DIR="$INSTALL_DIR" \
 AGENT_BRIDGE_AUDIO_EMBODY_PATH="$ADAPTER_PATH" \
+AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
     "$SCRIPT_DIR/deploy_from_master.sh" --use-binary "$ROOT/new-agent-bridge" --yes >/dev/null
 
 test -f "$ADAPTER_PATH"
 cmp -s "$SCRIPT_DIR/audio_embody.py" "$ADAPTER_PATH"
 test -x "$ADAPTER_PATH"
+for asset in desktop_action.py desktop_confirm_store.py desktop_grant.py \
+    desktop_invoke.py desktop_snapshot.py desktop_steer.py desktop_verify.py \
+    vision_grounding_ocr.py; do
+    test -x "$RUNTIME_ASSET_DIR/$asset"
+    cmp -s "$SCRIPT_DIR/$asset" "$RUNTIME_ASSET_DIR/$asset"
+done
 
-printf 'PASS: deploy keeps agent-bridge.real and audio_embody.py at repository parity\n'
+printf 'PASS: deploy keeps binary, audio adapter, and runtime scripts at repository parity\n'

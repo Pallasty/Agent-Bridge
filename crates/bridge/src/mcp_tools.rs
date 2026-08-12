@@ -2130,6 +2130,27 @@ fn desktop_snapshot_role_is_actionable(role: &str) -> bool {
         || r == "link"
 }
 
+/// Stable installed fallback for script-backed MCP tools.
+///
+/// Release binaries are built in disposable git worktrees.  Their compile-time
+/// CARGO_MANIFEST_DIR therefore stops existing after a successful deploy.  The
+/// deploy helper installs the matching scripts under this user-owned directory,
+/// keeping no-cwd MCP calls independent of source/build worktree lifetime.
+fn installed_runtime_script_path(file_name: &str) -> Option<PathBuf> {
+    let root = std::env::var("AGENT_BRIDGE_RUNTIME_ASSET_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(|home| PathBuf::from(home).join(".local/lib/agent-bridge/scripts"))
+        })?;
+    let path = root.join(file_name);
+    path.exists().then_some(path)
+}
+
 fn desktop_snapshot_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
         return PathBuf::from(path);
@@ -2150,6 +2171,9 @@ fn desktop_snapshot_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf 
         if path.exists() {
             return path;
         }
+    }
+    if let Some(path) = installed_runtime_script_path("desktop_snapshot.py") {
+        return path;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_snapshot.py")
 }
@@ -2630,6 +2654,9 @@ fn desktop_verify_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
         if path.exists() {
             return path;
         }
+    }
+    if let Some(path) = installed_runtime_script_path("desktop_verify.py") {
+        return path;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_verify.py")
 }
@@ -5912,6 +5939,9 @@ fn vision_grounding_ocr_script_path(args: &Value, cwd: Option<&PathBuf>) -> Path
             return path;
         }
     }
+    if let Some(path) = installed_runtime_script_path("vision_grounding_ocr.py") {
+        return path;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/vision_grounding_ocr.py")
 }
 
@@ -6255,6 +6285,9 @@ fn desktop_action_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
             return path;
         }
     }
+    if let Some(path) = installed_runtime_script_path("desktop_action.py") {
+        return path;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_action.py")
 }
 
@@ -6576,13 +6609,16 @@ fn desktop_invoke_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
             return path;
         }
     }
+    if let Some(path) = installed_runtime_script_path("desktop_invoke.py") {
+        return path;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_invoke.py")
 }
 
 /// Resolve scripts/desktop_steer.py — the blessed phase-2 executor for `kind=steer`
 /// pendings (cross-process tmux injection). Mirrors desktop_{action,invoke}_script_path:
 /// explicit `script_path` arg > AGENT_BRIDGE_DESKTOP_STEER_SCRIPT env > cwd/scripts >
-/// current_dir/scripts > compile-time repo fallback.
+/// current_dir/scripts > stable installed runtime assets > compile-time repo fallback.
 fn desktop_steer_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
     if let Some(path) = args.get("script_path").and_then(|v| v.as_str()) {
         return PathBuf::from(path);
@@ -6603,6 +6639,9 @@ fn desktop_steer_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
         if path.exists() {
             return path;
         }
+    }
+    if let Some(path) = installed_runtime_script_path("desktop_steer.py") {
+        return path;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_steer.py")
 }

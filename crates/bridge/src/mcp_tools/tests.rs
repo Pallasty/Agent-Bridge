@@ -10022,6 +10022,37 @@ async fn browser_lite_probe_missing_binary_is_structured_not_tool_error() {
     assert_eq!(payload["safety"]["mutates_agent_bridge_state"], false);
 }
 
+#[test]
+fn installed_runtime_script_path_uses_stable_asset_directory() {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().expect("runtime asset env lock");
+    let previous = std::env::var_os("AGENT_BRIDGE_RUNTIME_ASSET_DIR");
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-runtime-assets-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("mkdir runtime assets");
+    let script = temp_dir.join("desktop_snapshot.py");
+    std::fs::write(&script, "# stable runtime fixture\n").expect("write runtime asset");
+    std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", &temp_dir);
+
+    assert_eq!(
+        installed_runtime_script_path("desktop_snapshot.py"),
+        Some(script)
+    );
+    assert_eq!(installed_runtime_script_path("missing.py"), None);
+
+    match previous {
+        Some(value) => std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", value),
+        None => std::env::remove_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR"),
+    }
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
 #[tokio::test]
 async fn desktop_snapshot_wrapper_defaults_to_non_mutating_script_flags() {
     let temp_dir = std::env::temp_dir().join(format!(
