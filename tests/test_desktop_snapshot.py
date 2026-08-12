@@ -18,6 +18,11 @@ def load_module():
 
 
 class DesktopSnapshotTests(unittest.TestCase):
+    def test_accepts_generic_and_push_button_role_names(self):
+        mod = load_module()
+        self.assertIn("button", mod.INTERESTING_ATSPI_ROLES)
+        self.assertIn("push button", mod.INTERESTING_ATSPI_ROLES)
+
     def test_hydrates_validated_session_bus_for_atspi(self):
         mod = load_module()
         with tempfile.TemporaryDirectory() as tmp:

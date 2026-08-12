@@ -43263,6 +43263,12 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // the act loop). Never clicks/types; completes the read-only triad with
     // desktop_snapshot + vision_grounding_ocr. Mutating act tools stay out.
     "desktop_verify",
+    // Linux Computer Use: semantic AT-SPI action surface. This is the one
+    // deliberately exposed act tool: dry-run and process-isolated invokes are
+    // available, while host invocation is refused by default. The coordinate
+    // desktop_action and host phase-2 desktop_confirm executors stay out of the
+    // compact profile, so exposure does not grant an autonomous host act loop.
+    "desktop_invoke",
     // macOS adapter feasibility: read-only AX trust/frontmost-window probe.
     // No permission prompt and no host mutation; this is the first local
     // cross-platform SSB runtime probe.
@@ -46750,8 +46756,9 @@ pub(crate) fn build_registry_with_policy_surface(
         Arc::new(DesktopActionTool::new(hub.clone())),
     );
     // Linux Computer Use L2: gated semantic AT-SPI invoke (isolated-only MVP).
-    // NOT in codex-essential (mutating); host-app invoke unreachable via this
-    // MCP surface — only dry-run or isolated (cage_pid process subtree).
+    // In codex-essential as the single bounded act surface: host invocation is
+    // default-denied, while coordinate desktop_action and phase-2
+    // desktop_confirm remain hidden from the compact profile.
     reg_if(
         &mut reg,
         policy,

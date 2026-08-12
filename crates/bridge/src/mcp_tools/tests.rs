@@ -14891,12 +14891,29 @@ fn desktop_steer_script_path_resolution() {
 }
 
 #[test]
-fn desktop_invoke_not_exposed_to_codex_essential() {
-    // Mutating semantic-invoke surface must stay out of the Codex essential allowlist.
-    assert!(!codex_essential_tool(Tier::Standard, "desktop_invoke"));
-    assert!(!codex_essential_tool(Tier::Niche, "desktop_invoke"));
-    // ...while the read-only snapshot IS exposed (sanity contrast).
+fn desktop_invoke_is_the_only_codex_essential_desktop_act_surface() {
+    // Semantic invoke is deliberately exposed as the smallest useful act
+    // surface. The implementation still default-denies host invocation.
+    assert!(codex_essential_tool(Tier::Niche, "desktop_invoke"));
+    // Coordinate injection and phase-2 host execution remain hidden.
+    assert!(!codex_essential_tool(Tier::Niche, "desktop_action"));
+    assert!(!codex_essential_tool(Tier::Niche, "desktop_confirm"));
+    // The read-only observation/verification legs remain exposed too.
     assert!(codex_essential_tool(Tier::Standard, "desktop_snapshot"));
+    assert!(codex_essential_tool(Tier::Standard, "desktop_verify"));
+
+    let policy = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+    let names: std::collections::HashSet<_> = build_registry_with_policy(
+        Hub::builder().build(),
+        policy,
+    )
+    .list()
+    .into_iter()
+    .map(|schema| schema.name)
+    .collect();
+    assert!(names.contains("desktop_invoke"));
+    assert!(!names.contains("desktop_action"));
+    assert!(!names.contains("desktop_confirm"));
 }
 
 #[test]

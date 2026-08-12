@@ -63,7 +63,9 @@ A11Y_STATUS_IFACE = "org.a11y.Status"
 # Roles worth surfacing as actionable/interesting from an AT-SPI tree. Kept small
 # on purpose — v0 is a probe, not a full accessibility crawler.
 INTERESTING_ATSPI_ROLES = {
-    "push button", "toggle button", "radio button", "check box", "menu item",
+    # pyatspi role names vary by toolkit/version: GTK3 on current Debian
+    # reports the generic `button`, while other adapters use `push button`.
+    "button", "push button", "toggle button", "radio button", "check box", "menu item",
     "menu", "text", "entry", "password text", "combo box", "list item",
     "tab", "page tab", "link", "slider", "spin button", "label", "heading",
     "table cell", "tree item",
