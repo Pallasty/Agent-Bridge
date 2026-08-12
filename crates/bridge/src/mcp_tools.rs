@@ -19571,9 +19571,11 @@ impl McpTool for SessionBootstrapTool {
                  session_handoff rows receive priority; auto-curated, unverified, \
                  background/archive, stale, global, and cross-project handoffs do not. query= enables \
                  semantic ranking. frontend='cursor'|'warp' uses compact format; default \
-                 'claude-code' is full. Compact output with an explicit query is a task-recovery \
-                 packet and omits auxiliary identity, curation, review, and associative panels; \
-                 static compact and full output retain them. When the outcome collector \
+                 'claude-code' is full. For every frontend, an explicit query produces a \
+                 task-recovery packet that omits global past-self letters, AiOT/Seed/perception, \
+                 curation, review, and associative panels. A bootstrap without a query retains \
+                 those auxiliary sections. Stable User and Agent Profile sections are unaffected. \
+                 When the outcome collector \
                  (AGENT_BRIDGE_OUTCOME_COLLECTOR) is on, the semantic page is logged to \
                  retrieval_surfacing as mode=bootstrap — telemetry-only (excluded from \
                  reinforce/decay aggregates until a calibrated ambient rule exists); \

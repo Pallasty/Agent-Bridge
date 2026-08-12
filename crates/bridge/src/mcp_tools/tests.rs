@@ -630,6 +630,20 @@ fn targeted_bootstrap_omits_global_auxiliary_sections_for_every_frontend() {
     assert!(include_bootstrap_auxiliary_sections(false));
 }
 
+#[test]
+fn session_bootstrap_schema_describes_targeted_policy_for_every_frontend() {
+    let schema = SessionBootstrapTool::new(Hub::builder().build()).schema();
+    assert!(schema.description.contains("For every frontend"));
+    assert!(schema.description.contains("global past-self letters"));
+    assert!(schema.description.contains("without a query retains"));
+    assert!(schema
+        .description
+        .contains("User and Agent Profile sections are unaffected"));
+    assert!(!schema
+        .description
+        .contains("Compact output with an explicit query"));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn targeted_compact_bootstrap_keeps_task_state_and_omits_feedback_preamble() {
     let (hub, temp_dir) = mk_test_hub_with_store().await;

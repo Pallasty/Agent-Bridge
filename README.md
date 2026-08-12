@@ -782,7 +782,7 @@ ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 | plan | `plan_save` | Persist a structured task plan (steps, deps, per-step status) to SQLite (W5) |
 | | `plan_load` | Load plan + `progress` / `next_step_id` summary |
 | | `plan_update` | Set one step's status by id |
-| session | `session_bootstrap` | Build a compact memory bootstrap block for the current session |
+| session | `session_bootstrap` | Build a scoped memory bootstrap; an explicit query is a targeted recovery packet on every frontend and omits global letters and auxiliary analysis panels |
 | | `session_curate` | Extract structured memories from conversation text; lifecycle calls inherit project scope and mark outputs inferred (two-pass pipeline) |
 | | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
 | | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3; Niche since the 2026-07 prune — `session_lifecycle_step` is the live successor) |
