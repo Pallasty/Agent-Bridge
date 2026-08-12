@@ -2,6 +2,12 @@
 
 R1 asks one product question: across 20 real development tasks, did remembered context help, go unused, fail to appear, or actively mislead?
 
+## Decision state
+
+The code-locked 20-task gate closed on 2026-08-11. The product decision is to retain the current memory and continuity architecture without widening retrieval, adding another ranking layer, or reopening research-heavy lanes from this aggregate alone. See `docs/reports/goal-c-u/2026-08-11-r1-memory-usefulness-final-decision.md`.
+
+The decision is based on the 20-task gate snapshot, not on an ever-growing positive counter. After closure, do not append routine `used` or `no_recall` rows merely to increase the sample size. Record a new row only when an ordinary product task produces meaningful `missing`, `stale`, or `harmful` recall evidence worth investigating. A ledger count above 20 does not reopen R1 or strengthen the causal claim.
+
 Record one aggregate row after a real task:
 
 ```bash
@@ -20,4 +26,4 @@ The local JSONL file is mode `0600` in Agent-Bridge's state directory. This comm
 
 Use outcomes consistently: `used` means recalled context materially informed the task; `no_recall` means no recall was attempted or needed; `missing` means useful prior context was expected but not returned; `stale` means returned context was outdated but caught; `harmful` means returned context caused avoidable wrong work or recovery.
 
-The report remains `COLLECTING_REAL_TASKS` before 20 unique tasks. It does not infer that memory caused an outcome and does not change retrieval, ranking, memory, or runtime behavior. Tasks should accrue naturally during product work; synthetic tasks must not be added to reach the target faster. This utility currently targets Unix-like hosts because it relies on `flock` and `O_NOFOLLOW`.
+The report remains `COLLECTING_REAL_TASKS` before 20 unique tasks and becomes `READY_FOR_PRODUCT_DECISION` at the gate. It does not infer that memory caused an outcome and does not change retrieval, ranking, memory, or runtime behavior. Before closure, tasks accrue naturally during product work; synthetic tasks must not be added to reach the target faster. After closure, use the recorder only for the meaningful negative regression evidence described above. This utility currently targets Unix-like hosts because it relies on `flock` and `O_NOFOLLOW`.
