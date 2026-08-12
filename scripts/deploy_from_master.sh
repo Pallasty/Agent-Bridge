@@ -54,7 +54,8 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="${AGENT_BRIDGE_INSTALL_DIR:-$HOME/.local/bin}"
 REAL_PATH="${AGENT_BRIDGE_REAL_BIN:-$INSTALL_DIR/agent-bridge.real}"
 WRAPPER_PATH="$INSTALL_DIR/agent-bridge"
-ADAPTER_SOURCE="$REPO/scripts/audio_embody.py"
+ASSET_SOURCE_ROOT="$REPO"
+ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
 ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
 RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
 RUNTIME_ASSETS=(
@@ -106,10 +107,6 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # markers_in would return EMPTY for every binary and the gate would falsely pass
 # ("superset" of nothing) — deploying completely unguarded. Fail closed instead.
 command -v strings >/dev/null 2>&1 || die "strings (binutils) is required for the regression gate; install binutils"
-[ -f "$ADAPTER_SOURCE" ] || die "repository audio adapter missing: $ADAPTER_SOURCE"
-for asset in "${RUNTIME_ASSETS[@]}"; do
-    [ -f "$REPO/scripts/$asset" ] || die "repository runtime asset missing: $REPO/scripts/$asset"
-done
 
 # pipe-free native-executable check — ELF on Linux, Mach-O on macOS.
 # (avoids `head | grep -q` SIGPIPE-under-pipefail flake). The byte magics below
@@ -220,6 +217,22 @@ else
     say "OK: built binary reports master ${MASTER_SHA:0:12}."
 fi
 
+# A normal deploy must install scripts from the exact detached master snapshot
+# that produced NEW_BIN, never from the caller's possibly stale/dirty worktree.
+# Otherwise two same-SHA deploys launched from different worktrees can end with
+# the correct binary but whichever caller's runtime assets happened to run last.
+# --use-binary has no verified source snapshot, so it deliberately retains the
+# documented repository-matched behavior and uses the invoking checkout.
+if [ -z "$USE_BINARY" ]; then
+    ASSET_SOURCE_ROOT="$BUILD_DIR"
+fi
+ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
+[ -f "$ADAPTER_SOURCE" ] || die "deploy-source audio adapter missing: $ADAPTER_SOURCE"
+for asset in "${RUNTIME_ASSETS[@]}"; do
+    [ -f "$ASSET_SOURCE_ROOT/scripts/$asset" ] ||
+        die "deploy-source runtime asset missing: $ASSET_SOURCE_ROOT/scripts/$asset"
+done
+
 is_native_exe "$NEW_BIN" || die "new binary is not a native executable (ELF/Mach-O): $NEW_BIN"
 
 # ---- 2. post-build master recheck ----
@@ -267,7 +280,7 @@ say "  new binary : $NEW_BIN ($new_size bytes)"
 say "  target     : $REAL_PATH (current $cur_size bytes)"
 say "  wrapper    : $WRAPPER_PATH (left untouched)"
 say "  adapter    : $ADAPTER_SOURCE -> $ADAPTER_PATH"
-say "  runtime    : ${#RUNTIME_ASSETS[@]} matched scripts -> $RUNTIME_ASSET_DIR"
+say "  runtime    : ${#RUNTIME_ASSETS[@]} scripts from $ASSET_SOURCE_ROOT -> $RUNTIME_ASSET_DIR"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     say
@@ -324,7 +337,7 @@ CLEANUP_RUNTIME_STAGE="$runtime_stage"
 rm -rf "$runtime_stage"
 mkdir -p "$runtime_stage"
 for asset in "${RUNTIME_ASSETS[@]}"; do
-    install -m 755 "$REPO/scripts/$asset" "$runtime_stage/$asset"
+    install -m 755 "$ASSET_SOURCE_ROOT/scripts/$asset" "$runtime_stage/$asset"
 done
 if [ -e "$RUNTIME_ASSET_DIR" ]; then
     runtime_bak="$RUNTIME_ASSET_DIR.bak-deploy-$(date +%Y%m%dT%H%M%S)"
@@ -360,7 +373,7 @@ cmp -s "$ADAPTER_SOURCE" "$ADAPTER_PATH" ||
     die "post-deploy audio adapter parity check failed"
 say "audio adapter parity: OK ($ADAPTER_PATH)"
 for asset in "${RUNTIME_ASSETS[@]}"; do
-    cmp -s "$REPO/scripts/$asset" "$RUNTIME_ASSET_DIR/$asset" ||
+    cmp -s "$ASSET_SOURCE_ROOT/scripts/$asset" "$RUNTIME_ASSET_DIR/$asset" ||
         die "post-deploy runtime asset parity check failed: $asset"
 done
 say "runtime asset parity: OK (${#RUNTIME_ASSETS[@]} scripts in $RUNTIME_ASSET_DIR)"
