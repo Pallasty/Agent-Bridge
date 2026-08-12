@@ -1557,6 +1557,7 @@ fn codex_essential_exposes_mobile_bridge_tools() {
         "mobile_projection_start",
         "mobile_projection_update",
         "mobile_projection_status",
+        "mobile_projection_wait",
         "mobile_projection_stop",
         "mobile_ui_snapshot",
         "mobile_wait_for_ui",
@@ -1569,6 +1570,34 @@ fn codex_essential_exposes_mobile_bridge_tools() {
     ] {
         assert!(codex_essential_tool(Tier::Standard, t), "{t}");
     }
+}
+
+#[test]
+fn mobile_projection_wait_reports_only_observed_or_terminal_facts() {
+    assert_eq!(
+        mobile_projection_wait_outcome(0, 0, false, false, 200, None, 150),
+        None
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(1, 1, false, false, 200, None, 150),
+        Some("consent_observed")
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(1, 1, false, false, 200, Some(2), 150),
+        None
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(2, 2, false, false, 200, Some(2), 150),
+        Some("revision_observed_by_device")
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(2, 2, true, false, 200, Some(2), 150),
+        Some("stopped_before_observation")
+    );
+    assert_eq!(
+        mobile_projection_wait_outcome(2, 2, false, false, 200, Some(3), 200),
+        Some("expired_before_observation")
+    );
 }
 
 #[test]

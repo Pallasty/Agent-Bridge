@@ -1669,6 +1669,28 @@ fn mobile_projection_snapshot(state: &MobileProjectionRuntimeState, now: i64) ->
     })
 }
 
+pub(super) fn mobile_projection_wait_outcome(
+    pulls: u64,
+    last_served_revision: u64,
+    stop_requested: bool,
+    ended: bool,
+    expires_at: i64,
+    target_revision: Option<u64>,
+    now: i64,
+) -> Option<&'static str> {
+    if stop_requested {
+        return Some("stopped_before_observation");
+    }
+    if ended || now >= expires_at {
+        return Some("expired_before_observation");
+    }
+    match target_revision {
+        Some(revision) if last_served_revision >= revision => Some("revision_observed_by_device"),
+        None if pulls > 0 => Some("consent_observed"),
+        _ => None,
+    }
+}
+
 #[async_trait]
 impl McpTool for MobileProjectionStartTool {
     fn name(&self) -> &'static str {
@@ -2084,6 +2106,113 @@ impl McpTool for MobileProjectionStatusTool {
             "status": "ok",
             "session_count": sessions.len(),
             "sessions": sessions
+        })))
+    }
+}
+
+pub struct MobileProjectionWaitTool;
+impl MobileProjectionWaitTool {
+    pub fn new(_hub: Hub) -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MobileProjectionWaitTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_wait"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Wait for bounded, authenticated evidence that a projection received \
+                consent or that a requested revision was served to the device. A timeout only \
+                reports that no matching evidence arrived; it never infers rejection or an \
+                explicit disconnect. This read-only wait does not extend session TTL."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "target_revision": { "type": "integer", "minimum": 1, "description": "Omit to wait for the first authenticated device pull (consent observation)." },
+                    "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 120000, "default": 30000 }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(session_id) = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(ToolResult::error("missing 'session_id'"));
+        };
+        let target_revision = args.get("target_revision").and_then(Value::as_u64);
+        if args.get("target_revision").is_some() && target_revision.is_none() {
+            return Ok(ToolResult::error("target_revision must be an integer >= 1"));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(30_000);
+        if !(100..=120_000).contains(&timeout_ms) {
+            return Ok(ToolResult::error("timeout_ms must be in 100..=120000"));
+        }
+        let state = {
+            let registry = mobile_projection_registry().lock().unwrap();
+            match registry.get(session_id) {
+                Some(state) => state.clone(),
+                None => {
+                    return Ok(ToolResult::error(
+                        "projection session not found in this MCP process",
+                    ))
+                }
+            }
+        };
+        if let Some(revision) = target_revision {
+            let current_revision = state.frame.read().unwrap().revision;
+            if revision > current_revision {
+                return Ok(ToolResult::error(format!(
+                    "target_revision {revision} is newer than current revision {current_revision}"
+                )));
+            }
+        }
+
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+        let outcome = loop {
+            use std::sync::atomic::Ordering;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or(i64::MAX);
+            if let Some(outcome) = mobile_projection_wait_outcome(
+                state.pulls.load(Ordering::Relaxed),
+                state.last_served_revision.load(Ordering::Relaxed),
+                state.stop_requested.load(Ordering::Relaxed),
+                state.ended.load(Ordering::Relaxed),
+                state.expires_at,
+                target_revision,
+                now,
+            ) {
+                break outcome;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break "timeout_without_matching_evidence";
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(i64::MAX);
+        Ok(ToolResult::json_text(&json!({
+            "status": outcome,
+            "target_revision": target_revision,
+            "waited_without_ttl_extension": true,
+            "timeout_is_not_rejection_or_disconnect": outcome == "timeout_without_matching_evidence",
+            "session": mobile_projection_snapshot(&state, now)
         })))
     }
 }
