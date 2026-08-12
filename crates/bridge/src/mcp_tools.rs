@@ -43322,6 +43322,12 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "plan_save"
             | "plan_load"
             | "plan_update"
+            // Mobile status only: discovery and projection evidence without
+            // capture, lifecycle writes, or device control.
+            | "mobile_list_devices"
+            | "mobile_health"
+            | "mobile_projection_status"
+            | "mobile_projection_wait"
             // Credential-, host-, and per-call-consent-gated remote screenshot.
             // Keeping it in the named allowlist avoids widening Codex to all Niche tools.
             | "cloudflare_kitesurf_snapshot"
