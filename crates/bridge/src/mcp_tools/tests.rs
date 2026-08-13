@@ -1646,6 +1646,32 @@ fn mobile_projection_patch_preserves_omitted_fields() {
 }
 
 #[test]
+fn mobile_projection_patch_carries_media_context_and_allows_explicit_clear() {
+    let context = crate::mobile_projection::MediaContext {
+        schema: crate::mobile_projection::MEDIA_CONTEXT_SCHEMA.into(),
+        player: Some("rhythmbox".into()),
+        title: Some("Track".into()),
+        metadata_available: true,
+        observed_at_unix_seconds: 10,
+        ..Default::default()
+    };
+    let original = crate::mobile_projection::ProjectionFrame::new(
+        "session-1", 1, 500, "Title", "Body",
+    )
+    .unwrap()
+    .with_media_context(Some(context.clone()))
+    .unwrap();
+    let (patched, changed) =
+        mobile_projection_patch_frame(&original, &json!({"media_context": context})).unwrap();
+    assert_eq!(patched.media_context.as_ref().unwrap().title.as_deref(), Some("Track"));
+    assert_eq!(changed, vec!["media_context"]);
+    let (cleared, changed) =
+        mobile_projection_patch_frame(&patched, &json!({"media_context": null})).unwrap();
+    assert!(cleared.media_context.is_none());
+    assert_eq!(changed, vec!["media_context"]);
+}
+
+#[test]
 fn mobile_projection_patch_clears_only_explicit_nullable_fields() {
     let original =
         crate::mobile_projection::ProjectionFrame::new("session-1", 1, 500, "Title", "Body")
@@ -1668,7 +1694,7 @@ fn mobile_projection_patch_rejects_empty_or_malformed_updates() {
             .unwrap();
     assert_eq!(
         mobile_projection_patch_frame(&original, &json!({})).unwrap_err(),
-        "provide at least one of title, body, status, or actions"
+        "provide at least one of title, body, status, actions, or media_context"
     );
     assert_eq!(
         mobile_projection_patch_frame(&original, &json!({"title": null})).unwrap_err(),

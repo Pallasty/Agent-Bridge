@@ -1747,8 +1747,21 @@ pub(super) fn mobile_projection_patch_frame(
         }
         Some(_) => return Err("actions must be an array of strings or null when provided".into()),
     };
+    let media_context = match args.get("media_context") {
+        None => current.media_context.clone(),
+        Some(Value::Null) => {
+            changed_fields.push("media_context");
+            None
+        }
+        Some(value) => {
+            changed_fields.push("media_context");
+            serde_json::from_value(value.clone())
+                .map_err(|error| format!("media_context must match agent_bridge.media_context.v0: {error}"))
+                .map(Some)?
+        }
+    };
     if changed_fields.is_empty() {
-        return Err("provide at least one of title, body, status, or actions".into());
+        return Err("provide at least one of title, body, status, actions, or media_context".into());
     }
     let revision = current.revision.saturating_add(1);
     let frame = crate::mobile_projection::ProjectionFrame::new(
@@ -1759,6 +1772,7 @@ pub(super) fn mobile_projection_patch_frame(
         &body,
     )
     .and_then(|frame| frame.with_presentation(status.as_deref(), &actions))
+    .and_then(|frame| frame.with_media_context(media_context))
     .map_err(|error| format!("invalid projection frame: {error}"))?;
     Ok((frame, changed_fields))
 }
@@ -1811,6 +1825,7 @@ impl McpTool for MobileProjectionStartTool {
                     "body": { "type": "string", "maxLength": 8000 },
                     "status": { "type": "string", "maxLength": 80, "description": "Optional short state label rendered as a status card." },
                     "actions": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Optional ordered, display-only next actions. They grant no actuation authority." },
+                    "media_context": { "type": ["object", "null"], "description": "Optional read-only agent_bridge.media_context.v0 payload; it grants no control authority." },
                     "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 600, "default": 300 },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
                 }
@@ -1909,6 +1924,13 @@ impl McpTool for MobileProjectionStartTool {
             Ok(value) => value,
             Err(error) => return Ok(ToolResult::error(error)),
         };
+        let media_context = match args.get("media_context") {
+            None | Some(Value::Null) => None,
+            Some(value) => match serde_json::from_value(value.clone()) {
+                Ok(context) => Some(context),
+                Err(error) => return Ok(ToolResult::error(format!("invalid media_context: {error}"))),
+            },
+        };
         let frame = match crate::mobile_projection::ProjectionFrame::new(
             &session_id,
             1,
@@ -1917,6 +1939,7 @@ impl McpTool for MobileProjectionStartTool {
             body,
         )
         .and_then(|frame| frame.with_presentation(status, &actions))
+        .and_then(|frame| frame.with_media_context(media_context))
         {
             Ok(frame) => frame,
             Err(error) => {
@@ -2060,6 +2083,7 @@ impl McpTool for MobileProjectionUpdateTool {
                     "session_id": { "type": "string" },
                     "title": { "type": "string", "maxLength": 160 },
                     "body": { "type": "string", "maxLength": 8000 }
+                    ,"media_context": { "type": ["object", "null"], "description": "Read-only agent_bridge.media_context.v0 payload. Omit to preserve; null to clear." }
                     ,"status": { "type": ["string", "null"], "maxLength": 80, "description": "Short state label. Omit to preserve; pass null to clear." }
                     ,"actions": { "type": ["array", "null"], "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Ordered, display-only next actions. Omit to preserve; pass null or [] to clear." }
                 }

@@ -58,3 +58,14 @@ On the corrected call:
 
 This slice improves daily Agent-Bridge utility. It does not broaden sensing,
 remote control, publication, or external-validation goals.
+
+## Media context extension (2026-08-13)
+
+The same authenticated, ephemeral frame can now carry an optional
+`agent_bridge.media_context.v0` object. It is read-only display data: player,
+active playlist object path/name, playback status, track identity, position,
+duration, metadata availability, and observation time. The frame rejects other
+schemas and bounded text violations. `MediaContext::changed_from` provides a
+small value-based change detector so a producer can skip duplicate mobile
+updates. Clearing or replacing the context is explicit in
+`mobile_projection_update`; no control callback or authority field is added.

@@ -9,13 +9,47 @@ use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const PROJECTION_SCHEMA: &str = "agent_bridge.mobile_projection.frame.v1";
+pub const MEDIA_CONTEXT_SCHEMA: &str = "agent_bridge.media_context.v0";
 pub const MAX_SESSION_SECONDS: i64 = 600;
 pub const MAX_ACTIONS: usize = 6;
 const MAX_REQUEST_BYTES: usize = 512;
 const MAX_FRAME_BYTES: usize = 16_384;
 const CLOCK_SKEW_SECONDS: i64 = 30;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Read-only media state that may be rendered by a mobile projection node.
+/// It carries no controls or authority; clients should treat missing fields as
+/// unknown rather than infering them from presentation text.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MediaContext {
+    pub schema: String,
+    pub player: Option<String>,
+    pub active_playlist_id: Option<String>,
+    pub active_playlist_name: Option<String>,
+    pub playback_status: Option<String>,
+    pub track_id: Option<String>,
+    pub artist: Option<String>,
+    pub title: Option<String>,
+    pub position_seconds: Option<f64>,
+    pub duration_seconds: Option<f64>,
+    pub metadata_available: bool,
+    pub observed_at_unix_seconds: i64,
+}
+
+impl MediaContext {
+    pub fn new(observed_at_unix_seconds: i64) -> Self {
+        Self {
+            schema: MEDIA_CONTEXT_SCHEMA.to_owned(),
+            observed_at_unix_seconds,
+            ..Self::default()
+        }
+    }
+
+    pub fn changed_from(&self, previous: Option<&Self>) -> bool {
+        previous != Some(self)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectionFrame {
     pub schema: String,
     pub session_id: String,
@@ -23,6 +57,8 @@ pub struct ProjectionFrame {
     pub expires_at_unix_seconds: i64,
     pub title: String,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_context: Option<MediaContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -51,12 +87,39 @@ impl ProjectionFrame {
             expires_at_unix_seconds: expires_at,
             title: title.to_owned(),
             body: body.to_owned(),
+            media_context: None,
             status: None,
             actions: Vec::new(),
             attention_authority: false,
             memory_authority: false,
             actuation_authority: false,
         })
+    }
+
+    pub fn with_media_context(mut self, context: Option<MediaContext>) -> Result<Self> {
+        if let Some(context) = &context {
+            if context.schema != MEDIA_CONTEXT_SCHEMA {
+                bail!("invalid media context schema");
+            }
+            for value in [
+                &context.player,
+                &context.active_playlist_id,
+                &context.active_playlist_name,
+                &context.playback_status,
+                &context.track_id,
+                &context.artist,
+                &context.title,
+            ] {
+                if value
+                    .as_ref()
+                    .is_some_and(|text| text.chars().count() > 512)
+                {
+                    bail!("media context text exceeds bounded limits");
+                }
+            }
+        }
+        self.media_context = context;
+        Ok(self)
     }
 
     pub fn with_presentation(mut self, status: Option<&str>, actions: &[String]) -> Result<Self> {
@@ -327,6 +390,32 @@ mod tests {
             .unwrap()
             .with_presentation(None, &vec!["x".into(); MAX_ACTIONS + 1])
             .is_err());
+    }
+
+    #[test]
+    fn media_context_is_bounded_read_only_and_change_detectable() {
+        let mut context = MediaContext::new(1234);
+        context.player = Some("rhythmbox".into());
+        context.title = Some("Ready For Love".into());
+        context.metadata_available = true;
+        let frame = ProjectionFrame::new("session-1", 1, 1234, "Media", "Now playing")
+            .unwrap()
+            .with_media_context(Some(context.clone()))
+            .unwrap();
+        assert_eq!(frame.media_context.as_ref(), Some(&context));
+        assert!(!context.changed_from(Some(&context)));
+        let mut changed = context.clone();
+        changed.title = Some("Next track".into());
+        assert!(changed.changed_from(Some(&context)));
+        assert!(
+            ProjectionFrame::new("session-1", 1, 1234, "Media", "Now playing")
+                .unwrap()
+                .with_media_context(Some(MediaContext {
+                    schema: "wrong".into(),
+                    ..context
+                }))
+                .is_err()
+        );
     }
 
     #[test]
