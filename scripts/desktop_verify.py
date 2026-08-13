@@ -37,7 +37,12 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from desktop_invoke import pid_is_descendant  # noqa: E402  reuse cage-subtree check
+from desktop_invoke import (  # noqa: E402  shared bounded selector + cage check
+    DEFAULT_SEARCH_BUDGET,
+    DEFAULT_SEARCH_MAX_DEPTH,
+    DEFAULT_SEARCH_MAX_NODES,
+    find_element,
+)
 from desktop_snapshot import hydrate_linux_session_env  # noqa: E402
 
 SCHEMA = "desktop_verify/v0"
@@ -80,71 +85,37 @@ def _element_states(node, pyatspi) -> list[str]:
     return held
 
 
-def resolve_atspi_matches(app_match, role_match, name_match, cage_pid):
-    """All AT-SPI accessibles matching (app, role, name), in cage scope if cage_pid.
-
-    Returns (matches, error). Each match: {role, name, app, pid, in_scope, states}.
-    Mirrors desktop_invoke.find_element's walk but returns the full list (so cage
-    filtering and 'gone' are correct even with multiple same-named widgets)."""
+def resolve_atspi_matches(app_match, role_match, name_match, nth, cage_pid,
+                          search_budget=DEFAULT_SEARCH_BUDGET,
+                          max_nodes=DEFAULT_SEARCH_MAX_NODES,
+                          max_depth=DEFAULT_SEARCH_MAX_DEPTH):
+    """Resolve the exact nth AT-SPI target through desktop_invoke's bounded DFS."""
     hydrate_linux_session_env()
     try:
         import pyatspi  # noqa: PLC0415  deferred binding
     except Exception as exc:  # noqa: BLE001  pragma: no cover
-        return [], f"pyatspi unavailable: {exc}"
-
-    matches: list[dict[str, Any]] = []
-
-    def walk(node, app_name, app_pid):
-        try:
-            role = node.getRoleName()
-            name = node.name or ""
-            is_app = node.getRole() == pyatspi.ROLE_APPLICATION
-        except Exception:  # noqa: BLE001
-            return
-        ok_role = (not role_match) or (role_match.lower() in role.lower())
-        ok_name = (not name_match) or (name_match.lower() in name.lower())
-        if ok_role and ok_name and not is_app:
-            in_scope = cage_pid is None or (
-                app_pid is not None and pid_is_descendant(app_pid, cage_pid)
-            )
-            matches.append(
-                {
-                    "role": role,
-                    "name": name,
-                    "app": app_name,
-                    "pid": app_pid,
-                    "in_scope": in_scope,
-                    "states": _element_states(node, pyatspi),
-                }
-            )
-        for j in range(node.childCount):
-            try:
-                child = node.getChildAtIndex(j)
-            except Exception:  # noqa: BLE001
-                child = None
-            if child is not None:
-                walk(child, app_name, app_pid)
-
+        return [], f"pyatspi unavailable: {exc}", None
     try:
-        desktop = pyatspi.Registry.getDesktop(0)
+        node, app_name, app_pid, coverage = find_element(
+            app_match, role_match, name_match, nth, cage_pid=cage_pid,
+            search_budget=search_budget, max_nodes=max_nodes, max_depth=max_depth,
+        )
     except Exception as exc:  # noqa: BLE001
-        return [], f"AT-SPI registry unreachable: {exc}"
-    for i in range(desktop.childCount):
-        try:
-            app = desktop.getChildAtIndex(i)
-        except Exception:  # noqa: BLE001
-            app = None
-        if app is None:
-            continue
-        app_name = app.name or ""
-        if app_match and app_match.lower() not in app_name.lower():
-            continue
-        try:
-            app_pid = app.get_process_id()
-        except Exception:  # noqa: BLE001
-            app_pid = None
-        walk(app, app_name, app_pid)
-    return matches, None
+        return [], f"AT-SPI registry unreachable: {exc}", None
+    if node is None:
+        return [], None, coverage
+    try:
+        match = {
+            "role": node.getRoleName(),
+            "name": node.name or "",
+            "app": app_name,
+            "pid": app_pid,
+            "in_scope": True,
+            "states": _element_states(node, pyatspi),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return [], f"matched AT-SPI target became unreadable: {exc}", coverage
+    return [match], None, coverage
 
 
 def collect_sway_windows(swaysock):
@@ -184,16 +155,24 @@ def window_matches(win, app_id, pid, title):
     return ok if (app_id or pid is not None or title) else False
 
 
-def evaluate(args) -> tuple[bool, dict[str, Any], str | None]:
+def evaluate(args) -> tuple[bool, dict[str, Any], Any | None]:
     """Evaluate the expectation once. Returns (holds, observed, error)."""
     expect = args.expect
     if expect in ELEMENT_EXPECTS:
-        matches, err = resolve_atspi_matches(args.app, args.role, args.name, args.cage_pid)
+        matches, err, coverage = resolve_atspi_matches(
+            args.app, args.role, args.name, args.nth, args.cage_pid,
+            search_budget=args.search_budget, max_nodes=args.search_max_nodes,
+            max_depth=args.search_max_depth,
+        )
         if err:
             return False, {"matches": [], "count": 0}, err
-        in_scope = [m for m in matches if m["in_scope"]]
-        observed = {"matches": in_scope, "count": len(in_scope)}
-        present = len(in_scope) > 0
+        observed = {"matches": matches, "count": len(matches), "search": coverage}
+        present = len(matches) > 0
+        if not present and coverage is not None and not coverage["complete"]:
+            return False, observed, {
+                "code": "search_incomplete",
+                "message": "AT-SPI search budget exhausted before target absence was established",
+            }
         if expect == "element_gone":
             return (not present), observed, None
         if expect == "element_appeared":
@@ -292,7 +271,7 @@ def run(args) -> dict[str, Any]:
     polls = 0
     held = False
     observed: dict[str, Any] = {}
-    error: str | None = None
+    error: Any | None = None
     started = time.time()
     held_after_ms: int | None = None
     while True:
@@ -317,9 +296,12 @@ def run(args) -> dict[str, Any]:
         verdict = "unmet"
         change = classify_change(args, observed)
 
+    recover = recover_hint(verdict, change)
+    if isinstance(error, dict) and error.get("code") == "search_incomplete":
+        recover = "replan"
     record.update(
         verdict=verdict,
-        recover=recover_hint(verdict, change),
+        recover=recover,
         change=change,
         held_after_ms=held_after_ms,
         polls=polls,
@@ -344,6 +326,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--nth", type=int, default=0)
     ap.add_argument("--cage-pid", type=int, default=None,
                     help="scope AT-SPI matches to this process subtree (isolated verify)")
+    ap.add_argument("--search-budget", type=float, default=DEFAULT_SEARCH_BUDGET)
+    ap.add_argument("--search-max-nodes", type=int, default=DEFAULT_SEARCH_MAX_NODES)
+    ap.add_argument("--search-max-depth", type=int, default=DEFAULT_SEARCH_MAX_DEPTH)
     ap.add_argument("--state", help="for state_is/state_not: "
                     + "|".join(sorted(_STATE_ALIASES)))
     # window selector (window_*/focus_is)
@@ -369,6 +354,10 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = parser().parse_args()
+    if args.nth < 0:
+        parser().error("--nth must be >= 0")
+    if args.search_budget <= 0 or args.search_max_nodes <= 0 or args.search_max_depth < 0:
+        parser().error("search budget/nodes must be positive and depth must be >= 0")
     # normalize before_present to bool|None
     if args.before_present is not None:
         args.before_present = args.before_present == "true"

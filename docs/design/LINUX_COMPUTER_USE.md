@@ -198,6 +198,12 @@ After an act it re-reads the bus and returns a `recover` hint that maps 1:1 to t
 move, so the caller reads ONE field instead of re-deriving intent from a fresh full
 snapshot.
 
+AT-SPI target resolution is itself bounded and shared by invoke and verify. It preserves
+depth-first selector order, stops at the exact `nth` target, and never falls back to the
+first match when `nth` is out of range. A time/node/depth budget exhaustion is reported as
+`search_incomplete` (recover=`replan`), not laundered into target absence; consequently an
+incomplete scan cannot verify `element_gone` or `state_not`.
+
 ```
 desktop_snapshot ─▶ pick target ─▶ desktop_invoke / desktop_action ─▶ desktop_verify
        ▲                                                                    │

@@ -7387,6 +7387,7 @@ fn desktop_semantic_task_action_summary(payload: Option<&Value>) -> Value {
         "before": payload.get("before").cloned().unwrap_or(Value::Null),
         "detail": payload.get("detail").cloned().unwrap_or(Value::Null),
         "error": payload.get("error").cloned().unwrap_or(Value::Null),
+        "search": payload.get("search").cloned().unwrap_or(Value::Null),
         "dispatch": payload.get("action_outcome").and_then(|value| value.get("dispatch_status")).cloned().unwrap_or(Value::Null),
         "wrapper": payload.get("mcp_wrapper").cloned().unwrap_or(Value::Null)
     })
@@ -7405,6 +7406,7 @@ fn desktop_semantic_task_verification_summary(payload: Option<&Value>) -> Value 
         "held_after_ms": payload.get("held_after_ms").cloned().unwrap_or(Value::Null),
         "polls": payload.get("polls").cloned().unwrap_or(Value::Null),
         "observed_count": observed.and_then(|value| value.get("count")).cloned().unwrap_or(Value::Null),
+        "search": observed.and_then(|value| value.get("search")).cloned().unwrap_or(Value::Null),
         "focused": observed.and_then(|value| value.get("focused")).cloned().unwrap_or(Value::Null),
         "error": payload.get("error").cloned().unwrap_or(Value::Null),
         "wrapper": payload.get("mcp_wrapper").cloned().unwrap_or(Value::Null)
@@ -7423,7 +7425,8 @@ fn desktop_semantic_task_invoke_recover(payload: Option<&Value>) -> &'static str
         .unwrap_or("")
         .to_lowercase();
     match code {
-        "missing_selector" | "host_invoke_not_exposed" | "script_missing" => "replan",
+        "missing_selector" | "host_invoke_not_exposed" | "script_missing" | "search_incomplete" => "replan",
+        "target_not_found" => "retry",
         "timeout" | "spawn_failed" => "retry",
         _ if message.contains("no matching accessible") => "retry",
         _ => "escalate",

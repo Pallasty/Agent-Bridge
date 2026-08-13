@@ -46,6 +46,9 @@ SCHEMA_VERSION = "desktop_invoke/v0"
 _CACHE_ROOT = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "agent-bridge"
 AUDIT_PATH = _CACHE_ROOT / "desktop_invoke_audit.jsonl"
 _ACTION_PRIORITY = ("click", "press", "activate", "do", "toggle")
+DEFAULT_SEARCH_BUDGET = 2.0
+DEFAULT_SEARCH_MAX_NODES = 2_000
+DEFAULT_SEARCH_MAX_DEPTH = 32
 
 
 def audit(record: dict[str, Any]) -> None:
@@ -90,29 +93,71 @@ def pid_is_descendant(pid: int, ancestor: int) -> bool:
     return False
 
 
-def find_element(app_match, role_match, name_match, nth):
-    """Search the AT-SPI desktop. Returns (element, app_name, app_pid) or (None, None, None)."""
+def find_element(app_match, role_match, name_match, nth, *, cage_pid=None,
+                 search_budget=DEFAULT_SEARCH_BUDGET,
+                 max_nodes=DEFAULT_SEARCH_MAX_NODES,
+                 max_depth=DEFAULT_SEARCH_MAX_DEPTH):
+    """Resolve exactly one AT-SPI target with bounded, truthful coverage.
+
+    Match ordering stays depth-first and compatible with the original resolver, but
+    traversal stops as soon as the requested 0-based ``nth`` match is found.  The
+    fourth return value is coverage metadata.  ``complete=False`` means absence was
+    *not* established and callers must report ``search_incomplete``, never no-match.
+    """
     import pyatspi  # noqa: deferred so --help works without the binding
 
-    matches: list[tuple[Any, str, int | None]] = []
+    started = time.monotonic()
+    deadline = started + max(0.0, search_budget)
+    visited = 0
+    matched = 0
+    stop_reason: str | None = None
+    found: tuple[Any, str, int | None] | None = None
 
-    def walk(node, app_name, app_pid):
+    def exhausted(depth: int) -> bool:
+        nonlocal stop_reason
+        if depth > max_depth:
+            stop_reason = "depth_budget"
+        elif visited >= max_nodes:
+            stop_reason = "node_budget"
+        elif time.monotonic() >= deadline:
+            stop_reason = "time_budget"
+        return stop_reason is not None
+
+    def walk(node, app_name, app_pid, depth):
+        nonlocal visited, matched, found
+        if node is None or exhausted(depth):
+            return True
+        visited += 1
         try:
             role = node.getRoleName()
             name = node.name or ""
         except Exception:
-            return
+            return False
         ok_role = (not role_match) or (role_match.lower() in role.lower())
         ok_name = (not name_match) or (name_match.lower() in name.lower())
-        if ok_role and ok_name and node.getRole() != pyatspi.ROLE_APPLICATION:
-            matches.append((node, app_name, app_pid))
-        for j in range(node.childCount):
+        in_scope = cage_pid is None or (
+            app_pid is not None and pid_is_descendant(app_pid, cage_pid)
+        )
+        if ok_role and ok_name and in_scope \
+                and node.getRole() != pyatspi.ROLE_APPLICATION:
+            if matched == nth:
+                found = (node, app_name, app_pid)
+                return True
+            matched += 1
+        try:
+            child_count = node.childCount
+        except Exception:
+            child_count = 0
+        for j in range(child_count):
+            if exhausted(depth):
+                return True
             try:
                 c = node.getChildAtIndex(j)
             except Exception:
                 c = None
-            if c is not None:
-                walk(c, app_name, app_pid)
+            if c is not None and walk(c, app_name, app_pid, depth + 1):
+                return True
+        return False
 
     desktop = pyatspi.Registry.getDesktop(0)
     for i in range(desktop.childCount):
@@ -129,13 +174,23 @@ def find_element(app_match, role_match, name_match, nth):
             app_pid = app.get_process_id()
         except Exception:
             app_pid = None
-        walk(app, app_name, app_pid)
+        if walk(app, app_name, app_pid, 0):
+            break
 
-    if not matches:
-        return None, None, None
-    if nth >= len(matches):
-        nth = 0
-    return matches[nth]
+    coverage = {
+        "complete": stop_reason is None,
+        "stop_reason": stop_reason or ("target_found" if found is not None else "registry_exhausted"),
+        "visited_nodes": visited,
+        "matched_before_target": matched,
+        "requested_nth": nth,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "budget_ms": int(max(0.0, search_budget) * 1000),
+        "max_nodes": max_nodes,
+        "max_depth": max_depth,
+    }
+    if found is None:
+        return None, None, None, coverage
+    return found[0], found[1], found[2], coverage
 
 
 def _current_focus() -> str | None:
@@ -221,18 +276,28 @@ def run_confirm_token(args: argparse.Namespace) -> int:
     deadline = time.time() + max(0.0, args.wait)
     try:
         while True:
-            element, app_name, app_pid = find_element(
-                sel.get("app"), sel.get("role"), sel.get("name"), int(sel.get("nth", 0) or 0))
-            if element is not None or time.time() >= deadline:
+            element, app_name, app_pid, coverage = find_element(
+                sel.get("app"), sel.get("role"), sel.get("name"), int(sel.get("nth", 0) or 0),
+                search_budget=args.search_budget, max_nodes=args.search_max_nodes,
+                max_depth=args.search_max_depth)
+            if element is not None or not coverage["complete"] or time.time() >= deadline:
                 break
             time.sleep(0.4)
     except ImportError as exc:
         record.update(allowed=True, rc=2, error=f"pyatspi unavailable: {exc}")
         audit(record); print(json.dumps(record, ensure_ascii=False)); return 2
 
+    record["search"] = coverage
+    if element is None and not coverage["complete"]:
+        record.update(allowed=True, rc=4, error={
+            "code": "search_incomplete",
+            "message": "AT-SPI search budget exhausted before target absence was established",
+        })
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return 4
     if element is None:
         record.update(allowed=True, rc=2,
-                      error="approved, but no matching accessible found now (token already consumed)")
+                      error={"code": "target_not_found", "message":
+                             "approved, but no matching accessible found now (token already consumed)"})
         audit(record); print(json.dumps(record, ensure_ascii=False)); return 2
 
     record["found"] = {"app": app_name, "app_pid": app_pid}
@@ -254,6 +319,12 @@ def main() -> int:
                     help="nested compositor PID; target app must be its descendant for isolated invoke")
     ap.add_argument("--wait", type=float, default=4.0,
                     help="seconds to poll for the accessible to appear (a11y subtree can lag app registration)")
+    ap.add_argument("--search-budget", type=float, default=DEFAULT_SEARCH_BUDGET,
+                    help="maximum seconds for one AT-SPI tree scan (default 2)")
+    ap.add_argument("--search-max-nodes", type=int, default=DEFAULT_SEARCH_MAX_NODES,
+                    help="maximum accessibles visited in one scan (default 2000)")
+    ap.add_argument("--search-max-depth", type=int, default=DEFAULT_SEARCH_MAX_DEPTH,
+                    help="maximum AT-SPI tree depth in one scan (default 32)")
     ap.add_argument("--dry-run", action="store_true", help="log intent, invoke nothing")
     ap.add_argument("--confirm", action="store_true", help="confirm a host (non-isolated) invoke")
     ap.add_argument("--i-understand-this-touches-the-real-desktop",
@@ -268,6 +339,10 @@ def main() -> int:
     ap.add_argument("--confirm-ttl", type=int, default=DEFAULT_CONFIRM_TTL,
                     help=f"seconds a minted pending token stays valid (default {DEFAULT_CONFIRM_TTL})")
     args = ap.parse_args()
+    if args.nth < 0:
+        ap.error("--nth must be >= 0")
+    if args.search_budget <= 0 or args.search_max_nodes <= 0 or args.search_max_depth < 0:
+        ap.error("search budget/nodes must be positive and depth must be >= 0")
 
     # Codex/CC MCP children can start without XDG_RUNTIME_DIR or the session
     # D-Bus address even though the user's AT-SPI services are healthy. Recover
@@ -293,16 +368,29 @@ def main() -> int:
     deadline = time.time() + max(0.0, args.wait)
     try:
         while True:
-            element, app_name, app_pid = find_element(args.app, args.role, args.name, args.nth)
-            if element is not None or time.time() >= deadline:
+            element, app_name, app_pid, coverage = find_element(
+                args.app, args.role, args.name, args.nth,
+                search_budget=args.search_budget, max_nodes=args.search_max_nodes,
+                max_depth=args.search_max_depth)
+            if element is not None or not coverage["complete"] or time.time() >= deadline:
                 break
             time.sleep(0.4)
     except ImportError as exc:
         record.update(allowed=False, rc=2, error=f"pyatspi unavailable: {exc}")
         audit(record); print(json.dumps(record, ensure_ascii=False)); return 2
 
+    record["search"] = coverage
+    if element is None and not coverage["complete"]:
+        record.update(allowed=False, rc=4, error={
+            "code": "search_incomplete",
+            "message": "AT-SPI search budget exhausted before target absence was established",
+        })
+        audit(record); print(json.dumps(record, ensure_ascii=False)); return 4
     if element is None:
-        record.update(allowed=False, rc=2, error="no matching accessible found in AT-SPI registry")
+        record.update(allowed=False, rc=2, error={
+            "code": "target_not_found",
+            "message": "no matching accessible found in AT-SPI registry",
+        })
         audit(record); print(json.dumps(record, ensure_ascii=False)); return 2
 
     isolated = bool(args.cage_pid and app_pid and pid_is_descendant(app_pid, args.cage_pid))

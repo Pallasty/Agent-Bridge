@@ -19,6 +19,7 @@ def ns(**kw):
         expect="element_gone", app=None, role=None, name=None, nth=0, cage_pid=None,
         state=None, win_app_id=None, win_pid=None, win_title=None, swaysock=None,
         timeout=1.0, poll_interval=0.3, settle=0.0, before_present=None, before_focus=None,
+        search_budget=2.0, search_max_nodes=2000, search_max_depth=32,
         compact=True,
     )
     base.update(kw)
@@ -105,6 +106,49 @@ class ExitCodeTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             dv.parser().parse_args(["--help"])
         self.assertEqual(cm.exception.code, 0)
+
+
+class BoundedResolutionTests(unittest.TestCase):
+    def test_incomplete_search_cannot_verify_element_gone(self):
+        coverage = {"complete": False, "stop_reason": "node_budget"}
+        original = dv.resolve_atspi_matches
+        dv.resolve_atspi_matches = lambda *args, **kwargs: ([], None, coverage)
+        try:
+            holds, observed, error = dv.evaluate(ns(expect="element_gone", app="large"))
+        finally:
+            dv.resolve_atspi_matches = original
+        self.assertFalse(holds)
+        self.assertEqual(observed["search"], coverage)
+        self.assertEqual(error["code"], "search_incomplete")
+
+    def test_incomplete_search_replans_instead_of_retrying(self):
+        coverage = {"complete": False, "stop_reason": "time_budget"}
+        original = dv.resolve_atspi_matches
+        dv.resolve_atspi_matches = lambda *args, **kwargs: ([], None, coverage)
+        try:
+            result = dv.run(ns(expect="state_not", app="large", state="checked", timeout=0))
+        finally:
+            dv.resolve_atspi_matches = original
+        self.assertEqual(result["verdict"], "error")
+        self.assertEqual(result["recover"], "replan")
+        self.assertEqual(result["error"]["code"], "search_incomplete")
+
+    def test_verify_forwards_exact_nth_to_shared_resolver(self):
+        seen = []
+        original = dv.find_element
+        dv.find_element = lambda app, role, name, nth, **kwargs: (
+            seen.append(nth) or (None, None, None, {"complete": True})
+        )
+        try:
+            matches, error, coverage = dv.resolve_atspi_matches(
+                "large", "button", None, 3, None
+            )
+        finally:
+            dv.find_element = original
+        self.assertEqual(seen, [3])
+        self.assertEqual(matches, [])
+        self.assertIsNone(error)
+        self.assertTrue(coverage["complete"])
 
 
 if __name__ == "__main__":

@@ -15009,6 +15009,22 @@ fn desktop_semantic_task_schema_exposes_no_host_or_coordinate_bypass() {
     }
 }
 
+#[test]
+fn desktop_semantic_task_maps_bounded_search_outcomes_to_actionable_recovery() {
+    assert_eq!(
+        desktop_semantic_task_invoke_recover(Some(&json!({
+            "error": {"code": "search_incomplete"}
+        }))),
+        "replan"
+    );
+    assert_eq!(
+        desktop_semantic_task_invoke_recover(Some(&json!({
+            "error": {"code": "target_not_found"}
+        }))),
+        "retry"
+    );
+}
+
 #[tokio::test]
 async fn desktop_semantic_task_refuses_real_host_task_before_exec() {
     let tool = DesktopSemanticTaskTool::new(Hub::builder().build());
