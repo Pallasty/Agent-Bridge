@@ -347,6 +347,26 @@ class ModelScopeAbotProviderTests(unittest.TestCase):
         self.assertIn("provider_not_ready", result["blockers"])
         self.assertIn("provider_busy", result["blockers"])
 
+    def test_runtime_preflight_rejects_readiness_claiming_runtime_admission(self):
+        packet, packet_path = self._gate7d_packet()
+        candidate, _ = self._gate7e_candidate()
+        readiness = self._ready_snapshot()
+        readiness["runtime_admitted"] = True
+        result = MODULE.runtime_preflight(
+            packet,
+            packet_path,
+            candidate,
+            readiness,
+            active_sessions=0,
+            session_state_authoritative=True,
+            runtime_opted_in=True,
+            now_unix_ms=1_786_588_542_277,
+        )
+        self.assertFalse(result["preflight_passed"])
+        self.assertIn("provider_runtime_admitted_must_be_false", result["blockers"])
+        self.assertFalse(result["studio_start_called"])
+        self.assertFalse(result["runtime_admitted"])
+
     def test_runtime_preflight_fails_closed_on_malformed_candidate(self):
         packet, packet_path = self._gate7d_packet()
         result = MODULE.runtime_preflight(

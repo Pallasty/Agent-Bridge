@@ -585,6 +585,8 @@ def runtime_preflight(
         blockers.append("readiness_schema_mismatch")
     if readiness.get("provider_id") != PROVIDER_ID:
         blockers.append("readiness_provider_mismatch")
+    if readiness.get("runtime_admitted") is not False:
+        blockers.append("provider_runtime_admitted_must_be_false")
     if readiness.get("ready") is not True or readiness.get("missing_endpoints") != []:
         blockers.append("provider_not_ready")
 
