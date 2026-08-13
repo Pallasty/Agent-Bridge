@@ -95,7 +95,7 @@ fn format_media_clock(seconds: Option<f64>) -> String {
     format!("{:02}:{:02}", total / 60, total % 60)
 }
 
-fn media_projection_presentation(context: &crate::mobile_projection::MediaContext) -> (String, String, String) {
+pub(super) fn media_projection_presentation(context: &crate::mobile_projection::MediaContext) -> (String, String, String) {
     let title = context.title.as_deref().unwrap_or("未播放曲目");
     let playlist = context.active_playlist_name.as_deref().unwrap_or("未选择播放列表");
     let status = context.playback_status.as_deref().unwrap_or("Unknown");
@@ -1876,6 +1876,19 @@ pub(super) fn mobile_projection_patch_frame(
     Ok((frame, changed_fields))
 }
 
+pub(super) fn mobile_projection_write_rejection(
+    stop_requested: bool,
+    ended: bool,
+    now: i64,
+    expires_at: i64,
+) -> Option<&'static str> {
+    if stop_requested || ended || now >= expires_at {
+        Some("projection session is stopped or expired; start a new consent session")
+    } else {
+        None
+    }
+}
+
 pub(super) fn mobile_projection_wait_outcome(
     pulls: u64,
     last_served_revision: u64,
@@ -2200,12 +2213,24 @@ impl McpTool for MobileProjectionSyncMediaTool {
         else {
             return Ok(ToolResult::error("missing 'session_id'"));
         };
-        if !mobile_projection_registry()
-            .lock()
-            .unwrap()
-            .contains_key(session_id)
-        {
-            return Ok(ToolResult::error("projection session not found or expired"));
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs() as i64,
+            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
+        };
+        let state = {
+            let registry = mobile_projection_registry().lock().unwrap();
+            match registry.get(session_id) {
+                Some(state) => state.clone(),
+                None => return Ok(ToolResult::error("projection session not found or expired")),
+            }
+        };
+        if let Some(error) = mobile_projection_write_rejection(
+            state.stop_requested.load(std::sync::atomic::Ordering::Relaxed),
+            state.ended.load(std::sync::atomic::Ordering::Relaxed),
+            now,
+            state.expires_at,
+        ) {
+            return Ok(ToolResult::error(error));
         }
         let mut read_args = json!({
             "domain": "media",
@@ -2235,10 +2260,7 @@ impl McpTool for MobileProjectionSyncMediaTool {
         else {
             return Ok(ToolResult::error("app_control returned no JSON payload"));
         };
-        let observed_at = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(duration) => duration.as_secs() as i64,
-            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
-        };
+        let observed_at = now;
         let context = match media_context_from_app_control(&payload, observed_at) {
             Ok(value) => value,
             Err(error) => return Ok(ToolResult::error(error)),
@@ -2338,13 +2360,13 @@ impl McpTool for MobileProjectionUpdateTool {
             }
         };
         use std::sync::atomic::Ordering;
-        if state.stop_requested.load(Ordering::Relaxed)
-            || state.ended.load(Ordering::Relaxed)
-            || now >= state.expires_at
-        {
-            return Ok(ToolResult::error(
-                "projection session is stopped or expired; start a new consent session",
-            ));
+        if let Some(error) = mobile_projection_write_rejection(
+            state.stop_requested.load(Ordering::Relaxed),
+            state.ended.load(Ordering::Relaxed),
+            now,
+            state.expires_at,
+        ) {
+            return Ok(ToolResult::error(error));
         }
         let mut frame = state.frame.write().unwrap();
         let (updated, changed_fields) = match mobile_projection_patch_frame(&frame, &args) {

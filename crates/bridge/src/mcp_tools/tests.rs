@@ -1625,6 +1625,34 @@ fn mobile_projection_wait_reports_only_observed_or_terminal_facts() {
 }
 
 #[test]
+fn mobile_projection_writes_reject_terminal_sessions() {
+    assert_eq!(
+        mobile_projection_write_rejection(false, false, 100, 200),
+        None
+    );
+    for (stopped, ended, now, expiry) in [
+        (true, false, 100, 200),
+        (false, true, 100, 200),
+        (false, false, 200, 200),
+    ] {
+        assert_eq!(
+            mobile_projection_write_rejection(stopped, ended, now, expiry),
+            Some("projection session is stopped or expired; start a new consent session")
+        );
+    }
+}
+
+#[test]
+fn mobile_projection_media_presentation_handles_missing_fields() {
+    let context = crate::mobile_projection::MediaContext::new(1234);
+    let (title, body, status) = media_projection_presentation(&context);
+    assert_eq!(title, "媒体状态 · 已同步");
+    assert!(body.contains("未播放曲目"));
+    assert!(body.contains("未选择播放列表"));
+    assert_eq!(status, "Unknown");
+}
+
+#[test]
 fn mobile_projection_patch_preserves_omitted_fields() {
     let original = crate::mobile_projection::ProjectionFrame::new(
         "session-1",
@@ -1704,6 +1732,35 @@ fn mobile_projection_sync_media_maps_only_verified_playlist_current_payload() {
     ] {
         assert!(media_context_from_app_control(&bad, 1234).is_err());
     }
+}
+
+#[test]
+fn mobile_projection_sync_media_repeated_payload_keeps_display_state_stable() {
+    let payload = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "verdict": "verified",
+        "action": "playlist_current",
+        "active_playlist": {"id": "/playlist/1", "name": "Allin1.m3u"},
+        "track_summary": {
+            "player": "rhythmbox", "playback_status": "Playing", "track_id": "/track/2",
+            "artist": "Sade", "title": "By Your Side", "position_seconds": 12.0,
+            "duration_seconds": 275.0, "metadata_available": true
+        }
+    });
+    let first = media_context_from_app_control(&payload, 100).unwrap();
+    let second = media_context_from_app_control(&payload, 101).unwrap();
+    assert_eq!(first.schema, second.schema);
+    assert_eq!(first.player, second.player);
+    assert_eq!(first.active_playlist_id, second.active_playlist_id);
+    assert_eq!(first.active_playlist_name, second.active_playlist_name);
+    assert_eq!(first.playback_status, second.playback_status);
+    assert_eq!(first.track_id, second.track_id);
+    assert_eq!(first.artist, second.artist);
+    assert_eq!(first.title, second.title);
+    assert_eq!(first.position_seconds, second.position_seconds);
+    assert_eq!(first.duration_seconds, second.duration_seconds);
+    assert_eq!(first.metadata_available, second.metadata_available);
+    assert_ne!(first.observed_at_unix_seconds, second.observed_at_unix_seconds);
 }
 
 #[test]
