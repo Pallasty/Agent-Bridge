@@ -10218,6 +10218,35 @@ print(json.dumps(payload))
     assert_eq!(payload["raw_available"], true);
     assert_eq!(payload["raw_included"], false);
     assert!(payload.get("raw_snapshot").is_none());
+    assert_eq!(
+        payload["observation"]["schema"],
+        "agent_bridge.observation.v0"
+    );
+    assert_eq!(payload["observation"]["revision"], 1780833000_u64);
+    assert_eq!(
+        payload["observation"]["content_hash"]["algorithm"],
+        "sha256"
+    );
+    let content_hash = payload["observation"]["content_hash"]["value"]
+        .as_str()
+        .expect("content hash");
+    assert_eq!(content_hash.len(), 64);
+    assert!(payload["observation"]["observation_id"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("obs-desktop-linux-")));
+    assert_eq!(
+        payload["observation"]["freshness"]["max_age_ms"],
+        5000_u64
+    );
+    assert!(payload["observation"]["freshness"]["age_ms_at_return"].is_u64());
+    assert_eq!(
+        payload["observation"]["coordinate_provenance"]["windows_rect"]["coordinate_space"],
+        "sway.logical.desktop"
+    );
+    assert_eq!(
+        payload["observation"]["coordinate_provenance"]["atspi_bounds"]["mapping_to_sway"],
+        "unverified"
+    );
     assert_eq!(payload["verification"]["verdict"], "verified");
     assert_eq!(payload["verification"]["verified_to"], "semantic_objects");
     assert_eq!(payload["verification"]["recover"], "proceed");
@@ -10271,8 +10300,30 @@ print(json.dumps(payload))
         DESKTOP_SNAPSHOT_SOURCE_SCHEMA
     );
     assert!(raw_payload["raw_snapshot"].get("mcp_wrapper").is_some());
+    assert_eq!(
+        raw_payload["observation"]["content_hash"]["value"],
+        payload["observation"]["content_hash"]["value"]
+    );
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[test]
+fn desktop_snapshot_observation_hash_excludes_runtime_wrapper_metadata() {
+    let source = json!({
+        "schema": DESKTOP_SNAPSHOT_SOURCE_SCHEMA,
+        "captured_at": 1780833000_u64,
+        "windows": []
+    });
+    let mut wrapped = source.clone();
+    wrapped.as_object_mut().expect("object").insert(
+        "mcp_wrapper".to_string(),
+        json!({"duration_ms": 999, "stderr": "runtime-only"}),
+    );
+    assert_eq!(
+        desktop_snapshot_source_content_sha256(&source),
+        desktop_snapshot_source_content_sha256(&wrapped)
+    );
 }
 
 #[tokio::test]

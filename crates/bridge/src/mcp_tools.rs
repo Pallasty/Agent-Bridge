@@ -1663,6 +1663,10 @@ impl McpTool for DesktopSnapshotTool {
                         "type": "boolean",
                         "default": false,
                         "description": "Only with semantic_bus=true: include the original desktop_snapshot payload as raw_snapshot. Default false keeps the semantic envelope compact."
+                    },
+                    "semantic_max_age_ms": {
+                        "type": "integer", "minimum": 100, "maximum": 300000, "default": 5000,
+                        "description": "Only with semantic_bus=true: freshness budget attached to this observation. Consumers should re-observe after this many milliseconds."
                     }
                 }
             }),
@@ -1701,6 +1705,11 @@ impl McpTool for DesktopSnapshotTool {
             .get("semantic_include_raw")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let semantic_max_age_ms = args
+            .get("semantic_max_age_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(5_000)
+            .clamp(100, 300_000);
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
         let script = desktop_snapshot_script_path(&args, cwd.as_ref());
@@ -1786,8 +1795,11 @@ impl McpTool for DesktopSnapshotTool {
                     );
                 }
                 if semantic_bus {
-                    let semantic_payload =
-                        desktop_snapshot_semantic_bus_payload(&payload, semantic_include_raw);
+                    let semantic_payload = desktop_snapshot_semantic_bus_payload(
+                        &payload,
+                        semantic_include_raw,
+                        semantic_max_age_ms,
+                    );
                     Ok(ToolResult::json_text(&semantic_payload))
                 } else {
                     Ok(ToolResult::json_text(&payload))
@@ -1805,13 +1817,29 @@ impl McpTool for DesktopSnapshotTool {
     }
 }
 
-fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) -> Value {
+fn desktop_snapshot_semantic_bus_payload(
+    snapshot: &Value,
+    include_raw: bool,
+    max_age_ms: u64,
+) -> Value {
     let source_schema = snapshot
         .get("schema")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     let captured_at = snapshot.get("captured_at").cloned().unwrap_or(Value::Null);
     let captured_label = desktop_snapshot_value_label(&captured_at, "unknown");
+    let captured_unix_seconds = captured_at.as_u64();
+    let returned_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let captured_unix_ms = captured_unix_seconds.and_then(|seconds| seconds.checked_mul(1_000));
+    let age_ms = captured_unix_ms
+        .filter(|captured| *captured <= returned_unix_ms)
+        .map(|captured| returned_unix_ms - captured);
+    let fresh_at_return = age_ms.is_some_and(|age| age <= max_age_ms);
+    let source_content_sha256 = desktop_snapshot_source_content_sha256(snapshot);
+    let observation_id = format!("obs-desktop-linux-{}", &source_content_sha256[..16]);
     let session_object_id = format!("desktop:linux:session:{captured_label}");
     let event_id = format!("evt-desktop-snapshot-{captured_label}");
     let verified = source_schema == DESKTOP_SNAPSHOT_SOURCE_SCHEMA;
@@ -2006,6 +2034,39 @@ fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) ->
         "source_schema": source_schema,
         "source_adapter": "linux.desktop_snapshot",
         "captured_at": captured_at,
+        "observation": {
+            "schema": "agent_bridge.observation.v0",
+            "observation_id": observation_id,
+            "revision": captured_unix_seconds,
+            "revision_semantics": "source_capture_unix_seconds; ordering hint only; ties are possible",
+            "content_hash": {
+                "algorithm": "sha256",
+                "scope": "source_snapshot_without_mcp_wrapper",
+                "value": source_content_sha256
+            },
+            "freshness": {
+                "max_age_ms": max_age_ms,
+                "age_ms_at_return": age_ms,
+                "fresh_at_return": fresh_at_return,
+                "returned_at_unix_ms": returned_unix_ms
+            },
+            "coordinate_provenance": {
+                "windows_rect": {
+                    "source_path": "windows[].rect",
+                    "coordinate_space": "sway.logical.desktop",
+                    "origin": "global_desktop_top_left",
+                    "transform": "identity",
+                    "output_binding": "windows[].output"
+                },
+                "atspi_bounds": {
+                    "source_path": "atspi.apps[].elements[].bounds",
+                    "coordinate_space": "atspi.screen",
+                    "origin": "global_screen_top_left",
+                    "transform": "none",
+                    "mapping_to_sway": "unverified"
+                }
+            }
+        },
         "read_only": true,
         "raw_available": true,
         "raw_included": include_raw,
@@ -2068,6 +2129,17 @@ fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) ->
         }
     }
     payload
+}
+
+fn desktop_snapshot_source_content_sha256(snapshot: &Value) -> String {
+    let mut source = snapshot.clone();
+    if let Some(object) = source.as_object_mut() {
+        object.remove("mcp_wrapper");
+    }
+    let encoded = serde_json::to_vec(&source).expect("serde_json::Value is serializable");
+    let mut hasher = Sha256::new();
+    hasher.update(encoded);
+    format!("{:x}", hasher.finalize())
 }
 
 fn desktop_snapshot_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
