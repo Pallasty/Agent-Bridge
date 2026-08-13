@@ -1,0 +1,30 @@
+{
+  "schema": "agent_bridge.modelscope_abot_browser_lifecycle.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-12",
+  "surface": "codex_in_app_browser",
+  "prompt_class": "bounded_neutral_scene",
+  "observations": {
+    "start_observed": true,
+    "start_signals": [
+      "start_button_disabled",
+      "stop_button_enabled",
+      "session_iframe_created",
+      "websocket_queue_status_visible"
+    ],
+    "stream_observed": true,
+    "max_observed_fps": 11.8,
+    "max_observed_generated_blocks": 117,
+    "max_observed_target_blocks": 120,
+    "max_observed_frames": 1404,
+    "stop_requested": true,
+    "stop_observed": true,
+    "post_stop_ready": true,
+    "post_stop_iframe_count": 0,
+    "post_stop_status": "stopped",
+    "post_stop_start_button_enabled": true
+  },
+  "generated_artifact": null,
+  "rollout_emitted": false,
+  "runtime_admitted": false
+}

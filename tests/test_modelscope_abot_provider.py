@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -45,6 +46,63 @@ class ModelScopeAbotProviderTests(unittest.TestCase):
         self.assertTrue(result["hidden_state_required"])
         self.assertFalse(result["rest_lifecycle_supported"])
         self.assertFalse(result["runtime_admitted"])
+
+    def test_browser_receipt_closes_lifecycle_without_rollout_admission(self):
+        receipt = {
+            "schema": MODULE.BROWSER_RECEIPT_SCHEMA,
+            "provider_id": MODULE.PROVIDER_ID,
+            "observations": {
+                "start_observed": True,
+                "stream_observed": True,
+                "max_observed_fps": 11.8,
+                "stop_requested": True,
+                "stop_observed": True,
+                "post_stop_ready": True,
+                "post_stop_iframe_count": 0,
+            },
+            "generated_artifact": None,
+            "rollout_emitted": False,
+            "runtime_admitted": False,
+        }
+        result = MODULE.validate_browser_receipt(receipt)
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["lifecycle_closed"])
+        self.assertFalse(result["generated_artifact_bound"])
+        self.assertFalse(result["rollout_eligible"])
+        self.assertFalse(result["runtime_admitted"])
+
+    def test_browser_receipt_rejects_missing_stop_and_false_admission(self):
+        receipt = {
+            "schema": MODULE.BROWSER_RECEIPT_SCHEMA,
+            "provider_id": MODULE.PROVIDER_ID,
+            "observations": {
+                "start_observed": True,
+                "stream_observed": True,
+                "max_observed_fps": 2.0,
+                "stop_requested": False,
+                "stop_observed": False,
+                "post_stop_ready": False,
+                "post_stop_iframe_count": 1,
+            },
+            "generated_artifact": None,
+            "rollout_emitted": True,
+            "runtime_admitted": True,
+        }
+        result = MODULE.validate_browser_receipt(receipt)
+        self.assertFalse(result["valid"])
+        self.assertIn("stop_observed_not_true", result["violations"])
+        self.assertIn("runtime_admitted_must_be_false", result["violations"])
+
+    def test_committed_gate7b_receipt_validates(self):
+        path = (
+            Path(__file__).parents[1]
+            / "docs"
+            / "design"
+            / "evidence"
+            / "modelscope_abot_gate7b_browser_receipt_2026_08_12.json"
+        )
+        result = MODULE.validate_browser_receipt(json.loads(path.read_text(encoding="utf-8")))
+        self.assertTrue(result["valid"])
 
 
 if __name__ == "__main__":

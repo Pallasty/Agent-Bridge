@@ -7,6 +7,7 @@ import argparse
 import json
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_URL = "https://amap-cvlab-abot-world-0.ms.show"
@@ -15,6 +16,8 @@ REQUIRED_ENDPOINTS = {
     "/on_click_start_ws",
     "/on_stop_ws",
 }
+BROWSER_RECEIPT_SCHEMA = "agent_bridge.modelscope_abot_browser_lifecycle.v0"
+PROVIDER_ID = "modelscope.studio.amap_cvlab.abot-world-0"
 
 
 class ProviderError(RuntimeError):
@@ -115,7 +118,7 @@ class ModelScopeAbotProvider:
         ready = not missing and isinstance(ready_text, str) and "就绪" in ready_text
         return {
             "schema": "agent_bridge.modelscope_abot_readiness.v0",
-            "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+            "provider_id": PROVIDER_ID,
             "ready": ready,
             "missing_endpoints": missing,
             "status_text": ready_text,
@@ -138,7 +141,7 @@ class ModelScopeAbotProvider:
         stateful = len(start_inputs) > 1 or len(stop_inputs) > 1
         return {
             "schema": "agent_bridge.modelscope_abot_session_contract.v0",
-            "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+            "provider_id": PROVIDER_ID,
             "start_input_count": len(start_inputs),
             "start_output_count": len(start_outputs),
             "stop_input_count": len(stop_inputs),
@@ -149,21 +152,81 @@ class ModelScopeAbotProvider:
         }
 
 
+def validate_browser_receipt(receipt: Any) -> dict[str, Any]:
+    violations: list[str] = []
+    if not isinstance(receipt, dict):
+        violations.append("receipt_not_object")
+        receipt = {}
+    if receipt.get("schema") != BROWSER_RECEIPT_SCHEMA:
+        violations.append("schema_mismatch")
+    if receipt.get("provider_id") != PROVIDER_ID:
+        violations.append("provider_id_mismatch")
+
+    observations = receipt.get("observations")
+    if not isinstance(observations, dict):
+        violations.append("observations_not_object")
+        observations = {}
+    required_true = (
+        "start_observed",
+        "stream_observed",
+        "stop_requested",
+        "stop_observed",
+        "post_stop_ready",
+    )
+    for field in required_true:
+        if observations.get(field) is not True:
+            violations.append(f"{field}_not_true")
+
+    max_fps = observations.get("max_observed_fps")
+    if not isinstance(max_fps, (int, float)) or isinstance(max_fps, bool) or max_fps <= 0:
+        violations.append("positive_max_observed_fps_required")
+    if observations.get("post_stop_iframe_count") != 0:
+        violations.append("post_stop_iframe_count_not_zero")
+
+    artifact = receipt.get("generated_artifact")
+    if artifact is not None:
+        if not isinstance(artifact, dict):
+            violations.append("generated_artifact_not_object_or_null")
+        elif not artifact.get("ref") or not artifact.get("sha256"):
+            violations.append("generated_artifact_unbound")
+    if receipt.get("rollout_emitted") is not False:
+        violations.append("rollout_emitted_must_be_false")
+    if receipt.get("runtime_admitted") is not False:
+        violations.append("runtime_admitted_must_be_false")
+
+    return {
+        "schema": "agent_bridge.modelscope_abot_browser_receipt_validation.v0",
+        "valid": not violations,
+        "violations": violations,
+        "lifecycle_closed": not violations,
+        "generated_artifact_bound": isinstance(artifact, dict) and not any(
+            violation.startswith("generated_artifact_") for violation in violations
+        ),
+        "rollout_eligible": False,
+        "runtime_admitted": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--output")
     parser.add_argument("--session-contract", action="store_true")
+    parser.add_argument("--validate-browser-receipt", type=Path)
     args = parser.parse_args()
-    provider = ModelScopeAbotProvider(args.base_url)
-    result = provider.session_contract() if args.session_contract else provider.readiness()
+    if args.validate_browser_receipt:
+        receipt = json.loads(args.validate_browser_receipt.read_text(encoding="utf-8"))
+        result = validate_browser_receipt(receipt)
+    else:
+        provider = ModelScopeAbotProvider(args.base_url)
+        result = provider.session_contract() if args.session_contract else provider.readiness()
     rendered = json.dumps(result, ensure_ascii=True, indent=2) + "\n"
     if args.output:
         with open(args.output, "w", encoding="utf-8") as stream:
             stream.write(rendered)
     else:
         print(rendered, end="")
-    return 0 if result.get("ready", True) else 2
+    return 0 if result.get("ready", result.get("valid", True)) else 2
 
 
 if __name__ == "__main__":
