@@ -170,6 +170,23 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(payload["status"], "observation_failed")
         self.assertEqual(payload["error"]["code"], "active_playlist_observation_failed")
 
+    def test_actions_fail_closed_when_no_mpris_player_exists(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        def fake_run(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-l"]: return 0, "", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("playlist_current", None, False, 0.2)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(payload["status"], "target_unavailable")
+        self.assertEqual(payload["verdict"], "error")
+        self.assertEqual(payload["error"]["code"], "no_mpris_player")
+        self.assertEqual(payload["route"]["selected"], None)
+        self.assertFalse(any(item["status"] == "executed" for item in payload["route"]["fallbacks"]))
+
     def test_dry_run_discovers_and_never_dispatches(self):
         mod = load_module()
         calls = []
