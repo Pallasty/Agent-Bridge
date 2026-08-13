@@ -15205,7 +15205,7 @@ fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
     let actions = tool.input_schema["properties"]["action"]["enum"]
         .as_array()
         .expect("action enum");
-    for action in ["volume_get", "volume_up", "volume_down", "volume_set", "state_get"] {
+    for action in ["volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get"] {
         assert!(actions.iter().any(|value| value == action), "missing {action}");
     }
     assert_eq!(tool.input_schema["properties"]["volume"]["minimum"], json!(0.0));

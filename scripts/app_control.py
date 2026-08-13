@@ -21,7 +21,7 @@ from typing import Any, MutableMapping
 SCHEMA = "agent_bridge.app_control.v0"
 ACTIONS = (
     "discover", "next", "previous", "play", "pause", "play_pause", "stop",
-    "volume_get", "volume_up", "volume_down", "volume_set", "state_get",
+    "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get",
 )
 PLAYERCTL_ACTION = {
     "next": "next",
@@ -111,6 +111,20 @@ def observe(player: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, di
     except ValueError:
         volume = None
         volume_error = f"invalid volume: {volume_text}"
+    rc_position, position_text, position_error = run(["playerctl", "-p", player, "position"], env)
+    try:
+        position = float(position_text) if rc_position == 0 else None
+    except ValueError:
+        position = None
+        position_error = f"invalid position: {position_text}"
+    rc_length, length_text, length_error = run(
+        ["playerctl", "-p", player, "metadata", "--format", "{{mpris:length}}"], env
+    )
+    try:
+        duration = float(length_text) / 1_000_000 if rc_length == 0 else None
+    except ValueError:
+        duration = None
+        length_error = f"invalid duration: {length_text}"
     return {
         "player": player,
         "playback_status": status,
@@ -120,6 +134,11 @@ def observe(player: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, di
         "volume": volume,
         "volume_available": volume is not None,
         "volume_error": None if volume is not None else (volume_error or volume_text),
+        "position_seconds": position,
+        "duration_seconds": duration,
+        "position_available": position is not None and duration is not None,
+        "position_error": None if position is not None else (position_error or position_text),
+        "duration_error": None if duration is not None else (length_error or length_text),
         "metadata_available": rc_meta == 0,
         "metadata_error": None if rc_meta == 0 else (err_meta or meta),
     }, None
@@ -238,6 +257,20 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "domain": "media", "action": action, "read_only": True, "player": player,
             "route": route_summary(True), "before": before,
             "verification": {"status": "verified", "predicate": "player_state_observed"},
+        }
+    if action == "position_get":
+        if not before.get("position_available"):
+            return {
+                "schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry",
+                "domain": "media", "action": action, "player": player,
+                "route": route_summary(True), "before": before,
+                "error": {"code": "position_unavailable", "message": before.get("position_error") or before.get("duration_error")},
+            }
+        return {
+            "schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed",
+            "domain": "media", "action": action, "read_only": True, "player": player,
+            "route": route_summary(True), "before": before,
+            "verification": {"status": "verified", "predicate": "media_position_observed"},
         }
     if dry_run:
         if action == "volume_set":

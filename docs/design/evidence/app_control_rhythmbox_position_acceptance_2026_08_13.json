@@ -1,0 +1,21 @@
+{
+  "schema": "agent_bridge.app_control.position_acceptance.v0",
+  "date": "2026-08-13",
+  "player": "rhythmbox",
+  "backend": "mpris_playerctl",
+  "route_layer": "application_protocol",
+  "action": "position_get",
+  "receipt": {
+    "status": "observed",
+    "verdict": "verified",
+    "predicate": "media_position_observed",
+    "position_seconds": 74.000011,
+    "duration_seconds": 250.0,
+    "position_available": true
+  },
+  "fallbacks": {
+    "atspi": "not_executed",
+    "vision": "not_executed",
+    "coordinate_input": "not_executed"
+  }
+}
