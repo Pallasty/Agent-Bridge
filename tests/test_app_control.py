@@ -37,6 +37,24 @@ class AppControlTests(unittest.TestCase):
         self.assertTrue(mod.effect_verified("pause", before, {"playback_status": "Paused"})[0])
         self.assertFalse(mod.effect_verified("pause", before, {"playback_status": "Playing"})[0])
 
+    def test_state_get_returns_protocol_observation(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        def fake_run(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-l"]: return 0, "rhythmbox", ""
+            if argv[-1] == "status": return 0, "Playing", ""
+            if "metadata" in argv: return 0, "/track/1\tArtist\tTitle", ""
+            if argv[-1] == "volume": return 0, "0.50", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("state_get", "rhythmbox", False, 0.2)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(payload["verdict"], "verified")
+        self.assertEqual(payload["verification"]["predicate"], "player_state_observed")
+        self.assertEqual(payload["before"]["title"], "Title")
+
     def test_dry_run_discovers_and_never_dispatches(self):
         mod = load_module()
         calls = []

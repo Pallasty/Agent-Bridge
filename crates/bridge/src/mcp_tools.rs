@@ -7486,7 +7486,7 @@ impl McpTool for AppControlTool {
                     "domain": {"type": "string", "enum": ["media"], "default": "media"},
                     "action": {
                         "type": "string",
-                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop", "volume_get", "volume_up", "volume_down", "volume_set"]
+                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop", "volume_get", "volume_up", "volume_down", "volume_set", "state_get"]
                     },
                     "player": {
                         "type": "string",
@@ -7534,6 +7534,7 @@ impl McpTool for AppControlTool {
             "volume_up",
             "volume_down",
             "volume_set",
+            "state_get",
         ];
         if !ACTIONS.contains(&action.as_str()) {
             return Ok(app_control_error("replan", json!({
