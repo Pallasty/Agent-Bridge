@@ -131,6 +131,45 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(payload["track_summary"]["title"], "Title")
         self.assertEqual(payload["verification"]["predicate"], "active_playlist_observed")
 
+    def test_playlist_current_preserves_inactive_and_empty_metadata_state(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        def fake_run(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-l"]: return 0, "rhythmbox", ""
+            if argv[0] == "gdbus":
+                return 0, "(<(false, (objectpath '/', '', ''))>,)", ""
+            if argv[-1] == "status": return 0, "Stopped", ""
+            if argv[-1] == "position": return 1, "", "no position"
+            if any("mpris:length" in item for item in argv): return 1, "", "no length"
+            if "metadata" in argv: return 1, "", "no metadata"
+            if argv[-1] == "volume": return 0, "0.50", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("playlist_current", "rhythmbox", False, 0.2)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(payload["verdict"], "verified")
+        self.assertFalse(payload["active_playlist"]["active"])
+        self.assertIsNone(payload["active_playlist"]["id"])
+        self.assertFalse(payload["track_summary"]["metadata_available"])
+        self.assertIsNone(payload["track_summary"]["track_id"])
+
+    def test_playlist_current_fails_closed_when_active_playlist_read_fails(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        def fake_run(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-l"]: return 0, "rhythmbox", ""
+            if argv[0] == "gdbus": return 1, "", "org.freedesktop.DBus.Error.Failed"
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("playlist_current", "rhythmbox", False, 0.2)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(payload["status"], "observation_failed")
+        self.assertEqual(payload["error"]["code"], "active_playlist_observation_failed")
+
     def test_dry_run_discovers_and_never_dispatches(self):
         mod = load_module()
         calls = []

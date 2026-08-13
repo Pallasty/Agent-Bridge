@@ -40,6 +40,7 @@ API failure must not unexpectedly become a desktop click.
   - `position_get`: current position and track duration observed in seconds.
   - `playlist_list`: MPRIS playlist object paths and names observed.
   - `playlist_current`: MPRIS `ActivePlaylist` object path/name and independent current-track summary observed.
+    If no playlist is active, it returns `active=false` and an empty track summary as a verified observation; if the MPRIS property read fails, it returns structured `observation_failed` and never infers a playlist from player metadata.
   - `playlist_activate`: exact object path activated and a track observed afterward;
     duplicate names are never resolved implicitly.
 
