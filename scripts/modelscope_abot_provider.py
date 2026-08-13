@@ -126,6 +126,8 @@ class ModelScopeAbotProvider:
         }
 
     def session_contract(self) -> dict[str, Any]:
+        advertised = self.endpoint_names()
+        missing_advertised = sorted(REQUIRED_ENDPOINTS - advertised)
         config = self.app_config()
         dependencies = config.get("dependencies", [])
         by_name = {
@@ -139,15 +141,26 @@ class ModelScopeAbotProvider:
         start_outputs = start.get("outputs", [])
         stop_inputs = stop.get("inputs", [])
         stateful = len(start_inputs) > 1 or len(stop_inputs) > 1
+        blockers: list[str] = []
+        if missing_advertised:
+            blockers.append("required_endpoint_not_advertised")
+        if not isinstance(start, dict) or not start:
+            blockers.append("start_dependency_missing")
+        if not isinstance(stop, dict) or not stop:
+            blockers.append("stop_dependency_missing")
+        if stateful:
+            blockers.append("hidden_state_required")
         return {
             "schema": "agent_bridge.modelscope_abot_session_contract.v0",
             "provider_id": PROVIDER_ID,
             "start_input_count": len(start_inputs),
             "start_output_count": len(start_outputs),
             "stop_input_count": len(stop_inputs),
+            "missing_advertised_endpoints": missing_advertised,
             "hidden_state_required": stateful,
-            "rest_lifecycle_supported": not stateful,
+            "rest_lifecycle_supported": not blockers,
             "browser_or_websocket_adapter_required": stateful,
+            "admission_blockers": blockers,
             "runtime_admitted": False,
         }
 

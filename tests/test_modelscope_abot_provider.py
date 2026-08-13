@@ -40,11 +40,30 @@ class ModelScopeAbotProviderTests(unittest.TestCase):
             ]
         }
         with patch.object(provider, "app_config", return_value=config):
-            result = provider.session_contract()
+            with patch.object(provider, "endpoint_names", return_value=set(MODULE.REQUIRED_ENDPOINTS)):
+                result = provider.session_contract()
         self.assertEqual(result["start_input_count"], 2)
         self.assertEqual(result["stop_input_count"], 3)
         self.assertTrue(result["hidden_state_required"])
         self.assertFalse(result["rest_lifecycle_supported"])
+        self.assertEqual(result["admission_blockers"], ["hidden_state_required"])
+        self.assertFalse(result["runtime_admitted"])
+
+    def test_session_contract_fails_closed_when_endpoint_or_dependency_is_missing(self):
+        provider = MODULE.ModelScopeAbotProvider()
+        with patch.object(provider, "endpoint_names", return_value={"/check_model_ready_ui"}), patch.object(
+            provider, "app_config", return_value={"dependencies": []}
+        ):
+            result = provider.session_contract()
+        self.assertFalse(result["rest_lifecycle_supported"])
+        self.assertEqual(
+            result["admission_blockers"],
+            [
+                "required_endpoint_not_advertised",
+                "start_dependency_missing",
+                "stop_dependency_missing",
+            ],
+        )
         self.assertFalse(result["runtime_admitted"])
 
     def test_browser_receipt_closes_lifecycle_without_rollout_admission(self):
