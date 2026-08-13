@@ -59,6 +59,7 @@ ADAPTER_SOURCE="$ASSET_SOURCE_ROOT/scripts/audio_embody.py"
 ADAPTER_PATH="${AGENT_BRIDGE_AUDIO_EMBODY_PATH:-$HOME/.local/share/ab-tts/audio_embody.py}"
 RUNTIME_ASSET_DIR="${AGENT_BRIDGE_RUNTIME_ASSET_DIR:-$HOME/.local/lib/agent-bridge/scripts}"
 RUNTIME_ASSETS=(
+    app_control.py
     desktop_action.py
     desktop_confirm_store.py
     desktop_grant.py
@@ -75,6 +76,7 @@ MASTER_REF="refs/remotes/$DEPLOY_REMOTE/master"
 # deployed binary is also present in the NEW one (new may add more — superset OK).
 # Add a marker when a lane ships a distinctive capability string.
 SENTINELS=(
+    "app_control.py"        # protocol-first application control router
     "desktop_steer.py"      # steer control plane / cross-process injection (item 3)
     "desktop_action.py"     # computer-use: coordinate action
     "desktop_invoke.py"     # computer-use: AT-SPI semantic invoke
