@@ -14954,11 +14954,14 @@ fn desktop_steer_script_path_resolution() {
 }
 
 #[test]
-fn desktop_invoke_is_the_only_codex_essential_desktop_act_surface() {
-    // Semantic invoke is deliberately exposed as the smallest useful act
-    // surface. The implementation still default-denies host invocation.
-    assert!(codex_essential_tool(Tier::Niche, "desktop_invoke"));
-    // Coordinate injection and phase-2 host execution remain hidden.
+fn desktop_semantic_task_is_the_only_codex_essential_desktop_act_surface() {
+    // The bounded snapshot -> invoke -> verify transaction is the smallest
+    // useful act surface. Low-level action/invoke and host execution stay hidden.
+    assert!(codex_essential_tool(
+        Tier::Niche,
+        "desktop_semantic_task"
+    ));
+    assert!(!codex_essential_tool(Tier::Niche, "desktop_invoke"));
     assert!(!codex_essential_tool(Tier::Niche, "desktop_action"));
     assert!(!codex_essential_tool(Tier::Niche, "desktop_confirm"));
     // The read-only observation/verification legs remain exposed too.
@@ -14974,9 +14977,196 @@ fn desktop_invoke_is_the_only_codex_essential_desktop_act_surface() {
     .into_iter()
     .map(|schema| schema.name)
     .collect();
-    assert!(names.contains("desktop_invoke"));
+    assert!(names.contains("desktop_semantic_task"));
+    assert!(!names.contains("desktop_invoke"));
     assert!(!names.contains("desktop_action"));
     assert!(!names.contains("desktop_confirm"));
+}
+
+#[test]
+fn desktop_semantic_task_schema_exposes_no_host_or_coordinate_bypass() {
+    let policy = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+    let schemas = build_registry_with_policy(Hub::builder().build(), policy).list();
+    let tool = schemas
+        .iter()
+        .find(|schema| schema.name == "desktop_semantic_task")
+        .expect("desktop_semantic_task schema");
+    assert!(tool.description.contains("snapshot -> AT-SPI invoke"));
+    assert_eq!(tool.input_schema["required"], json!(["expect"]));
+    for forbidden in [
+        "confirm_host",
+        "use_grant",
+        "confirm",
+        "token",
+        "x",
+        "y",
+        "text",
+    ] {
+        assert!(
+            tool.input_schema["properties"].get(forbidden).is_none(),
+            "unexpected bypass field {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn desktop_semantic_task_refuses_real_host_task_before_exec() {
+    let tool = DesktopSemanticTaskTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({"name": "Save", "expect": "element_appeared"}),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    assert!(out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["error"]["code"], "host_task_not_exposed");
+    assert_eq!(payload["recover"], "replan");
+    assert_eq!(payload["safety"]["host_mutation_exposed"], false);
+}
+
+#[tokio::test]
+async fn desktop_semantic_task_rejects_invalid_postcondition_inputs_before_action() {
+    let tool = DesktopSemanticTaskTool::new(Hub::builder().build());
+    for (args, expected_code) in [
+        (
+            json!({"name": "Save", "dry_run": true, "expect": "anything"}),
+            "invalid_expectation",
+        ),
+        (
+            json!({"name": "Save", "dry_run": true, "expect": "element_appeared", "nth": -1}),
+            "invalid_nth",
+        ),
+        (
+            json!({"name": "Save", "dry_run": true, "expect": "state_is", "state": "invented"}),
+            "invalid_state",
+        ),
+    ] {
+        let out = tool
+            .execute(args, &ToolContext::default())
+            .await
+            .expect("execute");
+        assert!(out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["error"]["code"], expected_code);
+        assert_eq!(payload["recover"], "replan");
+    }
+}
+
+#[tokio::test]
+async fn desktop_semantic_task_composes_snapshot_invoke_and_verify_in_cage() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-desktop-semantic-task-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let snapshot_script = temp_dir.join("desktop_snapshot.py");
+    let invoke_script = temp_dir.join("desktop_invoke.py");
+    let verify_script = temp_dir.join("desktop_verify.py");
+    tokio::fs::write(
+        &snapshot_script,
+        r#"#!/usr/bin/env python3
+import json
+import sys
+assert "--no-screenshot" in sys.argv
+print(json.dumps({
+    "schema": "desktop_snapshot/v0.5",
+    "window_count": 1,
+    "atspi": {"available": True, "apps": [{
+        "name": "toy_button",
+        "pid": 222,
+        "timed_out": False,
+        "elements": [{"role": "button", "name": "INVOKE_TARGET"}]
+    }]}
+}))
+"#,
+    )
+    .await
+    .expect("write snapshot script");
+    tokio::fs::write(
+        &invoke_script,
+        r#"#!/usr/bin/env python3
+import json
+import sys
+assert "--cage-pid" in sys.argv and "12345" in sys.argv
+assert "--name" in sys.argv and "INVOKE_TARGET" in sys.argv
+assert "--confirm" not in sys.argv and "--request-host-confirm" not in sys.argv
+print(json.dumps({
+    "schema": "desktop_invoke/v0",
+    "allowed": True,
+    "rc": 0,
+    "found": {"app": "toy_button", "app_pid": 222, "isolated": True},
+    "before": {"target_present": True, "focus": "toy|before"},
+    "detail": "doAction('click') -> True"
+}))
+"#,
+    )
+    .await
+    .expect("write invoke script");
+    tokio::fs::write(
+        &verify_script,
+        r#"#!/usr/bin/env python3
+import json
+import sys
+assert "--cage-pid" in sys.argv and "12345" in sys.argv
+assert "--before-present" in sys.argv and "true" in sys.argv
+assert "--expect" in sys.argv and "element_appeared" in sys.argv
+print(json.dumps({
+    "schema": "desktop_verify/v0",
+    "verdict": "verified",
+    "recover": "proceed",
+    "change": None,
+    "held_after_ms": 11,
+    "polls": 1,
+    "observed": {"count": 1},
+    "error": None
+}))
+"#,
+    )
+    .await
+    .expect("write verify script");
+
+    let tool = DesktopSemanticTaskTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "app": "toy_button",
+                "role": "button",
+                "name": "INVOKE_TARGET",
+                "cage_pid": 12345,
+                "expect": "element_appeared",
+                "snapshot_script_path": snapshot_script.to_string_lossy(),
+                "invoke_script_path": invoke_script.to_string_lossy(),
+                "verify_script_path": verify_script.to_string_lossy(),
+                "snapshot_timeout_ms": 5000,
+                "invoke_timeout_ms": 5000,
+                "verify_timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    assert!(!out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["schema"], DESKTOP_SEMANTIC_TASK_SCHEMA);
+    assert_eq!(payload["status"], "verified");
+    assert_eq!(payload["verdict"], "verified");
+    assert_eq!(payload["recover"], "proceed");
+    assert_eq!(payload["safety"]["mode"], "isolated");
+    assert_eq!(payload["safety"]["host_mutation_exposed"], false);
+    assert_eq!(
+        payload["preflight"]["target_matches_in_bounded_snapshot"],
+        1
+    );
+    assert_eq!(payload["action"]["found"]["app_pid"], 222);
+    assert_eq!(payload["verification"]["observed_count"], 1);
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 
 #[test]

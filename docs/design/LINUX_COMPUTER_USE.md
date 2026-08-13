@@ -1,6 +1,6 @@
 # Linux Computer Use — canonical lane reference
 
-**Lane:** forum thread 79 · **Status:** four-tool family complete, isolated-only · **Last updated:** 2026-05-30
+**Lane:** forum thread 79 · **Status:** bounded semantic task transaction complete, host-default-denied · **Last updated:** 2026-08-12
 
 The desktop sibling of the `browser_*` and `mobile_*` MCP tool families: let an agent
 *see* and *act on* a live Wayland/sway desktop. The guiding principle throughout is
@@ -22,14 +22,17 @@ for history read the project memory `project_linux_computer_use_v0_v1_shipped_20
 | `desktop_verify` | **read** | AT-SPI + sway tree, polled to timeout → verdict + `recover` | semantic / window | `scripts/desktop_verify.py` | `desktop_verify/v0` | read-only; `--cage-pid`/`--swaysock` only *scope* presence |
 | `desktop_action` | **write** | wtype / wlrctl / ydotool / sway-IPC cursor | **coordinate** | `scripts/desktop_action.py` | `desktop_action/v1` | **by display** (nested `WAYLAND_DISPLAY` + sway-IPC abs cursor) |
 | `desktop_invoke` | **write** | AT-SPI `Action.do_action` | **semantic** (zero coords) | `scripts/desktop_invoke.py` | `desktop_invoke/v0` | **by process** (target app PID ∈ `--cage-pid` subtree) |
+| `desktop_semantic_task` | **transaction** | bounded snapshot → semantic invoke → postcondition verify | **semantic** (zero coords) | composes the three backends above | `agent_bridge.desktop_semantic_task.v0` | real invoke requires `cage_pid`; host target is dry-run only |
 
 The three read tools are the "look + confirm" set (structure / pixels / *did it
 work?*); the two write tools are the "act" pair (meaning vs coordinates).
 `desktop_invoke` is the input-side dual of the bus-first read path: where
 `desktop_snapshot` *enumerates* AT-SPI accessibles, `desktop_invoke` *activates* one
 by app/role/name with no screenshot and no OCR, and `desktop_verify` *re-reads* one to
-confirm the effect landed. All three read tools are in `codex-essential`; the two
-mutating tools are not.
+confirm the effect landed. The compact `codex-essential` act surface is now only
+`desktop_semantic_task`: it requires an explicit postcondition and returns one
+`proceed|retry|replan|escalate` decision. The low-level mutating tools remain available
+only under the full tool profile.
 
 ### Grounding ladder (verified on aio2 sway 1.11, kernel 7.0 / Ubuntu 26.04)
 
@@ -89,13 +92,12 @@ Default (no flags) on the host = **DENIED**. Every call, allowed or denied, is
 appended to a JSONL audit trail (`~/.cache/agent-bridge/desktop_{action,invoke}_audit.jsonl`),
 ready to feed the event spine (thread 56).
 
-**The MCP wrapper never passes (b).** It checks only for the isolation marker
+**The compact task wrapper never passes (b).** It checks only for the isolation marker
 (`cage_pid` for invoke, an isolated display for action) and refuses host mutation
-with a structured error (`host_invoke_not_exposed` / equivalent) before ever
-shelling out. So through MCP, host mutation is **structurally unreachable** — not
-merely discouraged. The host path exists in the backend (for a deliberate,
-human-driven future) but has no MCP surface. Neither tool is in
-`CODEX_ESSENTIAL_DIRECT_EXTRAS`.
+with a structured `host_task_not_exposed` error before ever shelling out. It exposes
+neither `confirm_host` nor `use_grant`, so compact-profile host mutation is
+**structurally unreachable** — not merely discouraged. The explicit host-confirm
+surfaces still exist in the full profile for deliberate human-approved operation.
 
 Crossing this boundary — exposing host mutation behind a human-in-the-loop confirm —
 is the **deferred frontier** (§6): a product-level decision, not a code tweak.
@@ -146,7 +148,7 @@ Everything was validated in a **nested sway** acting as a disposable cage:
 |---|---|---|
 | `run_accept.sh` | `desktop_action` isolated absolute click | 0px landing error in nested sway |
 | `run_grounding_accept.sh` | vision grounding e2e (fixture-tsv → grounding → action click) | click lands on ground-truth bbox center |
-| `run_invoke_accept.sh` | `desktop_invoke` semantic activate (GTK3 toy) | toy records activation; gate A/B/C 8/8 |
+| `run_invoke_accept.sh` | low-level `desktop_invoke` plus one-call `desktop_semantic_task` (GTK3 toy) | toy records both activations; host gate remains denied; transaction returns verified/proceed |
 | `run_realapp_accept.sh` | **four-tool family vs a REAL GTK4 app (zenity)** | the app's **native exit code** — unfakeable |
 
 `run_realapp_accept.sh` is the lane's closing proof. It drives **zenity** (a real
@@ -187,6 +189,9 @@ is an agent-proof sandbox. Their job is to keep host mutation deliberate and aud
 ## 8. The act loop — snapshot → act → verify → recover
 
 The primitives compose into a closed loop; `desktop_verify` is the leg that closes it.
+For compact Codex sessions, `desktop_semantic_task` executes this loop as one bounded
+transaction, retains only compact preflight/action/verification evidence, and refuses
+to act unless the call is a dry-run or supplies a positive process-cage PID.
 After an act it re-reads the bus and returns a `recover` hint that maps 1:1 to the next
 move, so the caller reads ONE field instead of re-deriving intent from a fresh full
 snapshot.

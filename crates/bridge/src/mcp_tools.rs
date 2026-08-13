@@ -6808,6 +6808,571 @@ fn desktop_invoke_error(error: Value) -> ToolResult {
     result
 }
 
+// ===========================================================================
+//  Linux Computer Use — bounded semantic task transaction
+// ===========================================================================
+// One practical Codex-facing call for the full snapshot -> invoke -> verify loop.
+// The low-level tools remain independently testable and available in profile=all,
+// but this transaction is the compact act surface. It deliberately supports no
+// host-confirm or capability-grant arguments: inline mutation is possible only in
+// a caller-supplied process cage. A host target is reachable only as dry-run.
+
+const DESKTOP_SEMANTIC_TASK_SCHEMA: &str = "agent_bridge.desktop_semantic_task.v0";
+const DESKTOP_SEMANTIC_TASK_EXPECTS: &[&str] = &[
+    "element_gone",
+    "element_appeared",
+    "state_is",
+    "state_not",
+    "window_gone",
+    "window_appeared",
+    "focus_is",
+];
+const DESKTOP_SEMANTIC_TASK_STATES: &[&str] = &[
+    "checked",
+    "expanded",
+    "selected",
+    "showing",
+    "visible",
+    "focused",
+    "sensitive",
+    "enabled",
+    "pressed",
+    "active",
+];
+
+pub struct DesktopSemanticTaskTool {
+    hub: Hub,
+}
+
+impl DesktopSemanticTaskTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for DesktopSemanticTaskTool {
+    fn name(&self) -> &'static str {
+        "desktop_semantic_task"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Bounded Linux desktop semantic task transaction. Runs one compact, \
+                 auditable snapshot -> AT-SPI invoke -> postcondition verify loop and returns \
+                 a single recover decision (proceed|retry|replan|escalate). The snapshot and \
+                 verify legs are read-only. The invoke leg is allowed only with dry_run=true \
+                 or a positive cage_pid whose process subtree owns the target; host mutation, \
+                 coordinate input, host-confirm tokens, and capability grants are not exposed. \
+                 `expect` is required so an action cannot report success without checking its \
+                 intended effect."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string", "description": "AT-SPI application name substring." },
+                    "role": { "type": "string", "description": "AT-SPI role substring, e.g. button." },
+                    "name": { "type": "string", "description": "Accessible name/label substring." },
+                    "nth": { "type": "integer", "minimum": 0, "default": 0 },
+                    "action": { "type": "string", "description": "AT-SPI action; default auto-picks click/press/activate/first." },
+                    "dry_run": { "type": "boolean", "default": false, "description": "Locate, audit, and verify without invoking. Allowed against any target." },
+                    "cage_pid": { "type": "integer", "minimum": 1, "description": "Nested compositor PID. Required for a real invoke; the target app PID must be its descendant." },
+                    "wait": { "type": "number", "minimum": 0.0, "maximum": 30.0, "default": 4.0 },
+                    "expect": {
+                        "type": "string",
+                        "enum": ["element_gone", "element_appeared", "state_is", "state_not", "window_gone", "window_appeared", "focus_is"],
+                        "description": "Required postcondition. Element/state checks reuse app/role/name; window/focus checks use win_* selectors."
+                    },
+                    "state": {
+                        "type": "string",
+                        "enum": ["checked", "expanded", "selected", "showing", "visible", "focused", "sensitive", "enabled", "pressed", "active"],
+                        "description": "Required by state_is/state_not."
+                    },
+                    "win_app_id": { "type": "string" },
+                    "win_pid": { "type": "integer" },
+                    "win_title": { "type": "string" },
+                    "swaysock": { "type": "string", "description": "Nested sway IPC socket for window/focus verification." },
+                    "poll_timeout_secs": { "type": "number", "minimum": 0.0, "maximum": 30.0, "default": 4.0 },
+                    "poll_interval_secs": { "type": "number", "minimum": 0.05, "maximum": 5.0, "default": 0.3 },
+                    "settle_secs": { "type": "number", "minimum": 0.0, "maximum": 5.0, "default": 0.0 },
+                    "cwd": { "type": "string", "description": "Repo root used to resolve all three backend scripts." },
+                    "snapshot_script_path": { "type": "string", "description": "Explicit desktop_snapshot.py path (tests/alternate checkouts)." },
+                    "invoke_script_path": { "type": "string", "description": "Explicit desktop_invoke.py path (tests/alternate checkouts)." },
+                    "verify_script_path": { "type": "string", "description": "Explicit desktop_verify.py path (tests/alternate checkouts)." },
+                    "snapshot_timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 60000, "default": 12000 },
+                    "invoke_timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000 },
+                    "verify_timeout_ms": { "type": "integer", "minimum": 2000, "maximum": 60000, "default": 12000 }
+                },
+                "required": ["expect"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let selector = desktop_semantic_task_selector(&args);
+        if ["app", "role", "name"].iter().all(|key| {
+            args.get(*key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
+        }) {
+            return Ok(desktop_semantic_task_error(
+                "replan",
+                json!({
+                    "code": "missing_selector",
+                    "message": "at least one of `app`, `role`, or `name` is required"
+                }),
+            ));
+        }
+
+        let expect = match required_str_arg(&args, "expect") {
+            Ok(value) => value,
+            Err(message) => {
+                return Ok(desktop_semantic_task_error(
+                    "replan",
+                    json!({"code": "missing_expectation", "message": message}),
+                ))
+            }
+        };
+        if !DESKTOP_SEMANTIC_TASK_EXPECTS.contains(&expect.as_str()) {
+            return Ok(desktop_semantic_task_error(
+                "replan",
+                json!({
+                    "code": "invalid_expectation",
+                    "message": format!("unsupported postcondition `{expect}`")
+                }),
+            ));
+        }
+        if let Some(nth) = args.get("nth") {
+            if nth.as_i64().map(|value| value < 0).unwrap_or(true) {
+                return Ok(desktop_semantic_task_error(
+                    "replan",
+                    json!({
+                        "code": "invalid_nth",
+                        "message": "`nth` must be a non-negative integer"
+                    }),
+                ));
+            }
+        }
+        if matches!(expect.as_str(), "state_is" | "state_not") {
+            let state = args
+                .get("state")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let Some(state) = state else {
+                return Ok(desktop_semantic_task_error(
+                    "replan",
+                    json!({
+                        "code": "missing_state",
+                        "message": format!("`state` is required for expect={expect}")
+                    }),
+                ));
+            };
+            if !DESKTOP_SEMANTIC_TASK_STATES.contains(&state) {
+                return Ok(desktop_semantic_task_error(
+                    "replan",
+                    json!({
+                        "code": "invalid_state",
+                        "message": format!("unsupported AT-SPI state `{state}`")
+                    }),
+                ));
+            }
+        }
+        let window_expect = matches!(
+            expect.as_str(),
+            "window_gone" | "window_appeared" | "focus_is"
+        );
+        let has_window_string = ["win_app_id", "win_title"].iter().any(|key| {
+            args.get(*key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty())
+        });
+        let has_window_pid = args
+            .get("win_pid")
+            .and_then(Value::as_i64)
+            .is_some_and(|pid| pid > 0);
+        if window_expect && !has_window_string && !has_window_pid {
+            return Ok(desktop_semantic_task_error(
+                "replan",
+                json!({
+                    "code": "missing_window_selector",
+                    "message": format!("one of win_app_id/win_pid/win_title is required for expect={expect}")
+                }),
+            ));
+        }
+
+        let dry_run = args
+            .get("dry_run")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let cage_pid = args
+            .get("cage_pid")
+            .and_then(Value::as_i64)
+            .filter(|pid| *pid > 0);
+        if !dry_run && cage_pid.is_none() {
+            return Ok(desktop_semantic_task_error(
+                "replan",
+                json!({
+                    "code": "host_task_not_exposed",
+                    "message": "a real semantic task requires a positive cage_pid; host mutation is not exposed by this transaction",
+                    "hint": "set dry_run:true or provide the nested compositor cage_pid"
+                }),
+            ));
+        }
+
+        // Preflight is deliberately bounded and read-only. The full raw snapshot can be
+        // large, so the transaction retains only coverage and selector-match evidence.
+        let mut snapshot_args = json!({
+            "include_screenshot": false,
+            "include_atspi": true,
+            "max_elements": 80,
+            "atspi_budget": 0.5,
+            "timeout_ms": args.get("snapshot_timeout_ms").cloned().unwrap_or_else(|| json!(12000))
+        });
+        desktop_semantic_task_copy(&args, &mut snapshot_args, "cwd", "cwd");
+        desktop_semantic_task_copy(
+            &args,
+            &mut snapshot_args,
+            "snapshot_script_path",
+            "script_path",
+        );
+        let snapshot_result = DesktopSnapshotTool::new(self.hub.clone())
+            .execute(snapshot_args, ctx)
+            .await?;
+        let snapshot_payload = desktop_semantic_task_result_payload(&snapshot_result);
+        let preflight = desktop_semantic_task_preflight_summary(
+            snapshot_payload.as_ref(),
+            snapshot_result.is_error,
+            &args,
+        );
+
+        let mut invoke_args = json!({
+            "dry_run": dry_run,
+            "timeout_ms": args.get("invoke_timeout_ms").cloned().unwrap_or_else(|| json!(10000))
+        });
+        for key in ["app", "role", "name", "nth", "action", "wait", "cwd"] {
+            desktop_semantic_task_copy(&args, &mut invoke_args, key, key);
+        }
+        if let Some(pid) = cage_pid {
+            invoke_args["cage_pid"] = json!(pid);
+        }
+        desktop_semantic_task_copy(
+            &args,
+            &mut invoke_args,
+            "invoke_script_path",
+            "script_path",
+        );
+        let invoke_result = DesktopInvokeTool::new(self.hub.clone())
+            .execute(invoke_args, ctx)
+            .await?;
+        let invoke_payload = desktop_semantic_task_result_payload(&invoke_result);
+        if invoke_result.is_error || invoke_payload.is_none() {
+            let recover = desktop_semantic_task_invoke_recover(invoke_payload.as_ref());
+            let mut result = ToolResult::json_text(&json!({
+                "schema": DESKTOP_SEMANTIC_TASK_SCHEMA,
+                "status": "action_failed",
+                "verdict": "error",
+                "recover": recover,
+                "safety": desktop_semantic_task_safety(dry_run, cage_pid),
+                "selector": selector,
+                "expect": expect,
+                "preflight": preflight,
+                "action": desktop_semantic_task_action_summary(invoke_payload.as_ref()),
+                "verification": Value::Null
+            }));
+            result.is_error = true;
+            return Ok(result);
+        }
+
+        let invoke_payload = invoke_payload.expect("checked above");
+        let mut verify_args = json!({
+            "expect": expect,
+            "timeout_ms": args.get("verify_timeout_ms").cloned().unwrap_or_else(|| json!(12000))
+        });
+        for key in [
+            "app",
+            "role",
+            "name",
+            "nth",
+            "state",
+            "win_app_id",
+            "win_pid",
+            "win_title",
+            "swaysock",
+            "poll_timeout_secs",
+            "poll_interval_secs",
+            "settle_secs",
+            "cwd",
+        ] {
+            desktop_semantic_task_copy(&args, &mut verify_args, key, key);
+        }
+        if let Some(pid) = cage_pid {
+            verify_args["cage_pid"] = json!(pid);
+        }
+        desktop_semantic_task_copy(
+            &args,
+            &mut verify_args,
+            "verify_script_path",
+            "script_path",
+        );
+        if let Some(present) = invoke_payload
+            .get("before")
+            .and_then(|value| value.get("target_present"))
+            .and_then(Value::as_bool)
+        {
+            verify_args["before_present"] = json!(if present { "true" } else { "false" });
+        }
+        if let Some(focus) = invoke_payload
+            .get("before")
+            .and_then(|value| value.get("focus"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            verify_args["before_focus"] = json!(focus);
+        }
+
+        let verify_result = DesktopVerifyTool::new(self.hub.clone())
+            .execute(verify_args, ctx)
+            .await?;
+        let verify_payload = desktop_semantic_task_result_payload(&verify_result);
+        let verdict = verify_payload
+            .as_ref()
+            .and_then(|payload| payload.get("verdict"))
+            .and_then(Value::as_str)
+            .unwrap_or("error");
+        let recover = verify_payload
+            .as_ref()
+            .and_then(|payload| payload.get("recover"))
+            .and_then(Value::as_str)
+            .filter(|value| matches!(*value, "proceed" | "retry" | "replan" | "escalate"))
+            .unwrap_or(if verdict == "verified" { "proceed" } else { "escalate" });
+        let status = match verdict {
+            "verified" => "verified",
+            "unmet" => "unmet",
+            _ => "error",
+        };
+        let mut result = ToolResult::json_text(&json!({
+            "schema": DESKTOP_SEMANTIC_TASK_SCHEMA,
+            "status": status,
+            "verdict": verdict,
+            "recover": recover,
+            "safety": desktop_semantic_task_safety(dry_run, cage_pid),
+            "selector": selector,
+            "expect": expect,
+            "preflight": preflight,
+            "action": desktop_semantic_task_action_summary(Some(&invoke_payload)),
+            "verification": desktop_semantic_task_verification_summary(verify_payload.as_ref())
+        }));
+        result.is_error = verify_result.is_error || verdict == "error";
+        Ok(result)
+    }
+}
+
+fn desktop_semantic_task_selector(args: &Value) -> Value {
+    json!({
+        "app": args.get("app").cloned().unwrap_or(Value::Null),
+        "role": args.get("role").cloned().unwrap_or(Value::Null),
+        "name": args.get("name").cloned().unwrap_or(Value::Null),
+        "nth": args.get("nth").cloned().unwrap_or_else(|| json!(0))
+    })
+}
+
+fn desktop_semantic_task_copy(source: &Value, target: &mut Value, from: &str, to: &str) {
+    if let Some(value) = source.get(from).filter(|value| !value.is_null()) {
+        target[to] = value.clone();
+    }
+}
+
+fn desktop_semantic_task_result_payload(result: &ToolResult) -> Option<Value> {
+    result.structured_content.clone().or_else(|| {
+        result.content.iter().find_map(|block| match block {
+            ContentBlock::Text { text } => serde_json::from_str(text).ok(),
+            _ => None,
+        })
+    })
+}
+
+fn desktop_semantic_task_safety(dry_run: bool, cage_pid: Option<i64>) -> Value {
+    json!({
+        "mode": if dry_run { "dry-run" } else { "isolated" },
+        "cage_pid": cage_pid,
+        "host_mutation_exposed": false,
+        "coordinate_input_exposed": false,
+        "postcondition_required": true
+    })
+}
+
+fn desktop_semantic_task_preflight_summary(
+    payload: Option<&Value>,
+    is_error: bool,
+    args: &Value,
+) -> Value {
+    let Some(payload) = payload else {
+        return json!({
+            "status": "degraded",
+            "read_only": true,
+            "reason": "snapshot_payload_missing"
+        });
+    };
+    if is_error {
+        return json!({
+            "status": "degraded",
+            "read_only": true,
+            "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
+            "error": payload.get("error").cloned().unwrap_or(Value::Null)
+        });
+    }
+
+    let app_match = args
+        .get("app")
+        .and_then(Value::as_str)
+        .map(str::to_lowercase);
+    let role_match = args
+        .get("role")
+        .and_then(Value::as_str)
+        .map(str::to_lowercase);
+    let name_match = args
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_lowercase);
+    let apps = payload
+        .get("atspi")
+        .and_then(|value| value.get("apps"))
+        .and_then(Value::as_array);
+    let mut target_matches = 0_u64;
+    let mut timed_out_apps = 0_u64;
+    if let Some(apps) = apps {
+        for app in apps {
+            if app.get("timed_out").and_then(Value::as_bool).unwrap_or(false) {
+                timed_out_apps += 1;
+            }
+            let app_name = app
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_lowercase();
+            if app_match
+                .as_ref()
+                .map(|want| !app_name.contains(want))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if let Some(elements) = app.get("elements").and_then(Value::as_array) {
+                for element in elements {
+                    let role = element
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let name = element
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let role_ok = role_match
+                        .as_ref()
+                        .map(|want| role.contains(want))
+                        .unwrap_or(true);
+                    let name_ok = name_match
+                        .as_ref()
+                        .map(|want| name.contains(want))
+                        .unwrap_or(true);
+                    if role_ok && name_ok {
+                        target_matches += 1;
+                    }
+                }
+            }
+        }
+    }
+    json!({
+        "status": "observed",
+        "read_only": true,
+        "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
+        "window_count": payload.get("window_count").cloned().unwrap_or(Value::Null),
+        "atspi_available": payload.get("atspi").and_then(|value| value.get("available")).cloned().unwrap_or(Value::Null),
+        "atspi_app_count": apps.map(|apps| apps.len()).unwrap_or(0),
+        "target_matches_in_bounded_snapshot": target_matches,
+        "timed_out_apps": timed_out_apps,
+        "coverage_complete": timed_out_apps == 0
+    })
+}
+
+fn desktop_semantic_task_action_summary(payload: Option<&Value>) -> Value {
+    let Some(payload) = payload else {
+        return json!({"status": "missing"});
+    };
+    json!({
+        "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
+        "allowed": payload.get("allowed").cloned().unwrap_or(Value::Null),
+        "rc": payload.get("rc").cloned().unwrap_or(Value::Null),
+        "found": payload.get("found").cloned().unwrap_or(Value::Null),
+        "before": payload.get("before").cloned().unwrap_or(Value::Null),
+        "detail": payload.get("detail").cloned().unwrap_or(Value::Null),
+        "error": payload.get("error").cloned().unwrap_or(Value::Null),
+        "wrapper": payload.get("mcp_wrapper").cloned().unwrap_or(Value::Null)
+    })
+}
+
+fn desktop_semantic_task_verification_summary(payload: Option<&Value>) -> Value {
+    let Some(payload) = payload else {
+        return json!({"verdict": "error", "recover": "escalate", "error": "verify_payload_missing"});
+    };
+    let observed = payload.get("observed");
+    json!({
+        "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
+        "verdict": payload.get("verdict").cloned().unwrap_or_else(|| json!("error")),
+        "recover": payload.get("recover").cloned().unwrap_or_else(|| json!("escalate")),
+        "change": payload.get("change").cloned().unwrap_or(Value::Null),
+        "held_after_ms": payload.get("held_after_ms").cloned().unwrap_or(Value::Null),
+        "polls": payload.get("polls").cloned().unwrap_or(Value::Null),
+        "observed_count": observed.and_then(|value| value.get("count")).cloned().unwrap_or(Value::Null),
+        "focused": observed.and_then(|value| value.get("focused")).cloned().unwrap_or(Value::Null),
+        "error": payload.get("error").cloned().unwrap_or(Value::Null),
+        "wrapper": payload.get("mcp_wrapper").cloned().unwrap_or(Value::Null)
+    })
+}
+
+fn desktop_semantic_task_invoke_recover(payload: Option<&Value>) -> &'static str {
+    let code = payload
+        .and_then(|value| value.get("error"))
+        .and_then(|value| value.get("code"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let message = payload
+        .and_then(|value| value.get("error"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_lowercase();
+    match code {
+        "missing_selector" | "host_invoke_not_exposed" | "script_missing" => "replan",
+        "timeout" | "spawn_failed" => "retry",
+        _ if message.contains("no matching accessible") => "retry",
+        _ => "escalate",
+    }
+}
+
+fn desktop_semantic_task_error(recover: &str, error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": DESKTOP_SEMANTIC_TASK_SCHEMA,
+        "status": "error",
+        "verdict": "error",
+        "recover": recover,
+        "error": error,
+        "safety": {
+            "host_mutation_exposed": false,
+            "coordinate_input_exposed": false,
+            "postcondition_required": true
+        }
+    }));
+    result.is_error = true;
+    result
+}
+
 /// Read a pending host-confirm record's `kind` ("invoke" | "action" | "steer") WITHOUT
 /// consuming it, so desktop_confirm can dispatch to the right backend script. Token must be
 /// hex (path safety); returns None if malformed, missing, or unreadable (caller defaults to
@@ -43415,12 +43980,12 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // the act loop). Never clicks/types; completes the read-only triad with
     // desktop_snapshot + vision_grounding_ocr. Mutating act tools stay out.
     "desktop_verify",
-    // Linux Computer Use: semantic AT-SPI action surface. This is the one
-    // deliberately exposed act tool: dry-run and process-isolated invokes are
-    // available, while host invocation is refused by default. The coordinate
-    // desktop_action and host phase-2 desktop_confirm executors stay out of the
-    // compact profile, so exposure does not grant an autonomous host act loop.
-    "desktop_invoke",
+    // Linux Computer Use: the compact act surface is one bounded transaction,
+    // not the low-level invoke primitive. It composes a read-only snapshot,
+    // process-isolated/dry-run semantic invoke, and mandatory postcondition
+    // verification into one recover decision. Coordinate action, direct invoke,
+    // and host phase-2 execution remain profile=all only.
+    "desktop_semantic_task",
     // macOS adapter feasibility: read-only AX trust/frontmost-window probe.
     // No permission prompt and no host mutation; this is the first local
     // cross-platform SSB runtime probe.
@@ -46916,6 +47481,14 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(DesktopInvokeTool::new(hub.clone())),
+    );
+    // Practical Codex-facing task loop. This is the sole compact act surface;
+    // it cannot request/consume host confirmation and cannot use grants.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(DesktopSemanticTaskTool::new(hub.clone())),
     );
     // Linux Computer Use host-confirm phase 2: execute a human-approved host action by
     // its single-use token. NOT in codex-essential. The only MCP path to host mutation,

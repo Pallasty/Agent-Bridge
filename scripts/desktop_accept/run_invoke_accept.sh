@@ -7,12 +7,14 @@
 #   A. isolated invoke (--cage-pid = nested sway) -> ALLOWED, button activates.
 #   B. --dry-run                                  -> ALLOWED, NO activation.
 #   C. no --cage-pid, no --confirm (host posture) -> DENIED,  NO activation.
+#   D. desktop_semantic_task MCP transaction         -> snapshot + invoke + verify.
 #
 # AT-SPI is a session-global D-Bus registry, so desktop_invoke runs in the HOST
 # env (display-independent) and isolates by process: the toy is exec'd by the
 # nested sway, so its app PID is a descendant of $SWAY_PID.
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$DIR/../.." && pwd)"
 INV="$DIR/../desktop_invoke.py"
 SNAP="$DIR/../desktop_snapshot.py"
 VERIFY="$DIR/../desktop_verify.py"
@@ -89,10 +91,104 @@ C=$(python3 "$INV" "${SEL[@]}" 2>&1); echo "   $C"
 C_allowed=$(echo "$C" | field allowed); C_acts=$(acts)
 echo "   -> allowed=$C_allowed activations=$C_acts (must be unchanged = $A_acts)"
 
-echo "== VERDICT =="
-python3 - "$S_present" "$A_allowed" "$A_rc" "$A_iso" "$A_acts" "$V_verdict" "$V_recover" "$B_allowed" "$B_acts" "$C_allowed" "$C_acts" <<'PY'
+echo "== D. one-call desktop_semantic_task transaction =="
+AB_BIN="${AB_MCP_BIN:-$ROOT/target/debug/agent-bridge}"
+if [ ! -x "$AB_BIN" ]; then
+  echo "FAIL: MCP binary not executable at $AB_BIN (build it or set AB_MCP_BIN)"
+  exit 1
+fi
+MCP_IN="$WORK/semantic-task.in.jsonl"
+MCP_OUT="$WORK/semantic-task.out.jsonl"
+MCP_ERR="$WORK/semantic-task.stderr"
+python3 - "$MCP_IN" "$SWAY_PID" "$ROOT" "$SWAYSOCK" <<'PY'
+import json
 import sys
-S_present,A_allowed,A_rc,A_iso,A_acts,V_verdict,V_recover,B_allowed,B_acts,C_allowed,C_acts = sys.argv[1:12]
+
+path, cage_pid, cwd, swaysock = sys.argv[1:5]
+messages = [
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "desktop-semantic-task-accept", "version": "1"},
+        },
+    },
+    {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+    {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "desktop_semantic_task",
+            "arguments": {
+                "app": "toy_button",
+                "role": "button",
+                "name": "INVOKE_TARGET",
+                "cage_pid": int(cage_pid),
+                "expect": "element_appeared",
+                "swaysock": swaysock,
+                "cwd": cwd,
+                "snapshot_timeout_ms": 15000,
+                "invoke_timeout_ms": 10000,
+                "verify_timeout_ms": 10000,
+                "poll_timeout_secs": 2,
+            },
+        },
+    },
+]
+with open(path, "w", encoding="utf-8") as handle:
+    for message in messages:
+        handle.write(json.dumps(message) + "\n")
+PY
+timeout 60 env \
+  AGENT_BRIDGE_TOOLSET=codex-essential \
+  AGENT_BRIDGE_DB="$WORK/agent-bridge.sqlite" \
+  "$AB_BIN" mcp <"$MCP_IN" >"$MCP_OUT" 2>"$MCP_ERR" || true
+D=$(python3 - "$MCP_OUT" <<'PY'
+import json
+import sys
+
+for line in open(sys.argv[1], encoding="utf-8"):
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if message.get("id") != 2:
+        continue
+    if message.get("error"):
+        print(json.dumps({"status": "mcp_error", "error": message["error"]}))
+        break
+    for block in (message.get("result") or {}).get("content") or []:
+        if block.get("type") == "text":
+            try:
+                print(json.dumps(json.loads(block.get("text") or "{}")))
+            except json.JSONDecodeError:
+                print(json.dumps({"status": "invalid_text_json"}))
+            raise SystemExit
+    print(json.dumps({"status": "missing_text_result"}))
+    break
+else:
+    print(json.dumps({"status": "missing_call_response"}))
+PY
+)
+echo "   $D"
+D_status=$(echo "$D" | field status)
+D_verdict=$(echo "$D" | field verdict)
+D_recover=$(echo "$D" | field recover)
+D_mode=$(echo "$D" | python3 -c "import json,sys;print((json.load(sys.stdin).get('safety') or {}).get('mode'))" 2>/dev/null)
+D_acts=$(acts)
+echo "   -> status=$D_status verdict=$D_verdict recover=$D_recover mode=$D_mode activations=$D_acts"
+if [ "$D_status" != "verified" ]; then
+  echo "   MCP stderr: $(tail -c 2000 "$MCP_ERR" 2>/dev/null)"
+fi
+
+echo "== VERDICT =="
+python3 - "$S_present" "$A_allowed" "$A_rc" "$A_iso" "$A_acts" "$V_verdict" "$V_recover" "$B_allowed" "$B_acts" "$C_allowed" "$C_acts" "$D_status" "$D_verdict" "$D_recover" "$D_mode" "$D_acts" <<'PY'
+import sys
+S_present,A_allowed,A_rc,A_iso,A_acts,V_verdict,V_recover,B_allowed,B_acts,C_allowed,C_acts,D_status,D_verdict,D_recover,D_mode,D_acts = sys.argv[1:17]
 ok = True
 checks = [
   ("0 snapshot sees target", S_present=="True"),
@@ -106,10 +202,15 @@ checks = [
   ("B no extra activation", B_acts=="1"),
   ("C host invoke DENIED", C_allowed=="False"),
   ("C no activation", C_acts=="1"),
+  ("D transaction status verified", D_status=="verified"),
+  ("D transaction verdict verified", D_verdict=="verified"),
+  ("D transaction recover proceed", D_recover=="proceed"),
+  ("D transaction mode isolated", D_mode=="isolated"),
+  ("D transaction activated once", D_acts=="2"),
 ]
 for label, passed in checks:
     print(f"   [{'PASS' if passed else 'FAIL'}] {label}")
     ok = ok and passed
-print("== RESULT:", "ALL PASS — L2 AT-SPI invoke isolated + gated (zero coordinates)" if ok else "FAIL")
+print("== RESULT:", "ALL PASS — low-level invoke + one-call semantic task isolated and verified" if ok else "FAIL")
 raise SystemExit(0 if ok else 1)
 PY
