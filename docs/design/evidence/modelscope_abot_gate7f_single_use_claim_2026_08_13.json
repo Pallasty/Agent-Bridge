@@ -1,0 +1,36 @@
+{
+  "schema": "agent_bridge.modelscope_abot_gate7f_contract_evidence.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-13",
+  "evidence_class": "synthetic_contract_test",
+  "tests": {
+    "atomic_claim_and_reservation": true,
+    "transaction_interruption_rolls_back_both_rows": true,
+    "concurrent_exactly_one_winner": true,
+    "busy_rejects_without_consuming_second_nonce": true,
+    "release_does_not_restore_nonce": true,
+    "expired_lease_recovery_does_not_restore_nonce": true,
+    "tamper_and_wrong_key_rejected": true,
+    "expired_candidate_rejected": true,
+    "synthetic_candidate_rejected": true
+  },
+  "durability": {
+    "store": "sqlite",
+    "journal_mode": "WAL",
+    "synchronous": "FULL",
+    "transaction": "BEGIN IMMEDIATE",
+    "store_mode": "0600",
+    "nonce_recovery_allowed": false,
+    "expired_session_lease_recovery_allowed": true
+  },
+  "authority_key_loaded": false,
+  "real_authority_consumed": false,
+  "real_nonce_consumed": false,
+  "execution_capability_issued": false,
+  "studio_start_called": false,
+  "execution_authorized": false,
+  "runtime_admitted": false,
+  "mcp_registered": false,
+  "deployment_authorized": false,
+  "next_gate": "gate7g_bounded_execution_capability_contract"
+}
