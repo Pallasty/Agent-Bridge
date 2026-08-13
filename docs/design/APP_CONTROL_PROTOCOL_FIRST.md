@@ -25,7 +25,7 @@ API failure must not unexpectedly become a desktop click.
 
 - Domain: `media`
 - Read-only operation: `discover`
-- Read-only observations: `state_get`, `volume_get`, `position_get`, `playlist_list`
+- Read-only observations: `state_get`, `volume_get`, `position_get`, `playlist_list`, `playlist_current`
 - Mutating operations: `next`, `previous`, `play`, `pause`, `play_pause`,
   `stop`, `playlist_activate`
 - Backend: MPRIS through the argument-safe `playerctl` client
@@ -39,6 +39,7 @@ API failure must not unexpectedly become a desktop click.
   - `state_get`: playback state, track identity, metadata, and volume observed.
   - `position_get`: current position and track duration observed in seconds.
   - `playlist_list`: MPRIS playlist object paths and names observed.
+  - `playlist_current`: MPRIS `ActivePlaylist` object path/name and independent current-track summary observed.
   - `playlist_activate`: exact object path activated and a track observed afterward;
     duplicate names are never resolved implicitly.
 

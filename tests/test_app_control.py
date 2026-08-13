@@ -105,6 +105,32 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(activated["verdict"], "verified")
         self.assertEqual(activated["verification"]["predicate"], "playlist_active_with_track")
 
+    def test_playlist_current_returns_active_playlist_and_track_summary(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        def fake_run(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-l"]: return 0, "rhythmbox", ""
+            if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.GetPlaylists" in argv:
+                return 0, "([(objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Allin1.m3u', '')],)", ""
+            if argv[0] == "gdbus" and "org.freedesktop.DBus.Properties.Get" in argv:
+                return 0, "(<(true, (objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Allin1.m3u', ''))>,)", ""
+            if argv[-1] == "status": return 0, "Playing", ""
+            if argv[-1] == "position": return 0, "1.0", ""
+            if any("mpris:length" in item for item in argv): return 0, "100000000", ""
+            if "metadata" in argv: return 0, "/track/1\tArtist\tTitle", ""
+            if argv[-1] == "volume": return 0, "0.50", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("playlist_current", "rhythmbox", False, 0.2)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(payload["verdict"], "verified")
+        self.assertEqual(payload["active_playlist"]["id"], "/org/gnome/Rhythmbox3/Playlist/0x1")
+        self.assertEqual(payload["active_playlist"]["name"], "Allin1.m3u")
+        self.assertEqual(payload["track_summary"]["title"], "Title")
+        self.assertEqual(payload["verification"]["predicate"], "active_playlist_observed")
+
     def test_dry_run_discovers_and_never_dispatches(self):
         mod = load_module()
         calls = []

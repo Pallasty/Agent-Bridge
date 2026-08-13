@@ -7486,7 +7486,7 @@ impl McpTool for AppControlTool {
                     "domain": {"type": "string", "enum": ["media"], "default": "media"},
                     "action": {
                         "type": "string",
-                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop", "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get", "playlist_list", "playlist_activate"]
+                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop", "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get", "playlist_list", "playlist_current", "playlist_activate"]
                     },
                     "player": {
                         "type": "string",
@@ -7541,6 +7541,7 @@ impl McpTool for AppControlTool {
             "state_get",
             "position_get",
             "playlist_list",
+            "playlist_current",
             "playlist_activate",
         ];
         if !ACTIONS.contains(&action.as_str()) {

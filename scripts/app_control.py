@@ -22,7 +22,7 @@ SCHEMA = "agent_bridge.app_control.v0"
 ACTIONS = (
     "discover", "next", "previous", "play", "pause", "play_pause", "stop",
     "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get",
-    "playlist_list", "playlist_activate",
+    "playlist_list", "playlist_current", "playlist_activate",
 )
 PLAYERCTL_ACTION = {
     "next": "next",
@@ -107,6 +107,26 @@ def list_playlists(player: str, env: dict[str, str]) -> tuple[list[dict[str, str
     import re
     entries = [{"id": path, "name": name} for path, name in re.findall(r"(?:objectpath )?'([^']+)', '([^']*)', '[^']*'", out)]
     return entries, None
+
+
+def current_playlist(player: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Read the MPRIS ActivePlaylist property without guessing by playlist name."""
+    rc, out, err = playlist_call(
+        player,
+        "org.freedesktop.DBus.Properties.Get",
+        ["org.mpris.MediaPlayer2.Playlists", "ActivePlaylist"],
+        env,
+    )
+    if rc != 0:
+        return None, {"code": "active_playlist_observation_failed", "rc": rc, "message": err or out}
+    import re
+    match = re.search(r"\(\s*(true|false),\s*\(objectpath '([^']*)', '([^']*)'", out)
+    if not match:
+        return None, {"code": "active_playlist_parse_failed", "message": out}
+    active = match.group(1) == "true"
+    playlist_id = match.group(2) if active and match.group(2) != "/" else None
+    name = match.group(3) if active else None
+    return {"active": active, "id": playlist_id, "name": name}, None
 
 
 def observe(player: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -230,7 +250,7 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "domain": "media", "action": action, "read_only": True,
             "capabilities": {"backend": "mpris_playerctl", "available": True, "players": players,
         "actions": list(ACTIONS[1:]), "volume": {"supported": True, "range": [0.0, 1.0], "default_step": 0.05},
-        "playlists": {"supported": True, "activation_requires_unique_id": True}},
+        "playlists": {"supported": True, "activation_requires_unique_id": True, "active_observation": True}},
             "route": route_summary(bool(players)), "session_env_restored": sorted(restored),
             "duration_ms": round((time.monotonic() - started) * 1000),
         }
@@ -242,6 +262,12 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "error": {"code": select_error, "selector": player_selector},
         }
     assert player is not None
+    if action == "playlist_current":
+        active_playlist, active_error = current_playlist(player, env)
+        if active_error:
+            return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": active_error}
+        after, observe_error = observe(player, env)
+        return {"schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed", "domain": "media", "action": action, "read_only": True, "player": player, "active_playlist": active_playlist, "track_summary": after, "route": route_summary(True), "verification": {"status": "verified", "predicate": "active_playlist_observed", "observation_error": observe_error}}
     if action in ("playlist_list", "playlist_activate"):
         playlists, playlist_error = list_playlists(player, env)
         if playlist_error:
