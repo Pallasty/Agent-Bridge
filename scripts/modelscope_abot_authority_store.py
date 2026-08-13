@@ -19,6 +19,7 @@ CANDIDATE_SCHEMA = "agent_bridge.modelscope_abot_preflight_candidate.v0"
 AUTHORITY_SCHEMA = "agent_bridge.authority_decision.v0"
 AUTHENTICITY_SCHEMA = "agent_bridge.modelscope_abot_authority_hmac.v0"
 CLAIM_SCHEMA = "agent_bridge.modelscope_abot_single_use_claim.v0"
+ACTIVATION_SCHEMA = "agent_bridge.modelscope_abot_activation_admission.v0"
 _INIT_LOCK = threading.Lock()
 
 
@@ -164,6 +165,7 @@ class SingleUseAuthorityStore:
             connection.execute("pragma foreign_keys=ON")
             connection.execute("create table if not exists consumed_authorities (nonce_sha256 text primary key, provider_id text not null, decision_id text not null, candidate_sha256 text not null, consumed_at_unix_ms integer not null)")
             connection.execute("create table if not exists provider_session_leases (provider_id text primary key, lease_id text not null unique, nonce_sha256 text not null, candidate_sha256 text not null, reserved_at_unix_ms integer not null, expires_at_unix_ms integer not null, foreign key(nonce_sha256) references consumed_authorities(nonce_sha256))")
+            connection.execute("create table if not exists activation_ledger (activation_id text primary key, provider_id text not null, capability_id text not null, capability_sha256 text not null unique, lease_id text not null, admitted_at_unix_ms integer not null, expires_at_unix_ms integer not null, activation_consumed integer not null default 0, execution_capability_issued integer not null default 0)")
             connection.close()
             os.chmod(self.path, 0o600)
 
@@ -268,6 +270,98 @@ class SingleUseAuthorityStore:
             )
             connection.commit()
             return cursor.rowcount == 1
+
+    def admit_activation(
+        self,
+        *,
+        activation_id: str,
+        capability_id: str,
+        capability_sha256: str,
+        lease_id: str,
+        now_unix_ms: int,
+        expires_at_unix_ms: int,
+    ) -> dict[str, Any]:
+        fields = (
+            (activation_id, r"[A-Za-z0-9._-]{16,128}", "activation id invalid"),
+            (capability_id, r"[A-Za-z0-9._-]{16,128}", "capability id invalid"),
+            (capability_sha256, r"[0-9a-f]{64}", "capability digest invalid"),
+            (lease_id, r"[A-Za-z0-9._-]{16,128}", "lease id invalid"),
+        )
+        for value, pattern, message in fields:
+            if not isinstance(value, str) or not re.fullmatch(pattern, value):
+                raise AuthorityStoreError(message)
+        if (
+            not isinstance(now_unix_ms, int)
+            or isinstance(now_unix_ms, bool)
+            or not isinstance(expires_at_unix_ms, int)
+            or isinstance(expires_at_unix_ms, bool)
+            or not now_unix_ms < expires_at_unix_ms
+        ):
+            raise AuthorityStoreError("activation expiry invalid")
+        with self._connect() as connection:
+            try:
+                connection.execute("begin immediate")
+                lease = connection.execute(
+                    "select expires_at_unix_ms from provider_session_leases "
+                    "where provider_id = ? and lease_id = ?",
+                    (PROVIDER_ID, lease_id),
+                ).fetchone()
+                if lease is None or lease[0] <= now_unix_ms:
+                    raise AuthorityStoreError("active claim lease missing")
+                if expires_at_unix_ms > lease[0]:
+                    raise AuthorityStoreError("activation exceeds lease")
+                connection.execute(
+                    "insert into activation_ledger "
+                    "(activation_id, provider_id, capability_id, capability_sha256, "
+                    "lease_id, admitted_at_unix_ms, expires_at_unix_ms) "
+                    "values (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        activation_id,
+                        PROVIDER_ID,
+                        capability_id,
+                        capability_sha256,
+                        lease_id,
+                        now_unix_ms,
+                        expires_at_unix_ms,
+                    ),
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as error:
+                connection.rollback()
+                raise AuthorityStoreError("activation already admitted") from error
+            except Exception:
+                connection.rollback()
+                raise
+        return {
+            "schema": ACTIVATION_SCHEMA,
+            "provider_id": PROVIDER_ID,
+            "activation_id": activation_id,
+            "capability_id": capability_id,
+            "capability_sha256": capability_sha256,
+            "lease_id": lease_id,
+            "activation_admitted": True,
+            "activation_consumed": False,
+            "execution_capability_issued": False,
+            "studio_start_called": False,
+            "execution_authorized": False,
+            "runtime_admitted": False,
+            "mcp_registered": False,
+            "next_gate": "gate7i_execution_capability_consumption",
+        }
+
+    def activation_snapshot(self) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "select count(*), coalesce(sum(activation_consumed), 0), "
+                "coalesce(sum(execution_capability_issued), 0) from activation_ledger"
+            ).fetchone()
+        return {
+            "provider_id": PROVIDER_ID,
+            "activation_count": row[0],
+            "consumed_activation_count": row[1],
+            "execution_capability_issued_count": row[2],
+            "runtime_admitted": False,
+        }
 
     def validate_claim_reference(
         self,

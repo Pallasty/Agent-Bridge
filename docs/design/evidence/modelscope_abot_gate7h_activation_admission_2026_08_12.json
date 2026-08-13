@@ -1,0 +1,34 @@
+{
+  "schema": "agent_bridge.modelscope_abot_gate7h_activation_evidence.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-12",
+  "evidence_class": "synthetic_contract_test",
+  "tests": {
+    "valid_request_admitted_once": true,
+    "default_off_rejected_without_write": true,
+    "owner_confirmation_required": true,
+    "capability_signature_required": true,
+    "active_gate7f_lease_required": true,
+    "capability_and_lease_bindings_required": true,
+    "exact_action_and_endpoint_required": true,
+    "expiry_bounded": true,
+    "duplicate_activation_rejected": true,
+    "tampered_request_rejected": true
+  },
+  "activation_ledger": {
+    "unique_activation_id": true,
+    "unique_capability_sha256": true,
+    "transaction": "BEGIN IMMEDIATE",
+    "execution_capability_issued": false,
+    "activation_consumed": false
+  },
+  "real_activation_admitted": false,
+  "activation_consumed": false,
+  "execution_capability_issued": false,
+  "studio_start_called": false,
+  "execution_authorized": false,
+  "runtime_admitted": false,
+  "mcp_registered": false,
+  "deployment_authorized": false,
+  "next_gate": "gate7i_execution_capability_consumption"
+}
