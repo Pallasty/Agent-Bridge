@@ -9572,6 +9572,16 @@ async fn collaboration_write_validation_returns_actionable_errors() {
 }
 
 #[test]
+fn mobile_ui_snapshot_observation_metadata_is_content_bound() {
+    let first = super::mobile::mobile_ui_observation_metadata("emulator-5554", &[], "<hierarchy/>");
+    let second = super::mobile::mobile_ui_observation_metadata("emulator-5554", &[], "<hierarchy changed/>");
+    assert_eq!(first["observation_id"].as_str().unwrap().split(':').count(), 3);
+    assert_eq!(first["coordinate_provenance"]["coordinate_space"], "android.screen.px");
+    assert_eq!(first["max_age_ms"], 2_000);
+    assert_ne!(first["content_hash"], second["content_hash"]);
+    assert_ne!(first["observation_id"], second["observation_id"]);
+}
+
 fn registry_exposes_desktop_snapshot_to_codex_essential() {
     let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
     assert!(p.includes(Tier::Standard, "desktop_snapshot"));

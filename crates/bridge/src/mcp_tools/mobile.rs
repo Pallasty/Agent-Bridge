@@ -12,6 +12,42 @@ use super::*;
 pub(super) const MOBILE_UI_DUMP_PATH: &str = "/sdcard/agent_bridge_window.xml";
 pub(super) const MOBILE_DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
+/// Additive observation identity for UIAutomator snapshots.  The existing
+/// compact node payload remains unchanged; this metadata lets an action bind
+/// itself to the exact read without pretending that UIAutomator ordinals are
+/// stable across captures.
+pub(super) fn mobile_ui_observation_metadata(
+    serial: &str,
+    nodes: &[MobileUiNode],
+    raw_xml: &str,
+) -> Value {
+    let observed_at_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let compact_nodes: Vec<Value> = nodes.iter().map(MobileUiNode::compact_json).collect();
+    let canonical = serde_json::to_vec(&json!({"serial": serial, "nodes": compact_nodes}))
+        .unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(&canonical);
+    hasher.update(raw_xml.as_bytes());
+    let content_hash = format!("sha256:{:x}", hasher.finalize());
+    json!({
+        "observation_id": format!("mobile-ui:{serial}:{}", &content_hash[7..23]),
+        "observed_at_unix_ms": observed_at_unix_ms,
+        "revision": observed_at_unix_ms,
+        "revision_semantics": "capture_unix_milliseconds; ordering hint only",
+        "content_hash": content_hash,
+        "max_age_ms": 2_000,
+        "coordinate_provenance": {
+            "source": "uiautomator",
+            "serial": serial,
+            "coordinate_space": "android.screen.px",
+            "bounds_semantics": "node bounds reported by UIAutomator"
+        }
+    })
+}
+
 /// Convert the verified, read-only `app_control playlist_current` payload into
 /// the bounded media context carried by a projection frame. Keeping this
 /// conversion here makes the sync tool unable to smuggle control fields into
@@ -2658,6 +2694,7 @@ impl McpTool for MobileUiSnapshotTool {
             "nodes": visible_nodes,
             "dump": dump.as_json(),
         });
+        resp["observation"] = mobile_ui_observation_metadata(&serial, &nodes, &cat.stdout);
         if include_xml {
             let xml_max = args
                 .get("xml_max_chars")
