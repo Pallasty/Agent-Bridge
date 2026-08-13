@@ -8227,6 +8227,202 @@ impl McpTool for PresentTool {
     }
 }
 
+/// GSL-1A: narrow Codex-facing projection of grounded observations.
+///
+/// This wrapper deliberately exposes only the structured-table subset of
+/// `present`: callers cannot supply markup, disable verification, enable
+/// interactivity, or choose another sink.  It gives eager/lean clients a useful
+/// projection organ without admitting the broader Niche presentation surface.
+pub struct GroundedSurfacePresentTool {
+    present: PresentTool,
+}
+
+impl GroundedSurfacePresentTool {
+    pub fn new(hub: Hub) -> Self {
+        Self {
+            present: PresentTool::new(hub),
+        }
+    }
+}
+
+fn bounded_optional_str(
+    args: &Value,
+    field: &str,
+    max_chars: usize,
+) -> std::result::Result<Option<String>, String> {
+    let Some(value) = args.get(field) else {
+        return Ok(None);
+    };
+    let Some(value) = value.as_str() else {
+        return Err(format!("'{field}' must be a string"));
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(format!("'{field}' must not be empty"));
+    }
+    if value.chars().count() > max_chars {
+        return Err(format!("'{field}' exceeds {max_chars} characters"));
+    }
+    Ok(Some(value.to_string()))
+}
+
+fn validate_grounded_observations(args: &Value) -> std::result::Result<Vec<Value>, String> {
+    let Some(root) = args.as_object() else {
+        return Err("grounded surface input must be an object".to_string());
+    };
+    let allowed = ["title", "intent", "cwd", "observations"];
+    if let Some(field) = root.keys().find(|field| !allowed.contains(&field.as_str())) {
+        return Err(format!("unsupported grounded surface field '{field}'"));
+    }
+    let observations = args
+        .get("observations")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "'observations' must be an array".to_string())?;
+    if observations.is_empty() || observations.len() > 64 {
+        return Err("'observations' must contain between 1 and 64 rows".to_string());
+    }
+
+    for (index, observation) in observations.iter().enumerate() {
+        let Some(row) = observation.as_object() else {
+            return Err(format!("observations[{index}] must be an object"));
+        };
+        for field in ["source", "status", "freshness"] {
+            let Some(value) = row.get(field).and_then(Value::as_str) else {
+                return Err(format!("observations[{index}].{field} must be a string"));
+            };
+            if value.trim().is_empty() || value.chars().count() > 128 {
+                return Err(format!(
+                    "observations[{index}].{field} must contain 1 to 128 characters"
+                ));
+            }
+        }
+        let freshness = row["freshness"].as_str().unwrap_or_default();
+        if !matches!(freshness, "fresh" | "stale" | "unavailable" | "unknown") {
+            return Err(format!(
+                "observations[{index}].freshness must be fresh|stale|unavailable|unknown"
+            ));
+        }
+        if row
+            .get("observed_at_unix_ms")
+            .and_then(Value::as_u64)
+            .is_none()
+        {
+            return Err(format!(
+                "observations[{index}].observed_at_unix_ms must be a non-negative integer"
+            ));
+        }
+    }
+
+    let encoded = serde_json::to_vec(observations)
+        .map_err(|error| format!("observations are not serializable: {error}"))?;
+    if encoded.len() > 128 * 1024 {
+        return Err("'observations' exceeds the 128 KiB encoded limit".to_string());
+    }
+    Ok(observations.clone())
+}
+
+#[async_trait]
+impl McpTool for GroundedSurfacePresentTool {
+    fn name(&self) -> &'static str {
+        "grounded_surface_present"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "GSL-1A bounded projection: render 1-64 provenance-bearing observation rows as a self-verified local table. The wrapper fixes kind=table, channel=file, verify=true, and interactive=false; it never accepts HTML/SVG/script input, controls a device, or claims that a human saw the result. Missing sensors must be represented explicitly with freshness=unavailable.".into(),
+            input_schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["observations"],
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "maxLength": 160,
+                        "default": "Agent-Bridge grounded surface"
+                    },
+                    "intent": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "description": "Why this grounded state card was requested."
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "maxLength": 4096,
+                        "description": "Optional workspace provenance; it is displayed as metadata, never executed."
+                    },
+                    "observations": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "required": ["source", "status", "observed_at_unix_ms", "freshness"],
+                            "properties": {
+                                "source": {"type": "string", "maxLength": 128},
+                                "status": {"type": "string", "maxLength": 128},
+                                "observed_at_unix_ms": {"type": "integer", "minimum": 0},
+                                "freshness": {
+                                    "type": "string",
+                                    "enum": ["fresh", "stale", "unavailable", "unknown"]
+                                },
+                                "evidence_ref": {"type": "string"},
+                                "detail": {}
+                            }
+                        }
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let observations = match validate_grounded_observations(&args) {
+            Ok(rows) => rows,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let title = match bounded_optional_str(&args, "title", 160) {
+            Ok(value) => value.unwrap_or_else(|| "Agent-Bridge grounded surface".to_string()),
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let intent = match bounded_optional_str(&args, "intent", 500) {
+            Ok(value) => value,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let cwd = match bounded_optional_str(&args, "cwd", 4096) {
+            Ok(value) => value,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let provenance = json!({
+            "source_tool": self.name(),
+            "cwd": cwd,
+            "observation_count": observations.len(),
+            "truth_boundary": {
+                "verification_target": "local_browser_render",
+                "human_seen_claimed": false,
+                "device_display_claimed": false,
+                "external_world_effect_claimed": false
+            }
+        });
+        self.present
+            .execute(
+                json!({
+                    "kind": "table",
+                    "payload": observations,
+                    "title": title,
+                    "intent": intent,
+                    "channel": "file",
+                    "provenance": provenance,
+                    "verify": true,
+                    "interactive": false
+                }),
+                ctx,
+            )
+            .await
+    }
+}
+
 /// Output / expression lane — list persisted `present()` artifacts by reading
 /// their self-describing HTML (embedded provenance + payload). Read-only.
 pub struct PresentListTool {
@@ -44179,6 +44375,9 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "xiao_shu_action_request"
             | "project_detect"
             | "changes_digest"
+            // GSL-1A: one bounded structured-table projection. This does not
+            // expose the raw-markup or interactive variants of `present`.
+            | "grounded_surface_present"
             | "git_topology_preflight"
             | "plan_save"
             | "plan_load"
@@ -48816,6 +49015,14 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(PresentTool::new(hub.clone())),
+    );
+    // GSL-1A: narrow structured observation card for Codex lean. The policy
+    // allowlist admits this wrapper by name without widening to raw `present`.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(GroundedSurfacePresentTool::new(hub.clone())),
     );
     // slice 2: read-only replay/audit projection over present() artifacts. Niche
     // (opt-in) alongside present; no new source of truth, no mutation.

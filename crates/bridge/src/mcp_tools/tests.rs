@@ -7703,6 +7703,7 @@ fn codex_lean_preserves_curated_surface() {
         "agent_spawn",
         "plan_save",
         "project_detect",
+        "grounded_surface_present",
         "pet_state_ritual",
         "forum_post",
         "forum_read",
@@ -7715,6 +7716,34 @@ fn codex_lean_preserves_curated_surface() {
     assert!(!p.includes(Tier::Niche, "forum_subscribe"));
     assert!(!p.includes(Tier::Niche, "forum_set_thread_status"));
     assert!(!p.includes(Tier::Niche, "agent_presence_announce"));
+}
+
+#[test]
+fn grounded_surface_present_is_the_only_present_lane_in_codex_lean() {
+    let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+    assert!(p.includes(Tier::Niche, "grounded_surface_present"));
+    for tool in [
+        "present",
+        "present_replay",
+        "present_dashboard",
+        "present_outcomes",
+    ] {
+        assert!(
+            !p.includes(Tier::Niche, tool),
+            "broad presentation surface leaked into lean: {tool}"
+        );
+    }
+
+    let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+    let tool = schemas
+        .iter()
+        .find(|schema| schema.name == "grounded_surface_present")
+        .expect("bounded grounded projection must register in codex-lean");
+    assert_eq!(tool.input_schema["additionalProperties"], false);
+    assert!(tool.input_schema["properties"].get("artifact").is_none());
+    assert!(tool.input_schema["properties"].get("kind").is_none());
+    assert!(tool.input_schema["properties"].get("verify").is_none());
+    assert!(tool.input_schema["properties"].get("interactive").is_none());
 }
 
 #[test]
@@ -11031,6 +11060,99 @@ async fn present_degrades_to_no_browser_and_still_writes_artifact() {
 
     std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn grounded_surface_present_forces_safe_verified_table_defaults() {
+    let _env = PRESENTATIONS_DIR_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let dir = std::env::temp_dir().join(format!(
+        "ab-grounded-surface-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &dir);
+
+    let tool = GroundedSurfacePresentTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "title": "AB state",
+                "intent": "ground current task",
+                "cwd": "/workspace",
+                "observations": [{
+                    "source": "body_status",
+                    "status": "nominal",
+                    "observed_at_unix_ms": 1_786_585_000_000u64,
+                    "freshness": "fresh",
+                    "detail": {"pressure": "nominal"}
+                }]
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute grounded projection");
+    let res = result_text_as_json(&out);
+
+    assert_eq!(res["kind"], "table");
+    assert_eq!(res["channel"], "file");
+    assert_eq!(res["interactive_status"], Value::Null);
+    assert_eq!(res["dual_encoding"], true);
+    assert_eq!(res["provenance"]["source_tool"], "grounded_surface_present");
+    assert_eq!(res["provenance"]["observation_count"], 1);
+    assert_eq!(
+        res["provenance"]["truth_boundary"]["external_world_effect_claimed"],
+        false
+    );
+    let html = std::fs::read_to_string(
+        res["artifact_path"]
+            .as_str()
+            .expect("artifact path must be returned"),
+    )
+    .expect("artifact written");
+    assert!(html.contains("body_status"));
+    assert!(!html.contains("<script>alert("));
+
+    std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn grounded_surface_present_rejects_missing_or_unbounded_evidence() {
+    let tool = GroundedSurfacePresentTool::new(Hub::builder().build());
+    for args in [
+        json!({"observations": []}),
+        json!({
+            "observations": [{
+                "source": "body_status",
+                "status": "nominal",
+                "observed_at_unix_ms": 1,
+                "freshness": "fresh"
+            }],
+            "html": "<script>alert('not admitted')</script>"
+        }),
+        json!({"observations": [{
+            "source": "ide_snapshot",
+            "status": "missing producer",
+            "observed_at_unix_ms": 1,
+            "freshness": "pretend-fresh"
+        }]}),
+        json!({"observations": [{
+            "source": "mobile",
+            "status": "none",
+            "freshness": "unavailable"
+        }]})
+    ] {
+        let out = tool
+            .execute(args, &ToolContext::default())
+            .await
+            .expect("invalid input returns a typed tool error");
+        assert!(out.is_error);
+    }
 }
 
 // present is a Niche opt-in tool: exposed only under the `all` profile
