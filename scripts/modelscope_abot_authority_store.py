@@ -273,6 +273,43 @@ class SingleUseAuthorityStore:
             connection.commit()
             return cursor.rowcount == 1
 
+    def validate_claim_reference(
+        self,
+        *,
+        lease_id: str,
+        candidate_sha256: str,
+        now_unix_ms: int,
+    ) -> dict[str, Any]:
+        if not isinstance(now_unix_ms, int) or isinstance(now_unix_ms, bool):
+            raise AuthorityStoreError("current time invalid")
+        if not isinstance(candidate_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", candidate_sha256
+        ):
+            raise AuthorityStoreError("candidate digest invalid")
+        with self._connect() as connection:
+            row = connection.execute(
+                "select nonce_sha256, candidate_sha256, reserved_at_unix_ms, "
+                "expires_at_unix_ms from provider_session_leases "
+                "where provider_id = ? and lease_id = ?",
+                (PROVIDER_ID, lease_id),
+            ).fetchone()
+        if row is None:
+            raise AuthorityStoreError("active claim lease missing")
+        nonce_sha256, stored_digest, reserved_at, expires_at = row
+        if stored_digest != candidate_sha256:
+            raise AuthorityStoreError("claim candidate digest mismatch")
+        if expires_at <= now_unix_ms:
+            raise AuthorityStoreError("claim lease expired")
+        return {
+            "provider_id": PROVIDER_ID,
+            "lease_id": lease_id,
+            "nonce_sha256": nonce_sha256,
+            "candidate_sha256": stored_digest,
+            "reserved_at_unix_ms": reserved_at,
+            "expires_at_unix_ms": expires_at,
+            "session_state_authoritative": True,
+        }
+
     def recover_expired_sessions(self, *, now_unix_ms: int) -> int:
         with self._connect() as connection:
             connection.execute("begin immediate")

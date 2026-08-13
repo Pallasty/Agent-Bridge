@@ -1,0 +1,43 @@
+{
+  "schema": "agent_bridge.modelscope_abot_gate7g_contract_evidence.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-13",
+  "evidence_class": "synthetic_contract_test",
+  "contract": {
+    "action": "start_simulated_projection",
+    "endpoint": "/on_click_start_ws",
+    "maximum_ttl_ms": 30000,
+    "maximum_session_duration_ms": 180000,
+    "maximum_concurrent_sessions": 1,
+    "single_use": true,
+    "queue_allowed": false,
+    "retry_allowed": false,
+    "raw_prompt_persisted": false,
+    "transport_frames_persisted": false,
+    "active_gate7f_claim_required": true,
+    "hmac_sha256_required": true
+  },
+  "tests": {
+    "signed_contract_validates": true,
+    "claim_store_binding_required": true,
+    "released_lease_rejected": true,
+    "mismatched_claim_digest_rejected": true,
+    "tampered_operation_rejected": true,
+    "wrong_key_rejected": true,
+    "expired_contract_rejected": true,
+    "ttl_capped_by_contract_and_lease": true,
+    "raw_prompt_absent": true,
+    "open_runtime_boundary_rejected": true
+  },
+  "authority_key_loaded": false,
+  "capability_key_loaded": false,
+  "real_authority_consumed": false,
+  "execution_capability_issued": false,
+  "capability_consumed": false,
+  "studio_start_called": false,
+  "execution_authorized": false,
+  "runtime_admitted": false,
+  "mcp_registered": false,
+  "deployment_authorized": false,
+  "next_gate": "gate7h_capability_activation_admission"
+}
