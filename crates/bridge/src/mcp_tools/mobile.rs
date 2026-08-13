@@ -3232,6 +3232,20 @@ pub(super) fn mobile_click_effect_verification(tap_ok: bool) -> Value {
     }
 }
 
+pub(super) fn mobile_input_text_effect_verification(input_ok: bool) -> Value {
+    if input_ok {
+        crate::semantic_event::effect_verification(
+            crate::semantic_event::VerdictStatus::Unknown,
+            "adb input text dispatched; focused-control state was not read back",
+        )
+    } else {
+        crate::semantic_event::effect_verification(
+            crate::semantic_event::VerdictStatus::NotVerified,
+            "adb input text returned nonzero",
+        )
+    }
+}
+
 mobile_tool_struct!(MobileClickTool);
 #[async_trait]
 impl McpTool for MobileClickTool {
@@ -3416,11 +3430,12 @@ impl McpTool for MobileInputTextTool {
             Ok(out) => out,
             Err(e) => return Ok(ToolResult::error(e)),
         };
-        Ok(ToolResult::json_text(&json!({
+        Ok(ToolResult::structured_json(&json!({
             "status": if out.ok() { "ok" } else { "error" },
             "serial": serial,
             "encoded_text": encoded,
             "adb": out.as_json(),
+            "effect_verification": mobile_input_text_effect_verification(out.ok()),
         })))
     }
 }

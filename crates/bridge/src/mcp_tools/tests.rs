@@ -6929,6 +6929,15 @@ fn mobile_click_effect_verification_preserves_unknown_dispatch_boundary() {
 }
 
 #[test]
+fn mobile_input_text_effect_verification_preserves_dispatch_boundary() {
+    let dispatched = mobile_input_text_effect_verification(true);
+    assert_eq!(dispatched["status"], "unknown");
+    assert!(dispatched["reason"].as_str().unwrap().contains("focused-control state"));
+    let failed = mobile_input_text_effect_verification(false);
+    assert_eq!(failed["status"], "not_verified");
+}
+
+#[test]
 fn inert_actions_block_caps_and_counts_overflow() {
     let now = 1_780_000_000_i64;
     let evs: Vec<_> = (0..7)
