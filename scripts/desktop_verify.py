@@ -155,9 +155,36 @@ def window_matches(win, app_id, pid, title):
     return ok if (app_id or pid is not None or title) else False
 
 
+def validate_expectation(args) -> dict[str, str] | None:
+    """Fail closed when an expectation cannot identify a concrete target/state."""
+    if args.expect in ELEMENT_EXPECTS:
+        if not any((args.app, args.role, args.name)):
+            return {
+                "code": "invalid_expectation",
+                "message": "element expectations require --app, --role, or --name",
+            }
+        if args.expect in {"state_is", "state_not"}:
+            state = (args.state or "").lower()
+            if state not in _STATE_ALIASES:
+                return {
+                    "code": "invalid_expectation",
+                    "message": "state expectations require a supported --state",
+                }
+    elif args.expect in WINDOW_EXPECTS:
+        if not any((args.win_app_id, args.win_pid is not None, args.win_title)):
+            return {
+                "code": "invalid_expectation",
+                "message": "window expectations require --win-app-id, --win-pid, or --win-title",
+            }
+    return None
+
+
 def evaluate(args) -> tuple[bool, dict[str, Any], Any | None]:
     """Evaluate the expectation once. Returns (holds, observed, error)."""
     expect = args.expect
+    invalid = validate_expectation(args)
+    if invalid is not None:
+        return False, {}, invalid
     if expect in ELEMENT_EXPECTS:
         matches, err, coverage = resolve_atspi_matches(
             args.app, args.role, args.name, args.nth, args.cage_pid,
@@ -182,7 +209,7 @@ def evaluate(args) -> tuple[bool, dict[str, Any], Any | None]:
             observed["note"] = "element_absent"
             return False, observed, None
         want = (args.state or "").lower()
-        has = any(want in m["states"] for m in in_scope)
+        has = any(want in m["states"] for m in matches)
         if expect == "state_is":
             return has, observed, None
         return (not has), observed, None  # state_not

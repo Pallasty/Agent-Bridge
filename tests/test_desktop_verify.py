@@ -109,6 +109,44 @@ class ExitCodeTests(unittest.TestCase):
 
 
 class BoundedResolutionTests(unittest.TestCase):
+    def test_state_is_uses_resolved_match_states(self):
+        original = dv.resolve_atspi_matches
+        dv.resolve_atspi_matches = lambda *args, **kwargs: (
+            [{"states": ["checked", "enabled"]}], None, {"complete": True}
+        )
+        try:
+            holds, observed, error = dv.evaluate(
+                ns(expect="state_is", app="player", state="checked")
+            )
+        finally:
+            dv.resolve_atspi_matches = original
+        self.assertTrue(holds)
+        self.assertEqual(observed["count"], 1)
+        self.assertIsNone(error)
+
+    def test_state_expectation_without_state_fails_closed(self):
+        holds, observed, error = dv.evaluate(ns(expect="state_is", app="player"))
+        self.assertFalse(holds)
+        self.assertEqual(observed, {})
+        self.assertEqual(error["code"], "invalid_expectation")
+
+    def test_state_expectation_rejects_unknown_state(self):
+        holds, _, error = dv.evaluate(
+            ns(expect="state_not", app="player", state="teleported")
+        )
+        self.assertFalse(holds)
+        self.assertEqual(error["code"], "invalid_expectation")
+
+    def test_element_expectation_without_selector_fails_closed(self):
+        holds, _, error = dv.evaluate(ns(expect="element_gone"))
+        self.assertFalse(holds)
+        self.assertEqual(error["code"], "invalid_expectation")
+
+    def test_window_expectation_without_selector_fails_closed(self):
+        holds, _, error = dv.evaluate(ns(expect="focus_is"))
+        self.assertFalse(holds)
+        self.assertEqual(error["code"], "invalid_expectation")
+
     def test_incomplete_search_cannot_verify_element_gone(self):
         coverage = {"complete": False, "stop_reason": "node_budget"}
         original = dv.resolve_atspi_matches
