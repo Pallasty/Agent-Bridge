@@ -240,7 +240,7 @@ pub fn contract_violations(rec: &SemanticEventRecord) -> Vec<String> {
 /// - `err_msg` — the error text when `ok` is false (empty otherwise).
 ///
 /// Mapping:
-/// - ref + ok                              → Verified (probe confirmed + real mouse)
+/// - ref + ok                              → Unknown (actionable + dispatched, no effect readback)
 /// - ref + refused/detached (would no-op)  → NotVerified (the inert case is caught)
 /// - ref + other failure                   → Unknown (ref-resolution / transport)
 /// - css + ok                              → Unknown (dispatched, no readback)
@@ -249,9 +249,13 @@ pub fn classify_click(is_ref: bool, ok: bool, err_msg: &str) -> Verdict {
     if is_ref {
         if ok {
             return Verdict {
-                status: VerdictStatus::Verified,
-                method: "cdp_actionability_probe+real_mouse".to_string(),
-                evidence: json!({ "probe": "connected+visible+enabled", "dispatched": "mousePressed+mouseReleased" }),
+                status: VerdictStatus::Unknown,
+                method: "cdp_actionability_probe+mouse_dispatch_no_effect_readback".to_string(),
+                evidence: json!({
+                    "probe": "connected+visible+enabled",
+                    "dispatched": "mousePressed+mouseReleased",
+                    "note": "input dispatch succeeded; expected UI effect was not read back"
+                }),
             };
         }
         // The actionability probe loudly refuses a no-op (disabled / zero-box) or
@@ -502,10 +506,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ref_ok_is_verified() {
+    fn ref_ok_is_unknown_until_effect_is_read_back() {
         let v = classify_click(true, true, "");
-        assert_eq!(v.status, VerdictStatus::Verified);
-        assert_eq!(v.status.as_ok(), Some(true));
+        assert_eq!(v.status, VerdictStatus::Unknown);
+        assert_eq!(v.status.as_ok(), None);
+        assert_eq!(
+            v.method,
+            "cdp_actionability_probe+mouse_dispatch_no_effect_readback"
+        );
     }
 
     #[test]
