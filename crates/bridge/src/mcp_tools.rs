@@ -2006,6 +2006,12 @@ fn desktop_snapshot_semantic_bus_payload(
                                 "app": app.get("name").cloned().unwrap_or(Value::Null),
                                 "role": role,
                                 "name": element.get("name").cloned().unwrap_or(Value::Null),
+                                "observation_ref": {
+                                    "observation_id": observation_id,
+                                    "content_sha256": source_content_sha256,
+                                    "captured_at_unix_ms": captured_unix_ms,
+                                    "max_age_ms": max_age_ms
+                                }
                             },
                             "risk_level": "medium",
                             "requires_gate": true,
@@ -6475,6 +6481,17 @@ impl McpTool for DesktopInvokeTool {
                     "cwd": { "type": "string", "description": "Repo root to resolve scripts/desktop_invoke.py." },
                     "script_path": { "type": "string", "description": "Explicit desktop_invoke.py path (tests / alternate checkouts)." },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 10000, "description": "Milliseconds before the invoke process is killed." }
+                    ,"observation_ref": {
+                        "type": "object",
+                        "description": "Required for every non-dry-run invoke. Copy from desktop_snapshot semantic output; stale or malformed observations are rejected before dispatch.",
+                        "properties": {
+                            "observation_id": { "type": "string", "minLength": 1 },
+                            "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                            "captured_at_unix_ms": { "type": "integer", "minimum": 1 },
+                            "max_age_ms": { "type": "integer", "minimum": 100, "maximum": 300000 }
+                        },
+                        "required": ["observation_id", "content_sha256", "captured_at_unix_ms", "max_age_ms"]
+                    }
                 }
             }),
         }
@@ -6534,6 +6551,10 @@ impl McpTool for DesktopInvokeTool {
                 "hint": "set dry_run:true, provide `cage_pid`, set confirm_host:true, or set use_grant:true with a desktop_grant.py grant"
             })));
         }
+        let observation_ref = match desktop_invoke_observation_ref(&args, dry_run) {
+            Ok(reference) => reference,
+            Err(error) => return Ok(desktop_invoke_error(error)),
+        };
 
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
         let script = desktop_invoke_script_path(&args, cwd.as_ref());
@@ -6627,6 +6648,15 @@ impl McpTool for DesktopInvokeTool {
         match serde_json::from_str::<Value>(&stdout) {
             Ok(mut payload) => {
                 if let Some(obj) = payload.as_object_mut() {
+                    let dispatch_status = if !output.status.success() {
+                        "failed"
+                    } else if dry_run {
+                        "not_dispatched_dry_run"
+                    } else if host_target && confirm_host && !use_grant {
+                        "pending_human_confirmation"
+                    } else {
+                        "dispatched"
+                    };
                     obj.insert(
                         "mcp_wrapper".to_string(),
                         json!({
@@ -6638,6 +6668,16 @@ impl McpTool for DesktopInvokeTool {
                             "exit_code": output.status.code().unwrap_or(-1),
                             "stderr": stderr,
                             "stderr_truncated": stderr_truncated
+                        }),
+                    );
+                    obj.insert(
+                        "action_outcome".to_string(),
+                        json!({
+                            "dispatch_status": dispatch_status,
+                            "effect_verification": "unknown",
+                            "effect_verified": false,
+                            "requires_postcondition_observation": output.status.success() && !dry_run,
+                            "observation_ref": observation_ref
                         }),
                     );
                 }
@@ -6658,6 +6698,46 @@ impl McpTool for DesktopInvokeTool {
             }))),
         }
     }
+}
+
+fn desktop_invoke_observation_ref(args: &Value, dry_run: bool) -> std::result::Result<Value, Value> {
+    if dry_run && args.get("observation_ref").is_none() {
+        return Ok(Value::Null);
+    }
+    let reference = args.get("observation_ref").ok_or_else(|| json!({
+        "code": "observation_ref_required",
+        "message": "non-dry-run desktop_invoke requires observation_ref from a recent semantic desktop_snapshot"
+    }))?;
+    let object = reference.as_object().ok_or_else(|| json!({
+        "code": "invalid_observation_ref", "message": "observation_ref must be an object"
+    }))?;
+    let id_ok = object.get("observation_id").and_then(Value::as_str).is_some_and(|v| !v.trim().is_empty());
+    let hash_ok = object.get("content_sha256").and_then(Value::as_str).is_some_and(|v| {
+        v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    });
+    let captured_at = object.get("captured_at_unix_ms").and_then(Value::as_u64);
+    let max_age_ms = object.get("max_age_ms").and_then(Value::as_u64).filter(|v| (100..=300_000).contains(v));
+    if !id_ok || !hash_ok || captured_at.is_none() || max_age_ms.is_none() {
+        return Err(json!({
+            "code": "invalid_observation_ref",
+            "message": "observation_ref requires non-empty observation_id, lowercase SHA-256, captured_at_unix_ms, and max_age_ms in 100..=300000"
+        }));
+    }
+    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+    let captured_at = captured_at.unwrap_or_default();
+    if captured_at > now_ms {
+        return Err(json!({ "code": "observation_from_future", "message": "observation capture time is later than action validation time" }));
+    }
+    let age_ms = now_ms - captured_at;
+    if age_ms > max_age_ms.unwrap_or_default() {
+        return Err(json!({
+            "code": "stale_observation",
+            "message": "observation exceeded its freshness budget",
+            "age_ms": age_ms,
+            "max_age_ms": max_age_ms
+        }));
+    }
+    Ok(reference.clone())
 }
 
 fn desktop_invoke_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {

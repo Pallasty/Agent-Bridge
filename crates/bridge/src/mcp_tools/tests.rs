@@ -10271,6 +10271,18 @@ print(json.dumps(payload))
     assert!(affordances
         .iter()
         .any(|a| { a["action_type"] == "desktop.invoke" && a["requires_gate"] == true }));
+    let invoke = affordances
+        .iter()
+        .find(|a| a["action_type"] == "desktop.invoke")
+        .expect("invoke affordance");
+    assert_eq!(
+        invoke["args_schema"]["observation_ref"]["observation_id"],
+        payload["observation"]["observation_id"]
+    );
+    assert_eq!(
+        invoke["args_schema"]["observation_ref"]["content_sha256"],
+        payload["observation"]["content_hash"]["value"]
+    );
     assert_eq!(
         payload["presentation"]["machine_payload"]["atspi_object_count"],
         1
@@ -14988,6 +15000,20 @@ fn desktop_invoke_schema_hides_host_unlock_flags() {
         .get("confirm_host")
         .is_some());
     assert!(tool.input_schema["properties"].get("use_grant").is_some());
+    assert!(tool.input_schema["properties"].get("observation_ref").is_some());
+}
+
+fn fresh_desktop_observation_ref() -> Value {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    json!({
+        "observation_id": "obs-desktop-linux-0123456789abcdef",
+        "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "captured_at_unix_ms": now_ms,
+        "max_age_ms": 5000
+    })
 }
 
 #[tokio::test]
@@ -15033,6 +15059,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 "name": "INVOKE_TARGET",
                 "role": "button",
                 "cage_pid": 12345,
+                "observation_ref": fresh_desktop_observation_ref(),
                 "script_path": script.to_string_lossy(),
                 "timeout_ms": 5000
             }),
@@ -15055,6 +15082,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     assert!(!argv.contains(&"--confirm"));
     assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
     assert!(!argv.contains(&"--dry-run"));
+    assert_eq!(payload["action_outcome"]["dispatch_status"], "dispatched");
+    assert_eq!(payload["action_outcome"]["effect_verified"], false);
+    assert_eq!(payload["action_outcome"]["effect_verification"], "unknown");
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
@@ -15141,6 +15171,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!({
                 "name": "Save",
                 "confirm_host": true,
+                "observation_ref": fresh_desktop_observation_ref(),
                 "script_path": script.to_string_lossy(),
                 "timeout_ms": 5000
             }),
@@ -15164,6 +15195,8 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     assert!(!argv.contains(&"--confirm"));
     assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
     assert!(!argv.contains(&"--dry-run"));
+    assert_eq!(payload["action_outcome"]["dispatch_status"], "pending_human_confirmation");
+    assert_eq!(payload["action_outcome"]["effect_verified"], false);
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
@@ -15199,6 +15232,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!({
                 "name": "Save",
                 "use_grant": true,
+                "observation_ref": fresh_desktop_observation_ref(),
                 "script_path": script.to_string_lossy(),
                 "timeout_ms": 5000
             }),
@@ -15220,6 +15254,30 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn desktop_invoke_rejects_stale_observation_before_dispatch() {
+    let tool = DesktopInvokeTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "name": "Save",
+                "cage_pid": 12345,
+                "observation_ref": {
+                    "observation_id": "obs-desktop-linux-stale",
+                    "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    "captured_at_unix_ms": 1,
+                    "max_age_ms": 5000
+                }
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    assert!(out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["error"]["code"], "stale_observation");
 }
 
 #[tokio::test]
