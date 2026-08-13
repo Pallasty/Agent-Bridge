@@ -1,0 +1,38 @@
+{
+  "schema": "agent_bridge.app_control.acceptance.v0",
+  "date": "2026-08-12",
+  "host": "local-linux-sway",
+  "domain": "media",
+  "action": "next",
+  "player": "rhythmbox",
+  "route": {
+    "selected_backend": "mpris_playerctl",
+    "selected_layer": "application_protocol",
+    "silent_fallback_allowed": false,
+    "atspi_executed": false,
+    "vision_executed": false,
+    "coordinate_input_executed": false
+  },
+  "before": {
+    "playback_status": "Playing",
+    "track_id": "/org/mpris/MediaPlayer2/Track/1829",
+    "artist": "Steve Jablonsky",
+    "title": "Autobots"
+  },
+  "dispatch": {
+    "argv": ["playerctl", "-p", "rhythmbox", "next"],
+    "rc": 0
+  },
+  "after": {
+    "playback_status": "Playing",
+    "track_id": "/org/mpris/MediaPlayer2/Track/2108",
+    "artist": "未知",
+    "title": "016.By Los Fernandos - Macarena [马卡雷娜].APE"
+  },
+  "verification": {
+    "verdict": "verified",
+    "predicate": "track_identity_changed",
+    "polls": 1,
+    "duration_ms": 79
+  }
+}

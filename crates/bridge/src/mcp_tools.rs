@@ -7450,6 +7450,220 @@ fn desktop_semantic_task_error(recover: &str, error: Value) -> ToolResult {
     result
 }
 
+// ===========================================================================
+//  Application control — protocol/API first, independently verified
+// ===========================================================================
+
+pub struct AppControlTool {
+    _hub: Hub,
+}
+
+impl AppControlTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for AppControlTool {
+    fn name(&self) -> &'static str {
+        "app_control"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Bounded application capability discovery and control transaction. \
+                The initial media adapter prefers the standard MPRIS application protocol, \
+                reads state before dispatch, executes one allowlisted action without shell \
+                interpolation, and independently re-reads MPRIS state to verify the effect. \
+                AT-SPI, vision, and coordinate input are reported as explicit fallbacks but \
+                are never selected silently. Use action=discover or dry_run=true for read-only use."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "domain": {"type": "string", "enum": ["media"], "default": "media"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop"]
+                    },
+                    "player": {
+                        "type": "string",
+                        "description": "Optional exact or unique-substring MPRIS player selector. Omit to select the first discovered player."
+                    },
+                    "dry_run": {
+                        "type": "boolean", "default": false,
+                        "description": "Discover the route and read current state without dispatching the action."
+                    },
+                    "verify_timeout_secs": {
+                        "type": "number", "minimum": 0.1, "maximum": 10.0, "default": 2.0
+                    },
+                    "cwd": {"type": "string", "description": "Repo root used to resolve scripts/app_control.py."},
+                    "script_path": {"type": "string", "description": "Explicit backend script path for tests or alternate checkouts."},
+                    "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 30000, "default": 15000}
+                },
+                "required": ["action"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let action = match required_str_arg(&args, "action") {
+            Ok(value) => value,
+            Err(message) => {
+                return Ok(app_control_error(
+                    "replan",
+                    json!({"code": "missing_action", "message": message}),
+                ))
+            }
+        };
+        const ACTIONS: &[&str] = &[
+            "discover",
+            "next",
+            "previous",
+            "play",
+            "pause",
+            "play_pause",
+            "stop",
+        ];
+        if !ACTIONS.contains(&action.as_str()) {
+            return Ok(app_control_error("replan", json!({
+                "code": "unsupported_action", "action": action
+            })));
+        }
+        let domain = args.get("domain").and_then(Value::as_str).unwrap_or("media");
+        if domain != "media" {
+            return Ok(app_control_error("replan", json!({
+                "code": "unsupported_domain", "domain": domain
+            })));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(15_000)
+            .clamp(1_000, 30_000);
+        let verify_timeout = args
+            .get("verify_timeout_secs")
+            .and_then(Value::as_f64)
+            .unwrap_or(2.0)
+            .clamp(0.1, 10.0);
+        let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
+        let script = app_control_script_path(&args, cwd.as_ref());
+        if !script.exists() {
+            return Ok(app_control_error("replan", json!({
+                "code": "script_missing", "message": format!("app_control.py not found at {}", script.display())
+            })));
+        }
+
+        let mut cmd = killable_command(
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "python3".into()),
+        );
+        cmd.arg(&script)
+            .arg("--domain")
+            .arg("media")
+            .arg("--action")
+            .arg(&action)
+            .arg("--verify-timeout")
+            .arg(verify_timeout.to_string());
+        if let Some(player) = args
+            .get("player")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            cmd.arg("--player").arg(player);
+        }
+        let dry_run = args.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+        if dry_run {
+            cmd.arg("--dry-run");
+        }
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+
+        let started = Instant::now();
+        let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await
+        {
+            Err(_) => {
+                return Ok(app_control_error(
+                    "retry",
+                    json!({"code": "timeout", "duration_ms": started.elapsed().as_millis()}),
+                ))
+            }
+            Ok(Err(error)) => {
+                return Ok(app_control_error(
+                    "retry",
+                    json!({"code": "spawn_failed", "message": error.to_string()}),
+                ))
+            }
+            Ok(Ok(output)) => output,
+        };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
+        let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
+        let mut payload = match serde_json::from_str::<Value>(&stdout) {
+            Ok(payload) => payload,
+            Err(error) => return Ok(app_control_error("retry", json!({
+                "code": "invalid_json", "message": error.to_string(), "exit_code": output.status.code().unwrap_or(-1),
+                "stdout": stdout, "stderr": stderr
+            }))),
+        };
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("mcp_wrapper".into(), json!({
+                "tool": self.name(), "duration_ms": duration_ms,
+                "exit_code": output.status.code().unwrap_or(-1), "stderr": stderr,
+                "truncated": stdout_truncated || stderr_truncated
+            }));
+        }
+        let verified = payload.get("verdict").and_then(Value::as_str) == Some("verified");
+        let mut result = ToolResult::json_text(&payload);
+        result.is_error = !verified;
+        Ok(result)
+    }
+}
+
+fn app_control_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
+    if let Some(path) = args.get("script_path").and_then(Value::as_str) {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("AGENT_BRIDGE_APP_CONTROL_SCRIPT") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    if let Some(cwd) = cwd {
+        let path = cwd.join("scripts/app_control.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("scripts/app_control.py");
+        if path.exists() {
+            return path;
+        }
+    }
+    if let Some(path) = installed_runtime_script_path("app_control.py") {
+        return path;
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/app_control.py")
+}
+
+fn app_control_error(recover: &str, error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "agent_bridge.app_control.v0", "status": "error", "verdict": "error",
+        "recover": recover, "error": error
+    }));
+    result.is_error = true;
+    result
+}
+
 /// Read a pending host-confirm record's `kind` ("invoke" | "action" | "steer") WITHOUT
 /// consuming it, so desktop_confirm can dispatch to the right backend script. Token must be
 /// hex (path safety); returns None if malformed, missing, or unreadable (caller defaults to
@@ -44259,6 +44473,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // verification into one recover decision. Coordinate action, direct invoke,
     // and host phase-2 execution remain profile=all only.
     "desktop_semantic_task",
+    // Application-protocol control: a narrow allowlisted MPRIS transaction
+    // with pre/post state reads. No arbitrary DBus method or shell surface.
+    "app_control",
     // macOS adapter feasibility: read-only AX trust/frontmost-window probe.
     // No permission prompt and no host mutation; this is the first local
     // cross-platform SSB runtime probe.
@@ -47765,6 +47982,14 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(DesktopSemanticTaskTool::new(hub.clone())),
+    );
+    // Protocol-first application control. The initial media adapter exposes
+    // only allowlisted MPRIS operations and requires independent postflight.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(AppControlTool::new(hub.clone())),
     );
     // Linux Computer Use host-confirm phase 2: execute a human-approved host action by
     // its single-use token. NOT in codex-essential. The only MCP path to host mutation,

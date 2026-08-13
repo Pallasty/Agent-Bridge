@@ -15132,6 +15132,99 @@ fn desktop_semantic_task_schema_exposes_no_host_or_coordinate_bypass() {
 }
 
 #[test]
+fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
+    assert!(codex_essential_tool(Tier::Niche, "app_control"));
+    let policy = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+    let schemas = build_registry_with_policy(Hub::builder().build(), policy).list();
+    let tool = schemas
+        .iter()
+        .find(|schema| schema.name == "app_control")
+        .expect("app_control schema");
+    assert_eq!(tool.input_schema["required"], json!(["action"]));
+    assert_eq!(tool.input_schema["properties"]["domain"]["enum"], json!(["media"]));
+    for forbidden in [
+        "command",
+        "method",
+        "bus_name",
+        "object_path",
+        "shell",
+        "x",
+        "y",
+    ] {
+        assert!(
+            tool.input_schema["properties"].get(forbidden).is_none(),
+            "unexpected raw control field {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn app_control_wrapper_preserves_verified_protocol_evidence() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-app-control-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let script = temp_dir.join("app_control.py");
+    tokio::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json
+import sys
+assert sys.argv[sys.argv.index("--domain") + 1] == "media"
+assert sys.argv[sys.argv.index("--action") + 1] == "next"
+assert sys.argv[sys.argv.index("--player") + 1] == "rhythmbox"
+assert "--dry-run" not in sys.argv
+print(json.dumps({
+  "schema": "agent_bridge.app_control.v0", "status": "verified",
+  "verdict": "verified", "recover": "proceed", "domain": "media", "action": "next",
+  "route": {"selected": {"backend": "mpris_playerctl", "layer": "application_protocol"}},
+  "before": {"track_id": "/track/1"}, "after": {"track_id": "/track/2"},
+  "verification": {"status": "verified", "predicate": "track_identity_changed"}
+}))
+"#,
+    )
+    .await
+    .expect("write script");
+    let tool = AppControlTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "action": "next", "player": "rhythmbox", "script_path": script.to_string_lossy(), "timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    assert!(!out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["route"]["selected"]["layer"], "application_protocol");
+    assert_ne!(payload["before"]["track_id"], payload["after"]["track_id"]);
+    assert_eq!(payload["mcp_wrapper"]["tool"], "app_control");
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn app_control_rejects_raw_or_unknown_control_before_exec() {
+    let tool = AppControlTool::new(Hub::builder().build());
+    for (args, code) in [
+        (json!({"action": "arbitrary_method"}), "unsupported_action"),
+        (json!({"domain": "browser", "action": "discover"}), "unsupported_domain"),
+    ] {
+        let out = tool
+            .execute(args, &ToolContext::default())
+            .await
+            .expect("execute");
+        assert!(out.is_error);
+        assert_eq!(result_text_as_json(&out)["error"]["code"], code);
+    }
+}
+
+#[test]
 fn desktop_semantic_task_maps_bounded_search_outcomes_to_actionable_recovery() {
     assert_eq!(
         desktop_semantic_task_invoke_recover(Some(&json!({
