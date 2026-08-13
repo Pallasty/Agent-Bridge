@@ -19,8 +19,15 @@ class ExecutionAdmissionTests(unittest.TestCase):
         self.plan = {
             "schema": admission.PLAN_SCHEMA,
             "provider_id": admission.PROVIDER_ID,
+            "activation_id": "gate7k-activation-0001",
+            "capability_id": "gate7k-capability-0001",
+            "capability_sha256": "12" * 32,
+            "capability_digest_bound": True,
             "plan_only": True,
             "adapter": {
+                "action": admission.ACTION,
+                "endpoint": admission.ENDPOINT,
+                "timeout_ms": admission.MAX_TTL_MS,
                 "network_allowed": False,
                 "subprocess_allowed": False,
             },
@@ -49,6 +56,7 @@ class ExecutionAdmissionTests(unittest.TestCase):
             "studio_start_called",
             "network_request_sent",
             "subprocess_started",
+            "execution_authorized",
             "runtime_admitted",
         ):
             self.assertFalse(result[field])
@@ -68,6 +76,14 @@ class ExecutionAdmissionTests(unittest.TestCase):
             self.admit(adapter_plan=opened)
         with self.assertRaisesRegex(admission.ExecutionAdmissionError, "ttl"):
             self.admit(requested_ttl_ms=30_001)
+
+    def test_binding_operation_and_timeout_are_bounded(self):
+        with self.assertRaisesRegex(admission.ExecutionAdmissionError, "binding"):
+            self.admit(adapter_plan={**self.plan, "capability_digest_bound": False})
+        with self.assertRaisesRegex(admission.ExecutionAdmissionError, "boundary"):
+            self.admit(adapter_plan={**self.plan, "adapter": {**self.plan["adapter"], "endpoint": "/other"}})
+        with self.assertRaisesRegex(admission.ExecutionAdmissionError, "timeout"):
+            self.admit(adapter_plan={**self.plan, "adapter": {**self.plan["adapter"], "timeout_ms": 30_001}})
 
 
 if __name__ == "__main__":
