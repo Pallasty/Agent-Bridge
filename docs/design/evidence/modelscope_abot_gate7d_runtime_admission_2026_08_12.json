@@ -1,0 +1,71 @@
+{
+  "schema": "agent_bridge.modelscope_abot_runtime_admission.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "evidence_lineage": {
+    "gate7a": "readiness_and_hidden_state_contract_verified",
+    "gate7b": "browser_start_stream_stop_lifecycle_verified",
+    "gate7c": "provider_native_artifact_hash_bound",
+    "artifact_receipt": "modelscope_abot_gate7c_artifact_receipt_2026_08_12.json",
+    "artifact_receipt_sha256": "1f96f670b305c83d52b7955cd933d3d5cf244ae92188167f5a2cd6c83eb4dfe1"
+  },
+  "authority_policy": {
+    "decision_schema": "agent_bridge.authority_decision.v0",
+    "required_status": "approved",
+    "owner_confirmation_required": true,
+    "required_boundary": "external_write",
+    "single_use_nonce_required": true,
+    "authority_consumed_by_preflight": false
+  },
+  "concurrency": {
+    "max_active": 1,
+    "when_busy": "reject_without_queue"
+  },
+  "cancellation": {
+    "primary": "studio_stop_then_verify_iframe_removed",
+    "hard_deadline_seconds": 180,
+    "stop_confirmation_deadline_seconds": 15,
+    "unconfirmed_stop_result": "failed_closed_no_new_session"
+  },
+  "retention": {
+    "prompt": "digest_only",
+    "session_identifier": "discard_after_stop",
+    "transport_frames": "ephemeral",
+    "artifact": "explicit_selection_only",
+    "default_cleanup": "delete_unselected"
+  },
+  "availability": {
+    "readiness_before_authority": true,
+    "readiness_after_stop": true,
+    "required_endpoints_rechecked": true,
+    "provider_unavailable_result": "blocked_without_authority_consumption"
+  },
+  "failure_recovery": {
+    "websocket_failure": "request_stop_and_verify_teardown",
+    "artifact_validation_failure": "discard_artifact_and_emit_no_rollout",
+    "client_cancellation": "request_stop_and_verify_teardown",
+    "process_loss": "mark_session_indeterminate_and_block_new_session_until_readiness",
+    "automatic_retry": false
+  },
+  "output_policy": {
+    "artifact_hash_required_for_rollout": true,
+    "evidence_class": "simulated.generated",
+    "verdict": "not_verified",
+    "external_world_effect_claimed": false,
+    "canonical_memory_write": false,
+    "response_contains_prompt_or_session_id": false
+  },
+  "exposure": {
+    "default_exposed": false,
+    "mcp_registered": false,
+    "runtime_caller_present": false,
+    "enable_env": "AB_MODELSCOPE_ABOT_RUNTIME_ENABLE",
+    "enable_required_value": "1"
+  },
+  "decision": {
+    "admission_contract_ready": true,
+    "execution_authorized": false,
+    "runtime_admitted": false,
+    "deployment_authorized": false
+  },
+  "next_gate": "gate7e_default_off_runtime_preflight_adapter"
+}

@@ -19,6 +19,7 @@ REQUIRED_ENDPOINTS = {
 }
 BROWSER_RECEIPT_SCHEMA = "agent_bridge.modelscope_abot_browser_lifecycle.v0"
 ARTIFACT_RECEIPT_SCHEMA = "agent_bridge.modelscope_abot_artifact_capture.v0"
+ADMISSION_PACKET_SCHEMA = "agent_bridge.modelscope_abot_runtime_admission.v0"
 PROVIDER_ID = "modelscope.studio.amap_cvlab.abot-world-0"
 
 
@@ -318,8 +319,16 @@ def validate_artifact_receipt(receipt: Any, receipt_path: Path) -> dict[str, Any
         violations.append("rollout_artifact_hash_mismatch")
     if rollout.get("verdict") != "not_verified":
         violations.append("rollout_verdict_must_be_not_verified")
-    request_prompt_sha = request.get("constraints", {}).get("prompt_sha256")
-    rollout_prompt_sha = rollout.get("generation_parameters", {}).get("prompt_sha256")
+    constraints = request.get("constraints", {})
+    if not isinstance(constraints, dict):
+        violations.append("request_constraints_not_object")
+        constraints = {}
+    generation_parameters = rollout.get("generation_parameters", {})
+    if not isinstance(generation_parameters, dict):
+        violations.append("rollout_generation_parameters_not_object")
+        generation_parameters = {}
+    request_prompt_sha = constraints.get("prompt_sha256")
+    rollout_prompt_sha = generation_parameters.get("prompt_sha256")
     if not request_prompt_sha or rollout_prompt_sha != request_prompt_sha:
         violations.append("rollout_prompt_binding_mismatch")
     boundary = rollout.get("truth_boundary")
@@ -346,6 +355,166 @@ def validate_artifact_receipt(receipt: Any, receipt_path: Path) -> dict[str, Any
     }
 
 
+def validate_admission_packet(packet: Any, packet_path: Path) -> dict[str, Any]:
+    violations: list[str] = []
+    if not isinstance(packet, dict):
+        violations.append("packet_not_object")
+        packet = {}
+    if packet.get("schema") != ADMISSION_PACKET_SCHEMA:
+        violations.append("schema_mismatch")
+    if packet.get("provider_id") != PROVIDER_ID:
+        violations.append("provider_id_mismatch")
+
+    lineage = packet.get("evidence_lineage")
+    if not isinstance(lineage, dict):
+        violations.append("evidence_lineage_not_object")
+        lineage = {}
+    receipt_ref = lineage.get("artifact_receipt")
+    if not isinstance(receipt_ref, str) or not receipt_ref:
+        violations.append("artifact_receipt_ref_missing")
+    else:
+        evidence_root = packet_path.resolve().parent
+        receipt_path = (evidence_root / receipt_ref).resolve()
+        if receipt_path.parent != evidence_root:
+            violations.append("artifact_receipt_ref_outside_evidence_root")
+        elif not receipt_path.is_file():
+            violations.append("artifact_receipt_file_missing")
+        elif hashlib.sha256(receipt_path.read_bytes()).hexdigest() != lineage.get(
+            "artifact_receipt_sha256"
+        ):
+            violations.append("artifact_receipt_sha256_mismatch")
+
+    authority = packet.get("authority_policy")
+    if not isinstance(authority, dict):
+        violations.append("authority_policy_not_object")
+        authority = {}
+    expected_authority = {
+        "decision_schema": "agent_bridge.authority_decision.v0",
+        "required_status": "approved",
+        "owner_confirmation_required": True,
+        "required_boundary": "external_write",
+        "single_use_nonce_required": True,
+        "authority_consumed_by_preflight": False,
+    }
+    for field, expected in expected_authority.items():
+        if authority.get(field) != expected:
+            violations.append(f"authority_{field}_mismatch")
+
+    concurrency = packet.get("concurrency")
+    if not isinstance(concurrency, dict):
+        violations.append("concurrency_not_object")
+        concurrency = {}
+    if concurrency.get("max_active") != 1:
+        violations.append("concurrency_max_active_must_be_one")
+    if concurrency.get("when_busy") != "reject_without_queue":
+        violations.append("concurrency_busy_policy_mismatch")
+
+    cancellation = packet.get("cancellation")
+    if not isinstance(cancellation, dict):
+        violations.append("cancellation_not_object")
+        cancellation = {}
+    if cancellation.get("primary") != "studio_stop_then_verify_iframe_removed":
+        violations.append("cancellation_primary_mismatch")
+    for field in ("hard_deadline_seconds", "stop_confirmation_deadline_seconds"):
+        value = cancellation.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            violations.append(f"cancellation_{field}_invalid")
+    if cancellation.get("unconfirmed_stop_result") != "failed_closed_no_new_session":
+        violations.append("cancellation_unconfirmed_stop_policy_mismatch")
+
+    retention = packet.get("retention")
+    if not isinstance(retention, dict):
+        violations.append("retention_not_object")
+        retention = {}
+    expected_retention = {
+        "prompt": "digest_only",
+        "session_identifier": "discard_after_stop",
+        "transport_frames": "ephemeral",
+        "artifact": "explicit_selection_only",
+        "default_cleanup": "delete_unselected",
+    }
+    for field, expected in expected_retention.items():
+        if retention.get(field) != expected:
+            violations.append(f"retention_{field}_mismatch")
+
+    availability = packet.get("availability")
+    if not isinstance(availability, dict):
+        violations.append("availability_not_object")
+        availability = {}
+    for field in ("readiness_before_authority", "readiness_after_stop", "required_endpoints_rechecked"):
+        if availability.get(field) is not True:
+            violations.append(f"availability_{field}_not_true")
+
+    recovery = packet.get("failure_recovery")
+    if not isinstance(recovery, dict):
+        violations.append("failure_recovery_not_object")
+        recovery = {}
+    expected_recovery = {
+        "websocket_failure": "request_stop_and_verify_teardown",
+        "artifact_validation_failure": "discard_artifact_and_emit_no_rollout",
+        "client_cancellation": "request_stop_and_verify_teardown",
+        "process_loss": "mark_session_indeterminate_and_block_new_session_until_readiness",
+        "automatic_retry": False,
+    }
+    for field, expected in expected_recovery.items():
+        if recovery.get(field) != expected:
+            violations.append(f"failure_recovery_{field}_mismatch")
+
+    output = packet.get("output_policy")
+    if not isinstance(output, dict):
+        violations.append("output_policy_not_object")
+        output = {}
+    expected_output = {
+        "artifact_hash_required_for_rollout": True,
+        "evidence_class": "simulated.generated",
+        "verdict": "not_verified",
+        "external_world_effect_claimed": False,
+    }
+    for field, expected in expected_output.items():
+        if output.get(field) != expected:
+            violations.append(f"output_{field}_mismatch")
+    if output.get("canonical_memory_write") is not False:
+        violations.append("output_canonical_memory_write_must_be_false")
+    if output.get("response_contains_prompt_or_session_id") is not False:
+        violations.append("output_sensitive_response_must_be_false")
+
+    exposure = packet.get("exposure")
+    if not isinstance(exposure, dict):
+        violations.append("exposure_not_object")
+        exposure = {}
+    expected_exposure = {
+        "default_exposed": False,
+        "mcp_registered": False,
+        "runtime_caller_present": False,
+        "enable_env": "AB_MODELSCOPE_ABOT_RUNTIME_ENABLE",
+        "enable_required_value": "1",
+    }
+    for field, expected in expected_exposure.items():
+        if exposure.get(field) != expected:
+            violations.append(f"exposure_{field}_mismatch")
+
+    decision = packet.get("decision")
+    if not isinstance(decision, dict):
+        violations.append("decision_not_object")
+        decision = {}
+    if decision.get("admission_contract_ready") is not True:
+        violations.append("admission_contract_not_ready")
+    for field in ("execution_authorized", "runtime_admitted", "deployment_authorized"):
+        if decision.get(field) is not False:
+            violations.append(f"decision_{field}_must_be_false")
+
+    valid = not violations
+    return {
+        "schema": "agent_bridge.modelscope_abot_runtime_admission_validation.v0",
+        "valid": valid,
+        "violations": violations,
+        "admission_contract_ready": valid,
+        "execution_authorized": False,
+        "runtime_admitted": False,
+        "mcp_registered": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
@@ -353,8 +522,12 @@ def main() -> int:
     parser.add_argument("--session-contract", action="store_true")
     parser.add_argument("--validate-browser-receipt", type=Path)
     parser.add_argument("--validate-artifact-receipt", type=Path)
+    parser.add_argument("--validate-admission-packet", type=Path)
     args = parser.parse_args()
-    if args.validate_artifact_receipt:
+    if args.validate_admission_packet:
+        packet = json.loads(args.validate_admission_packet.read_text(encoding="utf-8"))
+        result = validate_admission_packet(packet, args.validate_admission_packet)
+    elif args.validate_artifact_receipt:
         receipt = json.loads(args.validate_artifact_receipt.read_text(encoding="utf-8"))
         result = validate_artifact_receipt(receipt, args.validate_artifact_receipt)
     elif args.validate_browser_receipt:
