@@ -15055,6 +15055,58 @@ async fn desktop_semantic_task_rejects_invalid_postcondition_inputs_before_actio
 }
 
 #[tokio::test]
+async fn desktop_semantic_task_requires_fresh_snapshot_before_real_invoke() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-desktop-semantic-task-stale-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+    let snapshot_script = temp_dir.join("desktop_snapshot.py");
+    tokio::fs::write(
+        &snapshot_script,
+        r#"#!/usr/bin/env python3
+import json
+print(json.dumps({
+    "schema": "desktop_snapshot/v0.5",
+    "captured_at": 1,
+    "window_count": 0,
+    "atspi": {"available": True, "apps": []}
+}))
+"#,
+    )
+    .await
+    .expect("write snapshot script");
+
+    let tool = DesktopSemanticTaskTool::new(Hub::builder().build());
+    let out = tool
+        .execute(
+            json!({
+                "name": "Save",
+                "cage_pid": 12345,
+                "expect": "element_appeared",
+                "snapshot_script_path": snapshot_script.to_string_lossy(),
+                "invoke_script_path": temp_dir.join("must-not-run.py").to_string_lossy(),
+                "snapshot_timeout_ms": 5000
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+    assert!(out.is_error);
+    let payload = result_text_as_json(&out);
+    assert_eq!(payload["status"], "preflight_failed");
+    assert_eq!(payload["recover"], "retry");
+    assert_eq!(payload["error"]["code"], "fresh_observation_unavailable");
+    assert!(payload["action"].is_null());
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
 async fn desktop_semantic_task_composes_snapshot_invoke_and_verify_in_cage() {
     let temp_dir = std::env::temp_dir().join(format!(
         "ab-desktop-semantic-task-{}-{}",
@@ -15073,9 +15125,11 @@ async fn desktop_semantic_task_composes_snapshot_invoke_and_verify_in_cage() {
         r#"#!/usr/bin/env python3
 import json
 import sys
+import time
 assert "--no-screenshot" in sys.argv
 print(json.dumps({
     "schema": "desktop_snapshot/v0.5",
+    "captured_at": int(time.time()),
     "window_count": 1,
     "atspi": {"available": True, "apps": [{
         "name": "toy_button",
@@ -15159,11 +15213,17 @@ print(json.dumps({
     assert_eq!(payload["recover"], "proceed");
     assert_eq!(payload["safety"]["mode"], "isolated");
     assert_eq!(payload["safety"]["host_mutation_exposed"], false);
+    assert_eq!(payload["preflight"]["schema"], DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA);
+    assert_eq!(payload["preflight"]["observation"]["fresh_at_return"], true);
+    assert!(payload["preflight"]["observation"]["observation_id"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("obs-desktop-linux-")));
     assert_eq!(
         payload["preflight"]["target_matches_in_bounded_snapshot"],
         1
     );
     assert_eq!(payload["action"]["found"]["app_pid"], 222);
+    assert_eq!(payload["action"]["dispatch"], "dispatched");
     assert_eq!(payload["verification"]["observed_count"], 1);
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;

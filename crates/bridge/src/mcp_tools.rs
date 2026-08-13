@@ -7031,6 +7031,9 @@ impl McpTool for DesktopSemanticTaskTool {
             "include_atspi": true,
             "max_elements": 80,
             "atspi_budget": 0.5,
+            "semantic_bus": true,
+            "semantic_include_raw": true,
+            "semantic_max_age_ms": 15000,
             "timeout_ms": args.get("snapshot_timeout_ms").cloned().unwrap_or_else(|| json!(12000))
         });
         desktop_semantic_task_copy(&args, &mut snapshot_args, "cwd", "cwd");
@@ -7049,6 +7052,29 @@ impl McpTool for DesktopSemanticTaskTool {
             snapshot_result.is_error,
             &args,
         );
+        let observation_ref = snapshot_payload
+            .as_ref()
+            .and_then(desktop_semantic_task_observation_ref);
+        if !dry_run && observation_ref.is_none() {
+            let mut result = ToolResult::json_text(&json!({
+                "schema": DESKTOP_SEMANTIC_TASK_SCHEMA,
+                "status": "preflight_failed",
+                "verdict": "error",
+                "recover": "retry",
+                "safety": desktop_semantic_task_safety(dry_run, cage_pid),
+                "selector": selector,
+                "expect": expect,
+                "preflight": preflight,
+                "action": Value::Null,
+                "verification": Value::Null,
+                "error": {
+                    "code": "fresh_observation_unavailable",
+                    "message": "a real invoke requires a verified, fresh semantic desktop observation"
+                }
+            }));
+            result.is_error = true;
+            return Ok(result);
+        }
 
         let mut invoke_args = json!({
             "dry_run": dry_run,
@@ -7059,6 +7085,9 @@ impl McpTool for DesktopSemanticTaskTool {
         }
         if let Some(pid) = cage_pid {
             invoke_args["cage_pid"] = json!(pid);
+        }
+        if let Some(reference) = observation_ref {
+            invoke_args["observation_ref"] = reference;
         }
         desktop_semantic_task_copy(
             &args,
@@ -7227,6 +7256,7 @@ fn desktop_semantic_task_preflight_summary(
         });
     }
 
+    let raw_snapshot = payload.get("raw_snapshot").unwrap_or(payload);
     let app_match = args
         .get("app")
         .and_then(Value::as_str)
@@ -7239,7 +7269,7 @@ fn desktop_semantic_task_preflight_summary(
         .get("name")
         .and_then(Value::as_str)
         .map(str::to_lowercase);
-    let apps = payload
+    let apps = raw_snapshot
         .get("atspi")
         .and_then(|value| value.get("apps"))
         .and_then(Value::as_array);
@@ -7289,17 +7319,60 @@ fn desktop_semantic_task_preflight_summary(
             }
         }
     }
+    let fresh_at_return = payload
+        .get("observation")
+        .and_then(|value| value.get("freshness"))
+        .and_then(|value| value.get("fresh_at_return"))
+        .and_then(Value::as_bool);
+    let semantic_verified = payload
+        .get("verification")
+        .and_then(|value| value.get("verdict"))
+        .and_then(Value::as_str)
+        .is_some_and(|verdict| verdict == "verified");
     json!({
-        "status": "observed",
+        "status": if semantic_verified && fresh_at_return != Some(false) { "observed" } else { "degraded" },
         "read_only": true,
         "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
-        "window_count": payload.get("window_count").cloned().unwrap_or(Value::Null),
-        "atspi_available": payload.get("atspi").and_then(|value| value.get("available")).cloned().unwrap_or(Value::Null),
+        "source_schema": payload.get("source_schema").cloned().unwrap_or_else(|| raw_snapshot.get("schema").cloned().unwrap_or(Value::Null)),
+        "window_count": raw_snapshot.get("window_count").cloned().unwrap_or(Value::Null),
+        "atspi_available": raw_snapshot.get("atspi").and_then(|value| value.get("available")).cloned().unwrap_or(Value::Null),
         "atspi_app_count": apps.map(|apps| apps.len()).unwrap_or(0),
         "target_matches_in_bounded_snapshot": target_matches,
         "timed_out_apps": timed_out_apps,
-        "coverage_complete": timed_out_apps == 0
+        "coverage_complete": timed_out_apps == 0,
+        "observation": {
+            "observation_id": payload.get("observation").and_then(|value| value.get("observation_id")).cloned().unwrap_or(Value::Null),
+            "fresh_at_return": fresh_at_return,
+            "age_ms_at_return": payload.get("observation").and_then(|value| value.get("freshness")).and_then(|value| value.get("age_ms_at_return")).cloned().unwrap_or(Value::Null),
+            "max_age_ms": payload.get("observation").and_then(|value| value.get("freshness")).and_then(|value| value.get("max_age_ms")).cloned().unwrap_or(Value::Null)
+        }
     })
+}
+
+fn desktop_semantic_task_observation_ref(payload: &Value) -> Option<Value> {
+    if payload.get("schema").and_then(Value::as_str) != Some(DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA)
+        || payload
+            .get("verification")
+            .and_then(|value| value.get("verdict"))
+            .and_then(Value::as_str)
+            != Some("verified")
+        || payload
+            .get("observation")
+            .and_then(|value| value.get("freshness"))
+            .and_then(|value| value.get("fresh_at_return"))
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return None;
+    }
+    let observation = payload.get("observation")?;
+    let captured_at_unix_ms = payload.get("captured_at")?.as_u64()?.checked_mul(1_000)?;
+    Some(json!({
+        "observation_id": observation.get("observation_id")?.as_str()?,
+        "content_sha256": observation.get("content_hash")?.get("value")?.as_str()?,
+        "captured_at_unix_ms": captured_at_unix_ms,
+        "max_age_ms": observation.get("freshness")?.get("max_age_ms")?.as_u64()?
+    }))
 }
 
 fn desktop_semantic_task_action_summary(payload: Option<&Value>) -> Value {
@@ -7314,6 +7387,7 @@ fn desktop_semantic_task_action_summary(payload: Option<&Value>) -> Value {
         "before": payload.get("before").cloned().unwrap_or(Value::Null),
         "detail": payload.get("detail").cloned().unwrap_or(Value::Null),
         "error": payload.get("error").cloned().unwrap_or(Value::Null),
+        "dispatch": payload.get("action_outcome").and_then(|value| value.get("dispatch_status")).cloned().unwrap_or(Value::Null),
         "wrapper": payload.get("mcp_wrapper").cloned().unwrap_or(Value::Null)
     })
 }
