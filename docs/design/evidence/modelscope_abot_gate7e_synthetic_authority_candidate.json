@@ -1,0 +1,22 @@
+{
+  "schema": "agent_bridge.modelscope_abot_preflight_candidate.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "authority": {
+    "schema": "agent_bridge.authority_decision.v0",
+    "decision_id": "synthetic-gate7e-authority",
+    "cognitive_decision_id": "synthetic-gate7e-cognitive-decision",
+    "body_id": "modelscope-public-studio",
+    "status": "approved",
+    "boundary": "external_write",
+    "owner_confirmation": true,
+    "lease_id": null
+  },
+  "nonce": {
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scope": "modelscope.studio.amap_cvlab.abot-world-0",
+    "consumed": false,
+    "expires_at_unix_ms": 4102444800000
+  },
+  "synthetic_fixture": true,
+  "execution_authorized": false
+}

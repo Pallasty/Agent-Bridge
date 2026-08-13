@@ -239,6 +239,152 @@ class ModelScopeAbotProviderTests(unittest.TestCase):
         self.assertIn("failure_recovery_automatic_retry_mismatch", result["violations"])
         self.assertIn("output_canonical_memory_write_must_be_false", result["violations"])
 
+    def test_runtime_preflight_can_pass_without_authorizing_or_consuming(self):
+        packet, packet_path = self._gate7d_packet()
+        candidate, _ = self._gate7e_candidate()
+        candidate["synthetic_fixture"] = False
+        result = MODULE.runtime_preflight(
+            packet,
+            packet_path,
+            candidate,
+            self._ready_snapshot(),
+            active_sessions=0,
+            session_state_authoritative=True,
+            runtime_opted_in=True,
+            now_unix_ms=1_786_588_542_277,
+        )
+        self.assertTrue(result["preflight_passed"])
+        self.assertEqual(result["blockers"], [])
+        self.assertFalse(result["authority_consumed"])
+        self.assertFalse(result["nonce_consumed"])
+        self.assertFalse(result["studio_start_called"])
+        self.assertFalse(result["execution_authorized"])
+        self.assertFalse(result["runtime_admitted"])
+        self.assertEqual(result["next_gate"], "gate7f_single_use_authority_consumption_contract")
+
+    def test_runtime_preflight_default_off_blocks_without_consuming_candidate(self):
+        packet, packet_path = self._gate7d_packet()
+        candidate, candidate_path = self._gate7e_candidate()
+        before = candidate_path.read_bytes()
+        result = MODULE.runtime_preflight(
+            packet,
+            packet_path,
+            candidate,
+            self._ready_snapshot(),
+            active_sessions=0,
+            session_state_authoritative=False,
+            runtime_opted_in=False,
+            now_unix_ms=1_786_588_542_277,
+        )
+        self.assertFalse(result["preflight_passed"])
+        self.assertEqual(
+            result["blockers"],
+            [
+                "synthetic_candidate_not_executable",
+                "session_state_not_authoritative",
+                "runtime_opt_in_missing",
+            ],
+        )
+        self.assertEqual(candidate_path.read_bytes(), before)
+        self.assertFalse(result["nonce_consumed"])
+
+    def test_runtime_preflight_never_accepts_checked_in_synthetic_candidate(self):
+        packet, packet_path = self._gate7d_packet()
+        candidate, _ = self._gate7e_candidate()
+        result = MODULE.runtime_preflight(
+            packet,
+            packet_path,
+            candidate,
+            self._ready_snapshot(),
+            active_sessions=0,
+            session_state_authoritative=True,
+            runtime_opted_in=True,
+            now_unix_ms=1_786_588_542_277,
+        )
+        self.assertFalse(result["preflight_passed"])
+        self.assertEqual(result["blockers"], ["synthetic_candidate_not_executable"])
+        self.assertFalse(result["checks"]["authority_candidate_structurally_valid"])
+        self.assertFalse(result["checks"]["authority_authenticity_verified"])
+        self.assertFalse(result["checks"]["nonce_store_checked"])
+
+    def test_committed_gate7e_live_receipt_keeps_runtime_closed(self):
+        path = (
+            Path(__file__).parents[1]
+            / "docs"
+            / "design"
+            / "evidence"
+            / "modelscope_abot_gate7e_live_preflight_2026_08_12.json"
+        )
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        self.assertFalse(receipt["preflight_passed"])
+        self.assertEqual(receipt["cli_exit_code"], 2)
+        self.assertTrue(receipt["checks"]["provider_ready"])
+        self.assertFalse(receipt["checks"]["provider_idle"])
+        self.assertFalse(receipt["checks"]["session_state_authoritative"])
+        self.assertFalse(receipt["authority_consumed"])
+        self.assertFalse(receipt["nonce_consumed"])
+        self.assertFalse(receipt["studio_start_called"])
+        self.assertFalse(receipt["runtime_admitted"])
+
+    def test_runtime_preflight_rejects_expired_nonce_busy_and_unready_provider(self):
+        packet, packet_path = self._gate7d_packet()
+        candidate, _ = self._gate7e_candidate()
+        candidate["nonce"]["expires_at_unix_ms"] = 10
+        readiness = self._ready_snapshot()
+        readiness["ready"] = False
+        result = MODULE.runtime_preflight(
+            packet,
+            packet_path,
+            candidate,
+            readiness,
+            active_sessions=1,
+            session_state_authoritative=True,
+            runtime_opted_in=True,
+            now_unix_ms=11,
+        )
+        self.assertFalse(result["preflight_passed"])
+        self.assertIn("nonce_expired_or_invalid", result["blockers"])
+        self.assertIn("provider_not_ready", result["blockers"])
+        self.assertIn("provider_busy", result["blockers"])
+
+    def test_runtime_preflight_fails_closed_on_malformed_candidate(self):
+        packet, packet_path = self._gate7d_packet()
+        result = MODULE.runtime_preflight(
+            packet,
+            packet_path,
+            {"schema": "wrong", "provider_id": "wrong", "authority": [], "nonce": []},
+            self._ready_snapshot(),
+            active_sessions=-1,
+            session_state_authoritative=False,
+            runtime_opted_in=True,
+            now_unix_ms=1,
+        )
+        self.assertFalse(result["preflight_passed"])
+        self.assertIn("candidate_schema_mismatch", result["blockers"])
+        self.assertIn("authority_not_object", result["blockers"])
+        self.assertIn("nonce_not_object", result["blockers"])
+        self.assertIn("active_sessions_invalid", result["blockers"])
+
+    def _gate7e_candidate(self):
+        path = (
+            Path(__file__).parents[1]
+            / "docs"
+            / "design"
+            / "evidence"
+            / "modelscope_abot_gate7e_synthetic_authority_candidate.json"
+        )
+        return json.loads(path.read_text(encoding="utf-8")), path
+
+    def _ready_snapshot(self):
+        return {
+            "schema": "agent_bridge.modelscope_abot_readiness.v0",
+            "provider_id": MODULE.PROVIDER_ID,
+            "ready": True,
+            "missing_endpoints": [],
+            "status_text": "ready",
+            "runtime_admitted": False,
+        }
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import re
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +22,7 @@ REQUIRED_ENDPOINTS = {
 BROWSER_RECEIPT_SCHEMA = "agent_bridge.modelscope_abot_browser_lifecycle.v0"
 ARTIFACT_RECEIPT_SCHEMA = "agent_bridge.modelscope_abot_artifact_capture.v0"
 ADMISSION_PACKET_SCHEMA = "agent_bridge.modelscope_abot_runtime_admission.v0"
+PREFLIGHT_CANDIDATE_SCHEMA = "agent_bridge.modelscope_abot_preflight_candidate.v0"
 PROVIDER_ID = "modelscope.studio.amap_cvlab.abot-world-0"
 
 
@@ -515,6 +518,122 @@ def validate_admission_packet(packet: Any, packet_path: Path) -> dict[str, Any]:
     }
 
 
+def runtime_preflight(
+    packet: Any,
+    packet_path: Path,
+    candidate: Any,
+    readiness: Any,
+    *,
+    active_sessions: int,
+    session_state_authoritative: bool,
+    runtime_opted_in: bool,
+    now_unix_ms: int,
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    packet_validation = validate_admission_packet(packet, packet_path)
+    if not packet_validation["valid"]:
+        blockers.append("admission_packet_invalid")
+
+    if not isinstance(candidate, dict):
+        blockers.append("candidate_not_object")
+        candidate = {}
+    if candidate.get("schema") != PREFLIGHT_CANDIDATE_SCHEMA:
+        blockers.append("candidate_schema_mismatch")
+    if candidate.get("provider_id") != PROVIDER_ID:
+        blockers.append("candidate_provider_mismatch")
+    if candidate.get("synthetic_fixture") is True:
+        blockers.append("synthetic_candidate_not_executable")
+    if candidate.get("execution_authorized") is not False:
+        blockers.append("candidate_execution_authorized_must_be_false")
+
+    authority = candidate.get("authority")
+    if not isinstance(authority, dict):
+        blockers.append("authority_not_object")
+        authority = {}
+    expected_authority = {
+        "schema": "agent_bridge.authority_decision.v0",
+        "status": "approved",
+        "boundary": "external_write",
+        "owner_confirmation": True,
+    }
+    for field, expected in expected_authority.items():
+        if authority.get(field) != expected:
+            blockers.append(f"authority_{field}_mismatch")
+    for field in ("decision_id", "cognitive_decision_id", "body_id"):
+        if not isinstance(authority.get(field), str) or not authority[field].strip():
+            blockers.append(f"authority_{field}_missing")
+
+    nonce = candidate.get("nonce")
+    if not isinstance(nonce, dict):
+        blockers.append("nonce_not_object")
+        nonce = {}
+    nonce_digest = nonce.get("sha256")
+    if not isinstance(nonce_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", nonce_digest):
+        blockers.append("nonce_digest_invalid")
+    if nonce.get("scope") != PROVIDER_ID:
+        blockers.append("nonce_scope_mismatch")
+    if nonce.get("consumed") is not False:
+        blockers.append("nonce_already_consumed_or_unknown")
+    expires_at = nonce.get("expires_at_unix_ms")
+    if not isinstance(expires_at, int) or isinstance(expires_at, bool) or expires_at <= now_unix_ms:
+        blockers.append("nonce_expired_or_invalid")
+
+    if not isinstance(readiness, dict):
+        blockers.append("readiness_not_object")
+        readiness = {}
+    if readiness.get("schema") != "agent_bridge.modelscope_abot_readiness.v0":
+        blockers.append("readiness_schema_mismatch")
+    if readiness.get("provider_id") != PROVIDER_ID:
+        blockers.append("readiness_provider_mismatch")
+    if readiness.get("ready") is not True or readiness.get("missing_endpoints") != []:
+        blockers.append("provider_not_ready")
+
+    if not isinstance(active_sessions, int) or isinstance(active_sessions, bool) or active_sessions < 0:
+        blockers.append("active_sessions_invalid")
+    elif active_sessions != 0:
+        blockers.append("provider_busy")
+    if not session_state_authoritative:
+        blockers.append("session_state_not_authoritative")
+    if not runtime_opted_in:
+        blockers.append("runtime_opt_in_missing")
+
+    preflight_passed = not blockers
+    return {
+        "schema": "agent_bridge.modelscope_abot_runtime_preflight.v0",
+        "provider_id": PROVIDER_ID,
+        "preflight_passed": preflight_passed,
+        "blockers": blockers,
+        "checks": {
+            "admission_packet_valid": packet_validation["valid"],
+            "authority_candidate_structurally_valid": not any(
+                blocker.startswith("authority_") or blocker.startswith("candidate_")
+                or blocker == "synthetic_candidate_not_executable"
+                for blocker in blockers
+            ),
+            "authority_authenticity_verified": False,
+            "nonce_candidate_structurally_valid": not any(
+                blocker.startswith("nonce_") for blocker in blockers
+            ),
+            "nonce_store_checked": False,
+            "provider_ready": "provider_not_ready" not in blockers,
+            "provider_idle": (
+                "provider_busy" not in blockers
+                and "active_sessions_invalid" not in blockers
+                and session_state_authoritative
+            ),
+            "session_state_authoritative": session_state_authoritative,
+            "runtime_opted_in": runtime_opted_in,
+        },
+        "authority_consumed": False,
+        "nonce_consumed": False,
+        "studio_start_called": False,
+        "execution_authorized": False,
+        "runtime_admitted": False,
+        "mcp_registered": False,
+        "next_gate": "gate7f_single_use_authority_consumption_contract" if preflight_passed else None,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
@@ -523,8 +642,31 @@ def main() -> int:
     parser.add_argument("--validate-browser-receipt", type=Path)
     parser.add_argument("--validate-artifact-receipt", type=Path)
     parser.add_argument("--validate-admission-packet", type=Path)
+    parser.add_argument("--runtime-preflight", action="store_true")
+    parser.add_argument("--authority-candidate", type=Path)
+    parser.add_argument("--admission-packet", type=Path)
+    parser.add_argument("--active-sessions", type=int, default=0)
+    parser.add_argument("--now-unix-ms", type=int)
     args = parser.parse_args()
-    if args.validate_admission_packet:
+    if args.runtime_preflight:
+        if not args.authority_candidate or not args.admission_packet or args.now_unix_ms is None:
+            parser.error(
+                "--runtime-preflight requires --authority-candidate, --admission-packet, and --now-unix-ms"
+            )
+        packet = json.loads(args.admission_packet.read_text(encoding="utf-8"))
+        candidate = json.loads(args.authority_candidate.read_text(encoding="utf-8"))
+        readiness = ModelScopeAbotProvider(args.base_url).readiness()
+        result = runtime_preflight(
+            packet,
+            args.admission_packet,
+            candidate,
+            readiness,
+            active_sessions=args.active_sessions,
+            session_state_authoritative=False,
+            runtime_opted_in=os.environ.get("AB_MODELSCOPE_ABOT_RUNTIME_ENABLE") == "1",
+            now_unix_ms=args.now_unix_ms,
+        )
+    elif args.validate_admission_packet:
         packet = json.loads(args.validate_admission_packet.read_text(encoding="utf-8"))
         result = validate_admission_packet(packet, args.validate_admission_packet)
     elif args.validate_artifact_receipt:
@@ -542,7 +684,8 @@ def main() -> int:
             stream.write(rendered)
     else:
         print(rendered, end="")
-    return 0 if result.get("ready", result.get("valid", True)) else 2
+    success = result.get("ready", result.get("valid", result.get("preflight_passed", True)))
+    return 0 if success else 2
 
 
 if __name__ == "__main__":

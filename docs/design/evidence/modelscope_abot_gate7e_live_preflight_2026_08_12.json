@@ -1,0 +1,30 @@
+{
+  "schema": "agent_bridge.modelscope_abot_runtime_preflight.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-12",
+  "preflight_passed": false,
+  "blockers": [
+    "synthetic_candidate_not_executable",
+    "session_state_not_authoritative",
+    "runtime_opt_in_missing"
+  ],
+  "checks": {
+    "admission_packet_valid": true,
+    "authority_candidate_structurally_valid": false,
+    "authority_authenticity_verified": false,
+    "nonce_candidate_structurally_valid": true,
+    "nonce_store_checked": false,
+    "provider_ready": true,
+    "provider_idle": false,
+    "session_state_authoritative": false,
+    "runtime_opted_in": false
+  },
+  "authority_consumed": false,
+  "nonce_consumed": false,
+  "studio_start_called": false,
+  "execution_authorized": false,
+  "runtime_admitted": false,
+  "mcp_registered": false,
+  "next_gate": null,
+  "cli_exit_code": 2
+}
