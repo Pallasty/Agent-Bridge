@@ -69,3 +69,9 @@ schemas and bounded text violations. `MediaContext::changed_from` provides a
 small value-based change detector so a producer can skip duplicate mobile
 updates. Clearing or replacing the context is explicit in
 `mobile_projection_update`; no control callback or authority field is added.
+
+The lifecycle tools are intentionally exposed only by the named
+`AGENT_BRIDGE_TOOLSET=codex-mobile-projection` profile. `codex-essential` and
+`codex-lean` retain status/wait or other read-only mobile tools but must not
+silently gain projection start/update/stop. After changing the toolset, the MCP
+process must be reconnected before its schema changes are visible.

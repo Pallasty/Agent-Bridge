@@ -7857,6 +7857,19 @@ fn codex_mobile_projection_is_explicit_and_bounded() {
             "schema missing from explicit mobile projection profile: {tool}"
         );
     }
+    let start_schema = schemas
+        .iter()
+        .find(|schema| schema.name == "mobile_projection_start")
+        .expect("mobile projection start schema");
+    assert_eq!(
+        start_schema.input_schema["properties"]["media_context"]["description"],
+        json!("Optional read-only agent_bridge.media_context.v0 payload; it grants no control authority.")
+    );
+    let update_schema = schemas
+        .iter()
+        .find(|schema| schema.name == "mobile_projection_update")
+        .expect("mobile projection update schema");
+    assert!(update_schema.input_schema["properties"].get("media_context").is_some());
 }
 
 #[test]
