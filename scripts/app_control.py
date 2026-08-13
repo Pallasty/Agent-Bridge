@@ -263,6 +263,24 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "route": route_summary(bool(players)), "session_env_restored": sorted(restored),
             "duration_ms": round((time.monotonic() - started) * 1000),
         }
+    # Read-only playlist observation may probe each discovered player when no
+    # selector was supplied. Some MPRIS clients advertise the interface but
+    # fail the ActivePlaylist getter; do not let that unrelated client shadow
+    # a healthy player. Control actions remain strictly single-target.
+    if action == "playlist_current" and not player_selector and len(players) > 1:
+        attempts = []
+        for candidate in players:
+            active_playlist, active_error = current_playlist(candidate, env)
+            if active_error:
+                attempts.append({"player": candidate, "status": "observation_failed", "error": active_error})
+                continue
+            after, observe_error = observe(candidate, env)
+            if after is None:
+                attempts.append({"player": candidate, "status": "observation_failed", "error": observe_error or {"code": "observation_failed"}})
+                continue
+            return {"schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed", "domain": "media", "action": action, "read_only": True, "player": candidate, "active_playlist": active_playlist, "track_summary": after, "selection": {"policy": "first_verified_playlist_current", "attempts": attempts}, "route": route_summary(True), "verification": {"status": "verified", "predicate": "active_playlist_observed", "observation_error": observe_error}}
+        return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "players": players, "selection": {"policy": "first_verified_playlist_current", "attempts": attempts}, "route": route_summary(bool(players)), "error": {"code": "all_players_observation_failed", "message": "no discovered MPRIS player completed playlist_current"}}
+
     player, select_error = select_player(players, player_selector)
     if select_error:
         return {

@@ -170,6 +170,51 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(payload["status"], "observation_failed")
         self.assertEqual(payload["error"]["code"], "active_playlist_observation_failed")
 
+    def test_playlist_current_probes_next_player_after_read_only_getter_failure(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        def fake_run(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-l"]: return 0, "chromium.instance\nrhythmbox", ""
+            if argv[0] == "gdbus" and "chromium.instance" in " ".join(argv): return 1, "", "Get failed"
+            if argv == ["playerctl", "-p", "rhythmbox", "status"]: return 0, "Paused", ""
+            if argv[:4] == ["playerctl", "-p", "rhythmbox", "metadata"]: return 0, "/track\tArtist\tTitle", ""
+            if argv == ["playerctl", "-p", "rhythmbox", "volume"]: return 0, "1.0", ""
+            if argv == ["playerctl", "-p", "rhythmbox", "position"]: return 0, "2.0", ""
+            if argv[:4] == ["playerctl", "-p", "rhythmbox", "metadata"]: return 0, "2000000", ""
+            if argv[-2:] == ["--format", "{{mpris:length}}"]: return 0, "2000000", ""
+            if argv[0] == "gdbus": return 0, "(true, (objectpath '/playlist', 'List'))", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("playlist_current", None, False, 0.2)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(payload["verdict"], "verified")
+        self.assertEqual(payload["player"], "rhythmbox")
+        self.assertEqual(payload["selection"]["attempts"][0]["status"], "observation_failed")
+
+    def test_control_action_does_not_probe_multiple_players(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        calls = []
+        def fake_run(argv, env, timeout=2.0):
+            calls.append(argv)
+            if argv == ["playerctl", "-l"]: return 0, "chromium.instance\nrhythmbox", ""
+            if argv[0] == "playerctl" and argv[-1] == "status": return 0, "Paused", ""
+            if argv[0] == "playerctl" and "metadata" in argv: return 0, "/track\tArtist\tTitle", ""
+            if argv[0] == "playerctl" and argv[-1] == "volume": return 0, "1.0", ""
+            if argv[0] == "playerctl" and argv[-1] == "position": return 0, "2.0", ""
+            if argv[0] == "gdbus": return 0, "(true, (objectpath '/', ''))", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("pause", None, True, 0.2)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(payload["verdict"], "verified")
+        self.assertEqual(payload["player"], "chromium.instance")
+        self.assertFalse(any(call[0] == "playerctl" and call[-1] == "pause" for call in calls))
+
     def test_actions_fail_closed_when_no_mpris_player_exists(self):
         mod = load_module()
         old_run, old_which = mod.run, mod.shutil.which
