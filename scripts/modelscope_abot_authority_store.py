@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ CANDIDATE_SCHEMA = "agent_bridge.modelscope_abot_preflight_candidate.v0"
 AUTHORITY_SCHEMA = "agent_bridge.authority_decision.v0"
 AUTHENTICITY_SCHEMA = "agent_bridge.modelscope_abot_authority_hmac.v0"
 CLAIM_SCHEMA = "agent_bridge.modelscope_abot_single_use_claim.v0"
+_INIT_LOCK = threading.Lock()
 
 
 class AuthorityStoreError(ValueError):
@@ -154,28 +156,22 @@ class SingleUseAuthorityStore:
         self.path = path.resolve()
         if not self.path.parent.is_dir():
             raise AuthorityStoreError("authority store parent missing")
+        with _INIT_LOCK:
+            connection = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
+            connection.execute("pragma busy_timeout=5000")
+            connection.execute("pragma journal_mode=WAL")
+            connection.execute("pragma synchronous=FULL")
+            connection.execute("pragma foreign_keys=ON")
+            connection.execute("create table if not exists consumed_authorities (nonce_sha256 text primary key, provider_id text not null, decision_id text not null, candidate_sha256 text not null, consumed_at_unix_ms integer not null)")
+            connection.execute("create table if not exists provider_session_leases (provider_id text primary key, lease_id text not null unique, nonce_sha256 text not null, candidate_sha256 text not null, reserved_at_unix_ms integer not null, expires_at_unix_ms integer not null, foreign key(nonce_sha256) references consumed_authorities(nonce_sha256))")
+            connection.close()
+            os.chmod(self.path, 0o600)
 
     def _connect(self) -> sqlite3.Connection:
-        created = not self.path.exists()
         connection = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
-        connection.execute("pragma journal_mode=WAL")
+        connection.execute("pragma busy_timeout=5000")
         connection.execute("pragma synchronous=FULL")
         connection.execute("pragma foreign_keys=ON")
-        connection.execute(
-            "create table if not exists consumed_authorities ("
-            "nonce_sha256 text primary key, provider_id text not null, "
-            "decision_id text not null, candidate_sha256 text not null, "
-            "consumed_at_unix_ms integer not null)"
-        )
-        connection.execute(
-            "create table if not exists provider_session_leases ("
-            "provider_id text primary key, lease_id text not null unique, "
-            "nonce_sha256 text not null, candidate_sha256 text not null, "
-            "reserved_at_unix_ms integer not null, expires_at_unix_ms integer not null, "
-            "foreign key(nonce_sha256) references consumed_authorities(nonce_sha256))"
-        )
-        if created:
-            os.chmod(self.path, 0o600)
         return connection
 
     def claim(
