@@ -379,6 +379,17 @@ for asset in "${RUNTIME_ASSETS[@]}"; do
         die "post-deploy runtime asset parity check failed: $asset"
 done
 say "runtime asset parity: OK (${#RUNTIME_ASSETS[@]} scripts in $RUNTIME_ASSET_DIR)"
+# Parity alone is insufficient if a stale/partial asset set comes from a
+# different checkout. Check the protocol router's shipped action contract too;
+# this turns a later MCP `script_missing`/unknown-action failure into a deploy
+# gate failure with an actionable message.
+APP_CONTROL_RUNTIME="$RUNTIME_ASSET_DIR/app_control.py"
+[ -f "$APP_CONTROL_RUNTIME" ] || die "post-deploy app_control asset missing: $APP_CONTROL_RUNTIME"
+grep -q '"playlist_current"' "$APP_CONTROL_RUNTIME" ||
+    die "post-deploy app_control contract missing playlist_current: $APP_CONTROL_RUNTIME"
+grep -q '"playlist_activate"' "$APP_CONTROL_RUNTIME" ||
+    die "post-deploy app_control contract missing playlist_activate: $APP_CONTROL_RUNTIME"
+say "app_control action contract: OK (playlist_current, playlist_activate)"
 # unquoted on purpose: markers are one-per-line + whitespace-free, so word-splitting
 # gives one printf arg per marker (each gets its own "  + " prefix).
 # shellcheck disable=SC2046,SC2086

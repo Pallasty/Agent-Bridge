@@ -24,11 +24,13 @@ AGENT_BRIDGE_RUNTIME_ASSET_DIR="$RUNTIME_ASSET_DIR" \
 test -f "$ADAPTER_PATH"
 cmp -s "$SCRIPT_DIR/audio_embody.py" "$ADAPTER_PATH"
 test -x "$ADAPTER_PATH"
-for asset in desktop_action.py desktop_confirm_store.py desktop_grant.py \
+for asset in app_control.py desktop_action.py desktop_confirm_store.py desktop_grant.py \
     desktop_invoke.py desktop_snapshot.py desktop_steer.py desktop_verify.py \
     vision_grounding_ocr.py; do
     test -x "$RUNTIME_ASSET_DIR/$asset"
     cmp -s "$SCRIPT_DIR/$asset" "$RUNTIME_ASSET_DIR/$asset"
 done
+grep -q '"playlist_current"' "$RUNTIME_ASSET_DIR/app_control.py"
+grep -q '"playlist_activate"' "$RUNTIME_ASSET_DIR/app_control.py"
 
 printf 'PASS: deploy keeps binary, audio adapter, and runtime scripts at repository parity\n'
