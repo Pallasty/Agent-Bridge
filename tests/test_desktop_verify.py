@@ -174,15 +174,21 @@ class BoundedResolutionTests(unittest.TestCase):
     def test_verify_forwards_exact_nth_to_shared_resolver(self):
         seen = []
         original = dv.find_element
+        original_pyatspi = sys.modules.get("pyatspi")
         dv.find_element = lambda app, role, name, nth, **kwargs: (
             seen.append(nth) or (None, None, None, {"complete": True})
         )
+        sys.modules["pyatspi"] = object()
         try:
             matches, error, coverage = dv.resolve_atspi_matches(
                 "large", "button", None, 3, None
             )
         finally:
             dv.find_element = original
+            if original_pyatspi is None:
+                sys.modules.pop("pyatspi", None)
+            else:
+                sys.modules["pyatspi"] = original_pyatspi
         self.assertEqual(seen, [3])
         self.assertEqual(matches, [])
         self.assertIsNone(error)
