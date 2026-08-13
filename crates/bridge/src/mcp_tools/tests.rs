@@ -1649,7 +1649,38 @@ fn mobile_projection_media_presentation_handles_missing_fields() {
     assert_eq!(title, "媒体状态 · 已同步");
     assert!(body.contains("未播放曲目"));
     assert!(body.contains("未选择播放列表"));
-    assert_eq!(status, "Unknown");
+    assert!(body.contains("未知状态 · ??:?? / ??:??"));
+    assert_eq!(status, "未知状态");
+}
+
+#[test]
+fn mobile_projection_media_presentation_localizes_transport_states() {
+    for (raw, expected) in [("Playing", "播放中"), ("Paused", "已暂停"), ("Stopped", "已停止")] {
+        let context = crate::mobile_projection::MediaContext {
+            playback_status: Some(raw.into()),
+            ..crate::mobile_projection::MediaContext::new(1234)
+        };
+        let (_, body, status) = media_projection_presentation(&context);
+        assert!(body.contains(expected));
+        assert_eq!(status, expected);
+    }
+}
+
+#[test]
+fn mobile_projection_media_presentation_truncates_long_display_text() {
+    let context = crate::mobile_projection::MediaContext {
+        artist: Some("A".repeat(80)),
+        title: Some("曲目".repeat(100)),
+        active_playlist_name: Some("P".repeat(100)),
+        playback_status: Some("Paused".into()),
+        position_seconds: Some(1.0),
+        duration_seconds: Some(2.0),
+        ..crate::mobile_projection::MediaContext::new(1234)
+    };
+    let (_, body, status) = media_projection_presentation(&context);
+    assert_eq!(status, "已暂停");
+    assert!(body.contains('…'));
+    assert!(body.chars().count() < 260);
 }
 
 #[test]

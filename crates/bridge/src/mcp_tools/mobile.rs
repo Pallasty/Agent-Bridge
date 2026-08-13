@@ -91,24 +91,56 @@ pub(super) fn media_context_from_app_control(
 }
 
 fn format_media_clock(seconds: Option<f64>) -> String {
-    let total = seconds.unwrap_or(0.0).max(0.0).round() as u64;
+    let Some(seconds) = seconds.filter(|value| value.is_finite() && *value >= 0.0) else {
+        return "??:??".into();
+    };
+    let total = seconds.round() as u64;
     format!("{:02}:{:02}", total / 60, total % 60)
 }
 
+fn truncate_display(value: &str, max_chars: usize, fallback: &str) -> String {
+    if value.is_empty() {
+        return fallback.into();
+    }
+    let mut chars = value.chars();
+    let prefix: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        let keep = max_chars.saturating_sub(1);
+        format!("{}…", prefix.chars().take(keep).collect::<String>())
+    } else {
+        prefix
+    }
+}
+
+fn display_playback_status(value: Option<&str>) -> String {
+    match value.unwrap_or("Unknown") {
+        "Playing" => "播放中".into(),
+        "Paused" => "已暂停".into(),
+        "Stopped" => "已停止".into(),
+        "Unknown" | "" => "未知状态".into(),
+        other => truncate_display(other, 32, "未知状态"),
+    }
+}
+
 pub(super) fn media_projection_presentation(context: &crate::mobile_projection::MediaContext) -> (String, String, String) {
-    let title = context.title.as_deref().unwrap_or("未播放曲目");
-    let playlist = context.active_playlist_name.as_deref().unwrap_or("未选择播放列表");
-    let status = context.playback_status.as_deref().unwrap_or("Unknown");
+    let title = truncate_display(context.title.as_deref().unwrap_or(""), 96, "未播放曲目");
+    let artist = truncate_display(context.artist.as_deref().unwrap_or(""), 48, "未知艺术家");
+    let playlist = truncate_display(
+        context.active_playlist_name.as_deref().unwrap_or(""),
+        64,
+        "未选择播放列表",
+    );
+    let status = display_playback_status(context.playback_status.as_deref());
     let body = format!(
         "{} · {}\n{} · {} / {}\n播放列表：{}",
-        context.artist.as_deref().unwrap_or("未知"),
+        artist,
         title,
         status,
         format_media_clock(context.position_seconds),
         format_media_clock(context.duration_seconds),
         playlist,
     );
-    ("媒体状态 · 已同步".into(), body, status.into())
+    ("媒体状态 · 已同步".into(), body, status)
 }
 
 #[derive(Debug, Clone)]
