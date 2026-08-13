@@ -6907,6 +6907,19 @@ fn recover_hint_maps_known_failure_modes() {
 }
 
 #[test]
+fn browser_snapshot_observation_is_content_bound_and_explicitly_fresh() {
+    let page = PageId::from_raw("page-1".to_string());
+    let first = browser_snapshot_observation(&page, &json!({"role":"button","name":"Save"}));
+    let second = browser_snapshot_observation(&page, &json!({"role":"button","name":"Cancel"}));
+    assert_eq!(first["schema"], "agent_bridge.observation.v0");
+    assert_eq!(first["max_age_ms"], 2000);
+    assert_eq!(first["coordinate_provenance"]["coordinate_space"], "browser.viewport.css_px");
+    assert!(first["observation_id"].as_str().unwrap().starts_with("browser-ui:page-1:sha256:"));
+    assert_ne!(first["observation_id"], second["observation_id"]);
+    assert_ne!(first["content_hash"], second["content_hash"]);
+}
+
+#[test]
 fn inert_actions_block_caps_and_counts_overflow() {
     let now = 1_780_000_000_i64;
     let evs: Vec<_> = (0..7)

@@ -3791,12 +3791,46 @@ impl McpTool for BrowserSnapshotTool {
             None => return Ok(ToolResult::error("missing 'page'")),
         };
         match b.snapshot_a11y(&page).await {
-            Ok(tree) => Ok(ToolResult::json_text(
-                &serde_json::to_value(tree).unwrap_or(Value::Null),
-            )),
+            Ok(tree) => {
+                let mut payload = serde_json::to_value(tree).unwrap_or(Value::Null);
+                if payload.is_object() {
+                    let observation = browser_snapshot_observation(&page, &payload);
+                    payload
+                        .as_object_mut()
+                        .expect("object checked above")
+                        .insert("observation".to_string(), observation);
+                }
+                Ok(ToolResult::structured_json(&payload))
+            }
             Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
         }
     }
+}
+
+/// Additive, content-bound identity for a browser accessibility observation.
+pub(super) fn browser_snapshot_observation(page: &PageId, tree: &Value) -> Value {
+    let canonical = serde_json::to_vec(tree).unwrap_or_default();
+    let digest = Sha256::digest(&canonical);
+    let content_hash = format!("sha256:{digest:x}");
+    let observed_at_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default();
+    json!({
+        "schema": "agent_bridge.observation.v0",
+        "observation_id": format!("browser-ui:{}:{}", page.as_str(), &content_hash[7..23]),
+        "observed_at_unix_ms": observed_at_unix_ms,
+        "revision": observed_at_unix_ms,
+        "revision_semantics": "capture_unix_milliseconds; ordering hint only",
+        "max_age_ms": 2000,
+        "content_hash": content_hash,
+        "coordinate_provenance": {
+            "source": "browser.cdp.accessibility_tree",
+            "page": page.as_str(),
+            "coordinate_space": "browser.viewport.css_px",
+            "bounds_semantics": "accessibility tree has no guaranteed bounds; use screenshot/DOM readback before coordinate actions"
+        }
+    })
 }
 
 pub struct BrowserClickTool {
@@ -3896,7 +3930,15 @@ impl McpTool for BrowserClickTool {
             }
         }
         match outcome {
-            Ok(()) => Ok(ToolResult::text(format!("clicked {sel}"))),
+            Ok(()) => Ok(ToolResult::structured_json(&json!({
+                "status": "dispatched",
+                "message": format!("clicked {sel}"),
+                "selector": sel,
+                "effect_verification": {
+                    "status": "not_verified",
+                    "reason": "actionability and event dispatch were confirmed; expected page effect requires a fresh browser_snapshot or browser_wait_for readback"
+                }
+            }))),
             Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
         }
     }
