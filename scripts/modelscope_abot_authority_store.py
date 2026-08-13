@@ -363,6 +363,93 @@ class SingleUseAuthorityStore:
             "runtime_admitted": False,
         }
 
+    def validate_activation_reference(
+        self, *, activation_id: str, capability_sha256: str, now_unix_ms: int
+    ) -> dict[str, Any]:
+        if not isinstance(activation_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9._-]{16,128}", activation_id
+        ):
+            raise AuthorityStoreError("activation id invalid")
+        if not isinstance(capability_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", capability_sha256
+        ):
+            raise AuthorityStoreError("capability digest invalid")
+        if not isinstance(now_unix_ms, int) or isinstance(now_unix_ms, bool):
+            raise AuthorityStoreError("current time invalid")
+        with self._connect() as connection:
+            row = connection.execute(
+                "select provider_id, capability_id, capability_sha256, lease_id, "
+                "admitted_at_unix_ms, expires_at_unix_ms, activation_consumed, "
+                "execution_capability_issued from activation_ledger "
+                "where activation_id = ?",
+                (activation_id,),
+            ).fetchone()
+        if row is None:
+            raise AuthorityStoreError("activation record missing")
+        (
+            provider_id, capability_id, stored_digest, lease_id, admitted_at,
+            expires_at, consumed, issued,
+        ) = row
+        if provider_id != PROVIDER_ID or stored_digest != capability_sha256:
+            raise AuthorityStoreError("activation binding mismatch")
+        if expires_at <= now_unix_ms:
+            raise AuthorityStoreError("activation expired")
+        if consumed != 0 or issued != 0:
+            raise AuthorityStoreError("activation already consumed")
+        return {
+            "provider_id": provider_id,
+            "activation_id": activation_id,
+            "capability_id": capability_id,
+            "capability_sha256": stored_digest,
+            "lease_id": lease_id,
+            "admitted_at_unix_ms": admitted_at,
+            "expires_at_unix_ms": expires_at,
+            "activation_consumed": False,
+            "execution_capability_issued": False,
+        }
+
+    def consume_activation(
+        self, *, activation_id: str, capability_sha256: str, now_unix_ms: int,
+        fault_after_mark: bool = False,
+    ) -> dict[str, Any]:
+        reference = self.validate_activation_reference(
+            activation_id=activation_id,
+            capability_sha256=capability_sha256,
+            now_unix_ms=now_unix_ms,
+        )
+        with self._connect() as connection:
+            try:
+                connection.execute("begin immediate")
+                cursor = connection.execute(
+                    "update activation_ledger set activation_consumed = 1 "
+                    "where activation_id = ? and capability_sha256 = ? "
+                    "and activation_consumed = 0 and execution_capability_issued = 0 "
+                    "and expires_at_unix_ms > ?",
+                    (activation_id, capability_sha256, now_unix_ms),
+                )
+                if cursor.rowcount != 1:
+                    raise AuthorityStoreError("activation already consumed")
+                if fault_after_mark:
+                    raise RuntimeError("synthetic activation transaction interruption")
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return {
+            "schema": "agent_bridge.modelscope_abot_activation_consumption.v0",
+            "provider_id": PROVIDER_ID,
+            "activation_id": activation_id,
+            "capability_id": reference["capability_id"],
+            "capability_sha256": capability_sha256,
+            "activation_consumed": True,
+            "execution_capability_issued": False,
+            "studio_start_called": False,
+            "execution_authorized": False,
+            "runtime_admitted": False,
+            "mcp_registered": False,
+            "next_gate": "gate7j_external_execution_adapter",
+        }
+
     def validate_claim_reference(
         self,
         *,
