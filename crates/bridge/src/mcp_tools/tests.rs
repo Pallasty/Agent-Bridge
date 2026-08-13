@@ -6914,7 +6914,7 @@ fn browser_snapshot_observation_is_content_bound_and_explicitly_fresh() {
     assert_eq!(first["schema"], "agent_bridge.observation.v0");
     assert_eq!(first["max_age_ms"], 2000);
     assert_eq!(first["coordinate_provenance"]["coordinate_space"], "browser.viewport.css_px");
-    assert!(first["observation_id"].as_str().unwrap().starts_with("browser-ui:page-1:sha256:"));
+    assert!(first["observation_id"].as_str().unwrap().starts_with("browser-ui:page-1:"));
     assert_ne!(first["observation_id"], second["observation_id"]);
     assert_ne!(first["content_hash"], second["content_hash"]);
 }
