@@ -50,6 +50,16 @@ impl VerdictStatus {
     }
 }
 
+/// Shared wire shape for post-action effect verification. Adapters may append
+/// evidence fields (for example matched selector, URL, or elapsed time), but
+/// every channel starts with the same honest status/reason pair.
+pub fn effect_verification(status: VerdictStatus, reason: impl Into<String>) -> Value {
+    json!({
+        "status": status.as_str(),
+        "reason": reason.into(),
+    })
+}
+
 /// A verdict plus how it was reached and the evidence behind it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Verdict {
@@ -504,6 +514,13 @@ pub fn cluster_inert_patterns(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effect_verification_has_shared_status_reason_shape() {
+        let value = effect_verification(VerdictStatus::NotVerified, "readback unavailable");
+        assert_eq!(value["status"], "not_verified");
+        assert_eq!(value["reason"], "readback unavailable");
+    }
 
     #[test]
     fn ref_ok_is_unknown_until_effect_is_read_back() {

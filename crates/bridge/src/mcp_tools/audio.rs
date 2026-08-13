@@ -3936,17 +3936,29 @@ impl McpTool for BrowserClickTool {
                     let wait_selector = condition.get("selector").and_then(Value::as_str).filter(|v| !v.is_empty());
                     let wait_url = condition.get("url_substring").and_then(Value::as_str).filter(|v| !v.is_empty());
                     if wait_selector.is_none() && wait_url.is_none() {
-                        json!({"status":"not_verified", "reason":"postcondition must provide selector or url_substring"})
+                        crate::semantic_event::effect_verification(crate::semantic_event::VerdictStatus::NotVerified, "postcondition must provide selector or url_substring")
                     } else {
                         let timeout_ms = condition.get("timeout_ms").and_then(Value::as_u64).unwrap_or(10_000).clamp(50, 60_000);
                         match b.wait_for(&page, wait_selector, wait_url, timeout_ms).await {
-                            Ok(wait) if wait.matched != "timeout" => json!({"status":"verified", "matched":wait.matched, "elapsed_ms":wait.elapsed_ms, "current_url":wait.current_url}),
-                            Ok(wait) => json!({"status":"not_verified", "matched":"timeout", "elapsed_ms":wait.elapsed_ms, "current_url":wait.current_url}),
-                            Err(error) => json!({"status":"not_verified", "reason":format!("postcondition readback failed: {error}")}),
+                            Ok(wait) if wait.matched != "timeout" => {
+                                let mut value = crate::semantic_event::effect_verification(crate::semantic_event::VerdictStatus::Verified, "postcondition matched");
+                                value["matched"] = json!(wait.matched);
+                                value["elapsed_ms"] = json!(wait.elapsed_ms);
+                                value["current_url"] = json!(wait.current_url);
+                                value
+                            }
+                            Ok(wait) => {
+                                let mut value = crate::semantic_event::effect_verification(crate::semantic_event::VerdictStatus::NotVerified, "postcondition timed out");
+                                value["matched"] = json!("timeout");
+                                value["elapsed_ms"] = json!(wait.elapsed_ms);
+                                value["current_url"] = json!(wait.current_url);
+                                value
+                            }
+                            Err(error) => crate::semantic_event::effect_verification(crate::semantic_event::VerdictStatus::NotVerified, format!("postcondition readback failed: {error}")),
                         }
                     }
                 } else {
-                    json!({"status":"not_verified", "reason":"no postcondition supplied; use browser_snapshot or browser_wait_for readback"})
+                    crate::semantic_event::effect_verification(crate::semantic_event::VerdictStatus::NotVerified, "no postcondition supplied; use browser_snapshot or browser_wait_for readback")
                 };
                 Ok(ToolResult::structured_json(&json!({
                 "status": "dispatched",
