@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import urllib.request
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ REQUIRED_ENDPOINTS = {
     "/on_stop_ws",
 }
 BROWSER_RECEIPT_SCHEMA = "agent_bridge.modelscope_abot_browser_lifecycle.v0"
+ARTIFACT_RECEIPT_SCHEMA = "agent_bridge.modelscope_abot_artifact_capture.v0"
 PROVIDER_ID = "modelscope.studio.amap_cvlab.abot-world-0"
 
 
@@ -28,6 +30,32 @@ class ProviderError(RuntimeError):
 class GradioEvent:
     event: str
     data: Any
+
+
+def jpeg_dimensions(content: bytes) -> tuple[int, int] | None:
+    if not content.startswith(b"\xff\xd8"):
+        return None
+    offset = 2
+    sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+    while offset + 8 < len(content):
+        if content[offset] != 0xFF:
+            offset += 1
+            continue
+        marker = content[offset + 1]
+        if marker in sof_markers:
+            height = int.from_bytes(content[offset + 5 : offset + 7], "big")
+            width = int.from_bytes(content[offset + 7 : offset + 9], "big")
+            return width, height
+        if marker == 0xDA or offset + 4 > len(content):
+            break
+        if marker in {0x01, *range(0xD0, 0xDA)}:
+            offset += 2
+            continue
+        segment_length = int.from_bytes(content[offset + 2 : offset + 4], "big")
+        if segment_length < 2:
+            break
+        offset += 2 + segment_length
+    return None
 
 
 def parse_sse(body: str) -> list[GradioEvent]:
@@ -220,14 +248,116 @@ def validate_browser_receipt(receipt: Any) -> dict[str, Any]:
     }
 
 
+def validate_artifact_receipt(receipt: Any, receipt_path: Path) -> dict[str, Any]:
+    violations: list[str] = []
+    if not isinstance(receipt, dict):
+        violations.append("receipt_not_object")
+        receipt = {}
+    if receipt.get("schema") != ARTIFACT_RECEIPT_SCHEMA:
+        violations.append("schema_mismatch")
+    if receipt.get("provider_id") != PROVIDER_ID:
+        violations.append("provider_id_mismatch")
+
+    artifact = receipt.get("artifact")
+    artifact_sha = None
+    if not isinstance(artifact, dict):
+        violations.append("artifact_not_object")
+        artifact = {}
+    artifact_ref = artifact.get("ref")
+    if not isinstance(artifact_ref, str) or not artifact_ref:
+        violations.append("artifact_ref_missing")
+    else:
+        evidence_root = receipt_path.resolve().parent
+        artifact_path = (evidence_root / artifact_ref).resolve()
+        if artifact_path.parent != evidence_root:
+            violations.append("artifact_ref_outside_evidence_root")
+        elif not artifact_path.is_file():
+            violations.append("artifact_file_missing")
+        else:
+            content = artifact_path.read_bytes()
+            artifact_sha = hashlib.sha256(content).hexdigest()
+            if artifact_sha != artifact.get("sha256"):
+                violations.append("artifact_sha256_mismatch")
+            if len(content) != artifact.get("bytes"):
+                violations.append("artifact_size_mismatch")
+            if not (content.startswith(b"\xff\xd8\xff") and content.endswith(b"\xff\xd9")):
+                violations.append("artifact_not_complete_jpeg")
+            if jpeg_dimensions(content) != (artifact.get("width"), artifact.get("height")):
+                violations.append("artifact_dimensions_mismatch")
+    if artifact.get("content_type") != "image/jpeg":
+        violations.append("artifact_content_type_mismatch")
+
+    request = receipt.get("request")
+    if not isinstance(request, dict):
+        violations.append("request_not_object")
+        request = {}
+    if request.get("schema") != "agent_bridge.projection_request_envelope.v0":
+        violations.append("request_schema_mismatch")
+    if request.get("provider_id") != PROVIDER_ID:
+        violations.append("request_provider_mismatch")
+    if request.get("projection_class") != "simulated.generated":
+        violations.append("request_projection_class_mismatch")
+    if "provider_native_jpeg_frame" not in request.get("requested_outputs", []):
+        violations.append("request_output_missing")
+
+    rollout = receipt.get("rollout")
+    if not isinstance(rollout, dict):
+        violations.append("rollout_not_object")
+        rollout = {}
+    if rollout.get("schema") != "agent_bridge.simulated_world_rollout.v0":
+        violations.append("rollout_schema_mismatch")
+    if not request.get("request_id") or rollout.get("request_id") != request.get("request_id"):
+        violations.append("rollout_request_mismatch")
+    if rollout.get("evidence_class") != "simulated.generated":
+        violations.append("rollout_evidence_class_mismatch")
+    provider = rollout.get("provider")
+    if not isinstance(provider, dict) or provider.get("id") != PROVIDER_ID:
+        violations.append("rollout_provider_mismatch")
+    expected_hashes = [f"sha256:{artifact_sha}"] if artifact_sha else []
+    if rollout.get("generated_artifact_hashes") != expected_hashes:
+        violations.append("rollout_artifact_hash_mismatch")
+    if rollout.get("verdict") != "not_verified":
+        violations.append("rollout_verdict_must_be_not_verified")
+    request_prompt_sha = request.get("constraints", {}).get("prompt_sha256")
+    rollout_prompt_sha = rollout.get("generation_parameters", {}).get("prompt_sha256")
+    if not request_prompt_sha or rollout_prompt_sha != request_prompt_sha:
+        violations.append("rollout_prompt_binding_mismatch")
+    boundary = rollout.get("truth_boundary")
+    if not isinstance(boundary, dict):
+        violations.append("rollout_truth_boundary_missing")
+    elif (
+        boundary.get("external_world_effect_claimed") is not False
+        or boundary.get("generated_visual_claimed") is not True
+        or boundary.get("verified_to") is not None
+    ):
+        violations.append("rollout_truth_boundary_exceeded")
+    if receipt.get("runtime_admitted") is not False:
+        violations.append("runtime_admitted_must_be_false")
+
+    valid = not violations
+    return {
+        "schema": "agent_bridge.modelscope_abot_artifact_validation.v0",
+        "valid": valid,
+        "violations": violations,
+        "artifact_bound": valid,
+        "rollout_contract_satisfied": valid,
+        "rollout_eligible": valid,
+        "runtime_admitted": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--output")
     parser.add_argument("--session-contract", action="store_true")
     parser.add_argument("--validate-browser-receipt", type=Path)
+    parser.add_argument("--validate-artifact-receipt", type=Path)
     args = parser.parse_args()
-    if args.validate_browser_receipt:
+    if args.validate_artifact_receipt:
+        receipt = json.loads(args.validate_artifact_receipt.read_text(encoding="utf-8"))
+        result = validate_artifact_receipt(receipt, args.validate_artifact_receipt)
+    elif args.validate_browser_receipt:
         receipt = json.loads(args.validate_browser_receipt.read_text(encoding="utf-8"))
         result = validate_browser_receipt(receipt)
     else:

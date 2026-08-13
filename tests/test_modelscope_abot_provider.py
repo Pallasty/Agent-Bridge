@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -122,6 +123,50 @@ class ModelScopeAbotProviderTests(unittest.TestCase):
         )
         result = MODULE.validate_browser_receipt(json.loads(path.read_text(encoding="utf-8")))
         self.assertTrue(result["valid"])
+
+    def test_committed_gate7c_artifact_and_rollout_validate(self):
+        path = (
+            Path(__file__).parents[1]
+            / "docs"
+            / "design"
+            / "evidence"
+            / "modelscope_abot_gate7c_artifact_receipt_2026_08_12.json"
+        )
+        result = MODULE.validate_artifact_receipt(
+            json.loads(path.read_text(encoding="utf-8")), path
+        )
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["artifact_bound"])
+        self.assertTrue(result["rollout_contract_satisfied"])
+        self.assertTrue(result["rollout_eligible"])
+        self.assertFalse(result["runtime_admitted"])
+
+    def test_artifact_validator_rejects_tampering_and_truth_promotion(self):
+        source_root = Path(__file__).parents[1] / "docs" / "design" / "evidence"
+        source_receipt = source_root / "modelscope_abot_gate7c_artifact_receipt_2026_08_12.json"
+        receipt = json.loads(source_receipt.read_text(encoding="utf-8"))
+        receipt["rollout"]["truth_boundary"]["verified_to"] = "real_world"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / source_receipt.name
+            path.write_text(json.dumps(receipt), encoding="utf-8")
+            artifact = source_root / receipt["artifact"]["ref"]
+            (root / artifact.name).write_bytes(artifact.read_bytes() + b"tampered")
+            result = MODULE.validate_artifact_receipt(receipt, path)
+        self.assertFalse(result["valid"])
+        self.assertIn("artifact_sha256_mismatch", result["violations"])
+        self.assertIn("rollout_truth_boundary_exceeded", result["violations"])
+
+    def test_artifact_validator_rejects_dimension_and_prompt_binding_drift(self):
+        source_root = Path(__file__).parents[1] / "docs" / "design" / "evidence"
+        source_receipt = source_root / "modelscope_abot_gate7c_artifact_receipt_2026_08_12.json"
+        receipt = json.loads(source_receipt.read_text(encoding="utf-8"))
+        receipt["artifact"]["width"] = 1
+        receipt["rollout"]["generation_parameters"]["prompt_sha256"] = "different"
+        result = MODULE.validate_artifact_receipt(receipt, source_receipt)
+        self.assertFalse(result["valid"])
+        self.assertIn("artifact_dimensions_mismatch", result["violations"])
+        self.assertIn("rollout_prompt_binding_mismatch", result["violations"])
 
 
 if __name__ == "__main__":

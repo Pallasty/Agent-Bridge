@@ -1,0 +1,73 @@
+{
+  "schema": "agent_bridge.modelscope_abot_artifact_capture.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-12",
+  "capture_surface": "codex_in_app_browser_cdp",
+  "request": {
+    "schema": "agent_bridge.projection_request_envelope.v0",
+    "request_id": "modelscope-abot-gate7c-20260812-001",
+    "intent_id": null,
+    "source_world_ref": null,
+    "source_world_revision": 0,
+    "projection_class": "simulated.generated",
+    "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+    "requested_outputs": [
+      "provider_native_jpeg_frame"
+    ],
+    "constraints": {
+      "bounded_session": true,
+      "prompt_sha256": "fcbb9859f72b3bac76b99fa4ff3a59780b76597477e0a7042d3c6b717798491f",
+      "reference_condition": "studio_default_reference_present_unverified"
+    },
+    "authority_ref": null,
+    "created_at_unix_ms": 1786588542277
+  },
+  "transport": {
+    "kind": "websocket_binary",
+    "opcode": 2,
+    "transport_header_bytes": 24,
+    "payload_encoding_observed_by_cdp": "base64",
+    "artifact_encoding": "jpeg"
+  },
+  "artifact": {
+    "ref": "modelscope_abot_gate7c_provider_frame_2026_08_12.jpg",
+    "content_type": "image/jpeg",
+    "bytes": 95419,
+    "width": 1280,
+    "height": 704,
+    "sha256": "3ecb04301af4a90b9be916609534c81792a793d0a803ff22b9ac9b5060fa58ad"
+  },
+  "rollout": {
+    "schema": "agent_bridge.simulated_world_rollout.v0",
+    "request_id": "modelscope-abot-gate7c-20260812-001",
+    "receipt_id": "modelscope-abot-rollout-gate7c-20260812-001",
+    "evidence_class": "simulated.generated",
+    "provider": {
+      "id": "modelscope.studio.amap_cvlab.abot-world-0",
+      "engine": "ABot-World ModelScope Studio",
+      "engine_version": "public-studio-observed-2026-08-12"
+    },
+    "source_world_revision": 0,
+    "input_artifact_hash": null,
+    "generated_artifact_hashes": [
+      "sha256:3ecb04301af4a90b9be916609534c81792a793d0a803ff22b9ac9b5060fa58ad"
+    ],
+    "model_metadata": {
+      "model_family": "ABot-World-0-5B-LF",
+      "delivery_surface": "public_modelscope_studio",
+      "exact_runtime_revision": "not_exposed"
+    },
+    "generation_parameters": {
+      "prompt_sha256": "fcbb9859f72b3bac76b99fa4ff3a59780b76597477e0a7042d3c6b717798491f",
+      "seed": "not_exposed",
+      "reference_condition": "studio_default_reference_present_unverified"
+    },
+    "verdict": "not_verified",
+    "truth_boundary": {
+      "external_world_effect_claimed": false,
+      "generated_visual_claimed": true,
+      "verified_to": null
+    }
+  },
+  "runtime_admitted": false
+}
