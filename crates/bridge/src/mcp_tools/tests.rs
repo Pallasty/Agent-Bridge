@@ -7774,6 +7774,66 @@ fn codex_lean_exposes_only_mobile_readonly_status_tools() {
 }
 
 #[test]
+fn codex_mobile_projection_is_explicit_and_bounded() {
+    let mobile = ToolPolicy::from_values(Some("codex-mobile-projection"), None, None, None);
+    for tool in [
+        "mobile_list_devices",
+        "mobile_health",
+        "mobile_projection_status",
+        "mobile_projection_wait",
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+    ] {
+        assert!(
+            mobile.includes(Tier::Niche, tool),
+            "mobile projection profile must expose {tool}"
+        );
+    }
+    for tool in [
+        "mobile_install_apk",
+        "mobile_launch_app",
+        "mobile_click",
+        "mobile_input_text",
+        "mobile_screenshot",
+        "mobile_ui_snapshot",
+    ] {
+        assert!(
+            !mobile.includes(Tier::Niche, tool),
+            "mobile projection profile must not expose unrelated control/heavy tool {tool}"
+        );
+    }
+
+    let lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+    for tool in [
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+    ] {
+        assert!(
+            !lean.includes(Tier::Niche, tool),
+            "codex-lean must keep lifecycle write hidden: {tool}"
+        );
+    }
+
+    let schemas = build_registry_with_policy(
+        Hub::builder().build(),
+        mobile,
+    )
+    .list();
+    for tool in [
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+    ] {
+        assert!(
+            schemas.iter().any(|schema| schema.name == tool),
+            "schema missing from explicit mobile projection profile: {tool}"
+        );
+    }
+}
+
+#[test]
 fn collab_groups_no_partial_coverage() {
     // (d) The drift guardrail: no profile may list SOME-but-not-all members
     // of a collab group. Partial coverage = a new tool that wasn't added to

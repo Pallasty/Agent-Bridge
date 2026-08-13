@@ -44191,6 +44191,10 @@ enum ToolSet {
     /// Explicit opt-in Codex surface for grounded voice projection. It keeps
     /// the compact codex-essential base and adds only the bounded voice lane.
     CodexVoice,
+    /// Explicit opt-in Codex surface for one TTL-bounded mobile projection
+    /// session. It keeps codex-lean read tools and adds only mobile projection
+    /// lifecycle tools; it never widens to install/click/input controls.
+    CodexMobileProjection,
     CodexLean,
     /// An opt-in Codex profile for inspecting static A2UI previews.
     /// It is deliberately the codex-lean allowlist plus one read-only tool.
@@ -44209,6 +44213,7 @@ impl ToolSet {
             Self::Profile => "profile",
             Self::CodexEssential => "codex-essential",
             Self::CodexVoice => "codex-voice",
+            Self::CodexMobileProjection => "codex-mobile-projection",
             Self::CodexLean => "codex-lean",
             Self::CodexA2ui => "codex-a2ui",
             Self::ChatGptRead => "chatgpt-read",
@@ -44225,6 +44230,9 @@ impl ToolSet {
             Some("profile") | Some("legacy") => Some(Self::Profile),
             Some("codex-essential") | Some("codex") => Some(Self::CodexEssential),
             Some("codex-voice") | Some("codex-audio") => Some(Self::CodexVoice),
+            Some("codex-mobile-projection") | Some("codex-mobile") => {
+                Some(Self::CodexMobileProjection)
+            }
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
             Some("codex-a2ui") | Some("codex-a2ui-preview") => Some(Self::CodexA2ui),
             Some("chatgpt-read") | Some("chatgpt") | Some("openai-chat") => Some(Self::ChatGptRead),
@@ -44254,6 +44262,7 @@ impl ToolSet {
                 .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
                 .chain(CODEX_VOICE_EXTRAS.iter().copied())
                 .collect(),
+            Self::CodexMobileProjection => CODEX_MOBILE_PROJECTION_EXTRAS.to_vec(),
             Self::CodexA2ui => vec!["a2ui_preview"],
             _ => Vec::new(),
         }
@@ -44289,7 +44298,9 @@ impl ToolPolicy {
         let legacy_profile = ToolProfile::from_value(profile);
         let profile = match set {
             ToolSet::Profile => legacy_profile,
-            ToolSet::CodexEssential | ToolSet::CodexVoice => ToolProfile::Compact,
+            ToolSet::CodexEssential | ToolSet::CodexVoice | ToolSet::CodexMobileProjection => {
+                ToolProfile::Compact
+            }
             ToolSet::CodexLean
             | ToolSet::CodexA2ui
             | ToolSet::ChatGptRead
@@ -44327,6 +44338,9 @@ impl ToolPolicy {
             ToolSet::CodexEssential => codex_essential_tool(tier, tool_name),
             ToolSet::CodexVoice => {
                 codex_essential_tool(tier, tool_name) || CODEX_VOICE_EXTRAS.contains(&tool_name)
+            }
+            ToolSet::CodexMobileProjection => {
+                codex_lean_tool(tool_name) || CODEX_MOBILE_PROJECTION_EXTRAS.contains(&tool_name)
             }
             ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::CodexA2ui => codex_lean_tool(tool_name) || tool_name == "a2ui_preview",
@@ -44554,6 +44568,18 @@ const CODEX_VOICE_EXTRAS: &[&str] = &[
     "voice_runtime_preflight",
     "voice_delivery_health",
     "embodiment_operating_readiness",
+];
+
+/// Explicit mobile projection lane. Read-only discovery remains available,
+/// while start/update/stop are isolated behind this named opt-in profile.
+const CODEX_MOBILE_PROJECTION_EXTRAS: &[&str] = &[
+    "mobile_list_devices",
+    "mobile_health",
+    "mobile_projection_status",
+    "mobile_projection_wait",
+    "mobile_projection_start",
+    "mobile_projection_update",
+    "mobile_projection_stop",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
