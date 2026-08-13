@@ -40,6 +40,7 @@ from desktop_confirm_store import (  # noqa: E402  shared host-confirm store (to
     record_grant_use,
     write_pending,
 )
+from desktop_snapshot import hydrate_linux_session_env  # noqa: E402
 
 SCHEMA_VERSION = "desktop_invoke/v0"
 _CACHE_ROOT = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "agent-bridge"
@@ -267,6 +268,12 @@ def main() -> int:
     ap.add_argument("--confirm-ttl", type=int, default=DEFAULT_CONFIRM_TTL,
                     help=f"seconds a minted pending token stays valid (default {DEFAULT_CONFIRM_TTL})")
     args = ap.parse_args()
+
+    # Codex/CC MCP children can start without XDG_RUNTIME_DIR or the session
+    # D-Bus address even though the user's AT-SPI services are healthy. Recover
+    # only the current UID's validated runtime bus before importing pyatspi.
+    # desktop_snapshot and desktop_verify use the same fail-closed helper.
+    hydrate_linux_session_env()
 
     if args.confirm_token:  # phase 2: execute a human-approved pending host invoke
         return run_confirm_token(args)
