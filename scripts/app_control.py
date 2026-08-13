@@ -22,6 +22,7 @@ SCHEMA = "agent_bridge.app_control.v0"
 ACTIONS = (
     "discover", "next", "previous", "play", "pause", "play_pause", "stop",
     "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get",
+    "playlist_list", "playlist_activate",
 )
 PLAYERCTL_ACTION = {
     "next": "next",
@@ -32,6 +33,7 @@ PLAYERCTL_ACTION = {
     "stop": "stop",
 }
 METADATA_FORMAT = "{{mpris:trackid}}\t{{xesam:artist}}\t{{xesam:title}}"
+MPRIS_PLAYLIST_PATH = "/org/mpris/MediaPlayer2"
 
 
 def hydrate_session_bus(env: MutableMapping[str, str] | None = None) -> dict[str, str]:
@@ -91,6 +93,20 @@ def select_player(players: list[str], selector: str | None) -> tuple[str | None,
     if len(matches) == 1:
         return matches[0], None
     return None, "player_not_found" if not matches else "ambiguous_player"
+
+
+def playlist_call(player: str, method: str, args: list[str], env: dict[str, str]) -> tuple[int, str, str]:
+    bus = f"org.mpris.MediaPlayer2.{player}"
+    return run(["gdbus", "call", "--session", "--dest", bus, "--object-path", MPRIS_PLAYLIST_PATH, "--method", method, *args], env)
+
+
+def list_playlists(player: str, env: dict[str, str]) -> tuple[list[dict[str, str]], dict[str, Any] | None]:
+    rc, out, err = playlist_call(player, "org.mpris.MediaPlayer2.Playlists.GetPlaylists", ["0", "100", "Alphabetical", "false"], env)
+    if rc != 0:
+        return [], {"code": "playlist_discovery_failed", "rc": rc, "message": err or out}
+    import re
+    entries = [{"id": path, "name": name} for path, name in re.findall(r"(?:objectpath )?'([^']+)', '([^']*)', '[^']*'", out)]
+    return entries, None
 
 
 def observe(player: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -192,7 +208,7 @@ def route_summary(selected: bool) -> dict[str, Any]:
     }
 
 
-def execute(action: str, player_selector: str | None, dry_run: bool, verify_timeout: float, volume: float | None = None) -> dict[str, Any]:
+def execute(action: str, player_selector: str | None, dry_run: bool, verify_timeout: float, volume: float | None = None, playlist_id: str | None = None) -> dict[str, Any]:
     started = time.monotonic()
     env = dict(os.environ)
     restored = hydrate_session_bus(env)
@@ -213,7 +229,8 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed",
             "domain": "media", "action": action, "read_only": True,
             "capabilities": {"backend": "mpris_playerctl", "available": True, "players": players,
-                             "actions": list(ACTIONS[1:]), "volume": {"supported": True, "range": [0.0, 1.0], "default_step": 0.05}},
+        "actions": list(ACTIONS[1:]), "volume": {"supported": True, "range": [0.0, 1.0], "default_step": 0.05},
+        "playlists": {"supported": True, "activation_requires_unique_id": True}},
             "route": route_summary(bool(players)), "session_env_restored": sorted(restored),
             "duration_ms": round((time.monotonic() - started) * 1000),
         }
@@ -225,6 +242,22 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "error": {"code": select_error, "selector": player_selector},
         }
     assert player is not None
+    if action in ("playlist_list", "playlist_activate"):
+        playlists, playlist_error = list_playlists(player, env)
+        if playlist_error:
+            return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": playlist_error}
+        if action == "playlist_list":
+            return {"schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed", "domain": "media", "action": action, "read_only": True, "player": player, "playlists": playlists, "route": route_summary(True), "verification": {"status": "verified", "predicate": "playlist_catalog_observed"}}
+        if not playlist_id:
+            return {"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "domain": "media", "action": action, "player": player, "route": route_summary(True), "playlists": playlists, "error": {"code": "missing_playlist_id", "message": "playlist_activate requires exact playlist object path"}}
+        if playlist_id not in {item["id"] for item in playlists}:
+            return {"schema": SCHEMA, "status": "target_unavailable", "verdict": "error", "recover": "replan", "domain": "media", "action": action, "player": player, "route": route_summary(True), "playlists": playlists, "error": {"code": "playlist_not_found", "playlist_id": playlist_id}}
+        rc, out, err = playlist_call(player, "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist", [playlist_id], env)
+        if rc != 0:
+            return {"schema": SCHEMA, "status": "action_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": {"code": "playlist_activation_failed", "rc": rc, "message": err or out}}
+        after, observe_error = observe(player, env)
+        verified = after is not None and after.get("metadata_available") and after.get("track_id") is not None
+        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "playlist_id": playlist_id, "route": route_summary(True), "after": after, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_with_track" if verified else "playlist_activation_effect_unmet", "observation_error": observe_error}}
     if action == "volume_set" and (volume is None or not 0.0 <= volume <= 1.0):
         return {
             "schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan",
@@ -346,8 +379,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verify-timeout", type=float, default=2.0)
     parser.add_argument("--volume", type=float)
+    parser.add_argument("--playlist-id")
     args = parser.parse_args()
-    payload = execute(args.action, args.player, args.dry_run, min(max(args.verify_timeout, 0.1), 10.0), args.volume)
+    payload = execute(args.action, args.player, args.dry_run, min(max(args.verify_timeout, 0.1), 10.0), args.volume, args.playlist_id)
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     return 0 if payload.get("verdict") == "verified" else 2
 

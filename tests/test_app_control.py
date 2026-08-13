@@ -78,6 +78,33 @@ class AppControlTests(unittest.TestCase):
         self.assertAlmostEqual(payload["before"]["position_seconds"], 12.5)
         self.assertAlmostEqual(payload["before"]["duration_seconds"], 187.0)
 
+    def test_playlist_list_and_activate_use_unique_object_path(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        calls = []
+        playlist = "/org/gnome/Rhythmbox3/Playlist/0x1"
+        def fake_run(argv, env, timeout=2.0):
+            calls.append(argv)
+            if argv == ["playerctl", "-l"]: return 0, "rhythmbox", ""
+            if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.GetPlaylists" in argv:
+                return 0, "([(objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Allin1.m3u', ''), (objectpath '/org/gnome/Rhythmbox3/Playlist/0x2', 'Allin1.m3u', '')],)", ""
+            if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist" in argv: return 0, "()", ""
+            if argv[-1] == "status": return 0, "Playing", ""
+            if argv[-1] == "position": return 0, "1.0", ""
+            if any("mpris:length" in item for item in argv): return 0, "100000000", ""
+            if "metadata" in argv: return 0, "/track/1\tArtist\tTitle", ""
+            if argv[-1] == "volume": return 0, "0.50", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            listed = mod.execute("playlist_list", "rhythmbox", False, 0.2)
+            activated = mod.execute("playlist_activate", "rhythmbox", False, 0.2, playlist_id=playlist)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(len(listed["playlists"]), 2)
+        self.assertEqual(activated["verdict"], "verified")
+        self.assertEqual(activated["verification"]["predicate"], "playlist_active_with_track")
+
     def test_dry_run_discovers_and_never_dispatches(self):
         mod = load_module()
         calls = []

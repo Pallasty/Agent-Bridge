@@ -1,0 +1,25 @@
+{
+  "schema": "agent_bridge.app_control.playlist_acceptance.v0",
+  "date": "2026-08-13",
+  "player": "rhythmbox",
+  "backend": "mpris_playerctl_gdbus_mpris_playlists",
+  "playlist_list": {
+    "count": 11,
+    "duplicate_name": "Allin1.m3u",
+    "unique_ids_exposed": true,
+    "verdict": "verified"
+  },
+  "playlist_activate": {
+    "playlist_id": "/org/gnome/Rhythmbox3/Playlist/0x576e0d311fa0",
+    "verdict": "verified",
+    "predicate": "playlist_active_with_track",
+    "playback_status": "Paused",
+    "title": "Dark Forest",
+    "duration_seconds": 156.0
+  },
+  "fallbacks": {
+    "atspi": "not_executed",
+    "vision": "not_executed",
+    "coordinate_input": "not_executed"
+  }
+}

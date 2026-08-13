@@ -7486,7 +7486,7 @@ impl McpTool for AppControlTool {
                     "domain": {"type": "string", "enum": ["media"], "default": "media"},
                     "action": {
                         "type": "string",
-                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop", "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get"]
+                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop", "volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get", "playlist_list", "playlist_activate"]
                     },
                     "player": {
                         "type": "string",
@@ -7495,6 +7495,10 @@ impl McpTool for AppControlTool {
                     "volume": {
                         "type": "number", "minimum": 0.0, "maximum": 1.0,
                         "description": "Target player volume in the normalized MPRIS range 0.0–1.0; required by volume_set."
+                    },
+                    "playlist_id": {
+                        "type": "string",
+                        "description": "Exact MPRIS playlist object path returned by playlist_list; required by playlist_activate."
                     },
                     "dry_run": {
                         "type": "boolean", "default": false,
@@ -7536,6 +7540,8 @@ impl McpTool for AppControlTool {
             "volume_set",
             "state_get",
             "position_get",
+            "playlist_list",
+            "playlist_activate",
         ];
         if !ACTIONS.contains(&action.as_str()) {
             return Ok(app_control_error("replan", json!({
@@ -7592,6 +7598,9 @@ impl McpTool for AppControlTool {
             .arg(verify_timeout.to_string());
         if let Some(volume) = args.get("volume").and_then(Value::as_f64) {
             cmd.arg("--volume").arg(volume.to_string());
+        }
+        if let Some(playlist_id) = args.get("playlist_id").and_then(Value::as_str) {
+            cmd.arg("--playlist-id").arg(playlist_id);
         }
         if let Some(player) = args
             .get("player")
