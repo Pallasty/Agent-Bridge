@@ -1,0 +1,29 @@
+{
+  "schema": "agent_bridge.app_control.volume_acceptance.v0",
+  "date": "2026-08-13",
+  "player": "rhythmbox",
+  "backend": "mpris_playerctl",
+  "route_layer": "application_protocol",
+  "initial_volume": 1.0,
+  "set_to": 0.9,
+  "set_to_receipt": {
+    "argv": ["playerctl", "-p", "rhythmbox", "volume", "0.900"],
+    "rc": 0,
+    "after_volume": 0.9,
+    "verdict": "verified",
+    "predicate": "volume_is_requested"
+  },
+  "restored_to": 1.0,
+  "restore_receipt": {
+    "argv": ["playerctl", "-p", "rhythmbox", "volume", "1.000"],
+    "rc": 0,
+    "after_volume": 1.0,
+    "verdict": "verified",
+    "predicate": "volume_is_requested"
+  },
+  "fallbacks": {
+    "atspi": "not_executed",
+    "vision": "not_executed",
+    "coordinate_input": "not_executed"
+  }
+}

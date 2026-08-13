@@ -15142,6 +15142,14 @@ fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
         .expect("app_control schema");
     assert_eq!(tool.input_schema["required"], json!(["action"]));
     assert_eq!(tool.input_schema["properties"]["domain"]["enum"], json!(["media"]));
+    let actions = tool.input_schema["properties"]["action"]["enum"]
+        .as_array()
+        .expect("action enum");
+    for action in ["volume_get", "volume_up", "volume_down", "volume_set"] {
+        assert!(actions.iter().any(|value| value == action), "missing {action}");
+    }
+    assert_eq!(tool.input_schema["properties"]["volume"]["minimum"], json!(0.0));
+    assert_eq!(tool.input_schema["properties"]["volume"]["maximum"], json!(1.0));
     for forbidden in [
         "command",
         "method",
@@ -15214,6 +15222,7 @@ async fn app_control_rejects_raw_or_unknown_control_before_exec() {
     for (args, code) in [
         (json!({"action": "arbitrary_method"}), "unsupported_action"),
         (json!({"domain": "browser", "action": "discover"}), "unsupported_domain"),
+        (json!({"action": "volume_set", "volume": 1.1}), "invalid_volume"),
     ] {
         let out = tool
             .execute(args, &ToolContext::default())

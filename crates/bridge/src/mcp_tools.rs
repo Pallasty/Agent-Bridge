@@ -7486,11 +7486,15 @@ impl McpTool for AppControlTool {
                     "domain": {"type": "string", "enum": ["media"], "default": "media"},
                     "action": {
                         "type": "string",
-                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop"]
+                        "enum": ["discover", "next", "previous", "play", "pause", "play_pause", "stop", "volume_get", "volume_up", "volume_down", "volume_set"]
                     },
                     "player": {
                         "type": "string",
                         "description": "Optional exact or unique-substring MPRIS player selector. Omit to select the first discovered player."
+                    },
+                    "volume": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0,
+                        "description": "Target player volume in the normalized MPRIS range 0.0–1.0; required by volume_set."
                     },
                     "dry_run": {
                         "type": "boolean", "default": false,
@@ -7526,6 +7530,10 @@ impl McpTool for AppControlTool {
             "pause",
             "play_pause",
             "stop",
+            "volume_get",
+            "volume_up",
+            "volume_down",
+            "volume_set",
         ];
         if !ACTIONS.contains(&action.as_str()) {
             return Ok(app_control_error("replan", json!({
@@ -7548,6 +7556,17 @@ impl McpTool for AppControlTool {
             .and_then(Value::as_f64)
             .unwrap_or(2.0)
             .clamp(0.1, 10.0);
+        if action == "volume_set"
+            && !args
+                .get("volume")
+                .and_then(Value::as_f64)
+                .is_some_and(|value| (0.0..=1.0).contains(&value))
+        {
+            return Ok(app_control_error(
+                "replan",
+                json!({"code": "invalid_volume", "message": "volume_set requires volume in [0.0, 1.0]"}),
+            ));
+        }
         let cwd = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
         let script = app_control_script_path(&args, cwd.as_ref());
         if !script.exists() {
@@ -7569,6 +7588,9 @@ impl McpTool for AppControlTool {
             .arg(&action)
             .arg("--verify-timeout")
             .arg(verify_timeout.to_string());
+        if let Some(volume) = args.get("volume").and_then(Value::as_f64) {
+            cmd.arg("--volume").arg(volume.to_string());
+        }
         if let Some(player) = args
             .get("player")
             .and_then(Value::as_str)

@@ -31,7 +31,14 @@ API failure must not unexpectedly become a desktop click.
 - Verification:
   - `next`/`previous`: MPRIS track identity changed;
   - `play`/`pause`/`stop`: requested playback status observed;
-  - `play_pause`: playback status changed.
+  - `play_pause`: playback status changed;
+  - `volume_get`: normalized player volume observed;
+  - `volume_up`/`volume_down`: volume changed in the requested direction;
+  - `volume_set`: normalized volume reached the requested value within 0.01.
+
+The media adapter also exposes `volume` capability discovery with the MPRIS
+range `0.0..=1.0` and a default step of `0.05`. This is player-local volume;
+system output volume remains a separate `system_control` concern.
 
 The MCP schema exposes no arbitrary bus name, object path, DBus method, shell
 command, or coordinates. `dry_run=true` performs discovery and reads the

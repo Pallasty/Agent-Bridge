@@ -19,7 +19,10 @@ from pathlib import Path
 from typing import Any, MutableMapping
 
 SCHEMA = "agent_bridge.app_control.v0"
-ACTIONS = ("discover", "next", "previous", "play", "pause", "play_pause", "stop")
+ACTIONS = (
+    "discover", "next", "previous", "play", "pause", "play_pause", "stop",
+    "volume_get", "volume_up", "volume_down", "volume_set",
+)
 PLAYERCTL_ACTION = {
     "next": "next",
     "previous": "previous",
@@ -102,12 +105,21 @@ def observe(player: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, di
             "message": err_status or status,
         }
     fields = (meta.split("\t", 2) + ["", "", ""])[:3] if rc_meta == 0 else ["", "", ""]
+    rc_volume, volume_text, volume_error = run(["playerctl", "-p", player, "volume"], env)
+    try:
+        volume = float(volume_text) if rc_volume == 0 else None
+    except ValueError:
+        volume = None
+        volume_error = f"invalid volume: {volume_text}"
     return {
         "player": player,
         "playback_status": status,
         "track_id": fields[0] or None,
         "artist": fields[1] or None,
         "title": fields[2] or None,
+        "volume": volume,
+        "volume_available": volume is not None,
+        "volume_error": None if volume is not None else (volume_error or volume_text),
         "metadata_available": rc_meta == 0,
         "metadata_error": None if rc_meta == 0 else (err_meta or meta),
     }, None
@@ -130,6 +142,17 @@ def effect_verified(action: str, before: dict[str, Any], after: dict[str, Any]) 
             after.get("playback_status") != before.get("playback_status"),
             "playback_status_changed",
         )
+    if action == "volume_get":
+        return after.get("volume") is not None, "volume_observed"
+    if action in ("volume_up", "volume_down", "volume_set"):
+        before_volume = before.get("volume")
+        after_volume = after.get("volume")
+        if before_volume is None or after_volume is None:
+            return False, "volume_unavailable"
+        if action == "volume_set":
+            return abs(after_volume - before.get("requested_volume", after_volume)) <= 0.01, "volume_is_requested"
+        direction = 1 if action == "volume_up" else -1
+        return (after_volume - before_volume) * direction > 0.001, "volume_changed_in_requested_direction"
     return False, "unsupported_effect"
 
 
@@ -150,7 +173,7 @@ def route_summary(selected: bool) -> dict[str, Any]:
     }
 
 
-def execute(action: str, player_selector: str | None, dry_run: bool, verify_timeout: float) -> dict[str, Any]:
+def execute(action: str, player_selector: str | None, dry_run: bool, verify_timeout: float, volume: float | None = None) -> dict[str, Any]:
     started = time.monotonic()
     env = dict(os.environ)
     restored = hydrate_session_bus(env)
@@ -171,7 +194,7 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed",
             "domain": "media", "action": action, "read_only": True,
             "capabilities": {"backend": "mpris_playerctl", "available": True, "players": players,
-                             "actions": list(ACTIONS[1:])},
+                             "actions": list(ACTIONS[1:]), "volume": {"supported": True, "range": [0.0, 1.0], "default_step": 0.05}},
             "route": route_summary(bool(players)), "session_env_restored": sorted(restored),
             "duration_ms": round((time.monotonic() - started) * 1000),
         }
@@ -183,21 +206,60 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "error": {"code": select_error, "selector": player_selector},
         }
     assert player is not None
+    if action == "volume_set" and (volume is None or not 0.0 <= volume <= 1.0):
+        return {
+            "schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan",
+            "domain": "media", "action": action, "player": player, "route": route_summary(True),
+            "error": {"code": "invalid_volume", "message": "volume_set requires 0.0 <= volume <= 1.0"},
+        }
     before, error = observe(player, env)
     if error or before is None:
         return {
             "schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry",
             "domain": "media", "action": action, "route": route_summary(True), "error": error,
         }
+    if action == "volume_get":
+        if before.get("volume") is None:
+            return {
+                "schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry",
+                "domain": "media", "action": action, "player": player,
+                "route": route_summary(True), "before": before,
+                "error": {"code": "volume_unavailable", "message": before.get("volume_error")},
+            }
+        return {
+            "schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed",
+            "domain": "media", "action": action, "read_only": True, "player": player,
+            "route": route_summary(True), "before": before,
+            "verification": {"status": "verified", "predicate": "volume_observed"},
+        }
     if dry_run:
+        if action == "volume_set":
+            planned_level = volume
+        elif action in ("volume_up", "volume_down") and before.get("volume") is not None:
+            planned_level = before["volume"] + (0.05 if action == "volume_up" else -0.05)
+            planned_level = max(0.0, min(1.0, planned_level))
+        else:
+            planned_level = None
+        planned_argv = ["playerctl", "-p", player, "volume", f"{planned_level:.3f}"] if planned_level is not None else ["playerctl", "-p", player, action]
         return {
             "schema": SCHEMA, "status": "planned", "verdict": "verified", "recover": "proceed",
             "domain": "media", "action": action, "read_only": True, "player": player,
             "route": route_summary(True), "before": before,
-            "dispatch": {"status": "not_dispatched_dry_run", "argv": ["playerctl", "-p", player, PLAYERCTL_ACTION[action]]},
+            "dispatch": {"status": "not_dispatched_dry_run", "argv": planned_argv},
             "verification": {"status": "not_run", "reason": "dry_run"},
         }
-    argv = ["playerctl", "-p", player, PLAYERCTL_ACTION[action]]
+    if action == "volume_set":
+        target = volume
+    elif action in ("volume_up", "volume_down"):
+        if before.get("volume") is None:
+            return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "replan", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": {"code": "volume_unavailable"}}
+        target = before["volume"] + (0.05 if action == "volume_up" else -0.05)
+        target = max(0.0, min(1.0, target))
+    else:
+        target = None
+    argv = ["playerctl", "-p", player, "volume", f"{target:.3f}"] if target is not None else ["playerctl", "-p", player, PLAYERCTL_ACTION[action]]
+    if target is not None:
+        before["requested_volume"] = target
     rc, out, err = run(argv, env)
     dispatch = {"status": "dispatched" if rc == 0 else "failed", "rc": rc, "argv": argv,
                 "stdout": out, "stderr": err}
@@ -243,8 +305,9 @@ def main() -> int:
     parser.add_argument("--player")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verify-timeout", type=float, default=2.0)
+    parser.add_argument("--volume", type=float)
     args = parser.parse_args()
-    payload = execute(args.action, args.player, args.dry_run, min(max(args.verify_timeout, 0.1), 10.0))
+    payload = execute(args.action, args.player, args.dry_run, min(max(args.verify_timeout, 0.1), 10.0), args.volume)
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     return 0 if payload.get("verdict") == "verified" else 2
 

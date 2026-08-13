@@ -49,6 +49,8 @@ class AppControlTests(unittest.TestCase):
                 return 0, "Playing", ""
             if "metadata" in argv:
                 return 0, "/track/1\tArtist\tTitle", ""
+            if argv[-1] == "volume":
+                return 0, "0.50", ""
             raise AssertionError(f"unexpected mutation: {argv}")
 
         old_run, old_which = mod.run, mod.shutil.which
@@ -78,6 +80,8 @@ class AppControlTests(unittest.TestCase):
                 metadata_reads += 1
                 track = "1" if metadata_reads == 1 else "2"
                 return 0, f"/track/{track}\tArtist\tTitle {track}", ""
+            if argv[-1] == "volume":
+                return 0, "0.50", ""
             if argv == ["playerctl", "-p", "rhythmbox", "next"]:
                 return 0, "", ""
             raise AssertionError(argv)
@@ -93,6 +97,49 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(calls.count(["playerctl", "-p", "rhythmbox", "next"]), 1)
         self.assertEqual(payload["route"]["selected"]["layer"], "application_protocol")
         self.assertFalse(payload["route"]["silent_fallback_allowed"])
+
+    def test_volume_set_is_range_checked_and_verified(self):
+        mod = load_module()
+        calls = []
+        volume_reads = 0
+
+        def fake_run(argv, env, timeout=2.0):
+            nonlocal volume_reads
+            calls.append(argv)
+            if argv == ["playerctl", "-l"]:
+                return 0, "rhythmbox", ""
+            if argv[-1] == "status":
+                return 0, "Playing", ""
+            if "metadata" in argv:
+                return 0, "/track/1\tArtist\tTitle", ""
+            if argv[-1] == "volume":
+                volume_reads += 1
+                return 0, "0.50" if volume_reads == 1 else "0.70", ""
+            if argv[:4] == ["playerctl", "-p", "rhythmbox", "volume"]:
+                return 0, "", ""
+            raise AssertionError(argv)
+
+        old_run, old_which = mod.run, mod.shutil.which
+        try:
+            mod.run = fake_run
+            mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("volume_set", "rhythmbox", False, 0.2, 0.7)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(payload["verdict"], "verified")
+        self.assertIn(["playerctl", "-p", "rhythmbox", "volume", "0.700"], calls)
+        self.assertEqual(payload["verification"]["predicate"], "volume_is_requested")
+
+    def test_volume_set_rejects_out_of_range(self):
+        mod = load_module()
+        old_which = mod.shutil.which
+        try:
+            mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            payload = mod.execute("volume_set", "rhythmbox", False, 0.2, 1.1)
+        finally:
+            mod.shutil.which = old_which
+        self.assertEqual(payload["error"]["code"], "invalid_volume")
+        self.assertEqual(payload["recover"], "replan")
 
 
 if __name__ == "__main__":
