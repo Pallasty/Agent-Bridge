@@ -2,7 +2,9 @@
 
 Gate 7M durably commits a valid Gate 7L preflight exactly once. The SQLite
 ledger uses `BEGIN IMMEDIATE` and unique constraints on both attempt ID and
-attempt digest. Replay is rejected and an interrupted transaction rolls back.
+attempt digest. The commit boundary also validates both upstream digest fields,
+the preflight time window, the 30-second lifetime ceiling, and every closed
+execution flag. Replay is rejected and an interrupted transaction rolls back.
 
 Before commit, Gate 7K and Gate 7L now verify the actual nested adapter boundary,
 absolute admission expiry, and the Gate 7J plan digest carried by the Gate 7K

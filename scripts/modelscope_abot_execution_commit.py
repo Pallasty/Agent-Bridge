@@ -15,6 +15,7 @@ from typing import Any
 PROVIDER_ID = "modelscope.studio.amap_cvlab.abot-world-0"
 ATTEMPT_SCHEMA = "agent_bridge.modelscope_abot_execution_attempt.v0"
 COMMIT_SCHEMA = "agent_bridge.modelscope_abot_execution_commit.v0"
+MAX_ATTEMPT_TTL_MS = 30_000
 _INIT_LOCK = threading.Lock()
 
 
@@ -32,6 +33,53 @@ def _digest(value: Any) -> str:
             allow_nan=False,
         ).encode()
     ).hexdigest()
+
+
+def _require_digest(value: Any, label: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ExecutionCommitError(f"{label} invalid")
+
+
+def _validate_attempt_receipt(attempt_receipt: Any, now_unix_ms: Any) -> tuple[str, int]:
+    if (
+        not isinstance(attempt_receipt, dict)
+        or attempt_receipt.get("schema") != ATTEMPT_SCHEMA
+        or attempt_receipt.get("provider_id") != PROVIDER_ID
+        or attempt_receipt.get("preflight_only") is not True
+    ):
+        raise ExecutionCommitError("attempt receipt invalid")
+    attempt_id = attempt_receipt.get("attempt_id")
+    if not isinstance(attempt_id, str) or re.fullmatch(r"[A-Za-z0-9._-]{16,128}", attempt_id) is None:
+        raise ExecutionCommitError("attempt id invalid")
+    for field in ("adapter_plan_sha256", "admission_receipt_sha256"):
+        _require_digest(attempt_receipt.get(field), field)
+    for field in (
+        "network_request_sent",
+        "subprocess_started",
+        "studio_start_called",
+        "execution_attempted",
+        "execution_authorized",
+        "runtime_admitted",
+        "mcp_registered",
+    ):
+        if attempt_receipt.get(field) is not False:
+            raise ExecutionCommitError("attempt boundary open")
+    prepared_at = attempt_receipt.get("prepared_at_unix_ms")
+    expires_at = attempt_receipt.get("expires_at_unix_ms")
+    if (
+        not isinstance(now_unix_ms, int)
+        or isinstance(now_unix_ms, bool)
+        or not isinstance(prepared_at, int)
+        or isinstance(prepared_at, bool)
+        or not isinstance(expires_at, int)
+        or isinstance(expires_at, bool)
+        or prepared_at >= expires_at
+        or expires_at - prepared_at > MAX_ATTEMPT_TTL_MS
+        or now_unix_ms < prepared_at
+        or now_unix_ms >= expires_at
+    ):
+        raise ExecutionCommitError("attempt expired")
+    return attempt_id, expires_at
 
 
 class ExecutionCommitStore:
@@ -59,39 +107,7 @@ class ExecutionCommitStore:
         now_unix_ms: int,
         fault_after_insert: bool = False,
     ) -> dict[str, Any]:
-        if (
-            not isinstance(attempt_receipt, dict)
-            or attempt_receipt.get("schema") != ATTEMPT_SCHEMA
-            or attempt_receipt.get("provider_id") != PROVIDER_ID
-            or attempt_receipt.get("preflight_only") is not True
-        ):
-            raise ExecutionCommitError("attempt receipt invalid")
-        attempt_id = attempt_receipt.get("attempt_id")
-        if not isinstance(attempt_id, str) or re.fullmatch(
-            r"[A-Za-z0-9._-]{16,128}", attempt_id
-        ) is None:
-            raise ExecutionCommitError("attempt id invalid")
-        if any(
-            attempt_receipt.get(field) is not False
-            for field in (
-                "network_request_sent",
-                "subprocess_started",
-                "studio_start_called",
-                "execution_attempted",
-                "runtime_admitted",
-                "mcp_registered",
-            )
-        ):
-            raise ExecutionCommitError("attempt boundary open")
-        expires_at = attempt_receipt.get("expires_at_unix_ms")
-        if (
-            not isinstance(now_unix_ms, int)
-            or isinstance(now_unix_ms, bool)
-            or not isinstance(expires_at, int)
-            or isinstance(expires_at, bool)
-            or now_unix_ms >= expires_at
-        ):
-            raise ExecutionCommitError("attempt expired")
+        attempt_id, expires_at = _validate_attempt_receipt(attempt_receipt, now_unix_ms)
         attempt_sha256 = _digest(attempt_receipt)
         try:
             with self._connect() as connection:
@@ -116,6 +132,7 @@ class ExecutionCommitStore:
             "attempt_sha256": attempt_sha256,
             "commit_recorded": True,
             "execution_attempted": False,
+            "execution_authorized": False,
             "network_request_sent": False,
             "subprocess_started": False,
             "studio_start_called": False,

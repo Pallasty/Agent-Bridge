@@ -81,6 +81,36 @@ class ExecutionCommitTests(unittest.TestCase):
         with self.assertRaisesRegex(commit.ExecutionCommitError, "already committed"):
             self.store.commit(attempt_receipt=self.receipt, now_unix_ms=NOW)
 
+    def test_attempt_receipt_binding_and_boundary_are_validated(self):
+        with self.assertRaisesRegex(commit.ExecutionCommitError, "invalid"):
+            self.store.commit(
+                attempt_receipt={**self.receipt, "adapter_plan_sha256": "not-a-digest"},
+                now_unix_ms=NOW,
+            )
+        with self.assertRaisesRegex(commit.ExecutionCommitError, "boundary"):
+            self.store.commit(
+                attempt_receipt={**self.receipt, "execution_authorized": True},
+                now_unix_ms=NOW,
+            )
+        with self.assertRaisesRegex(commit.ExecutionCommitError, "expired"):
+            self.store.commit(
+                attempt_receipt={
+                    **self.receipt,
+                    "prepared_at_unix_ms": NOW,
+                    "expires_at_unix_ms": NOW + 30_001,
+                },
+                now_unix_ms=NOW,
+            )
+        with self.assertRaisesRegex(commit.ExecutionCommitError, "expired"):
+            self.store.commit(
+                attempt_receipt={
+                    **self.receipt,
+                    "prepared_at_unix_ms": NOW + 1,
+                    "expires_at_unix_ms": NOW + 30_000,
+                },
+                now_unix_ms=NOW,
+            )
+
     def test_concurrent_commit_has_exactly_one_winner(self):
         barrier = threading.Barrier(2)
         outcomes = []

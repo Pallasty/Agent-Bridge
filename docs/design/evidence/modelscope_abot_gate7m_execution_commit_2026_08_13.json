@@ -1,0 +1,26 @@
+{
+  "schema": "agent_bridge.modelscope_abot_gate7m_execution_commit_evidence.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-13",
+  "evidence_class": "synthetic_contract_test",
+  "tests": {
+    "attempt_schema_and_id_checked": true,
+    "upstream_digest_fields_checked": true,
+    "attempt_window_bounded": true,
+    "closed_execution_flags_required": true,
+    "single_use_attempt_id": true,
+    "single_use_attempt_digest": true,
+    "concurrent_winner_is_unique": true,
+    "interrupted_transaction_rolls_back": true
+  },
+  "commit_recorded": true,
+  "execution_attempted": false,
+  "execution_authorized": false,
+  "network_request_sent": false,
+  "subprocess_started": false,
+  "studio_start_called": false,
+  "runtime_admitted": false,
+  "mcp_registered": false,
+  "deployment_authorized": false,
+  "next_gate": "gate7n_external_execution_dispatch"
+}
