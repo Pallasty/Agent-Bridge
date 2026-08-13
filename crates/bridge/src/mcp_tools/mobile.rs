@@ -2327,7 +2327,9 @@ impl McpTool for MobileProjectionSyncMediaTool {
             "app_control": {
                 "action": "playlist_current",
                 "read_only": true,
-                "verdict": "verified"
+                "verdict": "verified",
+                "player": payload.get("player").cloned().unwrap_or(Value::Null),
+                "selection": payload.get("selection").cloned().unwrap_or(Value::Null)
             },
             "projection_update": update_payload,
             "authority": {
