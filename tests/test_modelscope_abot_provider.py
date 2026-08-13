@@ -179,6 +179,66 @@ class ModelScopeAbotProviderTests(unittest.TestCase):
         self.assertIn("request_constraints_not_object", result["violations"])
         self.assertIn("rollout_generation_parameters_not_object", result["violations"])
 
+    def test_committed_gate7d_admission_packet_validates_without_admission(self):
+        path = (
+            Path(__file__).parents[1]
+            / "docs"
+            / "design"
+            / "evidence"
+            / "modelscope_abot_gate7d_runtime_admission_2026_08_12.json"
+        )
+        result = MODULE.validate_admission_packet(
+            json.loads(path.read_text(encoding="utf-8")), path
+        )
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["admission_contract_ready"])
+        self.assertFalse(result["execution_authorized"])
+        self.assertFalse(result["runtime_admitted"])
+        self.assertFalse(result["mcp_registered"])
+
+    def test_admission_packet_rejects_implicit_authority_and_runtime_promotion(self):
+        packet, path = self._gate7d_packet()
+        packet["authority_policy"]["owner_confirmation_required"] = False
+        packet["decision"]["runtime_admitted"] = True
+        packet["exposure"]["mcp_registered"] = True
+        result = MODULE.validate_admission_packet(packet, path)
+        self.assertFalse(result["valid"])
+        self.assertIn("authority_owner_confirmation_required_mismatch", result["violations"])
+        self.assertIn("decision_runtime_admitted_must_be_false", result["violations"])
+        self.assertIn("exposure_mcp_registered_mismatch", result["violations"])
+
+    def test_admission_packet_rejects_unbounded_or_retained_session(self):
+        packet, path = self._gate7d_packet()
+        packet["concurrency"]["max_active"] = 2
+        packet["cancellation"]["hard_deadline_seconds"] = 0
+        packet["retention"]["transport_frames"] = "persistent"
+        result = MODULE.validate_admission_packet(packet, path)
+        self.assertFalse(result["valid"])
+        self.assertIn("concurrency_max_active_must_be_one", result["violations"])
+        self.assertIn("cancellation_hard_deadline_seconds_invalid", result["violations"])
+        self.assertIn("retention_transport_frames_mismatch", result["violations"])
+
+    def _gate7d_packet(self):
+        path = (
+            Path(__file__).parents[1]
+            / "docs"
+            / "design"
+            / "evidence"
+            / "modelscope_abot_gate7d_runtime_admission_2026_08_12.json"
+        )
+        return json.loads(path.read_text(encoding="utf-8")), path
+
+    def test_admission_packet_rejects_lineage_tampering_and_automatic_retry(self):
+        packet, path = self._gate7d_packet()
+        packet["evidence_lineage"]["artifact_receipt_sha256"] = "0" * 64
+        packet["failure_recovery"]["automatic_retry"] = True
+        packet["output_policy"]["canonical_memory_write"] = True
+        result = MODULE.validate_admission_packet(packet, path)
+        self.assertFalse(result["valid"])
+        self.assertIn("artifact_receipt_sha256_mismatch", result["violations"])
+        self.assertIn("failure_recovery_automatic_retry_mismatch", result["violations"])
+        self.assertIn("output_canonical_memory_write_must_be_false", result["violations"])
+
 
 if __name__ == "__main__":
     unittest.main()
