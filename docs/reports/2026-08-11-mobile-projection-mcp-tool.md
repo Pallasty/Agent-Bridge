@@ -82,3 +82,14 @@ projection lane, use the combined explicit profile
 essential schemas while adding only the seven bounded mobile projection/device
 tools; APK install, click, text input, screenshots, and desktop actuation stay
 excluded.
+
+## On-demand media sync (2026-08-13)
+
+`mobile_projection_sync_media` is an additional bounded tool in the same
+explicit profile. It calls `app_control` with only the verified,
+read-only `playlist_current` action, maps its `track_summary` and
+`active_playlist` fields into `agent_bridge.media_context.v0`, and patches an
+already consent-gated projection session. It cannot dispatch playback
+controls, reopen the Activity, extend TTL, start a companion service, or add
+authority. Synchronization is deliberately on-demand; no background polling
+loop is introduced.

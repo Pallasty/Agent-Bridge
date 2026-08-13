@@ -12,6 +12,69 @@ use super::*;
 pub(super) const MOBILE_UI_DUMP_PATH: &str = "/sdcard/agent_bridge_window.xml";
 pub(super) const MOBILE_DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
+/// Convert the verified, read-only `app_control playlist_current` payload into
+/// the bounded media context carried by a projection frame. Keeping this
+/// conversion here makes the sync tool unable to smuggle control fields into
+/// the projection protocol.
+pub(super) fn media_context_from_app_control(
+    payload: &Value,
+    observed_at_unix_seconds: i64,
+) -> std::result::Result<crate::mobile_projection::MediaContext, String> {
+    if payload.get("schema").and_then(Value::as_str) != Some("agent_bridge.app_control.v0")
+        || payload.get("verdict").and_then(Value::as_str) != Some("verified")
+        || payload.get("action").and_then(Value::as_str) != Some("playlist_current")
+    {
+        return Err("app_control playlist_current result was not verified".into());
+    }
+    let playlist = payload
+        .get("active_playlist")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "app_control result missing active_playlist".to_string())?;
+    let track = payload
+        .get("track_summary")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "app_control result missing track_summary".to_string())?;
+    let mut context = crate::mobile_projection::MediaContext::new(observed_at_unix_seconds);
+    context.player = track.get("player").and_then(Value::as_str).map(str::to_owned);
+    context.active_playlist_id = playlist.get("id").and_then(Value::as_str).map(str::to_owned);
+    context.active_playlist_name = playlist.get("name").and_then(Value::as_str).map(str::to_owned);
+    context.playback_status = track
+        .get("playback_status")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    context.track_id = track.get("track_id").and_then(Value::as_str).map(str::to_owned);
+    context.artist = track.get("artist").and_then(Value::as_str).map(str::to_owned);
+    context.title = track.get("title").and_then(Value::as_str).map(str::to_owned);
+    context.position_seconds = track.get("position_seconds").and_then(Value::as_f64);
+    context.duration_seconds = track.get("duration_seconds").and_then(Value::as_f64);
+    context.metadata_available = track
+        .get("metadata_available")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Ok(context)
+}
+
+fn format_media_clock(seconds: Option<f64>) -> String {
+    let total = seconds.unwrap_or(0.0).max(0.0).round() as u64;
+    format!("{:02}:{:02}", total / 60, total % 60)
+}
+
+fn media_projection_presentation(context: &crate::mobile_projection::MediaContext) -> (String, String, String) {
+    let title = context.title.as_deref().unwrap_or("未播放曲目");
+    let playlist = context.active_playlist_name.as_deref().unwrap_or("未选择播放列表");
+    let status = context.playback_status.as_deref().unwrap_or("Unknown");
+    let body = format!(
+        "{} · {}\n{} · {} / {}\n播放列表：{}",
+        context.artist.as_deref().unwrap_or("未知"),
+        title,
+        status,
+        format_media_clock(context.position_seconds),
+        format_media_clock(context.duration_seconds),
+        playlist,
+    );
+    ("媒体状态 · 已同步".into(), body, status.into())
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct AdbCommandOutput {
     pub(super) exit_code: i32,
@@ -2062,6 +2125,127 @@ impl McpTool for MobileProjectionStartTool {
                 "actuation": false
             },
             "next": "The device holder must review the source/session/expiry and press Allow and connect."
+        })))
+    }
+}
+
+mobile_tool_struct!(MobileProjectionSyncMediaTool);
+#[async_trait]
+impl McpTool for MobileProjectionSyncMediaTool {
+    fn name(&self) -> &'static str {
+        "mobile_projection_sync_media"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read the current media playlist/track through the verified, read-only app_control playlist_current path and patch an existing consent-gated mobile projection. This never dispatches playback controls, extends TTL, reopens the Activity, or grants authority.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": { "type": "string", "description": "Active mobile projection session to update." },
+                    "player": { "type": "string", "description": "Optional exact or unique-substring MPRIS player selector." },
+                    "cwd": { "type": "string", "description": "Optional repo root used to resolve app_control.py." },
+                    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 30000, "default": 15000 }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(error) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(error));
+        }
+        let Some(session_id) = args
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(ToolResult::error("missing 'session_id'"));
+        };
+        if !mobile_projection_registry()
+            .lock()
+            .unwrap()
+            .contains_key(session_id)
+        {
+            return Ok(ToolResult::error("projection session not found or expired"));
+        }
+        let mut read_args = json!({
+            "domain": "media",
+            "action": "playlist_current",
+            "dry_run": true,
+            "timeout_ms": args.get("timeout_ms").cloned().unwrap_or(json!(15_000)),
+        });
+        if let Some(player) = args.get("player") {
+            read_args["player"] = player.clone();
+        }
+        if let Some(cwd) = args.get("cwd") {
+            read_args["cwd"] = cwd.clone();
+        }
+        let read_result = AppControlTool::new(self.hub.clone())
+            .execute(read_args, ctx)
+            .await?;
+        if read_result.is_error {
+            return Ok(read_result);
+        }
+        let Some(payload) = read_result
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Text { text } => serde_json::from_str::<Value>(text).ok(),
+                _ => None,
+            })
+        else {
+            return Ok(ToolResult::error("app_control returned no JSON payload"));
+        };
+        let observed_at = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs() as i64,
+            Err(_) => return Ok(ToolResult::error("system clock before Unix epoch")),
+        };
+        let context = match media_context_from_app_control(&payload, observed_at) {
+            Ok(value) => value,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let (title, body, status) = media_projection_presentation(&context);
+        let update_args = json!({
+            "session_id": session_id,
+            "title": title,
+            "body": body,
+            "status": status,
+            "media_context": context,
+        });
+        let update_result = MobileProjectionUpdateTool::new(self.hub.clone())
+            .execute(update_args, ctx)
+            .await?;
+        if update_result.is_error {
+            return Ok(update_result);
+        }
+        let update_payload = update_result
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Text { text } => serde_json::from_str::<Value>(text).ok(),
+                _ => None,
+            })
+            .unwrap_or_else(|| json!({"status": "updated"}));
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.mobile_projection_sync_media.v0",
+            "status": "updated",
+            "session_id": session_id,
+            "media_context": context,
+            "app_control": {
+                "action": "playlist_current",
+                "read_only": true,
+                "verdict": "verified"
+            },
+            "projection_update": update_payload,
+            "authority": {
+                "attention": false,
+                "memory": false,
+                "sensor": false,
+                "actuation": false
+            }
         })))
     }
 }

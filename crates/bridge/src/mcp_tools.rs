@@ -44611,6 +44611,7 @@ const CODEX_MOBILE_PROJECTION_EXTRAS: &[&str] = &[
     "mobile_projection_wait",
     "mobile_projection_start",
     "mobile_projection_update",
+    "mobile_projection_sync_media",
     "mobile_projection_stop",
 ];
 
@@ -48236,6 +48237,13 @@ pub(crate) fn build_registry_with_policy_surface(
         surface.android_adb,
         Tier::Niche,
         Arc::new(MobileProjectionUpdateTool::new(hub.clone())),
+    );
+    reg_if_available(
+        &mut reg,
+        policy,
+        surface.android_adb,
+        Tier::Niche,
+        Arc::new(MobileProjectionSyncMediaTool::new(hub.clone())),
     );
     reg_if_available(
         &mut reg,

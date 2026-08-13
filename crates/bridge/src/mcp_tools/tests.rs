@@ -1585,6 +1585,7 @@ fn codex_essential_exposes_mobile_readonly_bridge_tools() {
     for t in [
         "mobile_projection_start",
         "mobile_projection_update",
+        "mobile_projection_sync_media",
         "mobile_projection_stop",
         "mobile_install_apk",
         "mobile_launch_app",
@@ -1669,6 +1670,40 @@ fn mobile_projection_patch_carries_media_context_and_allows_explicit_clear() {
         mobile_projection_patch_frame(&patched, &json!({"media_context": null})).unwrap();
     assert!(cleared.media_context.is_none());
     assert_eq!(changed, vec!["media_context"]);
+}
+
+#[test]
+fn mobile_projection_sync_media_maps_only_verified_playlist_current_payload() {
+    let payload = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "status": "observed",
+        "verdict": "verified",
+        "action": "playlist_current",
+        "active_playlist": {"active": true, "id": "/playlist/1", "name": "Allin1.m3u"},
+        "track_summary": {
+            "player": "rhythmbox",
+            "playback_status": "Playing",
+            "track_id": "/track/2",
+            "artist": "Sade",
+            "title": "By Your Side",
+            "position_seconds": 12.5,
+            "duration_seconds": 275.0,
+            "metadata_available": true
+        }
+    });
+    let context = media_context_from_app_control(&payload, 1234).unwrap();
+    assert_eq!(context.schema, crate::mobile_projection::MEDIA_CONTEXT_SCHEMA);
+    assert_eq!(context.active_playlist_name.as_deref(), Some("Allin1.m3u"));
+    assert_eq!(context.title.as_deref(), Some("By Your Side"));
+    assert_eq!(context.position_seconds, Some(12.5));
+    assert!(context.metadata_available);
+
+    for bad in [
+        json!({"schema":"agent_bridge.app_control.v0","verdict":"verified","action":"next"}),
+        json!({"schema":"agent_bridge.app_control.v0","verdict":"error","action":"playlist_current"}),
+    ] {
+        assert!(media_context_from_app_control(&bad, 1234).is_err());
+    }
 }
 
 #[test]
@@ -7897,7 +7932,12 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
     for tool in ["mobile_install_apk", "mobile_click", "mobile_input_text", "desktop_action"] {
         assert!(!names.contains(tool), "unsafe tool leaked into combined profile: {tool}");
     }
-    for tool in ["mobile_projection_start", "mobile_projection_update", "mobile_projection_stop"] {
+    for tool in [
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_sync_media",
+        "mobile_projection_stop",
+    ] {
         assert!(schemas.iter().any(|schema| schema.name == tool), "schema missing {tool}");
     }
 }
