@@ -25,6 +25,7 @@ API failure must not unexpectedly become a desktop click.
 
 - Domain: `media`
 - Read-only operation: `discover`
+- Read-only observations: `state_get`, `volume_get`
 - Mutating operations: `next`, `previous`, `play`, `pause`, `play_pause`,
   `stop`
 - Backend: MPRIS through the argument-safe `playerctl` client
@@ -35,6 +36,7 @@ API failure must not unexpectedly become a desktop click.
   - `volume_get`: normalized player volume observed;
   - `volume_up`/`volume_down`: volume changed in the requested direction;
   - `volume_set`: normalized volume reached the requested value within 0.01.
+  - `state_get`: playback state, track identity, metadata, and volume observed.
 
 The media adapter also exposes `volume` capability discovery with the MPRIS
 range `0.0..=1.0` and a default step of `0.05`. This is player-local volume;

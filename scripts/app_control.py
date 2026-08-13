@@ -21,7 +21,7 @@ from typing import Any, MutableMapping
 SCHEMA = "agent_bridge.app_control.v0"
 ACTIONS = (
     "discover", "next", "previous", "play", "pause", "play_pause", "stop",
-    "volume_get", "volume_up", "volume_down", "volume_set",
+    "volume_get", "volume_up", "volume_down", "volume_set", "state_get",
 )
 PLAYERCTL_ACTION = {
     "next": "next",
@@ -231,6 +231,13 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             "domain": "media", "action": action, "read_only": True, "player": player,
             "route": route_summary(True), "before": before,
             "verification": {"status": "verified", "predicate": "volume_observed"},
+        }
+    if action == "state_get":
+        return {
+            "schema": SCHEMA, "status": "observed", "verdict": "verified", "recover": "proceed",
+            "domain": "media", "action": action, "read_only": True, "player": player,
+            "route": route_summary(True), "before": before,
+            "verification": {"status": "verified", "predicate": "player_state_observed"},
         }
     if dry_run:
         if action == "volume_set":
