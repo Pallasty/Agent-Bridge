@@ -90,10 +90,36 @@ class ExecutionAttemptTests(unittest.TestCase):
         opened = {**self.admission, "runtime_admitted": True}
         with self.assertRaisesRegex(attempt.ExecutionAttemptError, "boundary"):
             self.prepare(admission_receipt=opened)
+        opened = {**self.admission, "execution_authorized": True}
+        with self.assertRaisesRegex(attempt.ExecutionAttemptError, "boundary"):
+            self.prepare(admission_receipt=opened)
         with self.assertRaisesRegex(attempt.ExecutionAttemptError, "attempt id"):
             self.prepare(attempt_id="x")
         with self.assertRaisesRegex(attempt.ExecutionAttemptError, "timeout"):
             self.prepare(timeout_ms=30_001)
+        with self.assertRaisesRegex(attempt.ExecutionAttemptError, "timeout"):
+            bounded_plan = {**self.plan, "adapter": {**self.plan["adapter"], "timeout_ms": 10_000}}
+            bounded_admission = admission.admit_execution(
+                adapter_plan=bounded_plan,
+                owner_confirmation=True,
+                runtime_opt_in=True,
+                now_unix_ms=NOW,
+            )
+            self.prepare(
+                timeout_ms=20_000,
+                adapter_plan=bounded_plan,
+                admission_receipt=bounded_admission,
+            )
+
+    def test_incomplete_plan_fails_closed_before_receipt_binding(self):
+        incomplete = {**self.plan, "adapter": {"network_allowed": False, "subprocess_allowed": False}}
+        with self.assertRaisesRegex(attempt.ExecutionAttemptError, "adapter plan"):
+            self.prepare(adapter_plan=incomplete)
+
+    def test_admission_window_is_bounded(self):
+        invalid = {**self.admission, "expires_at_unix_ms": NOW + 30_001}
+        with self.assertRaisesRegex(attempt.ExecutionAttemptError, "expired"):
+            self.prepare(admission_receipt=invalid)
 
 
 if __name__ == "__main__":
