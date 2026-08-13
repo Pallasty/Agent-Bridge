@@ -230,6 +230,15 @@ def route_summary(selected: bool) -> dict[str, Any]:
 
 def execute(action: str, player_selector: str | None, dry_run: bool, verify_timeout: float, volume: float | None = None, playlist_id: str | None = None) -> dict[str, Any]:
     started = time.monotonic()
+    # Validate caller-supplied parameters before probing the optional backend.
+    # This keeps malformed requests deterministic on machines without MPRIS and
+    # preserves the contract's distinction between caller error and availability.
+    if action == "volume_set" and (volume is None or not 0.0 <= volume <= 1.0):
+        return {
+            "schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan",
+            "domain": "media", "action": action, "route": route_summary(False),
+            "error": {"code": "invalid_volume", "message": "volume_set requires 0.0 <= volume <= 1.0"},
+        }
     env = dict(os.environ)
     restored = hydrate_session_bus(env)
     if not shutil.which("playerctl"):
@@ -284,12 +293,6 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
         after, observe_error = observe(player, env)
         verified = after is not None and after.get("metadata_available") and after.get("track_id") is not None
         return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "playlist_id": playlist_id, "route": route_summary(True), "after": after, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_with_track" if verified else "playlist_activation_effect_unmet", "observation_error": observe_error}}
-    if action == "volume_set" and (volume is None or not 0.0 <= volume <= 1.0):
-        return {
-            "schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan",
-            "domain": "media", "action": action, "player": player, "route": route_summary(True),
-            "error": {"code": "invalid_volume", "message": "volume_set requires 0.0 <= volume <= 1.0"},
-        }
     before, error = observe(player, env)
     if error or before is None:
         return {

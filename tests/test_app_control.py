@@ -301,6 +301,16 @@ class AppControlTests(unittest.TestCase):
         finally:
             mod.shutil.which = old_which
         self.assertEqual(payload["error"]["code"], "invalid_volume")
+
+    def test_volume_set_invalid_range_precedes_backend_probe(self):
+        mod = load_module()
+        original = mod.list_players
+        mod.list_players = lambda env: ([], {"code": "no_mpris_player"})
+        try:
+            payload = mod.execute("volume_set", "rhythmbox", False, 0.2, 1.1)
+        finally:
+            mod.list_players = original
+        self.assertEqual(payload["error"]["code"], "invalid_volume")
         self.assertEqual(payload["recover"], "replan")
 
 
