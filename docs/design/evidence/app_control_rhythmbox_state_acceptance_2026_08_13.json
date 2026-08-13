@@ -1,0 +1,22 @@
+{
+  "schema": "agent_bridge.app_control.state_acceptance.v0",
+  "date": "2026-08-13",
+  "player": "rhythmbox",
+  "backend": "mpris_playerctl",
+  "route_layer": "application_protocol",
+  "action": "state_get",
+  "receipt": {
+    "status": "observed",
+    "verdict": "verified",
+    "predicate": "player_state_observed",
+    "playback_status": "Playing",
+    "track_id_observed": true,
+    "metadata_observed": true,
+    "volume": 1.0
+  },
+  "fallbacks": {
+    "atspi": "not_executed",
+    "vision": "not_executed",
+    "coordinate_input": "not_executed"
+  }
+}
