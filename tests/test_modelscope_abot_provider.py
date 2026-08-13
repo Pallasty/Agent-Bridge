@@ -168,6 +168,17 @@ class ModelScopeAbotProviderTests(unittest.TestCase):
         self.assertIn("artifact_dimensions_mismatch", result["violations"])
         self.assertIn("rollout_prompt_binding_mismatch", result["violations"])
 
+    def test_artifact_validator_fails_closed_on_malformed_nested_fields(self):
+        source_root = Path(__file__).parents[1] / "docs" / "design" / "evidence"
+        source_receipt = source_root / "modelscope_abot_gate7c_artifact_receipt_2026_08_12.json"
+        receipt = json.loads(source_receipt.read_text(encoding="utf-8"))
+        receipt["request"]["constraints"] = "malformed"
+        receipt["rollout"]["generation_parameters"] = ["malformed"]
+        result = MODULE.validate_artifact_receipt(receipt, source_receipt)
+        self.assertFalse(result["valid"])
+        self.assertIn("request_constraints_not_object", result["violations"])
+        self.assertIn("rollout_generation_parameters_not_object", result["violations"])
+
 
 if __name__ == "__main__":
     unittest.main()

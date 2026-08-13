@@ -318,8 +318,16 @@ def validate_artifact_receipt(receipt: Any, receipt_path: Path) -> dict[str, Any
         violations.append("rollout_artifact_hash_mismatch")
     if rollout.get("verdict") != "not_verified":
         violations.append("rollout_verdict_must_be_not_verified")
-    request_prompt_sha = request.get("constraints", {}).get("prompt_sha256")
-    rollout_prompt_sha = rollout.get("generation_parameters", {}).get("prompt_sha256")
+    constraints = request.get("constraints", {})
+    if not isinstance(constraints, dict):
+        violations.append("request_constraints_not_object")
+        constraints = {}
+    generation_parameters = rollout.get("generation_parameters", {})
+    if not isinstance(generation_parameters, dict):
+        violations.append("rollout_generation_parameters_not_object")
+        generation_parameters = {}
+    request_prompt_sha = constraints.get("prompt_sha256")
+    rollout_prompt_sha = generation_parameters.get("prompt_sha256")
     if not request_prompt_sha or rollout_prompt_sha != request_prompt_sha:
         violations.append("rollout_prompt_binding_mismatch")
     boundary = rollout.get("truth_boundary")
