@@ -866,6 +866,7 @@ fn compact_mcp_output_default_for_policy(policy: ToolPolicy) -> bool {
     matches!(
         policy.set,
         ToolSet::CodexEssential
+            | ToolSet::CodexEssentialMobileProjection
             | ToolSet::CodexLean
             | ToolSet::CodexA2ui
             | ToolSet::ChatGptRead
@@ -44207,6 +44208,8 @@ enum ToolSet {
     /// session. It keeps codex-lean read tools and adds only mobile projection
     /// lifecycle tools; it never widens to install/click/input controls.
     CodexMobileProjection,
+    /// Codex essential surface plus the explicit, bounded mobile projection lane.
+    CodexEssentialMobileProjection,
     CodexLean,
     /// An opt-in Codex profile for inspecting static A2UI previews.
     /// It is deliberately the codex-lean allowlist plus one read-only tool.
@@ -44226,6 +44229,7 @@ impl ToolSet {
             Self::CodexEssential => "codex-essential",
             Self::CodexVoice => "codex-voice",
             Self::CodexMobileProjection => "codex-mobile-projection",
+            Self::CodexEssentialMobileProjection => "codex-essential-mobile-projection",
             Self::CodexLean => "codex-lean",
             Self::CodexA2ui => "codex-a2ui",
             Self::ChatGptRead => "chatgpt-read",
@@ -44244,6 +44248,9 @@ impl ToolSet {
             Some("codex-voice") | Some("codex-audio") => Some(Self::CodexVoice),
             Some("codex-mobile-projection") | Some("codex-mobile") => {
                 Some(Self::CodexMobileProjection)
+            }
+            Some("codex-essential-mobile-projection") | Some("codex-essential-mobile") => {
+                Some(Self::CodexEssentialMobileProjection)
             }
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
             Some("codex-a2ui") | Some("codex-a2ui-preview") => Some(Self::CodexA2ui),
@@ -44275,6 +44282,12 @@ impl ToolSet {
                 .chain(CODEX_VOICE_EXTRAS.iter().copied())
                 .collect(),
             Self::CodexMobileProjection => CODEX_MOBILE_PROJECTION_EXTRAS.to_vec(),
+            Self::CodexEssentialMobileProjection => CODEX_ESSENTIAL_GROUPS
+                .iter()
+                .flat_map(|g| g.iter().copied())
+                .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
+                .chain(CODEX_MOBILE_PROJECTION_EXTRAS.iter().copied())
+                .collect(),
             Self::CodexA2ui => vec!["a2ui_preview"],
             _ => Vec::new(),
         }
@@ -44310,7 +44323,10 @@ impl ToolPolicy {
         let legacy_profile = ToolProfile::from_value(profile);
         let profile = match set {
             ToolSet::Profile => legacy_profile,
-            ToolSet::CodexEssential | ToolSet::CodexVoice | ToolSet::CodexMobileProjection => {
+            ToolSet::CodexEssential
+            | ToolSet::CodexVoice
+            | ToolSet::CodexMobileProjection
+            | ToolSet::CodexEssentialMobileProjection => {
                 ToolProfile::Compact
             }
             ToolSet::CodexLean
@@ -44353,6 +44369,10 @@ impl ToolPolicy {
             }
             ToolSet::CodexMobileProjection => {
                 codex_lean_tool(tool_name) || CODEX_MOBILE_PROJECTION_EXTRAS.contains(&tool_name)
+            }
+            ToolSet::CodexEssentialMobileProjection => {
+                codex_essential_tool(tier, tool_name)
+                    || CODEX_MOBILE_PROJECTION_EXTRAS.contains(&tool_name)
             }
             ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::CodexA2ui => codex_lean_tool(tool_name) || tool_name == "a2ui_preview",

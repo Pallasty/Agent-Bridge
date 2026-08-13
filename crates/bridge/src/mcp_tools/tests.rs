@@ -7873,6 +7873,36 @@ fn codex_mobile_projection_is_explicit_and_bounded() {
 }
 
 #[test]
+fn codex_essential_mobile_projection_preserves_essential_surface() {
+    let combined = ToolPolicy::from_values(
+        Some("codex-essential-mobile-projection"),
+        None,
+        None,
+        None,
+    );
+    let schemas = build_registry_with_policy(Hub::builder().build(), combined).list();
+    let names: std::collections::HashSet<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
+    for tool in [
+        "memory_search",
+        "memory_save",
+        "forum_read",
+        "mobile_projection_status",
+        "mobile_projection_wait",
+        "mobile_projection_start",
+        "mobile_projection_update",
+        "mobile_projection_stop",
+    ] {
+        assert!(names.contains(tool), "combined profile missing {tool}");
+    }
+    for tool in ["mobile_install_apk", "mobile_click", "mobile_input_text", "desktop_action"] {
+        assert!(!names.contains(tool), "unsafe tool leaked into combined profile: {tool}");
+    }
+    for tool in ["mobile_projection_start", "mobile_projection_update", "mobile_projection_stop"] {
+        assert!(schemas.iter().any(|schema| schema.name == tool), "schema missing {tool}");
+    }
+}
+
+#[test]
 fn collab_groups_no_partial_coverage() {
     // (d) The drift guardrail: no profile may list SOME-but-not-all members
     // of a collab group. Partial coverage = a new tool that wasn't added to

@@ -75,3 +75,10 @@ The lifecycle tools are intentionally exposed only by the named
 `codex-lean` retain status/wait or other read-only mobile tools but must not
 silently gain projection start/update/stop. After changing the toolset, the MCP
 process must be reconnected before its schema changes are visible.
+
+For a Codex session that needs both the normal essential surface and the
+projection lane, use the combined explicit profile
+`AGENT_BRIDGE_TOOLSET=codex-essential-mobile-projection`. It preserves the
+essential schemas while adding only the seven bounded mobile projection/device
+tools; APK install, click, text input, screenshots, and desktop actuation stay
+excluded.
