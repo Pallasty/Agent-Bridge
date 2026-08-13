@@ -6920,6 +6920,15 @@ fn browser_snapshot_observation_is_content_bound_and_explicitly_fresh() {
 }
 
 #[test]
+fn mobile_click_effect_verification_preserves_unknown_dispatch_boundary() {
+    let dispatched = mobile_click_effect_verification(true);
+    assert_eq!(dispatched["status"], "unknown");
+    assert!(dispatched["reason"].as_str().unwrap().contains("no post-action UI readback"));
+    let failed = mobile_click_effect_verification(false);
+    assert_eq!(failed["status"], "not_verified");
+}
+
+#[test]
 fn inert_actions_block_caps_and_counts_overflow() {
     let now = 1_780_000_000_i64;
     let evs: Vec<_> = (0..7)

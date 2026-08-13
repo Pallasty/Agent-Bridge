@@ -3218,6 +3218,20 @@ pub(super) async fn record_mobile_click_event(hub: &Hub, ok: bool, err_msg: &str
     }
 }
 
+pub(super) fn mobile_click_effect_verification(tap_ok: bool) -> Value {
+    if tap_ok {
+        crate::semantic_event::effect_verification(
+            crate::semantic_event::VerdictStatus::Unknown,
+            "adb input tap dispatched; no post-action UI readback was performed",
+        )
+    } else {
+        crate::semantic_event::effect_verification(
+            crate::semantic_event::VerdictStatus::NotVerified,
+            "adb input tap returned nonzero",
+        )
+    }
+}
+
 mobile_tool_struct!(MobileClickTool);
 #[async_trait]
 impl McpTool for MobileClickTool {
@@ -3344,12 +3358,13 @@ impl McpTool for MobileClickTool {
             json!({ "stage": "tap", "tap": { "x": x, "y": y } }),
         )
         .await;
-        Ok(ToolResult::json_text(&json!({
+        Ok(ToolResult::structured_json(&json!({
             "status": if tap_ok { "ok" } else { "error" },
             "serial": serial,
             "tap": { "x": x, "y": y },
             "selected_node": selected_node,
             "adb": out.as_json(),
+            "effect_verification": mobile_click_effect_verification(tap_ok),
         })))
     }
 }
