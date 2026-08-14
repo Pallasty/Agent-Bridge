@@ -1,0 +1,21 @@
+{
+  "schema": "agent_bridge.modelscope_abot_gate7v_independent_runtime_implementation_review_evidence.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-13",
+  "evidence_class": "synthetic_contract_test",
+  "implementation_present": false,
+  "implementation_review_passed": false,
+  "runtime_admission_present": false,
+  "runtime_enablement_admitted": false,
+  "runtime_implementation_enabled": false,
+  "mcp_registered": false,
+  "network_dispatcher_enabled": false,
+  "subprocess_executor_enabled": false,
+  "bearer_token_created": false,
+  "execution_authorized": false,
+  "runtime_admitted": false,
+  "review_only": true,
+  "status": "blocked_implementation_absent",
+  "blockers": ["runtime_implementation_not_present"],
+  "next_gate": "gate7w_separate_runtime_admission_review"
+}
