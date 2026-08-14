@@ -19,6 +19,7 @@ const MAX_REQUEST_ID_CHARS: usize = 128;
 const TASK_SCHEMA: &str = "agent_bridge.modelscope_abot_task.v0";
 const STUDIO_PROMPT_SELECTOR: &str = "textarea";
 const STUDIO_READY_TIMEOUT_MS: u64 = 45_000;
+const STUDIO_START_TIMEOUT_MS: u64 = 20_000;
 
 static SESSION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 static TASK_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -370,6 +371,31 @@ async fn selector_for_text(
     first_selector(&candidates).ok_or_else(|| format!("button '{text}' not found"))
 }
 
+async fn wait_for_text_selector(
+    browser: &dyn BrowserBackend,
+    page: &PageId,
+    text: &str,
+    timeout_ms: u64,
+) -> std::result::Result<String, String> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        match selector_for_text(browser, page, text).await {
+            Ok(selector) => return Ok(selector),
+            Err(_) if Instant::now() < deadline => {
+                browser
+                    .wait_for(page, None, None, 500)
+                    .await
+                    .map_err(|error| format!("wait for button '{text}': {error}"))?;
+            }
+            Err(_) => {
+                return Err(format!(
+                    "button '{text}' did not become ready within {timeout_ms}ms"
+                ))
+            }
+        }
+    }
+}
+
 async fn stop_session(browser: &dyn BrowserBackend, page: &PageId) -> bool {
     let Ok(selector) = selector_for_text(browser, page, "封存你的世界").await else {
         return false;
@@ -409,7 +435,13 @@ async fn run_once(
             .fill_form(&page, STUDIO_PROMPT_SELECTOR, &request.prompt)
             .await
             .map_err(|error| format!("fill prompt: {error}"))?;
-        let start_selector = selector_for_text(browser.as_ref(), &page, "唤醒你的世界").await?;
+        let start_selector = wait_for_text_selector(
+            browser.as_ref(),
+            &page,
+            "唤醒你的世界",
+            STUDIO_START_TIMEOUT_MS,
+        )
+        .await?;
         browser
             .click(&page, &start_selector)
             .await
