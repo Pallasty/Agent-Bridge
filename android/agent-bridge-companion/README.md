@@ -34,6 +34,15 @@ ordered next actions. These are display-only fields: they do not create
 buttons, callbacks, or any actuation path. Clients that do not render the
 optional fields continue to display the original title and body.
 
+While a person-approved projection session is in the foreground, the Activity
+also offers an explicit **Submit text** field. Submission is a device-originated
+observation, not `adb input text`: it is HMAC-bound to the same session, timestamp,
+and one-time nonce, carries its locale and payload digest, and is acknowledged
+only after the host validates the zero-authority envelope. The text remains
+in-memory in the current MCP process/session record only. It is not written to
+memory, interpreted as an instruction, or used to authorize an action. There is
+no background capture, clipboard read, microphone access, or automatic submit.
+
 ## Build
 
 Set `ANDROID_SDK_ROOT` to an Android SDK containing API 35 and build-tools,

@@ -7,6 +7,7 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -36,6 +37,8 @@ public final class ProjectionActivity extends Activity {
     private long expiresAt;
     private TextView heading, body, statusCard, actionsHeading, actionsBody, state;
     private Button primary;
+    private EditText textInput;
+    private TextView textSubmitState;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -91,10 +94,74 @@ public final class ProjectionActivity extends Activity {
         actionsHeading = text("Next actions", 17, Typeface.BOLD); actionsHeading.setVisibility(View.GONE); panel.addView(actionsHeading);
         actionsBody = text("", 18, Typeface.NORMAL); actionsBody.setVisibility(View.GONE); panel.addView(actionsBody);
         state = text("Temporary read-only projection", 14, Typeface.ITALIC); panel.addView(state);
+        panel.addView(text("Send text to Agent-Bridge", 18, Typeface.BOLD));
+        panel.addView(text("Submitted text is authenticated, retained only in this temporary session, and grants no attention, memory, or control authority.", 14, Typeface.NORMAL));
+        textInput = new EditText(this);
+        textInput.setHint("Type a message (maximum 1000 characters)");
+        textInput.setMaxLines(6);
+        panel.addView(textInput);
+        Button submit = button("Submit text"); panel.addView(submit);
+        textSubmitState = text("Nothing submitted", 14, Typeface.ITALIC); panel.addView(textSubmitState);
+        submit.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) { submitTextObservation(); }
+        });
         primary = button("Disconnect"); panel.addView(primary);
         primary.setOnClickListener(new View.OnClickListener() { public void onClick(View view) { disconnect("Disconnected by you"); } });
         setContentView(scroll(panel));
         poll();
+    }
+
+    private void submitTextObservation() {
+        if (!connected) return;
+        final String submitted = textInput.getText().toString();
+        try { TextObservationProtocol.payloadDigest(submitted); }
+        catch (IllegalArgumentException error) {
+            textSubmitState.setText("Enter 1–1000 characters before submitting");
+            return;
+        }
+        textSubmitState.setText("Submitting…");
+        new Thread(new Runnable() { public void run() {
+            try {
+                final long now = System.currentTimeMillis() / 1000L;
+                byte[] nonceBytes = new byte[16]; random.nextBytes(nonceBytes);
+                final String nonce = Hex.encode(nonceBytes);
+                final String digest = TextObservationProtocol.payloadDigest(submitted);
+                JSONObject payload = new JSONObject();
+                payload.put("schema", TextObservationProtocol.SCHEMA);
+                payload.put("session_id", sessionId);
+                payload.put("captured_at_unix_seconds", now);
+                payload.put("locale", Locale.getDefault().toLanguageTag());
+                payload.put("text", submitted);
+                payload.put("payload_sha256", digest);
+                payload.put("retention_policy", TextObservationProtocol.RETENTION);
+                payload.put("foreground_user_submit", true);
+                payload.put("attention_authority", false);
+                payload.put("memory_authority", false);
+                payload.put("actuation_authority", false);
+                String request = TextObservationProtocol.request(
+                        token, sessionId, now, nonce, payload.toString());
+                Socket socket = new Socket();
+                try {
+                    socket.connect(new InetSocketAddress(host, port), 2000);
+                    socket.setSoTimeout(2000);
+                    BufferedWriter writer = new BufferedWriter(
+                            new OutputStreamWriter(socket.getOutputStream(), "UTF-8"));
+                    writer.write(request); writer.write("\n"); writer.flush();
+                    String response = new BufferedReader(
+                            new InputStreamReader(socket.getInputStream(), "UTF-8")).readLine();
+                    if (response == null) throw new IllegalArgumentException("empty acknowledgement");
+                    TextObservationProtocol.verifyAck(token, sessionId, now, nonce, digest, response);
+                } finally { socket.close(); }
+                handler.post(new Runnable() { public void run() {
+                    textInput.setText("");
+                    textSubmitState.setText("Accepted by this temporary Agent-Bridge session");
+                } });
+            } catch (final Exception error) {
+                handler.post(new Runnable() { public void run() {
+                    textSubmitState.setText("Not accepted; text remains on this device");
+                } });
+            }
+        } }, "AgentBridgeTextSubmit").start();
     }
 
     private void poll() {

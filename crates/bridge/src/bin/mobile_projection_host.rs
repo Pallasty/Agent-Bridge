@@ -1,4 +1,6 @@
-use ab_bridge::mobile_projection::{ProjectionFrame, ProjectionSession, MAX_SESSION_SECONDS};
+use ab_bridge::mobile_projection::{
+    ProjectionEvent, ProjectionFrame, ProjectionSession, MAX_SESSION_SECONDS,
+};
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use std::net::IpAddr;
@@ -42,7 +44,14 @@ fn main() -> Result<()> {
     );
     while (SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64) < expires {
         match session.serve_next(&frame, Duration::from_secs(1)) {
-            Ok(Some(peer)) => eprintln!("served read-only frame to {peer}"),
+            Ok(Some(ProjectionEvent::FramePulled { peer })) => {
+                eprintln!("served read-only frame to {peer}")
+            }
+            Ok(Some(ProjectionEvent::TextSubmitted { peer, observation })) => eprintln!(
+                "accepted ephemeral text observation from {peer} digest={} chars={}",
+                observation.payload_sha256,
+                observation.text.chars().count()
+            ),
             Ok(None) => {}
             Err(error) => eprintln!("rejected projection pull: {error:#}"),
         }

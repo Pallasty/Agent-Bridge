@@ -4,17 +4,72 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const PROJECTION_SCHEMA: &str = "agent_bridge.mobile_projection.frame.v1";
 pub const MEDIA_CONTEXT_SCHEMA: &str = "agent_bridge.media_context.v0";
 pub const MAX_SESSION_SECONDS: i64 = 600;
 pub const MAX_ACTIONS: usize = 6;
-const MAX_REQUEST_BYTES: usize = 512;
+const MAX_REQUEST_BYTES: usize = 6_000;
 const MAX_FRAME_BYTES: usize = 16_384;
+const MAX_TEXT_OBSERVATION_BYTES: usize = 4_096;
 const CLOCK_SKEW_SECONDS: i64 = 30;
+pub const TEXT_OBSERVATION_SCHEMA: &str = "agent_bridge.mobile_text_observation.v0";
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MobileTextObservation {
+    pub schema: String,
+    pub session_id: String,
+    pub captured_at_unix_seconds: i64,
+    pub locale: String,
+    pub text: String,
+    pub payload_sha256: String,
+    pub retention_policy: String,
+    pub foreground_user_submit: bool,
+    pub attention_authority: bool,
+    pub memory_authority: bool,
+    pub actuation_authority: bool,
+}
+
+impl MobileTextObservation {
+    fn validate(&self, session_id: &str, now: i64) -> Result<()> {
+        if self.schema != TEXT_OBSERVATION_SCHEMA
+            || self.session_id != session_id
+            || self.retention_policy != "ephemeral_session_only"
+            || !self.foreground_user_submit
+            || self.attention_authority
+            || self.memory_authority
+            || self.actuation_authority
+            || self.text.trim().is_empty()
+            || self.text.chars().count() > 1_000
+            || self.locale.is_empty()
+            || self.locale.len() > 35
+            || (self.captured_at_unix_seconds - now).abs() > CLOCK_SKEW_SECONDS
+        {
+            bail!("invalid mobile text observation boundary");
+        }
+        let digest = hex(&Sha256::digest(self.text.as_bytes()));
+        if !constant_time_eq(digest.as_bytes(), self.payload_sha256.as_bytes()) {
+            bail!("mobile text observation digest mismatch");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProjectionEvent {
+    FramePulled {
+        peer: SocketAddr,
+    },
+    TextSubmitted {
+        peer: SocketAddr,
+        observation: MobileTextObservation,
+    },
+}
 
 /// Read-only media state that may be rendered by a mobile projection node.
 /// It carries no controls or authority; clients should treat missing fields as
@@ -140,6 +195,7 @@ pub struct ProjectionSession {
     token: [u8; 32],
     session_id: String,
     expires_at: i64,
+    seen_text_nonces: Mutex<HashSet<String>>,
 }
 
 impl ProjectionSession {
@@ -165,6 +221,7 @@ impl ProjectionSession {
             token: decode_lower_hex_32(token_hex)?,
             session_id: session_id.to_owned(),
             expires_at,
+            seen_text_nonces: Mutex::new(HashSet::new()),
         })
     }
 
@@ -178,7 +235,7 @@ impl ProjectionSession {
         &self,
         frame: &ProjectionFrame,
         timeout: Duration,
-    ) -> Result<Option<SocketAddr>> {
+    ) -> Result<Option<ProjectionEvent>> {
         validate_frame(frame, &self.session_id, self.expires_at)?;
         self.listener.set_nonblocking(true)?;
         let deadline = Instant::now() + timeout;
@@ -196,14 +253,20 @@ impl ProjectionSession {
         };
         stream.set_read_timeout(Some(timeout))?;
         stream.set_write_timeout(Some(timeout))?;
-        serve_stream(
+        let event = serve_stream(
             &mut stream,
             &self.token,
             &self.session_id,
             self.expires_at,
             frame,
+            &self.seen_text_nonces,
         )?;
-        Ok(Some(peer))
+        Ok(Some(match event {
+            ProjectionEvent::FramePulled { .. } => ProjectionEvent::FramePulled { peer },
+            ProjectionEvent::TextSubmitted { observation, .. } => {
+                ProjectionEvent::TextSubmitted { peer, observation }
+            }
+        }))
     }
 }
 
@@ -213,7 +276,8 @@ fn serve_stream(
     session_id: &str,
     expires_at: i64,
     frame: &ProjectionFrame,
-) -> Result<()> {
+    seen_text_nonces: &Mutex<HashSet<String>>,
+) -> Result<ProjectionEvent> {
     let mut request = Vec::new();
     BufReader::new(&mut *stream)
         .take((MAX_REQUEST_BYTES + 1) as u64)
@@ -226,23 +290,67 @@ fn serve_stream(
     }
     let request = std::str::from_utf8(&request).context("projection request is not UTF-8")?;
     let fields: Vec<&str> = request.split(' ').collect();
-    if fields.len() != 5 || fields[0] != "ABP1" || fields[1] != session_id {
+    if fields.len() < 5 || fields[1] != session_id {
         bail!("invalid projection request");
     }
     let timestamp: i64 = fields[2].parse().context("invalid projection timestamp")?;
-    if !is_lower_hex(fields[3], 32) || !is_lower_hex(fields[4], 64) {
+    let kind = fields[0];
+    let valid_shape =
+        (kind == "ABP1" && fields.len() == 5) || (kind == "ABT1" && fields.len() == 6);
+    let mac_field = if kind == "ABT1" {
+        fields.get(5)
+    } else {
+        fields.get(4)
+    };
+    if !valid_shape
+        || !is_lower_hex(fields[3], 32)
+        || mac_field.is_none_or(|value| !is_lower_hex(value, 64))
+    {
         bail!("invalid projection authentication fields");
     }
     let now = unix_seconds()?;
     if (timestamp - now).abs() > CLOCK_SKEW_SECONDS || now >= expires_at {
         bail!("expired projection request");
     }
-    let canonical = format!("ABP1\n{session_id}\n{timestamp}\n{}", fields[3]);
+    let canonical = if kind == "ABT1" {
+        format!(
+            "ABT1\n{session_id}\n{timestamp}\n{}\n{}",
+            fields[3], fields[4]
+        )
+    } else {
+        format!("ABP1\n{session_id}\n{timestamp}\n{}", fields[3])
+    };
     if !constant_time_eq(
         &hmac_sha256(token, canonical.as_bytes()),
-        &decode_lower_hex_32(fields[4])?,
+        &decode_lower_hex_32(mac_field.unwrap())?,
     ) {
         bail!("invalid projection request MAC");
+    }
+
+    if kind == "ABT1" {
+        let payload = STANDARD_NO_PAD
+            .decode(fields[4])
+            .context("invalid mobile text observation encoding")?;
+        if payload.len() > MAX_TEXT_OBSERVATION_BYTES {
+            bail!("mobile text observation too large");
+        }
+        let observation: MobileTextObservation =
+            serde_json::from_slice(&payload).context("invalid mobile text observation payload")?;
+        observation.validate(session_id, now)?;
+        let mut nonces = seen_text_nonces.lock().unwrap();
+        if !nonces.insert(fields[3].to_owned()) {
+            bail!("replayed mobile text observation");
+        }
+        let digest = &observation.payload_sha256;
+        let response_canonical =
+            format!("ABT1R\n{session_id}\n{timestamp}\n{}\n{digest}", fields[3]);
+        let mac = hex(&hmac_sha256(token, response_canonical.as_bytes()));
+        writeln!(stream, "ACCEPTED {digest} {mac}")?;
+        stream.flush()?;
+        return Ok(ProjectionEvent::TextSubmitted {
+            peer: stream.peer_addr()?,
+            observation,
+        });
     }
 
     let payload = serde_json::to_vec(frame)?;
@@ -254,7 +362,9 @@ fn serve_stream(
     let mac = hex(&hmac_sha256(token, response_canonical.as_bytes()));
     writeln!(stream, "OK {payload} {mac}")?;
     stream.flush()?;
-    Ok(())
+    Ok(ProjectionEvent::FramePulled {
+        peer: stream.peer_addr()?,
+    })
 }
 
 fn validate_frame(frame: &ProjectionFrame, session_id: &str, expires_at: i64) -> Result<()> {
@@ -444,6 +554,7 @@ mod tests {
                 session,
                 expires,
                 &frame_for_server,
+                &Mutex::new(HashSet::new()),
             )
             .unwrap();
         });
@@ -466,5 +577,91 @@ mod tests {
         let decoded: ProjectionFrame =
             serde_json::from_slice(&STANDARD_NO_PAD.decode(fields[1]).unwrap()).unwrap();
         assert_eq!(decoded, frame);
+    }
+
+    #[test]
+    fn authenticated_text_submission_is_ephemeral_zero_authority_and_replay_safe() {
+        let token = [0x11u8; 32];
+        let session_id = "projection-1";
+        let timestamp = unix_seconds().unwrap();
+        let nonce = "0123456789abcdef0123456789abcdef";
+        let text = "hello from phone";
+        let digest = hex(&Sha256::digest(text.as_bytes()));
+        let observation = MobileTextObservation {
+            schema: TEXT_OBSERVATION_SCHEMA.into(),
+            session_id: session_id.into(),
+            captured_at_unix_seconds: timestamp,
+            locale: "en-US".into(),
+            text: text.into(),
+            payload_sha256: digest.clone(),
+            retention_policy: "ephemeral_session_only".into(),
+            foreground_user_submit: true,
+            attention_authority: false,
+            memory_authority: false,
+            actuation_authority: false,
+        };
+        let mut invalid_digest = observation.clone();
+        invalid_digest.payload_sha256 = "00".repeat(32);
+        assert!(invalid_digest.validate(session_id, timestamp).is_err());
+        let mut invalid_authority = observation.clone();
+        invalid_authority.memory_authority = true;
+        assert!(invalid_authority.validate(session_id, timestamp).is_err());
+        let payload = STANDARD_NO_PAD.encode(serde_json::to_vec(&observation).unwrap());
+        let canonical = format!("ABT1\n{session_id}\n{timestamp}\n{nonce}\n{payload}");
+        let mac = hex(&hmac_sha256(&token, canonical.as_bytes()));
+        let request = format!("ABT1 {session_id} {timestamp} {nonce} {payload} {mac}\n");
+        let first_request = request.clone();
+        let frame = ProjectionFrame::new(session_id, 1, timestamp + 60, "AB", "Ready").unwrap();
+        let seen = Mutex::new(HashSet::new());
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream.write_all(first_request.as_bytes()).unwrap();
+            let mut response = String::new();
+            BufReader::new(stream).read_line(&mut response).unwrap();
+            response
+        });
+        let (mut stream, _) = listener.accept().unwrap();
+        let event = serve_stream(
+            &mut stream,
+            &token,
+            session_id,
+            timestamp + 60,
+            &frame,
+            &seen,
+        )
+        .unwrap();
+        let response = client.join().unwrap();
+        assert!(response.starts_with(&format!("ACCEPTED {digest} ")));
+        assert_eq!(
+            event,
+            ProjectionEvent::TextSubmitted {
+                peer: stream.peer_addr().unwrap(),
+                observation
+            }
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+
+        let replay_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let replay_address = replay_listener.local_addr().unwrap();
+        let replay_client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(replay_address).unwrap();
+            stream.write_all(request.as_bytes()).unwrap();
+        });
+        let (mut replay_stream, _) = replay_listener.accept().unwrap();
+        let replay_error = serve_stream(
+            &mut replay_stream,
+            &token,
+            session_id,
+            timestamp + 60,
+            &frame,
+            &seen,
+        )
+        .unwrap_err()
+        .to_string();
+        replay_client.join().unwrap();
+        assert!(replay_error.contains("replayed mobile text observation"));
     }
 }

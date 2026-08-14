@@ -1749,6 +1749,9 @@ struct MobileProjectionRuntimeState {
     pulls: std::sync::atomic::AtomicU64,
     last_served_revision: std::sync::atomic::AtomicU64,
     last_pull_unix_seconds: std::sync::atomic::AtomicU64,
+    text_submissions: std::sync::atomic::AtomicU64,
+    latest_text_observation:
+        std::sync::RwLock<Option<crate::mobile_projection::MobileTextObservation>>,
     stop_requested: std::sync::atomic::AtomicBool,
     ended: std::sync::atomic::AtomicBool,
 }
@@ -1782,16 +1785,21 @@ pub(super) fn mobile_projection_phase(
     }
 }
 
-fn mobile_projection_snapshot(state: &MobileProjectionRuntimeState, now: i64) -> Value {
+fn mobile_projection_snapshot(
+    state: &MobileProjectionRuntimeState,
+    now: i64,
+    include_text: bool,
+) -> Value {
     use std::sync::atomic::Ordering;
     let pulls = state.pulls.load(Ordering::Relaxed);
     let last_pull = state.last_pull_unix_seconds.load(Ordering::Relaxed);
+    let text_submissions = state.text_submissions.load(Ordering::Relaxed);
     let stopped = state.stop_requested.load(Ordering::Relaxed);
     let ended = state.ended.load(Ordering::Relaxed);
     let frame = state.frame.read().unwrap();
     let current_revision = frame.revision;
     let last_served_revision = state.last_served_revision.load(Ordering::Relaxed);
-    json!({
+    let mut snapshot = json!({
         "session_id": state.session_id,
         "serial": state.serial,
         "endpoint": state.endpoint,
@@ -1808,11 +1816,20 @@ fn mobile_projection_snapshot(state: &MobileProjectionRuntimeState, now: i64) ->
         "pull_count": pulls,
         "last_pull_unix_seconds": if last_pull == 0 { Value::Null } else { json!(last_pull) },
         "consent_observed": pulls > 0,
+        "text_submission_count": text_submissions,
+        "latest_text_observation_available": text_submissions > 0,
+        "text_retention": "in_memory_until_mcp_process_or_session_record_ends",
+        "text_does_not_grant_attention_memory_or_actuation": true,
         "listener_active": !stopped && !ended && now < state.expires_at,
         "stop_requested": stopped,
         "ended": ended,
         "disconnect_inference": "connected_then_idle means pulls stopped or paused; without a signed device disconnect event it is not proof of explicit disconnect"
-    })
+    });
+    if include_text {
+        snapshot["latest_text_observation"] =
+            json!(state.latest_text_observation.read().unwrap().clone());
+    }
+    snapshot
 }
 
 fn mobile_projection_presentation(
@@ -2157,6 +2174,8 @@ impl McpTool for MobileProjectionStartTool {
             pulls: std::sync::atomic::AtomicU64::new(0),
             last_served_revision: std::sync::atomic::AtomicU64::new(0),
             last_pull_unix_seconds: std::sync::atomic::AtomicU64::new(0),
+            text_submissions: std::sync::atomic::AtomicU64::new(0),
+            latest_text_observation: std::sync::RwLock::new(None),
             stop_requested: std::sync::atomic::AtomicBool::new(false),
             ended: std::sync::atomic::AtomicBool::new(false),
         });
@@ -2176,15 +2195,29 @@ impl McpTool for MobileProjectionStartTool {
                         .unwrap_or(false)
                 {
                     let frame = runtime_thread.frame.read().unwrap().clone();
-                    if let Ok(Some(_peer)) = session.serve_next(&frame, Duration::from_secs(1)) {
-                        runtime_thread.pulls.fetch_add(1, Ordering::Relaxed);
-                        runtime_thread
-                            .last_served_revision
-                            .store(frame.revision, Ordering::Relaxed);
-                        if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
-                            runtime_thread
-                                .last_pull_unix_seconds
-                                .store(duration.as_secs(), Ordering::Relaxed);
+                    if let Ok(Some(event)) = session.serve_next(&frame, Duration::from_secs(1)) {
+                        match event {
+                            crate::mobile_projection::ProjectionEvent::FramePulled { .. } => {
+                                runtime_thread.pulls.fetch_add(1, Ordering::Relaxed);
+                                runtime_thread
+                                    .last_served_revision
+                                    .store(frame.revision, Ordering::Relaxed);
+                                if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
+                                    runtime_thread
+                                        .last_pull_unix_seconds
+                                        .store(duration.as_secs(), Ordering::Relaxed);
+                                }
+                            }
+                            crate::mobile_projection::ProjectionEvent::TextSubmitted {
+                                observation,
+                                ..
+                            } => {
+                                *runtime_thread.latest_text_observation.write().unwrap() =
+                                    Some(observation);
+                                runtime_thread
+                                    .text_submissions
+                                    .fetch_add(1, Ordering::Relaxed);
+                            }
                         }
                     }
                 }
@@ -2453,7 +2486,9 @@ impl McpTool for MobileProjectionStatusTool {
             name: self.name().into(),
             description: "Read in-process mobile projection lifecycle state. Reports whether \
                  consent was observed through authenticated pulls and whether the listener is \
-                 active. An idle connection is reported honestly as ambiguous, not as proof \
+                 active. Passing an exact session_id also returns its latest foreground, \
+                 user-submitted text observation; the session list exposes only availability \
+                 metadata. An idle connection is reported honestly as ambiguous, not as proof \
                  that the device explicitly disconnected."
                 .into(),
             input_schema: json!({
@@ -2479,7 +2514,7 @@ impl McpTool for MobileProjectionStatusTool {
             return match registry.get(session_id) {
                 Some(state) => Ok(ToolResult::json_text(&json!({
                     "status": "ok",
-                    "session": mobile_projection_snapshot(state, now)
+                    "session": mobile_projection_snapshot(state, now, true)
                 }))),
                 None => Ok(ToolResult::error(
                     "projection session not found in this MCP process",
@@ -2488,7 +2523,7 @@ impl McpTool for MobileProjectionStatusTool {
         }
         let mut sessions: Vec<Value> = registry
             .values()
-            .map(|state| mobile_projection_snapshot(state, now))
+            .map(|state| mobile_projection_snapshot(state, now, false))
             .collect();
         sessions.sort_by_key(|value| {
             std::cmp::Reverse(
@@ -2608,7 +2643,7 @@ impl McpTool for MobileProjectionWaitTool {
             "target_revision": target_revision,
             "waited_without_ttl_extension": true,
             "timeout_is_not_rejection_or_disconnect": outcome == "timeout_without_matching_evidence",
-            "session": mobile_projection_snapshot(&state, now)
+            "session": mobile_projection_snapshot(&state, now, true)
         })))
     }
 }

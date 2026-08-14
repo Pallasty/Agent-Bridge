@@ -35,6 +35,26 @@ public final class ProtocolTest {
         catch (IllegalArgumentException expected) { rejected = true; }
         check(rejected);
         ProjectionProtocol.validateSession(now, now + 600L);
+        String text = "手机主动提交给 AB";
+        String digest = TextObservationProtocol.payloadDigest(text);
+        String textPayloadJson = "{\"schema\":\"" + TextObservationProtocol.SCHEMA
+                + "\",\"text\":\"" + text + "\",\"payload_sha256\":\"" + digest + "\"}";
+        String textPayload = Base64.getEncoder().withoutPadding().encodeToString(
+                textPayloadJson.getBytes(Charset.forName("UTF-8")));
+        String textRequest = TextObservationProtocol.request(
+                token, projectionSession, now, nonce, textPayloadJson);
+        check(textRequest.equals("ABT1 " + projectionSession + " " + now + " " + nonce
+                + " " + textPayload + " "
+                + hmac(token, "ABT1\n" + projectionSession + "\n" + now + "\n" + nonce
+                        + "\n" + textPayload)));
+        String ackMac = hmac(token, "ABT1R\n" + projectionSession + "\n" + now + "\n"
+                + nonce + "\n" + digest);
+        TextObservationProtocol.verifyAck(token, projectionSession, now, nonce, digest,
+                "ACCEPTED " + digest + " " + ackMac);
+        rejected = false;
+        try { TextObservationProtocol.payloadDigest(repeat("x", 1001)); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        check(rejected);
         System.out.println("android companion protocol tests: PASS");
     }
 
