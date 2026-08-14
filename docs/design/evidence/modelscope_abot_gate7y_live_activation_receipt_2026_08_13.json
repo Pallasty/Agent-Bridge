@@ -1,0 +1,42 @@
+{
+  "schema": "agent_bridge.modelscope_abot_live_activation_receipt.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-14T03:57:21Z",
+  "authorization": {
+    "source": "interactive_user_instruction",
+    "owner_confirmed": true,
+    "scope": "one_shot_browser_smoke",
+    "persistent_registration_authorized": false
+  },
+  "prompt_sha256": "176c71e9ec879a9065103b9a86909d5f50c4dcd9d1050749e42c9e11a800b6e2",
+  "observations": {
+    "start_observed": true,
+    "gpu_allocated": true,
+    "stream_observed": true,
+    "max_observed_fps": 2.0,
+    "stop_requested": true,
+    "stop_observed": true,
+    "post_stop_ready": true,
+    "post_stop_iframe_count": 0
+  },
+  "execution": {
+    "network_request_sent": true,
+    "studio_start_called": true,
+    "execution_attempted": true,
+    "execution_authorized": true,
+    "runtime_admitted": false,
+    "mcp_registered": false,
+    "persistent_runtime": false
+  },
+  "artifact": {
+    "ref": "modelscope_abot_gate7y_live_activation_2026_08_13.png",
+    "sha256": "f27ad88a6362dd17033908967540e2430d8041e585e178d0faaf30ab47cde895",
+    "bytes": 1048287,
+    "width": 1200,
+    "height": 1189,
+    "content_type": "image/png",
+    "evidence_type": "presentation_screenshot"
+  },
+  "status": "completed",
+  "lifecycle_closed": true
+}
