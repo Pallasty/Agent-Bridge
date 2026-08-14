@@ -1,0 +1,21 @@
+{
+  "schema": "agent_bridge.modelscope_abot_gate7u_owner_runtime_authorization_receipt_review_evidence.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-13",
+  "evidence_class": "synthetic_contract_test",
+  "receipt_status": "absent",
+  "authorization_receipt_validated": false,
+  "owner_authorization_issued": false,
+  "runtime_enablement_admitted": false,
+  "runtime_implementation_enabled": false,
+  "mcp_registered": false,
+  "network_dispatcher_enabled": false,
+  "subprocess_executor_enabled": false,
+  "bearer_token_created": false,
+  "execution_authorized": false,
+  "runtime_admitted": false,
+  "review_only": true,
+  "status": "blocked_missing_receipt",
+  "blockers": ["owner_authorization_receipt_missing"],
+  "next_gate": "gate7v_independent_runtime_implementation_review"
+}
