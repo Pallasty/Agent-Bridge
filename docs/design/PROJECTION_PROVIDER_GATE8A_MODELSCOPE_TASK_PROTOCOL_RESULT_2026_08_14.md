@@ -16,8 +16,10 @@ background executor.
 
 ## Provenance
 
-- Source, GitLab master, and GitHub master:
+- Validated source and deployed code:
   `9b32e2f3d21f38ef5be5fad1b862e62955451f34`
+- The result document was committed afterward; it changes no runtime code or
+  deployed asset.
 - Deployed binary: `agent-bridge 0.14.0
   (v0.14.0-1607-g9b32e2f3; 9b32e2f3d21f)`
 - Toolset: `codex-modelscope-abot`
