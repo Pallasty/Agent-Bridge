@@ -1,6 +1,12 @@
 use super::*;
 use ab_browser::BrowserBackend;
-use std::sync::OnceLock;
+use std::{
+    fs,
+    io::Write,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    path::Path,
+    sync::OnceLock,
+};
 
 const PROVIDER_ID: &str = "modelscope.studio.amap_cvlab.abot-world-0";
 const BASE_URL: &str = "https://amap-cvlab-abot-world-0.ms.show";
@@ -9,14 +15,68 @@ const MIN_OBSERVE_MS: u64 = 5_000;
 const MAX_OBSERVE_MS: u64 = 60_000;
 const DEFAULT_OBSERVE_MS: u64 = 30_000;
 const MAX_PROMPT_CHARS: usize = 4_000;
+const MAX_REQUEST_ID_CHARS: usize = 128;
+const TASK_SCHEMA: &str = "agent_bridge.modelscope_abot_task.v0";
 
 static SESSION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static TASK_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static PROCESS_INSTANCE_ID: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 struct RunRequest {
     prompt: String,
     prompt_sha256: String,
     observe_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct TaskRequest {
+    request_id: String,
+    task_id: String,
+    request_digest: String,
+}
+
+impl TaskRequest {
+    fn parse(args: &Value, request: &RunRequest) -> std::result::Result<Option<Self>, String> {
+        let Some(request_id) = args
+            .get("request_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(None);
+        };
+        if request_id.chars().count() > MAX_REQUEST_ID_CHARS {
+            return Err(format!(
+                "request_id exceeds {MAX_REQUEST_ID_CHARS} characters"
+            ));
+        }
+        let task_hash = format!(
+            "{:x}",
+            Sha256::digest(format!("{PROVIDER_ID}\0{request_id}").as_bytes())
+        );
+        let task_id = format!("abot-task-{}", &task_hash[..24]);
+        let intent_id = args
+            .get("embodiment_intent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        let request_digest = format!(
+            "{:x}",
+            Sha256::digest(
+                format!(
+                    "{TASK_SCHEMA}\0{PROVIDER_ID}\0{request_id}\0{}\0{}\0{intent_id}",
+                    request.prompt_sha256, request.observe_ms,
+                )
+                .as_bytes()
+            )
+        );
+        Ok(Some(Self {
+            request_id: request_id.to_string(),
+            task_id,
+            request_digest,
+        }))
+    }
 }
 
 impl RunRequest {
@@ -108,6 +168,192 @@ fn cache_dir() -> PathBuf {
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
         .unwrap_or_else(|| PathBuf::from("."))
         .join("agent-bridge/modelscope-abot")
+}
+
+fn task_dir() -> PathBuf {
+    cache_dir().join("tasks")
+}
+
+fn task_path(task_id: &str) -> PathBuf {
+    task_dir().join(format!("{task_id}.json"))
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn process_instance_id() -> &'static str {
+    PROCESS_INSTANCE_ID.get_or_init(|| format!("mcp-{}-{}", std::process::id(), now_unix_ms()))
+}
+
+fn atomic_write_json(path: &Path, value: &Value) -> std::result::Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("task path has no parent: {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("create task directory {}: {error}", parent.display()))?;
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("secure task directory {}: {error}", parent.display()))?;
+    let staged = path.with_extension(format!("json.tmp-{}-{}", std::process::id(), now_unix_ms()));
+    let bytes = serde_json::to_vec_pretty(value)
+        .map_err(|error| format!("serialize task record: {error}"))?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&staged)
+        .map_err(|error| format!("create staged task record {}: {error}", staged.display()))?;
+    file.write_all(&bytes)
+        .map_err(|error| format!("stage task record {}: {error}", staged.display()))?;
+    file.sync_all()
+        .map_err(|error| format!("sync task record {}: {error}", staged.display()))?;
+    fs::rename(&staged, path)
+        .map_err(|error| format!("commit task record {}: {error}", path.display()))?;
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("sync task directory {}: {error}", parent.display()))
+}
+
+fn read_task(path: &Path) -> std::result::Result<Option<Value>, String> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("read task record {}: {error}", path.display())),
+    };
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| format!("parse task record {}: {error}", path.display()))
+}
+
+fn running_task_record(task: &TaskRequest, request: &RunRequest, lease_id: &LeaseId) -> Value {
+    let now = now_unix_ms();
+    json!({
+        "schema": TASK_SCHEMA,
+        "task_id": task.task_id,
+        "request_id": task.request_id,
+        "request_digest": task.request_digest,
+        "provider_id": PROVIDER_ID,
+        "status": "running",
+        "failure_class": Value::Null,
+        "error": Value::Null,
+        "created_at_unix_ms": now,
+        "updated_at_unix_ms": now,
+        "process_instance_id": process_instance_id(),
+        "process_id": std::process::id(),
+        "prompt_sha256": request.prompt_sha256,
+        "observe_ms": request.observe_ms,
+        "embodiment_lease_id": lease_id,
+        "receipt": Value::Null,
+        "retry_policy": "new_request_id_required_after_failure_or_interruption",
+        "persistent_runtime_admitted": false,
+    })
+}
+
+fn classify_failure(error: &str) -> &'static str {
+    if error.contains("positive FPS") {
+        "provider_timeout"
+    } else if error.contains("stop action") || error.contains("lifecycle did not close") {
+        "provider_lifecycle"
+    } else if error.contains("receipt")
+        || error.contains("screenshot")
+        || error.contains("artifact")
+    {
+        "artifact_io"
+    } else if error.contains("already active") {
+        "concurrency_busy"
+    } else {
+        "browser_backend"
+    }
+}
+
+fn completed_task_record(mut record: Value, receipt: Value) -> Value {
+    record["status"] = json!("completed");
+    record["updated_at_unix_ms"] = json!(now_unix_ms());
+    record["receipt"] = receipt;
+    record
+}
+
+fn failed_task_record(mut record: Value, error: &str) -> Value {
+    record["status"] = json!("failed");
+    record["failure_class"] = json!(classify_failure(error));
+    record["error"] = json!(error);
+    record["updated_at_unix_ms"] = json!(now_unix_ms());
+    record
+}
+
+fn inspect_existing_task(
+    task: &TaskRequest,
+    record: &Value,
+) -> std::result::Result<Option<Value>, String> {
+    if record.get("request_digest").and_then(Value::as_str) != Some(task.request_digest.as_str()) {
+        return Err(format!(
+            "idempotency_conflict: request_id '{}' is already bound to a different request digest",
+            task.request_id
+        ));
+    }
+    match record.get("status").and_then(Value::as_str) {
+        Some("completed") => {
+            let mut receipt = record
+                .get("receipt")
+                .cloned()
+                .filter(Value::is_object)
+                .ok_or_else(|| "completed task has no receipt".to_string())?;
+            receipt["task_protocol"] = json!({
+                "schema": TASK_SCHEMA,
+                "task_id": task.task_id,
+                "request_id": task.request_id,
+                "request_digest": task.request_digest,
+                "idempotent_replay": true,
+                "external_execution_repeated": false,
+            });
+            Ok(Some(receipt))
+        }
+        Some("running") => {
+            let same_process = record.get("process_instance_id").and_then(Value::as_str)
+                == Some(process_instance_id());
+            Err(if same_process {
+                format!("task_in_progress: {}", task.task_id)
+            } else {
+                format!(
+                    "task_interrupted_after_restart: {}; use a new request_id to retry",
+                    task.task_id
+                )
+            })
+        }
+        Some("failed") => Err(format!(
+            "task_previously_failed: {}; use a new request_id to retry",
+            task.task_id
+        )),
+        Some(status) => Err(format!("unknown task status '{status}'")),
+        None => Err("task record has no status".into()),
+    }
+}
+
+fn task_status_projection(mut record: Value, include_receipt: bool) -> Value {
+    let persisted_status = record
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    if persisted_status == "running"
+        && record.get("process_instance_id").and_then(Value::as_str) != Some(process_instance_id())
+    {
+        record["persisted_status"] = json!("running");
+        record["status"] = json!("interrupted");
+        record["failure_class"] = json!("interrupted_after_restart");
+        record["requires_new_request_id"] = json!(true);
+    }
+    if !include_receipt {
+        record
+            .as_object_mut()
+            .map(|object| object.remove("receipt"));
+    }
+    record["read_only"] = json!(true);
+    record["status_projection_mutated_record"] = json!(false);
+    record
 }
 
 async fn selector_for_text(
@@ -325,7 +571,8 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                     "observe_ms": {"type": "integer", "minimum": MIN_OBSERVE_MS, "maximum": MAX_OBSERVE_MS, "default": DEFAULT_OBSERVE_MS},
                     "owner_confirmed": {"type": "boolean", "const": true},
                     "embodiment_lease_id": {"type": "string", "minLength": 1, "maxLength": 128},
-                    "embodiment_intent_id": {"type": "string", "minLength": 1, "maxLength": 128}
+                    "embodiment_intent_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "request_id": {"type": "string", "minLength": 1, "maxLength": MAX_REQUEST_ID_CHARS, "description": "Optional stable idempotency key. Same id plus same request replays the completed receipt without external execution; failed or interrupted tasks require a new id."}
                 }
             }),
         }
@@ -348,10 +595,29 @@ impl McpTool for ModelScopeAbotRunOnceTool {
             Ok(request) => request,
             Err(error) => return Ok(ToolResult::error(error)),
         };
+        let task = match TaskRequest::parse(&args, &request) {
+            Ok(task) => task,
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
         let browser = match self.hub.browser.clone() {
             Some(browser) => browser,
             None => return Ok(ToolResult::error("no browser backend configured")),
         };
+        if let Some(task) = task.as_ref() {
+            let _task_guard = TASK_LOCK
+                .get_or_init(|| tokio::sync::Mutex::new(()))
+                .lock()
+                .await;
+            match read_task(&task_path(&task.task_id)) {
+                Ok(Some(record)) => match inspect_existing_task(task, &record) {
+                    Ok(Some(receipt)) => return Ok(ToolResult::structured_json(&receipt)),
+                    Ok(None) => {}
+                    Err(error) => return Ok(ToolResult::error(error)),
+                },
+                Ok(None) => {}
+                Err(error) => return Ok(ToolResult::error(error)),
+            }
+        }
         let lock = SESSION_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
         let _guard = match lock.try_lock() {
             Ok(guard) => guard,
@@ -361,6 +627,28 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                 ))
             }
         };
+        let mut task_record = None;
+        if let Some(task) = task.as_ref() {
+            let _task_guard = TASK_LOCK
+                .get_or_init(|| tokio::sync::Mutex::new(()))
+                .lock()
+                .await;
+            let path = task_path(&task.task_id);
+            match read_task(&path) {
+                Ok(Some(record)) => match inspect_existing_task(task, &record) {
+                    Ok(Some(receipt)) => return Ok(ToolResult::structured_json(&receipt)),
+                    Ok(None) => {}
+                    Err(error) => return Ok(ToolResult::error(error)),
+                },
+                Ok(None) => {}
+                Err(error) => return Ok(ToolResult::error(error)),
+            }
+            let record = running_task_record(task, &request, &lease_id);
+            if let Err(error) = atomic_write_json(&path, &record) {
+                return Ok(ToolResult::error(error));
+            }
+            task_record = Some(record);
+        }
         let intent_id = args
             .get("embodiment_intent_id")
             .and_then(Value::as_str)
@@ -369,6 +657,22 @@ impl McpTool for ModelScopeAbotRunOnceTool {
         match run_once(browser, request).await {
             Ok(mut receipt) => {
                 receipt["embodiment_lease_id"] = json!(lease_id.to_string());
+                if let (Some(task), Some(record)) = (task.as_ref(), task_record.take()) {
+                    receipt["task_protocol"] = json!({
+                        "schema": TASK_SCHEMA,
+                        "task_id": task.task_id,
+                        "request_id": task.request_id,
+                        "request_digest": task.request_digest,
+                        "idempotent_replay": false,
+                        "external_execution_repeated": false,
+                    });
+                    let completed = completed_task_record(record, receipt.clone());
+                    if let Err(error) = atomic_write_json(&task_path(&task.task_id), &completed) {
+                        return Ok(ToolResult::error(format!(
+                            "execution completed but durable task receipt failed: {error}; do not retry with the same request_id"
+                        )));
+                    }
+                }
                 record_embodiment_receipt(
                     &self.hub,
                     "modelscope_abot",
@@ -385,6 +689,16 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                 Ok(ToolResult::structured_json(&receipt))
             }
             Err(error) => {
+                if let (Some(task), Some(record)) = (task.as_ref(), task_record.take()) {
+                    let failed = failed_task_record(record, &error);
+                    if let Err(persist_error) =
+                        atomic_write_json(&task_path(&task.task_id), &failed)
+                    {
+                        return Ok(ToolResult::error(format!(
+                            "{error}; durable task failure write also failed: {persist_error}; do not retry with the same request_id"
+                        )));
+                    }
+                }
                 record_embodiment_receipt(
                     &self.hub,
                     "modelscope_abot",
@@ -398,6 +712,59 @@ impl McpTool for ModelScopeAbotRunOnceTool {
                 Ok(ToolResult::error(error))
             }
         }
+    }
+}
+
+pub struct ModelScopeAbotTaskStatusTool;
+
+#[async_trait]
+impl McpTool for ModelScopeAbotTaskStatusTool {
+    fn name(&self) -> &'static str {
+        "modelscope_abot_task_status"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read one durable ModelScope ABot task record. A running record from an earlier MCP process is projected as interrupted and is never resumed automatically.".into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["task_id"],
+                "properties": {
+                    "task_id": {"type": "string", "pattern": "^abot-task-[0-9a-f]{24}$"},
+                    "include_receipt": {"type": "boolean", "default": true}
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(task_id) = args.get("task_id").and_then(Value::as_str) else {
+            return Ok(ToolResult::error("missing 'task_id'"));
+        };
+        let valid = task_id.len() == "abot-task-".len() + 24
+            && task_id.starts_with("abot-task-")
+            && task_id["abot-task-".len()..]
+                .chars()
+                .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase());
+        if !valid {
+            return Ok(ToolResult::error(
+                "task_id must match ^abot-task-[0-9a-f]{24}$",
+            ));
+        }
+        let record = match read_task(&task_path(task_id)) {
+            Ok(Some(record)) => record,
+            Ok(None) => return Ok(ToolResult::error(format!("task not found: {task_id}"))),
+            Err(error) => return Ok(ToolResult::error(error)),
+        };
+        let include_receipt = args
+            .get("include_receipt")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        Ok(ToolResult::structured_json(&task_status_projection(
+            record,
+            include_receipt,
+        )))
     }
 }
 
@@ -434,6 +801,134 @@ mod tests {
     }
 
     #[test]
+    fn task_request_is_stable_and_digest_bound() {
+        let mut args = valid_args();
+        args["request_id"] = json!("gate8a-request-001");
+        let request = RunRequest::parse(&args).expect("run request");
+        let first = TaskRequest::parse(&args, &request)
+            .expect("task request")
+            .expect("present task");
+        let second = TaskRequest::parse(&args, &request)
+            .expect("task request")
+            .expect("present task");
+        assert_eq!(first.task_id, second.task_id);
+        assert_eq!(first.request_digest, second.request_digest);
+        assert!(first.task_id.starts_with("abot-task-"));
+
+        args["observe_ms"] = json!(20_000);
+        let changed = RunRequest::parse(&args).expect("changed run request");
+        let changed = TaskRequest::parse(&args, &changed)
+            .expect("changed task request")
+            .expect("present task");
+        assert_eq!(first.task_id, changed.task_id);
+        assert_ne!(first.request_digest, changed.request_digest);
+
+        args["observe_ms"] = json!(10_000);
+        args["embodiment_intent_id"] = json!("different-intent");
+        let changed_intent = RunRequest::parse(&args).expect("changed intent run request");
+        let changed_intent = TaskRequest::parse(&args, &changed_intent)
+            .expect("changed intent task request")
+            .expect("present task");
+        assert_eq!(first.task_id, changed_intent.task_id);
+        assert_ne!(first.request_digest, changed_intent.request_digest);
+    }
+
+    #[test]
+    fn task_record_replays_completed_and_projects_restart_interruption() {
+        let mut args = valid_args();
+        args["request_id"] = json!("gate8a-request-002");
+        let request = RunRequest::parse(&args).expect("run request");
+        let task = TaskRequest::parse(&args, &request)
+            .expect("task request")
+            .expect("present task");
+        let lease = LeaseId::from_raw("lease-test");
+        let running = running_task_record(&task, &request, &lease);
+        let completed = completed_task_record(
+            running.clone(),
+            json!({"schema": "agent_bridge.modelscope_abot_run_once_receipt.v0"}),
+        );
+        let replay = inspect_existing_task(&task, &completed)
+            .expect("completed inspection")
+            .expect("replay receipt");
+        assert_eq!(replay["task_protocol"]["idempotent_replay"], true);
+        assert_eq!(
+            replay["task_protocol"]["external_execution_repeated"],
+            false
+        );
+
+        let mut prior_process = running;
+        prior_process["process_instance_id"] = json!("mcp-prior-process");
+        let projection = task_status_projection(prior_process, false);
+        assert_eq!(projection["status"], "interrupted");
+        assert_eq!(projection["failure_class"], "interrupted_after_restart");
+        assert!(projection.get("receipt").is_none());
+        assert_eq!(projection["status_projection_mutated_record"], false);
+    }
+
+    #[test]
+    fn task_conflict_and_failure_classes_are_stable() {
+        let mut args = valid_args();
+        args["request_id"] = json!("gate8a-request-003");
+        let request = RunRequest::parse(&args).expect("run request");
+        let task = TaskRequest::parse(&args, &request)
+            .expect("task request")
+            .expect("present task");
+        let mut record = running_task_record(&task, &request, &LeaseId::from_raw("lease-test"));
+        record["request_digest"] = json!("different");
+        assert!(inspect_existing_task(&task, &record)
+            .unwrap_err()
+            .contains("idempotency_conflict"));
+        assert_eq!(
+            classify_failure("Studio stream did not report positive FPS before deadline"),
+            "provider_timeout"
+        );
+        assert_eq!(
+            classify_failure("Studio lifecycle did not close"),
+            "provider_lifecycle"
+        );
+    }
+
+    #[test]
+    fn task_record_atomic_roundtrip_preserves_digest() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("abot-task-test.json");
+        let record = json!({
+            "schema": TASK_SCHEMA,
+            "task_id": "abot-task-0123456789abcdef01234567",
+            "request_digest": "digest-test",
+            "status": "running",
+        });
+        atomic_write_json(&path, &record).expect("atomic write");
+        let readback = read_task(&path).expect("read task").expect("task present");
+        assert_eq!(readback, record);
+        assert_eq!(
+            fs::metadata(&path)
+                .expect("task metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(directory.path())
+                .expect("directory metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert!(directory
+            .path()
+            .read_dir()
+            .expect("read directory")
+            .all(|entry| !entry
+                .expect("directory entry")
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-")));
+    }
+
+    #[test]
     fn selector_and_fps_parsers_accept_browser_payloads() {
         let candidates = json!([{"text": "start", "selector": "button:nth-of-type(1)"}]);
         assert_eq!(
@@ -467,5 +962,12 @@ mod tests {
         assert!(schema
             .description
             .contains("never creates a persistent runtime"));
+        assert!(schema.input_schema["properties"]
+            .get("request_id")
+            .is_some());
+
+        let status = ModelScopeAbotTaskStatusTool;
+        assert_eq!(status.name(), "modelscope_abot_task_status");
+        assert!(status.schema().description.contains("never resumed"));
     }
 }

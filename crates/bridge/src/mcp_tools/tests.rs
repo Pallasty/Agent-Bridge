@@ -9880,9 +9880,15 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
         true
     );
     assert!(tool.description.contains("never creates a persistent runtime"));
+    assert!(tool.input_schema["properties"].get("request_id").is_some());
     assert!(abot_tools
         .iter()
         .any(|schema| schema.name == "embodiment_lease"));
+    let status = abot_tools
+        .iter()
+        .find(|schema| schema.name == "modelscope_abot_task_status")
+        .expect("modelscope_abot_task_status schema");
+    assert!(status.description.contains("never resumed"));
     assert!(abot_tools
         .iter()
         .all(|schema| schema.name != "browser_navigate"));
@@ -9891,6 +9897,9 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
     assert!(standard_tools
         .iter()
         .all(|schema| schema.name != "modelscope_abot_run_once"));
+    assert!(standard_tools
+        .iter()
+        .all(|schema| schema.name != "modelscope_abot_task_status"));
 }
 
 #[test]

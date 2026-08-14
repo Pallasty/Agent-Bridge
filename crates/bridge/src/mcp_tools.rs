@@ -77,7 +77,7 @@ use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
 mod kitesurf;
 use kitesurf::CloudflareKitesurfSnapshotTool;
 mod modelscope_abot_runtime;
-use modelscope_abot_runtime::ModelScopeAbotRunOnceTool;
+use modelscope_abot_runtime::{ModelScopeAbotRunOnceTool, ModelScopeAbotTaskStatusTool};
 #[cfg(feature = "embodiment-runtime-p4")]
 mod embodiment_runtime;
 #[cfg(all(feature = "embodiment-runtime-p4", test))]
@@ -44709,8 +44709,11 @@ const CODEX_MOBILE_PROJECTION_EXTRAS: &[&str] = &[
 
 /// Explicit one-shot ABot-World lane. The runtime tool owns its BrowserBackend
 /// lifecycle internally, so raw browser_* controls remain outside this surface.
-const CODEX_MODELSCOPE_ABOT_EXTRAS: &[&str] =
-    &["embodiment_lease", "modelscope_abot_run_once"];
+const CODEX_MODELSCOPE_ABOT_EXTRAS: &[&str] = &[
+    "embodiment_lease",
+    "modelscope_abot_run_once",
+    "modelscope_abot_task_status",
+];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
     matches!(tier, Tier::Essential)
@@ -49426,6 +49429,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(ModelScopeAbotRunOnceTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(ModelScopeAbotTaskStatusTool),
     );
     // Output / expression lane — E1 present() static-artifact sink (uses the
     // browser for self-verify; opt-in via AGENT_BRIDGE_TOOL_PROFILE=all for v0).
