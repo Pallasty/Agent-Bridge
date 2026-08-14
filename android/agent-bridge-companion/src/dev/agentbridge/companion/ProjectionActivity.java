@@ -29,6 +29,7 @@ public final class ProjectionActivity extends Activity {
     private static final String TOKEN = "projection_token";
     private static final String SESSION_ID = "projection_session_id";
     private static final String EXPIRES_AT = "projection_expires_at_unix_seconds";
+    private static final String AUTO_CONNECT = "projection_auto_connect";
     private final Handler handler = new Handler();
     private final SecureRandom random = new SecureRandom();
     private volatile boolean connected;
@@ -56,6 +57,12 @@ public final class ProjectionActivity extends Activity {
         port = getIntent().getIntExtra(PORT, 0);
         expiresAt = getIntent().getLongExtra(EXPIRES_AT, 0L);
         showConsent();
+        if (getIntent().getBooleanExtra(AUTO_CONNECT, false)) {
+            // Test-only host opt-in: ADB pairing still scopes delivery to this
+            // device, while beginProjection retains endpoint/session validation
+            // and the authenticated, expiring pull protocol.
+            handler.post(new Runnable() { public void run() { beginProjection(); } });
+        }
     }
 
     private void showConsent() {

@@ -708,7 +708,10 @@ async fn targeted_compact_bootstrap_keeps_task_state_and_omits_feedback_preamble
         .expect("targeted compact bootstrap");
     let text = result_text(&out);
     assert!(text.contains("targeted_compact_task_state"), "{text}");
-    assert!(text.contains("targeted_compact_semantic_feedback"), "{text}");
+    assert!(
+        text.contains("targeted_compact_semantic_feedback"),
+        "{text}"
+    );
     assert!(text.contains("Continuity Kernel"), "{text}");
     assert!(!text.contains("Feedback preamble"), "{text}");
 
@@ -1655,7 +1658,11 @@ fn mobile_projection_media_presentation_handles_missing_fields() {
 
 #[test]
 fn mobile_projection_media_presentation_localizes_transport_states() {
-    for (raw, expected) in [("Playing", "播放中"), ("Paused", "已暂停"), ("Stopped", "已停止")] {
+    for (raw, expected) in [
+        ("Playing", "播放中"),
+        ("Paused", "已暂停"),
+        ("Stopped", "已停止"),
+    ] {
         let context = crate::mobile_projection::MediaContext {
             playback_status: Some(raw.into()),
             ..crate::mobile_projection::MediaContext::new(1234)
@@ -1715,15 +1722,17 @@ fn mobile_projection_patch_carries_media_context_and_allows_explicit_clear() {
         observed_at_unix_seconds: 10,
         ..Default::default()
     };
-    let original = crate::mobile_projection::ProjectionFrame::new(
-        "session-1", 1, 500, "Title", "Body",
-    )
-    .unwrap()
-    .with_media_context(Some(context.clone()))
-    .unwrap();
+    let original =
+        crate::mobile_projection::ProjectionFrame::new("session-1", 1, 500, "Title", "Body")
+            .unwrap()
+            .with_media_context(Some(context.clone()))
+            .unwrap();
     let (patched, changed) =
         mobile_projection_patch_frame(&original, &json!({"media_context": context})).unwrap();
-    assert_eq!(patched.media_context.as_ref().unwrap().title.as_deref(), Some("Track"));
+    assert_eq!(
+        patched.media_context.as_ref().unwrap().title.as_deref(),
+        Some("Track")
+    );
     assert_eq!(changed, vec!["media_context"]);
     let (cleared, changed) =
         mobile_projection_patch_frame(&patched, &json!({"media_context": null})).unwrap();
@@ -1751,7 +1760,10 @@ fn mobile_projection_sync_media_maps_only_verified_playlist_current_payload() {
         }
     });
     let context = media_context_from_app_control(&payload, 1234).unwrap();
-    assert_eq!(context.schema, crate::mobile_projection::MEDIA_CONTEXT_SCHEMA);
+    assert_eq!(
+        context.schema,
+        crate::mobile_projection::MEDIA_CONTEXT_SCHEMA
+    );
     assert_eq!(context.active_playlist_name.as_deref(), Some("Allin1.m3u"));
     assert_eq!(context.title.as_deref(), Some("By Your Side"));
     assert_eq!(context.position_seconds, Some(12.5));
@@ -1786,8 +1798,14 @@ fn mobile_projection_sync_media_preserves_player_selection_evidence() {
     assert_eq!(evidence["read_only"], true);
     assert_eq!(evidence["verdict"], "verified");
     assert_eq!(evidence["player"], "rhythmbox");
-    assert_eq!(evidence["selection"]["policy"], "first_verified_playlist_current");
-    assert_eq!(evidence["selection"]["attempts"][0]["player"], "chromium.instance");
+    assert_eq!(
+        evidence["selection"]["policy"],
+        "first_verified_playlist_current"
+    );
+    assert_eq!(
+        evidence["selection"]["attempts"][0]["player"],
+        "chromium.instance"
+    );
 }
 
 #[test]
@@ -1816,7 +1834,10 @@ fn mobile_projection_sync_media_repeated_payload_keeps_display_state_stable() {
     assert_eq!(first.position_seconds, second.position_seconds);
     assert_eq!(first.duration_seconds, second.duration_seconds);
     assert_eq!(first.metadata_available, second.metadata_available);
-    assert_ne!(first.observed_at_unix_seconds, second.observed_at_unix_seconds);
+    assert_ne!(
+        first.observed_at_unix_seconds,
+        second.observed_at_unix_seconds
+    );
 }
 
 #[test]
@@ -1877,8 +1898,14 @@ fn mobile_debug_bundle_permissions_are_private() {
     harden_mobile_bundle_path(&root, true).expect("harden directory");
     let file = root.join("manifest.json");
     write_mobile_bundle_text(&file, "{}").expect("write private file");
-    assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
-    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert_eq!(
+        std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     std::fs::remove_dir_all(root).expect("remove test bundle");
 }
 
@@ -2781,9 +2808,7 @@ async fn session_bootstrap_recovers_actionable_work_memory_after_store_restart()
     let first_store = ab_store::SqliteStore::open(&db_path)
         .await
         .expect("open first store");
-    let first_hub = crate::Hub::builder()
-        .store(Arc::new(first_store))
-        .build();
+    let first_hub = crate::Hub::builder().store(Arc::new(first_store)).build();
     WorkMemoryTool::new(first_hub.clone())
         .execute(
             json!({
@@ -2928,11 +2953,7 @@ fn bootstrap_work_memory_keeps_latest_live_precompact_and_structured_lanes() {
     expired.updated_at = now - 15 * WORK_MEMORY_SECONDS_PER_DAY;
     expired.created_at = expired.updated_at;
 
-    let selected = bootstrap_work_memory_rows(
-        vec![older, expired, structured, newest],
-        cwd,
-        now,
-    );
+    let selected = bootstrap_work_memory_rows(vec![older, expired, structured, newest], cwd, now);
     let keys: Vec<&str> = selected.iter().map(|row| row.key.as_str()).collect();
     assert_eq!(keys, vec!["structured", "precompact_new"]);
 }
@@ -6938,8 +6959,14 @@ fn browser_snapshot_observation_is_content_bound_and_explicitly_fresh() {
     let second = browser_snapshot_observation(&page, &json!({"role":"button","name":"Cancel"}));
     assert_eq!(first["schema"], "agent_bridge.observation.v0");
     assert_eq!(first["max_age_ms"], 2000);
-    assert_eq!(first["coordinate_provenance"]["coordinate_space"], "browser.viewport.css_px");
-    assert!(first["observation_id"].as_str().unwrap().starts_with("browser-ui:page-1:"));
+    assert_eq!(
+        first["coordinate_provenance"]["coordinate_space"],
+        "browser.viewport.css_px"
+    );
+    assert!(first["observation_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("browser-ui:page-1:"));
     assert_ne!(first["observation_id"], second["observation_id"]);
     assert_ne!(first["content_hash"], second["content_hash"]);
 }
@@ -6948,7 +6975,10 @@ fn browser_snapshot_observation_is_content_bound_and_explicitly_fresh() {
 fn mobile_click_effect_verification_preserves_unknown_dispatch_boundary() {
     let dispatched = mobile_click_effect_verification(true);
     assert_eq!(dispatched["status"], "unknown");
-    assert!(dispatched["reason"].as_str().unwrap().contains("no post-action UI readback"));
+    assert!(dispatched["reason"]
+        .as_str()
+        .unwrap()
+        .contains("no post-action UI readback"));
     let failed = mobile_click_effect_verification(false);
     assert_eq!(failed["status"], "not_verified");
 }
@@ -6957,7 +6987,10 @@ fn mobile_click_effect_verification_preserves_unknown_dispatch_boundary() {
 fn mobile_input_text_effect_verification_preserves_dispatch_boundary() {
     let dispatched = mobile_input_text_effect_verification(true);
     assert_eq!(dispatched["status"], "unknown");
-    assert!(dispatched["reason"].as_str().unwrap().contains("focused-control state"));
+    assert!(dispatched["reason"]
+        .as_str()
+        .unwrap()
+        .contains("focused-control state"));
     let failed = mobile_input_text_effect_verification(false);
     assert_eq!(failed["status"], "not_verified");
 }
@@ -7960,7 +7993,10 @@ fn codex_lean_exposes_only_mobile_readonly_status_tools() {
         "mobile_projection_status",
         "mobile_projection_wait",
     ] {
-        assert!(p.includes(Tier::Standard, tool), "missing lean status tool: {tool}");
+        assert!(
+            p.includes(Tier::Standard, tool),
+            "missing lean status tool: {tool}"
+        );
     }
     for tool in [
         "mobile_screenshot",
@@ -7974,7 +8010,10 @@ fn codex_lean_exposes_only_mobile_readonly_status_tools() {
         "mobile_click",
         "mobile_input_text",
     ] {
-        assert!(!p.includes(Tier::Standard, tool), "control/heavy tool leaked into lean: {tool}");
+        assert!(
+            !p.includes(Tier::Standard, tool),
+            "control/heavy tool leaked into lean: {tool}"
+        );
     }
 }
 
@@ -8021,11 +8060,7 @@ fn codex_mobile_projection_is_explicit_and_bounded() {
         );
     }
 
-    let schemas = build_registry_with_policy(
-        Hub::builder().build(),
-        mobile,
-    )
-    .list();
+    let schemas = build_registry_with_policy(Hub::builder().build(), mobile).list();
     for tool in [
         "mobile_projection_start",
         "mobile_projection_update",
@@ -8044,23 +8079,33 @@ fn codex_mobile_projection_is_explicit_and_bounded() {
         start_schema.input_schema["properties"]["media_context"]["description"],
         json!("Optional read-only agent_bridge.media_context.v0 payload; it grants no control authority.")
     );
+    assert_eq!(
+        start_schema.input_schema["properties"]["auto_connect"]["default"],
+        json!(false),
+        "unattended companion connection must remain explicit opt-in"
+    );
+    assert!(
+        start_schema.input_schema["properties"]["auto_connect"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("Test-only")),
+        "auto_connect must not look like a general production bypass"
+    );
     let update_schema = schemas
         .iter()
         .find(|schema| schema.name == "mobile_projection_update")
         .expect("mobile projection update schema");
-    assert!(update_schema.input_schema["properties"].get("media_context").is_some());
+    assert!(update_schema.input_schema["properties"]
+        .get("media_context")
+        .is_some());
 }
 
 #[test]
 fn codex_essential_mobile_projection_preserves_essential_surface() {
-    let combined = ToolPolicy::from_values(
-        Some("codex-essential-mobile-projection"),
-        None,
-        None,
-        None,
-    );
+    let combined =
+        ToolPolicy::from_values(Some("codex-essential-mobile-projection"), None, None, None);
     let schemas = build_registry_with_policy(Hub::builder().build(), combined).list();
-    let names: std::collections::HashSet<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
+    let names: std::collections::HashSet<_> =
+        schemas.iter().map(|schema| schema.name.as_str()).collect();
     for tool in [
         "memory_search",
         "memory_save",
@@ -8073,8 +8118,16 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
     ] {
         assert!(names.contains(tool), "combined profile missing {tool}");
     }
-    for tool in ["mobile_install_apk", "mobile_click", "mobile_input_text", "desktop_action"] {
-        assert!(!names.contains(tool), "unsafe tool leaked into combined profile: {tool}");
+    for tool in [
+        "mobile_install_apk",
+        "mobile_click",
+        "mobile_input_text",
+        "desktop_action",
+    ] {
+        assert!(
+            !names.contains(tool),
+            "unsafe tool leaked into combined profile: {tool}"
+        );
     }
     for tool in [
         "mobile_projection_start",
@@ -8082,7 +8135,10 @@ fn codex_essential_mobile_projection_preserves_essential_surface() {
         "mobile_projection_sync_media",
         "mobile_projection_stop",
     ] {
-        assert!(schemas.iter().any(|schema| schema.name == tool), "schema missing {tool}");
+        assert!(
+            schemas.iter().any(|schema| schema.name == tool),
+            "schema missing {tool}"
+        );
     }
 }
 
@@ -8282,10 +8338,7 @@ fn host_surface_gates_device_and_credential_families() {
                 "cloudflare_zone_list",
             ],
         ),
-        (
-            "cloudflare_kitesurf",
-            &["cloudflare_kitesurf_snapshot"],
-        ),
+        ("cloudflare_kitesurf", &["cloudflare_kitesurf_snapshot"]),
         (
             "github_api",
             &["github_issue_create", "github_issue_list", "github_pr_list"],
@@ -9718,9 +9771,16 @@ async fn collaboration_write_validation_returns_actionable_errors() {
 #[test]
 fn mobile_ui_snapshot_observation_metadata_is_content_bound() {
     let first = super::mobile::mobile_ui_observation_metadata("emulator-5554", &[], "<hierarchy/>");
-    let second = super::mobile::mobile_ui_observation_metadata("emulator-5554", &[], "<hierarchy changed/>");
-    assert_eq!(first["observation_id"].as_str().unwrap().split(':').count(), 3);
-    assert_eq!(first["coordinate_provenance"]["coordinate_space"], "android.screen.px");
+    let second =
+        super::mobile::mobile_ui_observation_metadata("emulator-5554", &[], "<hierarchy changed/>");
+    assert_eq!(
+        first["observation_id"].as_str().unwrap().split(':').count(),
+        3
+    );
+    assert_eq!(
+        first["coordinate_provenance"]["coordinate_space"],
+        "android.screen.px"
+    );
     assert_eq!(first["max_age_ms"], 2_000);
     assert_ne!(first["content_hash"], second["content_hash"]);
     assert_ne!(first["observation_id"], second["observation_id"]);
@@ -10614,10 +10674,7 @@ print(json.dumps(payload))
     assert!(payload["observation"]["observation_id"]
         .as_str()
         .is_some_and(|id| id.starts_with("obs-desktop-linux-")));
-    assert_eq!(
-        payload["observation"]["freshness"]["max_age_ms"],
-        5000_u64
-    );
+    assert_eq!(payload["observation"]["freshness"]["max_age_ms"], 5000_u64);
     assert!(payload["observation"]["freshness"]["age_ms_at_return"].is_u64());
     assert_eq!(
         payload["observation"]["coordinate_provenance"]["windows_rect"]["coordinate_space"],
@@ -11496,7 +11553,7 @@ async fn grounded_surface_present_rejects_missing_or_unbounded_evidence() {
             "source": "mobile",
             "status": "none",
             "freshness": "unavailable"
-        }]})
+        }]}),
     ] {
         let out = tool
             .execute(args, &ToolContext::default())
@@ -11642,7 +11699,9 @@ fn present_is_niche_opt_in_and_registers_under_all() {
         "task_summary_finalize must register under the all profile"
     );
     assert!(
-        schemas.iter().any(|s| s.name == "task_summary_completion_check"),
+        schemas
+            .iter()
+            .any(|s| s.name == "task_summary_completion_check"),
         "task_summary_completion_check must register under the all profile"
     );
     assert!(
@@ -11854,20 +11913,16 @@ async fn voice_runtime_preflight_is_non_actuating_and_fails_closed() {
     assert_eq!(payload["mutates_runtime"], false);
     assert_eq!(payload["backend"], "kokoro");
     assert_eq!(payload["capture_channel"], "sink_monitor");
-    assert!(
-        payload["blockers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|v| v.as_str().unwrap_or("").contains("audio adapter"))
-    );
-    assert!(
-        payload["blockers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|v| v.as_str().unwrap_or("").contains("Kokoro model"))
-    );
+    assert!(payload["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str().unwrap_or("").contains("audio adapter")));
+    assert!(payload["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str().unwrap_or("").contains("Kokoro model")));
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -11926,15 +11981,27 @@ print(json.dumps({
     let argv = payload["argv"].as_array().expect("argv");
     let argv: Vec<&str> = argv.iter().filter_map(Value::as_str).collect();
     for expected in [
-        "--qwen-rust-bin", "/opt/qwen-tts", "--qwen-rust-model-dir", "/models/qwen3",
-        "--qwen-rust-profile", "1.7b-customvoice", "--stt-model", "base",
+        "--qwen-rust-bin",
+        "/opt/qwen-tts",
+        "--qwen-rust-model-dir",
+        "/models/qwen3",
+        "--qwen-rust-profile",
+        "1.7b-customvoice",
+        "--stt-model",
+        "base",
     ] {
         assert!(argv.contains(&expected), "missing {expected}: {argv:?}");
     }
 
-    let sidecar = temp_dir.join(payload["outcome_sidecar"].as_str().expect("outcome sidecar"));
+    let sidecar = temp_dir.join(
+        payload["outcome_sidecar"]
+            .as_str()
+            .expect("outcome sidecar"),
+    );
     let outcome: Value = serde_json::from_str(
-        &tokio::fs::read_to_string(&sidecar).await.expect("read sidecar"),
+        &tokio::fs::read_to_string(&sidecar)
+            .await
+            .expect("read sidecar"),
     )
     .expect("sidecar json");
     assert_eq!(outcome["backend"], "qwen3-rust");
@@ -15435,10 +15502,7 @@ fn desktop_steer_script_path_resolution() {
 fn desktop_semantic_task_is_the_only_codex_essential_desktop_act_surface() {
     // The bounded snapshot -> invoke -> verify transaction is the smallest
     // useful act surface. Low-level action/invoke and host execution stay hidden.
-    assert!(codex_essential_tool(
-        Tier::Niche,
-        "desktop_semantic_task"
-    ));
+    assert!(codex_essential_tool(Tier::Niche, "desktop_semantic_task"));
     assert!(!codex_essential_tool(Tier::Niche, "desktop_invoke"));
     assert!(!codex_essential_tool(Tier::Niche, "desktop_action"));
     assert!(!codex_essential_tool(Tier::Niche, "desktop_confirm"));
@@ -15447,14 +15511,12 @@ fn desktop_semantic_task_is_the_only_codex_essential_desktop_act_surface() {
     assert!(codex_essential_tool(Tier::Standard, "desktop_verify"));
 
     let policy = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
-    let names: std::collections::HashSet<_> = build_registry_with_policy(
-        Hub::builder().build(),
-        policy,
-    )
-    .list()
-    .into_iter()
-    .map(|schema| schema.name)
-    .collect();
+    let names: std::collections::HashSet<_> =
+        build_registry_with_policy(Hub::builder().build(), policy)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
     assert!(names.contains("desktop_semantic_task"));
     assert!(!names.contains("desktop_invoke"));
     assert!(!names.contains("desktop_action"));
@@ -15497,15 +15559,37 @@ fn app_control_is_codex_visible_and_exposes_only_allowlisted_media_intents() {
         .find(|schema| schema.name == "app_control")
         .expect("app_control schema");
     assert_eq!(tool.input_schema["required"], json!(["action"]));
-    assert_eq!(tool.input_schema["properties"]["domain"]["enum"], json!(["media"]));
+    assert_eq!(
+        tool.input_schema["properties"]["domain"]["enum"],
+        json!(["media"])
+    );
     let actions = tool.input_schema["properties"]["action"]["enum"]
         .as_array()
         .expect("action enum");
-    for action in ["volume_get", "volume_up", "volume_down", "volume_set", "state_get", "position_get", "playlist_list", "playlist_current", "playlist_activate"] {
-        assert!(actions.iter().any(|value| value == action), "missing {action}");
+    for action in [
+        "volume_get",
+        "volume_up",
+        "volume_down",
+        "volume_set",
+        "state_get",
+        "position_get",
+        "playlist_list",
+        "playlist_current",
+        "playlist_activate",
+    ] {
+        assert!(
+            actions.iter().any(|value| value == action),
+            "missing {action}"
+        );
     }
-    assert_eq!(tool.input_schema["properties"]["volume"]["minimum"], json!(0.0));
-    assert_eq!(tool.input_schema["properties"]["volume"]["maximum"], json!(1.0));
+    assert_eq!(
+        tool.input_schema["properties"]["volume"]["minimum"],
+        json!(0.0)
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["volume"]["maximum"],
+        json!(1.0)
+    );
     for forbidden in [
         "command",
         "method",
@@ -15566,7 +15650,10 @@ print(json.dumps({
         .expect("execute");
     assert!(!out.is_error);
     let payload = result_text_as_json(&out);
-    assert_eq!(payload["route"]["selected"]["layer"], "application_protocol");
+    assert_eq!(
+        payload["route"]["selected"]["layer"],
+        "application_protocol"
+    );
     assert_ne!(payload["before"]["track_id"], payload["after"]["track_id"]);
     assert_eq!(payload["mcp_wrapper"]["tool"], "app_control");
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -15577,8 +15664,14 @@ async fn app_control_rejects_raw_or_unknown_control_before_exec() {
     let tool = AppControlTool::new(Hub::builder().build());
     for (args, code) in [
         (json!({"action": "arbitrary_method"}), "unsupported_action"),
-        (json!({"domain": "browser", "action": "discover"}), "unsupported_domain"),
-        (json!({"action": "volume_set", "volume": 1.1}), "invalid_volume"),
+        (
+            json!({"domain": "browser", "action": "discover"}),
+            "unsupported_domain",
+        ),
+        (
+            json!({"action": "volume_set", "volume": 1.1}),
+            "invalid_volume",
+        ),
     ] {
         let out = tool
             .execute(args, &ToolContext::default())
@@ -15809,7 +15902,10 @@ print(json.dumps({
     assert_eq!(payload["recover"], "proceed");
     assert_eq!(payload["safety"]["mode"], "isolated");
     assert_eq!(payload["safety"]["host_mutation_exposed"], false);
-    assert_eq!(payload["preflight"]["schema"], DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA);
+    assert_eq!(
+        payload["preflight"]["schema"],
+        DESKTOP_SNAPSHOT_SEMANTIC_SCHEMA
+    );
     assert_eq!(payload["preflight"]["observation"]["fresh_at_return"], true);
     assert!(payload["preflight"]["observation"]["observation_id"]
         .as_str()
@@ -15853,7 +15949,9 @@ fn desktop_invoke_schema_hides_host_unlock_flags() {
         .get("confirm_host")
         .is_some());
     assert!(tool.input_schema["properties"].get("use_grant").is_some());
-    assert!(tool.input_schema["properties"].get("observation_ref").is_some());
+    assert!(tool.input_schema["properties"]
+        .get("observation_ref")
+        .is_some());
 }
 
 fn fresh_desktop_observation_ref() -> Value {
@@ -16053,7 +16151,10 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     assert!(!argv.contains(&"--confirm"));
     assert!(!argv.contains(&"--i-understand-this-touches-the-real-desktop"));
     assert!(!argv.contains(&"--dry-run"));
-    assert_eq!(payload["action_outcome"]["dispatch_status"], "pending_human_confirmation");
+    assert_eq!(
+        payload["action_outcome"]["dispatch_status"],
+        "pending_human_confirmation"
+    );
     assert_eq!(payload["action_outcome"]["effect_verified"], false);
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -35623,12 +35724,7 @@ fn practical_scorecard_excludes_noninteractive_hook_bootstrap_from_continuation(
     let codex = mk_call(200, "session_bootstrap", true, 2_000);
     let followup = mk_call(212, "memory_get", true, 500);
 
-    let report = compute_practical_workflow_scorecard(
-        &[hook, codex, followup],
-        3_600,
-        600,
-        1_000,
-    );
+    let report = compute_practical_workflow_scorecard(&[hook, codex, followup], 3_600, 600, 1_000);
 
     assert_eq!(report.continuation.bootstrap_calls, 2);
     assert_eq!(report.continuation.excluded_hook_bootstraps, 1);

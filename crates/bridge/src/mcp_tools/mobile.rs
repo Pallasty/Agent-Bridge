@@ -26,8 +26,8 @@ pub(super) fn mobile_ui_observation_metadata(
         .unwrap_or_default()
         .as_millis() as u64;
     let compact_nodes: Vec<Value> = nodes.iter().map(MobileUiNode::compact_json).collect();
-    let canonical = serde_json::to_vec(&json!({"serial": serial, "nodes": compact_nodes}))
-        .unwrap_or_default();
+    let canonical =
+        serde_json::to_vec(&json!({"serial": serial, "nodes": compact_nodes})).unwrap_or_default();
     let mut hasher = Sha256::new();
     hasher.update(&canonical);
     hasher.update(raw_xml.as_bytes());
@@ -71,16 +71,34 @@ pub(super) fn media_context_from_app_control(
         .and_then(Value::as_object)
         .ok_or_else(|| "app_control result missing track_summary".to_string())?;
     let mut context = crate::mobile_projection::MediaContext::new(observed_at_unix_seconds);
-    context.player = track.get("player").and_then(Value::as_str).map(str::to_owned);
-    context.active_playlist_id = playlist.get("id").and_then(Value::as_str).map(str::to_owned);
-    context.active_playlist_name = playlist.get("name").and_then(Value::as_str).map(str::to_owned);
+    context.player = track
+        .get("player")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    context.active_playlist_id = playlist
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    context.active_playlist_name = playlist
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     context.playback_status = track
         .get("playback_status")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    context.track_id = track.get("track_id").and_then(Value::as_str).map(str::to_owned);
-    context.artist = track.get("artist").and_then(Value::as_str).map(str::to_owned);
-    context.title = track.get("title").and_then(Value::as_str).map(str::to_owned);
+    context.track_id = track
+        .get("track_id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    context.artist = track
+        .get("artist")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    context.title = track
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     context.position_seconds = track.get("position_seconds").and_then(Value::as_f64);
     context.duration_seconds = track.get("duration_seconds").and_then(Value::as_f64);
     context.metadata_available = track
@@ -135,7 +153,9 @@ fn display_playback_status(value: Option<&str>) -> String {
     }
 }
 
-pub(super) fn media_projection_presentation(context: &crate::mobile_projection::MediaContext) -> (String, String, String) {
+pub(super) fn media_projection_presentation(
+    context: &crate::mobile_projection::MediaContext,
+) -> (String, String, String) {
     let title = truncate_display(context.title.as_deref().unwrap_or(""), 96, "未播放曲目");
     let artist = truncate_display(context.artist.as_deref().unwrap_or(""), 48, "未知艺术家");
     let playlist = truncate_display(
@@ -1917,12 +1937,16 @@ pub(super) fn mobile_projection_patch_frame(
         Some(value) => {
             changed_fields.push("media_context");
             serde_json::from_value(value.clone())
-                .map_err(|error| format!("media_context must match agent_bridge.media_context.v0: {error}"))
+                .map_err(|error| {
+                    format!("media_context must match agent_bridge.media_context.v0: {error}")
+                })
                 .map(Some)?
         }
     };
     if changed_fields.is_empty() {
-        return Err("provide at least one of title, body, status, actions, or media_context".into());
+        return Err(
+            "provide at least one of title, body, status, actions, or media_context".into(),
+        );
     }
     let revision = current.revision.saturating_add(1);
     let frame = crate::mobile_projection::ProjectionFrame::new(
@@ -1985,7 +2009,9 @@ impl McpTool for MobileProjectionStartTool {
                  Android Activity for one short-lived, \
                  read-only Agent-Bridge title/text projection. Generates an in-memory token, \
                  binds a random private-LAN port, and never starts the companion service. \
-                 The device holder must still press Allow and connect; this tool grants no \
+                 By default the device holder must still press Allow and connect. The explicit \
+                 test-only auto_connect option skips that display confirmation for an already \
+                 ADB-paired device; this tool grants no \
                  attention, memory, sensor, or control authority. Payloads are authenticated \
                  but not encrypted, so do not project secrets."
                 .into(),
@@ -2000,6 +2026,7 @@ impl McpTool for MobileProjectionStartTool {
                     "status": { "type": "string", "maxLength": 80, "description": "Optional short state label rendered as a status card." },
                     "actions": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 240 }, "description": "Optional ordered, display-only next actions. They grant no actuation authority." },
                     "media_context": { "type": ["object", "null"], "description": "Optional read-only agent_bridge.media_context.v0 payload; it grants no control authority." },
+                    "auto_connect": { "type": "boolean", "default": false, "description": "Test-only. Explicitly skip the companion Activity's display confirmation for this already ADB-paired device. Keeps the short expiry, per-session token, authenticated pull, and zero authority boundary." },
                     "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 600, "default": 300 },
                     "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": MOBILE_DEFAULT_TIMEOUT_MS }
                 }
@@ -2038,6 +2065,10 @@ impl McpTool for MobileProjectionStartTool {
         if !(1..=crate::mobile_projection::MAX_SESSION_SECONDS).contains(&ttl_seconds) {
             return Ok(ToolResult::error("ttl_seconds must be in 1..=600"));
         }
+        let auto_connect = args
+            .get("auto_connect")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         let mut token = [0u8; 32];
         let random_result = std::fs::File::open("/dev/urandom")
@@ -2102,7 +2133,9 @@ impl McpTool for MobileProjectionStartTool {
             None | Some(Value::Null) => None,
             Some(value) => match serde_json::from_value(value.clone()) {
                 Ok(context) => Some(context),
-                Err(error) => return Ok(ToolResult::error(format!("invalid media_context: {error}"))),
+                Err(error) => {
+                    return Ok(ToolResult::error(format!("invalid media_context: {error}")))
+                }
             },
         };
         let frame = match crate::mobile_projection::ProjectionFrame::new(
@@ -2123,7 +2156,10 @@ impl McpTool for MobileProjectionStartTool {
             }
         };
 
-        let adb_start = adb_args(&[
+        let bind_text = bind.to_string();
+        let endpoint_port = endpoint.port().to_string();
+        let expires_at_text = expires_at.to_string();
+        let mut adb_start_args = vec![
             "shell",
             "am",
             "start",
@@ -2132,10 +2168,10 @@ impl McpTool for MobileProjectionStartTool {
             "dev.agentbridge.companion/.ProjectionActivity",
             "--es",
             "projection_host",
-            &bind.to_string(),
+            &bind_text,
             "--ei",
             "projection_port",
-            &endpoint.port().to_string(),
+            &endpoint_port,
             "--es",
             "projection_token",
             &token_hex,
@@ -2144,8 +2180,12 @@ impl McpTool for MobileProjectionStartTool {
             &session_id,
             "--el",
             "projection_expires_at_unix_seconds",
-            &expires_at.to_string(),
-        ]);
+            &expires_at_text,
+        ];
+        if auto_connect {
+            adb_start_args.extend_from_slice(&["--ez", "projection_auto_connect", "true"]);
+        }
+        let adb_start = adb_args(&adb_start_args);
         let launched = match run_adb_command(Some(&serial), &adb_start, timeout_ms).await {
             Ok(output)
                 if output.ok()
@@ -2243,6 +2283,7 @@ impl McpTool for MobileProjectionStartTool {
             "activity_launch_duration_ms": launched.duration_ms,
             "token_exposed": false,
             "companion_service_started": false,
+            "auto_connect": auto_connect,
             "replaced_prior_projection_activity": true,
             "replaced_prior_listener_count": replaced_listener_count,
             "authority": {
@@ -2303,7 +2344,9 @@ impl McpTool for MobileProjectionSyncMediaTool {
             }
         };
         if let Some(error) = mobile_projection_write_rejection(
-            state.stop_requested.load(std::sync::atomic::Ordering::Relaxed),
+            state
+                .stop_requested
+                .load(std::sync::atomic::Ordering::Relaxed),
             state.ended.load(std::sync::atomic::Ordering::Relaxed),
             now,
             state.expires_at,
@@ -2328,14 +2371,10 @@ impl McpTool for MobileProjectionSyncMediaTool {
         if read_result.is_error {
             return Ok(read_result);
         }
-        let Some(payload) = read_result
-            .content
-            .iter()
-            .find_map(|block| match block {
-                ContentBlock::Text { text } => serde_json::from_str::<Value>(text).ok(),
-                _ => None,
-            })
-        else {
+        let Some(payload) = read_result.content.iter().find_map(|block| match block {
+            ContentBlock::Text { text } => serde_json::from_str::<Value>(text).ok(),
+            _ => None,
+        }) else {
             return Ok(ToolResult::error("app_control returned no JSON payload"));
         };
         let observed_at = now;
