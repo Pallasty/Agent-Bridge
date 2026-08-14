@@ -7438,6 +7438,22 @@ fn desktop_semantic_task_action_summary(payload: Option<&Value>) -> Value {
     let Some(payload) = payload else {
         return json!({"status": "missing"});
     };
+    let effect_verification = payload
+        .get("effect_verification")
+        .cloned()
+        .or_else(|| {
+            payload
+                .get("action_outcome")
+                .and_then(|value| value.get("effect_verification_detail"))
+                .cloned()
+        })
+        .unwrap_or_else(|| {
+            json!({
+                "status": "unknown",
+                "reason": "effect verification detail was not provided by the action surface"
+            })
+        });
+    let action_outcome = payload.get("action_outcome");
     json!({
         "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
         "allowed": payload.get("allowed").cloned().unwrap_or(Value::Null),
@@ -7447,7 +7463,10 @@ fn desktop_semantic_task_action_summary(payload: Option<&Value>) -> Value {
         "detail": payload.get("detail").cloned().unwrap_or(Value::Null),
         "error": payload.get("error").cloned().unwrap_or(Value::Null),
         "search": payload.get("search").cloned().unwrap_or(Value::Null),
-        "dispatch": payload.get("action_outcome").and_then(|value| value.get("dispatch_status")).cloned().unwrap_or(Value::Null),
+        "dispatch": action_outcome.and_then(|value| value.get("dispatch_status")).cloned().unwrap_or(Value::Null),
+        "effect_verification": effect_verification,
+        "effect_verified": action_outcome.and_then(|value| value.get("effect_verified")).cloned().unwrap_or(Value::Null),
+        "requires_postcondition_observation": action_outcome.and_then(|value| value.get("requires_postcondition_observation")).cloned().unwrap_or(Value::Null),
         "wrapper": payload.get("mcp_wrapper").cloned().unwrap_or(Value::Null)
     })
 }

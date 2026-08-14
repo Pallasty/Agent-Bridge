@@ -15820,6 +15820,13 @@ print(json.dumps({
     );
     assert_eq!(payload["action"]["found"]["app_pid"], 222);
     assert_eq!(payload["action"]["dispatch"], "dispatched");
+    assert_eq!(payload["action"]["effect_verification"]["status"], "unknown");
+    assert_eq!(
+        payload["action"]["effect_verification"]["reason"],
+        "desktop invoke was dispatched; resulting UI state was not read back"
+    );
+    assert_eq!(payload["action"]["effect_verified"], false);
+    assert_eq!(payload["action"]["requires_postcondition_observation"], true);
     assert_eq!(payload["verification"]["observed_count"], 1);
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
