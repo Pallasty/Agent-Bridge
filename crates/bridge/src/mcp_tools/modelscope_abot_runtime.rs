@@ -80,6 +80,14 @@ fn strings_in(value: &Value, out: &mut Vec<String>) {
     }
 }
 
+fn frame_values(value: &Value) -> Vec<Value> {
+    value
+        .get("frames")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
 fn observed_fps(value: &Value) -> Option<f64> {
     let mut strings = Vec::new();
     strings_in(value, &mut strings);
@@ -162,7 +170,7 @@ async fn run_once(
                 .list_frames(&page)
                 .await
                 .map_err(|error| format!("list Studio frames: {error}"))?;
-            let frame_values = frames.as_array().cloned().unwrap_or_default();
+            let frame_values = frame_values(&frames);
             observed_frame_count = observed_frame_count.max(frame_values.len().saturating_sub(1));
             for frame in frame_values {
                 let frame_id = frame.get("frame_id").and_then(Value::as_str);
@@ -217,15 +225,10 @@ async fn run_once(
             .list_frames(&page)
             .await
             .map_err(|error| format!("verify Studio stop: {error}"))?;
-        let iframe_count_after_stop = frames_after_stop
-            .as_array()
-            .map(|frames| {
-                frames
-                    .iter()
-                    .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
-                    .count()
-            })
-            .unwrap_or(usize::MAX);
+        let iframe_count_after_stop = frame_values(&frames_after_stop)
+            .iter()
+            .filter(|frame| frame.get("parent_id").and_then(Value::as_str).is_some())
+            .count();
         if iframe_count_after_stop != 0 {
             return Err(format!(
                 "Studio lifecycle did not close: {iframe_count_after_stop} iframe(s) remain"
@@ -441,6 +444,15 @@ mod tests {
             observed_fps(&json!({"text": "GPU ready · 2.0 FPS"})),
             Some(2.0)
         );
+        assert_eq!(
+            frame_values(&json!({
+                "count": 2,
+                "frames": [{"kind": "main"}, {"kind": "oopif"}]
+            }))
+            .len(),
+            2
+        );
+        assert!(frame_values(&json!([{"kind": "main"}])).is_empty());
     }
 
     #[test]
