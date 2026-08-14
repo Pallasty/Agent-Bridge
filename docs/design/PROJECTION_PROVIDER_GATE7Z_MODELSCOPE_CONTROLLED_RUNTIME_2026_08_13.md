@@ -22,3 +22,6 @@ and `persistent_runtime_admitted=false`.
 The dedicated `codex-modelscope-abot` toolset exposes the codex-lean base plus
 only `embodiment_lease` and `modelscope_abot_run_once`; raw browser controls are
 not added to that surface.
+
+The deployed live verification is recorded in
+`PROJECTION_PROVIDER_GATE7Z_MODELSCOPE_CONTROLLED_RUNTIME_RESULT_2026_08_13.md`.
