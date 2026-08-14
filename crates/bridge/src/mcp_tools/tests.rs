@@ -15931,6 +15931,11 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     assert_eq!(payload["action_outcome"]["dispatch_status"], "dispatched");
     assert_eq!(payload["action_outcome"]["effect_verified"], false);
     assert_eq!(payload["action_outcome"]["effect_verification"], "unknown");
+    assert_eq!(payload["effect_verification"]["status"], "unknown");
+    assert_eq!(
+        payload["action_outcome"]["effect_verification_detail"]["status"],
+        "unknown"
+    );
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }

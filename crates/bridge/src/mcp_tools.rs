@@ -6685,12 +6685,41 @@ impl McpTool for DesktopInvokeTool {
                     } else {
                         "dispatched"
                     };
+                    let mode = if dry_run {
+                        "dry-run"
+                    } else if !host_target {
+                        "isolated"
+                    } else if use_grant {
+                        "host-grant"
+                    } else {
+                        "pending-host-confirm"
+                    };
+                    let verdict = crate::semantic_event::classify_action(
+                        mode,
+                        output.status.success(),
+                        &stderr,
+                    );
+                    let verification_reason = if verdict.status
+                        == crate::semantic_event::VerdictStatus::Unknown
+                    {
+                        if matches!(mode, "dry-run" | "pending-host-confirm") {
+                            "desktop invoke was not injected by design; no effect readback"
+                        } else {
+                            "desktop invoke was dispatched; resulting UI state was not read back"
+                        }
+                    } else {
+                        "desktop invoke failed or was blocked; effect was not verified"
+                    };
+                    let effect_verification = crate::semantic_event::effect_verification(
+                        verdict.status,
+                        verification_reason,
+                    );
                     obj.insert(
                         "mcp_wrapper".to_string(),
                         json!({
                             "tool": self.name(),
                             "read_only": false,
-                            "mode": if dry_run { "dry-run" } else if !host_target { "isolated" } else if use_grant { "host-grant" } else { "pending-host-confirm" },
+                            "mode": mode,
                             "host_protected": true,
                             "duration_ms": duration_ms,
                             "exit_code": output.status.code().unwrap_or(-1),
@@ -6703,11 +6732,13 @@ impl McpTool for DesktopInvokeTool {
                         json!({
                             "dispatch_status": dispatch_status,
                             "effect_verification": "unknown",
+                            "effect_verification_detail": effect_verification.clone(),
                             "effect_verified": false,
                             "requires_postcondition_observation": output.status.success() && !dry_run,
                             "observation_ref": observation_ref
                         }),
                     );
+                    obj.insert("effect_verification".to_string(), effect_verification);
                 }
                 let mut result = ToolResult::json_text(&payload);
                 if !output.status.success() {
