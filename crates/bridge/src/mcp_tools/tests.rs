@@ -15183,6 +15183,11 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
         .await
         .expect("execute");
     let payload = result_text_as_json(&out);
+    assert_eq!(payload["effect_verification"]["status"], "unknown");
+    assert!(payload["effect_verification"]["reason"]
+        .as_str()
+        .expect("verification reason")
+        .contains("not read back"));
     let argv: Vec<&str> = payload["argv"]
         .as_array()
         .expect("argv")

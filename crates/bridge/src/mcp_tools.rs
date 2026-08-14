@@ -6311,6 +6311,31 @@ impl McpTool for DesktopActionTool {
                             "stderr_truncated": stderr_truncated
                         }),
                     );
+                    let effect_verification = crate::semantic_event::classify_action(
+                        mode,
+                        ok,
+                        &event_err,
+                    );
+                    let verification_reason = if effect_verification.status
+                        == crate::semantic_event::VerdictStatus::Unknown
+                    {
+                        if matches!(mode, "dry-run" | "pending-host-confirm") {
+                            "desktop action was not injected by design; no effect readback"
+                        } else {
+                            "desktop action was dispatched; resulting UI state was not read back"
+                        }
+                    } else if event_err.is_empty() {
+                        "desktop action was not completed; effect was not verified"
+                    } else {
+                        "desktop action failed or was blocked; effect was not verified"
+                    };
+                    obj.insert(
+                        "effect_verification".to_string(),
+                        crate::semantic_event::effect_verification(
+                            effect_verification.status,
+                            verification_reason,
+                        ),
+                    );
                 }
                 // SSB Phase-1 typed event spine: stamp the verify-first verdict
                 // for this injection AT ACTION TIME (Unknown on success — no
