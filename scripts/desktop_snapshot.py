@@ -36,6 +36,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import shutil
@@ -140,6 +141,35 @@ def hydrate_linux_session_env(
         address = f"unix:path={bus_socket}"
         target["DBUS_SESSION_BUS_ADDRESS"] = address
         restored["DBUS_SESSION_BUS_ADDRESS"] = address
+
+    # A stale AT_SPI_BUS_ADDRESS fails inside dbind before pyatspi can report a
+    # structured error. Ask the org.a11y.Bus service on the trusted session bus
+    # for its current private address and replace any inherited value. This is
+    # intentionally best-effort: desktop reads still work on sessions without
+    # AT-SPI, and the caller will report that capability as unavailable.
+    if valid_bus and shutil.which("gdbus"):
+        try:
+            probe_env = dict(os.environ)
+            probe_env.update(target)
+            probe = subprocess.run(
+                [
+                    "gdbus", "call", "--session", "--dest", "org.a11y.Bus",
+                    "--object-path", "/org/a11y/bus", "--method",
+                    "org.a11y.Bus.GetAddress",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                env=probe_env,
+            )
+            if probe.returncode == 0:
+                value = ast.literal_eval(probe.stdout.strip())
+                address = value[0] if isinstance(value, tuple) and value else None
+                if isinstance(address, str) and address.startswith("unix:"):
+                    target["AT_SPI_BUS_ADDRESS"] = address
+                    restored["AT_SPI_BUS_ADDRESS"] = address
+        except (OSError, subprocess.TimeoutExpired, ValueError, SyntaxError):
+            pass
     return restored
 
 
