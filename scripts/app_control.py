@@ -308,9 +308,27 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
         rc, out, err = playlist_call(player, "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist", [playlist_id], env)
         if rc != 0:
             return {"schema": SCHEMA, "status": "action_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": {"code": "playlist_activation_failed", "rc": rc, "message": err or out}}
-        after, observe_error = observe(player, env)
-        verified = after is not None and after.get("metadata_available") and after.get("track_id") is not None
-        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "playlist_id": playlist_id, "route": route_summary(True), "after": after, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_with_track" if verified else "playlist_activation_effect_unmet", "observation_error": observe_error}}
+        deadline = time.monotonic() + verify_timeout
+        polls = 0
+        active_playlist = None
+        active_error = None
+        after = None
+        observe_error = None
+        verified = False
+        while True:
+            polls += 1
+            active_playlist, active_error = current_playlist(player, env)
+            after, observe_error = observe(player, env)
+            verified = (
+                active_error is None
+                and active_playlist is not None
+                and active_playlist.get("active") is True
+                and active_playlist.get("id") == playlist_id
+            )
+            if verified or time.monotonic() >= deadline:
+                break
+            time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "playlist_id": playlist_id, "route": route_summary(True), "active_playlist": active_playlist, "after": after, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_id_matches_target" if verified else "playlist_activation_effect_unmet", "polls": polls, "active_playlist_error": active_error, "observation_error": observe_error}}
     before, error = observe(player, env)
     if error or before is None:
         return {

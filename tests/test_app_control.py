@@ -89,6 +89,8 @@ class AppControlTests(unittest.TestCase):
             if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.GetPlaylists" in argv:
                 return 0, "([(objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Allin1.m3u', ''), (objectpath '/org/gnome/Rhythmbox3/Playlist/0x2', 'Allin1.m3u', '')],)", ""
             if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist" in argv: return 0, "()", ""
+            if argv[0] == "gdbus" and "org.freedesktop.DBus.Properties.Get" in argv:
+                return 0, "(<(true, (objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Allin1.m3u', ''))>,)", ""
             if argv[-1] == "status": return 0, "Playing", ""
             if argv[-1] == "position": return 0, "1.0", ""
             if any("mpris:length" in item for item in argv): return 0, "100000000", ""
@@ -103,7 +105,34 @@ class AppControlTests(unittest.TestCase):
             mod.run, mod.shutil.which = old_run, old_which
         self.assertEqual(len(listed["playlists"]), 2)
         self.assertEqual(activated["verdict"], "verified")
-        self.assertEqual(activated["verification"]["predicate"], "playlist_active_with_track")
+        self.assertEqual(activated["active_playlist"]["id"], playlist)
+        self.assertEqual(activated["verification"]["predicate"], "playlist_active_id_matches_target")
+
+    def test_playlist_activate_verifies_target_even_when_stopped_without_track(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        playlist = "/org/gnome/Rhythmbox3/Playlist/0x1"
+        def fake_run(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-l"]: return 0, "rhythmbox", ""
+            if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.GetPlaylists" in argv:
+                return 0, "([(objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Recently Added', '')],)", ""
+            if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist" in argv: return 0, "()", ""
+            if argv[0] == "gdbus" and "org.freedesktop.DBus.Properties.Get" in argv:
+                return 0, "(<(true, (objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Recently Added', ''))>,)", ""
+            if argv[-1] == "status": return 0, "Stopped", ""
+            if argv[-1] == "position": return 1, "", "No player could handle this command"
+            if any("mpris:length" in item for item in argv): return 1, "", "No player could handle this command"
+            if "metadata" in argv: return 1, "", "No player could handle this command"
+            if argv[-1] == "volume": return 0, "0.50", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            activated = mod.execute("playlist_activate", "rhythmbox", False, 0.2, playlist_id=playlist)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(activated["verdict"], "verified")
+        self.assertEqual(activated["after"]["playback_status"], "Stopped")
+        self.assertFalse(activated["after"]["metadata_available"])
 
     def test_playlist_current_returns_active_playlist_and_track_summary(self):
         mod = load_module()
