@@ -1,0 +1,23 @@
+{
+  "schema": "agent_bridge.modelscope_abot_gate7t_owner_runtime_enablement_decision_evidence.v0",
+  "provider_id": "modelscope.studio.amap_cvlab.abot-world-0",
+  "observed_at": "2026-08-13",
+  "evidence_class": "synthetic_contract_test",
+  "decision": "defer",
+  "decision_recorded": true,
+  "approve_rejected_without_authority": true,
+  "gate7s_review_required": true,
+  "owner_authorization_issued": false,
+  "runtime_enablement_requested": false,
+  "runtime_enablement_admitted": false,
+  "runtime_implementation_enabled": false,
+  "mcp_registered": false,
+  "network_dispatcher_enabled": false,
+  "subprocess_executor_enabled": false,
+  "bearer_token_created": false,
+  "execution_authorized": false,
+  "runtime_admitted": false,
+  "review_only": true,
+  "status": "deferred",
+  "next_gate": "gate7u_separate_owner_authorization_receipt"
+}
