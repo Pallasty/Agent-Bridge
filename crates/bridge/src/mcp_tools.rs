@@ -76,6 +76,8 @@ mod operator_request;
 use operator_request::{OperatorRequestGetTool, OperatorRequestStageTool};
 mod kitesurf;
 use kitesurf::CloudflareKitesurfSnapshotTool;
+mod modelscope_abot_runtime;
+use modelscope_abot_runtime::ModelScopeAbotRunOnceTool;
 #[cfg(feature = "embodiment-runtime-p4")]
 mod embodiment_runtime;
 #[cfg(all(feature = "embodiment-runtime-p4", test))]
@@ -44235,6 +44237,8 @@ enum ToolSet {
     CodexMobileProjection,
     /// Codex essential surface plus the explicit, bounded mobile projection lane.
     CodexEssentialMobileProjection,
+    /// Codex lean plus the explicitly gated, one-shot ModelScope ABot runtime.
+    CodexModelScopeAbot,
     CodexLean,
     /// An opt-in Codex profile for inspecting static A2UI previews.
     /// It is deliberately the codex-lean allowlist plus one read-only tool.
@@ -44255,6 +44259,7 @@ impl ToolSet {
             Self::CodexVoice => "codex-voice",
             Self::CodexMobileProjection => "codex-mobile-projection",
             Self::CodexEssentialMobileProjection => "codex-essential-mobile-projection",
+            Self::CodexModelScopeAbot => "codex-modelscope-abot",
             Self::CodexLean => "codex-lean",
             Self::CodexA2ui => "codex-a2ui",
             Self::ChatGptRead => "chatgpt-read",
@@ -44276,6 +44281,9 @@ impl ToolSet {
             }
             Some("codex-essential-mobile-projection") | Some("codex-essential-mobile") => {
                 Some(Self::CodexEssentialMobileProjection)
+            }
+            Some("codex-modelscope-abot") | Some("codex-abot") => {
+                Some(Self::CodexModelScopeAbot)
             }
             Some("codex-lean") | Some("codex-minimal") => Some(Self::CodexLean),
             Some("codex-a2ui") | Some("codex-a2ui-preview") => Some(Self::CodexA2ui),
@@ -44313,6 +44321,7 @@ impl ToolSet {
                 .chain(CODEX_ESSENTIAL_DIRECT_EXTRAS.iter().copied())
                 .chain(CODEX_MOBILE_PROJECTION_EXTRAS.iter().copied())
                 .collect(),
+            Self::CodexModelScopeAbot => CODEX_MODELSCOPE_ABOT_EXTRAS.to_vec(),
             Self::CodexA2ui => vec!["a2ui_preview"],
             _ => Vec::new(),
         }
@@ -44355,6 +44364,7 @@ impl ToolPolicy {
                 ToolProfile::Compact
             }
             ToolSet::CodexLean
+            | ToolSet::CodexModelScopeAbot
             | ToolSet::CodexA2ui
             | ToolSet::ChatGptRead
             | ToolSet::ChatGptCollab
@@ -44398,6 +44408,9 @@ impl ToolPolicy {
             ToolSet::CodexEssentialMobileProjection => {
                 codex_essential_tool(tier, tool_name)
                     || CODEX_MOBILE_PROJECTION_EXTRAS.contains(&tool_name)
+            }
+            ToolSet::CodexModelScopeAbot => {
+                codex_lean_tool(tool_name) || CODEX_MODELSCOPE_ABOT_EXTRAS.contains(&tool_name)
             }
             ToolSet::CodexLean => codex_lean_tool(tool_name),
             ToolSet::CodexA2ui => codex_lean_tool(tool_name) || tool_name == "a2ui_preview",
@@ -44639,6 +44652,11 @@ const CODEX_MOBILE_PROJECTION_EXTRAS: &[&str] = &[
     "mobile_projection_sync_media",
     "mobile_projection_stop",
 ];
+
+/// Explicit one-shot ABot-World lane. The runtime tool owns its BrowserBackend
+/// lifecycle internally, so raw browser_* controls remain outside this surface.
+const CODEX_MODELSCOPE_ABOT_EXTRAS: &[&str] =
+    &["embodiment_lease", "modelscope_abot_run_once"];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
     matches!(tier, Tier::Essential)
@@ -49345,6 +49363,15 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Niche,
         Arc::new(BrowserNavigateTool::new(hub.clone())),
+    );
+    // Browser-owned, one-shot ABot-World lifecycle. Execution remains gated by
+    // Browser capability, an embodiment lease, owner confirmation, and an
+    // explicit runtime opt-in environment variable.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(ModelScopeAbotRunOnceTool::new(hub.clone())),
     );
     // Output / expression lane — E1 present() static-artifact sink (uses the
     // browser for self-verify; opt-in via AGENT_BRIDGE_TOOL_PROFILE=all for v0).

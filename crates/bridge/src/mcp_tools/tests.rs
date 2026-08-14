@@ -9806,6 +9806,34 @@ fn registry_exposes_browser_lite_probe_to_all_profile() {
 }
 
 #[test]
+fn registry_keeps_modelscope_abot_runtime_niche() {
+    let abot = ToolPolicy::from_values(Some("codex-modelscope-abot"), None, None, None);
+    let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
+
+    let abot_tools = build_registry_with_policy(Hub::builder().build(), abot).list();
+    let tool = abot_tools
+        .iter()
+        .find(|schema| schema.name == "modelscope_abot_run_once")
+        .expect("modelscope_abot_run_once schema");
+    assert_eq!(
+        tool.input_schema["properties"]["owner_confirmed"]["const"],
+        true
+    );
+    assert!(tool.description.contains("never creates a persistent runtime"));
+    assert!(abot_tools
+        .iter()
+        .any(|schema| schema.name == "embodiment_lease"));
+    assert!(abot_tools
+        .iter()
+        .all(|schema| schema.name != "browser_navigate"));
+
+    let standard_tools = build_registry_with_policy(Hub::builder().build(), standard).list();
+    assert!(standard_tools
+        .iter()
+        .all(|schema| schema.name != "modelscope_abot_run_once"));
+}
+
+#[test]
 fn system_control_plan_blocks_poweroff_without_confirm() {
     let blocked = system_control_plan("power", "off", false, 40, None).unwrap_err();
     assert!(blocked.contains("confirm=true"));
