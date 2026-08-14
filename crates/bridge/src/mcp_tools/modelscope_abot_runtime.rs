@@ -17,6 +17,8 @@ const DEFAULT_OBSERVE_MS: u64 = 30_000;
 const MAX_PROMPT_CHARS: usize = 4_000;
 const MAX_REQUEST_ID_CHARS: usize = 128;
 const TASK_SCHEMA: &str = "agent_bridge.modelscope_abot_task.v0";
+const STUDIO_PROMPT_SELECTOR: &str = "textarea";
+const STUDIO_READY_TIMEOUT_MS: u64 = 45_000;
 
 static SESSION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 static TASK_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -389,12 +391,22 @@ async fn run_once(
         .map_err(|error| format!("navigate Studio: {error}"))?;
     let mut started = false;
     let run_result = async {
-        browser
-            .wait_for(&page, None, None, 12_000)
+        let ready = browser
+            .wait_for(
+                &page,
+                Some(STUDIO_PROMPT_SELECTOR),
+                None,
+                STUDIO_READY_TIMEOUT_MS,
+            )
             .await
             .map_err(|error| format!("wait Studio load: {error}"))?;
+        if ready.matched != "selector" {
+            return Err(format!(
+                "Studio prompt did not become ready within {STUDIO_READY_TIMEOUT_MS}ms"
+            ));
+        }
         browser
-            .fill_form(&page, "textarea", &request.prompt)
+            .fill_form(&page, STUDIO_PROMPT_SELECTOR, &request.prompt)
             .await
             .map_err(|error| format!("fill prompt: {error}"))?;
         let start_selector = selector_for_text(browser.as_ref(), &page, "唤醒你的世界").await?;
