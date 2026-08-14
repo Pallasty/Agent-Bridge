@@ -104,6 +104,10 @@ def find_element(app_match, role_match, name_match, nth, *, cage_pid=None,
     fourth return value is coverage metadata.  ``complete=False`` means absence was
     *not* established and callers must report ``search_incomplete``, never no-match.
     """
+    # MCP servers may outlive the graphical session and launch this child without
+    # XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS. Restore only the current UID's
+    # owned runtime bus before pyatspi initializes its accessibility connection.
+    hydrate_linux_session_env()
     import pyatspi  # noqa: deferred so --help works without the binding
 
     started = time.monotonic()
