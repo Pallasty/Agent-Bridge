@@ -90,6 +90,19 @@ pub(super) fn media_context_from_app_control(
     Ok(context)
 }
 
+/// Preserve the read-only player-selection evidence in the projection response.
+/// This is intentionally a pure projection of the verified app-control payload;
+/// it cannot add control capabilities or fabricate a selection result.
+pub(super) fn mobile_projection_app_control_evidence(payload: &Value) -> Value {
+    json!({
+        "action": "playlist_current",
+        "read_only": true,
+        "verdict": "verified",
+        "player": payload.get("player").cloned().unwrap_or(Value::Null),
+        "selection": payload.get("selection").cloned().unwrap_or(Value::Null)
+    })
+}
+
 fn format_media_clock(seconds: Option<f64>) -> String {
     let Some(seconds) = seconds.filter(|value| value.is_finite() && *value >= 0.0) else {
         return "??:??".into();
@@ -2324,13 +2337,7 @@ impl McpTool for MobileProjectionSyncMediaTool {
             "status": "updated",
             "session_id": session_id,
             "media_context": context,
-            "app_control": {
-                "action": "playlist_current",
-                "read_only": true,
-                "verdict": "verified",
-                "player": payload.get("player").cloned().unwrap_or(Value::Null),
-                "selection": payload.get("selection").cloned().unwrap_or(Value::Null)
-            },
+            "app_control": mobile_projection_app_control_evidence(&payload),
             "projection_update": update_payload,
             "authority": {
                 "attention": false,

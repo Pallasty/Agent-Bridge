@@ -1766,6 +1766,31 @@ fn mobile_projection_sync_media_maps_only_verified_playlist_current_payload() {
 }
 
 #[test]
+fn mobile_projection_sync_media_preserves_player_selection_evidence() {
+    let payload = json!({
+        "schema": "agent_bridge.app_control.v0",
+        "verdict": "verified",
+        "action": "playlist_current",
+        "player": "rhythmbox",
+        "selection": {
+            "policy": "first_verified_playlist_current",
+            "attempts": [{
+                "player": "chromium.instance",
+                "status": "observation_failed",
+                "error": {"code": "active_playlist_getter_failed"}
+            }]
+        }
+    });
+    let evidence = mobile_projection_app_control_evidence(&payload);
+    assert_eq!(evidence["action"], "playlist_current");
+    assert_eq!(evidence["read_only"], true);
+    assert_eq!(evidence["verdict"], "verified");
+    assert_eq!(evidence["player"], "rhythmbox");
+    assert_eq!(evidence["selection"]["policy"], "first_verified_playlist_current");
+    assert_eq!(evidence["selection"]["attempts"][0]["player"], "chromium.instance");
+}
+
+#[test]
 fn mobile_projection_sync_media_repeated_payload_keeps_display_state_stable() {
     let payload = json!({
         "schema": "agent_bridge.app_control.v0",
