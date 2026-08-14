@@ -134,6 +134,39 @@ class AppControlTests(unittest.TestCase):
         self.assertEqual(activated["after"]["playback_status"], "Stopped")
         self.assertFalse(activated["after"]["metadata_available"])
 
+    def test_playlist_activate_repauses_unexpected_resume(self):
+        mod = load_module()
+        old_run, old_which = mod.run, mod.shutil.which
+        playlist = "/org/gnome/Rhythmbox3/Playlist/0x1"
+        state = {"activated": False, "paused": False, "pause_calls": 0}
+        def fake_run(argv, env, timeout=2.0):
+            if argv == ["playerctl", "-l"]: return 0, "rhythmbox", ""
+            if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.GetPlaylists" in argv:
+                return 0, "([(objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Recently Added', '')],)", ""
+            if argv[0] == "gdbus" and "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist" in argv:
+                state["activated"] = True; return 0, "()", ""
+            if argv[0] == "gdbus" and "org.freedesktop.DBus.Properties.Get" in argv:
+                return 0, "(<(true, (objectpath '/org/gnome/Rhythmbox3/Playlist/0x1', 'Recently Added', ''))>,)", ""
+            if argv == ["playerctl", "-p", "rhythmbox", "pause"]:
+                state["paused"] = True; state["pause_calls"] += 1; return 0, "", ""
+            if argv[-1] == "status":
+                return 0, "Paused" if not state["activated"] or state["paused"] else "Playing", ""
+            if argv[-1] == "position": return 1, "", "No player could handle this command"
+            if any("mpris:length" in item for item in argv): return 1, "", "No player could handle this command"
+            if "metadata" in argv: return 1, "", "No player could handle this command"
+            if argv[-1] == "volume": return 0, "0.50", ""
+            raise AssertionError(argv)
+        try:
+            mod.run = fake_run; mod.shutil.which = lambda _: "/usr/bin/playerctl"
+            activated = mod.execute("playlist_activate", "rhythmbox", False, 0.2, playlist_id=playlist)
+        finally:
+            mod.run, mod.shutil.which = old_run, old_which
+        self.assertEqual(activated["verdict"], "verified")
+        self.assertEqual(state["pause_calls"], 1)
+        self.assertEqual(activated["after"]["playback_status"], "Paused")
+        self.assertTrue(activated["playback_preservation"]["required"])
+        self.assertEqual(activated["playback_preservation"]["status"], "verified")
+
     def test_playlist_current_returns_active_playlist_and_track_summary(self):
         mod = load_module()
         old_run, old_which = mod.run, mod.shutil.which

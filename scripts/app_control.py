@@ -305,6 +305,10 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             return {"schema": SCHEMA, "status": "error", "verdict": "error", "recover": "replan", "domain": "media", "action": action, "player": player, "route": route_summary(True), "playlists": playlists, "error": {"code": "missing_playlist_id", "message": "playlist_activate requires exact playlist object path"}}
         if playlist_id not in {item["id"] for item in playlists}:
             return {"schema": SCHEMA, "status": "target_unavailable", "verdict": "error", "recover": "replan", "domain": "media", "action": action, "player": player, "route": route_summary(True), "playlists": playlists, "error": {"code": "playlist_not_found", "playlist_id": playlist_id}}
+        before, before_error = observe(player, env)
+        if before is None:
+            return {"schema": SCHEMA, "status": "observation_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": before_error or {"code": "observation_failed"}}
+        preserve_nonplaying = before.get("playback_status") in ("Paused", "Stopped")
         rc, out, err = playlist_call(player, "org.mpris.MediaPlayer2.Playlists.ActivatePlaylist", [playlist_id], env)
         if rc != 0:
             return {"schema": SCHEMA, "status": "action_failed", "verdict": "error", "recover": "retry", "domain": "media", "action": action, "player": player, "route": route_summary(True), "error": {"code": "playlist_activation_failed", "rc": rc, "message": err or out}}
@@ -328,7 +332,18 @@ def execute(action: str, player_selector: str | None, dry_run: bool, verify_time
             if verified or time.monotonic() >= deadline:
                 break
             time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
-        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "playlist_id": playlist_id, "route": route_summary(True), "active_playlist": active_playlist, "after": after, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_id_matches_target" if verified else "playlist_activation_effect_unmet", "polls": polls, "active_playlist_error": active_error, "observation_error": observe_error}}
+        activation_status = after.get("playback_status") if after else None
+        pause_dispatch = None
+        preservation_verified = not preserve_nonplaying
+        if verified and preserve_nonplaying and activation_status == "Playing":
+            pause_rc, pause_out, pause_err = run(["playerctl", "-p", player, "pause"], env)
+            pause_dispatch = {"status": "dispatched" if pause_rc == 0 else "failed", "rc": pause_rc, "stdout": pause_out, "stderr": pause_err}
+            after, observe_error = observe(player, env)
+            preservation_verified = pause_rc == 0 and after is not None and after.get("playback_status") == "Paused"
+        elif verified and preserve_nonplaying:
+            preservation_verified = activation_status != "Playing"
+        verified = verified and preservation_verified
+        return {"schema": SCHEMA, "status": "verified" if verified else "unmet", "verdict": "verified" if verified else "unmet", "recover": "proceed" if verified else "replan", "domain": "media", "action": action, "player": player, "playlist_id": playlist_id, "route": route_summary(True), "before": before, "active_playlist": active_playlist, "after": after, "playback_preservation": {"required": preserve_nonplaying, "before_status": before.get("playback_status"), "after_activation_status": activation_status, "status": "verified" if preservation_verified else "unmet", "pause_dispatch": pause_dispatch}, "verification": {"status": "verified" if verified else "unmet", "predicate": "playlist_active_id_matches_target" if verified else "playlist_activation_effect_unmet", "polls": polls, "active_playlist_error": active_error, "observation_error": observe_error}}
     before, error = observe(player, env)
     if error or before is None:
         return {
