@@ -126,7 +126,17 @@ def hydrate_linux_session_env(
         valid_bus = bus_socket.is_socket() and bus_socket.stat().st_uid == uid
     except OSError:
         valid_bus = False
-    if not target.get("DBUS_SESSION_BUS_ADDRESS") and valid_bus:
+    existing_address = target.get("DBUS_SESSION_BUS_ADDRESS", "")
+    existing_valid = bool(existing_address)
+    if existing_address.startswith("unix:path="):
+        existing_path = Path(existing_address.removeprefix("unix:path=").split(",", 1)[0])
+        try:
+            existing_valid = (
+                existing_path.is_socket() and existing_path.stat().st_uid == uid
+            )
+        except OSError:
+            existing_valid = False
+    if valid_bus and not existing_valid:
         address = f"unix:path={bus_socket}"
         target["DBUS_SESSION_BUS_ADDRESS"] = address
         restored["DBUS_SESSION_BUS_ADDRESS"] = address
