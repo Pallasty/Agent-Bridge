@@ -10507,6 +10507,33 @@ fn installed_runtime_script_path_uses_stable_asset_directory() {
     let _ = std::fs::remove_dir_all(temp_dir);
 }
 
+#[test]
+fn desktop_invoke_prefers_deployed_asset_over_implicit_current_directory() {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().expect("runtime asset env lock");
+    let previous = std::env::var_os("AGENT_BRIDGE_RUNTIME_ASSET_DIR");
+    let temp_dir = std::env::temp_dir().join(format!(
+        "ab-desktop-invoke-runtime-authority-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("mkdir runtime assets");
+    let script = temp_dir.join("desktop_invoke.py");
+    std::fs::write(&script, "# deployed runtime fixture\n").expect("write runtime asset");
+    std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", &temp_dir);
+
+    assert_eq!(desktop_invoke_script_path(&json!({}), None), script);
+
+    match previous {
+        Some(value) => std::env::set_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR", value),
+        None => std::env::remove_var("AGENT_BRIDGE_RUNTIME_ASSET_DIR"),
+    }
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
 #[tokio::test]
 async fn desktop_snapshot_wrapper_defaults_to_non_mutating_script_flags() {
     let temp_dir = std::env::temp_dir().join(format!(

@@ -6814,14 +6814,18 @@ fn desktop_invoke_script_path(args: &Value, cwd: Option<&PathBuf>) -> PathBuf {
             return path;
         }
     }
+    // Runtime calls without an explicit cwd must use the deployed asset.  The MCP
+    // server can be launched from a dirty/stale checkout whose scripts no longer
+    // match the deployed binary; treating that incidental current directory as
+    // authoritative bypasses deployment and can revive fixed desktop behavior.
+    if let Some(path) = installed_runtime_script_path("desktop_invoke.py") {
+        return path;
+    }
     if let Ok(cwd) = std::env::current_dir() {
         let path = cwd.join("scripts/desktop_invoke.py");
         if path.exists() {
             return path;
         }
-    }
-    if let Some(path) = installed_runtime_script_path("desktop_invoke.py") {
-        return path;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/desktop_invoke.py")
 }
