@@ -991,7 +991,6 @@ def synth_sherpa_worker(text, voice, speed, sherpa_worker):
         return None, {"detail": info.get("detail", "Sherpa worker did not write WAV")}
     return wav, info
 
-
 def synth_qwen3_rust(text, voice, speed, instruct=None, binary=None,
                      model_dir=None, model_profile=None):
     """Run the pure-Rust Qwen3-TTS pilot through its fail-closed integrity gate.
