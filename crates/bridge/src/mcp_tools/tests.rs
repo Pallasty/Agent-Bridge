@@ -10086,6 +10086,12 @@ fn registry_keeps_modelscope_abot_runtime_niche() {
         .expect("modelscope_abot_receipt_validate schema");
     assert!(validator.description.contains("Read-only and offline"));
     assert!(validator.input_schema["properties"].get("document").is_some());
+    let audit = abot_tools
+        .iter()
+        .find(|schema| schema.name == "modelscope_abot_receipt_audit")
+        .expect("modelscope_abot_receipt_audit schema");
+    assert!(audit.description.contains("Read-only and offline"));
+    assert_eq!(audit.input_schema["properties"]["documents"]["maxItems"], 256);
     assert!(abot_tools
         .iter()
         .all(|schema| schema.name != "browser_navigate"));
